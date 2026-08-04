@@ -15,6 +15,11 @@ name = "ExplicitLean"
 [[lean_exe]]
 name = "explicit-lean"
 root = "Main"
+# Capture elaborates source in-process, which runs Lean's own elaborators
+# through the interpreter. Without this the binary links Lean but cannot run
+# those initializers, and notation such as `a + b` fails with "elaboration
+# function has not been implemented".
+supportInterpreter = true
 
 # Test modules live in their own library so the harness can import them.
 [[lean_lib]]

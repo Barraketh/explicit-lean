@@ -1,0 +1,41 @@
+module A.B
+path A/B.lean
+import Init [exported]
+import Init [exported,meta]
+commands 11
+command 0 kind=Lean.Parser.Command.set_option range=136-165 new=0
+command 1 kind=Lean.Parser.Command.universe range=167-177 new=0
+command 2 kind=Lean.Parser.Command.declaration range=179-228 new=1
+command 3 kind=Lean.Parser.Command.declaration range=230-279 new=1
+command 4 kind=Lean.Parser.Command.declaration range=281-338 new=1
+command 5 kind=Lean.Parser.Command.declaration range=340-410 new=1
+command 6 kind=Lean.Parser.Command.declaration range=563-602 new=1
+command 7 kind=Lean.Parser.Command.declaration range=604-647 new=1
+command 8 kind=Lean.Parser.Command.declaration range=649-688 new=1
+command 9 kind=Lean.Parser.Command.declaration range=763-805 new=1
+command 10 kind=Lean.Parser.Command.eoi range=806-806 new=0
+declarations 8
+  decl explicitOnly kind=definition cmd=2 universes=[u]
+    type (forall : Sort(succ(u)) => (forall : #0 => #1))
+    value (fun : Sort(succ(u)) => (fun : #0 => #0))
+  decl withImplicit kind=definition cmd=3 universes=[u]
+    type (forall : Sort(succ(u)) => (forall : #0 => #1))
+    value (fun : Sort(succ(u)) => (fun : #0 => #0))
+  decl withStrictImplicit kind=definition cmd=4 universes=[u]
+    type (forall : Sort(succ(u)) => (forall : #0 => #1))
+    value (fun : Sort(succ(u)) => (fun : #0 => #0))
+  decl withInstance kind=definition cmd=5 universes=[u]
+    type (forall : Sort(succ(u)) => (forall : (Inhabited.{succ(u)} #0) => (forall : #1 => #2)))
+    value (fun : Sort(succ(u)) => (fun : (Inhabited.{succ(u)} #0) => (fun : #1 => ((Inhabited.default.{succ(u)} #2) #1))))
+  decl useImplicit kind=definition cmd=6 universes=[]
+    type Nat
+    value ((withImplicit.{0} Nat) (((OfNat.ofNat.{0} Nat) nat_lit 1) (instOfNatNat nat_lit 1)))
+  decl useStrict kind=definition cmd=7 universes=[]
+    type Nat
+    value ((withStrictImplicit.{0} Nat) (((OfNat.ofNat.{0} Nat) nat_lit 2) (instOfNatNat nat_lit 2)))
+  decl useInstance kind=definition cmd=8 universes=[]
+    type Nat
+    value (((withInstance.{0} Nat) instInhabitedNat) (((OfNat.ofNat.{0} Nat) nat_lit 3) (instOfNatNat nat_lit 3)))
+  decl arrowTyped kind=definition cmd=9 universes=[]
+    type (forall : Nat => Nat)
+    value (fun : Nat => #0)

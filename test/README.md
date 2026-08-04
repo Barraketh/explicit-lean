@@ -23,9 +23,13 @@ test/
       pkg/          source package root, when the case needs one
       expected/
         exit        expected exit status
+        stdout      expected standard output bytes
         stderr      expected standard error bytes
         artifacts/  expected published tree, when the case succeeds
 ```
+
+A missing `stdout` or `stderr` file means "expect nothing on that stream", so an
+empty golden is redundant and `--accept` removes it rather than writing one.
 
 `cmd` holds one argument per line with blank lines and `#` comments ignored.
 Two placeholders are substituted at run time:

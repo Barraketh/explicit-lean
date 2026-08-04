@@ -1,0 +1,24 @@
+module A.B
+path A/B.lean
+import Init [exported]
+import Init [exported,meta]
+commands 6
+command 0 kind=Lean.Parser.Command.set_option range=66-95 new=0
+command 1 kind=Lean.Parser.Command.declaration range=97-115 new=1
+command 2 kind=Lean.Parser.Command.declaration range=117-146 new=1
+command 3 kind=Lean.Parser.Command.declaration range=148-175 new=1
+command 4 kind=Lean.Parser.Command.declaration range=177-196 new=1
+command 5 kind=Lean.Parser.Command.eoi range=197-197 new=0
+declarations 4
+  decl one kind=definition cmd=1 universes=[]
+    type Nat
+    value (((OfNat.ofNat.{0} Nat) nat_lit 1) (instOfNatNat nat_lit 1))
+  decl two kind=definition cmd=2 universes=[]
+    type Nat
+    value (Nat.succ one)
+  decl alsoTwo kind=definition cmd=3 universes=[]
+    type Nat
+    value two
+  decl hidden kind=opaque cmd=4 universes=[]
+    type Nat
+    value ((Inhabited.default.{succ(0)} Nat) instInhabitedNat)

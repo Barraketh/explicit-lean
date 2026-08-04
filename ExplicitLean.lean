@@ -6,3 +6,5 @@ import ExplicitLean.Publish
 import ExplicitLean.Cli
 import ExplicitLean.Toolchain
 import ExplicitLean.Driver
+import ExplicitLean.Capture
+import ExplicitLean.CaptureDebug

@@ -104,12 +104,17 @@ def toCJson (d : Diagnostic) : CJson :=
     | some s => base.push ("span", s.toCJson)
     | none => base)
 
-/-- Concise human-readable rendering. -/
+/-- Concise human-readable rendering.
+
+A message forwarded from Lean can be several lines long. Continuation lines are
+indented so that one diagnostic still begins at exactly one unindented line,
+which keeps the human stream as countable and parseable as the JSON one. -/
 def toHuman (d : Diagnostic) : String :=
   let loc := match d.span with
     | some s => s!"{s.file}:{s.startByte}-{s.endByte}: "
     | none => ""
-  s!"{loc}{d.severity}[{d.code}] ({d.phase}) {d.message}"
+  let message := String.intercalate "\n  " (d.message.splitOn "\n")
+  s!"{loc}{d.severity}[{d.code}] ({d.phase}) {message}"
 
 /-- Is `a` ordered strictly before `b`?
 

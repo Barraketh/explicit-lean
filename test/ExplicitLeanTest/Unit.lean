@@ -123,6 +123,16 @@ def diagnosticTests (fs : Failures) : Failures :=
   -- Phase ordering also applies within the unranged group.
   |> checkEq "unranged phase order"
       (codes #[d "A" .cli, d "B" .cli (sp "f" 0 1), d "C" .source]) "B,A,C"
+  -- A forwarded multi-line message still occupies exactly one unindented line,
+  -- so diagnostics stay countable in human mode.
+  |> checkEq "human rendering indents continuation lines"
+      (Diagnostic.toHuman { code := "X", message := "first\nsecond\nthird", phase := .source })
+      "error[X] (source) first\n  second\n  third"
+  |> check "human rendering has one unindented line"
+      (List.length
+        (((Diagnostic.toHuman
+            { code := "X", message := "first\nsecond", phase := .source }).splitOn "\n").filter
+          fun l => !l.startsWith "  ") == 1)
 
 /-! ## Exit statuses -/
 
@@ -242,6 +252,38 @@ def cliTests (fs : Failures) : Failures :=
 No fixture case can reach `publish` until a compilation actually succeeds, so
 these checks drive it directly against a temporary output root. -/
 
+/-! ## Canonical name ordering
+
+The order new constants are enumerated in is not a stable identity, so capture
+sorts them. These checks pin that sort's contract. -/
+
+open Lean in
+def nameOrderTests (fs : Failures) : Failures :=
+  let s := Name.mkStr
+  let n := Name.mkNum
+  let root := Name.anonymous
+  fs
+  |> check "anonymous first" (nameLt root (s root "a"))
+  |> check "not reflexive" (!nameLt (s root "a") (s root "a"))
+  |> check "by component" (nameLt (s root "a") (s root "b"))
+  -- A proper prefix sorts before the longer name.
+  |> check "prefix first" (nameLt (s root "a") (s (s root "a") "b"))
+  |> check "prefix reverse" (!nameLt (s (s root "a") "b") (s root "a"))
+  -- The first differing component decides, not the overall length.
+  |> check "first component decides"
+      (nameLt (s (s root "a") "z") (s (s root "b") "a"))
+  -- Byte order, so uppercase precedes lowercase.
+  |> check "uppercase first" (nameLt (s root "B") (s root "a"))
+  -- Numeric components compare numerically rather than as text, so 9 < 10.
+  |> check "numeric order" (nameLt (n root 9) (n root 10))
+  |> check "numeric reverse" (!nameLt (n root 10) (n root 9))
+  -- Mixed components still have a total order.
+  |> check "string before numeric" (nameLt (s root "a") (n root 0))
+  |> check "numeric after string" (!nameLt (n root 0) (s root "a"))
+  -- The order used on real generated names.
+  |> check "generated name order"
+      (nameLt (s root "Point") (s (s root "Point") "mk"))
+
 /-! ## Toolchain validation
 
 The compiler's own repository must satisfy the environment contract it enforces
@@ -319,7 +361,7 @@ def run : IO UInt32 := do
   let scratch := (← IO.currentDir) / ".lake" / "test-scratch"
   IO.FS.createDirAll scratch
   let fs := #[] |> jsonTests |> orderTests |> diagnosticTests
-              |> exitTests |> moduleTests |> cliTests
+              |> exitTests |> moduleTests |> cliTests |> nameOrderTests
   let fs := fs ++ (← toolchainTests) ++ (← publishTests scratch)
   for f in fs do
     IO.println s!"FAIL     {f}"

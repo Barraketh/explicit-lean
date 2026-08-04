@@ -1,0 +1,31 @@
+module A.B
+path A/B.lean
+import Init [exported]
+import Init [exported,meta]
+commands 13
+command 0 kind=Lean.Parser.Command.set_option range=151-180 new=0
+command 1 kind=Lean.Parser.Command.namespace range=182-197 new=0
+command 2 kind=Lean.Parser.Command.declaration range=199-218 new=1
+command 3 kind=Lean.Parser.Command.namespace range=220-235 new=0
+command 4 kind=Lean.Parser.Command.declaration range=237-263 new=1
+command 5 kind=Lean.Parser.Command.end range=265-274 new=0
+command 6 kind=Lean.Parser.Command.section range=276-283 new=0
+command 7 kind=Lean.Parser.Command.variable range=284-302 new=0
+command 8 kind=Lean.Parser.Command.declaration range=414-450 new=1
+command 9 kind=Lean.Parser.Command.end range=452-455 new=0
+command 10 kind=Lean.Parser.Command.end range=457-466 new=0
+command 11 kind=Lean.Parser.Command.in range=468-508 new=1
+command 12 kind=Lean.Parser.Command.eoi range=509-509 new=0
+declarations 4
+  decl Outer.base kind=definition cmd=2 universes=[]
+    type Nat
+    value (((OfNat.ofNat.{0} Nat) nat_lit 7) (instOfNatNat nat_lit 7))
+  decl Outer.Inner.usesBase kind=definition cmd=4 universes=[]
+    type Nat
+    value Outer.base
+  decl Outer.withSectionVar kind=definition cmd=8 universes=[]
+    type (forall : Nat => Nat)
+    value (fun : Nat => ((((((HAdd.hAdd.{0,0,0} Nat) Nat) Nat) ((instHAdd.{0} Nat) instAddNat)) #0) Outer.base))
+  decl usesOpen kind=definition cmd=11 universes=[]
+    type Nat
+    value Outer.base

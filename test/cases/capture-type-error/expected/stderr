@@ -1,0 +1,1 @@
+{"code":"SOURCE-ELABORATION-FAILED","message":"Type mismatch\n  \"not a nat\"\nhas type\n  String\nbut is expected to have type\n  Nat","phase":"source","severity":"error","span":{"endByte":181,"file":"A/B.lean","startByte":170}}

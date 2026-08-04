@@ -1,0 +1,24 @@
+module A.B
+path A/B.lean
+import Init [exported]
+import Init [exported,meta]
+commands 6
+command 0 kind=Lean.Parser.Command.set_option range=128-157 new=0
+command 1 kind=Lean.Parser.Command.declaration range=159-175 new=1
+command 2 kind=Lean.Parser.Command.declaration range=177-206 new=1
+command 3 kind=Lean.Parser.Command.declaration range=208-252 new=1
+command 4 kind=Lean.Parser.Command.declaration range=254-318 new=1
+command 5 kind=Lean.Parser.Command.eoi range=319-319 new=0
+declarations 4
+  decl n kind=definition cmd=1 universes=[]
+    type Nat
+    value (((OfNat.ofNat.{0} Nat) nat_lit 2) (instOfNatNat nat_lit 2))
+  decl nEqTwo kind=theorem cmd=2 universes=[]
+    type (((Eq.{succ(0)} Nat) n) (((OfNat.ofNat.{0} Nat) nat_lit 2) (instOfNatNat nat_lit 2)))
+    value ((rfl.{succ(0)} Nat) n)
+  decl symmNEqTwo kind=theorem cmd=3 universes=[]
+    type (((Eq.{succ(0)} Nat) (((OfNat.ofNat.{0} Nat) nat_lit 2) (instOfNatNat nat_lit 2))) n)
+    value ((((Eq.symm.{succ(0)} Nat) n) (((OfNat.ofNat.{0} Nat) nat_lit 2) (instOfNatNat nat_lit 2))) nEqTwo)
+  decl transTrivial kind=theorem cmd=4 universes=[]
+    type (((Eq.{succ(0)} Nat) n) n)
+    value ((((((Eq.trans.{succ(0)} Nat) n) (((OfNat.ofNat.{0} Nat) nat_lit 2) (instOfNatNat nat_lit 2))) n) nEqTwo) ((((Eq.symm.{succ(0)} Nat) n) (((OfNat.ofNat.{0} Nat) nat_lit 2) (instOfNatNat nat_lit 2))) nEqTwo))

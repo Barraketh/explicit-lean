@@ -24,9 +24,23 @@ argument beginning with `--` is read as the next option rather than as a value.
 
 namespace ExplicitLean
 
-/-- Parsed and validated `compile` options. Paths here are exactly as given on
-the command line; resolution against the filesystem happens in `Driver`. -/
+/-- Which command was requested. -/
+inductive Command where
+  /-- The v0 command: capture, check, and publish artifacts. -/
+  | compile
+  /-- Capture only, printing the stable capture projection to standard output.
+
+  This is the coverage-probe entry point required by
+  [C10](../CAPTURE.md#c10-coverage-probes-and-acceptance). It publishes nothing,
+  so `--output-root` is unused but still required, keeping one option shape for
+  both commands. -/
+  | captureDebug
+  deriving Inhabited, Repr, BEq, DecidableEq
+
+/-- Parsed and validated options. Paths here are exactly as given on the command
+line; resolution against the filesystem happens in `Driver`. -/
 structure CompileOptions where
+  command : Command
   packageRoot : System.FilePath
   module : ModuleName
   source : System.FilePath
@@ -36,7 +50,7 @@ structure CompileOptions where
 
 /-- The usage text, printed on a command-line error. -/
 def usage : String :=
-  "usage: explicit-lean compile \
+  "usage: explicit-lean compile|capture-debug \
 --package-root ROOT --module MODULE --source FILE --output-root OUT \
 [--diagnostic-format human|json]"
 
@@ -64,17 +78,19 @@ def peekDiagnosticFormat (args : List String) : DiagnosticFormat :=
   | _ :: rest => peekDiagnosticFormat rest
   | [] => .human
 
-/-- Parse `compile` arguments. Returns diagnostics on failure. -/
+/-- Parse command-line arguments. Returns diagnostics on failure. -/
 def parseArgs (args : List String) : Except (Array Diagnostic) CompileOptions := do
   match args with
   | [] =>
     .error #[cliError "CLI-NO-COMMAND" s!"missing command. {usage}"]
   | cmd :: rest =>
-    if cmd != "compile" then
-      .error #[cliError "CLI-UNKNOWN-COMMAND" s!"unknown command '{cmd}'. {usage}"]
-    else
-      let p ← go rest {}
-      finish p
+    let command ←
+      match cmd with
+      | "compile" => pure Command.compile
+      | "capture-debug" => pure Command.captureDebug
+      | _ => .error #[cliError "CLI-UNKNOWN-COMMAND" s!"unknown command '{cmd}'. {usage}"]
+    let p ← go rest {}
+    finish command p
 where
   /-- Accept the `--opt=value` spelling. Only an argument that starts with `--`
   is an option, so a bare argument containing `=` is not split into a bogus
@@ -147,13 +163,13 @@ where
   options together and reaches the module-name check only when a value is
   present, so no branch can return an empty diagnostic array — which would
   otherwise be reported as a silent success. -/
-  finish (p : Partial) : Except (Array Diagnostic) CompileOptions :=
+  finish (command : Command) (p : Partial) : Except (Array Diagnostic) CompileOptions :=
     match p.packageRoot, p.module, p.source, p.outputRoot with
     | some packageRoot, some moduleText, some source, some outputRoot =>
       match ModuleName.parse moduleText with
       | some module =>
         .ok {
-          packageRoot, module, source, outputRoot
+          command, packageRoot, module, source, outputRoot
           diagnosticFormat := p.diagnosticFormat.getD .human
         }
       | none =>

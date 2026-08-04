@@ -1,0 +1,24 @@
+module A.B
+path A/B.lean
+import Init [exported]
+import Init [exported,meta]
+commands 6
+command 0 kind=Lean.Parser.Command.set_option range=236-265 new=0
+command 1 kind=Lean.Parser.Command.declaration range=267-334 new=1
+command 2 kind=Lean.Parser.Command.declaration range=336-366 new=1
+command 3 kind=Lean.Parser.Command.declaration range=368-399 new=1
+command 4 kind=Lean.Parser.Command.declaration range=401-446 new=1
+command 5 kind=Lean.Parser.Command.eoi range=447-447 new=0
+declarations 4
+  decl withLet kind=definition cmd=1 universes=[]
+    type (forall : Nat => Nat)
+    value (fun : Nat => (let : Nat := ((((((HAdd.hAdd.{0,0,0} Nat) Nat) Nat) ((instHAdd.{0} Nat) instAddNat)) #0) #0); ((((((HAdd.hAdd.{0,0,0} Nat) Nat) Nat) ((instHAdd.{0} Nat) instAddNat)) #0) (((OfNat.ofNat.{0} Nat) nat_lit 1) (instOfNatNat nat_lit 1)))))
+  decl usesLet kind=definition cmd=2 universes=[]
+    type Nat
+    value (withLet (((OfNat.ofNat.{0} Nat) nat_lit 3) (instOfNatNat nat_lit 3)))
+  decl ascribed kind=definition cmd=3 universes=[]
+    type Nat
+    value (((OfNat.ofNat.{0} Nat) nat_lit 2) (instOfNatNat nat_lit 2))
+  decl projected kind=definition cmd=4 universes=[]
+    type (forall : ((Prod.{0,0} Nat) Nat) => Nat)
+    value (fun : ((Prod.{0,0} Nat) Nat) => (((Prod.fst.{0,0} Nat) Nat) #0))

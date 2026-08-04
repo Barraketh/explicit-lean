@@ -137,7 +137,7 @@ unsupported, so no case publishes artifacts yet; the compilation stages arrive i
 work packages 2 through 8. Import-artifact resolution and recording is deferred
 to the capture spike, which is where imports are first actually loaded.
 
-### 2. Stock capture spike
+### 2. Stock capture spike — done
 
 - Invoke `Lean.Language.Lean.process` in-process for one module with asynchronous elaboration disabled.
 - Walk completed command snapshots in source order.
@@ -148,6 +148,37 @@ to the capture spike, which is where imports are first actually loaded.
 Probe fixtures must cover hidden universe and term arguments, imported instance synthesis, coercion insertion, stock arrow or binder expansion, a term proof, namespace and section context, and a simple generated declaration if stock Lean creates one.
 
 Exit criterion: the spike inventories every declaration in each fixture, completes all captured expressions, correlates them with source, and produces an identical stable debug projection on repeated runs.
+
+Status: complete. `explicit-lean capture-debug` is the probe entry point; it
+captures a module and prints the stable projection, publishing nothing. Every
+capture fixture is a positive case, so the harness runs it twice and requires
+byte-identical output, which is the repeat-run determinism check.
+
+Findings worth carrying forward:
+
+- The executable needs `supportInterpreter = true`. Without it the binary links
+  Lean but cannot run the elaborator initializers, and ordinary notation such as
+  `a + b` fails with "elaboration function has not been implemented".
+- `internal.cmdlineSnapshots` must stay `false`; it discards exactly the
+  per-command snapshot metadata capture reads. A fixture fails if it is enabled.
+- `Elab.async` is set to `false` because C1 and C8 require it, but no test
+  detects its absence: the failure it prevents is scheduling-dependent.
+- `ConstantInfo.value?` hides theorem and `opaque` bodies unless
+  `allowOpaque := true`, so capture asks for them explicitly.
+- `Command.State` is per command rather than cumulative: each command carries at
+  most one info tree and only its own messages.
+- The environment's map traversal order is reproducible within a build but is
+  not a stable identity, and it is not source order — a `structure` command
+  yields `Point.noConfusion` before `Point`. New constants are therefore sorted
+  by name, pinned by the `capture-multi-constant` fixture.
+- Within the v0 accepted declaration and term forms, stock Lean creates no
+  same-module generated auxiliaries; `capture-let` records that result. Whether
+  post-v0 forms need correlation for their auxiliaries is work package 9.
+
+Information trees are retained per command but not yet consumed: the completed
+`ConstantInfo` supplies everything the v0 fixtures need, and C4 makes it the
+semantic authority. Admission and lowering are what will need the tree's
+syntax-to-expression correlation.
 
 ### 3. v0 admission and diagnostics
 

@@ -1,0 +1,57 @@
+module A.B
+path A/B.lean
+import Init [exported]
+import Init [exported,meta]
+commands 3
+command 0 kind=Lean.Parser.Command.set_option range=285-314 new=0
+command 1 kind=Lean.Parser.Command.declaration range=316-357 new=17
+command 2 kind=Lean.Parser.Command.eoi range=358-358 new=0
+declarations 17
+  decl Point kind=inductive cmd=1 universes=[]
+    type Sort(succ(0))
+  decl Point._sizeOf_1 kind=definition cmd=1 universes=[]
+    type (forall : Point => Nat)
+    value (fun : Point => (((Point.rec.{succ(0)} (fun : Point => Nat)) (fun : Nat => (fun : Nat => ((((((HAdd.hAdd.{0,0,0} Nat) Nat) Nat) ((instHAdd.{0} Nat) instAddNat)) ((((((HAdd.hAdd.{0,0,0} Nat) Nat) Nat) ((instHAdd.{0} Nat) instAddNat)) (((OfNat.ofNat.{0} Nat) nat_lit 1) (instOfNatNat nat_lit 1))) (((SizeOf.sizeOf.{succ(0)} Nat) instSizeOfNat) #1))) (((SizeOf.sizeOf.{succ(0)} Nat) instSizeOfNat) #0))))) #0))
+  decl Point._sizeOf_inst kind=definition cmd=1 universes=[]
+    type (SizeOf.{succ(0)} Point)
+    value ((SizeOf.mk.{succ(0)} Point) (fun : Point => (Point._sizeOf_1 #0)))
+  decl Point.casesOn kind=definition cmd=1 universes=[u]
+    type (forall : (forall : Point => Sort(u)) => (forall : Point => (forall : (forall : Nat => (forall : Nat => (#3 ((Point.mk #1) #0)))) => (#2 #1))))
+    value (fun : (forall : Point => Sort(u)) => (fun : Point => (fun : (forall : Nat => (forall : Nat => (#3 ((Point.mk #1) #0)))) => (((Point.rec.{u} #2) (fun : Nat => (fun : Nat => ((#2 #1) #0)))) #1))))
+  decl Point.ctorIdx kind=definition cmd=1 universes=[]
+    type (forall : Point => Nat)
+    value (fun : Point => nat_lit 0)
+  decl Point.mk kind=constructor cmd=1 universes=[]
+    type (forall : Nat => (forall : Nat => Point))
+  decl Point.mk._flat_ctor kind=definition cmd=1 universes=[]
+    type (forall : Nat => (forall : Nat => Point))
+    value (fun : Nat => (fun : Nat => ((Point.mk #1) #0)))
+  decl Point.mk.inj kind=theorem cmd=1 universes=[]
+    type (forall : Nat => (forall : Nat => (forall : Nat => (forall : Nat => (forall : (((Eq.{succ(0)} Point) ((Point.mk #3) #2)) ((Point.mk #1) #0)) => ((And (((Eq.{succ(0)} Nat) #4) #2)) (((Eq.{succ(0)} Nat) #3) #1)))))))
+    value (fun : Nat => (fun : Nat => (fun : Nat => (fun : Nat => (fun : (((Eq.{succ(0)} Point) ((Point.mk #3) #2)) ((Point.mk #1) #0)) => (((((((Point.mk.noConfusion.{0} ((And (((Eq.{succ(0)} Nat) #4) #2)) (((Eq.{succ(0)} Nat) #3) #1))) #4) #3) #2) #1) #0) (fun : (((Eq.{succ(0)} Nat) #4) #2) => (fun : (((Eq.{succ(0)} Nat) #4) #2) => ((((And.intro (((Eq.{succ(0)} Nat) #6) #4)) (((Eq.{succ(0)} Nat) #5) #3)) #1) #0)))))))))
+  decl Point.mk.injEq kind=theorem cmd=1 universes=[]
+    type (forall : Nat => (forall : Nat => (forall : Nat => (forall : Nat => (((Eq.{succ(0)} Sort(0)) (((Eq.{succ(0)} Point) ((Point.mk #3) #2)) ((Point.mk #1) #0))) ((And (((Eq.{succ(0)} Nat) #3) #1)) (((Eq.{succ(0)} Nat) #2) #0)))))))
+    value (fun : Nat => (fun : Nat => (fun : Nat => (fun : Nat => ((((Eq.propIntro (((Eq.{succ(0)} Point) ((Point.mk #3) #2)) ((Point.mk #1) #0))) ((And (((Eq.{succ(0)} Nat) #3) #1)) (((Eq.{succ(0)} Nat) #2) #0))) ((((Point.mk.inj #3) #2) #1) #0)) ((((Lean.injEq_helper (((Eq.{succ(0)} Nat) #3) #1)) (((Eq.{succ(0)} Nat) #2) #0)) (((Eq.{succ(0)} Point) ((Point.mk #3) #2)) ((Point.mk #1) #0))) (((((Eq.ndrec.{0,succ(0)} Nat) #3) (fun : Nat => (forall : (((Eq.{succ(0)} Nat) #3) #1) => (((Eq.{succ(0)} Point) ((Point.mk #5) #4)) ((Point.mk #1) #2))))) (((((Eq.ndrec.{0,succ(0)} Nat) #2) (fun : Nat => (((Eq.{succ(0)} Point) ((Point.mk #4) #3)) ((Point.mk #4) #0)))) ((Eq.refl.{succ(0)} Point) ((Point.mk #3) #2))) #0)) #1)))))))
+  decl Point.mk.noConfusion kind=definition cmd=1 universes=[u]
+    type (forall : Sort(u) => (forall : Nat => (forall : Nat => (forall : Nat => (forall : Nat => (forall : (((Eq.{succ(0)} Point) ((Point.mk #3) #2)) ((Point.mk #1) #0)) => (forall : (forall : (((Eq.{succ(0)} Nat) #4) #2) => (forall : (((Eq.{succ(0)} Nat) #4) #2) => #7)) => #6)))))))
+    value (fun : Sort(u) => (fun : Nat => (fun : Nat => (fun : Nat => (fun : Nat => (fun : (((Eq.{succ(0)} Point) ((Point.mk #3) #2)) ((Point.mk #1) #0)) => (fun : (forall : (((Eq.{succ(0)} Nat) #4) #2) => (forall : (((Eq.{succ(0)} Nat) #4) #2) => #7)) => ((id.{u} #6) (((((Point.noConfusion.{u} #6) ((Point.mk #5) #4)) ((Point.mk #3) #2)) #1) #0)))))))))
+  decl Point.mk.sizeOf_spec kind=theorem cmd=1 universes=[]
+    type (forall : Nat => (forall : Nat => (((Eq.{succ(0)} Nat) (((SizeOf.sizeOf.{succ(0)} Point) Point._sizeOf_inst) ((Point.mk #1) #0))) ((((((HAdd.hAdd.{0,0,0} Nat) Nat) Nat) ((instHAdd.{0} Nat) instAddNat)) ((((((HAdd.hAdd.{0,0,0} Nat) Nat) Nat) ((instHAdd.{0} Nat) instAddNat)) (((OfNat.ofNat.{0} Nat) nat_lit 1) (instOfNatNat nat_lit 1))) (((SizeOf.sizeOf.{succ(0)} Nat) instSizeOfNat) #1))) (((SizeOf.sizeOf.{succ(0)} Nat) instSizeOfNat) #0)))))
+    value (fun : Nat => (fun : Nat => ((Eq.refl.{succ(0)} Nat) ((((((HAdd.hAdd.{0,0,0} Nat) Nat) Nat) ((instHAdd.{0} Nat) instAddNat)) ((((((HAdd.hAdd.{0,0,0} Nat) Nat) Nat) ((instHAdd.{0} Nat) instAddNat)) (((OfNat.ofNat.{0} Nat) nat_lit 1) (instOfNatNat nat_lit 1))) (((SizeOf.sizeOf.{succ(0)} Nat) instSizeOfNat) #1))) (((SizeOf.sizeOf.{succ(0)} Nat) instSizeOfNat) #0)))))
+  decl Point.noConfusion kind=definition cmd=1 universes=[u]
+    type (forall : Sort(u) => (forall : Point => (forall : Point => (forall : (((Eq.{succ(0)} Point) #1) #0) => (((Point.noConfusionType.{u} #3) #2) #1)))))
+    value (fun : Sort(u) => (fun : Point => (fun : Point => (fun : (((Eq.{succ(0)} Point) #1) #0) => ((((((Eq.ndrec.{u,succ(0)} Point) #2) (fun : Point => (((Point.noConfusionType.{u} #4) #3) #0))) (((Point.casesOn.{u} (fun : Point => (((Point.noConfusionType.{u} #4) #0) #0))) #2) (fun : Nat => (fun : Nat => (fun : (forall : (((Eq.{succ(0)} Nat) #1) #1) => (forall : (((Eq.{succ(0)} Nat) #1) #1) => #7)) => ((#0 ((Eq.refl.{succ(0)} Nat) #2)) ((Eq.refl.{succ(0)} Nat) #1))))))) #1) #0)))))
+  decl Point.noConfusionType kind=definition cmd=1 universes=[u]
+    type (forall : Sort(u) => (forall : Point => (forall : Point => Sort(u))))
+    value (fun : Sort(u) => (fun : Point => (fun : Point => (((Point.casesOn.{succ(u)} (fun : Point => Sort(u))) #1) (fun : Nat => (fun : Nat => (((Point.casesOn.{succ(u)} (fun : Point => Sort(u))) #2) (fun : Nat => (fun : Nat => (forall : (forall : (((Eq.{succ(0)} Nat) #3) #1) => (forall : (((Eq.{succ(0)} Nat) #3) #1) => #8)) => #7))))))))))
+  decl Point.rec kind=recursor cmd=1 universes=[u]
+    type (forall : (forall : Point => Sort(u)) => (forall : (forall : Nat => (forall : Nat => (#2 ((Point.mk #1) #0)))) => (forall : Point => (#2 #0))))
+  decl Point.recOn kind=definition cmd=1 universes=[u]
+    type (forall : (forall : Point => Sort(u)) => (forall : Point => (forall : (forall : Nat => (forall : Nat => (#3 ((Point.mk #1) #0)))) => (#2 #1))))
+    value (fun : (forall : Point => Sort(u)) => (fun : Point => (fun : (forall : Nat => (forall : Nat => (#3 ((Point.mk #1) #0)))) => (((Point.rec.{u} #2) #0) #1))))
+  decl Point.x kind=definition cmd=1 universes=[]
+    type (forall : Point => Nat)
+    value (fun : Point => proj(Point,0,#0))
+  decl Point.y kind=definition cmd=1 universes=[]
+    type (forall : Point => Nat)
+    value (fun : Point => proj(Point,1,#0))

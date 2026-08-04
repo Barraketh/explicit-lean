@@ -78,6 +78,13 @@ def renderTree (files : Array (String × String)) : String :=
       acc ++ "=== " ++ path ++ "\n" ++ contents
         ++ (if contents.endsWith "\n" then "" else "\n")
 
+/-- Write a stream golden, removing the file when the stream was empty. -/
+def writeStream (path : System.FilePath) (contents : String) : IO Unit := do
+  if contents.isEmpty then
+    if ← path.pathExists then IO.FS.removeFile path
+  else
+    IO.FS.writeBinFile path contents.toUTF8
+
 /-- Write a tree snapshot back out as golden files beneath `dir`. -/
 def writeTree (dir : System.FilePath) (files : Array (String × String)) : IO Unit := do
   if ← dir.pathExists then IO.FS.removeDirAll dir
@@ -88,14 +95,15 @@ def writeTree (dir : System.FilePath) (files : Array (String × String)) : IO Un
       IO.FS.createDirAll parent
     IO.FS.writeBinFile target contents.toUTF8
 
-/-- Run the executable once with `args`, returning exit status and stderr. -/
-def runOnce (cfg : Config) (args : List String) : IO (UInt32 × String) := do
+/-- Run the executable once with `args`, returning exit status, stdout, and
+stderr. -/
+def runOnce (cfg : Config) (args : List String) : IO (UInt32 × String × String) := do
   let out ← IO.Process.output {
     cmd := cfg.exe.toString
     args := args.toArray
     cwd := some cfg.root
   }
-  return (out.exitCode, out.stderr)
+  return (out.exitCode, out.stdout, out.stderr)
 
 /-- Run one case. -/
 def runCase (cfg : Config) (name : String) : IO Outcome := do
@@ -110,7 +118,7 @@ def runCase (cfg : Config) (name : String) : IO Outcome := do
   IO.FS.createDirAll outDir
 
   let args := parseCmd cmdText pkg outDir
-  let (exit, stderr) ← runOnce cfg args
+  let (exit, stdout, stderr) ← runOnce cfg args
   let published ← snapshotTree outDir
 
   let expectedDir := caseDir / "expected"
@@ -118,7 +126,11 @@ def runCase (cfg : Config) (name : String) : IO Outcome := do
   if cfg.accept then
     IO.FS.createDirAll expectedDir
     IO.FS.writeBinFile (expectedDir / "exit") (toString exit ++ "\n").toUTF8
-    IO.FS.writeBinFile (expectedDir / "stderr") stderr.toUTF8
+    -- A missing stream file means "expect nothing", so an empty golden would be
+    -- redundant. Removing it rather than writing it keeps that convention from
+    -- drifting every time expectations are accepted.
+    writeStream (expectedDir / "stdout") stdout
+    writeStream (expectedDir / "stderr") stderr
     writeTree (expectedDir / "artifacts") published
     return .accepted
 
@@ -137,6 +149,11 @@ def runCase (cfg : Config) (name : String) : IO Outcome := do
   | some want =>
     if want != toString exit then
       reasons := reasons.push s!"exit status: expected {want}, got {exit}"
+
+  let wantStdout := (← readIfExists (expectedDir / "stdout")).getD ""
+  if wantStdout != stdout then
+    reasons := reasons.push
+      s!"stdout mismatch:\n--- expected ---\n{wantStdout}--- actual ---\n{stdout}---"
 
   let wantStderr := (← readIfExists (expectedDir / "stderr")).getD ""
   if wantStderr != stderr then
@@ -159,15 +176,21 @@ def runCase (cfg : Config) (name : String) : IO Outcome := do
         ++ String.intercalate ", " (published.toList.map (·.1)))
 
   -- Determinism: a successful run repeated into a clean output directory must
-  -- publish byte-identical artifacts.
+  -- publish byte-identical artifacts and report byte-identical output. The
+  -- latter is what makes this the stable-projection check the capture coverage
+  -- probes require.
   if isPositive then
     let outDir2 := cfg.scratch / name / "out2"
     IO.FS.createDirAll outDir2
     let args2 := parseCmd cmdText pkg outDir2
-    let (exit2, _) ← runOnce cfg args2
+    let (exit2, stdout2, _) ← runOnce cfg args2
     let published2 ← snapshotTree outDir2
     if exit2 != exit then
       reasons := reasons.push s!"repeat run exit status: expected {exit}, got {exit2}"
+    if stdout2 != stdout then
+      reasons := reasons.push
+        s!"repeat run wrote different stdout:\n--- first ---\n{stdout}\
+--- second ---\n{stdout2}---"
     if published2 != published then
       reasons := reasons.push
         s!"repeat run published different bytes:\n--- first ---\n{renderTree published}\

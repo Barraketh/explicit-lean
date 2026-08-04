@@ -1,0 +1,25 @@
+module A.B
+path A/B.lean
+import Init [exported]
+import Init [exported,meta]
+commands 7
+command 0 kind=Lean.Parser.Command.set_option range=138-167 new=0
+command 1 kind=Lean.Parser.Command.universe range=169-181 new=0
+command 2 kind=Lean.Parser.Command.declaration range=183-224 new=1
+command 3 kind=Lean.Parser.Command.declaration range=226-293 new=1
+command 4 kind=Lean.Parser.Command.declaration range=421-451 new=1
+command 5 kind=Lean.Parser.Command.declaration range=453-516 new=1
+command 6 kind=Lean.Parser.Command.eoi range=517-517 new=0
+declarations 4
+  decl idAt kind=definition cmd=2 universes=[u]
+    type (forall : Sort(succ(u)) => (forall : #0 => #1))
+    value (fun : Sort(succ(u)) => (fun : #0 => #0))
+  decl constAt kind=definition cmd=3 universes=[u,v]
+    type (forall : Sort(succ(u)) => (forall : Sort(succ(v)) => (forall : #1 => (forall : #1 => #3))))
+    value (fun : Sort(succ(u)) => (fun : Sort(succ(v)) => (fun : #1 => (fun : #1 => #1))))
+  decl usesId kind=definition cmd=4 universes=[]
+    type Nat
+    value ((idAt.{0} Nat) (((OfNat.ofNat.{0} Nat) nat_lit 3) (instOfNatNat nat_lit 3)))
+  decl usesConst kind=definition cmd=5 universes=[u]
+    type (forall : Sort(succ(u)) => (forall : #0 => #1))
+    value (fun : Sort(succ(u)) => (fun : #0 => ((((constAt.{u,0} #1) Nat) #0) (((OfNat.ofNat.{0} Nat) nat_lit 0) (instOfNatNat nat_lit 0)))))

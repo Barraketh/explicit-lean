@@ -2,6 +2,7 @@ import ExplicitLean.Cli
 import ExplicitLean.ExitStatus
 import ExplicitLean.Publish
 import ExplicitLean.Toolchain
+import ExplicitLean.CaptureDebug
 
 /-!
 # Compile driver
@@ -82,12 +83,42 @@ def resolveInputs (opts : CompileOptions) : IO (Except (Array Diagnostic) Resolv
     module := opts.module
   }
 
+/-- Prepare this process to elaborate source with the pinned toolchain.
+
+`lake env` has already put the imported artifacts on the search path; this
+resolves that path and enables the initializer execution `importModules`
+requires. -/
+def initializeElaboration : IO Unit := do
+  Lean.initSearchPath (← Lean.findSysroot)
+  unsafe Lean.enableInitializersExecution
+
+/-- Capture one module and return its stable projection.
+
+This is the coverage-probe entry point required by
+[C10](../CAPTURE.md#c10-coverage-probes-and-acceptance). It observes the source
+elaboration and reports what capture recovered, without lowering anything. -/
+def captureDebug (inputs : ResolvedInputs) : IO (Except (Array Diagnostic) String) := do
+  initializeElaboration
+  match ← captureModule inputs.module inputs.source inputs.sourceRelPath with
+  | .error ds => return .error ds
+  | .ok captured =>
+    -- A declaration that cannot be inventoried, or an expression retaining an
+    -- unresolved metavariable, is a capture failure rather than something to
+    -- project and pass on (C4, C9).
+    let (delta, missing) := moduleDeltaWithFailures captured
+    let failures :=
+      checkDelta inputs.sourceRelPath missing
+        ++ checkCompleted inputs.sourceRelPath delta
+    if !failures.isEmpty then
+      return .error failures
+    return .ok (projectModule captured)
+
 /-- Run the compilation stages for validated inputs.
 
-Later work packages replace the placeholder with capture, admission, lowering,
-grammar checking, audit, verification, and manifest generation. Until then this
-reports the module as unsupported rather than publishing artifacts that have not
-been through those stages. -/
+Later work packages replace the placeholder with admission, lowering, grammar
+checking, audit, verification, and manifest generation. Until then this reports
+the module as unsupported rather than publishing artifacts that have not been
+through those stages. -/
 def runStages (inputs : ResolvedInputs) : IO (Except (Array Diagnostic) Artifacts) := do
   return .error #[{
     code := "UNSUPPORTED-NOT-IMPLEMENTED"
@@ -118,11 +149,19 @@ def compile (opts : CompileOptions) : IO (Array Diagnostic) := do
     let envDiags ← validateEnvironment inputs.packageRoot
     if !envDiags.isEmpty then
       return envDiags
-    match ← runStages inputs with
-    | .error ds => return failureDiagnostics ds
-    | .ok artifacts =>
-      publish inputs.outputRoot inputs.module artifacts
-      return #[]
+    match opts.command with
+    | .captureDebug =>
+      match ← captureDebug inputs with
+      | .error ds => return failureDiagnostics ds
+      | .ok projection =>
+        IO.print projection
+        return #[]
+    | .compile =>
+      match ← runStages inputs with
+      | .error ds => return failureDiagnostics ds
+      | .ok artifacts =>
+        publish inputs.outputRoot inputs.module artifacts
+        return #[]
 
 /-- Entry point shared by the executable and the tests. -/
 def main (args : List String) : IO UInt32 := do

@@ -1,0 +1,20 @@
+module A.B
+path A/B.lean
+import Init [exported]
+import Init [exported,meta]
+commands 5
+command 0 kind=Lean.Parser.Command.set_option range=128-157 new=0
+command 1 kind=Lean.Parser.Command.declaration range=159-189 new=1
+command 2 kind=Lean.Parser.Command.declaration range=191-216 new=1
+command 3 kind=Lean.Parser.Command.declaration range=218-259 new=1
+command 4 kind=Lean.Parser.Command.eoi range=260-260 new=0
+declarations 3
+  decl asInt kind=definition cmd=1 universes=[]
+    type (forall : Nat => Int)
+    value (fun : Nat => (((Nat.cast.{0} Int) instNatCastInt) #0))
+  decl literalInt kind=definition cmd=2 universes=[]
+    type Int
+    value (((OfNat.ofNat.{0} Int) nat_lit 5) (instOfNat nat_lit 5))
+  decl viaCoe kind=definition cmd=3 universes=[]
+    type (forall : Nat => Int)
+    value (fun : Nat => ((((((HAdd.hAdd.{0,0,0} Int) Int) Int) ((instHAdd.{0} Int) Int.instAdd)) (asInt #0)) (((OfNat.ofNat.{0} Int) nat_lit 1) (instOfNat nat_lit 1))))
