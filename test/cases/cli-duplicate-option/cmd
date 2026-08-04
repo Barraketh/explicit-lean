@@ -1,0 +1,5 @@
+compile
+--module
+A.B
+--module
+A.C

@@ -1,0 +1,1 @@
+error[TOOLCHAIN-PIN-MISMATCH] (cli) package root pins 'leanprover/lean4:v4.31.0', expected 'leanprover/lean4:v4.32.2'

@@ -1,0 +1,5 @@
+compile
+--package-root=/nonexistent-explicit-lean-root
+--module=A.B
+--source=/nonexistent-explicit-lean-root/A/B.lean
+--output-root=@OUT@

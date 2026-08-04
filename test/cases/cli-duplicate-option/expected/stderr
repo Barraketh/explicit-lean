@@ -1,0 +1,1 @@
+error[CLI-DUPLICATE-OPTION] (cli) option '--module' given more than once

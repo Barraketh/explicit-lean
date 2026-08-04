@@ -1,0 +1,1 @@
+error[LAKE-MANIFEST-MISSING] (cli) package root has no 'lake-manifest.json'; run 'lake update' and build before compiling

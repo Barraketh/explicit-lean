@@ -1,7 +1,27 @@
 name = "explicitLean"
 version = "0.1.0"
+# The test executable is a default target so a bare `lake build` cannot leave a
+# stale test binary behind for the next `explicit-lean-test` run.
+defaultTargets = ["ExplicitLean", "explicit-lean", "explicit-lean-test"]
 
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
 rev = "v4.32.2"
+
+[[lean_lib]]
+name = "ExplicitLean"
+
+[[lean_exe]]
+name = "explicit-lean"
+root = "Main"
+
+# Test modules live in their own library so the harness can import them.
+[[lean_lib]]
+name = "ExplicitLeanTest"
+srcDir = "test"
+
+[[lean_exe]]
+name = "explicit-lean-test"
+srcDir = "test"
+root = "Harness"

@@ -117,7 +117,7 @@ Diagnostics are ordered by ranged before unranged, source file, start byte, end 
 
 ## Work packages
 
-### 1. Project and test skeleton
+### 1. Project and test skeleton — done
 
 - Add the documented `ExplicitLean` library and `explicit-lean` executable targets to Lake.
 - Establish fixture directories, golden-output tests, negative-diagnostic tests, and a command that runs the complete local test suite.
@@ -126,6 +126,16 @@ Diagnostics are ordered by ranged before unranged, source file, start byte, end 
 - Confirm the complete skeleton on the supported Apple-silicon macOS host.
 
 Exit criterion: a trivial executable and empty fixture suite build and run from a clean checkout with the pinned toolchain.
+
+Status: complete. `lake build` produces the library, `explicit-lean`, and the
+`explicit-lean-test` harness; `./test/run.sh` runs the complete suite. The
+skeleton implements canonical JSON, diagnostics with the documented ordering and
+both output formats, the exit-status severity rule, the module-to-file mapping
+and root-escape checks, prebuilt-environment validation, and staged atomic
+publication. `runStages` is still a placeholder that reports every module as
+unsupported, so no case publishes artifacts yet; the compilation stages arrive in
+work packages 2 through 8. Import-artifact resolution and recording is deferred
+to the capture spike, which is where imports are first actually loaded.
 
 ### 2. Stock capture spike
 

@@ -1,0 +1,1 @@
+error[CLI-BAD-MODULE-NAME] (cli) --module must be a nonanonymous dotted Lean module name, got 'A..B'

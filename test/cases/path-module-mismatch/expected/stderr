@@ -1,0 +1,1 @@
+error[PATH-MODULE-MISMATCH] (cli) module 'A.C' must be read from 'A/C.lean', got 'A/B.lean'

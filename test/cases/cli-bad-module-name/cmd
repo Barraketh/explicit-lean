@@ -1,0 +1,5 @@
+compile
+--module=A..B
+--package-root=/nonexistent
+--source=/nonexistent
+--output-root=/nonexistent

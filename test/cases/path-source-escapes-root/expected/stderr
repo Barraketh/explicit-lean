@@ -1,0 +1,1 @@
+error[PATH-SOURCE-ESCAPES-ROOT] (cli) --source does not resolve beneath --package-root

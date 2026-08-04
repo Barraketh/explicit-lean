@@ -1,0 +1,11 @@
+compile
+--package-root
+@PKG@
+--module
+A.B
+--source
+@PKG@/A/B.lean
+--output-root
+@OUT@
+--diagnostic-format
+json

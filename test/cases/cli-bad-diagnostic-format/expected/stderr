@@ -1,0 +1,1 @@
+error[CLI-BAD-DIAGNOSTIC-FORMAT] (cli) --diagnostic-format must be 'human' or 'json', got 'yaml'

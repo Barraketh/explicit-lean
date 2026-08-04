@@ -1,0 +1,9 @@
+compile
+--package-root
+@PKG@
+--module
+A.Missing
+--source
+@PKG@/A/Missing.lean
+--output-root
+@OUT@

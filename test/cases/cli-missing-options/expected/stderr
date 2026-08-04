@@ -1,0 +1,3 @@
+error[CLI-MISSING-OPTION] (cli) missing required option '--output-root'
+error[CLI-MISSING-OPTION] (cli) missing required option '--package-root'
+error[CLI-MISSING-OPTION] (cli) missing required option '--source'

@@ -1,0 +1,1 @@
+{"code":"UNSUPPORTED-NOT-IMPLEMENTED","message":"compilation stages are not implemented yet; cannot compile 'A.B'","phase":"admission","severity":"error","span":{"endByte":0,"file":"A/B.lean","startByte":0}}
