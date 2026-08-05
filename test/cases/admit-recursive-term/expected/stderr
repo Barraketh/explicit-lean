@@ -1,0 +1,1 @@
+A/B.lean:309-399: error[UNSUPPORTED-RECURSIVE-DECLARATION] (admission) 'countdown._unsafe_rec' refers to itself; v0 accepts only nonrecursive declarations

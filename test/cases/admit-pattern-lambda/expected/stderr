@@ -1,0 +1,1 @@
+A/B.lean:175-194: error[UNSUPPORTED-MATCH] (admission) a pattern-matching lambda is not in the v0 source feature set

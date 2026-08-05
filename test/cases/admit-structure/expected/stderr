@@ -1,0 +1,3 @@
+A/B.lean:101-150: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Pair' is an inductive type, which is not in the v0 source feature set
+A/B.lean:101-150: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Pair.mk' is a constructor, which is not in the v0 source feature set
+A/B.lean:101-150: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Pair.rec' is a recursor, which is not in the v0 source feature set

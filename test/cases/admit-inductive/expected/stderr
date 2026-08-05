@@ -1,0 +1,4 @@
+A/B.lean:155-194: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Color' is an inductive type, which is not in the v0 source feature set
+A/B.lean:155-194: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Color.green' is a constructor, which is not in the v0 source feature set
+A/B.lean:155-194: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Color.rec' is a recursor, which is not in the v0 source feature set
+A/B.lean:155-194: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Color.red' is a constructor, which is not in the v0 source feature set

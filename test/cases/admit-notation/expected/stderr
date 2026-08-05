@@ -1,0 +1,1 @@
+A/B.lean:119-141: error[UNSUPPORTED-COMMAND] (admission) command 'Lean.Parser.Command.notation' is not in the v0 source feature set

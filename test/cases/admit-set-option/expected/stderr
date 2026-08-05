@@ -1,0 +1,1 @@
+A/B.lean:108-130: error[UNSUPPORTED-SET-OPTION] (admission) the only option v0 accepts is 'set_option autoImplicit false'

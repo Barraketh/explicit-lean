@@ -1,0 +1,1 @@
+A/B.lean:100-104: error[UNSUPPORTED-DERIVING] (admission) a deriving clause is not in the v0 source feature set

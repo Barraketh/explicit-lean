@@ -1,0 +1,1 @@
+A/B.lean:81-115: error[UNSUPPORTED-LET-REC] (admission) a let rec binding is not in the v0 source feature set

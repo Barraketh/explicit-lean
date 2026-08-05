@@ -180,7 +180,7 @@ Information trees are retained per command but not yet consumed: the completed
 semantic authority. Admission and lowering are what will need the tree's
 syntax-to-expression correlation.
 
-### 3. v0 admission and diagnostics
+### 3. v0 admission and diagnostics — done
 
 - Implement the v0 declaration and completed-expression checks.
 - Reject unsupported source structure before lowering depends on it.
@@ -188,6 +188,38 @@ syntax-to-expression correlation.
 - Add explicit checks for unresolved metavariables, unclassified generated declarations, and persistent effects.
 
 Exit criterion: every v0 feature has a positive fixture and every rejected category above has a negative fixture with a stable diagnostic.
+
+Status: complete. `explicit-lean admit` captures and admits without lowering;
+`compile` now runs admission and reports an admitted module as a lowering gap
+rather than an admission failure. `admit-accepted` is the positive fixture
+covering every accepted declaration form and context command; each rejected
+category has its own `admit-*` fixture and reason code.
+
+Findings worth carrying forward:
+
+- Admission must check source syntax, not only completed terms. A tactic proof
+  and `do` notation elaborate to completed expressions indistinguishable from
+  accepted ones — nothing in the `Expr` records which mechanism produced it — so
+  they can only be rejected from the syntax.
+- A rejection rule naming a Lean *parser* that never appears as a syntax node
+  kind compiles cleanly and silently never fires. Two such rules were written
+  and caught: `Parser.Command.deriving` (the node is `derivingClass`; the
+  enclosing `optDeriving` is present even with no clause) and
+  `Parser.Command.visibility` (the nodes are `private` and `protected`). A rule
+  must be confirmed against a real fixture, not just compiled.
+- Rejecting `Parser.Term.fun` rejects ordinary lambdas too, since `fun x => e`
+  and `fun | p => e` share that kind; the pattern form is `matchAlts`. A unit
+  check now pins this, along with rules having nonempty codes, no duplicate
+  kinds, and no overlap with the accepted-command list.
+- `checkTerm` matches every `Expr` constructor without a wildcard, so a new
+  constructor is a build error rather than a silently accepted term. Only two
+  term rejections are reachable: both `Expr.lit` cases are exactly the literals
+  G10 permits, and a `let rec` becomes a separate generated constant rather than
+  a self-referential `letE`.
+- Recursion is caught two ways: equation syntax at the syntax level, and
+  well-founded recursion by the self-reference check on the completed value. The
+  latter names an auxiliary such as `f._unsafe_rec` that the source never wrote,
+  which the span compensates for.
 
 ### 4. Deterministic phase-one printer
 

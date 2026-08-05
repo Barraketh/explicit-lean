@@ -284,6 +284,38 @@ def nameOrderTests (fs : Failures) : Failures :=
   |> check "generated name order"
       (nameLt (s root "Point") (s (s root "Point") "mk"))
 
+/-! ## Admission rules
+
+A rejection rule naming a parser that never appears as a syntax node kind
+compiles fine and simply never fires, which is how a rejected construct silently
+becomes accepted. These checks make each rule's shape and coverage explicit. -/
+
+def admissionTests (fs : Failures) : Failures :=
+  let codes := rejectedSyntaxKinds.map (fun (_, code, _) => code)
+  let kinds := rejectedSyntaxKinds.map (fun (k, _, _) => k)
+  fs
+  -- Every rule must carry a reason code and a description: an empty one would
+  -- produce a diagnostic that says nothing.
+  |> check "no rule has an empty code" (!codes.contains "")
+  |> check "no rule has an empty description"
+      (!(rejectedSyntaxKinds.map (fun (_, _, d) => d)).contains "")
+  -- Every code matches the documented `[A-Z][A-Z0-9-]*` shape.
+  |> check "codes are uppercase identifiers"
+      (codes.all fun c =>
+        !c.isEmpty
+          && (c.get ⟨0⟩).isUpper
+          && c.all fun ch => ch.isUpper || ch.isDigit || ch == '-')
+  -- A duplicated kind means one of the two entries is unreachable.
+  |> check "no duplicate rejected kind"
+      (kinds.all fun k => (kinds.filter (· == k)).size == 1)
+  -- The accepted-command list must not also be rejected.
+  |> check "accepted commands are not rejected"
+      (acceptedCommandKinds.all fun k => !kinds.contains k)
+  -- `Parser.Term.fun` must not be rejected: it is the kind of the ordinary
+  -- lambda too, so rejecting it would reject every `fun x => e`.
+  |> check "ordinary lambda is not rejected"
+      (!kinds.contains ``Lean.Parser.Term.fun)
+
 /-! ## Toolchain validation
 
 The compiler's own repository must satisfy the environment contract it enforces
@@ -361,7 +393,7 @@ def run : IO UInt32 := do
   let scratch := (← IO.currentDir) / ".lake" / "test-scratch"
   IO.FS.createDirAll scratch
   let fs := #[] |> jsonTests |> orderTests |> diagnosticTests
-              |> exitTests |> moduleTests |> cliTests |> nameOrderTests
+              |> exitTests |> moduleTests |> cliTests |> nameOrderTests |> admissionTests
   let fs := fs ++ (← toolchainTests) ++ (← publishTests scratch)
   for f in fs do
     IO.println s!"FAIL     {f}"

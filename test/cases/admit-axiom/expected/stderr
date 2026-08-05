@@ -1,0 +1,1 @@
+A/B.lean:184-206: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'unproven' is an axiom, which is not in the v0 source feature set

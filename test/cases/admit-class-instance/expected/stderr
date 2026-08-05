@@ -1,0 +1,3 @@
+A/B.lean:84-126: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Default' is an inductive type, which is not in the v0 source feature set
+A/B.lean:84-126: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Default.mk' is a constructor, which is not in the v0 source feature set
+A/B.lean:84-126: error[UNSUPPORTED-DECLARATION-KIND] (admission) 'Default.rec' is a recursor, which is not in the v0 source feature set

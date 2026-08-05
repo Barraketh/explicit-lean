@@ -3,6 +3,7 @@ import ExplicitLean.ExitStatus
 import ExplicitLean.Publish
 import ExplicitLean.Toolchain
 import ExplicitLean.CaptureDebug
+import ExplicitLean.Admission
 
 /-!
 # Compile driver
@@ -92,41 +93,69 @@ def initializeElaboration : IO Unit := do
   Lean.initSearchPath (← Lean.findSysroot)
   unsafe Lean.enableInitializersExecution
 
-/-- Capture one module and return its stable projection.
+/-- A captured module together with its checked declaration delta. -/
+structure Captured where
+  module : CapturedModule
+  delta : Array CapturedDeclaration
 
-This is the coverage-probe entry point required by
-[C10](../CAPTURE.md#c10-coverage-probes-and-acceptance). It observes the source
-elaboration and reports what capture recovered, without lowering anything. -/
-def captureDebug (inputs : ResolvedInputs) : IO (Except (Array Diagnostic) String) := do
+/-- Capture one module and check what capture itself must guarantee.
+
+A declaration that cannot be inventoried, or an expression retaining an
+unresolved metavariable, is a capture failure rather than something to pass on
+to later stages (C4, C9). -/
+def captureChecked (inputs : ResolvedInputs) :
+    IO (Except (Array Diagnostic) Captured) := do
   initializeElaboration
   match ← captureModule inputs.module inputs.source inputs.sourceRelPath with
   | .error ds => return .error ds
-  | .ok captured =>
-    -- A declaration that cannot be inventoried, or an expression retaining an
-    -- unresolved metavariable, is a capture failure rather than something to
-    -- project and pass on (C4, C9).
-    let (delta, missing) := moduleDeltaWithFailures captured
+  | .ok module =>
+    let (delta, missing) := moduleDeltaWithFailures module
     let failures :=
       checkDelta inputs.sourceRelPath missing
         ++ checkCompleted inputs.sourceRelPath delta
     if !failures.isEmpty then
       return .error failures
-    return .ok (projectModule captured)
+    return .ok { module, delta }
+
+/-- Capture one module and return its stable projection.
+
+This is the coverage-probe entry point required by
+[C10](../CAPTURE.md#c10-coverage-probes-and-acceptance). It observes the source
+elaboration and reports what capture recovered, without admitting or lowering
+anything, so a module outside the v0 feature set still yields a projection. -/
+def captureDebug (inputs : ResolvedInputs) : IO (Except (Array Diagnostic) String) := do
+  match ← captureChecked inputs with
+  | .error ds => return .error ds
+  | .ok c => return .ok (projectModule c.module)
+
+/-- Capture and admit one module, reporting whether it is inside the v0 source
+feature set. -/
+def admitOnly (inputs : ResolvedInputs) : IO (Array Diagnostic) := do
+  match ← captureChecked inputs with
+  | .error ds => return ds
+  | .ok c => return admitModule inputs.sourceRelPath c.module c.delta
 
 /-- Run the compilation stages for validated inputs.
 
-Later work packages replace the placeholder with admission, lowering, grammar
-checking, audit, verification, and manifest generation. Until then this reports
-the module as unsupported rather than publishing artifacts that have not been
-through those stages. -/
+Capture and admission are implemented. Lowering, grammar checking, the output
+elaboration audit, quotation verification, and manifest generation arrive in
+later work packages, so an admitted module is still reported as not yet
+compilable rather than published without those checks. -/
 def runStages (inputs : ResolvedInputs) : IO (Except (Array Diagnostic) Artifacts) := do
-  return .error #[{
-    code := "UNSUPPORTED-NOT-IMPLEMENTED"
-    message :=
-      s!"compilation stages are not implemented yet; cannot compile '{inputs.module}'"
-    phase := .admission
-    span := some { file := inputs.sourceRelPath, startByte := 0, endByte := 0 }
-  }]
+  match ← captureChecked inputs with
+  | .error ds => return .error ds
+  | .ok c =>
+    let rejected := admitModule inputs.sourceRelPath c.module c.delta
+    if !rejected.isEmpty then
+      return .error rejected
+    return .error #[{
+      code := "UNSUPPORTED-NOT-IMPLEMENTED"
+      message :=
+        s!"'{inputs.module}' is inside the v0 source feature set, but lowering \
+is not implemented yet"
+      phase := .lowering
+      span := some { file := inputs.sourceRelPath, startByte := 0, endByte := 0 }
+    }]
 
 /-- A failure path that produced no diagnostic would exit `0` and claim a
 success that never happened, so report it as an internal error instead. -/
@@ -156,6 +185,8 @@ def compile (opts : CompileOptions) : IO (Array Diagnostic) := do
       | .ok projection =>
         IO.print projection
         return #[]
+    | .admit =>
+      return ← admitOnly inputs
     | .compile =>
       match ← runStages inputs with
       | .error ds => return failureDiagnostics ds

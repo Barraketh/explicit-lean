@@ -1,0 +1,1 @@
+A/B.lean:94-101: error[UNSUPPORTED-VISIBILITY] (admission) a private declaration is not in the v0 source feature set

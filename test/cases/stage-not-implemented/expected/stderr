@@ -1,1 +1,1 @@
-A/B.lean:0-0: error[UNSUPPORTED-NOT-IMPLEMENTED] (admission) compilation stages are not implemented yet; cannot compile 'A.B'
+A/B.lean:0-0: error[UNSUPPORTED-NOT-IMPLEMENTED] (lowering) 'A.B' is inside the v0 source feature set, but lowering is not implemented yet

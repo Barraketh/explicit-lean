@@ -1,0 +1,1 @@
+A/B.lean:56-98: error[UNSUPPORTED-COMMAND] (admission) command 'Lean.Parser.Command.macro' is not in the v0 source feature set
