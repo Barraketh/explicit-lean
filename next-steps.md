@@ -221,7 +221,7 @@ Findings worth carrying forward:
   latter names an auxiliary such as `f._unsafe_rec` that the source never wrote,
   which the span compensates for.
 
-### 4. Deterministic phase-one printer
+### 4. Deterministic phase-one printer — done
 
 - Emit conservative imports and the required module option.
 - Print canonical universes, declaration telescopes, names, binders, applications, lets, projections, and primitive literals.
@@ -229,6 +229,39 @@ Findings worth carrying forward:
 - Implement deterministic naming, declaration ordering, whitespace, escaping, and LF output for the v0 subset.
 
 Exit criterion: every positive fixture emits grammar-v1 source that compiles with pinned stock Lean and contains no syntax forbidden for v0 output.
+
+Status: complete. `explicit-lean lower` prints the generated module without
+publishing it. Each `lower-*` fixture is checked three ways: its bytes against a
+golden, its layout against the G1 rules that can be read off the bytes, and its
+compilation with the pinned stock toolchain. The compile check fails
+independently of the goldens, so a printer change that produces stable but
+uncompilable output is caught.
+
+Findings worth carrying forward:
+
+- A declaration inside `namespace Outer` must state its name relative to the
+  open namespace. Printing the full name declares `Outer.Outer.base`, which
+  compiles but is the wrong constant.
+- G8 permits `@` exactly when exposing a non-explicit binder is necessary and
+  forbids redundant syntax otherwise, so it is emitted only for a constant whose
+  type has an implicit, strict-implicit, or instance binder.
+- `Expr.proj` is not reachable from v0-admitted source: field access such as
+  `p.fst` and `s.val` elaborates to an ordinary projection-function application,
+  and `Expr.proj` was observed only inside the constants a `structure` generates.
+  Printing it would require recovering the structure's parameters by inferring
+  the receiver's type, which is reconstruction rather than printing a recorded
+  choice, so v0 rejects it and the rule arrives with structure support.
+- The G1 canonical layout is a Wadler-style grouped renderer: 100 columns, two
+  spaces per level, a group's soft breaks all breaking together. Line-oriented
+  string concatenation cannot express it; `Print/Doc.lean` implements the engine
+  and the term and declaration printers build documents rather than strings.
+- `Doc.render` starts at column 0, so a declaration nested in namespaces is
+  rendered behind a leading hard break inside the same nesting. That makes the
+  width budget account for the indentation on the first line too, rather than
+  only after a break.
+- The string-literal encoding G10 specifies (uppercase `\uNNNN`, C1 controls
+  escaped) is deliberately different from M1 canonical JSON's (lowercase, a
+  different escape set). They are separate encodings and must not share code.
 
 ### 5. Grammar checker and elaboration audit
 

@@ -1,0 +1,29 @@
+import Init
+
+set_option autoImplicit false
+
+def withLet (n : _root_.Nat) : _root_.Nat :=
+  let doubled : _root_.Nat :=
+    @_root_.HAdd.hAdd.{0, 0, 0}
+      _root_.Nat
+      _root_.Nat
+      _root_.Nat
+      (@_root_.instHAdd.{0} _root_.Nat _root_.instAddNat)
+      n
+      n;
+  @_root_.HAdd.hAdd.{0, 0, 0}
+    _root_.Nat
+    _root_.Nat
+    _root_.Nat
+    (@_root_.instHAdd.{0} _root_.Nat _root_.instAddNat)
+    doubled
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 1) (_root_.instOfNatNat (nat_lit 1)))
+
+def usesLet : _root_.Nat :=
+  _root_.withLet (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 3) (_root_.instOfNatNat (nat_lit 3)))
+
+def ascribed : _root_.Nat :=
+  @_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 2) (_root_.instOfNatNat (nat_lit 2))
+
+def projected (p : _root_.Prod.{0, 0} _root_.Nat _root_.Nat) : _root_.Nat :=
+  @_root_.Prod.fst.{0, 0} _root_.Nat _root_.Nat p

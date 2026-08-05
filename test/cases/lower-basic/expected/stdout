@@ -1,0 +1,15 @@
+import Init
+
+set_option autoImplicit false
+
+def one : _root_.Nat :=
+  @_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 1) (_root_.instOfNatNat (nat_lit 1))
+
+def two : _root_.Nat :=
+  _root_.Nat.succ _root_.one
+
+def alsoTwo : _root_.Nat :=
+  _root_.two
+
+opaque hidden : _root_.Nat :=
+  @_root_.Inhabited.default.{1} _root_.Nat _root_.instInhabitedNat

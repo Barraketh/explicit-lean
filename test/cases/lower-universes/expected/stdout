@@ -1,0 +1,21 @@
+import Init
+
+set_option autoImplicit false
+
+def idAt.{u} (α : Type u) (a : α) : α :=
+  a
+
+def constAt.{u, v} (α : Type u) (β : Type v) (a : α) (x1 : β) : α :=
+  a
+
+def usesId : _root_.Nat :=
+  _root_.idAt.{0}
+    _root_.Nat
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 3) (_root_.instOfNatNat (nat_lit 3)))
+
+def usesConst.{u} (α : Type u) (a : α) : α :=
+  _root_.constAt.{u, 0}
+    α
+    _root_.Nat
+    a
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 0) (_root_.instOfNatNat (nat_lit 0)))

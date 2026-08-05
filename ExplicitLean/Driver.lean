@@ -4,6 +4,7 @@ import ExplicitLean.Publish
 import ExplicitLean.Toolchain
 import ExplicitLean.CaptureDebug
 import ExplicitLean.Admission
+import ExplicitLean.Print.Module
 
 /-!
 # Compile driver
@@ -135,6 +136,25 @@ def admitOnly (inputs : ResolvedInputs) : IO (Array Diagnostic) := do
   | .error ds => return ds
   | .ok c => return admitModule inputs.sourceRelPath c.module c.delta
 
+/-- Capture, admit, and print the generated module.
+
+This is the lowering probe: it shows what the printer produces without
+publishing anything or running the grammar check, audit, verification, and
+manifest stages that a real compile requires. -/
+def lowerOnly (inputs : ResolvedInputs) : IO (Except (Array Diagnostic) String) := do
+  match ← captureChecked inputs with
+  | .error ds => return .error ds
+  | .ok c =>
+    let rejected := admitModule inputs.sourceRelPath c.module c.delta
+    if !rejected.isEmpty then
+      return .error rejected
+    match printModule c.module.finalEnv c.module c.delta with
+    | .error e =>
+      return .error #[{
+        code := e.code, message := e.message, phase := .lowering
+        span := some { file := inputs.sourceRelPath, startByte := 0, endByte := 0 } }]
+    | .ok text => return .ok text
+
 /-- Run the compilation stages for validated inputs.
 
 Capture and admission are implemented. Lowering, grammar checking, the output
@@ -187,6 +207,12 @@ def compile (opts : CompileOptions) : IO (Array Diagnostic) := do
         return #[]
     | .admit =>
       return ← admitOnly inputs
+    | .lower =>
+      match ← lowerOnly inputs with
+      | .error ds => return failureDiagnostics ds
+      | .ok text =>
+        IO.print text
+        return #[]
     | .compile =>
       match ← runStages inputs with
       | .error ds => return failureDiagnostics ds

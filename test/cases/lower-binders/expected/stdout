@@ -1,0 +1,34 @@
+import Init
+
+set_option autoImplicit false
+
+def explicitOnly.{u} (α : Type u) (a : α) : α :=
+  a
+
+def withImplicit.{u} (α : Type u) (a : α) : α :=
+  a
+
+def withStrictImplicit.{u} (α : Type u) (a : α) : α :=
+  a
+
+def withInstance.{u} (α : Type u) (inst1 : _root_.Inhabited.{u+1} α) (x1 : α) : α :=
+  @_root_.Inhabited.default.{u+1} α inst1
+
+def useImplicit : _root_.Nat :=
+  @_root_.withImplicit.{0}
+    _root_.Nat
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 1) (_root_.instOfNatNat (nat_lit 1)))
+
+def useStrict : _root_.Nat :=
+  @_root_.withStrictImplicit.{0}
+    _root_.Nat
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 2) (_root_.instOfNatNat (nat_lit 2)))
+
+def useInstance : _root_.Nat :=
+  @_root_.withInstance.{0}
+    _root_.Nat
+    _root_.instInhabitedNat
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 3) (_root_.instOfNatNat (nat_lit 3)))
+
+def arrowTyped (x : _root_.Nat) : _root_.Nat :=
+  x

@@ -38,6 +38,9 @@ inductive Command where
   /-- Capture and admit only, reporting whether the module is inside the v0
   source feature set. Publishes nothing. -/
   | admit
+  /-- Capture, admit, and print the generated module to standard output without
+  publishing it or running the later checks. -/
+  | lower
   deriving Inhabited, Repr, BEq, DecidableEq
 
 /-- Parsed and validated options. Paths here are exactly as given on the command
@@ -53,7 +56,7 @@ structure CompileOptions where
 
 /-- The usage text, printed on a command-line error. -/
 def usage : String :=
-  "usage: explicit-lean compile|capture-debug|admit \
+  "usage: explicit-lean compile|capture-debug|admit|lower \
 --package-root ROOT --module MODULE --source FILE --output-root OUT \
 [--diagnostic-format human|json]"
 
@@ -92,6 +95,7 @@ def parseArgs (args : List String) : Except (Array Diagnostic) CompileOptions :=
       | "compile" => pure Command.compile
       | "capture-debug" => pure Command.captureDebug
       | "admit" => pure Command.admit
+      | "lower" => pure Command.lower
       | _ => .error #[cliError "CLI-UNKNOWN-COMMAND" s!"unknown command '{cmd}'. {usage}"]
     let p ← go rest {}
     finish command p

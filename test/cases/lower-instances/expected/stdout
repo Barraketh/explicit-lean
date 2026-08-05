@@ -1,0 +1,33 @@
+import Init
+
+set_option autoImplicit false
+
+def addNats (a : _root_.Nat) (b : _root_.Nat) : _root_.Nat :=
+  @_root_.HAdd.hAdd.{0, 0, 0}
+    _root_.Nat
+    _root_.Nat
+    _root_.Nat
+    (@_root_.instHAdd.{0} _root_.Nat _root_.instAddNat)
+    a
+    b
+
+def mulNats (a : _root_.Nat) (b : _root_.Nat) : _root_.Nat :=
+  @_root_.HMul.hMul.{0, 0, 0}
+    _root_.Nat
+    _root_.Nat
+    _root_.Nat
+    (@_root_.instHMul.{0} _root_.Nat _root_.instMulNat)
+    a
+    b
+
+def sum : _root_.Nat :=
+  _root_.addNats
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 2) (_root_.instOfNatNat (nat_lit 2)))
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 3) (_root_.instOfNatNat (nat_lit 3)))
+
+def eqTest (a : _root_.Nat) (b : _root_.Nat) : _root_.Bool :=
+  @_root_.BEq.beq.{0}
+    _root_.Nat
+    (@_root_.instBEqOfDecidableEq.{0} _root_.Nat _root_.instDecidableEqNat)
+    a
+    b

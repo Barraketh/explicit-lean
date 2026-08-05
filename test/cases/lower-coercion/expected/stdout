@@ -1,0 +1,18 @@
+import Init
+
+set_option autoImplicit false
+
+def asInt (n : _root_.Nat) : _root_.Int :=
+  @_root_.Nat.cast.{0} _root_.Int _root_.instNatCastInt n
+
+def literalInt : _root_.Int :=
+  @_root_.OfNat.ofNat.{0} _root_.Int (nat_lit 5) (@_root_.instOfNat (nat_lit 5))
+
+def viaCoe (n : _root_.Nat) : _root_.Int :=
+  @_root_.HAdd.hAdd.{0, 0, 0}
+    _root_.Int
+    _root_.Int
+    _root_.Int
+    (@_root_.instHAdd.{0} _root_.Int _root_.Int.instAdd)
+    (_root_.asInt n)
+    (@_root_.OfNat.ofNat.{0} _root_.Int (nat_lit 1) (@_root_.instOfNat (nat_lit 1)))

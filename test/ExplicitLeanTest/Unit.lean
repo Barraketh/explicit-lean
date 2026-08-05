@@ -284,6 +284,43 @@ def nameOrderTests (fs : Failures) : Failures :=
   |> check "generated name order"
       (nameLt (s root "Point") (s (s root "Point") "mk"))
 
+/-! ## Layout engine
+
+The G1 canonical layout: 100 columns, two spaces per nesting level, a hard line
+always breaks, and a soft line renders as one space when its enclosing group
+fits and as a newline otherwise — all soft lines in a group breaking together. -/
+
+def layoutTests (fs : Failures) : Failures :=
+  let long := String.ofList (List.replicate 60 'x')
+  fs
+  |> checkEq "text is verbatim" (Doc.render (.text "abc")) "abc"
+  |> checkEq "hard always breaks" (Doc.render (.text "a" ++ .hard ++ .text "b")) "a\nb"
+  -- A group that fits renders every soft break as one space.
+  |> checkEq "fitting group is flat"
+      (Doc.render (.group (Doc.joinSoft [.text "a", .text "b", .text "c"]))) "a b c"
+  -- A group that does not fit breaks every soft break in it, together.
+  |> checkEq "overflowing group breaks all"
+      (Doc.render (.group (Doc.joinSoft [.text long, .text long, .text "z"])))
+      (long ++ "\n" ++ long ++ "\nz")
+  -- Nesting indents by two spaces per level.
+  |> checkEq "nest indents two spaces"
+      (Doc.render (.nest (.text "a" ++ .hard ++ .text "b"))) "a\n  b"
+  |> checkEq "nest is cumulative"
+      (Doc.render (.nest (.nest (.text "a" ++ .hard ++ .text "b")))) "a\n    b"
+  -- An indivisible token may exceed the limit rather than being split.
+  |> checkEq "long token is not split"
+      (Doc.render (.group (.text (String.ofList (List.replicate 120 'y')))))
+      (String.ofList (List.replicate 120 'y'))
+  -- An inner group that fits stays flat even when the outer one breaks.
+  |> checkEq "inner group independent"
+      (Doc.render (.group (Doc.joinSoft
+        [.text long, .text long, .group (Doc.joinSoft [.text "p", .text "q"])])))
+      (long ++ "\n" ++ long ++ "\np q")
+  -- Rendering never emits trailing whitespace on a line.
+  |> check "no trailing whitespace"
+      ((Doc.render (.nest (.text "a" ++ .hard ++ .hard ++ .text "b"))).splitOn "\n"
+        |>.all fun l => !l.endsWith " " || l.all (· == ' '))
+
 /-! ## Admission rules
 
 A rejection rule naming a parser that never appears as a syntax node kind
@@ -303,7 +340,7 @@ def admissionTests (fs : Failures) : Failures :=
   |> check "codes are uppercase identifiers"
       (codes.all fun c =>
         !c.isEmpty
-          && (c.get ⟨0⟩).isUpper
+          && c.front.isUpper
           && c.all fun ch => ch.isUpper || ch.isDigit || ch == '-')
   -- A duplicated kind means one of the two entries is unreachable.
   |> check "no duplicate rejected kind"
@@ -393,7 +430,7 @@ def run : IO UInt32 := do
   let scratch := (← IO.currentDir) / ".lake" / "test-scratch"
   IO.FS.createDirAll scratch
   let fs := #[] |> jsonTests |> orderTests |> diagnosticTests
-              |> exitTests |> moduleTests |> cliTests |> nameOrderTests |> admissionTests
+              |> exitTests |> moduleTests |> cliTests |> nameOrderTests |> admissionTests |> layoutTests
   let fs := fs ++ (← toolchainTests) ++ (← publishTests scratch)
   for f in fs do
     IO.println s!"FAIL     {f}"

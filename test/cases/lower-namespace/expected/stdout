@@ -1,0 +1,25 @@
+import Init
+
+set_option autoImplicit false
+
+namespace Outer
+  def base : _root_.Nat :=
+    @_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 7) (_root_.instOfNatNat (nat_lit 7))
+
+  namespace Inner
+    def usesBase : _root_.Nat :=
+      _root_.Outer.base
+  end Inner
+
+  def withSectionVar (k : _root_.Nat) : _root_.Nat :=
+    @_root_.HAdd.hAdd.{0, 0, 0}
+      _root_.Nat
+      _root_.Nat
+      _root_.Nat
+      (@_root_.instHAdd.{0} _root_.Nat _root_.instAddNat)
+      k
+      _root_.Outer.base
+end Outer
+
+def usesOpen : _root_.Nat :=
+  _root_.Outer.base

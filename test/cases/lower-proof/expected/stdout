@@ -1,0 +1,37 @@
+import Init
+
+set_option autoImplicit false
+
+def n : _root_.Nat :=
+  @_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 2) (_root_.instOfNatNat (nat_lit 2))
+
+theorem nEqTwo
+  : @_root_.Eq.{1}
+    _root_.Nat
+    _root_.n
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 2) (_root_.instOfNatNat (nat_lit 2))) :=
+  @_root_.rfl.{1} _root_.Nat _root_.n
+
+theorem symmNEqTwo
+  : @_root_.Eq.{1}
+    _root_.Nat
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 2) (_root_.instOfNatNat (nat_lit 2)))
+    _root_.n :=
+  @_root_.Eq.symm.{1}
+    _root_.Nat
+    _root_.n
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 2) (_root_.instOfNatNat (nat_lit 2)))
+    _root_.nEqTwo
+
+theorem transTrivial : @_root_.Eq.{1} _root_.Nat _root_.n _root_.n :=
+  @_root_.Eq.trans.{1}
+    _root_.Nat
+    _root_.n
+    (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 2) (_root_.instOfNatNat (nat_lit 2)))
+    _root_.n
+    _root_.nEqTwo
+    (@_root_.Eq.symm.{1}
+      _root_.Nat
+      _root_.n
+      (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 2) (_root_.instOfNatNat (nat_lit 2)))
+      _root_.nEqTwo)

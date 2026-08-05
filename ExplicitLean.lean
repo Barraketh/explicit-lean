@@ -9,3 +9,8 @@ import ExplicitLean.Driver
 import ExplicitLean.Capture
 import ExplicitLean.CaptureDebug
 import ExplicitLean.Admission
+import ExplicitLean.Print.Doc
+import ExplicitLean.Print.Level
+import ExplicitLean.Print.Term
+import ExplicitLean.Print.Name
+import ExplicitLean.Print.Module

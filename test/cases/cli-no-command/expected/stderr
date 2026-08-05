@@ -1,1 +1,1 @@
-error[CLI-NO-COMMAND] (cli) missing command. usage: explicit-lean compile|capture-debug|admit --package-root ROOT --module MODULE --source FILE --output-root OUT [--diagnostic-format human|json]
+error[CLI-NO-COMMAND] (cli) missing command. usage: explicit-lean compile|capture-debug|admit|lower --package-root ROOT --module MODULE --source FILE --output-root OUT [--diagnostic-format human|json]

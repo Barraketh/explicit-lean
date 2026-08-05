@@ -105,6 +105,54 @@ def runOnce (cfg : Config) (args : List String) : IO (UInt32 × String × String
   }
   return (out.exitCode, out.stdout, out.stderr)
 
+/-- Check a generated module against the G1 canonical layout rules that can be
+read off the bytes: 100 columns, no tabs, no trailing whitespace, one final LF,
+and no extra empty line at end. -/
+def checkLayout (generated : String) : Array String := Id.run do
+  let mut reasons : Array String := #[]
+  if !generated.endsWith "\n" then
+    reasons := reasons.push "generated module does not end in LF"
+  if generated.endsWith "\n\n" then
+    reasons := reasons.push "generated module has an empty line at end"
+  if generated.contains '\t' then
+    reasons := reasons.push "generated module contains a tab"
+  if generated.contains '\r' then
+    reasons := reasons.push "generated module contains a carriage return"
+  let lines := (generated.splitOn "\n").dropLast
+  for (line, i) in lines.zipIdx do
+    -- Width is counted in Unicode scalars, which is what G1 specifies.
+    if line.length > 100 then
+      reasons := reasons.push
+        s!"line {i + 1} is {line.length} columns, over the 100-column limit"
+    if line.endsWith " " then
+      reasons := reasons.push s!"line {i + 1} has trailing whitespace"
+  return reasons
+
+/-- Compile a generated module with the pinned stock Lean toolchain.
+
+Returns a failure reason, or `none` when it compiled. Linter warnings are not
+failures: they are style advice about the source, and the printer's contract is
+that the module compiles, not that it is idiomatic. -/
+def checkCompiles (cfg : Config) (name : String) (generated : String) :
+    IO (Option String) := do
+  if generated.isEmpty then
+    return some "lower produced no output to compile"
+  let dir := cfg.scratch / name / "compile"
+  IO.FS.createDirAll dir
+  let path := dir / "Generated.lean"
+  IO.FS.writeBinFile path generated.toUTF8
+  let out ← IO.Process.output {
+    cmd := "lake"
+    args := #["env", "lean", path.toString]
+    cwd := some cfg.root
+  }
+  -- `lean` exits nonzero on an error and zero when only warnings were emitted.
+  if out.exitCode == 0 then
+    return none
+  else
+    let text := (out.stdout ++ out.stderr).replace dir.toString "<dir>"
+    return some s!"generated module does not compile with the pinned toolchain:\n{text}"
+
 /-- Run one case. -/
 def runCase (cfg : Config) (name : String) : IO Outcome := do
   let caseDir := cfg.casesDir / name
@@ -174,6 +222,15 @@ def runCase (cfg : Config) (name : String) : IO Outcome := do
     reasons := reasons.push
       (s!"failed run published {published.size} artifact(s): "
         ++ String.intercalate ", " (published.toList.map (·.1)))
+
+  -- A case whose `cmd` runs `lower` must produce a module that compiles with
+  -- the pinned stock Lean toolchain. This is the exit criterion for the
+  -- phase-one printer: grammar-valid output that does not compile is not
+  -- Explicit Lean.
+  if isPositive && (parseCmd cmdText pkg outDir).head? == some "lower" then
+    reasons := reasons ++ checkLayout stdout
+    if let some reason ← checkCompiles cfg name stdout then
+      reasons := reasons.push reason
 
   -- Determinism: a successful run repeated into a clean output directory must
   -- publish byte-identical artifacts and report byte-identical output. The

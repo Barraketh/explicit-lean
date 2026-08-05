@@ -1,0 +1,49 @@
+import Init
+
+set_option autoImplicit false
+
+namespace Sample
+  def plain : _root_.Nat :=
+    @_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 1) (_root_.instOfNatNat (nat_lit 1))
+
+  def alias : _root_.Nat :=
+    _root_.Sample.plain
+
+  opaque hidden : _root_.Nat :=
+    @_root_.Inhabited.default.{1} _root_.Nat _root_.instInhabitedNat
+
+  theorem plainEqOne
+    : @_root_.Eq.{1}
+      _root_.Nat
+      _root_.Sample.plain
+      (@_root_.OfNat.ofNat.{0} _root_.Nat (nat_lit 1) (_root_.instOfNatNat (nat_lit 1))) :=
+    @_root_.rfl.{1} _root_.Nat _root_.Sample.plain
+
+  def polymorphic.{u} (a : Type u) (x : a) : a :=
+    x
+
+  def withImplicit.{u} (a : Type u) (x : a) : a :=
+    x
+
+  def withInstance.{u} (a : Type u) (inst1 : _root_.Inhabited.{u+1} a) (x1 : a) : a :=
+    @_root_.Inhabited.default.{u+1} a inst1
+
+  def withStrict.{u} (a : Type u) (x : a) : a :=
+    x
+
+  def usesLambda (n : _root_.Nat) : _root_.Nat :=
+    n
+
+  def usesLet : _root_.Nat :=
+    let doubled : _root_.Nat := _root_.Sample.plain;
+    doubled
+
+  def usesArrow (a : _root_.Nat) (x1 : _root_.Nat) : _root_.Nat :=
+    a
+
+  def withSectionVariable (k : _root_.Nat) : _root_.Nat :=
+    k
+end Sample
+
+def usesOpen : _root_.Nat :=
+  _root_.Sample.plain
