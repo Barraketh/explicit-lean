@@ -5,20 +5,18 @@ lake env lean Experiment/Main.lean
 lake env lean Experiment/StatementCheck.lean
 python3 Experiment/rewrite.py
 
-lake env lean \
-  -Dlinter.unusedVariables=false \
-  -DmaxHeartbeats=0 \
-  -DmaxRecDepth=100000 \
-  .lake/proof-term-probe/rewritten/Mathlib/SetTheory/Cardinal/NatCount.lean
-
-lake env lean \
-  -Dlinter.unusedVariables=false \
-  -DmaxHeartbeats=0 \
-  -DmaxRecDepth=100000 \
-  .lake/proof-term-probe/rewritten/Mathlib/Algebra/ContinuedFractions/Translations.lean
-
-lake env lean \
-  -Dlinter.unusedVariables=false \
-  -DmaxHeartbeats=0 \
-  -DmaxRecDepth=100000 \
-  .lake/proof-term-probe/rewritten/Mathlib/Algebra/DualNumber.lean
+for module in \
+  Mathlib/SetTheory/Cardinal/NatCount.lean \
+  Mathlib/Algebra/ContinuedFractions/Translations.lean \
+  Mathlib/Algebra/DualNumber.lean \
+  Mathlib/Data/List/Range.lean \
+  Mathlib/Topology/Basic.lean \
+  Mathlib/NumberTheory/Divisors.lean
+do
+  lake env lean \
+    -Dlinter.unusedVariables=false \
+    -Dlinter.auxLemma=false \
+    -DmaxHeartbeats=0 \
+    -DmaxRecDepth=100000 \
+    ".lake/proof-term-probe/rewritten/$module"
+done

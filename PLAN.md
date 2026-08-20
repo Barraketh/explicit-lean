@@ -60,7 +60,7 @@ purpose is to identify which expression forms occur in realistic elaborated
 proofs, which of them can be printed directly, and where additional lowering is
 actually required.
 
-### Initial result
+### Initial pilot result
 
 The first experiment used Mathlib and Lean 4.32.2. It rewrote four theorems in
 three modules:
@@ -166,3 +166,98 @@ This demonstrates that most of the apparent type-class dictionary explosion in
 the stress case is repeated syntax, not irreducibly distinct proof content.
 Explicit elaboration choices and compact output are compatible when repeated
 subterms may be named with `let`.
+
+### Readability cleanup for shared terms
+
+The sharing pass now applies four cleanup steps after finding exact repeated
+subterms:
+
+1. A binding name is derived from the head constant of its value, with a stable
+   numeric suffix for uniqueness. Proof names receive an `h_` prefix and names
+   for shared types receive a `_type` suffix.
+2. A binding whose type is a proposition is represented as a nondependent local
+   declaration, causing Lean to print it as `have` instead of `let`.
+3. Each candidate is rendered again after already-selected child expressions
+   have been replaced. The candidate is inlined when its remaining text is too
+   small to pay for the binding and all references to its name.
+4. Each retained binding is sunk to the smallest source-printable expression
+   node containing all of its uses. The traversal opens and rebuilds
+   intervening binders so that moving a binding through an existing `let`,
+   lambda, or forall preserves the expression's de Bruijn indices. It stops at
+   the enclosing application when further descent would print the invalid form
+   `@(let ...)` in function position.
+
+The refined measurements are:
+
+| Theorem | Bindings | `have`s | `let`s | Inlined candidates | Body bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `Nat.count_le_setENCard` | 3 | 0 | 3 | 0 | 1,422 |
+| `GenContFract.first_num_eq` | 3 | 0 | 3 | 3 | 1,084 |
+| `DualNumber.commute_eps_left` | 20 | 0 | 20 | 12 | 4,782 |
+| `DualNumber.range_lift` | 72 | 11 | 61 | 32 | 18,221 |
+
+The largest term is slightly longer than the flat exact-sharing result because
+localized scopes introduce indentation and line breaks. It remains less than
+0.3% of the 7.17 MB unshared term. All three rewritten modules still compile,
+and the generated bodies still contain no placeholders, inaccessible names,
+tactic scripts, or private helper references. For comparison, each rewritten
+declaration includes its original source body in a block comment immediately
+before the generated replacement term.
+
+### Representative cross-domain rerun
+
+The four-theorem pilot was biased: all four source bodies belonged to the
+`simp` family. It tested an important stress case, but it did not constitute a
+representative Mathlib sample. The rerun retains those four proofs and expands
+the sample to 19 declarations from six modules selected across different
+domains:
+
+- `Mathlib.SetTheory.Cardinal.NatCount`: all three theorems, covering predicates,
+  decidability instances, cardinal/set cardinality, rewriting, and exact terms;
+- `Mathlib.Algebra.ContinuedFractions.Translations`: a definitional proof, a
+  cases proof, and the original simplification proof;
+- `Mathlib.Algebra.DualNumber`: the two commute theorems, the `simp_rw` stress
+  case, and `ringHom_ext`, which uses local instances and structure literals;
+- `Mathlib.Data.List.Range`: structural induction with nested cases and an
+  induction proof involving construction, rewriting, and arithmetic;
+- `Mathlib.Topology.Basic`: a direct extensionality term, `rw`/`exact`, a
+  `refine` proof, and finite-set induction; and
+- `Mathlib.NumberTheory.Divisors`: cases, a `calc` chain, and a direct function
+  term over `Finset` inclusions.
+
+Thus the source proof shapes include reflexivity, direct terms, rewriting,
+`calc`, construction, local instances, cases, induction, extensionality,
+arithmetic automation, and the `simp` family. The modules and declarations were
+fixed before inspecting their generated proof terms, and no selected theorem
+was removed after an export or compilation failure.
+
+Each rewritten statement has a separate alpha-equivalence check. Each generated
+declaration also includes its original source body in an `Original body:` block
+comment immediately before the replacement term. The aggregate measurements
+are:
+
+| Module | Theorems | Unshared bytes | Shared bytes |
+| --- | ---: | ---: | ---: |
+| `SetTheory/Cardinal/NatCount` | 3 | 10,106 | 4,684 |
+| `Algebra/ContinuedFractions/Translations` | 3 | 14,529 | 6,491 |
+| `Algebra/DualNumber` | 4 | 7,308,136 | 32,154 |
+| `Data/List/Range` | 2 | 88,331 | 53,952 |
+| `Topology/Basic` | 4 | 9,173 | 6,248 |
+| `NumberTheory/Divisors` | 3 | 19,213 | 9,914 |
+| **Total** | **19** | **7,449,488** | **113,443** |
+
+All 19 replacement terms compile in their copied source modules. The complete
+experiment—export, statement checks, rewriting, and six module compilations—ran
+in approximately 37 seconds on the test machine.
+
+The expanded sample found two source-generation bugs that the pilot did not:
+
+- sinking a binding into the function side of an explicit application could
+  produce the unparsable source form `@(let ...)`; and
+- printing a root declaration outside its target namespace could omit the
+  `_root_.` qualifier needed to avoid a different declaration inside
+  `namespace Nat`.
+
+The exporter now treats source-printability as a constraint on scope sinking
+and renders each proof using its source namespace. Both fixes are exercised by
+the expanded sample.
