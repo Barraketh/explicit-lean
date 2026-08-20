@@ -131,3 +131,38 @@ examples. It does not resolve the size problem. Printing derived type-class
 dictionaries explicitly makes the stress case exceed 7 MB, so a useful next
 experiment should investigate compact sharing or another representation that
 does not re-run type-class inference and does not duplicate those dictionaries.
+
+### Sharing repeated subterms with `let`
+
+The next pass introduces `let` bindings for repeated subterms before printing
+the proof body. It operates on Lean expressions rather than rendered strings,
+so it only replaces structurally identical terms and cannot split tokens or
+cross a binding scope incorrectly.
+
+The pass constructs the expression DAG and counts incoming references to each
+structurally distinct node. It considers repeated application terms that do not
+depend on a nested binder and whose expanded syntax tree contains at least 12
+nodes. Candidates are introduced from smallest to largest, allowing a larger
+shared value to refer to shared children. A limit of 512 candidates prevents
+pathological output; none of these examples reached it.
+
+The resulting measurements were:
+
+| Theorem | `let`s | Unshared bytes | Shared bytes |
+| --- | ---: | ---: | ---: |
+| `Nat.count_le_setENCard` | 3 | 1,887 | 1,421 |
+| `GenContFract.first_num_eq` | 6 | 5,797 | 1,102 |
+| `DualNumber.commute_eps_left` | 32 | 50,113 | 4,923 |
+| `DualNumber.range_lift` | 104 | 7,172,142 | 17,536 |
+
+All three rewritten modules still compiled, and the generated bodies still
+contain no `_` placeholders, inaccessible names, tactic scripts, or private
+helper references. The two small modules compiled in approximately 3.2 and 2.8
+seconds. The `DualNumber` module compiled in approximately 4.0 seconds with a
+reported maximum resident set size of 0.92 GB, down from approximately 44
+seconds and 3.2 GB for the unshared body.
+
+This demonstrates that most of the apparent type-class dictionary explosion in
+the stress case is repeated syntax, not irreducibly distinct proof content.
+Explicit elaboration choices and compact output are compatible when repeated
+subterms may be named with `let`.

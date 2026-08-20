@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Create body-rewritten copies of the representative Mathlib modules."""
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -74,7 +74,7 @@ def main() -> None:
                 raise RuntimeError(
                     f"expected one declaration block for {stem}, found {occurrences}"
                 )
-            body = (EXPORTS / f"{stem}.named-body.lean").read_text(
+            body = (EXPORTS / f"{stem}.shared-body.lean").read_text(
                 encoding="utf-8"
             ).rstrip("\n")
             if PLACEHOLDER.search(body):
