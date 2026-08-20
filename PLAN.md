@@ -261,3 +261,139 @@ The expanded sample found two source-generation bugs that the pilot did not:
 The exporter now treats source-printability as a constraint on scope sinking
 and renders each proof using its source namespace. Both fixes are exercised by
 the expanded sample.
+
+## 3. Compact deterministic simplification
+
+The size of the generated source, rather than the size of Lean's internal
+kernel proof, is the optimization target. In particular, it is acceptable for
+elaboration to reconstruct a large proof term as long as the checked-in theorem
+body is small, explicit, and deterministic.
+
+The next experiment will replace `simp` with a record/replay tactic tentatively
+named `simp_explicit`:
+
+1. A recording invocation runs the ordinary simplifier once and observes its
+   successful rewrite applications.
+2. It emits a compact certificate containing only choices that replay cannot
+   reconstruct deterministically: the ordered rewrite theorem and direction,
+   an explicit traversal position only when necessary, and eventually any
+   nontrivial congruence, simproc, or discharge choice.
+3. `simp_explicit` traverses the expression using an empty simp set. At each
+   step it tries only the next named rule, optionally at a recorded position,
+   and fails if every certificate entry is not consumed. It never searches the
+   ambient simp set or tries alternative rewrite rules.
+4. Lean constructs and checks the ordinary equality proof produced by replay.
+   That proof is deliberately not printed back into the source.
+
+The certificate should omit data that local matching can uniquely reconstruct,
+including universe parameters, implicit arguments, substitutions, intermediate
+expressions, reflexive steps, and routine congruence traversal. These omissions
+are compression, not search: replay has already been told which rule to apply
+and where to apply it.
+
+The initial prototype is intentionally narrower than `simp`. It will simplify
+the target only, record theorem rewrites made by `simp`, and reject traces that
+depend on unencoded simprocs or nontrivial discharge searches. Later versions
+can add hypotheses and locations, structured discharge certificates,
+congruence-rule identities, and `simp_rw`/`rw` using the same replay format.
+
+This experiment succeeds when a generated `simp_explicit` body:
+
+- compiles against the unchanged theorem statement;
+- is materially smaller than the printed elaborated proof body;
+- recompiles without consulting the ambient simp theorem set; and
+- fails explicitly when its recorded traversal or rewrite no longer matches.
+
+### Initial prototype
+
+`ExplicitLean.SimpExplicit` implements the target-only prototype. A source call
+such as
+
+```lean
+simp_explicit? [GenContFract.num_eq_conts_a,
+  GenContFract.first_cont_eq zeroth_s_eq]
+```
+
+runs the ordinary simplifier and reports:
+
+```lean
+simp_explicit [
+  GenContFract.num_eq_conts_a,
+  GenContFract.first_cont_eq zeroth_s_eq
+]
+```
+
+The list is an ordered rewrite program, not a simp set. The replayer follows
+Lean's deterministic traversal and tries only the next listed rule. When that
+rule matches, it is consumed exactly once; no alternative simp rule is
+considered. A rule is a post-rewrite by default, while `↓` requests a
+pre-rewrite and `←` reverses its direction. Matching reconstructs implicit
+arguments. A terminal `eq_self` or `iff_self` is omitted because replay closes
+a reflexive residual goal directly.
+
+Before suggesting the position-free program, the recorder replays it with an
+empty simp set and checks that it consumes every rule and reproduces the exact
+searched result expression. If that check fails, it tries the same validation
+with the absolute traversal position on each event, using syntax such as
+`11 => add_zero`. It rejects the recording when neither representation replays
+exactly. Thus positions are exceptional machine metadata rather than the normal
+source representation, and a definitionally equal but syntactically different
+residual goal is not accepted because it can change the behavior of a following
+syntax-sensitive tactic such as `rw`.
+
+The probe covers pre- and post-rewrites, local hypotheses, explicit theorem
+applications, and two Mathlib examples. It also verifies that replay ignores a
+higher-priority local simp theorem and rejects a deliberately stale traversal
+position. The `first_num_eq` certificate block is 98 bytes, compared with
+1,084 bytes for the shared elaborated body. The two certificates for
+`commute_eps_left`, including the surrounding `ext`, occupy 507 bytes, compared
+with 4,782 bytes for the shared elaborated body.
+
+The current recorder rejects nondefault simp configuration, custom dischargers,
+successful side-condition discharge, simprocs, special rules, inaccessible
+local hypotheses, and locations other than the target. Replay still uses Lean's
+ordinary deterministic expression traversal and congruence machinery; only
+the simp theorem set and simproc search have been removed. Absolute traversal
+positions, when required as a fallback, are intentionally strict and therefore
+sensitive to changes in the simplifier implementation or congruence traversal.
+
+### Simp-heavy module experiment
+
+The next test copied two compact modules from the pinned Mathlib checkout:
+
+- `Mathlib.Data.List.DropRight` (219 source lines and 47 occurrences of
+  `simp`-family tactic names); and
+- `Mathlib.Analysis.RCLike.Sqrt` (152 source lines and 45 occurrences).
+
+The selection covers different domains and deliberately includes calls with
+explicit rewrite lists, `simp only`, local hypotheses, algebraic identities,
+coercions, and type-class-driven operations. This first module-scale pass chose
+18 standalone, target-only `simp` calls—nine in each module. Multigoal calls,
+`simpa`, `simp_rw`, and simplification embedded inside another tactic remain
+outside the prototype's stated scope.
+
+Seven of the 18 selected calls produced exact deterministic certificates and
+were replaced: four in `DropRight` and three in `Sqrt`. Together their ordered
+programs contain 74 theorem applications. Both complete copied modules compile
+with those replacements, while the 11 unsupported calls remain unchanged.
+Each replacement carries a one-line `Original body:` comment for comparison,
+and `Experiment/simp_heavy_modules.py` regenerates the two copies from the
+pinned upstream source.
+
+The unsupported calls expose four concrete gaps:
+
+- two recorded simplifier steps attribute one change to two theorem origins;
+- three traces use successful side-condition discharge;
+- five traces require traversal metadata that the current positional replay
+  cannot reproduce exactly; and
+- one zero-event trace leaves a definitionally equal but syntactically
+  different residual goal, which breaks the following `rw`.
+
+The result is mechanically sound but not a source-size win. The seven original
+`simp` lines occupy 175 bytes, whereas their certificates occupy 1,716 bytes
+before the comparison comments. The three `Sqrt` certificates are especially
+long: 18, 14, and 20 rules. This confirms at module scale that an ordered flat
+rewrite log removes simp-set search, but does not by itself provide readable or
+compact source for simp-heavy code. A useful next representation needs
+structured compression of common rewrite phases, not merely shorter theorem
+names or printed kernel terms.
