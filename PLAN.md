@@ -332,14 +332,12 @@ arguments. A terminal `eq_self` or `iff_self` is omitted because replay closes
 a reflexive residual goal directly.
 
 Before suggesting the position-free program, the recorder replays it with an
-empty simp set and checks that it consumes every rule and reproduces the exact
-searched result expression. If that check fails, it tries the same validation
-with the absolute traversal position on each event, using syntax such as
-`11 => add_zero`. It rejects the recording when neither representation replays
-exactly. Thus positions are exceptional machine metadata rather than the normal
-source representation, and a definitionally equal but syntactically different
-residual goal is not accepted because it can change the behavior of a following
-syntax-sensitive tactic such as `rw`.
+empty simp set and checks that it consumes every rule and produces a result
+definitionally equal to the searched result. If that check fails, it tries the
+same validation with the absolute traversal position on each event, using
+syntax such as `11 => add_zero`. It rejects the recording when neither
+representation is a valid deterministic replay. Thus positions are exceptional
+machine metadata rather than the normal source representation.
 
 The probe covers pre- and post-rewrites, local hypotheses, explicit theorem
 applications, and two Mathlib examples. It also verifies that replay ignores a
@@ -372,22 +370,26 @@ coercions, and type-class-driven operations. This first module-scale pass chose
 `simpa`, `simp_rw`, and simplification embedded inside another tactic remain
 outside the prototype's stated scope.
 
-Seven of the 18 selected calls produced exact deterministic certificates and
-were replaced: four in `DropRight` and three in `Sqrt`. Together their ordered
-programs contain 74 theorem applications. Both complete copied modules compile
-with those replacements, while the 11 unsupported calls remain unchanged.
-Each replacement carries a one-line `Original body:` comment for comparison,
-and `Experiment/simp_heavy_modules.py` regenerates the two copies from the
-pinned upstream source.
+Eight of the 18 selected calls produce deterministic certificates in isolation.
+Seven were replaced—four in `DropRight` and three in `Sqrt`—and together their
+ordered programs contain 74 theorem applications. The eighth is a valid empty
+certificate for a definitionally equal intermediate goal, but replacing only
+that tactic changes the presentation consumed by the following `rw`. Both
+complete copied modules compile with the seven body-valid replacements, while
+the other 11 calls remain unchanged. Each replacement carries a one-line
+`Original body:` comment for comparison, and
+`Experiment/simp_heavy_modules.py` regenerates the two copies from the pinned
+upstream source.
 
-The unsupported calls expose four concrete gaps:
+The non-materialized calls expose four concrete gaps:
 
 - two recorded simplifier steps attribute one change to two theorem origins;
 - three traces use successful side-condition discharge;
 - five traces require traversal metadata that the current positional replay
   cannot reproduce exactly; and
-- one zero-event trace leaves a definitionally equal but syntactically
-  different residual goal, which breaks the following `rw`.
+- one zero-event trace is definitionally valid in isolation, but replacing only
+  that tactic changes the presentation expected by the following `rw`; a
+  body-level rewrite would need to absorb the continuation as well.
 
 The result is mechanically sound but not a source-size win. The seven original
 `simp` lines occupy 175 bytes, whereas their certificates occupy 1,716 bytes
@@ -397,3 +399,197 @@ rewrite log removes simp-set search, but does not by itself provide readable or
 compact source for simp-heavy code. A useful next representation needs
 structured compression of common rewrite phases, not merely shorter theorem
 names or printed kernel terms.
+
+### Named normalization experiment
+
+The next experiment tests whether many recorded rewrites are better described
+as normalization to one of a small number of named canonical forms. Unlike an
+ordered rewrite certificate, a normalizer specifies its destination and a
+fixed proof-producing algorithm. One invocation can therefore represent many
+individual theorem applications.
+
+`ExplicitLean.Normalize` defines normalizers for category composition, functor
+structure, isomorphisms, equivalences, elementary algebra, pointwise
+projections, matrices, powers, lists, complex coordinates, `RCLike`
+coordinates, and inverses. The initial experiment deliberately implemented
+each one with `simp only`: this was a convenient way to test rule orientation
+and normal-form boundaries without consulting the ambient simp set.
+
+Category composition has now advanced beyond that prototype. Bare
+`normalize_category` is a syntax-directed Meta procedure. It recognizes
+`CategoryStruct.comp` and `CategoryStruct.id`, treats all other morphisms as
+opaque atoms, recursively computes a right-associated identity-free chain,
+and constructs an equality certificate using direct applications of
+`Category.assoc`, `Category.id_comp`, and `Category.comp_id`. It then transports
+the goal along that fully instantiated certificate. There is no simp call,
+theorem indexing, rule selection, or rule orientation in this path. The probe
+also removes the three laws from the simp set and installs a competing
+higher-priority identity rule; normalization is unchanged. Running the tactic
+twice leaves the same canonical target, exercising idempotence.
+
+The other normalizers remain fixed `simp only` catalogs. In addition, a form
+such as
+
+```lean
+normalize_category using [equiv_comp]
+```
+
+is retained as a compatibility path for explicitly named
+representation-changing rules. Those rules and the three category laws run in
+one closed `simp only` fixed point. This proved necessary when exposure rules
+and normalizing rules must interleave; simply exposing first and then invoking
+the direct normalizer did not compile the algebraic-geometry cases. Thus the
+bare tactic is the deterministic normalizer, while `using` marks a remaining
+boundary where theorem-specific exposure has not yet been separated from
+normalization. Fixed declaration names are stored as data and resolved in the
+consuming module, so importing the normalizer does not widen the source
+module's Mathlib dependencies.
+
+The experiment first traced complete elaboration of five modules selected to
+be substantially more involved than the initial simp-heavy pair. Reflexive
+closures (`eq_self` and `iff_self`) were excluded. The trace includes rewrite
+work performed inside established algorithmic normalizers such as `ring_nf`,
+not only source-level `simp` calls.
+
+| Module | Source lines | Simp-family tokens | Rewrite events | Events in fixed normal forms |
+| --- | ---: | ---: | ---: | ---: |
+| `CategoryTheory/Localization/SmallHom` | 391 | 31 | 219 | 128 (58.4%) |
+| `MeasureTheory/Integral/RieszMarkovKakutani/Basic` | 348 | 29 | 85 | 15 (17.6%) |
+| `LinearAlgebra/Vandermonde` | 322 | 53 | 371 | 54 (14.6%) |
+| `AlgebraicGeometry/Normalization` | 692 | 109 | 844 | 176 (20.9%) |
+| `NumberTheory/ModularForms/Derivative` | 253 | 33 | 376 | 240 (63.8%) |
+| **Total** |  |  | **1,895** | **613 (32.3%)** |
+
+The largest covered families were category composition (159 events), the
+existing `ring_nf` algorithm (122), functor normalization (76), pointwise
+projection normalization (70), natural-power normalization (62), elementary
+algebra (46), and isomorphism normalization (41). The result supports the
+normalization hypothesis without suggesting that the first catalog is
+complete. In particular, the residual events cluster around further plausible
+normal forms: `Fin` embeddings and reversal in `Vandermonde`, coercions and
+nonnegative-real projections in the measure-theory module, and equality
+transport, opposites, and limit/colimit beta rules in algebraic geometry.
+
+Fifteen source fragments were then rewritten in copied modules:
+
+- two list proofs and three `RCLike`/complex square-root proofs from the earlier
+  simp-heavy experiment;
+- one localization proof from `SmallHom`;
+- two matrix proofs from `Vandermonde`;
+- two relative-normalization proofs from algebraic geometry; and
+- five normalized-derivative proofs from modular forms.
+
+All six complete copied modules compile. For the five longer calls shared with
+the exact-replay experiment, the original ambient `simp` fragments occupy 134
+bytes, the ordered certificates occupy 1,597 bytes, and the named normalization
+pipelines occupy 316 bytes. Thus normalization removes about 80% of the exact
+certificate source while retaining fixed rule dependencies. It is still larger
+than ambient `simp`, whose brevity comes from leaving its rule dependencies
+implicit. Across the ten new fragments from the four harder rewritten modules,
+the original `simp only` fragments occupy 612 bytes and the normalization
+versions occupy 589 bytes.
+
+The failed intermediate variants were informative. Normalizing projections
+after unfolding a definition left later occurrences hidden; projections had to
+run first or participate in the same fixed point as the exposure rule. An
+initial category normalizer that also expanded functors and isomorphisms changed
+semireducible dependent terms in the algebraic-geometry module. Splitting
+category composition, functor, and isomorphism normal forms fixed that boundary.
+These results argue for small composable normalizers with explicit phase order,
+plus a controlled way for theorem-specific exposure rules to participate in a
+normalization phase.
+
+The next implementation pass should make exposure a deterministic phase with
+a stated traversal policy, so the two algebraic-geometry `using` calls can feed
+the direct category normalizer without a joint simp fixed point. After that,
+the prototype theorem catalogs should be replaced one at a time with procedures
+whose termination, idempotence, and canonical output can be stated and tested
+directly. The three residual families identified above remain candidates for
+new normal forms. Exact ordered replay remains useful for exceptional steps
+that do not belong to a named normal form.
+
+### Mixed deterministic certificate experiment
+
+`simp_explicit?` now treats the direct category normalizer as a compression
+primitive rather than forcing every successful simplification to remain a flat
+rewrite log. `Normalize.categoryTarget` exposes category normalization as an
+expression-level operation returning the normalized target and a proof that it
+equals the input target. It does not assign the goal. This permits speculative
+certificate construction and validation without changing the user's proof
+state.
+
+After recording and validating the ordinary flat certificate, the recorder
+runs a bounded breadth-first search over certificate-program states. A state is
+the current target plus the phases that produced it. At each state it:
+
+1. runs the requested simplifier afresh and tests its trace as a terminal exact
+   phase;
+2. replays each exact prefix of up to 64 events;
+3. invokes syntax-directed category normalization at that boundary; and
+4. enqueues the resulting target for another exact/normalization phase.
+
+The search permits two normalization phases, visits at most 256 states, and
+does not enqueue a partial program already larger than the best certificate.
+Terminal results are checked by definitional equality or by closing a reflexive
+goal. Recording afresh at every state matters because normalization can expose
+a different exact trace rather than merely split the original one.
+
+Only a validated pipeline whose UTF-8 source is smaller than the flat
+certificate is printed. Otherwise the recorder retains its previous exact
+certificate. Consequently this compression changes the proof construction
+while retaining deterministic replay and kernel-checked definitional validity.
+
+The focused regression exercises and manually replays four useful forms:
+
+```lean
+normalize_category
+```
+
+```lean
+normalize_category
+simp_explicit [h]
+```
+
+```lean
+normalize_category
+simp_explicit [h]
+normalize_category
+```
+
+```lean
+simp_explicit [wrappedComp_eq]
+normalize_category
+```
+
+The first replaces an entire category-law log, the second leaves an exceptional
+rewrite after normalization, the third normalizes structure exposed by that
+exceptional rewrite, and the fourth performs an explicit representation change
+before normalization. A Python check asserts that the recorder continues to
+print all four compressed forms.
+
+Five complete copied Mathlib modules now contain materialized mixed
+certificates, rather than recorder invocations:
+
+| Module | Materialized certificate shape |
+| --- | --- |
+| `CategoryTheory/PathCategory/Basic` | normalize, two exceptional rewrites, normalize |
+| `CategoryTheory/Yoneda` | two exceptional rewrites, normalize |
+| `CategoryTheory/FiberedCategory/Cartesian` | two exceptional rewrites, normalize |
+| `CategoryTheory/Triangulated/Subcategory` | three exceptional rewrites, normalize |
+| `CategoryTheory/EqToHom` | two exceptional rewrites, normalize |
+
+All five complete modules compile. The selected source fragments total 339
+bytes as ambient `simp only` calls and 604 bytes as explicit mixed
+certificates. The mixed form is deliberately not expected to beat syntax that
+leaves the rewrite search implicit; its compression target is the flat,
+ordered, fully explicit certificate. All five bodies are now discovered and
+definitionally validated by `simp_explicit?`, including the two-normalizer
+`PathCategory` program, and then checked by compiling the complete modules. The
+generator retains each original call in a comment beside its replacement so
+the comparison is inspectable.
+
+The automatic search still does not normalize hypotheses, rescue a
+simplification the flat recorder cannot encode, or use the catalog-backed
+list/complex normalizers as compression edges. The certificate-program
+structure is now present, however: new proof-producing normalizers can be added
+as candidate edges without changing the exact replay engine.

@@ -2,7 +2,41 @@
 set -eu
 
 lake build ExplicitLean.SimpExplicit
-lake env lean Experiment/SimpExplicitProbe.lean
+python3 Experiment/check_mixed_certificates.py
+python3 Experiment/mixed_certificate_rewrites.py
+for module in \
+  Mathlib/CategoryTheory/PathCategory/Basic.lean \
+  Mathlib/CategoryTheory/Yoneda.lean \
+  Mathlib/CategoryTheory/FiberedCategory/Cartesian.lean \
+  Mathlib/CategoryTheory/Triangulated/Subcategory.lean \
+  Mathlib/CategoryTheory/EqToHom.lean
+do
+  lake env lean \
+    -Dlinter.unusedVariables=false \
+    -DmaxHeartbeats=0 \
+    ".lake/mixed-certificate-rewritten/$module"
+done
+
+lake build ExplicitLean.Normalize
+lake env lean Experiment/NormalizationProbe.lean
+python3 Experiment/normalization_modules.py
+
+for module in \
+  Mathlib/Data/List/DropRight.lean \
+  Mathlib/Analysis/RCLike/Sqrt.lean \
+  Mathlib/CategoryTheory/Localization/SmallHom.lean \
+  Mathlib/LinearAlgebra/Vandermonde.lean \
+  Mathlib/AlgebraicGeometry/Normalization.lean \
+  Mathlib/NumberTheory/ModularForms/Derivative.lean
+do
+  lake env lean \
+    -Dlinter.unusedVariables=false \
+    -DmaxHeartbeats=0 \
+    ".lake/normalization-probe/rewritten/$module"
+done
+
+python3 Experiment/normalization_analysis.py
+
 python3 Experiment/simp_heavy_modules.py rewritten
 
 for module in \

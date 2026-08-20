@@ -1,5 +1,7 @@
 module
 
+public import ExplicitLean.Normalize
+public meta import ExplicitLean.Normalize
 public meta import Lean.Elab.Tactic.Simp
 public import Lean.Elab.Tactic.Simp
 public meta import Lean.Meta.Tactic.Refl
@@ -19,7 +21,9 @@ syntax simpExplicitTraceArgs := optConfig (discharger)? (&" only")?
 
 /-- Replay an ordered simplifier certificate without consulting the simp set. -/
 syntax (name := simpExplicit) "simp_explicit" " [" simpExplicitEvent,* "]" : tactic
-/-- Run `simp` once and report an equivalent `simp_explicit` certificate. -/
+/-- Run `simp` once and report an equivalent deterministic certificate. The
+shortest validated suggestion may be a pipeline containing
+`normalize_category` and `simp_explicit` phases. -/
 syntax (name := simpExplicitTrace) "simp_explicit?" simpExplicitTraceArgs : tactic
 
 end Lean.Parser.Tactic
@@ -328,12 +332,50 @@ private def canReplay (target : Expr) (recorded : Array RecordedEvent)
       if searchedResult.expr.isTrue then
         isReflexiveResult replayedResult.expr
       else
-        -- Subsequent syntax-sensitive tactics such as `rw` can distinguish
-        -- definitionally equal goals. A certificate must reproduce the
-        -- simplifier's actual output expression, not just its proposition.
-        return searchedResult.expr == replayedResult.expr
+        -- A certificate is a replacement proof program, not a promise to
+        -- preserve the simplifier's internal expression representation.
+        return ← isDefEq searchedResult.expr replayedResult.expr
   catch _ =>
     return false
+
+private def replayEncoding? (target : Expr) (recorded : Array RecordedEvent)
+    (searchedResult : Simp.Result) : TacticM (Option Bool) := do
+  if ← canReplay target recorded searchedResult (withPositions := false) then
+    return some false
+  if ← canReplay target recorded searchedResult (withPositions := true) then
+    return some true
+  return none
+
+/-- Replay a recorded prefix, preferring a position-free encoding. The result
+is the complete target after that prefix and whether absolute positions were
+needed. -/
+private def replayRecorded? (target : Expr)
+    (recorded : Array RecordedEvent) : TacticM (Option (Simp.Result × Bool)) := do
+  for withPositions in #[false, true] do
+    try
+      let count := certificateEventCount recorded
+      let mut events := #[]
+      for index in *...count do
+        let some event := recorded[index]? | return none
+        events := events.push (← recordedReplayEvent event withPositions)
+      let (result, state) ← runReplay target events
+      if state.next == events.size then
+        return some (result, withPositions)
+    catch _ =>
+      pure ()
+  return none
+
+private def joinCertificatePhases (phases : Array String) : String :=
+  String.intercalate "\n" phases.toList
+
+/-- Keep automatic compression bounded on very large simplifier traces. -/
+private def maxMixedPrefixEvents : Nat := 64
+
+/-- Two phases discover `normalize; exact; normalize` programs while keeping
+the certificate search small. -/
+private def maxMixedNormalizerPhases : Nat := 2
+
+private def maxMixedSearchStates : Nat := 256
 
 private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainContext do
   unless simpStx.getKind == ``Lean.Parser.Tactic.simp do
@@ -347,16 +389,77 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   let { ctx, simprocs, dischargeWrapper, .. } ← mkSimpContext simpStx (eraseLocal := false)
   let mvarId ← getMainGoal
   let target ← instantiateMVars (← mvarId.getType)
-  let ref ← IO.mkRef ({} : RecorderState)
-  let result ← dischargeWrapper.with fun discharge? => do
-    let methods := recordingMethods ref simprocs discharge?
-    withOptions (·.setBool `diagnostics true) do
-      return (← Simp.mainCore target ctx (methods := methods)).1
-  let state ← ref.get
-  let positionFree ← canReplay target state.events result (withPositions := false)
-  unless positionFree || (← canReplay target state.events result (withPositions := true)) do
-    throwErrorAt reportStx "simp_explicit recorder cannot encode this simplification as an exact deterministic replay"
-  let suggestion ← certificateText state.events (withPositions := !positionFree)
+  let runAndRecord := fun (input : Expr) => do
+    let ref ← IO.mkRef ({} : RecorderState)
+    let result ← dischargeWrapper.with fun discharge? => do
+      let methods := recordingMethods ref simprocs discharge?
+      withOptions (·.setBool `diagnostics true) do
+        return (← Simp.mainCore input ctx (methods := methods)).1
+    return (result, ← ref.get)
+  let (result, state) ← runAndRecord target
+  let some flatWithPositions ← replayEncoding? target state.events result
+    | throwErrorAt reportStx "simp_explicit recorder cannot encode this simplification as a deterministic replay"
+  let flatSuggestion ← certificateText state.events (withPositions := flatWithPositions)
+  let mut suggestion := flatSuggestion
+
+  -- Search a bounded certificate-program graph breadth first. A node is the
+  -- current target plus the phases that produced it. Its outgoing edges replay
+  -- an exact prefix and then normalize. Recording afresh at every node is
+  -- essential: normalization can expose a different exact suffix.
+  let mut frontier : Array (Expr × Array String) := #[(target, #[])]
+  let mut stateCount := 1
+  for depth in *...(maxMixedNormalizerPhases + 1) do
+    let mut nextFrontier := #[]
+    for (input, previousPhases) in frontier do
+      let (nodeResult, nodeState) ← runAndRecord input
+      let closes ← isReflexiveResult nodeResult.expr
+      let reachesResult ← if closes then pure true else if result.expr.isTrue then
+        pure false
+      else
+        isDefEq nodeResult.expr result.expr
+      if reachesResult then
+        if let some withPositions ← replayEncoding? input nodeState.events nodeResult then
+          let mut phases := previousPhases
+          if certificateEventCount nodeState.events > 0 then
+            phases := phases.push
+              (← certificateText nodeState.events (withPositions := withPositions))
+          let candidate := joinCertificatePhases phases
+          if !candidate.isEmpty && candidate.utf8ByteSize < suggestion.utf8ByteSize then
+            suggestion := candidate
+
+      if depth < maxMixedNormalizerPhases then
+        let eventCount := certificateEventCount nodeState.events
+        let prefixLimit := min eventCount maxMixedPrefixEvents
+        for prefixCount in *...(prefixLimit + 1) do
+          let transition? ← try
+            withoutModifyingState do
+              let prefixEvents := nodeState.events.extract 0 prefixCount
+              let some (prefixResult, prefixWithPositions) ← replayRecorded? input prefixEvents
+                | return none
+              -- A replay phase would close the goal before the normalizer ran.
+              if prefixCount > 0 && (← isReflexiveResult prefixResult.expr) then
+                return none
+              let normalized ← Normalize.categoryTarget mvarId prefixResult.expr
+              if Expr.equal prefixResult.expr normalized.expr then
+                return none
+              let mut phases := previousPhases
+              if prefixCount > 0 then
+                phases := phases.push
+                  (← certificateText prefixEvents (withPositions := prefixWithPositions))
+              phases := phases.push "normalize_category"
+              return some (normalized.expr, phases, ← isReflexiveResult normalized.expr)
+          catch _ =>
+            pure none
+          if let some (normalized, phases, closes) := transition? then
+            let phaseText := joinCertificatePhases phases
+            if closes then
+              if phaseText.utf8ByteSize < suggestion.utf8ByteSize then
+                suggestion := phaseText
+            else if stateCount < maxMixedSearchStates &&
+                phaseText.utf8ByteSize < suggestion.utf8ByteSize then
+              nextFrontier := nextFrontier.push (normalized, phases)
+              stateCount := stateCount + 1
+    frontier := nextFrontier
   logInfoAt reportStx m!"Try this deterministic replay:\n{suggestion}"
   applyResultToTarget mvarId target result
 

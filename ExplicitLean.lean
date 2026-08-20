@@ -1,1 +1,2 @@
 import ExplicitLean.SimpExplicit
+import ExplicitLean.Normalize

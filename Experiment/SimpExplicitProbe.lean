@@ -1,8 +1,9 @@
 import ExplicitLean.SimpExplicit
 import Mathlib.Algebra.DualNumber
 import Mathlib.Algebra.ContinuedFractions.Translations
+import Mathlib.CategoryTheory.Category.Basic
 
-open ExplicitLean
+open ExplicitLean CategoryTheory CategoryTheory.Category
 
 example (n : Nat) : n + 0 = n := by
   simp_explicit?
@@ -41,6 +42,54 @@ example (n : Nat) : n + 0 = n := by
   simp_explicit [
     add_zero
   ]
+
+example {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) :
+    ((𝟙 W ≫ f) ≫ g) ≫ 𝟙 Y = f ≫ g := by
+  simp_explicit? only [Category.assoc, Category.id_comp, Category.comp_id]
+
+example {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) :
+    ((𝟙 W ≫ f) ≫ g) ≫ 𝟙 Y = f ≫ g := by
+  normalize_category
+
+example {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) (k : W ⟶ Y)
+    (h : f ≫ g = k) : ((𝟙 W ≫ f) ≫ g) ≫ 𝟙 Y = k := by
+  simp_explicit? only [Category.assoc, Category.id_comp, Category.comp_id, h]
+
+example {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) (k : W ⟶ Y)
+    (h : f ≫ g = k) : ((𝟙 W ≫ f) ≫ g) ≫ 𝟙 Y = k := by
+  normalize_category
+  simp_explicit [h]
+
+example {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) (k : W ⟶ Y)
+    (h : f ≫ g = 𝟙 W ≫ k) : ((𝟙 W ≫ f) ≫ g) ≫ 𝟙 Y = k := by
+  simp_explicit? only [Category.assoc, Category.id_comp, Category.comp_id, h]
+
+example {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) (k : W ⟶ Y)
+    (h : f ≫ g = 𝟙 W ≫ k) : ((𝟙 W ≫ f) ≫ g) ≫ 𝟙 Y = k := by
+  normalize_category
+  simp_explicit [h]
+  normalize_category
+
+private def wrappedComp {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) : W ⟶ Y := (𝟙 W ≫ f) ≫ g
+
+theorem wrappedComp_eq {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) : wrappedComp f g = (𝟙 W ≫ f) ≫ g := rfl
+
+example {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) : wrappedComp f g = f ≫ g := by
+  simp_explicit? only [wrappedComp_eq, Category.assoc, Category.id_comp, Category.comp_id]
+
+example {C : Type*} [Category C] {W X Y : C}
+    (f : W ⟶ X) (g : X ⟶ Y) : wrappedComp f g = f ≫ g := by
+  simp_explicit [wrappedComp_eq]
+  normalize_category
 
 example {K : Type*} {g : GenContFract K} [DivisionRing K]
     {gp : GenContFract.Pair K} (zeroth_s_eq : g.s.get? 0 = some gp) :
