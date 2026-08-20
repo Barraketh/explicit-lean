@@ -1,0 +1,12 @@
+name = "explicitLean"
+version = "0.1.0"
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.32.2"
+
+[[lean_exe]]
+name = "proof-term-probe"
+root = "Experiment.Main"
+supportInterpreter = true
