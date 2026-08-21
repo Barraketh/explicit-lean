@@ -623,6 +623,16 @@ roadmap and completion criterion; the design document owns the certificate IR,
 replay invariants, failure encodings, source-rewriting strategy, and staged
 acceptance gates.
 
+The governing goal was revised on 2026-08-21. Every committed successful
+non-simproc execution must be reconstructed from the operations that `simp`
+actually performed: named or source-supplied theorem applications,
+deterministic reductions, structural traversal, and recursively explicit
+premise programs. Generated event equalities, whole-result proofs, aggregate
+presentation `change`s, and enclosing-body proofs are not successful
+certificates. A missing transition is a recorder coverage failure to repair.
+Simproc transitions are partitioned for a separate design and may not be
+silently converted into generated rewrite proofs.
+
 Build a syntax-aware inventory of every `simp` and `simp only` invocation in
 the pinned Mathlib source. The inventory must include calls nested under tactic
 combinators and calls that simplify hypotheses or all local hypotheses; a text
@@ -636,8 +646,9 @@ module from compiling. Record per occurrence:
 
 - module, declaration, source location, and original syntax;
 - whether ordinary simplification succeeds and whether it closes the goal;
-- trace length and whether traversal positions are needed;
-- the proposed flat or mixed certificate and its source size;
+- the complete ordered operational trace, including definitional reductions;
+- trace length, structural selectors, and transition-continuity checks;
+- the proposed fallback-free certificate and its source size;
 - whether the materialized replacement compiles in the complete body;
 - a terminal outcome when the occurrence is not reached, fails, or is observed
   only in a backtracked branch; and
@@ -648,10 +659,17 @@ Per-occurrence IDs keep failures attributable without requiring one recording
 compile per call. Materialization should optimistically compile all candidate
 replacements in one fresh module copy, then partition by declaration and bisect
 only failing groups; single-occurrence compilation is the final diagnostic
-fallback. The experiment should be resumable and reproducible from source
-scripts, keep generated Mathlib copies under `.lake`, and emit a
+tool, not a semantic fallback. The experiment should be resumable and
+reproducible from source scripts, keep generated Mathlib copies under `.lake`,
+and emit a
 machine-readable summary, compile-count and timing metrics, plus a compact table
 for the plan.
+
+The following results describe the historical proof-fallback baseline. Its
+inventory, passive recording, source ownership, exact-state validation, and
+aggregate compilation infrastructure remain useful. Its proof-result,
+whole-result, presentation-change, and body-proof materializations no longer
+count toward the revised completion criterion.
 
 The syntax-aware inventory harness now covers the complete pinned checkout.
 It incrementally maintains namespace, section, and `open` state while parsing,
@@ -789,21 +807,30 @@ within the 180-second module budget. Full Centralizer closure remains deferred
 to the separately classified context occurrence `161579b1c1009ed4`, so this
 regression does not claim aggregate closure.
 
-The known recorder failures are the staged work packages in sections 8 and 11
-of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result
-fallback, recorded side-condition proofs, structural selectors, hypothesis and
-local-context replay, source printability, configuration effects, and
-multi-goal body rewriting. Keeping the detailed failure semantics in one
-document avoids giving the roadmap a second, drifting specification.
+The Centralizer investigation identified the first concrete operational gap.
+Occurrence `161579b1c1009ed4` starts with a hypothesis containing
+`Finsupp.sum`, but its first recorded event is `Finset.mul_sum` after that
+definition has already reduced to a `Finset` sum. All ten recorded theorem
+events are individually named and premise-free, yet closed replay consumes
+zero because the initial `Finsupp.sum` transition is absent. The earlier
+whole-result proof hid this recorder defect. Operational packages O1 and O2 in
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md) now own continuity checking
+and deterministic reduction replay, beginning with this occurrence.
 
 The completion criterion is not merely that the recorder emits something for
 every call. Every inventoried `simp` and `simp only` occurrence must have a
 terminal outcome. Every committed successful execution must have a materialized
-deterministic replacement that compiles in its original complete module;
-unreached, originally failing, and backtracked-only occurrences are reported
-separately and do not count as replacements. The report must contain no
-coverage failure or unexplained or unclassified outcome, and the existing
-focused replay tests must continue to pass.
+deterministic operational replacement that compiles in its original complete
+module. For the non-simproc milestone, every command must be a recorded theorem
+application, deterministic reduction, or recursively operational premise;
+accepted reports must contain no generated proof, whole-result proof,
+presentation change, enclosing-body proof, absolute-tick dependency caused by
+a missing transition, coverage failure, or unclassified outcome. Simproc and
+irreducible custom-discharger executions are reported as deferred cohorts and
+do not count as materialized. Inventoried occurrences that are unreached,
+originally failing, or backtracked-only are reported separately and do not
+count as replacements. The existing focused replay tests must continue to
+pass.
 
 ### 4.2 Expand the normalizer set
 
@@ -878,15 +905,17 @@ All three directions retain the same project rules:
   definitional equality, not by syntactic identity with an intermediate goal;
 - there is one deterministic certificate semantics, without optional strict or
   compatibility modes;
-- search bounds are small fixed implementation constants and the flat exact
-  certificate remains the conservative fallback;
+- search bounds are small fixed implementation constants and the uncompressed
+  operational trace remains the conservative baseline;
 - reports distinguish recorder coverage from certificate compression;
 - generated source always retains enough provenance to compare it with the
   original body; and
 - `Experiment/run.sh` remains the single end-to-end verification command.
 
-The next concrete milestone is Package G from
-[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): run all 83,015 supported
-`simp` and `simp only` occurrences, fix reason-code clusters without weakening
-the replay invariants, compile complete-module aggregates, and publish the
-generated Markdown summary with no coverage failure or unclassified outcome.
+The next concrete milestones are O1 and O2 from
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): reject missing transitions
+before proof export, add deterministic reduction commands, and materialize
+Centralizer occurrence `161579b1c1009ed4` as a `Finsupp.sum` reduction followed
+by its ten named theorem events. Complete non-simproc corpus closure follows
+only after the fallback encoders have ceased to be accepted materialization
+paths.

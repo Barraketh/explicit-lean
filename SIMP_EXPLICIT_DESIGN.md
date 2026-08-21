@@ -1,118 +1,163 @@
-# Deterministic `simp` certificate design
+# Fallback-free deterministic `simp` replay
 
-Status: implementation draft
+Status: revised implementation design
 
-Scope: the `simp` and `simp only` coverage work in [PLAN.md](PLAN.md), section
-4.1
+Scope: `simp` and `simp only` coverage in [PLAN.md](PLAN.md), section 4.1
 
 ## 1. Purpose
 
 `simp_explicit?` must turn each committed successful `simp` or `simp only`
-execution into Lean source whose replay is deterministic and does not consult
-the ambient simp set. The replacement is complete only when it compiles in the
-original theorem body and, after module-wide aggregation, in the original
-module. Inventoried syntax that is never reached or is observed only in a
-failed or backtracked branch receives an explicit terminal outcome rather than
-a fabricated certificate.
+execution into deterministic Lean source that replays the simplifier's actual
+operations. If `simp` reached a result through theorem applications,
+definitional reductions, congruence traversal, and premise discharge, the
+certificate must spell out those operations. A missing operation is a recorder
+failure; it is not permission to replace the observed result with an exported
+proof.
 
-The first recorder proves the basic approach, but it identifies a semantic
-rewrite by looking for one changed diagnostics origin. That approximation is
-the source of most current failures: a proof-producing simplifier step can have
-zero, one, or several diagnostics origins; it can use a simproc; and it can
-solve premises through a separate discharge procedure.
+The prior implementation treated the proof in `Simp.Result` as a semantic
+completeness fallback. It could replace one event, a whole simplification, a
+presentation gap, or an enclosing tactic body with a generated equality or
+proof term. That policy is superseded. Generated-result proofs can demonstrate
+that an experiment reached an equivalent state, but they do not explain or
+replay how `simp` reached it and therefore do not satisfy section 4.1.
 
-The revised design records the proof-producing result as the authority.
-Diagnostics remain useful for finding a compact theorem-based encoding, but
-they are never required for correctness. When no compact encoding validates,
-the recorder emits a local equality or iff proof and replays that proof as an
-ordinary explicit rewrite rule.
+The motivating production example is Centralizer occurrence
+`161579b1c1009ed4`. Its hypothesis initially contains `Finsupp.sum`; the first
+recorded theorem event is `Finset.mul_sum`, whose input is already a `Finset`
+sum. The omitted `Finsupp.sum` reduction prevents every named-rule selector
+from consuming even the first event. A whole-result equality hides that defect.
+The correct repair is to record and replay the missing reduction.
 
-## 2. Goals and non-goals
+## 2. Scope and deferred boundaries
 
-The design has four goals:
+The ultimate project goal remains coverage of every supported `simp` and
+`simp only` occurrence. The current operational-replay milestone covers every
+execution whose state changes come from:
 
-1. Every committed successful `simp` and `simp only` execution has a
-   deterministic source replacement, including calls in hypotheses, under
-   tactic combinators, and across multiple goals; every other inventoried
-   occurrence has a justified terminal outcome.
-2. Replay uses only the certificate and named deterministic normalizers. It
-   does not use the global simp set, registered simprocs, an ambient discharger,
-   or the original simp configuration.
-3. Compact certificates remain readable when theorem names adequately explain
-   the simplification.
-4. A proof-producing fallback makes semantic coverage independent of the
-   quality of that compact explanation.
+- named simp theorems;
+- theorem terms explicitly supplied by the original source;
+- local hypotheses used as simp rules;
+- Lean's fixed, deterministic simplifier reductions and special rules;
+- congruence traversal; and
+- premise programs that can themselves be expressed by these operations.
 
-This phase does not try to:
+Simproc-produced transitions are a separate design problem. Until that design
+is agreed, an execution containing a simproc transition is classified as
+`deferred_simproc`; it is not materialized through a generated proof and does
+not count as completed coverage. Arbitrary custom dischargers present the same
+arbitrary-code boundary and are classified separately as
+`deferred_custom_discharger` when their proof cannot be reconstructed by the
+ordinary operational premise language.
 
-- preserve the simplifier's internal traversal algorithm as a public contract;
-- reconstruct one uniquely "correct" explanation from diagnostics;
-- minimize every generated certificate globally; or
-- cover `simpa`, `simp_rw`, or `simp_all`. They remain separately inventoried
-  inputs to later phases.
+This phase still does not cover `simpa`, `simp_rw`, or `simp_all`. They remain
+separately inventoried inputs to later phases.
 
-## 3. Certificate invariants
+## 3. Governing invariants
 
-Every accepted certificate must satisfy all of the following invariants.
+### 3.1 Operational completeness
 
-### 3.1 Closed dependency surface
+Every state-changing simplifier transition is represented by a certificate
+command. This includes proofless or definitionally equal transitions that only
+expose the next theorem redex.
 
-Replay may elaborate named theorem terms and invoke explicitly named
-normalizers. It may not consult:
+For each subject, the recorder validates transition continuity:
 
-- the active simp theorem set;
+1. replay from the original subject reaches the input of the first event;
+2. replay of each accepted prefix reaches the next event's input; and
+3. replay of the complete program reaches the recorded final state.
+
+The event inputs and results are recording-time validation data. They do not
+appear in materialized source.
+
+### 3.2 No semantic proof fallback
+
+An accepted `simp` certificate may not contain:
+
+- a generated equality or iff standing in for an unidentified rewrite;
+- a whole-result proof;
+- an aggregate `change` standing in for omitted simplifier operations;
+- an exported proof of an enclosing tactic body or branch;
+- a hidden invocation of `simp`, `dsimp`, `unfold`, or another search tactic;
+  or
+- a proof term returned by a simproc or arbitrary custom discharger merely to
+  bypass their operational behavior.
+
+The original theorem term written by the user is allowed: it is an input rule,
+not a generated fallback. Kernel proof terms constructed by a fixed replay
+primitive are also allowed. For example, a `delta Finsupp.sum` command may use
+definitional equality to construct its equality proof; the certificate still
+identifies the operation rather than serializing the final result.
+
+### 3.3 Closed dependency surface
+
+Replay may elaborate only recorded theorem terms, resolve recorded local
+hypotheses, execute fixed reduction primitives, and run explicit nested premise
+programs. It may not consult:
+
+- the ambient simp theorem set;
 - the registered simproc set;
-- the caller's discharger;
-- the caller's `simp` configuration; or
-- search tactics hidden in generated `by` blocks.
+- an ambient discharger;
+- the original `simp` configuration as an execution mode; or
+- automation hidden in generated `by` blocks.
 
-Generated proof terms may rely on ordinary declarations and local hypotheses,
-as any Lean proof does.
+Configuration remains provenance. Its effects must be visible in the selected
+operations and traversal.
 
-### 3.2 Exact consumption
+### 3.4 Exact consumption
 
-Every recorded command is consumed exactly once and in order. Replay fails if
-it finishes with an unused command, reaches a command at the wrong phase or
-subject, or needs an unrecorded rewrite or premise proof.
+Every command is consumed exactly once and in order. Replay fails when a
+command is not reached, is reached at the wrong phase or subject, consumes the
+wrong premise program, or needs an unrecorded transition.
 
-### 3.3 Proof authority
+Generated source uses structural selectors. Absolute callback ticks remain
+useful diagnostics while developing the recorder, but a final corpus
+certificate may not depend on a tick merely because an earlier operation was
+omitted.
 
-Each semantic rewrite carries, directly or through a named theorem, a proof of
-the equality or iff used to transform the expression. The kernel remains the
-final authority. Diagnostics counters and traversal observations are metadata,
-not evidence.
+### 3.5 Proof production
 
-### 3.4 Context identity
+Every command produces a kernel-checked equality, iff, or proposition proof:
 
-A command identifies whether it changes the target or a particular local
-declaration. Context replay preserves dependency order and updates later local
-declarations when the type of an earlier declaration changes.
+- rewrite commands use the recorded theorem or local rule;
+- reduction commands use a fixed kernel reduction procedure;
+- special-rule commands use a named, documented implementation; and
+- premise programs produce the exact proposition requested by the rewrite.
 
-### 3.5 Printable source
+The proof establishes the command's local transition. It never substitutes for
+an unidentified sequence of transitions.
+
+### 3.6 Context identity
+
+A command identifies the target or a particular local declaration. Context
+replay preserves authored location order, local-context indices, dependency
+transport, local closure, and the exact final target/context state. Helpers
+that perturb the local context are not allowed.
+
+### 3.7 Printable source
 
 Materialized source contains no metavariables, synthetic `sorry`, inaccessible
-local names, or references to private constants that are unavailable at the
-replacement site. Generated names are deterministic and collision-checked.
-Every declaration reference is rendered and re-elaborated in the replacement
-site's namespace and `open` environment, using a fully qualified or `_root_.`
-qualified name whenever shorter syntax would resolve differently.
+local names, or unavailable private constants. Rule references are resolved in
+the replacement site's namespace and `open` context and are qualified whenever
+shorter syntax would resolve differently.
 
-### 3.6 Full-body validation
+Reduction commands serialize operation identity, such as a definition name or
+projection, rather than a pretty-printed intermediate expression.
 
-An isolated replay is necessary but not sufficient. A certificate is accepted
-only after its rewritten complete declaration compiles. A module is accepted
-only after all materialized replacements compile together.
+### 3.8 Full-body validation
 
-## 4. Internal representation
+An isolated replay is necessary but insufficient. A replacement is accepted
+only when its complete declaration compiles. A module is accepted only when
+all replacements compile together. Validation compares exact final state,
+not merely provable equivalence of the final target.
 
-The implementation should separate its internal representation from the
-current parser syntax. The following types are schematic Lean, not a commitment
-to exact constructor or field names:
+## 4. Operational certificate model
+
+The following Lean-like types are schematic:
 
 ```lean
 inductive SubjectRef where
   | target
-  | local (name : Name)
+  | local (contextIndex : Nat) (sourceName : Name)
 
 inductive Phase where
   | pre
@@ -121,7 +166,6 @@ inductive Phase where
 inductive Selector where
   | next
   | matchOrdinal (index : Nat)
-  | traversalTick (tick : Nat)
 
 structure RuleTerm where
   source : String
@@ -129,467 +173,250 @@ structure RuleTerm where
 
 inductive RuleRef where
   | theorem (term : RuleTerm) (inverse : Bool)
-  | localProof (name : Name) (inverse : Bool)
+  | localRule (subject : SubjectRef) (inverse : Bool)
 
-structure PremiseRef where
-  binding : Nat
+inductive ReductionKind where
+  | beta
+  | eta
+  | iota
+  | zeta
+  | projection (structureName : Name) (fieldIndex : Nat)
+  | delta (declaration : Name)
+  | builtin (name : Name)
 
-structure RewriteCommand where
-  subject : SubjectRef
-  phase : Phase
-  selector : Selector
-  rule : RuleRef
-  premises : Array PremiseRef
+mutual
+  structure PremiseProgram where
+    propositionFingerprint : String
+    commands : Array Command
 
-structure NormalizerInvocation where
-  name : Name
-  arguments : Array RuleRef
+  structure RewriteCommand where
+    subject : SubjectRef
+    phase : Phase
+    selector : Selector
+    rule : RuleRef
+    premises : Array PremiseProgram
 
-inductive Command where
-  | rewrite (command : RewriteCommand)
-  | normalize (subject : SubjectRef) (invocation : NormalizerInvocation)
+  structure ReductionCommand where
+    subject : SubjectRef
+    phase : Phase
+    selector : Selector
+    kind : ReductionKind
 
-inductive BindingKind where
-  | premise
-  | rewrite
-
-inductive ProofSource where
-  | nestedCertificate (id : Nat)
-  | term (proof : Expr)
-
-structure Binding where
-  name : Name
-  type : Expr
-  kind : BindingKind
-  source : ProofSource
+  inductive Command where
+    | rewrite (command : RewriteCommand)
+    | reduce (command : ReductionCommand)
+end
 
 structure Certificate where
-  id : Nat
-  bindings : Array Binding
-  commands : Array Command
-
-structure CertificateBundle where
   version : Nat
-  certificates : Array Certificate
+  commands : Array Command
 
 structure StateFingerprint where
   target : String
   context : Array String
 
 structure ValidationEnvelope where
-  certificate : Nat
   initialState : StateFingerprint
   finalState : StateFingerprint
 ```
 
-The actual serialized report should use a versioned JSON equivalent of this
-model. `Expr` values require both a diagnostic pretty-printed form and an
-alpha-stable fingerprint. Rule terms likewise store canonical source text and
-the fingerprint of their elaborated proof; persistent reports do not store raw
-position-bearing `Syntax`. Only generated Lean source is used for replay.
+`builtin` is not an extension hook. Each accepted builtin name must have one
+fixed implementation, documented semantics, and focused mutation tests. It is
+intended for simplifier operations that are neither ordinary theorem rewrites
+nor one of the standard kernel reductions.
 
-The program remains linear. A nested premise certificate is referenced through
-a proof binding in the enclosing bundle, so the main rewrite cursor does not
-become a tree-walking protocol. Bundle-local numeric IDs do not appear in
-generated Lean source. The validation envelope is recorder and report metadata,
-not certificate syntax.
+Persistent JSON stores source text and alpha-stable fingerprints, not raw
+position-bearing `Syntax` or `Expr`. Historical event expressions remain in
+ephemeral recorder state only.
 
 ## 5. Recording model
 
-### 5.1 Semantic events
+### 5.1 Required observation boundary
 
-The recorder wraps the pre- and post-methods used by the original simplifier.
-For every method call it records:
+Wrapping only the simplifier's top-level pre/post methods is insufficient.
+Nested and proofless activity can change the expression before the first
+recorded method result, as the `Finsupp.sum` example demonstrates.
 
-- the input expression;
-- the phase and absolute diagnostic tick;
-- the returned `Simp.Step`;
-- the changed `Simp.Result`, including its proof when present;
-- diagnostics deltas as candidate origins; and
-- any premise proofs requested while producing that result.
+The recorder must observe, in simplifier execution order:
 
-A semantic event exists when the returned result changes the input expression.
-The returned result, not the number of changed origins, defines the event.
-When `Simp.Result.proof?` is absent because the change is definitional, the
-recorder constructs and kernel-checks the corresponding reflexive equality or
-iff proof before encoding the event.
+- theorem applications from the simplifier theorem index;
+- explicitly requested definition unfolding;
+- beta, eta, iota, zeta, and projection reductions;
+- fixed special-rule applications;
+- pre- and post-method results;
+- premise requests and their operational solutions; and
+- congruence descent and return boundaries needed to attribute a structural
+  selector to each operation.
 
-The recorder also captures the simplifier's final result even when there are no
-semantic events. This is needed to diagnose presentation changes that affect a
-following tactic.
+If Lean's public simplifier API does not expose a sufficiently precise hook,
+the implementation should instrument or mirror the relevant pinned Lean
+simplifier functions. Approximate attribution from diagnostic deltas is not an
+acceptable correctness boundary.
 
-### 5.2 Event encoding
+### 5.2 Event identity
 
-Each semantic event is encoded using the first candidate below that validates
-against the recorded input and result:
+The authority for an event is its operation identity plus its observed local
+transition:
 
-1. one named theorem or local theorem;
-2. an ordered group of named theorem or local theorem applications at the same
-   redex;
-3. a generated local equality or iff proof derived from the recorded
-   `Simp.Result`.
+- theorem term or named fixed operation;
+- direction;
+- subject and phase;
+- structural match ordinal; and
+- ordered premise subprograms.
 
-Candidate origins from diagnostics are used only in the first two cases. A
-candidate validates only when closed replay produces the recorded output and a
-kernel-checked proof. If an origin is noisy, incomplete, or unprintable, the
-encoder proceeds to the proof fallback.
+Diagnostics can corroborate theorem names and support reports, but they do not
+fill missing transitions and do not authorize a generated proof.
 
-An ordered group is an encoding optimization, not a new replay primitive. The
-printer may render it as consecutive rewrite commands or collapse it to one
-generated proof binding, whichever produces smaller validated source.
+### 5.3 Definitional and presentation transitions
 
-### 5.3 Proof export
+Every definitionally equal change is classified by the operation that caused
+it. The initial implementation must distinguish at least:
 
-The proof fallback should promote the proof-export work currently prototyped in
-`Experiment/Main.lean` into a reusable expression-rendering library. It must
-handle proof bodies, theorem and binding types, and goal types used by `change`
-or transport fallbacks. Before printing, it must:
+- named delta unfolding, beginning with `Finsupp.sum`, `rdropWhile`, and
+  `rtakeWhile` from the known corpus gaps;
+- beta and zeta reduction;
+- iota/match reduction;
+- structure projection reduction; and
+- reflexive or proof-irrelevant simplifier closure.
 
-- instantiate all metavariables;
-- abstract only locals that are in scope at the replacement site;
-- inline inaccessible private constants when possible;
-- assign stable source names to otherwise inaccessible locals;
-- share repeated subterms when that reduces rendered size; and
-- reject placeholders and synthetic `sorry`.
+An unknown definitionally equal gap is reported as `missing_transition`; it is
+never collapsed into `change` or a reflexive whole-result proof.
 
-The fallback is allowed to be verbose. Its purpose is to make coverage
-complete; named rules and later normalizers provide compression.
+### 5.4 Premises
 
-Proof-export source-size diagnostics are deliberately bounded. Sharing first
-computes an exact expanded expression-tree size using the memoized structural
-size traversal. When that size is at most the fixed internal threshold of
-100,000 nodes, `Metrics.unsharedBytes` is `some` of the exact UTF-8 size of
-the fully expanded pretty-print; above the threshold it is `none`. The exact
-public `Metrics.unsharedNodes` value makes omission auditable. This bound
-applies only to the unused diagnostic pretty-print: repeated-subterm sharing,
-shared value/type rendering, and kernel validation always run. The permanent
-large-DAG proof-export probe checks both branches and re-elaborates the shared
-source.
+A rewrite that requests premises records one ordered `PremiseProgram` per
+request. The program is replayed with an empty ambient discharger and must
+produce exactly the requested proposition. Failed probes restore both
+metavariables and premise cursors.
+
+A premise solved by assumption, reflexivity, a named theorem, deterministic
+reduction, or nested simplification is expressible operationally. Exporting the
+returned proof term because its derivation was not recorded is prohibited.
+An arbitrary custom discharger that cannot be decomposed this way is deferred,
+not papered over.
+
+### 5.5 Simprocs
+
+The operational semantics of simprocs are intentionally not specified here.
+The recorder must identify which transitions came from simprocs and retain
+their names, inputs, results, and proof metadata for the later design. The
+non-simproc encoder stops with `deferred_simproc` rather than translating the
+result proof into a rewrite command.
 
 ## 6. Replay model
 
-Replay uses fixed, certificate-specific simplifier methods. There is no ambient
-simp theorem collection and no registered simproc collection.
+Replay uses an empty simp theorem collection, no registered simprocs, and no
+ambient discharger. It interprets the certificate as a closed program.
 
-For each rewrite command, replay:
+For a rewrite command it:
 
-1. resolves its subject in the current goal state;
-2. elaborates only the recorded theorem term or local proof binding;
-3. installs the recorded premise provider;
-4. finds the selected pre- or post-phase application;
-5. checks that the application consumes all recorded premise proofs; and
-6. applies the returned equality or iff to the subject.
+1. resolves the recorded subject;
+2. elaborates the recorded theorem term or local rule;
+3. installs only the command's premise programs;
+4. probes structural sites without committing metavariables or premise state;
+5. selects the requested changing application; and
+6. commits its kernel-checked result.
 
-At the end, replay checks that all commands and bindings have been consumed and
-that every selected rule produced a proof-carrying change. During recording and
-materialization, the validation driver additionally compares the resulting
-target and context with the final state in the validation envelope. That
-out-of-band check reports the command index, subject, phase, expected
-fingerprint, and actual fingerprint. Emitted source does not contain historical
-intermediate or final expressions.
+For a reduction command it:
 
-Named normalizers such as `normalize_category` remain proof-producing commands
-in the same linear program. A normalizer transition is accepted only after the
-same final-state validation as an exact rewrite segment. Any `using [...]`
-arguments are stored as explicit `RuleRef` values in the invocation; a
-normalizer command never obtains extra rules from the ambient simp set.
+1. resolves the recorded subject;
+2. probes only sites where the named reduction is available;
+3. counts structural matches using the same rollback discipline;
+4. executes exactly that reduction; and
+5. constructs and checks the local equality or iff proof.
+
+At the end, replay requires complete command and premise consumption and exact
+agreement with the validation envelope.
 
 ## 7. Source representation
 
-The current syntax remains valid:
+Existing theorem syntax remains valid:
 
 ```lean
 simp_explicit [
-  ↓ List.drop_zero,
-  11 => List.append_nil
+  List.drop_zero,
+  match 2 => List.append_nil
 ]
 ```
 
-The bare numeric selector is retained as compatibility syntax for an absolute
-traversal tick. New generated source should spell selectors explicitly:
-
-```lean
-simp_explicit [
-  ↓ List.drop_zero,
-  match 2 => List.append_nil,
-  tick 11 => h_rewrite_1
-]
-```
-
-Here `match 2` means the second callback site, in the requested phase, where
-the recorded rule applies and changes the current expression using exactly the
-command's premise proofs. It does not compare with a hidden expected
-expression. Counting starts at one. Probes clone metavariable state and the
-premise cursor so unsuccessful candidates have no effects. The selected
-application is then committed. `tick 11` is the exact callback tick fallback.
-
-The printer omits a selector when ordinary ordered replay validates. It prefers
-`match` over `tick`, and uses `tick` only when the structural selector cannot
-distinguish the recorded event.
-
-When the recorded simplifier leaves a definitionally reflexive target open for
-the following tactic, generated source spells that final-state choice rather
-than silently applying `rfl`:
-
-```lean
-simp_explicit leave_open [rule_1, rule_2]
-```
-
-Ordinary `simp_explicit [...]` retains its compatibility behavior of closing a
-reflexive final target. The recorder selects `leave_open` only when the
-original `simp` execution itself did not close, and full-state validation
-checks the resulting open target before materialization.
-
-Generated proof bindings appear immediately before the certificate in the
-smallest source scope containing all uses:
-
-```lean
-have h_premise_1 : P := by
-  simp_explicit [rule_for_P]
-have h_rewrite_1 : lhs = rhs := by
-  exact exported_proof
-simp_explicit [
-  rule_with_premise discharging [h_premise_1],
-  h_rewrite_1
-]
-```
-
-The exact parser spelling of `discharging` is an implementation detail to
-settle in the premise-prototype work package. The semantic rule is fixed: the
-listed proofs are ordered, proposition-checked, and fully consumed.
-
-For hypothesis locations, generated source uses an explicit context program:
+Reduction syntax is schematic until the first reduction package fixes its
+parser spelling. A Centralizer certificate should read conceptually as:
 
 ```lean
 simp_explicit_context [
-  at h => [rule_1, rule_2],
-  at k => [rule_3],
-  at target => [rule_4]
+  at hw => [
+    reduce delta Finsupp.sum,
+    Finset.mul_sum,
+    Algebra.TensorProduct.tmul_mul_tmul,
+    one_mul,
+    match 2 => Algebra.TensorProduct.tmul_mul_tmul,
+    match 2 => one_mul,
+    Finset.sum_mul,
+    Algebra.TensorProduct.tmul_mul_tmul,
+    mul_one,
+    match 2 => Algebra.TensorProduct.tmul_mul_tmul,
+    match 2 => mul_one
+  ]
 ]
 ```
 
-This is the serialized result of `simp at h`, `simp at h k ⊢`, or `simp at *`;
-replay never executes a wildcard location. A target-only context program may be
-printed with the shorter `simp_explicit` syntax.
+The exact selectors above are illustrative; the generated program is accepted
+only after discovery and fresh-source validation. No intermediate expression
+or final expression appears in the source.
 
-## 8. Known failure categories
+For `simp at h`, multiple locations, and `at *`, source uses the existing
+explicit context program. Stable local renames may precede it, but no generated
+proof declaration may be inserted into the context.
 
-### 8.1 Multiple recorded origins
+## 8. Source ownership and multiple executions
 
-Several diagnostics origins may correspond to one returned `Simp.Result`.
-They are attempted as a validated ordered group. If grouping does not reproduce
-the exact result, the event becomes one generated equality or iff binding.
-There is no requirement to assign a unique origin to the step.
+One syntax occurrence can execute on multiple goals or in several tactic
+branches. The recorder retains every execution with an attempt token and a
+committed, backtracked, failed, or unknown disposition.
 
-### 8.2 Discharged side conditions
+The rewriter expands common combinators into explicit branches when necessary.
+It may duplicate operational certificates for the committed executions, but it
+may not close an enclosing `first`, repeated body, or singleton owner with an
+exported proof. If source ownership cannot be rewritten without such a proof,
+the occurrence remains a `source_rewrite` coverage failure.
 
-The recording discharger wraps the original discharger. When it returns a
-proof, the recorder stores the requested proposition and proof before returning
-that proof to the original simplifier.
+Unreached, originally failing, and backtracked-only occurrences receive
+terminal classifications rather than fabricated certificates.
 
-The encoder first tries to express that proof as a nested certificate. If that
-does not validate or would require unsupported automation, it exports the proof
-term. Replay uses a closed provider that returns only the next listed proof
-after checking its type against the requested proposition. It first uses a
-cheap structural comparison and then, when needed, bounded definitional
-equality under ordinary heartbeat accounting. It never calls the original or
-ambient discharger; a timeout is a structured premise-validation failure.
+## 9. Report schema and failure taxonomy
 
-### 8.3 Simprocs and special rules
+Each occurrence report includes:
 
-A simproc is a recording-time implementation detail. Its returned
-`Simp.Result` is encoded exactly like any other semantic event: preferably by a
-recognized named theorem, otherwise by a generated proof binding. Replay never
-invokes the simproc.
-
-Reflexive closure and other special rules may be omitted only when the closed
-replayer reaches the same final result definitionally and consumes every other
-command. Otherwise they also use an explicit proof binding.
-
-### 8.4 Traversal failures
-
-The preferred identity of a rewrite is `(subject, phase, rule,
-match-ordinal)`. This is more stable than the number of unrelated simplifier
-callbacks encountered first. Absolute ticks remain a last-resort certificate
-field because some rules can match indistinguishable sites whose earlier
-rewrites affect traversal.
-
-A prototype must demonstrate that rule probing can be performed without
-committing metavariables or consuming premise proofs before this selector is
-made the printer default. The ordinal counts rule applications that change the
-current expression; it never consults a recorded output expression.
-
-### 8.5 Hypothesis locations
-
-The certificate state consists of a metavariable target plus an ordered local
-context. User-named declarations are referenced by their source names. Generated
-or inaccessible declarations receive deterministic names such as
-`h_explicit_1`, chosen in local-context order and checked for collisions.
-
-After simplifying a local declaration's type, replay uses Lean's metavariable
-context operations to replace that declaration and transport dependent later
-declarations. It records the resulting declaration mapping rather than keeping
-raw `FVarId` values in source or JSON.
-
-For `at *`, the recorder stores the actual ordered sequence of affected local
-declarations and the target. The generated context program spells out that
-sequence. This makes context mutation reviewable and independent of future
-changes to wildcard traversal.
-
-### 8.6 Configurations and custom dischargers
-
-The original configuration influences recording only. Its semantic effect is
-captured by the resulting commands, selectors, and proof bindings. Replay has
-no configuration mode.
-
-The report retains the original syntax and a normalized configuration summary
-for provenance. If a configuration changes a result that cannot be reconstructed
-by compact commands, proof-result fallback is used. Custom dischargers follow
-the premise-proof design above.
-
-The implementation records the original `optConfig` syntax and all built-in
-`Simp.Config` fields available in the pinned Lean toolchain as primitive JSON
-values (including stable strings for enum fields and nullable values for
-options); opaque plugin options remain represented by their original syntax.
-This provenance is schema version 9 and is populated from the elaborated simp
-context for target and location recording. The focused
-`Mathlib/Algebra/Algebra/Bilinear.lean` regression verifies `+contextual`
-recording, configuration-free generated replay, and complete terminal
-classification of its same-body pair.
-
-### 8.7 Unprintable local facts
-
-The body rewriter, rather than the event printer, owns local naming. It assigns
-names at the smallest enclosing tactic sequence where the local exists and
-updates certificate references structurally. It must not perform textual name
-replacement over raw source.
-
-If a usable source name cannot be introduced without changing elaboration, the
-event is represented by a generated rewrite proof that abstracts over the
-available named locals instead of naming the inaccessible fact directly.
-
-### 8.8 Nested and multi-goal use
-
-One source occurrence can execute more than once and on more than one goal.
-The coverage report therefore stores an ordered array of executions, each with
-an execution index, goal fingerprint, initial context fingerprint, and
-certificate. Recording instrumentation assigns an attempt token and brackets
-enclosing combinator branches with completion markers so the report can
-distinguish committed results from failures and restored backtracking states.
-If that status cannot be established, the occurrence is a `coverage_failure`;
-the driver does not guess that an attempt committed.
-
-The source rewriter rewrites the smallest enclosing tactic construct that owns
-those executions. For common combinators, it expands implicit distribution
-into explicit goal branches. For example, a shared tactic under `<;>` can
-become separate bullet-local certificates. Goal order and fingerprints are
-then validated by compiling the complete declaration.
-
-For backtracking combinators such as `first` and repeated tactics, the rewriter
-preserves the successful branch as straight-line proof source. If it cannot do
-so safely, it exports the smallest enclosing proof fragment as a proof term.
-Replay does not add goal-shape search or branch selection.
-
-### 8.9 Zero-event presentation changes
-
-A simplifier call with no recorded semantic events is not automatically a
-no-op. Reducible unfolding or conversion can leave a presentation expected by
-the next tactic even when the isolated target is definitionally equal.
-
-The same fallback applies when a call has later semantic events but an
-unrecorded definitional transition is required to reach the first event (or to
-move between two recorded events). Such a trace is not a valid linear event
-certificate merely because its recorded premise and rewrite steps are
-individually replayable.
-
-Full-body compilation decides this case. On failure, the body rewriter may emit
-an explicit `change` justified by definitional equality, an equality/iff
-transport, or an exported proof for the smallest enclosing fragment. The
-recorder must classify which fallback was used rather than silently deleting
-the call.
-
-For corpus closure, whole-body proof export is an on-demand fallback only after
-an occurrence-level candidate has been isolated as `materialized_body_rejected`.
-It is eligible only when the inventoried body owns exactly one supported
-occurrence in the current module entry set. The exporter abstracts unresolved
-elaboration metavariables to inferred proof arguments; inaccessible locals are
-made printable with exact context-index/name commands. The resulting body
-candidate is accepted only when the final aggregate compile succeeds. The
-earlier optimistic aggregate failure and the proof-export/final-aggregate
-attempts remain in the closure audit record.
-
-## 9. Source rewriting pipeline
-
-The coverage driver should batch work by module while preserving per-occurrence
-identity:
-
-1. Parse the complete module and assign a stable ID to every occurrence and its
-   enclosing declaration and tactic combinators.
-2. Instrument all supported occurrences in one fresh module copy with a passive
-   recorder that preserves the original tactic result and reports recording
-   problems without aborting the module.
-3. Compile that copy once and collect every dynamic execution, including its
-   occurrence ID, attempt outcome, and semantic trace. If instrumentation
-   itself causes a hard module failure, partition the module's occurrences and
-   retry only the failing shards.
-4. Encode and validate traces in-process with the closed replayer and validation
-   envelopes.
-5. Search for shorter mixed programs using registered deterministic
-   normalizers.
-6. Introduce proof bindings and stable local names in enclosing bodies, and
-   rewrite combinators when one occurrence served several goals.
-7. Apply all candidate replacements to a fresh module copy and compile that
-   optimistic aggregate once.
-8. If aggregate compilation fails, partition first by declaration and then
-   bisect only failing replacement groups. Use single-occurrence compilation as
-   the final diagnostic fallback, not the normal execution path. Only an
-   isolated `materialized_body_rejected` occurrence with an exact singleton
-   body owner may trigger the on-demand whole-body proof export.
-9. Recompile the final accepted aggregate and store a terminal outcome for
-   every occurrence. A fallback proof is materialized only when that final
-   aggregate compiles; the failed optimistic attempt remains auditable.
-
-All stages are resumable and cached by pinned Mathlib revision, module source
-hash, occurrence identity, and certificate schema version. Aggregate rewriting
-is based on source ranges or syntax identities from the original file, not on
-sequential substring replacement. Reports include module compile counts, wall
-time, and CPU time so corpus closure has a visible compute budget.
-
-## 10. Report schema and failure taxonomy
-
-The JSON report needs a schema version and, per occurrence:
-
-- stable source identity: module, declaration, byte range, line and column;
+- stable module, declaration, source range, line, and column;
 - original syntax and normalized configuration provenance;
-- zero or more dynamic execution records, each with a result (`succeeded` or
-  `failed`) and, when applicable, a disposition (`committed` or `backtracked`);
-- event counts by semantic kind and encoding kind;
-- emitted bindings and certificate source;
-- selector use (`next`, `match`, or `tick`);
-- isolated replay, declaration compilation, and module compilation results;
-- generated source byte counts;
-- one terminal occurrence outcome; and
-- for coverage failures, one primary failure category plus structured stage
-  details.
+- dynamic executions and dispositions;
+- ordered operational event counts by kind;
+- theorem, reduction, selector, and premise-program details;
+- transition-continuity validation results;
+- isolated, declaration, and aggregate compilation results;
+- generated source size and module compile counts; and
+- one terminal outcome or one primary failure category.
 
-Terminal occurrence outcomes are mutually exclusive:
+Terminal outcomes remain:
 
-- `materialized`: at least one successful execution committed and every such
-  execution has a validated replacement;
-- `not_reached`: the occurrence had no dynamic execution;
-- `attempted_backtracked`: at least one execution succeeded, but every
-  successful execution belonged to a failed or abandoned tactic branch;
-- `original_failure`: the occurrence was reached but no execution of the
-  original tactic succeeded; and
-- `coverage_failure`: recording, encoding, replay, source rewriting, or
-  compilation failed for a committed successful execution, or instrumentation
-  could not establish the required execution outcome.
+- `materialized`;
+- `not_reached`;
+- `attempted_backtracked`;
+- `original_failure`; and
+- `coverage_failure`.
 
-Primary failure categories should remain stable enough for trend reports:
+Deferred arbitrary-code boundaries are reported separately and do not count as
+materialized coverage:
 
-- `recording`;
-- `proof_export`;
-- `premise`;
+- `deferred_simproc`;
+- `deferred_custom_discharger`.
+
+Primary failure categories for required non-simproc executions are:
+
+- `missing_transition`;
+- `unidentified_theorem_application`;
+- `unsupported_reduction`;
+- `premise_program`;
 - `selector`;
 - `context`;
 - `source_rewrite`;
@@ -598,307 +425,159 @@ Primary failure categories should remain stable enough for trend reports:
 - `aggregate_compile`; and
 - `infrastructure`.
 
-The current descriptive labels, such as multiple origins or discharged side
-conditions, become reason codes nested under these stages. No failure may be
-reported only as unclassified stderr. Terminal non-failure outcomes are not
-counted as materialized replacements and must be reported separately.
+`generated_proof`, `whole_result_proof`, `presentation_change`, and body-proof
+outcomes are migration diagnostics, not successful encodings. A report that
+contains one for a committed execution fails the new gate.
+
+## 10. Corpus pipeline
+
+The corpus pipeline remains batched:
+
+1. Build the syntax-aware inventory once for the pinned Mathlib revision.
+2. Instrument every supported occurrence in one copied module and compile that
+   module once when possible.
+3. Record all operational events and execution dispositions without attempting
+   per-occurrence source compilation.
+4. Reject transition gaps before certificate printing.
+5. Encode and validate closed operational programs in-process.
+6. Materialize all candidates in one optimistic module copy.
+7. Partition by declaration and bisect only failing replacement groups.
+8. Recompile the final accepted aggregate and store one terminal outcome for
+   every occurrence.
+
+All stages are resumable and cached by Mathlib revision, source hash,
+occurrence identity, and certificate schema version. Single-occurrence
+compilation is a diagnostic tool, never a semantic fallback.
 
 ## 11. Implementation sequence
 
-Each work package must land with focused tests and a bounded coverage run. The
-order below follows dependency rather than current failure frequency.
+Each package lands with focused tests, a bounded production fixture, the full
+regression, and its own commit.
 
-### A. Semantic trace and versioned certificate IR
+### O1. Transition continuity and fallback rejection
 
-Status: implemented on 2026-08-20.
+- Add explicit continuity checks from the original subject to the first event,
+  between event prefixes, and from the last event to the final state.
+- Classify the first missing transition and its structural location.
+- Make generated event proofs, whole-result proofs, presentation changes, and
+  body proofs fail the operational completion gate.
+- Preserve the old encoders temporarily only as diagnostic comparison tools;
+  they may not materialize accepted replacements.
 
-- Replace `RecordedEvent.origin` as the authority with the input and returned
-  proof-producing result.
-- Retain origin deltas as candidate metadata.
-- Add validation envelopes, terminal execution outcomes, JSON serialization,
-  and precise cursor mismatch diagnostics.
-- Make whole-module passive recording the default corpus path.
-- Preserve all current target-only theorem certificates.
+Gate: the Centralizer occurrence is reported specifically as a missing
+`Finsupp.sum` transition before any proof export is attempted, and existing
+direct named-rule certificates remain accepted.
 
-Gate: existing replay tests and the four successful `DropRight` replacements
-still pass, all 24 `DropRight` occurrences can be passively recorded in one
-module compile, and multiple-origin events are reported without aborting that
-compile.
+### O2. Deterministic reduction commands
 
-The bounded gate records 27 dynamic executions under the 24 stable occurrence
-IDs in one compile. The versioned report retains proof-producing
-`Simp.Result`s, candidate-origin arrays, premise observations, alpha-stable
-state fingerprints, nullable execution disposition, and validation envelopes.
-Nine top-level events have multiple candidate origins and four carry
-discharged premises. Reentrant method activity is retained in its enclosing
-event's provenance rather than duplicated as a main-cursor event. Raw
-recording deliberately leaves terminal outcomes unset; the
-coverage driver may assign them only after materialization and, for branching
-uses, after Package F can establish commitment.
+- Add reduction IR, replay, selectors, source syntax, JSON, and mutation tests.
+- Capture and replay named delta unfolding, then beta, zeta, iota, projection,
+  eta, and required fixed special reductions.
+- Record reductions at the same execution boundary used by the original
+  simplifier.
 
-### B. Generated rewrite-proof fallback
+Gate: Centralizer `161579b1c1009ed4` materializes as `Finsupp.sum` reduction
+plus its ten named theorem events, with no generated proof or `change`.
 
-Status: implemented on 2026-08-20.
+### O3. Complete theorem-event attribution
 
-- Promote and harden the proof exporter from `Experiment/Main.lean` as a
-  renderer for proof terms and types.
-- Encode multiple-origin, simproc, and special-rule results through named rules
-  when possible and proof bindings otherwise.
-- Add source-size and encoding-kind metrics.
+- Observe individual theorem-index applications instead of inferring a
+  semantic event from aggregate diagnostics.
+- Preserve source theorem terms, direction, phase, and exact structural site.
+- Eliminate generated event proofs for multiple-origin and special-rule
+  diagnostic clusters.
 
-Gate: the four target-local multiple-origin failures in the `DropRight`
-baseline (`df0c0dff00516f2a`, `f582f1aac3e05ab2`, `22c673bcce0f227e`, and
-`220c8550c1042081`) materialize, and dedicated simproc and special-rule
-fixtures replay with an empty ambient simp/simproc environment. The original
-eight-way diagnostic bucket also contained two executions whose whole-result
-proof mentions an inaccessible case binder; those close in Package E. Its two
-remaining occurrences execute under `<;>` on more than one branch and close in
-Package F. This partition is based on the semantic recorder, not on the old
-diagnostic-origin count.
+Gate: all non-simproc multiple-origin fixtures replay as individual named or
+fixed builtin operations.
 
-The reusable exporter now renders both proof terms and their declared types in
-the replacement namespace, preserves the recorded redex type for
-definitionally reflexive proofs, shares profitable subterms, and rejects
-metavariables, synthetic `sorry`, inaccessible locals, and residual private
-constants. Schema version 3 reports event and whole-result proof fallbacks with
-source-size and premise-binding metrics, plus premise provenance. All four
-Package B `DropRight` replacements compile both
-in isolation and together. A real `pushFun` simproc fixture materializes a
-certificate that contains no ambient simproc invocation, and a lower-level
-`Origin.other` fixture validates the same public proof-result encoder and
-closed replayer. The complete `Experiment/run.sh` regression passes.
+### O4. Operational premise programs
 
-### C. Recorded premise proofs
+- Compile built-in discharge behavior and nested simplification into closed
+  premise programs.
+- Remove premise proof-term export as an accepted encoding.
+- Classify irreducible custom dischargers at the deferred boundary.
 
-Status: implemented on 2026-08-21.
+Gate: premise fixtures pass with a failing ambient discharger and contain no
+generated premise proof term.
 
-- Record proposition/proof pairs from the original discharger.
-- Add the closed ordered premise provider.
-- Support nested certificates and proof-term fallback for bindings.
-- Report bounded definitional-equality timeouts distinctly.
+### O5. Fallback-free contexts and source ownership
 
-Gate: focused fixtures materialize both nested-certificate and proof-term
-premise bindings, reject missing, mismatched, and unconsumed providers, and
-replay when the relevant simp theorem and discharger are not ambiently
-registered.
+- Apply reduction programs uniformly to targets and local declarations.
+- Replace presentation `change` with the underlying reductions.
+- Remove enclosing-body and singleton proof closure from materialization.
+- Preserve local indices, dependent transport, multi-goal execution order, and
+  backtracking dispositions.
 
-The four single-execution `DropRight` occurrences originally classified as
-discharged-side-condition failures (`03210e4a7b3567e3`, `aaf54961bf787d28`,
-`739c7ac9dd3cd521`, and `90925e8b6e53287f`) have a layered failure: premise
-provenance is now separated and replayable, but an unrecorded definitional
-unfold is required before the first semantic event. Their existing
-whole-result fallbacks remain compile-checked here; compact event closure moves
-to Package F's presentation-gap work. The fifth old diagnostic,
-`c9eca03fcd0280ed`, also closes in Package F because one source occurrence
-executes in both branches of `<;>`.
+Gate: the existing DropRight presentation, inaccessible-local, shared-body,
+and first-owner fixtures materialize operationally or remain precise coverage
+failures; none passes via proof export.
 
-The recorder now stores each successful discharger request with its proof and
-diagnostic-origin delta, subtracting that multiset from the enclosing rewrite
-event. Schema version 3 reports premise provenance, deterministic binding
-names, encoding kinds, and source-size metrics. Generated source attaches an
-ordered closed provider with `using [...]`; replay performs a structural type
-check followed by bounded reducible definitional equality, restores
-metavariables and the provider cursor after every rejected probe, and requires
-exact premise consumption before committing a rule. Permanent fixtures compile
-both a nested `simp_explicit` premise certificate and a direct ProofExport term
-fallback, plus missing, mismatched, and unconsumed-provider mutations. The four
-layered `DropRight` cases retain their premise traces and compile individually
-and together through the deferred whole-result fallback. The complete
-`Experiment/run.sh` regression passes.
+### O6. Non-simproc Mathlib closure
 
-### D. Structural selectors
+- Run the complete 83,015-occurrence `simp`/`simp only` inventory.
+- Partition simproc and arbitrary custom-discharger executions explicitly.
+- Fix every remaining required reason-code cluster without weakening the
+  invariants.
+- Compile final complete-module aggregates and publish JSON and Markdown
+  summaries.
 
-Status: implemented on 2026-08-21.
+Gate: every non-deferred occurrence has a terminal outcome; every committed
+successful non-simproc execution is materialized from operational commands;
+there are no fallback encodings, coverage failures, or unclassified outcomes.
 
-- Implement side-effect-free rule probing whose ordinal counts applications
-  and does not inspect a recorded expected expression.
-- Add `match` and explicit `tick` syntax while retaining numeric compatibility.
-- Prefer the shortest validated selector during printing.
+### S. Simproc design
 
-Gate: focused fixtures require a structural `match` selector, exercise explicit
-`tick` and legacy numeric compatibility, verify skipped probes do not leak
-metavariable assignments or consume premise proofs, and make selector
-mutations fail at the exact command. Existing position-free certificates must
-remain position-free.
-
-The six `DropRight` occurrences originally classified as traversal failures
-(`bdfebd4de6e5f543`, `f578fdc66fc0399a`, `e72c0cbdffdb90b1`,
-`7a1c618c3a39b1cb`, `3acd3e1c76ad7f24`, and `e0e91bd09649e027`) also begin
-with an unrecorded unfold of `rdropWhile` or `rtakeWhile`. Their selector layer
-is implemented here and their existing whole-result fallbacks remain
-compile-checked; compact event closure moves to Package F with the other
-presentation gaps.
-
-Replay now distinguishes selector-free `next`, structural `match n`, and
-absolute `tick n` commands. A structural probe counts only exact-premise,
-proof-carrying applications that change the expression, and restores both
-metavariables and premise-provider state at every rejected or skipped site.
-The encoder first validates a selector-free program, then discovers structural
-ordinals using the recorded input and result only inside the encoder, replays
-the emitted expression-free program, and finally falls back to explicit ticks.
-Legacy numeric ticks still parse, while newly generated source always spells
-`tick` explicitly.
-
-Schema version 4 reports the nullable selector kind and value for each encoded
-event, aggregate counts for `next`, `match`, and `tick`, and treats
-`positionsNeeded` as meaning that an absolute tick was actually emitted.
-Permanent fixtures cover `match`, explicit and legacy ticks, phase and ordinal
-mutations, zero selectors, theorem-metavariable rollback, and premise-provider
-rollback. The six layered `DropRight` cases retain nonempty semantic traces and
-compile individually and together through their documented whole-result
-fallbacks without falsely reporting selector commands. The complete
-`Experiment/run.sh` regression passes.
-
-### E. Stable locals and context programs
-
-Status: implemented on 2026-08-21.
-
-- Deterministic, collision-checked local naming emits one exact-index
-  `simp_explicit_rename` prefix and sanitizes the complete report under the
-  renamed local context. Exact-index replay is idempotent: an entry already
-  carrying its requested printable name is a no-op, while an absent index or a
-  collision with another local is an error. Generated base names include that
-  stable context index, so different locals cannot receive the same name from
-  independently recorded certificates. This lets certificates generated
-  independently within one declaration compose without `rename_i` consuming a
-  different set of inaccessible locals on each invocation.
-- Closed `simp_explicit_context` records and replays authored local order,
-  target locations, `at *`, dependent-local transport, local closure, and
-  zero-event subjects; passive location recording rolls back before running the
-  original `simp` once.
-- Fresh-clone validation compares the complete context program and preserves
-  actual fvar transport identities and alpha-stable fingerprints.
-
-Gate: focused fixtures cover a single hypothesis, multiple hypotheses, a
-dependent later hypothesis, an inaccessible local fact, and `at *`.
-The gate also materializes `f3d6dce9ae772ce2` and `54d6b0e3b2ad8e41` from the
-`DropRight` baseline in isolation and together; both generated whole-result
-proofs require naming an inaccessible `cases` binder. The bounded regression
-retains all 24 stable occurrences and their 27 dynamic executions in one
-passive compile, and the complete `Experiment/run.sh` regression passes.
-
-### F. Enclosing-body and multi-goal rewriting
-
-Status: implemented on 2026-08-21.
-
-- Store all dynamic executions for one source occurrence.
-- Distinguish committed, failed, and backtracked attempts.
-- Expand common tactic combinators into explicit branches.
-- Add smallest-fragment proof export and presentation-change fallbacks.
-
-Schema v6 assigns attempt tokens inside rollback-aware body scopes and
-classifies each successful execution as committed or backtracked. Syntax
-inventory records exact owners for `<;>`, `all_goals`, `repeat`, `repeat'`, and
-`first`; the materializer expands shared committed executions into explicit
-bullets and reports terminal outcomes for unreached, backtracked-only, and
-originally failing occurrences. A closed `first` owner can export its exact
-input-goal assignment as the smallest enclosing `exact` proof, without
-straightening an outer tactic body.
-
-The encoder also performs one bounded presentation-only simplifier pass. It
-removes recorded proof-bearing theorem origins from the original context,
-rolls back rejected proof-bearing method results, requires a structurally
-different but definitionally equal whole-goal candidate, and validates the
-complete parenthesized `change` plus event program on a fresh clone. Named
-events under traversal binders are constructed without an invalid event-local
-context check, but are accepted only after complete ordered replay and
-fresh-source validation succeed.
-
-Gate: fixtures cover `<;>`, `all_goals`, a repeated occurrence, a backtracking
-branch, and the `DropRight` zero-event presentation failure. It also
-materializes `c485b5d0b1a08fac` and `754e9f44f095fc5d`, the two baseline
-occurrences whose one source `simp` executes in both branches of `<;>`, plus
-the similarly shared premise-bearing occurrence `c9eca03fcd0280ed`. Its
-presentation-gap gate also closes compact event programs for
-`03210e4a7b3567e3`, `aaf54961bf787d28`, `739c7ac9dd3cd521`, and
-`90925e8b6e53287f`, whose premise layer was completed in Package C, together
-with `bdfebd4de6e5f543`, `f578fdc66fc0399a`, `e72c0cbdffdb90b1`,
-`7a1c618c3a39b1cb`, `3acd3e1c76ad7f24`, and `e0e91bd09649e027`, whose
-selector layer was completed in Package D.
-
-The gate passes. The three shared `DropRight` owners compile in isolation and
-together after explicit branch expansion. Of the ten deferred presentation
-sites, eight compile with `presentation_change` programs and two with direct
-event programs; none retains a whole-result fallback. The two Package E
-inaccessible-local sites also now compile as renamed event programs. Focused
-fixtures cover all required combinators and terminal classifications, and a
-mutation check rejects a changed smallest-owner proof. The bounded one-compile
-recording regression and the complete `Experiment/run.sh` regression pass.
-
-### G. Corpus closure
-
-- Run all 83,015 supported `simp` and `simp only` occurrences.
-- Fix reason-code clusters without weakening replay invariants.
-- Run module aggregates and publish the generated Markdown summary.
-
-The bounded closure driver retains one passive module compile and uses
-whole-body proof export only for an isolated singleton rejection. Exact body
-ownership prevents a fallback from claiming another supported occurrence in
-the same body. Proof export abstracts unresolved elaboration metavariables to
-inferred arguments and emits exact-index local naming for inaccessible locals;
-the final aggregate compile, rather than the optimistic attempt, is the
-acceptance check and both attempts are retained in the audit record.
-
-The bounded proof-export scaling regression is separate from context replay.
-It verifies the production Centralizer occurrence `8a9d921fe307a652`
-(`simp [includeRight]`) in isolation through the `whole_result_proof` /
-`presentation_gap` path with a 30-second recording budget, then performs one
-passive recording compile of the module and checks all 13 stable supported
-occurrence IDs within a 180-second budget. The full module closure is not
-claimed by this diagnostic: occurrence `161579b1c1009ed4` is retained as the
-next separately classified context-encoding work item.
-
-Gate: every occurrence has a terminal outcome; every committed successful
-execution is materialized and compiles in its complete module; aggregate
-compilation passes; and the report contains no `coverage_failure` or
-unclassified outcome.
+Simproc handling begins only after a separate design discussion and document.
+No decision about re-execution, extraction, certification, or replacement is
+implied by this design.
 
 ## 12. Focused test matrix
 
-The permanent test suite should cross semantic behavior with source context:
-
 | Behavior | Target | Named hypothesis | Dependent context | Multi-goal |
 | --- | ---: | ---: | ---: | ---: |
-| One theorem, no premise | required | required | required | required |
-| Multiple origins | required | required | sampled | required |
-| Discharged premise | required | required | required | required |
-| Simproc result | required | required | sampled | required |
-| Structural selector | required | required | sampled | required |
-| Proof fallback | required | required | required | required |
+| Named theorem | required | required | required | required |
+| Delta unfolding | required | required | required | required |
+| Beta/zeta/iota/projection | required | required | sampled | required |
+| Multiple theorem events | required | required | sampled | required |
+| Operational premise | required | required | required | required |
+| Structural selector rollback | required | required | sampled | required |
 | Nondefault configuration | required | required | sampled | required |
-| Zero-event presentation | required | sampled | sampled | required |
+| Zero-theorem reduction-only result | required | required | sampled | required |
+| Missing-transition rejection | required | required | sampled | required |
+| Generated-proof rejection | required | required | required | required |
 
-Tests that claim ambient independence should remove or replace the relevant simp
-registration in a controlled fixture, not merely use `simp only`. Tests for
-premises should install a failing ambient discharger during replay.
+Mutation tests must change reduction names, selectors, directions, premise
+program order, local subjects, and operation order and require failure at the
+mutated command.
 
-## 13. Implementation spikes and resolved decisions
+## 13. Migration from the proof-fallback baseline
 
-The following decisions are part of the design:
+Packages A through G in the earlier implementation established useful
+infrastructure: passive module recording, versioned reports, structural
+selectors, premise observation, stable locals, body ownership, aggregate
+materialization, and exact final-state validation. Those components remain
+inputs to this design.
 
-- `Simp.Result` proofs are authoritative; diagnostics are compression hints.
-- explicit proof bindings are the semantic completeness fallback;
-- premise proofs are captured and replayed in order;
-- wildcard hypothesis locations are expanded to explicit subjects;
-- match ordinals count source-reconstructible rule applications and are
-  preferred to traversal ticks;
-- recorded final states live in validation envelopes rather than emitted
-  certificate syntax;
-- whole-module recording and optimistic aggregate materialization are the
-  normal corpus paths;
-- unreachable, failed, and backtracked occurrences receive explicit terminal
-  outcomes rather than fabricated certificates;
-- multi-goal behavior is made explicit in the surrounding source; and
-- full-body compilation, not isolated target equality, is the acceptance test.
+Their proof-result encoders, whole-result encoders, presentation changes, and
+body-proof materializers are no longer completion mechanisms. Existing commits
+and regression fixtures remain historical evidence and migration diagnostics;
+future package gates must assert that those paths were not used.
 
-Three short API spikes remain before their corresponding packages:
+`ExplicitLean.ProofExport` remains useful elsewhere in the project and for
+diagnostics. Its existence does not authorize proof export in a successful
+`simp` operational certificate.
 
-1. Verify that a candidate simp theorem can be probed under saved metavariable
-   state without leaking assignments or consuming a premise cursor.
-2. Verify proof extraction for built-in simproc and special-rule results across
-   equality, iff, and proof-of-proposition simplification.
-3. Select the Lean metavariable-context API that most directly replaces a local
-   declaration while transporting its dependents.
+## 14. Resolved decisions
 
-These spikes can change internal API choices or surface punctuation. They do
-not change the certificate invariants or fallback strategy.
+- The operational sequence, not `Simp.Result`'s aggregate proof, is the
+  certificate authority.
+- Every definitional presentation change is an operation to identify and
+  replay.
+- Missing transitions are hard coverage failures.
+- Final certificates contain no generated-result, whole-result, presentation,
+  or enclosing-body proof fallback.
+- Premises are nested operational programs, not captured proof terms.
+- Context and body rewriting preserve exact source and local-state identity.
+- Simprocs are deferred to a separate design rather than silently translated
+  into proof rules.
+- Full aggregate compilation is the acceptance test.
