@@ -593,3 +593,191 @@ simplification the flat recorder cannot encode, or use the catalog-backed
 list/complex normalizers as compression edges. The certificate-program
 structure is now present, however: new proof-producing normalizers can be added
 as candidate edges without changing the exact replay engine.
+
+## 4. Next steps
+
+The next work divides into three related directions:
+
+1. make deterministic recording work for every committed successful `simp` and
+   `simp only` execution in the pinned Mathlib checkout, while classifying all
+   other inventoried occurrences;
+2. add enough genuine normalizers to compress the resulting certificates; and
+3. make other automation tactics produce the same kind of explicit certificate
+   program.
+
+These are ordered dependencies rather than isolated projects. Broad `simp`
+coverage provides the trace corpus and failure data needed to choose useful
+normal forms. The normalizer search establishes the common linear certificate
+language that `rw` and `simp_rw` can reuse. Tactics with branching search, most
+notably `grind`, should be approached only after that common representation has
+been exercised across Mathlib.
+
+### 4.1 Mathlib-wide `simp` coverage
+
+The implementation design for this phase is specified in
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). This section remains the
+roadmap and completion criterion; the design document owns the certificate IR,
+replay invariants, failure encodings, source-rewriting strategy, and staged
+acceptance gates.
+
+Build a syntax-aware inventory of every `simp` and `simp only` invocation in
+the pinned Mathlib source. The inventory must include calls nested under tactic
+combinators and calls that simplify hypotheses or all local hypotheses; a text
+count alone is not sufficient. `simpa`, `simp_rw`, and `simp_all` should be
+counted separately for the later tactic-extension phase.
+
+Assign every inventoried call a stable source identity. Instrument all supported
+calls in a module with a passive recorder and compile that copied module once,
+falling back to smaller shards only when instrumentation itself prevents the
+module from compiling. Record per occurrence:
+
+- module, declaration, source location, and original syntax;
+- whether ordinary simplification succeeds and whether it closes the goal;
+- trace length and whether traversal positions are needed;
+- the proposed flat or mixed certificate and its source size;
+- whether the materialized replacement compiles in the complete body;
+- a terminal outcome when the occurrence is not reached, fails, or is observed
+  only in a backtracked branch; and
+- a stable failure category when recording or replay fails for an execution
+  that requires a replacement.
+
+Per-occurrence IDs keep failures attributable without requiring one recording
+compile per call. Materialization should optimistically compile all candidate
+replacements in one fresh module copy, then partition by declaration and bisect
+only failing groups; single-occurrence compilation is the final diagnostic
+fallback. The experiment should be resumable and reproducible from source
+scripts, keep generated Mathlib copies under `.lake`, and emit a
+machine-readable summary, compile-count and timing metrics, plus a compact table
+for the plan.
+
+The syntax-aware inventory harness now covers the complete pinned checkout.
+It incrementally maintains namespace, section, and `open` state while parsing,
+and compiled 12 notation-sensitive modules with an inventory linter when syntax
+alone recovered. The baseline denominator is:
+
+| Modules | `simp` | `simp only` | `simpa` | `simp_rw` | `simp_all` | Total |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8,264 | 55,449 | 27,566 | 20,039 | 8,714 | 2,088 | 113,856 |
+
+`Experiment/simp_coverage.py` provides resumable isolated recording and
+materialization trials, aggregate per-module compilation, stable failure
+categories, and JSON and Markdown reports under `.lake/simp-coverage`. The
+bounded end-to-end regression inventories two syntax-heavy modules, checks all
+five tactic families, materializes a known certificate, and compiles its
+aggregate module. A baseline run over all 24 `simp`/`simp only` calls in
+`Mathlib.Data.List.DropRight` materialized four calls successfully and compiled
+all four together. The 20 classified failures were eight multiple-origin
+steps, six traversal failures, five discharged side conditions, and one
+zero-event intermediate-presentation change. This establishes the requested
+coverage denominator and failure pipeline; resolving those categories across
+all 83,015 supported calls remains the recorder work below.
+
+Package A of the design is now implemented. One passive copied-module compile
+records all 24 stable `DropRight` occurrence IDs and 27 dynamic executions
+without aborting on unsupported compact encodings. Its versioned semantic
+reports retain 15 multiple-origin events and seven premise-bearing events,
+along with validation envelopes and alpha-stable state fingerprints. The
+existing isolated and aggregate materialization paths remain available, and
+the bounded check asserts that passive recording uses exactly one module
+compile.
+
+The known recorder failures are the staged work packages in sections 8 and 11
+of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result
+fallback, recorded side-condition proofs, structural selectors, hypothesis and
+local-context replay, source printability, configuration effects, and
+multi-goal body rewriting. Keeping the detailed failure semantics in one
+document avoids giving the roadmap a second, drifting specification.
+
+The completion criterion is not merely that the recorder emits something for
+every call. Every inventoried `simp` and `simp only` occurrence must have a
+terminal outcome. Every committed successful execution must have a materialized
+deterministic replacement that compiles in its original complete module;
+unreached, originally failing, and backtracked-only occurrences are reported
+separately and do not count as replacements. The report must contain no
+coverage failure or unexplained or unclassified outcome, and the existing
+focused replay tests must continue to pass.
+
+### 4.2 Expand the normalizer set
+
+Use the successful Mathlib-wide traces to rank potential normalizers by:
+
+- number of exact rewrite events eliminated;
+- number of distinct modules and declarations helped;
+- reduction in rendered certificate size; and
+- size and clarity of the deterministic implementation.
+
+Each normalizer must be a proof-producing expression transformation with a
+fixed traversal and orientation. Its intended canonical form, termination
+measure, and idempotence behavior should be stated and covered by focused
+tests. A normalizer may be composable and domain-specific; it need not attempt
+to reproduce an entire simp set.
+
+The immediate implementation work is:
+
+1. expose the existing category, functor, isomorphism, equivalence, projection,
+   algebra, power, matrix, list, complex, `RCLike`, and inverse candidates
+   through one internal registry;
+2. replace catalog-backed `simp only` prototypes one at a time with direct
+   syntax-directed procedures;
+3. add a deterministic exposure phase so theorem-specific unfolding can reveal
+   structure for a later normalizer without entering a joint simp fixed point;
+4. let the existing bounded certificate search consider every registered
+   normalizer at each edge; and
+5. rerun the Mathlib corpus after each addition, retaining a normalizer only
+   when it produces compiling certificates and a measurable coverage or
+   readability gain.
+
+Residual trace families already identified in localization, Vandermonde,
+algebraic geometry, and modular forms are the first candidates, but the full
+coverage report should determine their priority. The search continues to use
+one fixed policy and definitional validation; adding normalizers must not add a
+configuration surface or tactic-specific replay modes.
+
+### 4.3 Additional tactic producers
+
+Other tactics should emit the same certificate-program representation rather
+than acquire independent replay engines.
+
+- **`rw`.** Treat its already ordered rewrite list as an exact certificate
+  phase. Preserve elaborated theorem choices, direction, occurrence behavior,
+  and generated side-condition proofs so it can compose with normalizers.
+- **`simp_rw`.** Record the repeated rewrite traversal as ordered exact phases,
+  then allow the normalizer search to compress structural portions between
+  those phases.
+- **`simpa`.** Record target conversion and hypothesis use explicitly, followed
+  by the same simplification certificate used for `simp`.
+- **`simp_all`.** Build on hypothesis-location support and record the fixed
+  point across the target and local context.
+- **Other linear tactics.** Add them only when their effects can be represented
+  as proof-producing transformations of the current certificate state.
+- **`grind`.** Treat this as a later, separate producer for a richer certificate
+  program. Its proposition management, derived facts, congruence closure, case
+  splits, and specialized decision procedures cannot in general be represented
+  as one linear simp trace. Extend the common program with branching or local
+  fact derivations only when concrete `grind` examples require them.
+
+The order within this phase is `rw`, `simp_rw`, `simpa`, `simp_all`, and only
+then `grind`. Each producer first receives focused tests, then an inventoried
+Mathlib corpus, and finally complete-module materialization. A new producer is
+successful when its generated program contains no ambient invocation of the
+original automation tactic and the rewritten modules compile.
+
+### 4.4 Cross-cutting constraints
+
+All three directions retain the same project rules:
+
+- replacement bodies are accepted by kernel-checked compilation and
+  definitional equality, not by syntactic identity with an intermediate goal;
+- there is one deterministic certificate semantics, without optional strict or
+  compatibility modes;
+- search bounds are small fixed implementation constants and the flat exact
+  certificate remains the conservative fallback;
+- reports distinguish recorder coverage from certificate compression;
+- generated source always retains enough provenance to compare it with the
+  original body; and
+- `Experiment/run.sh` remains the single end-to-end verification command.
+
+The next concrete milestone is package B from
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): promote the expression
+renderer into a proof-source fallback and materialize the eight multiple-origin
+`DropRight` failures without consulting ambient simp or simproc registrations.
