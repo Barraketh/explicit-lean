@@ -731,6 +731,15 @@ the six layered `DropRight` traversal cases compile alone and together through
 their deferred whole-result presentation fallback. The complete
 `Experiment/run.sh` regression passes.
 
+Package E is now implemented. Stable local naming, closed context programs,
+authored location order, dependent-local transport, local closure, zero-event
+subjects, `at *`, and passive rollback are covered by permanent focused
+fixtures and schema-v5 report checks. The two closed `DropRight` occurrences
+`f3d6dce9ae772ce2` and `54d6b0e3b2ad8e41` materialize with collision-checked
+`rename_i` prefixes in isolation and in one aggregate module. The bounded
+regression retains all 24 stable occurrences and 27 dynamic executions, and
+the complete `sh Experiment/run.sh` regression passes.
+
 The known recorder failures are the staged work packages in sections 8 and 11
 of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result
 fallback, recorded side-condition proofs, structural selectors, hypothesis and
@@ -827,8 +836,7 @@ All three directions retain the same project rules:
   original body; and
 - `Experiment/run.sh` remains the single end-to-end verification command.
 
-The next concrete milestone is package E from
-[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): add stable local naming and
-deterministic context programs for hypothesis, multi-location, dependent-local,
-and `at *` simplification, then materialize the two `DropRight` occurrences
-whose exported proofs currently mention inaccessible case binders.
+The next concrete milestone is package F from
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): enclosing-body and
+multi-goal rewriting for shared and branched tactic executions, including the
+remaining `DropRight` presentation and `<;>` cases.

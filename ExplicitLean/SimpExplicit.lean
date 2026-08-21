@@ -27,9 +27,14 @@ syntax num : simpExplicitSelector
 syntax simpExplicitEvent := (simpExplicitSelector " => ")? simpExplicitRule
 syntax simpExplicitTraceArgs := optConfig (discharger)? (&" only")?
   (" [" withoutPosition((simpStar <|> simpErase <|> simpLemma),*,?) "]")? (location)?
+declare_syntax_cat simpExplicitContextGroup
+syntax "at" ident " => " "[" simpExplicitEvent,* "]" : simpExplicitContextGroup
 
 /-- Replay an ordered simplifier certificate without consulting the simp set. -/
 syntax (name := simpExplicit) "simp_explicit" " [" simpExplicitEvent,* "]" : tactic
+/-- Replay independent closed certificates against selected local declarations and
+the target, using the same batch staging semantics as `simp at ...`. -/
+syntax (name := simpExplicitContext) "simp_explicit_context" " [" simpExplicitContextGroup,* "]" : tactic
 /-- Run `simp` once and report an equivalent deterministic certificate. The
 shortest validated suggestion may be a pipeline containing
 `normalize_category` and `simp_explicit` phases. -/
@@ -61,7 +66,7 @@ register_option explicitLean.simpExplicit.occurrenceId : String := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 4
+def reportSchemaVersion : Nat := 5
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -105,7 +110,31 @@ structure PremiseReport where
   bindingName : Option String
   deriving ToJson
 
+structure SubjectReport where
+  kind : String
+  name : Option String
+  contextIndex : Option Nat
+  deriving ToJson
+
+structure SubjectTransportReport where
+  originalContextIndex : Nat
+  originalName : Option String
+  resultingContextIndex : Option Nat
+  resultingName : Option String
+  originalCleared : Bool
+  deriving ToJson
+
+structure SubjectSummary where
+  subject : SubjectReport
+  initial : ExprFingerprint
+  result : ExprFingerprint
+  closesGoal : Bool
+  eventCount : Nat
+  transport : Option SubjectTransportReport
+  deriving ToJson
+
 structure SemanticEventReport where
+  subject : SubjectReport
   tick : Nat
   phase : String
   input : ExprFingerprint
@@ -161,10 +190,17 @@ structure ExecutionReport where
       commitment. Package F may replace this with `committed` or `backtracked`. -/
   disposition : Option String
   trace : Array SemanticEventReport
+  subjects : Array SubjectSummary
   initialState : StateFingerprint
   finalState : StateFingerprint
   failureCategory : Option String
   failureMessage : Option String
+  deriving ToJson
+
+structure LocalRenameInfo where
+  /-- Stable local-context index of the candidate selected by `rename_i`. -/
+  contextIndex : Nat
+  generatedName : String
   deriving ToJson
 
 structure RecordingReport where
@@ -189,6 +225,7 @@ structure RecordingReport where
   recordingReason : Option String
   encoding : EncodingMetrics
   encodingFallbackReason : Option String
+  localRenames : Array LocalRenameInfo
   validation : Option ValidationEnvelope
   deriving ToJson
 
@@ -390,12 +427,13 @@ private def certificateEventCount (events : Array RecordedEvent) : Nat := Id.run
     | none => break
   return eventCount
 
-private def certificateText (events : Array RecordedEvent)
-    (selectors : Array ReplaySelector := #[]) : MetaM String := do
-  let eventCount := certificateEventCount events
+private def certificateEventListText (events : Array RecordedEvent)
+    (selectors : Array ReplaySelector := #[])
+    (includeTrailingReflexive : Bool := false) : MetaM String := do
+  let eventCount := if includeTrailingReflexive then events.size else certificateEventCount events
   if eventCount == 0 then
-    return "simp_explicit []"
-  let mut lines := #["simp_explicit ["]
+    return "[]"
+  let mut lines := #["["]
   for index in *...eventCount do
     let some event := events[index]?
       | throwError "simp_explicit recorder produced an inconsistent event count"
@@ -410,6 +448,10 @@ private def certificateText (events : Array RecordedEvent)
     lines := lines.push s!"  {selectorSource selector}{phase}{rule}{comma}"
   lines := lines.push "]"
   return String.intercalate "\n" lines.toList
+
+private def certificateText (events : Array RecordedEvent)
+    (selectors : Array ReplaySelector := #[]) : MetaM String := do
+  return "simp_explicit " ++ (← certificateEventListText events selectors)
 
 private def applyResultToTarget (mvarId : MVarId) (target : Expr)
     (result : Simp.Result) : TacticM Unit := do
@@ -477,6 +519,19 @@ private structure ReplayState where
   premiseFailure? : Option String := none
   /-- Ordinals discovered for committed internal discovery events, in cursor order. -/
   discoveredOrdinals : Array Nat := #[]
+
+private structure LocalRenamePlan where
+  contextIndex : Nat
+  fvarId : FVarId
+  generatedName : Name
+
+private structure EncodingAttempt where
+  suggestion : String
+  encodingInfos : Array EventEncodingInfo
+  premiseEncodingInfos : Array (Array PremiseEncodingInfo)
+  encodingMetrics : EncodingMetrics
+  encodingFallbackReason? : Option String
+  positionsNeeded : Bool
 
 private def premiseDefEqHeartbeatBudget : Nat := 20000
 
@@ -851,6 +906,71 @@ private def freshPremiseBindingName (premiseIndex : Nat) (used : Array Name) : M
     suffix := suffix + 1
   throwError "unreachable generated premise binding name search"
 
+private def localRenamePlan (lctx : LocalContext) : MetaM (Array LocalRenamePlan) := do
+  let mut found : NameSet := {}
+  let mut reverseCandidates : Array LocalDecl := #[]
+  let n := lctx.numIndices
+  -- This is the same reverse scan used by `rename_i`: shadowed names are
+  -- selected from newest to oldest, then restored to local-context order for
+  -- the generated source argument list.
+  for i in *...n do
+    let j := n - i - 1
+    match lctx.getAt? j with
+    | none => pure ()
+    | some localDecl =>
+        if localDecl.isImplementationDetail then
+          continue
+        let inaccessible := localDecl.userName.isInaccessibleUserName ||
+          localDecl.userName.hasMacroScopes
+        let shadowed := found.contains localDecl.userName
+        if inaccessible || shadowed then
+          reverseCandidates := reverseCandidates.push localDecl
+        found := found.insert localDecl.userName
+  let candidates := reverseCandidates.reverse
+  let mut usedNames : NameSet := {}
+  for i in *...n do
+    match lctx.getAt? i with
+    | some localDecl =>
+        -- Compare generated source names with both hygienic and printable
+        -- forms so a macro-scoped declaration cannot collide after source
+        -- rendering erases its scopes.
+        usedNames := usedNames.insert localDecl.userName
+        usedNames := usedNames.insert localDecl.userName.eraseMacroScopes
+    | none => pure ()
+  let mut next := 1
+  let mut result := #[]
+  for localDecl in candidates do
+    let mut generatedName := Name.mkSimple s!"h_explicit_{next}"
+    while usedNames.contains generatedName do
+      next := next + 1
+      generatedName := Name.mkSimple s!"h_explicit_{next}"
+    result := result.push {
+      contextIndex := localDecl.index
+      fvarId := localDecl.fvarId
+      generatedName
+    }
+    usedNames := usedNames.insert generatedName
+    usedNames := usedNames.insert generatedName.eraseMacroScopes
+    next := next + 1
+  return result
+
+private def renamedLocalContext (lctx : LocalContext)
+    (plan : Array LocalRenamePlan) : LocalContext :=
+  plan.foldl (fun current rename => current.setUserName rename.fvarId rename.generatedName) lctx
+
+private def localRenameInfos (plan : Array LocalRenamePlan) : Array LocalRenameInfo :=
+  plan.map fun rename => {
+    contextIndex := rename.contextIndex
+    generatedName := rename.generatedName.toString
+  }
+
+private def localRenamePrefix (plan : Array LocalRenamePlan) : String :=
+  if plan.isEmpty then
+    ""
+  else
+    let names := plan.map (·.generatedName.toString)
+    s!"rename_i {String.intercalate " " names.toList}\n"
+
 private def fallbackReason (event : RecordedEvent) : TacticM String := do
   if event.origins.isEmpty then
     return "no_origin"
@@ -884,7 +1004,8 @@ private def compactReplayEvent? (event : RecordedEvent) : TacticM (Option Replay
     let (result, state) ← runReplay event.input #[replay]
     if state.next == 1 && (← isDefEq result.expr event.result.expr) then
       return some replay
-  catch _ => pure ()
+  catch _ =>
+    return none
   return none
 
 private def nestedPremiseProof? (premise : RecordedPremise) :
@@ -1016,19 +1137,11 @@ private def generatedBinding (event : RecordedEvent) (eventIndex : Nat)
 private def indentSource (indent : String) (text : String) : String :=
   text.replace "\n" ("\n" ++ indent)
 
-private def certificatePlanText (events : Array EncodedEvent)
-    (bindings : Array GeneratedBinding) : String :=
+private def certificatePlanEventListText (events : Array EncodedEvent) : String :=
   Id.run do
-    let mut lines := #[]
-    for binding in bindings do
-      lines := lines.push s!"have {binding.name} : {indentSource "  " binding.typeText} :="
-      lines := lines.push s!"  {indentSource "  " binding.proofText}"
     if events.isEmpty then
-      if lines.isEmpty then
-        return "simp_explicit []"
-      lines := lines.push "simp_explicit []"
-      return String.intercalate "\n" lines.toList
-    lines := lines.push "simp_explicit ["
+      return "[]"
+    let mut lines := #["["]
     for index in *...events.size do
       let some event := events[index]? | continue
       let comma := if index + 1 < events.size then "," else ""
@@ -1041,6 +1154,19 @@ private def certificatePlanText (events : Array EncodedEvent)
           s!" using [{String.intercalate ", " names.toList}]"
       lines := lines.push s!"  {selectorSource event.replay.selector}{phase}{event.ruleText}{premises}{comma}"
     lines := lines.push "]"
+    return String.intercalate "\n" lines.toList
+
+private def certificatePlanText (events : Array EncodedEvent)
+    (bindings : Array GeneratedBinding) : String :=
+  Id.run do
+    let mut lines := #[]
+    for binding in bindings do
+      lines := lines.push s!"have {binding.name} : {indentSource "  " binding.typeText} :="
+      lines := lines.push s!"  {indentSource "  " binding.proofText}"
+    let eventList := certificatePlanEventListText events
+    if bindings.isEmpty then
+      return "simp_explicit " ++ eventList
+    lines := lines.push s!"simp_explicit {eventList}"
     return String.intercalate "\n" lines.toList
 
 private def wholeResultPlanText (binding : GeneratedBinding) : String :=
@@ -1061,8 +1187,9 @@ private def reachesSearchedResult? (searchedResult replayedResult : Simp.Result)
   else
     isDefEq searchedResult.expr replayedResult.expr
 
-private def buildEncodedEvents? (recorded : Array RecordedEvent) :
-    TacticM (Option (Array EncodedEvent × Array GeneratedBinding)) := do
+private def buildEncodedEvents? (recorded : Array RecordedEvent)
+    (initialUsedNames : Array Name := #[]) :
+    TacticM (Option (Array EncodedEvent × Array GeneratedBinding × Array Name)) := do
   try
     -- Keep the trailing reflexive closure in generated plans: unlike the
     -- compact certificate count, materialized proof bodies need the explicit
@@ -1072,7 +1199,7 @@ private def buildEncodedEvents? (recorded : Array RecordedEvent) :
     let count := recorded.size
     let mut encoded := #[]
     let mut bindings := #[]
-    let mut usedNames := #[]
+    let mut usedNames := initialUsedNames
     for index in *...count do
       let some event := recorded[index]? | return none
       if let some replay ← compactReplayEvent? event then
@@ -1114,7 +1241,7 @@ private def buildEncodedEvents? (recorded : Array RecordedEvent) :
           premiseEncodings
           binding? := some binding
         }
-    return some (encoded, bindings)
+    return some (encoded, bindings, usedNames)
   catch _ =>
     return none
 
@@ -1169,8 +1296,9 @@ private def annotateSelectorInfo (events : Array EncodedEvent) : Array EncodedEv
   }
 
 private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEvent)
-    (searchedResult : Simp.Result) : TacticM (Option CertificatePlan) := do
-  let some (baseEncoded, bindings) ← buildEncodedEvents? recorded
+    (searchedResult : Simp.Result) (initialUsedNames : Array Name := #[]) :
+    TacticM (Option CertificatePlan) := do
+  let some (baseEncoded, bindings, _) ← buildEncodedEvents? recorded initialUsedNames
     | return none
   for mode in #[CertificateSelectorMode.next, CertificateSelectorMode.discover,
       CertificateSelectorMode.ticks] do
@@ -1253,10 +1381,10 @@ def encodeProofResult (input : Expr) (result : Simp.Result)
     encodingReason := encoded.info.reason
   }
 
-private def buildWholeResultPlan? (target : Expr) (searchedResult : Simp.Result) :
-    TacticM (Option CertificatePlan) := do
+private def buildWholeResultPlan? (target : Expr) (searchedResult : Simp.Result)
+    (initialUsedNames : Array Name := #[]) : TacticM (Option CertificatePlan) := do
   try
-    let (binding, replay) ← generatedProofBinding target searchedResult 0 .pre #[]
+    let (binding, replay) ← generatedProofBinding target searchedResult 0 .pre initialUsedNames
     let (replayedResult, replayState) ← runReplay target #[replay]
     unless replayState.next == 1 do
       return none
@@ -1339,6 +1467,218 @@ private def recordedReplayEvents (recorded : Array RecordedEvent)
     events := events.push (← recordedReplayEvent event selector)
   return some events
 
+private inductive ContextReplaySubject where
+  | local (decl : LocalDecl)
+  | target
+
+private structure ContextReplayGroup where
+  subject : ContextReplaySubject
+  events : Array ReplayEvent
+  source : Syntax
+
+private structure PendingContextHypothesis where
+  subjectIndex : Nat
+  contextIndex : Nat
+  fvarId : FVarId
+  hypothesis : Hypothesis
+
+private structure ContextRecordSubject where
+  subject : ContextReplaySubject
+  report : SubjectReport
+
+private structure ContextSubjectTrace where
+  subject : SubjectReport
+  fvarId? : Option FVarId
+  lctx : LocalContext
+  initial : Expr
+  result : Simp.Result
+  state : RecorderState
+  encodingInfos : Array EventEncodingInfo
+  premiseEncodingInfos : Array (Array PremiseEncodingInfo)
+  metrics : EncodingMetrics
+  eventText : String
+  bindings : Array GeneratedBinding
+  transport : Option SubjectTransportReport
+
+private def contextRecordSubject (fvarId : FVarId) : TacticM ContextRecordSubject := do
+  let decl ← fvarId.getDecl
+  return {
+    subject := .local decl
+    report := {
+      kind := "local"
+      name := some decl.userName.toString
+      contextIndex := some decl.index
+    }
+  }
+
+private def contextLocationSubjects (mvarId : MVarId) (location : Location) :
+    TacticM (Array ContextRecordSubject) := do
+  match location with
+  | .targets hypotheses includeTarget =>
+      let fvarIds ← getFVarIds hypotheses
+      let mut result := #[]
+      for fvarId in fvarIds do
+        result := result.push (← contextRecordSubject fvarId)
+      if includeTarget then
+        result := result.push {
+          subject := .target
+          report := {
+            kind := "target"
+            name := some "target"
+            contextIndex := none
+          }
+        }
+      return result
+  | .wildcard =>
+      let fvarIds ← mvarId.getNondepPropHyps
+      let mut result := #[]
+      for fvarId in fvarIds do
+        result := result.push (← contextRecordSubject fvarId)
+      result := result.push {
+        subject := .target
+        report := {
+          kind := "target"
+          name := some "target"
+          contextIndex := none
+        }
+      }
+      return result
+
+private def contextSubjectLabel : ContextReplaySubject → String
+  | .local decl => decl.userName.toString
+  | .target => "target"
+
+private def elaborateContextGroups (groupSyntax : Array Syntax) : TacticM (Array ContextReplayGroup) := do
+  let lctx ← getLCtx
+  let mut groups := #[]
+  let mut seenLocals : Array FVarId := #[]
+  let mut targetSeen := false
+  for h : index in *...groupSyntax.size do
+    let groupStx := groupSyntax[index]
+    match groupStx with
+    | `(simpExplicitContextGroup| at $name:ident => [$events:simpExplicitEvent,*]) =>
+        let events ← events.getElems.mapM elaborateEvent
+        if name.getId == `target then
+          if targetSeen then
+            throwErrorAt groupStx "simp_explicit_context may contain `target` at most once"
+          if index + 1 != groupSyntax.size then
+            throwErrorAt groupStx "simp_explicit_context requires `target` to be the last group"
+          groups := groups.push {
+            subject := .target
+            events
+            source := groupStx
+          }
+          targetSeen := true
+        else
+          let some localDecl := lctx.findFromUserName? name.getId
+            | throwErrorAt name "unknown local subject `{name.getId}`"
+          if seenLocals.any (· == localDecl.fvarId) then
+            throwErrorAt name "duplicate local subject `{name.getId}`"
+          groups := groups.push {
+            subject := .local localDecl
+            events
+            source := groupStx
+          }
+          seenLocals := seenLocals.push localDecl.fvarId
+    | _ =>
+        throwErrorAt groupStx "invalid simp_explicit_context group"
+  return groups
+
+private def runContextGroup (mvarId : MVarId) (group : ContextReplayGroup) :
+    TacticM (Simp.Result × ReplayState) := do
+  let subject := contextSubjectLabel group.subject
+  try
+    mvarId.withContext do
+      let target ← match group.subject with
+        | .local decl => instantiateMVars (← decl.fvarId.getType)
+        | .target => instantiateMVars (← mvarId.getType)
+      runReplay target group.events
+  catch ex =>
+    let detail ← liftM (m := BaseIO) ex.toMessageData.toString
+    throwErrorAt group.source
+      m!"simp_explicit_context at {subject} failed: {detail}"
+
+private def applyContextTargetResult (mvarId : MVarId) (target : Expr)
+    (result : Simp.Result) : MetaM (Option MVarId) := do
+  if result.expr.isTrue then
+    let proof ← match result.proof? with
+      | some equality => mkOfEqTrue equality
+      | none => pure (mkConst ``True.intro)
+    mvarId.assign proof
+    return none
+  return some (← applySimpResultToTarget mvarId target result)
+
+private def replayContext (groupSyntax : Array Syntax) : TacticM Unit := withMainContext do
+  let groups ← elaborateContextGroups groupSyntax
+  let mut mvarId ← getMainGoal
+  let mut pending : Array PendingContextHypothesis := #[]
+  let mut closed := false
+  for h : index in *...groups.size do
+    let group := groups[index]
+    if closed then
+      throwErrorAt group.source
+        "simp_explicit_context group at {contextSubjectLabel group.subject} is unreachable after the goal closed"
+    let (result, replayState) ← runContextGroup mvarId group
+    unless replayState.next == group.events.size do
+      let subject := contextSubjectLabel group.subject
+      throwErrorAt group.source
+        m!"simp_explicit_context at {subject} did not consume its complete event group " ++
+          m!"(consumed {replayState.next}, expected {group.events.size})"
+    match group.subject with
+    | .local decl =>
+        let localDecl ← mvarId.withContext do decl.fvarId.getDecl
+        let type ← mvarId.withContext do instantiateMVars localDecl.type
+        if result.proof?.isSome then
+          if result.expr.isFalse && index + 1 < groups.size then
+            throwErrorAt group.source
+              "simp_explicit_context local result closed the goal before all groups were consumed"
+          let applied? ← mvarId.withContext do
+            applySimpResult mvarId (mkFVar decl.fvarId) type result
+          match applied? with
+          | none =>
+              closed := true
+          | some (value, type') =>
+              pending := pending.push {
+                subjectIndex := index
+                contextIndex := localDecl.index
+                fvarId := decl.fvarId
+                hypothesis := {
+                  userName := localDecl.userName
+                  type := type'
+                  value
+                  binderInfo := localDecl.binderInfo
+                  kind := localDecl.kind
+                }
+              }
+        else if result.expr.isFalse then
+          if index + 1 < groups.size then
+            throwErrorAt group.source
+              "simp_explicit_context local result closed the goal before all groups were consumed"
+          mvarId.withContext do
+            mvarId.assign (← mkFalseElim (← mvarId.getType) (mkFVar decl.fvarId))
+          closed := true
+        else
+          mvarId ← mvarId.withContext do
+            mvarId.replaceLocalDeclDefEq decl.fvarId result.expr
+          pure ()
+    | .target =>
+        let target ← mvarId.withContext do instantiateMVars (← mvarId.getType)
+        let mvarId? ← mvarId.withContext do
+          applyContextTargetResult mvarId target result
+        match mvarId? with
+        | none => closed := true
+        | some mvarId' => mvarId := mvarId'
+  if !closed then
+    -- Keep the authored location order.  This mirrors the fvar order supplied
+    -- to Lean's batch simp path; dependent staged hypotheses must not be
+    -- silently reordered by their context indices.
+    let (_, mvarId') ← mvarId.withContext do
+      mvarId.assertHypotheses (pending.map (·.hypothesis))
+    mvarId ← mvarId'.withContext do mvarId'.tryClearMany (pending.map (·.fvarId))
+    replaceMainGoal [mvarId]
+  else
+    replaceMainGoal []
+
 private def tickSelectors (recorded : Array RecordedEvent) : Array ReplaySelector := Id.run do
   let count := certificateEventCount recorded
   let mut selectors := #[]
@@ -1391,6 +1731,43 @@ private def replayEncoding? (target : Expr) (recorded : Array RecordedEvent)
       return some mixed
   let ticks := tickSelectors recorded
   if ← canReplayWithSelectors target recorded searchedResult ticks then
+    return some ticks
+  return none
+
+/- Context subjects must retain a trailing reflexive-closure event.  The target
+   certificate intentionally omits `eq_self`/`iff_self` from its printed event
+   count, but dropping that event from a local declaration changes the
+   declaration's final type (`n = n` versus `True`). -/
+private def contextRecordedReplayEvents (recorded : Array RecordedEvent)
+    (selectors : Array ReplaySelector) : TacticM (Option (Array ReplayEvent)) := do
+  if selectors.size != recorded.size then
+    return none
+  let mut events := #[]
+  for index in *...recorded.size do
+    let some event := recorded[index]? | return none
+    let some selector := selectors[index]? | return none
+    events := events.push (← recordedReplayEvent event selector)
+  return some events
+
+private def contextCanReplayWithSelectors (target : Expr) (recorded : Array RecordedEvent)
+    (searchedResult : Simp.Result) (selectors : Array ReplaySelector) : TacticM Bool := do
+  try
+    withoutModifyingState do
+      let some events ← contextRecordedReplayEvents recorded selectors | return false
+      let (replayedResult, replayState) ← runReplay target events
+      unless replayState.next == events.size do
+        return false
+      return ← reachesSearchedResult? searchedResult replayedResult
+  catch _ =>
+    return false
+
+private def contextReplayEncoding? (target : Expr) (recorded : Array RecordedEvent)
+    (searchedResult : Simp.Result) : TacticM (Option (Array ReplaySelector)) := do
+  let next := Array.replicate recorded.size (.next : ReplaySelector)
+  if ← contextCanReplayWithSelectors target recorded searchedResult next then
+    return some next
+  let ticks := recorded.map (fun event => .tickPos event.tick)
+  if ← contextCanReplayWithSelectors target recorded searchedResult ticks then
     return some ticks
   return none
 
@@ -1491,8 +1868,14 @@ private partial def canonicalExpr (lctx : LocalContext) : Expr → CanonicalM St
 
 private def exprFingerprint (expression : Expr) : MetaM ExprFingerprint := do
   let expression ← instantiateMVars expression
-  let printable ← withOptions (pp.mvars.set · false |>.set pp.mvars.levels.name false) <| ppExpr expression
-  let printable := toString printable
+  let printable ← withOptions
+      (pp.mvars.set · false |>.set pp.mvars.levels.name false
+        |>.set pp.fvars.anonymous.name false) <| ppExpr expression
+  -- A free variable that is not present in the diagnostic reader can otherwise
+  -- be rendered as Lean's internal `_fvar._` placeholder.  Keep that
+  -- diagnostic stable and explicitly non-identity-bearing in persistent JSON;
+  -- source rendering uses the original expression and is unaffected.
+  let printable := (toString printable).replace "_fvar._" "<free-variable>"
   let printable := if printable.length > 512 then (printable.take 512).toString ++ "…" else printable
   let (canonical, _) := (canonicalExpr (← getLCtx) expression).run {}
   return {
@@ -1547,7 +1930,12 @@ private def originCandidate (origin : Origin) : MetaM OriginCandidate := do
 
 private def semanticEventReport (event : RecordedEvent)
     (encoding? : Option EventEncodingInfo := none)
-    (premiseEncodings : Array PremiseEncodingInfo := #[]) : MetaM SemanticEventReport := do
+    (premiseEncodings : Array PremiseEncodingInfo := #[])
+    (subject : SubjectReport := {
+      kind := "target"
+      name := some "target"
+      contextIndex := none
+    }) : MetaM SemanticEventReport := do
   let origins ← event.origins.mapM originCandidate
   let premises ← event.premises.mapIdxM fun index premise => do
     let premiseOrigins ← premise.origins.mapM originCandidate
@@ -1561,6 +1949,7 @@ private def semanticEventReport (event : RecordedEvent)
       bindingName := encoding?.bind (·.bindingName.map (·.toString))
     }
   return {
+    subject
     tick := event.tick
     phase := if event.phase == .pre then "pre" else "post"
     input := ← exprFingerprint event.input
@@ -1580,13 +1969,30 @@ private def executionReport (target : Expr) (result : Simp.Result)
     (failureMessage? : Option String := none)
     (encodings : Array EventEncodingInfo := #[])
     (premiseEncodings : Array (Array PremiseEncodingInfo) := #[])
+    (subjects : Array SubjectSummary := #[])
     : MetaM ExecutionReport := do
+  let targetSubject : SubjectReport := {
+    kind := "target"
+    name := some "target"
+    contextIndex := none
+  }
+  let targetSummary : SubjectSummary := {
+    subject := targetSubject
+    initial := ← exprFingerprint target
+    result := ← exprFingerprint result.expr
+    closesGoal := ← isReflexiveResultEarly result.expr
+    eventCount := state.events.size
+    transport := none
+  }
+  let subjects := if subjects.isEmpty then #[targetSummary] else subjects
   return {
     executionIndex
     result := "succeeded"
     disposition := none
     trace := ← state.events.mapIdxM fun index event =>
       semanticEventReport event encodings[index]? (premiseEncodings[index]?.getD #[])
+        targetSubject
+    subjects
     initialState := ← stateFingerprint target
     finalState := ← stateFingerprint result.expr
     failureCategory := failureCategory?
@@ -1604,7 +2010,8 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     (encodings : Array EventEncodingInfo := #[])
     (premiseEncodings : Array (Array PremiseEncodingInfo) := #[])
     (encodingMetrics : EncodingMetrics := {})
-    (encodingFallbackReason? : Option String := none) : TacticM Unit := do
+    (encodingFallbackReason? : Option String := none)
+    (localRenames : Array LocalRenameInfo := #[]) : TacticM Unit := do
   let declaration := (← Term.getDeclName?).map (·.toString) |>.getD "<unknown>"
   let originalSyntax := toString simpStx.prettyPrint
   let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
@@ -1623,6 +2030,18 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
           result := "failed"
           disposition := none
           trace := #[]
+          subjects := #[{
+            subject := {
+              kind := "target"
+              name := some "target"
+              contextIndex := none
+            }
+            initial := ← exprFingerprint target
+            result := ← exprFingerprint finalTarget
+            closesGoal := false
+            eventCount := 0
+            transport := none
+          }]
           initialState := ← stateFingerprint target
           finalState := ← stateFingerprint finalTarget
           failureCategory := failureCategory?
@@ -1653,6 +2072,7 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     recordingReason := recordingReason?
     encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
     encodingFallbackReason := encodingFallbackReason?
+    localRenames
     validation := some {
       schemaVersion := reportSchemaVersion
       certificate := if suggestion.isEmpty then none else some 0
@@ -1683,12 +2103,13 @@ private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
   try
     emitRecordingReport simpStx reportStx target state (some result) "" false
       (some category) (some detail) none false "unavailable" (some detail)
-  catch ex =>
-    logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
+    catch ex =>
+      logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
 
 private def namedEncodingInfos (events : Array RecordedEvent)
-    (selectors : Array ReplaySelector) : Array EventEncodingInfo := Id.run do
-  let count := certificateEventCount events
+    (selectors : Array ReplaySelector)
+    (includeTrailingReflexive : Bool := false) : Array EventEncodingInfo := Id.run do
+  let count := if includeTrailingReflexive then events.size else certificateEventCount events
   let mut result := #[]
   for index in *...count do
     let selector := selectors[index]?.getD .next
@@ -1706,6 +2127,350 @@ private def planEncodingInfos (plan : CertificatePlan) : Array EventEncodingInfo
 private def planPremiseEncodingInfos (plan : CertificatePlan) :
     Array (Array PremiseEncodingInfo) :=
   plan.events.map (·.premiseEncodings)
+
+private structure ContextSubjectEncoding where
+  eventText : String
+  bindings : Array GeneratedBinding
+  encodingInfos : Array EventEncodingInfo
+  premiseEncodingInfos : Array (Array PremiseEncodingInfo)
+  metrics : EncodingMetrics
+  fallbackReason? : Option String
+  positionsNeeded : Bool
+
+private structure ContextEncodingBundle where
+  traces : Array ContextSubjectTrace
+  bindings : Array GeneratedBinding
+  metrics : EncodingMetrics
+  fallbackReason? : Option String
+  positionsNeeded : Bool
+
+private structure ContextReportBundle where
+  initialLctx : LocalContext
+  finalLctx : LocalContext
+  traces : Array ContextSubjectTrace
+  bindings : Array GeneratedBinding
+  metrics : EncodingMetrics
+  fallbackReason? : Option String
+  positionsNeeded : Bool
+  suggestion : String
+  localRenames : Array LocalRenameInfo
+
+private def contextRenameName? (subject : SubjectReport)
+    (plan : Array LocalRenamePlan) : Option Name :=
+  subject.contextIndex.bind fun contextIndex =>
+    plan.find? (fun rename => rename.contextIndex == contextIndex) |>.map (·.generatedName)
+
+private def renamedLocalContextByFVars (lctx : LocalContext)
+    (renames : Array (FVarId × Name)) : LocalContext :=
+  renames.foldl (fun current (fvarId, name) => current.setUserName fvarId name) lctx
+
+private def contextReportRenamePairs (traces : Array ContextSubjectTrace)
+    (resultingFVars : Array (Option FVarId)) (plan : Array LocalRenamePlan) :
+    Array (FVarId × Name) := Id.run do
+  let mut pairs : Array (FVarId × Name) := #[]
+  for h : index in *...traces.size do
+    let trace := traces[index]
+    let some generatedName := contextRenameName? trace.subject plan | continue
+    if let some fvarId := trace.fvarId? then
+      pairs := pairs.push (fvarId, generatedName)
+    if let some (some resultingFVar) := resultingFVars[index]? then
+      pairs := pairs.push (resultingFVar, generatedName)
+  return pairs
+
+private def contextTransportTraces (traces : Array ContextSubjectTrace)
+    (resultingFVars : Array (Option FVarId)) (finalLctx : LocalContext) :
+    Array ContextSubjectTrace :=
+  traces.mapIdx fun index trace =>
+    match trace.fvarId?, trace.subject.contextIndex, trace.subject.name with
+    | some fvarId, some contextIndex, some originalName =>
+        let resultingId? := match resultingFVars[index]? with
+          | some id? => id?
+          | none => none
+        let resulting? := resultingId?.bind (fun id => finalLctx.find? id)
+        { trace with
+          transport := some {
+            originalContextIndex := contextIndex
+            originalName := some originalName
+            resultingContextIndex := resulting?.map (·.index)
+            resultingName := resulting?.map (·.userName.toString)
+            originalCleared := finalLctx.find? fvarId |>.isNone
+          } }
+    | _, _, _ => trace
+
+private def addEncodingMetrics (lhs rhs : EncodingMetrics) : EncodingMetrics := {
+  mode := if lhs.mode == "event" && rhs.mode == "event" then "event" else "context"
+  namedRuleEvents := lhs.namedRuleEvents + rhs.namedRuleEvents
+  generatedProofEvents := lhs.generatedProofEvents + rhs.generatedProofEvents
+  generatedSimprocEvents := lhs.generatedSimprocEvents + rhs.generatedSimprocEvents
+  generatedSpecialEvents := lhs.generatedSpecialEvents + rhs.generatedSpecialEvents
+  wholeResultProofCount := lhs.wholeResultProofCount + rhs.wholeResultProofCount
+  generatedBindingCount := lhs.generatedBindingCount + rhs.generatedBindingCount
+  generatedBindingBytes := lhs.generatedBindingBytes + rhs.generatedBindingBytes
+  premiseBindingCount := lhs.premiseBindingCount + rhs.premiseBindingCount
+  premiseBindingBytes := lhs.premiseBindingBytes + rhs.premiseBindingBytes
+  nestedPremiseBindings := lhs.nestedPremiseBindings + rhs.nestedPremiseBindings
+  termPremiseBindings := lhs.termPremiseBindings + rhs.termPremiseBindings
+  nextSelectorCount := lhs.nextSelectorCount + rhs.nextSelectorCount
+  matchSelectorCount := lhs.matchSelectorCount + rhs.matchSelectorCount
+  tickSelectorCount := lhs.tickSelectorCount + rhs.tickSelectorCount
+  totalCertificateBytes := lhs.totalCertificateBytes + rhs.totalCertificateBytes
+}
+
+private def selectorMetrics (selectors : Array ReplaySelector) : EncodingMetrics := Id.run do
+  let mut nextSelectorCount := 0
+  let mut matchSelectorCount := 0
+  let mut tickSelectorCount := 0
+  for selector in selectors do
+    match selector with
+    | .next => nextSelectorCount := nextSelectorCount + 1
+    | .matchSite _ => matchSelectorCount := matchSelectorCount + 1
+    | .tickPos _ => tickSelectorCount := tickSelectorCount + 1
+    | .discover .. => pure ()
+  return {
+    namedRuleEvents := selectors.size
+    nextSelectorCount
+    matchSelectorCount
+    tickSelectorCount
+  }
+
+private def contextSubjectEncoding? (target : Expr)
+    (state : RecorderState) (result : Simp.Result) (usedNames : Array Name := #[]) :
+    TacticM (Option (ContextSubjectEncoding × Array Name)) := do
+  try
+    if !state.events.any (·.premises.size > 0) then
+      let includeTrailingReflexive := state.events.size > certificateEventCount state.events
+      let selectors? ← if includeTrailingReflexive then
+          contextReplayEncoding? target state.events result
+        else
+          replayEncoding? target state.events result
+      if let some selectors := selectors? then
+        let eventText ← certificateEventListText state.events selectors includeTrailingReflexive
+        let infos := namedEncodingInfos state.events selectors includeTrailingReflexive
+        let metrics := selectorMetrics selectors
+        return some ({
+          eventText
+          bindings := #[]
+          encodingInfos := infos
+          premiseEncodingInfos := state.events.map (fun _ => #[])
+          metrics
+          fallbackReason? := none
+          positionsNeeded := metrics.tickSelectorCount > 0
+        }, usedNames)
+    let plan? ← match (← buildCertificatePlan? target state.events result usedNames) with
+      | some plan => pure (some plan)
+      | none => buildWholeResultPlan? target result usedNames
+    let some plan := plan? | return none
+    let eventText := if plan.metrics.mode == "whole_result_proof" && plan.events.isEmpty then
+      match plan.bindings[0]? with
+      | some binding => s!"[↓ {binding.name}]"
+      | none => "[]"
+    else
+      certificatePlanEventListText plan.events
+    let allUsedNames := usedNames ++ plan.bindings.map (·.name)
+    return some ({
+      eventText
+      bindings := plan.bindings
+      encodingInfos := planEncodingInfos plan
+      premiseEncodingInfos := planPremiseEncodingInfos plan
+      metrics := plan.metrics
+      fallbackReason? :=
+        if plan.metrics.mode == "whole_result_proof" then some "presentation_gap" else none
+      positionsNeeded := plan.positions
+    }, allUsedNames)
+  catch _ =>
+    return none
+
+private def reencodeContextTraces? (traces : Array ContextSubjectTrace)
+    (plan : Array LocalRenamePlan) : TacticM (Option ContextEncodingBundle) := do
+  try
+    let mut usedNames : Array Name := #[]
+    let mut allBindings : Array GeneratedBinding := #[]
+    let mut aggregateMetrics : EncodingMetrics := {}
+    let mut fallbackReason? : Option String := none
+    let mut positionsNeeded := false
+    let mut renamedTraces : Array ContextSubjectTrace := #[]
+    for trace in traces do
+      let renamedLctx := renamedLocalContext trace.lctx plan
+      let some (encoding, _) ← withLCtx' renamedLctx do
+          contextSubjectEncoding? trace.initial trace.state trace.result usedNames
+        | return none
+      let subject := match contextRenameName? trace.subject plan with
+        | some generatedName => { trace.subject with name := some generatedName.toString }
+        | none => trace.subject
+      usedNames := usedNames ++ encoding.bindings.map (·.name)
+      allBindings := allBindings ++ encoding.bindings
+      aggregateMetrics := addEncodingMetrics aggregateMetrics encoding.metrics
+      fallbackReason? := fallbackReason?.or encoding.fallbackReason?
+      positionsNeeded := positionsNeeded || encoding.positionsNeeded
+      renamedTraces := renamedTraces.push {
+        trace with
+          subject
+          lctx := renamedLctx
+          encodingInfos := encoding.encodingInfos
+          premiseEncodingInfos := encoding.premiseEncodingInfos
+          metrics := encoding.metrics
+          eventText := encoding.eventText
+          bindings := encoding.bindings
+      }
+    return some {
+      traces := renamedTraces
+      bindings := allBindings
+      metrics := aggregateMetrics
+      fallbackReason?
+      positionsNeeded
+    }
+  catch _ =>
+    return none
+
+private def emitContextRecordingReport (simpStx reportStx : Syntax)
+    (initialTarget : Expr) (initialLctx : LocalContext)
+    (finalTarget : Expr) (finalLctx : LocalContext)
+    (subjects : Array ContextSubjectTrace) (suggestion : String)
+    (positionsNeeded : Bool) (encodingMetrics : EncodingMetrics)
+    (encodingFallbackReason? : Option String)
+    (localRenames : Array LocalRenameInfo) (closesGoal : Bool)
+    (capture? : Option (IO.Ref String) := none) : TacticM Unit := do
+  let declaration := (← Term.getDeclName?).map (·.toString) |>.getD "<unknown>"
+  let originalSyntax := toString simpStx.prettyPrint
+  let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
+  let initialState ← withLCtx' initialLctx do stateFingerprint initialTarget
+  let finalState ← withLCtx' finalLctx do stateFingerprint finalTarget
+  let mut trace := #[]
+  let mut summaries := #[]
+  let mut totalCertificateEventCount := 0
+  for subject in subjects do
+    let reports ← withLCtx' subject.lctx do
+      subject.state.events.mapIdxM fun index event =>
+        semanticEventReport event subject.encodingInfos[index]?
+          (subject.premiseEncodingInfos[index]?.getD #[]) subject.subject
+    trace := trace ++ reports
+    totalCertificateEventCount := totalCertificateEventCount + certificateEventCount subject.state.events
+    let summary ← withLCtx' subject.lctx do
+      pure {
+        subject := subject.subject
+        initial := ← exprFingerprint subject.initial
+        result := ← exprFingerprint subject.result.expr
+        closesGoal := ← isReflexiveResultEarly subject.result.expr
+        eventCount := subject.state.events.size
+        transport := subject.transport
+      }
+    summaries := summaries.push summary
+  let execution : ExecutionReport := {
+    executionIndex := 0
+    result := "succeeded"
+    disposition := none
+    trace
+    subjects := summaries
+    initialState
+    finalState
+    failureCategory := none
+    failureMessage := none
+  }
+  let report : RecordingReport := {
+    schema := reportSchema
+    schemaVersion := reportSchemaVersion
+    kind := "simp_explicit.recording"
+    occurrenceId
+    declaration
+    originalSyntax
+    closesGoal
+    traceLength := trace.size
+    certificateEventCount := totalCertificateEventCount
+    positionsNeeded
+    certificateBytes := suggestion.utf8ByteSize
+    certificate := suggestion
+    executions := #[execution]
+    terminalOutcome := none
+    failureCategory := none
+    failureMessage := none
+    traceAvailable := true
+    encodingStatus := if suggestion.isEmpty then "unavailable" else "validated"
+    recordingReason := if suggestion.isEmpty then some "context certificate encoding was not validated" else none
+    encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
+    encodingFallbackReason := encodingFallbackReason?
+    localRenames
+    validation := some {
+      schemaVersion := reportSchemaVersion
+      certificate := if suggestion.isEmpty then none else some 0
+      initialState
+      finalState
+    }
+  }
+  let payload := (toJson report).compress
+  match capture? with
+  | some capture => capture.set payload
+  | none => logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {payload}"
+
+private def contextCertificateText (subjects : Array ContextSubjectTrace)
+    (bindings : Array GeneratedBinding) : String := Id.run do
+  let mut lines := #[]
+  for binding in bindings do
+    lines := lines.push s!"have {binding.name} : {indentSource "  " binding.typeText} :="
+    lines := lines.push s!"  {indentSource "  " binding.proofText}"
+  if subjects.isEmpty then
+    if lines.isEmpty then
+      return "simp_explicit_context []"
+    lines := lines.push "simp_explicit_context []"
+    return String.intercalate "\n" lines.toList
+  lines := lines.push "simp_explicit_context ["
+  for index in *...subjects.size do
+    let some subject := subjects[index]? | continue
+    let comma := if index + 1 < subjects.size then "," else ""
+    let name := subject.subject.name.getD "target"
+    lines := lines.push s!"  at {name} => {subject.eventText}{comma}"
+  lines := lines.push "]"
+  return String.intercalate "\n" lines.toList
+
+private def sameStateFingerprint (lhs rhs : StateFingerprint) : Bool :=
+  toJson lhs == toJson rhs
+
+/- Validate the complete source program, rather than just each subject's event
+   plan, against a fresh goal carrying the captured initial local context.  The
+   source is parsed and elaborated here so generated `have` bindings and the
+   context tactic take the same path as a materialized replacement. -/
+private def validateContextCertificate (source : String)
+    (initialTarget : Expr) (initialLctx : LocalContext)
+    (initialLocalInstances : LocalInstances)
+    (actualClosed : Bool) (actualLctx : LocalContext) (actualTarget : Expr) :
+    TacticM Bool := do
+  try
+    withoutModifyingState do
+      let parsed ← match Parser.runParserCategory (← getEnv)
+          `term s!"by\n{source}" with
+        | .ok stx => pure stx
+        | .error detail =>
+            throwError m!"context certificate parse failed: {detail}"
+      let `(term| by $seq:tacticSeq) := parsed
+        | throwError "context certificate parser returned a non-tactic term"
+      let cloneExpr ← withLCtx' initialLctx do
+        mkFreshExprMVarAt initialLctx initialLocalInstances initialTarget
+          MetavarKind.syntheticOpaque
+      let cloneMVar := cloneExpr.mvarId!
+      withLCtx' initialLctx do
+        replaceMainGoal [cloneMVar]
+        evalTactic seq.raw
+      let goals ← getGoals
+      let replayClosed := goals.isEmpty
+      unless replayClosed == actualClosed do
+        return false
+      let replayTarget? ← match goals with
+        | [goal] => some <$> goal.getType
+        | _ => pure none
+      let replayLctx ← match goals with
+        | [goal] => some <$> (·.lctx) <$> goal.getDecl
+        | _ => pure none
+      if replayClosed then
+        -- The source was parsed and run to completion on a fresh clone.  Once
+        -- both executions close there is no remaining target to compare; the
+        -- explicit closure result is the observable outcome.
+        return true
+      let some replayTarget := replayTarget? | return false
+      let some replayLctx := replayLctx | return false
+      let replayState ← withLCtx' replayLctx do stateFingerprint replayTarget
+      let actualState ← withLCtx' actualLctx do stateFingerprint actualTarget
+      return sameStateFingerprint replayState actualState
+  catch _ =>
+    return false
 
 private def instantiateRecordedResult (result : Simp.Result) : MetaM Simp.Result := do
   return {
@@ -1737,17 +2502,397 @@ private def instantiateRecordedState (state : RecorderState) : MetaM RecorderSta
         }
   }
 
+private def encodeRecording? (target : Expr) (mvarId : MVarId)
+    (state : RecorderState) (result : Simp.Result)
+    (runAndRecord : Expr → TacticM (Simp.Result × RecorderState)) :
+    TacticM (Option EncodingAttempt) := do
+  try
+    -- Premise-bearing events must go through the certificate-plan encoder so
+    -- their closed provider bindings are printed next to the rule.  The flat
+    -- path has no source representation for `using [...]`.
+    let flatEncoding? ← if state.events.any (·.premises.size > 0) then
+      pure none
+    else
+      replayEncoding? target state.events result
+    let mut suggestion := ""
+    let mut encodingInfos : Array EventEncodingInfo := #[]
+    let mut premiseEncodingInfos : Array (Array PremiseEncodingInfo) := #[]
+    let mut encodingMetrics : EncodingMetrics := {}
+    let mut encodingFallbackReason? : Option String := none
+    let mut positionsNeeded := flatEncoding?.getD #[] |>.any isTickSelector
+    if let some flatSelectors := flatEncoding? then
+      suggestion := ← certificateText state.events flatSelectors
+      encodingInfos := namedEncodingInfos state.events flatSelectors
+      premiseEncodingInfos := state.events.map (fun _ => #[])
+      let mut nextSelectorCount := 0
+      let mut matchSelectorCount := 0
+      let mut tickSelectorCount := 0
+      for selector in flatSelectors do
+        match selector with
+        | .next => nextSelectorCount := nextSelectorCount + 1
+        | .matchSite _ => matchSelectorCount := matchSelectorCount + 1
+        | .tickPos _ => tickSelectorCount := tickSelectorCount + 1
+        | .discover .. => pure ()
+      encodingMetrics := {
+        namedRuleEvents := encodingInfos.size
+        nextSelectorCount
+        matchSelectorCount
+        tickSelectorCount
+      }
+    else
+      let plan? ← match (← buildCertificatePlan? target state.events result) with
+        | some plan => pure (some plan)
+        | none => buildWholeResultPlan? target result
+      let some plan := plan?
+        | return none
+      suggestion := plan.source
+      encodingInfos := planEncodingInfos plan
+      premiseEncodingInfos := planPremiseEncodingInfos plan
+      encodingMetrics := plan.metrics
+      encodingFallbackReason? :=
+        if plan.metrics.mode == "whole_result_proof" then some "presentation_gap" else none
+      positionsNeeded := plan.positions
+
+    -- Search a bounded certificate-program graph breadth first. A node is the
+    -- current target plus the phases that produced it. Its outgoing edges
+    -- replay an exact prefix and then normalize. Recording afresh at every
+    -- node is essential: normalization can expose a different exact suffix.
+    if flatEncoding?.isSome then
+      let mut frontier : Array (Expr × Array String) := #[(target, #[])]
+      let mut stateCount := 1
+      for depth in *...(maxMixedNormalizerPhases + 1) do
+        let mut nextFrontier := #[]
+        for (input, previousPhases) in frontier do
+          let (nodeResult, nodeState) ← runAndRecord input
+          let closes ← isReflexiveResult nodeResult.expr
+          let reachesResult ← if closes then pure true else if result.expr.isTrue then
+            pure false
+          else
+            isDefEq nodeResult.expr result.expr
+          if reachesResult then
+            if let some selectors ← replayEncoding? input nodeState.events nodeResult then
+              let mut phases := previousPhases
+              if certificateEventCount nodeState.events > 0 then
+                phases := phases.push
+                  (← certificateText nodeState.events selectors)
+              let candidate := joinCertificatePhases phases
+              if !candidate.isEmpty &&
+                  (suggestion.isEmpty || candidate.utf8ByteSize < suggestion.utf8ByteSize) then
+                suggestion := candidate
+
+          if depth < maxMixedNormalizerPhases then
+            let eventCount := certificateEventCount nodeState.events
+            let prefixLimit := min eventCount maxMixedPrefixEvents
+            for prefixCount in *...(prefixLimit + 1) do
+              let transition? ← try
+                withoutModifyingState do
+                  let prefixEvents := nodeState.events.extract 0 prefixCount
+                  let some (prefixResult, prefixSelectors) ← replayRecorded? input prefixEvents
+                    | return none
+                  -- A replay phase would close the goal before the normalizer ran.
+                  if prefixCount > 0 && (← isReflexiveResult prefixResult.expr) then
+                    return none
+                  let normalized ← Normalize.categoryTarget mvarId prefixResult.expr
+                  if Expr.equal prefixResult.expr normalized.expr then
+                    return none
+                  let mut phases := previousPhases
+                  if prefixCount > 0 then
+                    phases := phases.push
+                      (← certificateText prefixEvents prefixSelectors)
+                  phases := phases.push "normalize_category"
+                  return some (normalized.expr, phases, ← isReflexiveResult normalized.expr)
+              catch _ =>
+                pure none
+              if let some (normalized, phases, closes) := transition? then
+                let phaseText := joinCertificatePhases phases
+                if closes then
+                  if suggestion.isEmpty || phaseText.utf8ByteSize < suggestion.utf8ByteSize then
+                    suggestion := phaseText
+                else if stateCount < maxMixedSearchStates &&
+                    (suggestion.isEmpty || phaseText.utf8ByteSize < suggestion.utf8ByteSize) then
+                  nextFrontier := nextFrontier.push (normalized, phases)
+                  stateCount := stateCount + 1
+        frontier := nextFrontier
+    return some {
+      suggestion
+      encodingInfos
+      premiseEncodingInfos
+      encodingMetrics
+      encodingFallbackReason?
+      positionsNeeded
+    }
+  catch _ =>
+    return none
+
+private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
+    (passive : Bool := false) (capture? : Option (IO.Ref String) := none) :
+    TacticM Unit := withMainContext do
+  let initialMVarId ← getMainGoal
+  let initialTarget ← instantiateMVars (← initialMVarId.getType)
+  let initialDecl ← initialMVarId.getDecl
+  let initialLctx := initialDecl.lctx
+  let initialLocalInstances := initialDecl.localInstances
+  let subjects ← contextLocationSubjects initialMVarId location
+  let some { ctx, simprocs, dischargeWrapper, .. } ← try
+      some <$> mkSimpContext simpStx (eraseLocal := false)
+    catch ex =>
+      throw ex
+    | throwError "simp_explicit recorder failed to construct a context simp context"
+  let runRecorded := fun (input : Expr) (subjectCtx : Simp.Context) => do
+    let ref ← IO.mkRef ({} : RecorderState)
+    let result ← dischargeWrapper.with fun discharge? => do
+      let methods := recordingMethods ref simprocs discharge?
+      withOptions (·.setBool `diagnostics true) do
+        return (← Simp.mainCore input subjectCtx (methods := methods)).1
+    let result ← instantiateRecordedResult result
+    return (result, ← instantiateRecordedState (← ref.get))
+  let mut current := initialMVarId
+  let mut pending : Array PendingContextHypothesis := #[]
+  let mut traces : Array ContextSubjectTrace := #[]
+  let mut usedNames : Array Name := #[]
+  let mut allBindings : Array GeneratedBinding := #[]
+  let mut aggregateMetrics : EncodingMetrics := {}
+  let mut fallbackReason? : Option String := none
+  let mut positionsNeeded := false
+  let mut closed := false
+  let mut closedLctx? : Option LocalContext := none
+  let mut resultingFVars : Array (Option FVarId) := Array.replicate subjects.size none
+  let mut ordinaryEncodingFailed := false
+  for h : index in *...subjects.size do
+    let subject := subjects[index]
+    if closed then
+      throwError "simp_explicit recorder encountered a subject after the goal closed"
+    match subject.subject with
+    | .local decl =>
+        let (subjectLctx, localDecl, type, result, state, encoding?) ← current.withContext do
+          let localDecl ← decl.fvarId.getDecl
+          let subjectLctx ← getLCtx
+          let type ← instantiateMVars localDecl.type
+          let subjectCtx := ctx.setSimpTheorems
+            (ctx.simpTheorems.eraseTheorem (.fvar decl.fvarId))
+          let (result, state) ← runRecorded type subjectCtx
+          let encoding? ← contextSubjectEncoding? type state result usedNames
+          return (subjectLctx, localDecl, type, result, state, encoding?.map (·.fst))
+        let encoding := encoding?.getD {
+          eventText := "[]"
+          bindings := #[]
+          encodingInfos := #[]
+          premiseEncodingInfos := #[]
+          metrics := {}
+          fallbackReason? := some "context_subject_encoding"
+          positionsNeeded := false
+        }
+        if encoding?.isNone then
+          ordinaryEncodingFailed := true
+        usedNames := usedNames ++ encoding.bindings.map (·.name)
+        allBindings := allBindings ++ encoding.bindings
+        aggregateMetrics := addEncodingMetrics aggregateMetrics encoding.metrics
+        fallbackReason? := fallbackReason?.or encoding.fallbackReason?
+        positionsNeeded := positionsNeeded || encoding.positionsNeeded
+        traces := traces.push {
+          subject := subject.report
+          fvarId? := some decl.fvarId
+          lctx := subjectLctx
+          initial := type
+          result
+          state
+          encodingInfos := encoding.encodingInfos
+          premiseEncodingInfos := encoding.premiseEncodingInfos
+          metrics := encoding.metrics
+          eventText := encoding.eventText
+          bindings := encoding.bindings
+          transport := none
+        }
+        if result.proof?.isSome then
+          if result.expr.isFalse && index + 1 < subjects.size then
+            throwErrorAt reportStx
+              "simp_explicit recorder local result closed the goal before all subjects were consumed"
+          let applied? ← current.withContext do
+            applySimpResult current (mkFVar decl.fvarId) type result
+          match applied? with
+          | none =>
+              closedLctx? := some (← current.getDecl).lctx
+              closed := true
+          | some (value, type') =>
+              resultingFVars := resultingFVars.set! index none
+              pending := pending.push {
+                subjectIndex := index
+                contextIndex := localDecl.index
+                fvarId := decl.fvarId
+                hypothesis := {
+                  userName := localDecl.userName
+                  type := type'
+                  value
+                  binderInfo := localDecl.binderInfo
+                  kind := localDecl.kind
+                }
+              }
+        else if result.expr.isFalse then
+          if index + 1 < subjects.size then
+            throwErrorAt reportStx
+              "simp_explicit recorder local result closed the goal before all subjects were consumed"
+          current.withContext do
+            current.assign (← mkFalseElim (← current.getType) (mkFVar decl.fvarId))
+          closedLctx? := some (← current.getDecl).lctx
+          closed := true
+        else
+          current ← current.withContext do
+            current.replaceLocalDeclDefEq decl.fvarId result.expr
+          resultingFVars := resultingFVars.set! index (some decl.fvarId)
+    | .target =>
+        let (subjectLctx, target, result, state, encoding?) ← current.withContext do
+          let subjectLctx ← getLCtx
+          let target ← instantiateMVars (← current.getType)
+          let (result, state) ← runRecorded target ctx
+          let encoding? ← contextSubjectEncoding? target state result usedNames
+          return (subjectLctx, target, result, state, encoding?.map (·.fst))
+        let encoding := encoding?.getD {
+          eventText := "[]"
+          bindings := #[]
+          encodingInfos := #[]
+          premiseEncodingInfos := #[]
+          metrics := {}
+          fallbackReason? := some "context_subject_encoding"
+          positionsNeeded := false
+        }
+        if encoding?.isNone then
+          ordinaryEncodingFailed := true
+        usedNames := usedNames ++ encoding.bindings.map (·.name)
+        allBindings := allBindings ++ encoding.bindings
+        aggregateMetrics := addEncodingMetrics aggregateMetrics encoding.metrics
+        fallbackReason? := fallbackReason?.or encoding.fallbackReason?
+        positionsNeeded := positionsNeeded || encoding.positionsNeeded
+        traces := traces.push {
+          subject := subject.report
+          fvarId? := none
+          lctx := subjectLctx
+          initial := target
+          result
+          state
+          encodingInfos := encoding.encodingInfos
+          premiseEncodingInfos := encoding.premiseEncodingInfos
+          metrics := encoding.metrics
+          eventText := encoding.eventText
+          bindings := encoding.bindings
+          transport := none
+        }
+        let current? ← current.withContext do
+          applyContextTargetResult current target result
+        match current? with
+        | none =>
+            closedLctx? := some (← current.getDecl).lctx
+            closed := true
+        | some current' => current := current'
+  if !closed then
+    let (assertedFVars, asserted) ← current.withContext do
+      current.assertHypotheses (pending.map (·.hypothesis))
+    for h : index in *...pending.size do
+      if let some pendingHypothesis := pending[index]? then
+        if let some assertedFVar := assertedFVars[index]? then
+          resultingFVars := resultingFVars.set! pendingHypothesis.subjectIndex (some assertedFVar)
+    current ← asserted.withContext do asserted.tryClearMany (pending.map (·.fvarId))
+  let finalLctx ← if closed then
+      pure (closedLctx?.getD (← current.getDecl).lctx)
+    else
+      pure (← current.getDecl).lctx
+  let finalTarget ← if closed then pure (mkConst ``True) else current.getType
+  let ordinaryTraces := contextTransportTraces traces resultingFVars finalLctx
+  let ordinarySuggestion := contextCertificateText traces allBindings
+  let ordinaryValid ← validateContextCertificate ordinarySuggestion initialTarget initialLctx
+      initialLocalInstances closed finalLctx finalTarget
+  let stableRenamePlan ← localRenamePlan initialLctx
+  let report : ContextReportBundle ← if !ordinaryEncodingFailed && ordinaryValid &&
+      stableRenamePlan.isEmpty then
+      pure {
+        initialLctx
+        finalLctx
+        traces := ordinaryTraces
+        bindings := allBindings
+        metrics := aggregateMetrics
+        fallbackReason?
+        positionsNeeded
+        suggestion := ordinarySuggestion
+        localRenames := #[]
+      }
+    else do
+      let renamePlan := stableRenamePlan
+      if renamePlan.isEmpty then
+        throwErrorAt reportStx
+          "simp_explicit recorder could not encode or validate the complete context certificate"
+      let some encoded ← reencodeContextTraces? traces renamePlan
+        | throwErrorAt reportStx
+            "simp_explicit recorder could not encode the context under stable local names"
+      let renamedInitialLctx := renamedLocalContext initialLctx renamePlan
+      let renamePairs := contextReportRenamePairs traces resultingFVars renamePlan
+      let renamedFinalLctx := renamedLocalContextByFVars
+        (renamedLocalContext finalLctx renamePlan) renamePairs
+      let renamedTraces := contextTransportTraces encoded.traces resultingFVars renamedFinalLctx
+      let suggestion := localRenamePrefix renamePlan ++
+        contextCertificateText encoded.traces encoded.bindings
+      unless ← validateContextCertificate suggestion initialTarget initialLctx
+          initialLocalInstances closed renamedFinalLctx finalTarget do
+        throwErrorAt reportStx
+          "simp_explicit recorder could not validate the renamed context certificate"
+      pure {
+        initialLctx := renamedInitialLctx
+        finalLctx := renamedFinalLctx
+        traces := renamedTraces
+        bindings := encoded.bindings
+        metrics := encoded.metrics
+        fallbackReason? := encoded.fallbackReason?
+        positionsNeeded := encoded.positionsNeeded
+        suggestion
+        localRenames := localRenameInfos renamePlan
+      }
+  unless explicitLean.simpExplicit.passive.get (← getOptions) do
+    logInfoAt reportStx m!"Try this deterministic replay:\n{report.suggestion}"
+  let finalMetrics := { report.metrics with totalCertificateBytes := report.suggestion.utf8ByteSize }
+  let shouldReport := passive || explicitLean.simpExplicit.report.get (← getOptions)
+  if shouldReport then
+    emitContextRecordingReport simpStx reportStx initialTarget report.initialLctx finalTarget
+      report.finalLctx report.traces report.suggestion report.positionsNeeded finalMetrics
+      report.fallbackReason? report.localRenames closed capture?
+  if closed then
+    replaceMainGoal []
+  else
+    replaceMainGoal [current]
+
+private def passiveContextSimp (simpStx reportStx : Syntax) (target : Expr)
+    (location : Location) : TacticM Unit := do
+  let reportRef ← IO.mkRef ""
+  let recordingError? ← try
+    withoutModifyingState do
+      recordContextSimp simpStx reportStx location true (some reportRef)
+      pure none
+  catch ex =>
+    some <$> exceptionText ex
+  match recordingError? with
+  | some detail =>
+      passiveOriginalSimp simpStx reportStx target "context" detail
+  | none =>
+      let payload ← reportRef.get
+      if payload.isEmpty then
+        passiveOriginalSimp simpStx reportStx target "context"
+          "passive context recorder produced no report"
+      else
+        logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {payload}"
+        try
+          evalSimp simpStx
+        catch ex =>
+          let detail ← exceptionText ex
+          try
+            emitRecordingReport simpStx reportStx target {} none "" false
+              (some "context_original_failure") (some detail) none false "unavailable"
+              (some detail)
+          catch _ => pure ()
+          throw ex
+
 private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainContext do
   unless simpStx.getKind == ``Lean.Parser.Tactic.simp do
     throwErrorAt simpStx "simp_explicit? currently accepts one `simp` tactic"
   let mvarId ← getMainGoal
   let target ← instantiateMVars (← mvarId.getType)
   let passive := explicitLean.simpExplicit.passive.get (← getOptions)
-  if !simpStx[5].isNone then
-    if passive then
-      return ← passiveOriginalSimp simpStx reportStx target "context" "passive target recorder does not yet encode locations"
-    else
-      throwErrorAt simpStx "simp_explicit? currently supports the target only"
   if !simpStx[1][0].isNone then
     if passive then
       return ← passiveOriginalSimp simpStx reportStx target "recording" "passive recorder preserves nondefault simp configuration through the original tactic"
@@ -1758,6 +2903,11 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
       return ← passiveOriginalSimp simpStx reportStx target "premise" "passive recorder preserves custom dischargers through the original tactic"
     else
       throwErrorAt simpStx[2] "simp_explicit? does not yet encode a custom discharger"
+  if !simpStx[5].isNone then
+    if passive then
+      return ← passiveContextSimp simpStx reportStx target (expandLocation simpStx[5][0])
+    else
+      return ← recordContextSimp simpStx reportStx (expandLocation simpStx[5][0])
   let context? ← try
     some <$> mkSimpContext simpStx (eraseLocal := false)
   catch ex =>
@@ -1786,118 +2936,68 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
       throw ex
   let some (result, state) := recording?
     | throwError "simp_explicit recorder did not return a simplifier result"
-  -- Premise-bearing events must go through the certificate-plan encoder so
-  -- their closed provider bindings are printed next to the rule.  The flat
-  -- path has no source representation for `using [...]`.
-  let flatEncoding? ← if state.events.any (·.premises.size > 0) then
-    pure none
-  else
-    replayEncoding? target state.events result
-  let mut suggestion := ""
-  let mut encodingInfos : Array EventEncodingInfo := #[]
-  let mut premiseEncodingInfos : Array (Array PremiseEncodingInfo) := #[]
-  let mut encodingMetrics : EncodingMetrics := {}
-  let mut encodingFallbackReason? : Option String := none
-  let mut positionsNeeded := flatEncoding?.getD #[] |>.any isTickSelector
-  if let some flatSelectors := flatEncoding? then
-    suggestion := ← certificateText state.events flatSelectors
-    encodingInfos := namedEncodingInfos state.events flatSelectors
-    premiseEncodingInfos := state.events.map (fun _ => #[])
-    let mut nextSelectorCount := 0
-    let mut matchSelectorCount := 0
-    let mut tickSelectorCount := 0
-    for selector in flatSelectors do
-      match selector with
-      | .next => nextSelectorCount := nextSelectorCount + 1
-      | .matchSite _ => matchSelectorCount := matchSelectorCount + 1
-      | .tickPos _ => tickSelectorCount := tickSelectorCount + 1
-      | .discover .. => pure ()
-    encodingMetrics := {
-      namedRuleEvents := encodingInfos.size
-      nextSelectorCount
-      matchSelectorCount
-      tickSelectorCount
-    }
-  else
-    let plan? ← match (← buildCertificatePlan? target state.events result) with
-      | some plan => pure (some plan)
-      | none => buildWholeResultPlan? target result
-    match plan? with
-    | none =>
-        if passive then
-          return ← passiveOriginalSimp simpStx reportStx target "recording"
-            "proof-result fallback could not be validated"
-        else
-          throwErrorAt reportStx "simp_explicit recorder cannot encode this simplification as a deterministic replay"
-    | some plan =>
-        suggestion := plan.source
-        encodingInfos := planEncodingInfos plan
-        premiseEncodingInfos := planPremiseEncodingInfos plan
-        encodingMetrics := plan.metrics
-        encodingFallbackReason? :=
-          if plan.metrics.mode == "whole_result_proof" then some "presentation_gap" else none
-        positionsNeeded := plan.positions
-
-  -- Search a bounded certificate-program graph breadth first. A node is the
-  -- current target plus the phases that produced it. Its outgoing edges replay
-  -- an exact prefix and then normalize. Recording afresh at every node is
-  -- essential: normalization can expose a different exact suffix.
-  if flatEncoding?.isSome then
-    let mut frontier : Array (Expr × Array String) := #[(target, #[])]
-    let mut stateCount := 1
-    for depth in *...(maxMixedNormalizerPhases + 1) do
-      let mut nextFrontier := #[]
-      for (input, previousPhases) in frontier do
-        let (nodeResult, nodeState) ← runAndRecord input
-        let closes ← isReflexiveResult nodeResult.expr
-        let reachesResult ← if closes then pure true else if result.expr.isTrue then
-          pure false
-        else
-          isDefEq nodeResult.expr result.expr
-        if reachesResult then
-          if let some selectors ← replayEncoding? input nodeState.events nodeResult then
-            let mut phases := previousPhases
-            if certificateEventCount nodeState.events > 0 then
-              phases := phases.push
-                (← certificateText nodeState.events selectors)
-            let candidate := joinCertificatePhases phases
-            if !candidate.isEmpty &&
-                (suggestion.isEmpty || candidate.utf8ByteSize < suggestion.utf8ByteSize) then
-              suggestion := candidate
-
-        if depth < maxMixedNormalizerPhases then
-          let eventCount := certificateEventCount nodeState.events
-          let prefixLimit := min eventCount maxMixedPrefixEvents
-          for prefixCount in *...(prefixLimit + 1) do
-            let transition? ← try
-              withoutModifyingState do
-                let prefixEvents := nodeState.events.extract 0 prefixCount
-                let some (prefixResult, prefixSelectors) ← replayRecorded? input prefixEvents
-                  | return none
-                -- A replay phase would close the goal before the normalizer ran.
-                if prefixCount > 0 && (← isReflexiveResult prefixResult.expr) then
-                  return none
-                let normalized ← Normalize.categoryTarget mvarId prefixResult.expr
-                if Expr.equal prefixResult.expr normalized.expr then
-                  return none
-                let mut phases := previousPhases
-                if prefixCount > 0 then
-                  phases := phases.push
-                    (← certificateText prefixEvents prefixSelectors)
-                phases := phases.push "normalize_category"
-                return some (normalized.expr, phases, ← isReflexiveResult normalized.expr)
+  let mut localRenames : Array LocalRenamePlan := #[]
+  let mut reportLctx? : Option LocalContext := none
+  let mut attempt? ← encodeRecording? target mvarId state result runAndRecord
+  if attempt?.isNone then
+    let renamePlan ← localRenamePlan (← mvarId.getDecl).lctx
+    if !renamePlan.isEmpty then
+      let mvarDecl ← mvarId.getDecl
+      let renamedLctx := renamedLocalContext mvarDecl.lctx renamePlan
+      let renamedAttempt? ← withLCtx' renamedLctx do
+        encodeRecording? target mvarId state result runAndRecord
+      if let some renamedAttempt := renamedAttempt? then
+        localRenames := renamePlan
+        reportLctx? := some renamedLctx
+        attempt? := some renamedAttempt
+      else
+        -- If the already-recorded proof refers to private compiler-generated
+        -- declarations, rerun the recorder only in a speculative mvar under
+        -- the renamed context.  This mvar is never installed as the tactic's
+        -- goal; the original result remains authoritative for proof-state
+        -- application below.
+        let speculativeAttempt? ← withoutModifyingState do
+          withLCtx' renamedLctx do
+            let some {
+              ctx := renamedCtx
+              simprocs := renamedSimprocs
+              dischargeWrapper := renamedDischargeWrapper
+              ..
+            } ← try
+              some <$> mkSimpContext simpStx (eraseLocal := false)
             catch _ =>
               pure none
-            if let some (normalized, phases, closes) := transition? then
-              let phaseText := joinCertificatePhases phases
-              if closes then
-                if suggestion.isEmpty || phaseText.utf8ByteSize < suggestion.utf8ByteSize then
-                  suggestion := phaseText
-              else if stateCount < maxMixedSearchStates &&
-                  (suggestion.isEmpty || phaseText.utf8ByteSize < suggestion.utf8ByteSize) then
-                nextFrontier := nextFrontier.push (normalized, phases)
-                stateCount := stateCount + 1
-      frontier := nextFrontier
+            | return none
+            let renamedRunAndRecord := fun (input : Expr) => do
+              let ref ← IO.mkRef ({} : RecorderState)
+              let result ← renamedDischargeWrapper.with fun discharge? => do
+                let methods := recordingMethods ref renamedSimprocs discharge?
+                withOptions (·.setBool `diagnostics true) do
+                  return (← Simp.mainCore input renamedCtx (methods := methods)).1
+              let result ← instantiateRecordedResult result
+              return (result, ← instantiateRecordedState (← ref.get))
+            let speculativeExpr ← mkFreshExprMVarAt renamedLctx mvarDecl.localInstances
+              target MetavarKind.syntheticOpaque
+            let speculativeMVarId := speculativeExpr.mvarId!
+            let (speculativeResult, speculativeState) ← renamedRunAndRecord target
+            encodeRecording? target speculativeMVarId speculativeState
+              speculativeResult renamedRunAndRecord
+        if let some speculativeAttempt := speculativeAttempt? then
+          localRenames := renamePlan
+          reportLctx? := some renamedLctx
+          attempt? := some speculativeAttempt
+  let some attempt := attempt?
+    | if passive then
+        return ← passiveOriginalSimp simpStx reportStx target "recording"
+          "proof-result fallback could not be validated"
+      else
+        throwErrorAt reportStx "simp_explicit recorder cannot encode this simplification as a deterministic replay"
+  let suggestion := localRenamePrefix localRenames ++ attempt.suggestion
+  let encodingInfos := attempt.encodingInfos
+  let premiseEncodingInfos := attempt.premiseEncodingInfos
+  let encodingMetrics := attempt.encodingMetrics
+  let encodingFallbackReason? := attempt.encodingFallbackReason?
+  let positionsNeeded := attempt.positionsNeeded
   let shouldReport := passive || explicitLean.simpExplicit.report.get (← getOptions)
   if shouldReport then
     -- Recording cannot assign a terminal outcome: `materialized` requires the
@@ -1906,28 +3006,38 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
     let terminalOutcome? : Option String := none
     let encodingStatus := if suggestion.isEmpty then "unavailable" else "validated"
     let recordingReason? := if suggestion.isEmpty then some "compact certificate encoding was not validated" else none
+    let emitReport := fun () => do
+      match reportLctx? with
+      | some reportLctx =>
+          withLCtx' reportLctx do
+            emitRecordingReport simpStx reportStx target state (some result) suggestion
+              positionsNeeded failureCategory? none none
+              (traceAvailable := true) (encodingStatus := encodingStatus)
+              (recordingReason? := recordingReason?) (encodings := encodingInfos)
+              (premiseEncodings := premiseEncodingInfos)
+              (encodingMetrics := encodingMetrics)
+              (encodingFallbackReason? := encodingFallbackReason?)
+              (localRenames := localRenameInfos localRenames)
+      | none =>
+          emitRecordingReport simpStx reportStx target state (some result) suggestion
+            positionsNeeded failureCategory? none none
+            (traceAvailable := true) (encodingStatus := encodingStatus)
+            (recordingReason? := recordingReason?) (encodings := encodingInfos)
+            (premiseEncodings := premiseEncodingInfos)
+            (encodingMetrics := encodingMetrics)
+            (encodingFallbackReason? := encodingFallbackReason?)
+            (localRenames := localRenameInfos localRenames)
     if passive then
       try
-        emitRecordingReport simpStx reportStx target state (some result) suggestion
-          positionsNeeded failureCategory? none none
-          (traceAvailable := true) (encodingStatus := encodingStatus)
-          (recordingReason? := recordingReason?) (encodings := encodingInfos)
-          (premiseEncodings := premiseEncodingInfos)
-          (encodingMetrics := encodingMetrics)
-          (encodingFallbackReason? := encodingFallbackReason?)
+        emitReport ()
       catch ex =>
         logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
     else
-      emitRecordingReport simpStx reportStx target state (some result) suggestion
-        positionsNeeded failureCategory? none none
-        (traceAvailable := true) (encodingStatus := encodingStatus)
-        (recordingReason? := recordingReason?) (encodings := encodingInfos)
-        (premiseEncodings := premiseEncodingInfos)
-        (encodingMetrics := encodingMetrics)
-        (encodingFallbackReason? := encodingFallbackReason?)
+      emitReport ()
   unless passive do
     logInfoAt reportStx m!"Try this deterministic replay:\n{suggestion}"
-  applyResultToTarget mvarId target result
+  mvarId.withContext do
+    applyResultToTarget mvarId target result
 
 end SimpExplicit
 
@@ -1940,5 +3050,7 @@ elab_rules : tactic
       recordSimp inner (← getRef)
   | `(tactic| simp_explicit [$events:simpExplicitEvent,*]) =>
       replaySimp (events.getElems.map (·.raw))
+  | `(tactic| simp_explicit_context [$groups:simpExplicitContextGroup,*]) =>
+      replayContext (groups.getElems.map (·.raw))
 
 end ExplicitLean

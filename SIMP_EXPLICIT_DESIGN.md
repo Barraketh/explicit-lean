@@ -704,15 +704,24 @@ fallbacks without falsely reporting selector commands. The complete
 
 ### E. Stable locals and context programs
 
-- Add deterministic local naming and structural body edits.
-- Record and replay `at h`, multiple locations, target locations, and `at *`.
-- Validate dependent-local transport and final context fingerprints.
+Status: implemented on 2026-08-21.
+
+- Deterministic, collision-checked local naming emits one `rename_i` prefix and
+  sanitizes the complete schema-v5 report under the renamed local context.
+- Closed `simp_explicit_context` records and replays authored local order,
+  target locations, `at *`, dependent-local transport, local closure, and
+  zero-event subjects; passive location recording rolls back before running the
+  original `simp` once.
+- Fresh-clone validation compares the complete context program and preserves
+  actual fvar transport identities and alpha-stable fingerprints.
 
 Gate: focused fixtures cover a single hypothesis, multiple hypotheses, a
 dependent later hypothesis, an inaccessible local fact, and `at *`.
 The gate also materializes `f3d6dce9ae772ce2` and `54d6b0e3b2ad8e41` from the
-`DropRight` baseline, whose generated whole-result proofs require naming an
-inaccessible `cases` binder.
+`DropRight` baseline in isolation and together; both generated whole-result
+proofs require naming an inaccessible `cases` binder. The bounded regression
+retains all 24 stable occurrences and their 27 dynamic executions in one
+passive compile, and the complete `Experiment/run.sh` regression passes.
 
 ### F. Enclosing-body and multi-goal rewriting
 

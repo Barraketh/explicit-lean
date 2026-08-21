@@ -33,8 +33,10 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected premise report schema: {report!r}")
-    if report.get("schemaVersion") != 4:
+    if report.get("schemaVersion") != 5:
         raise RuntimeError(f"unexpected premise report version: {report!r}")
+    if report.get("localRenames") != []:
+        raise RuntimeError(f"ordinary premise encoding unexpectedly renamed locals: {report!r}")
     encoding = report.get("encoding") or {}
     if encoding.get("mode") != "event":
         raise RuntimeError(f"premise recording unexpectedly used whole-result mode: {report!r}")
@@ -92,6 +94,8 @@ def main() -> None:
             f"reports={len(guarded_reports)}\n{guarded_output}"
         )
     guarded_report = guarded_reports[0]
+    if guarded_report.get("localRenames") != []:
+        raise RuntimeError(f"guarded premise encoding unexpectedly renamed locals: {guarded_report!r}")
     guarded_events = [
         event
         for execution in guarded_report.get("executions", [])
@@ -133,6 +137,8 @@ def main() -> None:
             f"reports={len(term_reports)}\n{term_output}"
         )
     term_report = term_reports[0]
+    if term_report.get("localRenames") != []:
+        raise RuntimeError(f"term premise encoding unexpectedly renamed locals: {term_report!r}")
     term_encoding = term_report.get("encoding") or {}
     if (
         term_encoding.get("mode") != "event"

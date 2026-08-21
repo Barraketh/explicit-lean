@@ -87,7 +87,7 @@ def main() -> None:
     for report in passive["reports"]:
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected recording schema: {report!r}")
-        if report.get("schemaVersion") != 4:
+        if report.get("schemaVersion") != 5:
             raise RuntimeError(f"unexpected recording schema version: {report!r}")
         if report.get("terminalOutcome") is not None:
             raise RuntimeError(
@@ -131,6 +131,8 @@ def main() -> None:
         package_b_results[entry["id"]] = trial
         if trial.get("status") != "passed" or not trial.get("materialized_compile"):
             raise RuntimeError(f"Package B isolated materialization failed: {trial!r}")
+        if trial.get("local_renames") != []:
+            raise RuntimeError(f"Package B ordinary encoding renamed locals: {trial!r}")
         encoding = trial.get("encoding") or {}
         kinds = set(trial.get("trace_encoding_kinds", []))
         if encoding.get("mode") == "whole_result_proof":
@@ -174,6 +176,8 @@ def main() -> None:
         package_c_results[entry["id"]] = trial
         if trial.get("status") != "passed" or not trial.get("materialized_compile"):
             raise RuntimeError(f"Package C isolated materialization failed: {trial!r}")
+        if trial.get("local_renames") != []:
+            raise RuntimeError(f"Package C ordinary encoding renamed locals: {trial!r}")
         encoding = trial.get("encoding") or {}
         # These four old premise-classified occurrences also have an earlier
         # source-level definition unfolding that is not a semantic event. The
@@ -225,9 +229,11 @@ def main() -> None:
         package_d_results[entry["id"]] = trial
         if trial.get("status") != "passed" or not trial.get("materialized_compile"):
             raise RuntimeError(f"Package D isolated materialization failed: {trial!r}")
+        if trial.get("local_renames") != []:
+            raise RuntimeError(f"Package D ordinary encoding renamed locals: {trial!r}")
         if trial.get("recording_schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"Package D recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 4:
+        if trial.get("recording_schema_version") != 5:
             raise RuntimeError(f"Package D recording schema version changed: {trial!r}")
         if trial.get("trace_length", 0) <= 0:
             raise RuntimeError(f"Package D presentation trace was not retained: {trial!r}")
@@ -260,6 +266,58 @@ def main() -> None:
     )
     if not package_d_aggregate["compile"]:
         raise RuntimeError(f"Package D aggregate module failed: {package_d_aggregate!r}")
+
+    package_e_ids = [
+        "f3d6dce9ae772ce2",
+        "54d6b0e3b2ad8e41",
+    ]
+    package_e_entries = [
+        next(entry for entry in drop_entries if entry["id"] == identifier)
+        for identifier in package_e_ids
+    ]
+    package_e_results = {}
+    for entry in package_e_entries:
+        trial = coverage.run_trial(
+            entry, coverage.TrialConfig(timeout=180, keep_copies=True)
+        )
+        package_e_results[entry["id"]] = trial
+        if trial.get("status") != "passed" or not trial.get("materialized_compile"):
+            raise RuntimeError(f"Package E isolated materialization failed: {trial!r}")
+        if trial.get("recording_schema") != "explicitLean.simpRecording":
+            raise RuntimeError(f"Package E recording schema changed: {trial!r}")
+        if trial.get("recording_schema_version") != 5:
+            raise RuntimeError(f"Package E recording schema version changed: {trial!r}")
+        if trial.get("trace_length", 0) <= 0:
+            raise RuntimeError(f"Package E trace was not retained: {trial!r}")
+        if trial.get("local_renames") != [
+            {"contextIndex": 6, "generatedName": "h_explicit_1"}
+        ]:
+            raise RuntimeError(f"Package E local-renaming metadata changed: {trial!r}")
+        certificate = trial.get("certificate")
+        if not isinstance(certificate, str) or not certificate.startswith(
+            "rename_i h_explicit_1\n"
+        ):
+            raise RuntimeError(f"Package E certificate omitted its rename prefix: {trial!r}")
+        encoding = trial.get("encoding") or {}
+        if (
+            encoding.get("mode") != "whole_result_proof"
+            or trial.get("encoding_fallback_reason") != "presentation_gap"
+            or encoding.get("wholeResultProofCount") != 1
+        ):
+            raise RuntimeError(f"Package E encoding mode changed: {trial!r}")
+        metadata_text = json.dumps(trial.get("local_renames"), ensure_ascii=False)
+        if any(
+            marker in metadata_text
+            for marker in ("FVarId", "Syntax", "Expr", "mvar", "✝")
+        ):
+            raise RuntimeError(
+                f"Package E local-renaming metadata leaked an unstable identity: {trial!r}"
+            )
+    package_e_aggregate = coverage.aggregate_module(
+        modules[0], package_e_entries, package_e_results, timeout=180
+    )
+    if not package_e_aggregate["compile"]:
+        raise RuntimeError(f"Package E aggregate module failed: {package_e_aggregate!r}")
 
     target = next(
         entry

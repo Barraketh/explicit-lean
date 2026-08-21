@@ -531,6 +531,7 @@ def run_trial(entry: dict[str, Any], config: TrialConfig) -> dict[str, Any]:
         base.update(
             recording_schema=report.get("schema"),
             recording_schema_version=report.get("schemaVersion"),
+            local_renames=report.get("localRenames", []),
             closes_goal=report["closesGoal"],
             trace_length=report["traceLength"],
             certificate_event_count=report["certificateEventCount"],
