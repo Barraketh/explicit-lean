@@ -29,7 +29,7 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected simproc report schema: {report!r}")
-    if report.get("schemaVersion") != 2:
+    if report.get("schemaVersion") != 3:
         raise RuntimeError(f"unexpected simproc report version: {report!r}")
     if report.get("encodingStatus") != "validated":
         raise RuntimeError(f"simproc recording was not validated: {report!r}")

@@ -4,7 +4,11 @@ set -eu
 lake build ExplicitLean.SimpExplicit
 lake env lean Experiment/PassiveSimpProbe.lean
 lake env lean Experiment/ProofExportProbe.lean
+lake env lean Experiment/PremiseReplayProbe.lean
+lake env lean Experiment/GuardedPremiseProbe.lean
+lake env lean Experiment/TermPremiseProbe.lean
 lake env lean Experiment/SpecialFallbackProbe.lean
+python3 Experiment/check_premise_replay.py
 python3 Experiment/check_simp_fixtures.py
 python3 Experiment/check_mixed_certificates.py
 python3 Experiment/check_simp_coverage.py

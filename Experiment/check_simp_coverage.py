@@ -61,7 +61,7 @@ def main() -> None:
         raise RuntimeError(f"passive recorder emitted too few reports: {passive!r}")
     if passive.get("schema") != "explicitLean.simpModuleRecording":
         raise RuntimeError(f"unexpected module recording schema: {passive!r}")
-    if passive.get("schema_version") != 2:
+    if passive.get("schema_version") != 3:
         raise RuntimeError(f"unexpected module recording schema version: {passive!r}")
     if len(passive.get("occurrences", [])) != len(expected_ids):
         raise RuntimeError(f"passive reports were not grouped per occurrence: {passive!r}")
@@ -87,7 +87,7 @@ def main() -> None:
     for report in passive["reports"]:
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected recording schema: {report!r}")
-        if report.get("schemaVersion") != 2:
+        if report.get("schemaVersion") != 3:
             raise RuntimeError(f"unexpected recording schema version: {report!r}")
         if report.get("terminalOutcome") is not None:
             raise RuntimeError(
@@ -155,6 +155,55 @@ def main() -> None:
     )
     if not package_b_aggregate["compile"]:
         raise RuntimeError(f"Package B aggregate module failed: {package_b_aggregate!r}")
+
+    package_c_ids = [
+        "03210e4a7b3567e3",
+        "aaf54961bf787d28",
+        "739c7ac9dd3cd521",
+        "90925e8b6e53287f",
+    ]
+    package_c_entries = [
+        next(entry for entry in drop_entries if entry["id"] == identifier)
+        for identifier in package_c_ids
+    ]
+    package_c_results = {}
+    for entry in package_c_entries:
+        trial = coverage.run_trial(
+            entry, coverage.TrialConfig(timeout=180, keep_copies=True)
+        )
+        package_c_results[entry["id"]] = trial
+        if trial.get("status") != "passed" or not trial.get("materialized_compile"):
+            raise RuntimeError(f"Package C isolated materialization failed: {trial!r}")
+        encoding = trial.get("encoding") or {}
+        # These four old premise-classified occurrences also have an earlier
+        # source-level definition unfolding that is not a semantic event. The
+        # event encoder deliberately defers that presentation gap to Package
+        # F; retain the premise provenance and compile-verify the current
+        # whole-result fallback here.
+        if (
+            encoding.get("mode") != "whole_result_proof"
+            or trial.get("encoding_fallback_reason") != "presentation_gap"
+            or encoding.get("wholeResultProofCount") != 1
+        ):
+            raise RuntimeError(f"Package C presentation-gap encoding changed: {trial!r}")
+        if trial.get("premise_event_count") != 1:
+            raise RuntimeError(f"Package C did not retain one premise-bearing event: {trial!r}")
+        if trial.get("premise_event_outer_origin_kinds") != [["decl"]]:
+            raise RuntimeError(f"Package C outer premise origin was not one named declaration: {trial!r}")
+        outer_names = trial.get("premise_event_outer_origin_names") or []
+        if len(outer_names) != 1 or len(outer_names[0]) != 1 or not outer_names[0][0]:
+            raise RuntimeError(f"Package C outer premise declaration name was missing: {trial!r}")
+        if any(
+            count == 0
+            for event_counts in trial.get("premise_event_premise_origin_counts", [])
+            for count in event_counts
+        ):
+            raise RuntimeError(f"Package C premise provenance was empty: {trial!r}")
+    package_c_aggregate = coverage.aggregate_module(
+        modules[0], package_c_entries, package_c_results, timeout=180
+    )
+    if not package_c_aggregate["compile"]:
+        raise RuntimeError(f"Package C aggregate module failed: {package_c_aggregate!r}")
     target = next(
         entry
         for entry in document["entries"]

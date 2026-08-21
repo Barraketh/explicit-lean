@@ -34,7 +34,7 @@ REPORT_MARKER = "EXPLICIT_LEAN_SIMP_REPORT "
 PARSE_FAILURE_MARKER = "EXPLICIT_LEAN_INVENTORY_PARSE_FAILURE "
 SUPPORTED_KINDS = {"simp", "simp_only"}
 PASSIVE_RECORDING_SCHEMA = "explicitLean.simpModuleRecording"
-PASSIVE_RECORDING_SCHEMA_VERSION = 2
+PASSIVE_RECORDING_SCHEMA_VERSION = 3
 
 
 def run(
@@ -522,6 +522,12 @@ def run_trial(entry: dict[str, Any], config: TrialConfig) -> dict[str, Any]:
             return base
 
         base["declaration"] = report["declaration"]
+        trace_events = [
+            event
+            for execution in report.get("executions", [])
+            for event in execution.get("trace", [])
+        ]
+        premise_events = [event for event in trace_events if event.get("premises")]
         base.update(
             closes_goal=report["closesGoal"],
             trace_length=report["traceLength"],
@@ -532,16 +538,38 @@ def run_trial(entry: dict[str, Any], config: TrialConfig) -> dict[str, Any]:
             encoding=report.get("encoding"),
             encoding_fallback_reason=report.get("encodingFallbackReason"),
             trace_encoding_kinds=[
-                event.get("encodingKind")
-                for execution in report.get("executions", [])
-                for event in execution.get("trace", [])
+                event.get("encodingKind") for event in trace_events
                 if event.get("encodingKind") is not None
             ],
             trace_encoding_reasons=[
-                event.get("encodingReason")
-                for execution in report.get("executions", [])
-                for event in execution.get("trace", [])
+                event.get("encodingReason") for event in trace_events
                 if event.get("encodingReason") is not None
+            ],
+            premise_event_count=len(premise_events),
+            premise_event_encoding_kinds=[
+                event.get("encodingKind") for event in premise_events
+            ],
+            premise_event_outer_origin_kinds=[
+                [origin.get("kind") for origin in event.get("origins", [])]
+                for event in premise_events
+            ],
+            premise_event_outer_origin_names=[
+                [origin.get("name") for origin in event.get("origins", [])]
+                for event in premise_events
+            ],
+            premise_event_premise_origin_counts=[
+                [len(premise.get("origins", [])) for premise in event.get("premises", [])]
+                for event in premise_events
+            ],
+            premise_binding_names=[
+                premise.get("bindingName")
+                for event in premise_events
+                for premise in event.get("premises", [])
+            ],
+            premise_encoding_kinds=[
+                premise.get("encodingKind")
+                for event in premise_events
+                for premise in event.get("premises", [])
             ],
         )
         materialized_path = write_copy(

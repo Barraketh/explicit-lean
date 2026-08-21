@@ -462,6 +462,12 @@ A simplifier call with no recorded semantic events is not automatically a
 no-op. Reducible unfolding or conversion can leave a presentation expected by
 the next tactic even when the isolated target is definitionally equal.
 
+The same fallback applies when a call has later semantic events but an
+unrecorded definitional transition is required to reach the first event (or to
+move between two recorded events). Such a trace is not a valid linear event
+certificate merely because its recorded premise and rewrite steps are
+individually replayable.
+
 Full-body compilation decides this case. On failure, the body rewriter may emit
 an explicit `change` justified by definitional equality, an equality/iff
 transport, or an exported proof for the smallest enclosing fragment. The
@@ -607,8 +613,9 @@ The reusable exporter now renders both proof terms and their declared types in
 the replacement namespace, preserves the recorded redex type for
 definitionally reflexive proofs, shares profitable subterms, and rejects
 metavariables, synthetic `sorry`, inaccessible locals, and residual private
-constants. Schema version 2 reports event and whole-result proof fallbacks with
-source-size metrics. All four Package B `DropRight` replacements compile both
+constants. Schema version 3 reports event and whole-result proof fallbacks with
+source-size and premise-binding metrics, plus premise provenance. All four
+Package B `DropRight` replacements compile both
 in isolation and together. A real `pushFun` simproc fixture materializes a
 certificate that contains no ambient simproc invocation, and a lower-level
 `Origin.other` fixture validates the same public proof-result encoder and
@@ -616,14 +623,41 @@ closed replayer. The complete `Experiment/run.sh` regression passes.
 
 ### C. Recorded premise proofs
 
+Status: implemented on 2026-08-21.
+
 - Record proposition/proof pairs from the original discharger.
 - Add the closed ordered premise provider.
 - Support nested certificates and proof-term fallback for bindings.
 - Report bounded definitional-equality timeouts distinctly.
 
-Gate: all five discharged-side-condition failures in `DropRight` materialize,
-and replay still works when the relevant simp theorem and discharger are not
-ambiently registered.
+Gate: focused fixtures materialize both nested-certificate and proof-term
+premise bindings, reject missing, mismatched, and unconsumed providers, and
+replay when the relevant simp theorem and discharger are not ambiently
+registered.
+
+The four single-execution `DropRight` occurrences originally classified as
+discharged-side-condition failures (`03210e4a7b3567e3`, `aaf54961bf787d28`,
+`739c7ac9dd3cd521`, and `90925e8b6e53287f`) have a layered failure: premise
+provenance is now separated and replayable, but an unrecorded definitional
+unfold is required before the first semantic event. Their existing
+whole-result fallbacks remain compile-checked here; compact event closure moves
+to Package F's presentation-gap work. The fifth old diagnostic,
+`c9eca03fcd0280ed`, also closes in Package F because one source occurrence
+executes in both branches of `<;>`.
+
+The recorder now stores each successful discharger request with its proof and
+diagnostic-origin delta, subtracting that multiset from the enclosing rewrite
+event. Schema version 3 reports premise provenance, deterministic binding
+names, encoding kinds, and source-size metrics. Generated source attaches an
+ordered closed provider with `using [...]`; replay performs a structural type
+check followed by bounded reducible definitional equality, restores
+metavariables and the provider cursor after every rejected probe, and requires
+exact premise consumption before committing a rule. Permanent fixtures compile
+both a nested `simp_explicit` premise certificate and a direct ProofExport term
+fallback, plus missing, mismatched, and unconsumed-provider mutations. The four
+layered `DropRight` cases retain their premise traces and compile individually
+and together through the deferred whole-result fallback. The complete
+`Experiment/run.sh` regression passes.
 
 ### D. Structural selectors
 
@@ -658,7 +692,11 @@ inaccessible `cases` binder.
 Gate: fixtures cover `<;>`, `all_goals`, a repeated occurrence, a backtracking
 branch, and the `DropRight` zero-event presentation failure. It also
 materializes `c485b5d0b1a08fac` and `754e9f44f095fc5d`, the two baseline
-occurrences whose one source `simp` executes in both branches of `<;>`.
+occurrences whose one source `simp` executes in both branches of `<;>`, plus
+the similarly shared premise-bearing occurrence `c9eca03fcd0280ed`. Its
+presentation-gap gate also closes compact event programs for
+`03210e4a7b3567e3`, `aaf54961bf787d28`, `739c7ac9dd3cd521`, and
+`90925e8b6e53287f`, whose premise layer was completed in Package C.
 
 ### G. Corpus closure
 

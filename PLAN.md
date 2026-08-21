@@ -694,14 +694,28 @@ it is not a valid package boundary.
 
 Package B is now implemented. `ExplicitLean.ProofExport` renders proof terms
 and declared types in the replacement namespace and preserves explicit redex
-types even when Lean's proof is definitionally reflexive. Schema version 2
-distinguishes event proof bindings from whole-result presentation fallbacks
-and reports their source sizes and origin categories. The four Package B
+types even when Lean's proof is definitionally reflexive. Schema version 3
+distinguishes event proof bindings from whole-result presentation fallbacks,
+reports their source sizes and origin categories, and carries premise
+provenance and binding metrics. The four Package B
 `DropRight` occurrences materialize alone and in one aggregate module; the
 real `pushFun` simproc fixture materializes without retaining an ambient
 simproc invocation, and the synthetic special-origin fixture passes through
 the same public encoder and closed replayer. The full `Experiment/run.sh`
 regression passes.
+
+Package C is now implemented. Successful discharger requests retain their
+proposition, proof, and separate origin provenance; generated certificates
+attach deterministic premise bindings through a closed ordered `using [...]`
+provider. Replay backtracks metavariables and provider state on rejected
+candidates, requires exact proof consumption, and bounds reducible
+definitional-equality checks under a fixed internal heartbeat budget. Focused
+fixtures compile both nested-certificate and exported proof-term bindings and
+exercise missing, mismatched, and unconsumed providers. The four old
+`DropRight` premise diagnostics now have separated premise traces, but also
+require an earlier unrecorded definitional unfold; their current whole-result
+fallbacks compile alone and together, while compact event closure is assigned
+to Package F. The full `Experiment/run.sh` regression passes.
 
 The known recorder failures are the staged work packages in sections 8 and 11
 of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result
@@ -799,7 +813,8 @@ All three directions retain the same project rules:
   original body; and
 - `Experiment/run.sh` remains the single end-to-end verification command.
 
-The next concrete milestone is package C from
-[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): replay recorded
-side-condition proposition/proof pairs through a closed ordered premise
-provider and materialize the five discharged-premise `DropRight` failures.
+The next concrete milestone is package D from
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): add side-effect-free
+structural `match` selectors, retain explicit `tick` as the absolute fallback,
+and materialize the six `DropRight` traversal failures with selector mutation
+tests.
