@@ -16,8 +16,43 @@ EXPECTED = {
     "f1-first": ["backtracked", "committed"],
 }
 
+INDENT_FIXTURE = coverage.ROOT / "Experiment" / "BodyIndentationProbe.lean"
+INDENT_MODULE = "Experiment/BodyIndentationProbe.lean"
+
+
+def check_instrumented_body_indentation() -> None:
+    entries = coverage.syntax_inventory_file(INDENT_FIXTURE, INDENT_MODULE, 180)
+    entries = [entry for entry in entries if entry["kind"] in coverage.SUPPORTED_KINDS]
+    if len(entries) != 1:
+        raise RuntimeError(f"expected one indentation-probe occurrence: {entries!r}")
+    output = coverage.ROOT / ".lake" / "body-indentation-probe"
+    original_output = coverage.OUTPUT
+    original_results = coverage.RESULTS
+    original_aggregate_results = coverage.AGGREGATE_RESULTS
+    coverage.OUTPUT = output
+    coverage.RESULTS = output / "results"
+    coverage.AGGREGATE_RESULTS = output / "aggregate-results"
+    try:
+        record = coverage.passive_module_recording(
+            INDENT_MODULE,
+            entries,
+            timeout=180,
+            keep_copy=True,
+            source_path=INDENT_FIXTURE,
+        )
+    finally:
+        coverage.OUTPUT = original_output
+        coverage.RESULTS = original_results
+        coverage.AGGREGATE_RESULTS = original_aggregate_results
+    if record.get("compile") is not True or record.get("compile_count") != 1:
+        raise RuntimeError(f"nested body instrumentation did not compile: {record!r}")
+    reports = record.get("reports", [])
+    if len(reports) != 1 or reports[0].get("occurrenceId") != entries[0]["id"]:
+        raise RuntimeError(f"nested body instrumentation lost its report: {record!r}")
+
 
 def main() -> None:
+    check_instrumented_body_indentation()
     code, output, elapsed = coverage.run(
         [
             "lake",

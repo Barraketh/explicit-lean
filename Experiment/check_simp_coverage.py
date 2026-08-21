@@ -15,6 +15,12 @@ def main() -> None:
     coverage.RESULTS = smoke / "results"
     coverage.AGGREGATE_RESULTS = smoke / "aggregate-results"
 
+    copied_mathlib = smoke / "module-recording" / "Mathlib" / "Example.lean"
+    copied_command = coverage.lean_command(copied_mathlib)
+    expected_root = str(smoke / "module-recording")
+    if "-R" not in copied_command or copied_command[copied_command.index("-R") + 1] != expected_root:
+        raise RuntimeError(f"copied Mathlib module lost its module root: {copied_command!r}")
+
     modules = [
         "Mathlib/Data/List/DropRight.lean",
         "Mathlib/RepresentationTheory/Induced.lean",
@@ -61,7 +67,7 @@ def main() -> None:
         raise RuntimeError(f"passive recorder emitted too few reports: {passive!r}")
     if passive.get("schema") != "explicitLean.simpModuleRecording":
         raise RuntimeError(f"unexpected module recording schema: {passive!r}")
-    if passive.get("schema_version") != 3:
+    if passive.get("schema_version") != coverage.PASSIVE_RECORDING_SCHEMA_VERSION:
         raise RuntimeError(f"unexpected module recording schema version: {passive!r}")
     if len(passive.get("occurrences", [])) != len(expected_ids):
         raise RuntimeError(f"passive reports were not grouped per occurrence: {passive!r}")

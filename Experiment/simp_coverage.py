@@ -35,7 +35,7 @@ FIRST_OWNER_REPORT_MARKER = "EXPLICIT_LEAN_FIRST_OWNER_REPORT "
 PARSE_FAILURE_MARKER = "EXPLICIT_LEAN_INVENTORY_PARSE_FAILURE "
 SUPPORTED_KINDS = {"simp", "simp_only"}
 PASSIVE_RECORDING_SCHEMA = "explicitLean.simpModuleRecording"
-PASSIVE_RECORDING_SCHEMA_VERSION = 3
+PASSIVE_RECORDING_SCHEMA_VERSION = 4
 CLOSURE_SCHEMA = "explicitLean.simpClosure"
 CLOSURE_SCHEMA_VERSION = 1
 EXPECTED_SIMP_REPORT_SCHEMA_VERSION = 6
@@ -964,10 +964,21 @@ def body_scope_replacement(
             f"{body_entry['source']!r}, found {actual!r}"
         )
     rewritten = _replace_body_scope_entries(body_source, body_start, entries).decode("utf-8")
-    # `replace_bytes` supplies the original body column after every newline.
-    # Only the first tactic needs the extra two-space nesting; continuation
-    # lines already carry their authored indentation in the body slice.
-    return f'simp_explicit_body_scope "{scope_id}" in\n  {rewritten}'
+    # Continuation lines in the inventoried body slice retain their absolute
+    # source indentation.  The outer `replace_bytes` call will restore the
+    # body's base column after every generated newline, so remove that base
+    # column here before nesting the complete body two spaces under the scope
+    # wrapper.  Generated continuation lines for an occurrence at the very
+    # start of a body are already relative and therefore have no base prefix
+    # to remove.
+    base_prefix = " " * body_entry["column"]
+    body_lines = rewritten.split("\n")
+    for index in range(1, len(body_lines)):
+        if body_lines[index].startswith(base_prefix):
+            body_lines[index] = body_lines[index][len(base_prefix) :]
+    relative_body = "\n".join(body_lines)
+    nested_body = relative_body.replace("\n", "\n  ")
+    return f'simp_explicit_body_scope "{scope_id}" in\n  {nested_body}'
 
 
 def write_copy(root: Path, entry: dict[str, Any], replacement: str) -> Path:
@@ -989,6 +1000,17 @@ def lean_command(path: Path, *, report: bool = False) -> list[str]:
         "-Dlinter.unreachableTactic=false",
         "-DmaxHeartbeats=0",
     ]
+    # Lean uses the source path relative to its module root when assigning
+    # names to anonymous declarations.  Every copied Mathlib module must keep
+    # the original `Mathlib.Foo` identity or source references to those
+    # generated names can fail even before an instrumented tactic executes.
+    try:
+        mathlib_index = path.parts.index("Mathlib")
+    except ValueError:
+        pass
+    else:
+        module_root = Path(*path.parts[:mathlib_index])
+        command.extend(["-R", str(module_root)])
     if report:
         command.append("-DexplicitLean.simpExplicit.report=true")
     command.append(str(path))
@@ -1528,7 +1550,9 @@ def compile_closure_candidates(
             "failure_reason": "source_rewrite_failure",
             "error": str(error),
         }
-    destination = OUTPUT / "closure-attempts" / module / f"{label}.lean"
+    attempt_key = hashlib.sha256(f"{module}:{label}".encode()).hexdigest()[:16]
+    attempt_root = OUTPUT / "closure-attempts" / attempt_key
+    destination = attempt_root / module
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(rewritten)
     for suffix in (".olean", ".ilean", ".c", ".trace", ".hash"):
@@ -1545,9 +1569,9 @@ def compile_closure_candidates(
     }
     if not keep_copy and code == 0:
         destination.unlink(missing_ok=True)
-    (OUTPUT / "closure-attempts" / module / f"{label}.log").write_text(
-        output, encoding="utf-8"
-    )
+    log_path = OUTPUT / "closure-attempts" / module / f"{label}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(output, encoding="utf-8")
     return result
 
 
