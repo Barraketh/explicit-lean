@@ -487,6 +487,16 @@ transport, or an exported proof for the smallest enclosing fragment. The
 recorder must classify which fallback was used rather than silently deleting
 the call.
 
+For corpus closure, whole-body proof export is an on-demand fallback only after
+an occurrence-level candidate has been isolated as `materialized_body_rejected`.
+It is eligible only when the inventoried body owns exactly one supported
+occurrence in the current module entry set. The exporter abstracts unresolved
+elaboration metavariables to inferred proof arguments; inaccessible locals are
+made printable with exact context-index/name commands. The resulting body
+candidate is accepted only when the final aggregate compile succeeds. The
+earlier optimistic aggregate failure and the proof-export/final-aggregate
+attempts remain in the closure audit record.
+
 ## 9. Source rewriting pipeline
 
 The coverage driver should batch work by module while preserving per-occurrence
@@ -511,9 +521,12 @@ identity:
    optimistic aggregate once.
 8. If aggregate compilation fails, partition first by declaration and then
    bisect only failing replacement groups. Use single-occurrence compilation as
-   the final diagnostic fallback, not the normal execution path.
+   the final diagnostic fallback, not the normal execution path. Only an
+   isolated `materialized_body_rejected` occurrence with an exact singleton
+   body owner may trigger the on-demand whole-body proof export.
 9. Recompile the final accepted aggregate and store a terminal outcome for
-   every occurrence.
+   every occurrence. A fallback proof is materialized only when that final
+   aggregate compiles; the failed optimistic attempt remains auditable.
 
 All stages are resumable and cached by pinned Mathlib revision, module source
 hash, occurrence identity, and certificate schema version. Aggregate rewriting
@@ -796,6 +809,14 @@ recording regression and the complete `Experiment/run.sh` regression pass.
 - Run all 83,015 supported `simp` and `simp only` occurrences.
 - Fix reason-code clusters without weakening replay invariants.
 - Run module aggregates and publish the generated Markdown summary.
+
+The bounded closure driver retains one passive module compile and uses
+whole-body proof export only for an isolated singleton rejection. Exact body
+ownership prevents a fallback from claiming another supported occurrence in
+the same body. Proof export abstracts unresolved elaboration metavariables to
+inferred arguments and emits exact-index local naming for inaccessible locals;
+the final aggregate compile, rather than the optimistic attempt, is the
+acceptance check and both attempts are retained in the audit record.
 
 Gate: every occurrence has a terminal outcome; every committed successful
 execution is materialized and compiles in its complete module; aggregate

@@ -30,6 +30,7 @@ python3 Experiment/check_simp_final_state.py
 python3 Experiment/check_body_materialization.py
 python3 Experiment/check_first_owner.py
 python3 Experiment/check_closure.py
+python3 Experiment/check_body_scope_proof.py
 python3 Experiment/check_simp_fixtures.py
 python3 Experiment/check_mixed_certificates.py
 python3 Experiment/check_simp_coverage.py

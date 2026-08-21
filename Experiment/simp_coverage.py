@@ -32,12 +32,13 @@ RESULTS = OUTPUT / "results"
 AGGREGATE_RESULTS = OUTPUT / "aggregate-results"
 REPORT_MARKER = "EXPLICIT_LEAN_SIMP_REPORT "
 FIRST_OWNER_REPORT_MARKER = "EXPLICIT_LEAN_FIRST_OWNER_REPORT "
+BODY_SCOPE_PROOF_REPORT_MARKER = "EXPLICIT_LEAN_BODY_SCOPE_PROOF_REPORT "
 PARSE_FAILURE_MARKER = "EXPLICIT_LEAN_INVENTORY_PARSE_FAILURE "
 SUPPORTED_KINDS = {"simp", "simp_only"}
 PASSIVE_RECORDING_SCHEMA = "explicitLean.simpModuleRecording"
 PASSIVE_RECORDING_SCHEMA_VERSION = 4
 CLOSURE_SCHEMA = "explicitLean.simpClosure"
-CLOSURE_SCHEMA_VERSION = 1
+CLOSURE_SCHEMA_VERSION = 2
 EXPECTED_SIMP_REPORT_SCHEMA_VERSION = 8
 
 
@@ -857,11 +858,7 @@ def recording_replacement(entry: dict[str, Any], *, passive: bool = False) -> st
     if not passive:
         return replacement
     identifier = entry["id"]
-    return (
-        "set_option explicitLean.simpExplicit.passive true in\n"
-        f"set_option explicitLean.simpExplicit.occurrenceId \"{identifier}\" in\n"
-        + replacement
-    )
+    return f'simp_explicit_record "{identifier}"' + source[len("simp") :]
 
 
 def _replace_body_children(
@@ -953,7 +950,12 @@ def _body_entry(source: bytes, entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def body_scope_replacement(
-    source: bytes, body_entry: dict[str, Any], entries: list[dict[str, Any]], scope_id: str
+    source: bytes,
+    body_entry: dict[str, Any],
+    entries: list[dict[str, Any]],
+    scope_id: str,
+    *,
+    export_proof: bool = False,
 ) -> str:
     body_start = body_entry["startByte"]
     body_source = source[body_start : body_entry["endByte"]]
@@ -978,7 +980,8 @@ def body_scope_replacement(
             body_lines[index] = body_lines[index][len(base_prefix) :]
     relative_body = "\n".join(body_lines)
     nested_body = relative_body.replace("\n", "\n  ")
-    return f'simp_explicit_body_scope "{scope_id}" in\n  {nested_body}'
+    command = "simp_explicit_body_scope_proof" if export_proof else "simp_explicit_body_scope"
+    return f'{command} "{scope_id}" in\n  {nested_body}'
 
 
 def write_copy(root: Path, entry: dict[str, Any], replacement: str) -> Path:
@@ -1062,6 +1065,23 @@ def parse_first_owner_reports(output: str) -> list[dict[str, Any]]:
         if marker < 0:
             continue
         payload = line[marker + len(FIRST_OWNER_REPORT_MARKER) :].strip()
+        try:
+            value = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            reports.append(value)
+    return reports
+
+
+def parse_body_scope_proof_reports(output: str) -> list[dict[str, Any]]:
+    """Decode on-demand whole-body proof markers from a copied source compile."""
+    reports: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        marker = line.find(BODY_SCOPE_PROOF_REPORT_MARKER)
+        if marker < 0:
+            continue
+        payload = line[marker + len(BODY_SCOPE_PROOF_REPORT_MARKER) :].strip()
         try:
             value = json.loads(payload)
         except json.JSONDecodeError:
@@ -1575,6 +1595,282 @@ def compile_closure_candidates(
     return result
 
 
+def _body_scope_proof_rename_prefix(local_renames: list[dict[str, Any]]) -> str:
+    """Render the exact local-name map exported by a body proof report."""
+    if not local_renames:
+        return ""
+    parts: list[str] = []
+    for rename in local_renames:
+        if not isinstance(rename, dict):
+            raise RuntimeError("body proof local-renames metadata is malformed")
+        context_index = rename.get("contextIndex")
+        generated_name = rename.get("generatedName")
+        if not isinstance(context_index, int) or context_index < 0:
+            raise RuntimeError("body proof local-renames metadata has an invalid index")
+        if not isinstance(generated_name, str) or not generated_name:
+            raise RuntimeError("body proof local-renames metadata has an invalid name")
+        if set(rename) != {"contextIndex", "generatedName"}:
+            raise RuntimeError("body proof local-renames metadata has unexpected fields")
+        parts.append(f"{context_index} => {generated_name}")
+    return "simp_explicit_rename [" + ", ".join(parts) + "]\n"
+
+
+def body_scope_proof_replacement(report: dict[str, Any]) -> str:
+    """Turn a validated whole-body proof report into a tactic sequence.
+
+    The proof renderer may have renamed inaccessible locals in the enclosing
+    declaration.  Keep the report's exact index/name map adjacent to the
+    proof, so the source replacement remains deterministic and composable.
+    """
+    proof = report.get("proof")
+    if not isinstance(proof, str) or not proof.strip():
+        raise RuntimeError("body proof report has no proof")
+    if report.get("closesGoal") is not True:
+        raise RuntimeError("body proof report did not close its input goal")
+    if report.get("failureReason") is not None:
+        raise RuntimeError("body proof report contains a failure reason")
+    local_renames = report.get("localRenames", [])
+    if not isinstance(local_renames, list):
+        raise RuntimeError("body proof report has malformed local-renames metadata")
+    prefix = _body_scope_proof_rename_prefix(local_renames)
+    lines = proof.splitlines()
+    if not lines:
+        raise RuntimeError("body proof report has an empty proof")
+    replacement = prefix + "exact " + lines[0]
+    for line in lines[1:]:
+        replacement += "\n  " + line
+    return replacement
+
+
+def _eligible_body_scope_proof_candidates(
+    source: bytes,
+    entries: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    failed_ids: set[str],
+    singleton_failures: dict[str, str],
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Select the deliberately narrow singleton whole-body fallback set.
+
+    A body fallback owns exactly one occurrence in the current module entry
+    set.  In particular, it never claims a body containing another supported
+    occurrence merely because that occurrence was not a diagnostic survivor.
+    """
+    entries_by_id = {entry.get("id"): entry for entry in entries}
+    eligible: list[dict[str, Any]] = []
+    rejected: dict[str, str] = {}
+    for candidate in candidates:
+        candidate_ids = candidate.get("entry_ids", [])
+        if len(candidate_ids) != 1:
+            continue
+        identifier = candidate_ids[0]
+        if identifier not in failed_ids:
+            continue
+        if singleton_failures.get(identifier) != "materialized_body_rejected":
+            continue
+        if candidate.get("kind") != "occurrence":
+            continue
+        entry = entries_by_id.get(identifier)
+        if not isinstance(entry, dict):
+            rejected[identifier] = "body_scope_proof_missing_entry"
+            continue
+        start = entry.get("bodyScopeStartByte")
+        end = entry.get("bodyScopeEndByte")
+        scope_id = entry.get("bodyScopeId")
+        body_source = entry.get("bodyScopeSource")
+        if (
+            not isinstance(start, int)
+            or not isinstance(end, int)
+            or start >= end
+            or not isinstance(scope_id, str)
+            or not scope_id
+            or not isinstance(body_source, str)
+        ):
+            rejected[identifier] = "body_scope_proof_ineligible"
+            continue
+        body_entries = [
+            other
+            for other in entries
+            if other.get("bodyScopeId") == scope_id
+            and other.get("bodyScopeStartByte") == start
+            and other.get("bodyScopeEndByte") == end
+        ]
+        if len(body_entries) != 1 or body_entries[0].get("id") != identifier:
+            rejected[identifier] = "body_scope_proof_not_singleton"
+            continue
+        try:
+            body = _body_entry(source, entry)
+            if body["source"] != body_source:
+                raise RuntimeError("body source differs from inventory")
+        except Exception:
+            rejected[identifier] = "body_scope_proof_ineligible"
+            continue
+        eligible.append(
+            {
+                "candidate": candidate,
+                "entry": entry,
+                "body": body,
+                "scope_id": scope_id,
+            }
+        )
+    return eligible, rejected
+
+
+def compile_body_scope_proofs(
+    module: str,
+    source: bytes,
+    eligible: list[dict[str, Any]],
+    timeout: int,
+    *,
+    keep_copy: bool,
+) -> dict[str, Any]:
+    """Passively export all eligible singleton body proofs in one compile."""
+    if not eligible:
+        raise RuntimeError("body proof fallback requires at least one eligible scope")
+    ranges = sorted(
+        (
+            item["body"]["startByte"],
+            item["body"]["endByte"],
+            item,
+        )
+        for item in eligible
+    )
+    for previous, current in zip(ranges, ranges[1:]):
+        if previous[1] > current[0]:
+            raise RuntimeError("overlapping body proof scopes require broader ownership")
+    rewritten = source
+    for _, _, item in sorted(ranges, key=lambda value: value[0], reverse=True):
+        replacement = body_scope_replacement(
+            source,
+            item["body"],
+            [item["entry"]],
+            item["scope_id"],
+            export_proof=True,
+        )
+        rewritten = replace_range_bytes(
+            rewritten,
+            item["body"]["startByte"],
+            item["body"]["endByte"],
+            item["body"]["source"],
+            replacement,
+        )
+    label = "body-scope-proof-fallback"
+    attempt_key = hashlib.sha256(f"{module}:{label}".encode()).hexdigest()[:16]
+    attempt_root = OUTPUT / "closure-attempts" / attempt_key
+    destination = attempt_root / module
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(inject_import(rewritten))
+    for suffix in (".olean", ".ilean", ".c", ".trace", ".hash"):
+        destination.with_suffix(suffix).unlink(missing_ok=True)
+    code, output, elapsed = run(lean_command(destination), timeout=timeout)
+    reports = parse_body_scope_proof_reports(output)
+    expected_scope_ids = [item["scope_id"] for item in eligible]
+    expected_ids = [item["entry"]["id"] for item in eligible]
+    reports_by_scope: dict[str, dict[str, Any]] = {}
+    duplicate_scope_ids: set[str] = set()
+    for report in reports:
+        scope_id = report.get("scopeId")
+        if not isinstance(scope_id, str):
+            continue
+        if scope_id in reports_by_scope:
+            duplicate_scope_ids.add(scope_id)
+        reports_by_scope[scope_id] = report
+    result: dict[str, Any] = {
+        "label": label,
+        "candidate_ids": expected_ids,
+        "declarations": sorted({item["entry"].get("declaration") for item in eligible}),
+        "scope_ids": expected_scope_ids,
+        "compile_invoked": True,
+        "compile": code == 0,
+        "seconds": round(elapsed, 3),
+        "failure_reason": None if code == 0 else classify_failure(output, "materialized"),
+        "report_count": len(reports),
+        "reports": reports,
+        "valid_scope_ids": [],
+        "invalid_scope_ids": [],
+        "duplicate_scope_ids": sorted(duplicate_scope_ids),
+    }
+    valid_scope_ids: list[str] = []
+    invalid_scope_ids: list[str] = []
+    for item in eligible:
+        scope_id = item["scope_id"]
+        report = reports_by_scope.get(scope_id)
+        valid = (
+            code == 0
+            and scope_id not in duplicate_scope_ids
+            and isinstance(report, dict)
+            and report.get("scopeId") == scope_id
+            and report.get("closesGoal") is True
+            and isinstance(report.get("proof"), str)
+            and bool(report["proof"].strip())
+            and report.get("failureReason") is None
+        )
+        if valid:
+            # Exercise the same strict source encoder used below while the
+            # report is still attached to this audit record.
+            try:
+                body_scope_proof_replacement(report)
+            except Exception:
+                valid = False
+        if valid:
+            valid_scope_ids.append(scope_id)
+        else:
+            invalid_scope_ids.append(scope_id)
+    result["valid_scope_ids"] = valid_scope_ids
+    result["invalid_scope_ids"] = invalid_scope_ids
+    if code == 0 and invalid_scope_ids:
+        result["failure_reason"] = "body_scope_proof_report_invalid"
+    if not keep_copy and code == 0:
+        destination.unlink(missing_ok=True)
+    log_path = OUTPUT / "closure-attempts" / module / f"{label}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(output, encoding="utf-8")
+    return result
+
+
+def body_scope_proof_candidates(
+    source: bytes,
+    eligible: list[dict[str, Any]],
+    fallback_attempt: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Build body-range candidates only from validated fallback reports."""
+    reports = {
+        report.get("scopeId"): report
+        for report in fallback_attempt.get("reports", [])
+        if isinstance(report, dict) and isinstance(report.get("scopeId"), str)
+    }
+    valid_scope_ids = set(fallback_attempt.get("valid_scope_ids", []))
+    candidates: list[dict[str, Any]] = []
+    failures: dict[str, str] = {}
+    for item in eligible:
+        identifier = item["entry"]["id"]
+        scope_id = item["scope_id"]
+        if scope_id not in valid_scope_ids:
+            failures[identifier] = fallback_attempt.get("failure_reason") or (
+                "body_scope_proof_report_invalid"
+            )
+            continue
+        report = reports.get(scope_id)
+        try:
+            replacement = body_scope_proof_replacement(report or {})
+        except Exception:
+            failures[identifier] = "body_scope_proof_report_invalid"
+            continue
+        candidate = {
+            "kind": "body_scope_proof",
+            "startByte": item["body"]["startByte"],
+            "endByte": item["body"]["endByte"],
+            "expected": item["body"]["source"],
+            "replacement": replacement,
+            "declaration": item["entry"].get("declaration"),
+            "entry_ids": [identifier],
+            "bodyScopeId": scope_id,
+            "proofBytes": report.get("proofBytes", len(report["proof"].encode("utf-8"))),
+            "localRenames": report.get("localRenames", []),
+        }
+        candidates.append(candidate)
+    return candidates, failures
+
+
 def diagnose_closure_candidates(
     module: str,
     source: bytes,
@@ -1768,6 +2064,9 @@ def run_closure_module(
     attempts: list[dict[str, Any]] = []
     optimistic: dict[str, Any] | None = None
     survivor_optimistic: dict[str, Any] | None = None
+    body_scope_fallback: dict[str, Any] | None = None
+    body_scope_fallback_aggregate: dict[str, Any] | None = None
+    body_scope_fallback_failures: dict[str, str] = {}
     singleton_failures: dict[str, str] = {}
     aggregate_compile: bool | None = None
     aggregate_failure_reason: str | None = None
@@ -1805,7 +2104,142 @@ def run_closure_module(
                     for candidate in candidates
                     if not failed_ids.intersection(candidate["entry_ids"])
                 ]
-                if survivor_candidates:
+
+                # A committed occurrence whose ordinary certificate is
+                # rejected in the complete body gets one deliberately narrow
+                # whole-body proof attempt.  The fallback is eligible only for
+                # a singleton occurrence body; all other singleton failures
+                # retain their original reason code.
+                eligible, eligibility_failures = _eligible_body_scope_proof_candidates(
+                    source,
+                    entries,
+                    candidates,
+                    failed_ids,
+                    singleton_failures,
+                )
+                body_scope_fallback_failures.update(eligibility_failures)
+                fallback_candidates: list[dict[str, Any]] = []
+                if eligible:
+                    try:
+                        body_scope_fallback = compile_body_scope_proofs(
+                            module,
+                            source,
+                            eligible,
+                            timeout,
+                            keep_copy=keep_copy,
+                        )
+                        attempts.append(body_scope_fallback)
+                        fallback_candidates, report_failures = body_scope_proof_candidates(
+                            source, eligible, body_scope_fallback
+                        )
+                        body_scope_fallback_failures.update(report_failures)
+                    except Exception as error:
+                        # This is a bounded source-rewrite/report failure for
+                        # the eligible singleton set.  Keep the diagnostic
+                        # artifact as an uninvoked attempt and continue with
+                        # the ordinary survivor path.
+                        body_scope_fallback = {
+                            "label": "body-scope-proof-fallback",
+                            "candidate_ids": [item["entry"]["id"] for item in eligible],
+                            "declarations": sorted(
+                                {item["entry"].get("declaration") for item in eligible}
+                            ),
+                            "scope_ids": [item["scope_id"] for item in eligible],
+                            "compile_invoked": False,
+                            "compile": False,
+                            "seconds": 0,
+                            "failure_reason": "body_scope_proof_source_rewrite_failure",
+                            "report_count": 0,
+                            "reports": [],
+                            "valid_scope_ids": [],
+                            "invalid_scope_ids": [item["scope_id"] for item in eligible],
+                            "error": str(error),
+                        }
+                        attempts.append(body_scope_fallback)
+                        body_scope_fallback_failures.update(
+                            {
+                                item["entry"]["id"]: body_scope_fallback["failure_reason"]
+                                for item in eligible
+                            }
+                        )
+
+                fallback_ids = {
+                    identifier
+                    for candidate in fallback_candidates
+                    for identifier in candidate["entry_ids"]
+                }
+                # Replace each eligible failed occurrence in the candidate
+                # aggregate, and retain the exact body candidate on its
+                # occurrence record even if the final aggregate later rejects
+                # it.  The aggregate compile below is the only acceptance
+                # criterion for marking it materialized.
+                for candidate in fallback_candidates:
+                    for identifier in candidate["entry_ids"]:
+                        by_id[identifier]["candidate"] = candidate.copy()
+
+                aggregate_candidates = survivor_candidates + fallback_candidates
+                if fallback_candidates:
+                    body_scope_fallback_aggregate = compile_closure_candidates(
+                        module,
+                        source,
+                        aggregate_candidates,
+                        timeout,
+                        label="body-scope-proof-aggregate",
+                        keep_copy=keep_copy,
+                    )
+                    attempts.append(body_scope_fallback_aggregate)
+                    if body_scope_fallback_aggregate["compile"]:
+                        for candidate in aggregate_candidates:
+                            for identifier in candidate["entry_ids"]:
+                                result = by_id[identifier]
+                                result["terminal_outcome"] = "materialized"
+                                result["materialized_compile"] = True
+                                result["failure_reason"] = None
+                        unresolved_ids = failed_ids - fallback_ids
+                        for identifier in unresolved_ids:
+                            if identifier in by_id:
+                                _closure_failure_reason_for_report(
+                                    by_id[identifier],
+                                    body_scope_fallback_failures.get(
+                                        identifier, singleton_failures.get(identifier, "singleton_candidate_failures")
+                                    ),
+                                )
+                        all_candidate_ids = {
+                            identifier
+                            for candidate in candidates
+                            for identifier in candidate["entry_ids"]
+                        }
+                        aggregate_candidate_ids = {
+                            identifier
+                            for candidate in aggregate_candidates
+                            for identifier in candidate["entry_ids"]
+                        }
+                        if aggregate_candidate_ids == all_candidate_ids:
+                            # The fallback aggregate is now the accepted
+                            # complete aggregate.  The failed optimistic
+                            # attempt remains in `attempts` for auditability.
+                            aggregate_compile = True
+                            aggregate_failure_reason = None
+                        else:
+                            aggregate_failure_reason = "singleton_candidate_failures"
+                    else:
+                        body_scope_fallback_failures.update(
+                            {
+                                identifier: "body_scope_proof_rejected"
+                                for candidate in fallback_candidates
+                                for identifier in candidate["entry_ids"]
+                            }
+                        )
+
+                # If no fallback aggregate was accepted, compile the ordinary
+                # survivors exactly as before.  This keeps unresolved
+                # singleton failures attributable without pretending that a
+                # body proof was materialized in isolation.
+                fallback_aggregate_accepted = (
+                    body_scope_fallback_aggregate is not None
+                    and body_scope_fallback_aggregate.get("compile") is True
+                )
+                if not fallback_aggregate_accepted and survivor_candidates:
                     survivor_optimistic = compile_closure_candidates(
                         module,
                         source,
@@ -1815,7 +2249,20 @@ def run_closure_module(
                         keep_copy=keep_copy,
                     )
                     attempts.append(survivor_optimistic)
-                if survivor_optimistic is not None and survivor_optimistic["compile"]:
+                if fallback_aggregate_accepted:
+                    # The accepted body aggregate already materialized all
+                    # candidates it contains.  Any failed singleton outside
+                    # that aggregate remains a coverage failure.
+                    for identifier in failed_ids - fallback_ids:
+                        if identifier in by_id:
+                            _closure_failure_reason_for_report(
+                                by_id[identifier],
+                                body_scope_fallback_failures.get(
+                                    identifier,
+                                    singleton_failures.get(identifier, "singleton_candidate_failures"),
+                                ),
+                            )
+                elif survivor_optimistic is not None and survivor_optimistic["compile"]:
                     # The requested all-candidate aggregate remains failed:
                     # only the survivor aggregate is independently proven.
                     aggregate_failure_reason = "singleton_candidate_failures"
@@ -1825,21 +2272,25 @@ def run_closure_module(
                             result["terminal_outcome"] = "materialized"
                             result["materialized_compile"] = True
                             result["failure_reason"] = None
-                    for identifier, reason in singleton_failures.items():
+                    for identifier in failed_ids:
                         if identifier in by_id:
-                            _closure_failure_reason_for_report(by_id[identifier], reason)
+                            _closure_failure_reason_for_report(
+                                by_id[identifier],
+                                body_scope_fallback_failures.get(
+                                    identifier, singleton_failures.get(identifier, "singleton_candidate_failures")
+                                ),
+                            )
                 else:
                     aggregate_failure_reason = "aggregate_interaction"
                     for candidate in candidates:
                         for identifier in candidate["entry_ids"]:
-                            if identifier in singleton_failures:
-                                _closure_failure_reason_for_report(
-                                    by_id[identifier], singleton_failures[identifier]
-                                )
+                            if identifier in body_scope_fallback_failures:
+                                reason = body_scope_fallback_failures[identifier]
+                            elif identifier in singleton_failures:
+                                reason = singleton_failures[identifier]
                             else:
-                                _closure_failure_reason_for_report(
-                                    by_id[identifier], aggregate_failure_reason
-                                )
+                                reason = aggregate_failure_reason
+                            _closure_failure_reason_for_report(by_id[identifier], reason)
             else:
                 # No independently failing singleton was found, so the
                 # optimistic failure is a genuine cross-candidate
@@ -1890,6 +2341,9 @@ def run_closure_module(
 
     module_compile_provenance = {
         "aggregateCompile": aggregate_compile,
+        "optimisticCompile": (
+            optimistic.get("compile") if optimistic is not None else None
+        ),
         "aggregateFailureReason": aggregate_failure_reason,
         "candidatePlanComplete": candidate_plan_complete,
         "terminalClassificationComplete": terminal_classification_complete,
@@ -1906,6 +2360,9 @@ def run_closure_module(
             else 0
         ),
         "singletonFailures": singleton_failures,
+        "bodyScopeProofFallback": body_scope_fallback,
+        "bodyScopeProofAggregate": body_scope_fallback_aggregate,
+        "bodyScopeProofFailures": body_scope_fallback_failures,
         "attemptCount": len(attempts),
         "attemptLabels": [attempt.get("label") for attempt in attempts],
     }
@@ -1939,11 +2396,17 @@ def run_closure_module(
         "occurrences": occurrence_results,
         "aggregate": {
             "compile": aggregate_compile,
+            "optimistic_compile": (
+                optimistic.get("compile") if optimistic is not None else None
+            ),
             "failure_reason": aggregate_failure_reason,
             "candidate_plan_complete": candidate_plan_complete,
             "terminal_classification_complete": terminal_classification_complete,
             "closure_complete": closure_complete,
             "singleton_failures": singleton_failures,
+            "body_scope_proof_fallback": body_scope_fallback,
+            "body_scope_proof_aggregate": body_scope_fallback_aggregate,
+            "body_scope_proof_failures": body_scope_fallback_failures,
             "survivor_compile": (
                 survivor_optimistic.get("compile")
                 if survivor_optimistic is not None

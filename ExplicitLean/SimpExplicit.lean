@@ -48,10 +48,19 @@ so independently generated certificates can be composed in one declaration. -/
 syntax (name := simpExplicitRename) "simp_explicit_rename" " ["
   simpExplicitLocalRename,* "]" : tactic
 syntax (name := simpExplicitBodyScope) "simp_explicit_body_scope" str " in " tacticSeq : tactic
+/-- On-demand variant of the body recorder that also exports a proof when the
+complete inventoried body closes its input goal. Coverage uses this only after
+an occurrence-level certificate fails source materialization. -/
+syntax (name := simpExplicitBodyScopeProof) "simp_explicit_body_scope_proof" str
+  " in " tacticSeq : tactic
 /-- Instrument one closed `first` owner while materializing a body.  This is
     an internal source-rewriter primitive: it records a printable proof only
     when the wrapped owner closes its input goal. -/
 syntax (name := simpExplicitFirstScope) "simp_explicit_first_scope" str " in " tacticSeq : tactic
+/-- Internal passive-recorder entry point used by source rewriting. The source
+identity is an argument rather than nested `set_option ... in` syntax so the
+surrounding tactic context keeps its original macro scopes. -/
+syntax (name := simpExplicitRecord) "simp_explicit_record" str simpExplicitTraceArgs : tactic
 /-- Run `simp` once and report an equivalent deterministic certificate. The
 shortest validated suggestion may be a pipeline containing
 `normalize_category` and `simp_explicit` phases. -/
@@ -2600,6 +2609,15 @@ private structure FirstOwnerReport where
   closesGoal : Bool
   deriving ToJson
 
+private structure BodyScopeProofReport where
+  scopeId : String
+  proof : Option String
+  proofBytes : Nat
+  closesGoal : Bool
+  failureReason : Option String
+  localRenames : Array LocalRenameInfo := #[]
+  deriving ToJson
+
 private def runFirstOwnerScope (ownerId : String) (body : Syntax) (reportStx : Syntax) :
     TacticM Unit := withMainContext do
   let main ← getMainGoal
@@ -3606,13 +3624,103 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   if let some attempt := scopedAttempt? then
     commitScopedAttempt attempt
 
-private def runBodyScope (scopeId : String) (body : Syntax) (reportStx : Syntax) :
-    TacticM Unit := do
+private def runBodyScope (scopeId : String) (body : Syntax) (reportStx : Syntax)
+    (exportProof := false) : TacticM Unit := withMainContext do
+  let main ← getMainGoal
+  let initialTarget ← instantiateMVars (← main.getType)
+  let sourceNamespace := ((← Term.getDeclName?).map (·.getPrefix)).getD Name.anonymous
   let frameId ← enterScopedFrame scopeId
   try
     withOptions (·.set `explicitLean.simpExplicit.bodyScopeFrame frameId) do
       evalTactic body
+    if exportProof then
+      Term.synthesizeSyntheticMVars (postpone := .no) (ignoreStuckTC := true)
+    let bodyRenamePlan ← if exportProof then
+      localRenamePlan (← main.getDecl).lctx
+    else
+      pure #[]
+    let bodyProofReport? ← if exportProof then
+      let goals ← getGoals
+      if !goals.isEmpty then
+        pure (some ({
+          scopeId
+          proof := none
+          proofBytes := 0
+          closesGoal := false
+          failureReason := some "body_did_not_close"
+          localRenames := localRenameInfos bodyRenamePlan
+        } : BodyScopeProofReport))
+      else if !(← main.isAssigned) then
+        pure (some ({
+          scopeId
+          proof := none
+          proofBytes := 0
+          closesGoal := false
+          failureReason := some "body_goal_unassigned"
+          localRenames := localRenameInfos bodyRenamePlan
+        } : BodyScopeProofReport))
+      else
+        let some proof ← getExprMVarAssignment? main
+          | pure (some ({
+              scopeId
+              proof := none
+              proofBytes := 0
+              closesGoal := false
+              failureReason := some "body_assignment_missing"
+              localRenames := localRenameInfos bodyRenamePlan
+            } : BodyScopeProofReport))
+        let proof ← instantiateMVars proof
+        let proofType ← inferType proof
+        if !(← isDefEq proofType initialTarget) then
+          pure (some ({
+            scopeId
+            proof := none
+            proofBytes := 0
+            closesGoal := true
+            failureReason := some "body_proof_type_mismatch"
+            localRenames := localRenameInfos bodyRenamePlan
+          } : BodyScopeProofReport))
+        else
+          try
+            let (exportedProof, exportedType?, argumentCount) ← if proof.hasMVar then
+              let abstracted ← abstractMVars proof
+              if abstracted.expr.hasMVar then
+                throwError "whole-body proof contains metavariables from an outer elaboration depth"
+              pure (abstracted.expr, none, abstracted.mvars.size)
+            else
+              pure (proof, some initialTarget, 0)
+            let renamedLctx := renamedLocalContext (← main.getDecl).lctx bodyRenamePlan
+            let rendered ← withLCtx' renamedLctx do
+              ProofExport.render exportedProof (type? := exportedType?) {
+                sourceNamespace
+              }
+            let proofText := if argumentCount == 0 then
+              rendered.valueText
+            else
+              let arguments := Array.replicate argumentCount "_"
+              s!"({rendered.valueText}) {String.intercalate " " arguments.toList}"
+            pure (some ({
+              scopeId
+              proof := some proofText
+              proofBytes := proofText.utf8ByteSize
+              closesGoal := true
+              failureReason := none
+              localRenames := localRenameInfos bodyRenamePlan
+            } : BodyScopeProofReport))
+          catch ex =>
+            pure (some ({
+              scopeId
+              proof := none
+              proofBytes := 0
+              closesGoal := true
+              failureReason := some (← exceptionText ex)
+              localRenames := localRenameInfos bodyRenamePlan
+            } : BodyScopeProofReport))
+    else
+      pure none
     publishScopedFrame scopeId frameId reportStx
+    if let some report := bodyProofReport? then
+      logInfoAt reportStx m!"EXPLICIT_LEAN_BODY_SCOPE_PROOF_REPORT {(toJson report).compress}"
   catch ex =>
     leaveScopedFrame frameId
     throw ex
@@ -3626,10 +3734,24 @@ elab_rules : tactic
       let some scopeId := scope.raw.isStrLit?
         | throwErrorAt scope "body scope id must be a string literal"
       runBodyScope scopeId body.raw (← getRef)
+  | `(tactic| simp_explicit_body_scope_proof $scope:str in $body:tacticSeq) => do
+      let some scopeId := scope.raw.isStrLit?
+        | throwErrorAt scope "body scope id must be a string literal"
+      runBodyScope scopeId body.raw (← getRef) (exportProof := true)
   | `(tactic| simp_explicit_first_scope $owner:str in $body:tacticSeq) => do
       let some ownerId := owner.raw.isStrLit?
         | throwErrorAt owner "first owner id must be a string literal"
       runFirstOwnerScope ownerId body.raw (← getRef)
+  | `(tactic| simp_explicit_record $occurrence:str $args:simpExplicitTraceArgs) => do
+      let some occurrenceId := occurrence.raw.isStrLit?
+        | throwErrorAt occurrence "occurrence id must be a string literal"
+      let inner := mkNode ``Lean.Parser.Tactic.simp #[
+        mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
+      withOptions (fun options =>
+          options
+            |>.set `explicitLean.simpExplicit.passive true
+            |>.set `explicitLean.simpExplicit.occurrenceId occurrenceId) do
+        recordSimp inner (← getRef)
   | `(tactic| simp_explicit? $args:simpExplicitTraceArgs) => do
       let inner := mkNode ``Lean.Parser.Tactic.simp #[
         mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]

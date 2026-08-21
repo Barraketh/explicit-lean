@@ -755,6 +755,14 @@ and the two Package E renamed-local sites are also compact event programs.
 Schema v6, the bounded one-compile coverage regression, and the complete
 `sh Experiment/run.sh` regression all pass.
 
+Package G's body-proof fallback is deliberately on-demand: it runs only after
+an occurrence-level candidate is isolated as `materialized_body_rejected` and
+only when that occurrence is the sole supported entry in its inventoried body.
+Unresolved elaboration metavariables are abstracted to inferred arguments, and
+inaccessible locals are printed through exact context-index naming. The final
+aggregate compile is the acceptance check; the failed optimistic aggregate and
+the fallback attempts remain in the audit record.
+
 The known recorder failures are the staged work packages in sections 8 and 11
 of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result
 fallback, recorded side-condition proofs, structural selectors, hypothesis and
