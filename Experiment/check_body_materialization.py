@@ -34,8 +34,8 @@ def write_materialized(path: Path, source: bytes) -> None:
 def fixture_entries() -> list[dict]:
     entries = coverage.syntax_inventory_file(FIXTURE, FIXTURE_MODULE, 180)
     entries = [entry for entry in entries if entry["kind"] in coverage.SUPPORTED_KINDS]
-    if len(entries) != 6:
-        raise RuntimeError(f"expected six syntax-inventoried fixture occurrences: {entries!r}")
+    if len(entries) != 7:
+        raise RuntimeError(f"expected seven syntax-inventoried fixture occurrences: {entries!r}")
     return entries
 
 
@@ -111,11 +111,11 @@ def check_fixture() -> None:
     if not record["compile"] or record["compile_count"] != 1:
         raise RuntimeError(f"F2 fixture passive compile failed: {record!r}")
     reports = report_by_id(record)
-    if len(reports) != 5:
-        raise RuntimeError(f"expected five reached fixture occurrences: {reports!r}")
+    if len(reports) != 6:
+        raise RuntimeError(f"expected six reached fixture occurrences: {reports!r}")
     ordered = sorted(entries, key=lambda entry: entry["startByte"])
     check_owner_ranges(FIXTURE.read_bytes(), ordered)
-    shared, all_goals, repeated, dead, abandoned, fallback = ordered
+    shared, all_goals, repeated, dead, abandoned, fallback, nested = ordered
     if shared["ownerKind"] != "and_then" or shared["ownerRole"] != "and_then_right":
         raise RuntimeError(f"shared fixture owner shape changed: {shared!r}")
     if all_goals["ownerKind"] != "all_goals" or all_goals["ownerRole"] != "all_goals_child":
@@ -126,6 +126,8 @@ def check_fixture() -> None:
         raise RuntimeError(f"dead branch owner shape changed: {dead!r}")
     if abandoned["ownerKind"] != "first" or fallback["ownerKind"] != "first":
         raise RuntimeError("backtracking fixture lost first owner metadata")
+    if nested["ownerKind"] != "and_then" or nested["ownerRole"] != "and_then_right":
+        raise RuntimeError(f"nested-semicolon owner shape changed: {nested!r}")
 
     if coverage.classify_terminal_outcome(reports.get(dead["id"])) != "not_reached":
         raise RuntimeError("dead branch was not classified as not_reached")
@@ -152,6 +154,7 @@ def check_fixture() -> None:
         ("shared", shared),
         ("all-goals", all_goals),
         ("repeat-rhs", repeated),
+        ("nested-semicolon", nested),
     ):
         report = reports[entry["id"]]
         if len(coverage.committed_certificates(report)) != 2:
@@ -163,6 +166,8 @@ def check_fixture() -> None:
             raise RuntimeError(f"{label} owner retained ambient simp: {replacement!r}")
         if replacement.count("·") != 2:
             raise RuntimeError(f"{label} owner bullet count changed: {replacement!r}")
+        if entry.get("ownerKind") == "and_then" and not replacement.startswith("focus\n"):
+            raise RuntimeError(f"{label} owner was not focus-scoped: {replacement!r}")
         output_path = coverage.OUTPUT / "materialized" / f"{label}.lean"
         materialized_source = coverage.materialize_owner_source(
             fixture_source, entry, report, sibling_entries=entries

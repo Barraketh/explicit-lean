@@ -25,3 +25,8 @@ example (h : f2ProbeP) (n : Nat) : n + 0 = n ∧ f2ProbeP := by
   first
   | (simp only [Nat.add_zero]; fail)
   | simp [h]
+
+/- The distributed owner is itself the right-hand side of an outer semicolon.
+   Its generated multi-line tactic sequence must remain one scoped tactic. -/
+example (n : Nat) : True → (n + 0 = n ∧ n + 0 = n) := by
+  intro; constructor <;> simp

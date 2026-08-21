@@ -778,10 +778,10 @@ def owner_replacement(
         actual_left = source[left_start:left_end].decode("utf-8")
         if actual_left != left_source:
             raise RuntimeError("andThen left-child inventory is stale")
-        replacement = left_source
+        replacement = "focus\n  " + left_source
         # Bullets are peers of the left tactic.  The range replacer supplies
         # the owner's authored indentation after each newline.
-        bullet_prefix = ""
+        bullet_prefix = "  "
     else:
         replacement = ""
         bullet_prefix = ""
