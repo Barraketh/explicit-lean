@@ -404,6 +404,17 @@ meta def render (value : Expr) (type? : Option Expr := none)
     }
   }
 
+/-- Render an arbitrary type expression as source at the current replacement
+site.  This deliberately goes through the value renderer so private-constant
+inlining, source-namespace qualification, local-name validation, and repeated
+subterm sharing are identical to proof-term rendering.  The returned
+`valueText` is the term to use after a `change` command; its `typeText` is the
+sort/type inferred for that term. -/
+meta def renderType (type : Expr) (config : ProofExport.Options := {}) :
+    MetaM Rendered := do
+  let typeOfType ← inferType type
+  render type (type? := some typeOfType) config
+
 end ProofExport
 
 end ExplicitLean

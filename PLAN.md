@@ -740,6 +740,20 @@ fixtures and schema-v5 report checks. The two closed `DropRight` occurrences
 regression retains all 24 stable occurrences and 27 dynamic executions, and
 the complete `sh Experiment/run.sh` regression passes.
 
+Package F is now implemented. Rollback-aware body scopes retain every dynamic
+execution with an attempt token and committed/backtracked disposition, while
+syntax-owner metadata drives explicit branch materialization for `<;>`,
+`all_goals`, and repeated tactics. Closed `first` owners can be replaced by an
+exported proof of exactly their input goal, with mutation coverage ensuring the
+proof is authoritative. A single bounded presentation-only pass emits a
+definitionally checked, parenthesized `change` before the remaining semantic
+events and validates the complete source on a fresh clone. All three shared
+`DropRight` owners compile; the ten deferred premise/selector presentation
+sites now compile as eight `presentation_change` and two direct event programs,
+and the two Package E renamed-local sites are also compact event programs.
+Schema v6, the bounded one-compile coverage regression, and the complete
+`sh Experiment/run.sh` regression all pass.
+
 The known recorder failures are the staged work packages in sections 8 and 11
 of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result
 fallback, recorded side-condition proofs, structural selectors, hypothesis and
@@ -836,7 +850,8 @@ All three directions retain the same project rules:
   original body; and
 - `Experiment/run.sh` remains the single end-to-end verification command.
 
-The next concrete milestone is package F from
-[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): enclosing-body and
-multi-goal rewriting for shared and branched tactic executions, including the
-remaining `DropRight` presentation and `<;>` cases.
+The next concrete milestone is Package G from
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): run all 83,015 supported
+`simp` and `simp only` occurrences, fix reason-code clusters without weakening
+the replay invariants, compile complete-module aggregates, and publish the
+generated Markdown summary with no coverage failure or unclassified outcome.

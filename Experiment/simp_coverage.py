@@ -31,6 +31,7 @@ INVENTORY = OUTPUT / "inventory.json"
 RESULTS = OUTPUT / "results"
 AGGREGATE_RESULTS = OUTPUT / "aggregate-results"
 REPORT_MARKER = "EXPLICIT_LEAN_SIMP_REPORT "
+FIRST_OWNER_REPORT_MARKER = "EXPLICIT_LEAN_FIRST_OWNER_REPORT "
 PARSE_FAILURE_MARKER = "EXPLICIT_LEAN_INVENTORY_PARSE_FAILURE "
 SUPPORTED_KINDS = {"simp", "simp_only"}
 PASSIVE_RECORDING_SCHEMA = "explicitLean.simpModuleRecording"
@@ -70,6 +71,37 @@ def relative_module(path: str | Path) -> str:
 def occurrence_id(module: str, start: int, end: int) -> str:
     identity = f"{module}:{start}:{end}".encode()
     return hashlib.sha256(identity).hexdigest()[:16]
+
+
+def body_scope_id(module: str, start: int, end: int) -> str:
+    identity = f"body:{module}:{start}:{end}".encode()
+    return hashlib.sha256(identity).hexdigest()[:16]
+
+
+def first_owner_id(entry: dict[str, Any]) -> str:
+    """Return the deterministic identity used by the closed `first` probe."""
+    module = entry.get("module", "")
+    start = entry.get("ownerStartByte")
+    end = entry.get("ownerEndByte")
+    if not isinstance(start, int) or not isinstance(end, int):
+        raise RuntimeError(f"first owner has no stable range: {entry!r}")
+    identity = f"first:{module}:{start}:{end}".encode()
+    return hashlib.sha256(identity).hexdigest()[:16]
+
+
+OWNER_FIELDS = (
+    "ownerKind",
+    "ownerRole",
+    "ownerStartByte",
+    "ownerEndByte",
+    "ownerSource",
+    "ownerChildStartByte",
+    "ownerChildEndByte",
+    "ownerChildSource",
+    "ownerLeftStartByte",
+    "ownerLeftEndByte",
+    "ownerLeftSource",
+)
 
 
 DECLARATION = re.compile(
@@ -169,6 +201,14 @@ def inventory(args: argparse.Namespace) -> None:
         index = declaration_indexes.setdefault(module, declaration_index(source))
         raw["module"] = module
         raw["id"] = occurrence_id(module, raw["startByte"], raw["endByte"])
+        for field in OWNER_FIELDS:
+            raw.setdefault(field, None)
+        if raw.get("bodyScopeStartByte") is not None:
+            raw["bodyScopeId"] = body_scope_id(
+                module, raw["bodyScopeStartByte"], raw["bodyScopeEndByte"]
+            )
+        else:
+            raw["bodyScopeId"] = None
         raw["declaration"] = indexed_declaration_hint(
             index, raw["startByte"], raw["line"]
         )
@@ -264,7 +304,53 @@ def inventory_by_elaboration(module: str, timeout: int) -> list[dict[str, Any]]:
         raw["module"] = module
         raw["startByte"] -= len(import_text)
         raw["endByte"] -= len(import_text)
+        for field in ("bodyScopeStartByte", "bodyScopeEndByte"):
+            if raw.get(field) is not None:
+                raw[field] -= len(import_text)
+        for field in OWNER_FIELDS:
+            if field in {
+                "ownerStartByte",
+                "ownerEndByte",
+                "ownerChildStartByte",
+                "ownerChildEndByte",
+                "ownerLeftStartByte",
+                "ownerLeftEndByte",
+            } and raw.get(field) is not None:
+                raw[field] -= len(import_text)
         raw["line"] -= import_text.count(b"\n")
+        result.append(raw)
+    return result
+
+
+def syntax_inventory_file(path: Path, module: str, timeout: int) -> list[dict[str, Any]]:
+    """Run the syntax inventory against a focused non-Mathlib source file."""
+    command = [
+        "lake",
+        "env",
+        "lean",
+        "--run",
+        "Experiment/SimpInventory.lean",
+        str(path.resolve()),
+    ]
+    code, output, _ = run(command, timeout=timeout)
+    if code != 0:
+        raise RuntimeError(f"focused syntax inventory failed for {path}:\n{output}")
+    result: list[dict[str, Any]] = []
+    for line_text in output.splitlines():
+        if not line_text.startswith("{"):
+            continue
+        raw = json.loads(line_text)
+        raw.pop("file", None)
+        raw["module"] = module
+        raw["id"] = occurrence_id(module, raw["startByte"], raw["endByte"])
+        for field in OWNER_FIELDS:
+            raw.setdefault(field, None)
+        if raw.get("bodyScopeStartByte") is not None:
+            raw["bodyScopeId"] = body_scope_id(
+                module, raw["bodyScopeStartByte"], raw["bodyScopeEndByte"]
+            )
+        else:
+            raw["bodyScopeId"] = None
         result.append(raw)
     return result
 
@@ -282,6 +368,201 @@ def replace_bytes(source: bytes, entry: dict[str, Any], replacement: str) -> byt
     return source[:start] + replacement.encode("utf-8") + source[end:]
 
 
+def replace_range_bytes(
+    source: bytes, start: int, end: int, expected: str, replacement: str
+) -> bytes:
+    """Replace one syntax-owned range after checking its original byte slice."""
+    actual = source[start:end].decode("utf-8")
+    if actual != expected:
+        raise RuntimeError(
+            f"stale owner inventory at {start}: expected {expected!r}, found {actual!r}"
+        )
+    line_start = source.rfind(b"\n", 0, start) + 1
+    indent = " " * len(source[line_start:start].decode("utf-8"))
+    replacement = replacement.replace("\n", "\n" + indent)
+    return source[:start] + replacement.encode("utf-8") + source[end:]
+
+
+def scoped_executions(report: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if report is None:
+        return []
+    return [
+        execution
+        for execution in report.get("executions", [])
+        if isinstance(execution, dict)
+    ]
+
+
+def classify_terminal_outcome(
+    report: dict[str, Any] | None, *, materialized_compile: bool | None = None
+) -> str:
+    """Classify one scoped occurrence without manufacturing a replacement."""
+    executions = scoped_executions(report)
+    if report is None or not executions:
+        return "not_reached"
+    if any(
+        execution.get("disposition") not in {"committed", "backtracked"}
+        for execution in executions
+    ):
+        return "coverage_failure"
+    committed_successes = [
+        execution
+        for execution in executions
+        if execution.get("result") == "succeeded"
+        and execution.get("disposition") == "committed"
+    ]
+    if committed_successes:
+        if materialized_compile is True:
+            return "materialized"
+        if materialized_compile is False:
+            return "coverage_failure"
+        return "coverage_failure"
+    if any(execution.get("result") == "succeeded" for execution in executions):
+        return "attempted_backtracked"
+    return "original_failure"
+
+
+def committed_certificates(report: dict[str, Any]) -> list[str]:
+    """Return validated, goal-closing certificates for committed executions."""
+    result: list[str] = []
+    for execution in scoped_executions(report):
+        if execution.get("result") != "succeeded":
+            continue
+        if execution.get("disposition") != "committed":
+            continue
+        certificate = execution.get("certificate")
+        if not isinstance(certificate, str) or not certificate:
+            raise RuntimeError("committed execution has no certificate")
+        if not execution.get("closesGoal"):
+            raise RuntimeError("committed execution does not close its input goal")
+        result.append(certificate)
+    return result
+
+
+def owner_replacement(
+    source: bytes,
+    entry: dict[str, Any],
+    report: dict[str, Any],
+    *,
+    sibling_entries: list[dict[str, Any]] | None = None,
+) -> str:
+    """Build the F2 explicit branch replacement for one syntax owner."""
+    kind = entry.get("ownerKind")
+    role = entry.get("ownerRole")
+    if kind == "and_then" and role == "and_then_right":
+        pass
+    elif kind == "all_goals" and role == "all_goals_child":
+        pass
+    else:
+        raise RuntimeError(f"unsupported or non-owning F2 syntax parent: {kind}/{role}")
+    owner_start = entry.get("ownerStartByte")
+    owner_end = entry.get("ownerEndByte")
+    owner_source = entry.get("ownerSource")
+    if not isinstance(owner_start, int) or not isinstance(owner_end, int):
+        raise RuntimeError("F2 owner has no byte range")
+    if not isinstance(owner_source, str):
+        raise RuntimeError("F2 owner has no source")
+    if sibling_entries is not None:
+        owner_identity = (owner_start, owner_end)
+        same_owner = [
+            sibling
+            for sibling in sibling_entries
+            if (sibling.get("ownerStartByte"), sibling.get("ownerEndByte"))
+            == owner_identity
+        ]
+        if len(same_owner) != 1:
+            raise RuntimeError("F2 owner contains multiple instrumented occurrences")
+        for sibling in sibling_entries:
+            if sibling.get("id") == entry.get("id"):
+                continue
+            sibling_start = sibling.get("startByte")
+            if isinstance(sibling_start, int) and owner_start <= sibling_start < owner_end:
+                raise RuntimeError("F2 owner contains another supported occurrence")
+    certificates = committed_certificates(report)
+    if not certificates:
+        raise RuntimeError("F2 owner has no committed successful executions")
+    if kind == "and_then":
+        left_start = entry.get("ownerLeftStartByte")
+        left_end = entry.get("ownerLeftEndByte")
+        left_source = entry.get("ownerLeftSource")
+        if not isinstance(left_start, int) or not isinstance(left_end, int):
+            raise RuntimeError("andThen owner has no left-child range")
+        if not isinstance(left_source, str):
+            raise RuntimeError("andThen owner has no left-child source")
+        actual_left = source[left_start:left_end].decode("utf-8")
+        if actual_left != left_source:
+            raise RuntimeError("andThen left-child inventory is stale")
+        replacement = left_source
+        # Bullets are peers of the left tactic.  The range replacer supplies
+        # the owner's authored indentation after each newline.
+        bullet_prefix = ""
+    else:
+        replacement = ""
+        bullet_prefix = ""
+    for index, certificate in enumerate(certificates):
+        lines = certificate.splitlines()
+        if not lines:
+            raise RuntimeError("empty F2 certificate")
+        if index == 0 and kind == "and_then":
+            replacement += "\n"
+        elif index > 0:
+            replacement += "\n"
+        replacement += bullet_prefix + "· " + lines[0]
+        for line in lines[1:]:
+            replacement += "\n" + bullet_prefix + "  " + line
+    actual_owner = source[owner_start:owner_end].decode("utf-8")
+    if actual_owner != owner_source:
+        raise RuntimeError("F2 owner inventory is stale")
+    return replacement
+
+
+def first_owner_replacement(
+    source: bytes, entry: dict[str, Any], owner_report: dict[str, Any]
+) -> str:
+    """Build `exact <proof>` for one closed, syntax-owned `first` fragment."""
+    if entry.get("ownerKind") != "first" or entry.get("ownerRole") != "first_branch":
+        raise RuntimeError(f"not a first-owner entry: {entry!r}")
+    owner_start = entry.get("ownerStartByte")
+    owner_end = entry.get("ownerEndByte")
+    owner_source = entry.get("ownerSource")
+    if not isinstance(owner_start, int) or not isinstance(owner_end, int):
+        raise RuntimeError("first owner has no byte range")
+    if not isinstance(owner_source, str):
+        raise RuntimeError("first owner has no source")
+    actual = source[owner_start:owner_end].decode("utf-8")
+    if actual != owner_source:
+        raise RuntimeError("first owner inventory is stale")
+    if owner_report.get("ownerId") != first_owner_id(entry):
+        raise RuntimeError(f"first owner report identity mismatch: {owner_report!r}")
+    proof = owner_report.get("proof")
+    if not isinstance(proof, str) or not proof.strip():
+        raise RuntimeError("first owner report has no proof")
+    if owner_report.get("closesGoal") is not True:
+        raise RuntimeError("first owner report did not close its input goal")
+    lines = proof.splitlines()
+    if not lines:
+        raise RuntimeError("first owner report has an empty proof")
+    replacement = "exact " + lines[0]
+    for line in lines[1:]:
+        replacement += "\n" + "  " + line
+    return replacement
+
+
+def materialize_owner_source(
+    source: bytes,
+    entry: dict[str, Any],
+    report: dict[str, Any],
+    *,
+    sibling_entries: list[dict[str, Any]] | None = None,
+) -> bytes:
+    replacement = owner_replacement(
+        source, entry, report, sibling_entries=sibling_entries
+    )
+    start = entry["ownerStartByte"]
+    end = entry["ownerEndByte"]
+    return replace_range_bytes(source, start, end, entry["ownerSource"], replacement)
+
+
 def recording_replacement(entry: dict[str, Any], *, passive: bool = False) -> str:
     source = entry["source"]
     if not source.startswith("simp"):
@@ -295,6 +576,112 @@ def recording_replacement(entry: dict[str, Any], *, passive: bool = False) -> st
         f"set_option explicitLean.simpExplicit.occurrenceId \"{identifier}\" in\n"
         + replacement
     )
+
+
+def _replace_body_children(
+    body_source: bytes, body_start: int, entries: list[dict[str, Any]]
+) -> bytes:
+    """Apply occurrence replacements inside one untouched body slice.
+
+    The child offsets are translated only after the original body slice has
+    been verified.  This keeps the enclosing body edit and its children as a
+    single insertion-safe operation; no earlier replacement can drift a
+    later source offset.
+    """
+    rewritten = body_source
+    for entry in sorted(entries, key=lambda item: item["startByte"], reverse=True):
+        local = dict(entry)
+        local["startByte"] = entry["startByte"] - body_start
+        local["endByte"] = entry["endByte"] - body_start
+        # The body slice begins at the first tactic token, but continuation
+        # lines retain their original file indentation.  New lines introduced
+        # by a child replacement therefore need the original absolute column.
+        rewritten = replace_bytes(
+            rewritten, local, recording_replacement(entry, passive=True)
+        )
+    return rewritten
+
+
+def _replace_body_scope_entries(
+    body_source: bytes, body_start: int, entries: list[dict[str, Any]]
+) -> bytes:
+    """Rewrite body children and closed `first` owners in one local edit plan."""
+    first_entries = [entry for entry in entries if entry.get("ownerKind") == "first"]
+    first_groups: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for entry in first_entries:
+        start = entry.get("ownerStartByte")
+        end = entry.get("ownerEndByte")
+        if not isinstance(start, int) or not isinstance(end, int):
+            raise RuntimeError(f"first owner has no complete range: {entry!r}")
+        first_groups.setdefault((start, end), []).append(entry)
+    first_ranges = sorted(first_groups, key=lambda item: (item[0], item[1]))
+    for index, (start, end) in enumerate(first_ranges):
+        if index and first_ranges[index - 1][1] > start:
+            raise RuntimeError("overlapping first owners require a broader materializer")
+    edits: list[tuple[int, int, str, str]] = []
+    covered_ids: set[str] = set()
+    for (owner_start, owner_end), owner_entries in first_groups.items():
+        if len({(entry.get("ownerStartByte"), entry.get("ownerEndByte")) for entry in owner_entries}) != 1:
+            raise RuntimeError("first owner range grouping is inconsistent")
+        owner_source = owner_entries[0].get("ownerSource")
+        if not isinstance(owner_source, str):
+            raise RuntimeError("first owner source is missing")
+        owner_slice = body_source[owner_start - body_start : owner_end - body_start]
+        if owner_slice.decode("utf-8") != owner_source:
+            raise RuntimeError("first owner slice is stale")
+        rewritten_owner = _replace_body_children(
+            owner_slice, owner_start, owner_entries
+        ).decode("utf-8")
+        owner_token = first_owner_id(owner_entries[0])
+        wrapper = f'simp_explicit_first_scope "{owner_token}" in\n  {rewritten_owner}'
+        edits.append((owner_start - body_start, owner_end - body_start, owner_source, wrapper))
+        covered_ids.update(entry.get("id") for entry in owner_entries if isinstance(entry.get("id"), str))
+    for entry in entries:
+        if entry.get("id") in covered_ids:
+            continue
+        edits.append(
+            (
+                entry["startByte"] - body_start,
+                entry["endByte"] - body_start,
+                entry["source"],
+                recording_replacement(entry, passive=True),
+            )
+        )
+    rewritten = body_source
+    for start, end, expected, replacement in sorted(edits, key=lambda item: item[0], reverse=True):
+        rewritten = replace_range_bytes(rewritten, start, end, expected, replacement)
+    return rewritten
+
+
+def _body_entry(source: bytes, entry: dict[str, Any]) -> dict[str, Any]:
+    start = entry["bodyScopeStartByte"]
+    end = entry["bodyScopeEndByte"]
+    line_start = source.rfind(b"\n", 0, start) + 1
+    column = len(source[line_start:start].decode("utf-8"))
+    return {
+        "startByte": start,
+        "endByte": end,
+        "source": entry["bodyScopeSource"],
+        "column": column,
+    }
+
+
+def body_scope_replacement(
+    source: bytes, body_entry: dict[str, Any], entries: list[dict[str, Any]], scope_id: str
+) -> str:
+    body_start = body_entry["startByte"]
+    body_source = source[body_start : body_entry["endByte"]]
+    actual = body_source.decode("utf-8")
+    if actual != body_entry["source"]:
+        raise RuntimeError(
+            f"stale body inventory at {body_start}: expected "
+            f"{body_entry['source']!r}, found {actual!r}"
+        )
+    rewritten = _replace_body_scope_entries(body_source, body_start, entries).decode("utf-8")
+    # `replace_bytes` supplies the original body column after every newline.
+    # Only the first tactic needs the extra two-space nesting; continuation
+    # lines already carry their authored indentation in the body slice.
+    return f'simp_explicit_body_scope "{scope_id}" in\n  {rewritten}'
 
 
 def write_copy(root: Path, entry: dict[str, Any], replacement: str) -> Path:
@@ -359,6 +746,23 @@ def parse_recording_reports(output: str) -> list[dict[str, Any]]:
     return reports
 
 
+def parse_first_owner_reports(output: str) -> list[dict[str, Any]]:
+    """Decode closed-first owner proof markers from a copied source compile."""
+    reports: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        marker = line.find(FIRST_OWNER_REPORT_MARKER)
+        if marker < 0:
+            continue
+        payload = line[marker + len(FIRST_OWNER_REPORT_MARKER) :].strip()
+        try:
+            value = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            reports.append(value)
+    return reports
+
+
 def group_passive_reports(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge dynamic reports into one stable record per source occurrence."""
     grouped: dict[str, dict[str, Any]] = {}
@@ -393,6 +797,7 @@ def passive_module_recording(
     *,
     timeout: int,
     keep_copy: bool = False,
+    source_path: Path | None = None,
 ) -> dict[str, Any]:
     """Record every supported occurrence in one copied-module compile.
 
@@ -405,18 +810,46 @@ def passive_module_recording(
     """
     if not entries:
         raise RuntimeError(f"no supported occurrences for passive module {module}")
-    source = (MATHLIB / module).read_bytes()
+    source = (source_path or (MATHLIB / module)).read_bytes()
     rewritten = source
-    for entry in sorted(entries, key=lambda item: item["startByte"], reverse=True):
-        rewritten = replace_bytes(
-            rewritten, entry, recording_replacement(entry, passive=True)
+    body_groups: dict[str, list[dict[str, Any]]] = {}
+    unscoped_entries: list[dict[str, Any]] = []
+    for entry in entries:
+        scope_id = entry.get("bodyScopeId")
+        if scope_id and entry.get("bodyScopeStartByte") is not None:
+            body_groups.setdefault(scope_id, []).append(entry)
+        else:
+            unscoped_entries.append(entry)
+    edits: list[tuple[int, int, str, dict[str, Any]]] = []
+    for scope_id, group in body_groups.items():
+        representative = group[0]
+        body = _body_entry(source, representative)
+        edits.append(
+            (
+                body["startByte"],
+                body["endByte"],
+                body_scope_replacement(source, body, group, scope_id),
+                body,
+            )
         )
+    for entry in unscoped_entries:
+        edits.append((entry["startByte"], entry["endByte"],
+                      recording_replacement(entry, passive=True), entry))
+    for start, end, replacement, edit_entry in sorted(edits, key=lambda item: item[0], reverse=True):
+        rewritten = replace_bytes(rewritten, edit_entry, replacement)
     root = OUTPUT / "module-recording"
     destination = root / module
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(inject_import(rewritten))
+    # A copied module may have been compiled by an earlier bounded run.  Lean
+    # can then reuse its adjacent olean without elaborating the instrumented
+    # source, silently dropping the new scope reports.  Remove only artifacts
+    # for this exact copied module before the singular recording compile.
+    for suffix in (".olean", ".ilean", ".c", ".trace", ".hash"):
+        destination.with_suffix(suffix).unlink(missing_ok=True)
     code, output, elapsed = run(lean_command(destination), timeout=timeout)
     reports = parse_recording_reports(output)
+    first_owner_reports = parse_first_owner_reports(output)
     occurrences = group_passive_reports(reports)
     expected_ids = sorted(entry["id"] for entry in entries)
     observed_ids = sorted(occurrence["occurrenceId"] for occurrence in occurrences)
@@ -434,6 +867,7 @@ def passive_module_recording(
         "elapsed_seconds": round(elapsed, 3),
         "wall_seconds": round(elapsed, 3),
         "reports": reports,
+        "first_owner_reports": first_owner_reports,
         "occurrences": occurrences,
         "failure_category": None if code == 0 else classify_failure(output, "recording"),
     }

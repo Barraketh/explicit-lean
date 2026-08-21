@@ -8,6 +8,7 @@ public import Lean.Elab.Tactic.Simp
 public meta import Lean.Elab.Tactic.Location
 public meta import Lean.Data.Json
 public meta import Lean.Meta.Tactic.Refl
+public meta import Std.Sync.Mutex
 
 public meta section
 
@@ -35,6 +36,11 @@ syntax (name := simpExplicit) "simp_explicit" " [" simpExplicitEvent,* "]" : tac
 /-- Replay independent closed certificates against selected local declarations and
 the target, using the same batch staging semantics as `simp at ...`. -/
 syntax (name := simpExplicitContext) "simp_explicit_context" " [" simpExplicitContextGroup,* "]" : tactic
+syntax (name := simpExplicitBodyScope) "simp_explicit_body_scope" str " in " tacticSeq : tactic
+/-- Instrument one closed `first` owner while materializing a body.  This is
+    an internal source-rewriter primitive: it records a printable proof only
+    when the wrapped owner closes its input goal. -/
+syntax (name := simpExplicitFirstScope) "simp_explicit_first_scope" str " in " tacticSeq : tactic
 /-- Run `simp` once and report an equivalent deterministic certificate. The
 shortest validated suggestion may be a pipeline containing
 `normalize_category` and `simp_explicit` phases. -/
@@ -65,8 +71,13 @@ register_option explicitLean.simpExplicit.occurrenceId : String := {
   descr := "stable source identity supplied by the passive simp recorder"
 }
 
+register_option explicitLean.simpExplicit.bodyScopeFrame : Nat := {
+  defValue := 0
+  descr := "internal body-scope registry frame (not a source/report identity)"
+}
+
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 5
+def reportSchemaVersion : Nat := 6
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -156,6 +167,8 @@ structure SemanticEventReport where
 
 structure EncodingMetrics where
   mode : String := "event"
+  /-- Number of emitted presentation-only `change` prepasses. -/
+  presentationChangeCount : Nat := 0
   namedRuleEvents : Nat := 0
   generatedProofEvents : Nat := 0
   generatedSimprocEvents : Nat := 0
@@ -183,12 +196,31 @@ structure ProofResultEncoding where
   encodingKind : String
   encodingReason : Option String
 
+structure LocalRenameInfo where
+  /-- Stable local-context index of the candidate selected by `rename_i`. -/
+  contextIndex : Nat
+  generatedName : String
+  deriving ToJson
+
 structure ExecutionReport where
+  /-- Deterministic source-scope token; empty for unscoped compatibility reports. -/
+  attemptToken : String
   executionIndex : Nat
   result : String
   /-- `none` means that enclosing combinator instrumentation has not established
       commitment. Package F may replace this with `committed` or `backtracked`. -/
   disposition : Option String
+  /-- The certificate owned by this dynamic execution, when one was encoded. -/
+  certificate : Option String
+  certificateBytes : Nat
+  certificateEventCount : Nat
+  positionsNeeded : Bool
+  encodingStatus : String
+  recordingReason : Option String
+  encoding : EncodingMetrics
+  encodingFallbackReason : Option String
+  localRenames : Array LocalRenameInfo
+  closesGoal : Bool
   trace : Array SemanticEventReport
   subjects : Array SubjectSummary
   initialState : StateFingerprint
@@ -197,17 +229,12 @@ structure ExecutionReport where
   failureMessage : Option String
   deriving ToJson
 
-structure LocalRenameInfo where
-  /-- Stable local-context index of the candidate selected by `rename_i`. -/
-  contextIndex : Nat
-  generatedName : String
-  deriving ToJson
-
 structure RecordingReport where
   schema : String
   schemaVersion : Nat
   kind : String
   occurrenceId : String
+  bodyScopeId : Option String
   declaration : String
   originalSyntax : String
   closesGoal : Bool
@@ -228,6 +255,33 @@ structure RecordingReport where
   localRenames : Array LocalRenameInfo
   validation : Option ValidationEnvelope
   deriving ToJson
+
+/-! Dynamic body-scope state is deliberately kept outside Meta state.  The
+    sentinel itself is a Meta mvar, while the report payload and its source
+    token live in this IO registry so a tactic combinator can roll Meta state
+    back without erasing the diagnostic record.  The registry is process
+    local and frames are stacked, so nested elaboration cannot overwrite a
+    sibling scope's records.  MVarIds and frame ids never cross the JSON
+    boundary. -/
+structure ScopedAttempt where
+  frameId : Nat
+  occurrenceId : String
+  attemptToken : String
+  sentinel : MVarId
+  reportRef : IO.Ref (Option RecordingReport)
+
+structure ScopedFrame where
+  frameId : Nat
+  scopeId : String
+  attempts : Array ScopedAttempt
+
+structure ScopedRegistry where
+  nextFrameId : Nat
+  frames : Array ScopedFrame
+  deriving Nonempty
+
+initialize scopedRegistry : Std.Mutex ScopedRegistry ←
+  Std.Mutex.new { nextFrameId := 1, frames := #[] }
 
 inductive Phase where
   | pre
@@ -357,6 +411,82 @@ private def recordingMethods (ref : IO.Ref RecorderState)
             }
         }
       return result? }
+
+/-- State for the one bounded presentation probe used by the F3 encoder.  The
+    probe deliberately suppresses proof-producing/default rewrites while one
+    deterministic `Simp.mainCore` pass commits every proofless,
+    expression-changing method result. -/
+private structure PresentationProbeState where
+  candidates : Array (Expr × Expr) := #[]
+
+private def presentationMethod (ref : IO.Ref PresentationProbeState)
+    (method : Simp.Simproc) : Simp.Simproc := fun input => do
+  let metaSnapshot ← liftM Meta.saveState
+  let simpSnapshot ← get
+  try
+    let step ← method input
+    match stepResult? step with
+    | some result =>
+        let state ← ref.get
+        if result.proof?.isNone && !Expr.equal result.expr input then
+          ref.set {
+            candidates := state.candidates.push (input, result.expr)
+          }
+          return step
+        else
+          -- A rejected method is observational only. Restore both Meta and
+          -- Simp state: default dischargers and caches may have assigned
+          -- metavariables or consumed diagnostics before returning a result.
+          liftM metaSnapshot.restore
+          set simpSnapshot
+          return .continue
+    | none =>
+        liftM metaSnapshot.restore
+        set simpSnapshot
+        return .continue
+  catch _ =>
+    liftM metaSnapshot.restore
+    set simpSnapshot
+    return .continue
+
+private def presentationCandidate? (target : Expr) (ctx : Simp.Context)
+    (simprocs : Simp.SimprocsArray) (recorded : Array RecordedEvent) :
+    TacticM (Option (Expr × Array (Expr × Expr))) := do
+  try
+    -- The theorem engine is independent of `Simp.Methods`; method wrappers
+    -- alone cannot suppress recorded proof-bearing rewrites.  Remove exactly
+    -- the origins of those events from this speculative context, preserving
+    -- all original definition/unfolding entries and proofless rules.
+    let presentationTheorems := recorded.foldl (fun theorems event =>
+      if event.result.proof?.isSome then
+        event.origins.foldl (fun theorems origin => theorems.eraseTheorem origin) theorems
+      else
+        theorems) ctx.simpTheorems
+    let presentationCtx := ctx.setSimpTheorems presentationTheorems
+    withoutModifyingState do
+      let ref ← IO.mkRef ({} : PresentationProbeState)
+      let methods := Simp.mkDefaultMethodsCore simprocs
+      let methods : Simp.Methods := {
+        methods with
+          pre := presentationMethod ref methods.pre
+          post := presentationMethod ref methods.post
+      }
+      let (result, _) ← withOptions (·.setBool `diagnostics true) do
+        Simp.mainCore target presentationCtx (methods := methods)
+      let probe ← ref.get
+      -- Return the complete target produced by the probe. The accepted local
+      -- pairs are only boundary evidence for removing presentation events
+      -- already realized by this pass.
+      -- The candidate must be a genuine presentation change, but remain
+      -- definitionally equal to the original target so `change` is checked by
+      -- the kernel at the replacement site.
+      unless !Expr.equal result.expr target do
+        return none
+      unless ← isDefEq result.expr target do
+        return none
+      return some (result.expr, probe.candidates)
+  catch _ =>
+    return none
 
 private def ruleText (origin : Origin) : MetaM String := do
   match origin with
@@ -1056,28 +1186,29 @@ private def generatedPremiseBinding (premise : RecordedPremise)
   let sourceNamespace := ((← Term.getDeclName?).map (·.getPrefix)).getD Name.anonymous
   let name ← freshPremiseBindingName premiseIndex usedNames
   let nested? ← nestedPremiseProof? premise
-  let (bindingProof, rendered, proofText, kind, reason) ← match nested? with
+  let (bindingProof, typeText, proofText, kind, reason) ← match nested? with
     | some (nestedProof, proofText) =>
-        -- Nested certificates are the primary representation. Render the
-        -- validated nested proof itself; an unprintable authoritative proof
-        -- must not prevent this branch from succeeding.
-        let rendered ← ProofExport.render nestedProof (type? := some proposition) (config := {
+        -- Nested certificates are the primary representation. The checked
+        -- proof remains in memory for replay, while source prints only the
+        -- proposition type and the closed nested certificate. The proof may
+        -- contain a copied-module private auxiliary that has no source form.
+        let rendered ← ProofExport.renderType proposition (config := {
           sourceNamespace
         })
-        pure (nestedProof, rendered, proofText, "premise_nested", none)
+        pure (nestedProof, rendered.valueText, proofText, "premise_nested", none)
     | none =>
         let rendered ← ProofExport.render authoritativeProof (type? := some proposition) (config := {
           sourceNamespace
         })
-        pure (authoritativeProof, rendered, rendered.valueText, "premise_term",
+        pure (authoritativeProof, rendered.typeText, rendered.valueText, "premise_term",
           some "nested_certificate_unavailable")
-  let bytes := rendered.typeText.utf8ByteSize + proofText.utf8ByteSize
+  let bytes := typeText.utf8ByteSize + proofText.utf8ByteSize
   let binding : GeneratedBinding := {
     name
     kind
     type := proposition
     proof := bindingProof
-    typeText := rendered.typeText
+    typeText
     proofText
     bytes
   }
@@ -1202,8 +1333,21 @@ private def buildEncodedEvents? (recorded : Array RecordedEvent)
     let mut usedNames := initialUsedNames
     for index in *...count do
       let some event := recorded[index]? | return none
-      if let some replay ← compactReplayEvent? event then
-        let rule ← ruleText event.origins[0]!
+      -- A named event may be under a traversal binder, so its isolated
+      -- callback input is not necessarily replayable in the current local
+      -- context.  Construct the named rule without claiming that this local
+      -- probe validates it; the complete ordered program below remains the
+      -- acceptance check.
+      let namedReplay? ← if event.origins.size == 1 then
+        try
+          let replay ← recordedReplayEvent event .next
+          let rule ← ruleText event.origins[0]!
+          pure (some (replay, rule))
+        catch _ =>
+          pure none
+      else
+        pure none
+      if let some (replay, rule) := namedReplay? then
         let mut premiseNames := #[]
         let mut premiseEncodings := #[]
         for premiseIndex in *...event.premises.size do
@@ -1970,6 +2114,12 @@ private def executionReport (target : Expr) (result : Simp.Result)
     (encodings : Array EventEncodingInfo := #[])
     (premiseEncodings : Array (Array PremiseEncodingInfo) := #[])
     (subjects : Array SubjectSummary := #[])
+    (suggestion : String := "") (positionsNeeded : Bool := false)
+    (encodingStatus : String := "validated")
+    (recordingReason? : Option String := none)
+    (encodingMetrics : EncodingMetrics := {})
+    (encodingFallbackReason? : Option String := none)
+    (localRenames : Array LocalRenameInfo := #[])
     : MetaM ExecutionReport := do
   let targetSubject : SubjectReport := {
     kind := "target"
@@ -1986,9 +2136,20 @@ private def executionReport (target : Expr) (result : Simp.Result)
   }
   let subjects := if subjects.isEmpty then #[targetSummary] else subjects
   return {
+    attemptToken := ""
     executionIndex
     result := "succeeded"
     disposition := none
+    certificate := if suggestion.isEmpty then none else some suggestion
+    certificateBytes := suggestion.utf8ByteSize
+    certificateEventCount := certificateEventCount state.events
+    positionsNeeded
+    encodingStatus
+    recordingReason := recordingReason?
+    encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
+    encodingFallbackReason := encodingFallbackReason?
+    localRenames
+    closesGoal := ← isReflexiveResultEarly result.expr
     trace := ← state.events.mapIdxM fun index event =>
       semanticEventReport event encodings[index]? (premiseEncodings[index]?.getD #[])
         targetSubject
@@ -2002,6 +2163,59 @@ private def executionReport (target : Expr) (result : Simp.Result)
 private def exceptionText (ex : Exception) : TacticM String := do
   liftM (m := BaseIO) ex.toMessageData.toString
 
+private def currentScopedFrame? : TacticM (Option ScopedFrame) := do
+  let frameId := explicitLean.simpExplicit.bodyScopeFrame.get (← getOptions)
+  if frameId == 0 then
+    return none
+  scopedRegistry.atomically do
+    let registry ← get
+    pure (registry.frames.find? (·.frameId == frameId))
+
+private def replaceScopedFrame (frame : ScopedFrame) : TacticM Unit := do
+  scopedRegistry.atomically do
+    let registry ← get
+    let some index := registry.frames.findIdx? (·.frameId == frame.frameId) | return
+    set { registry with frames := registry.frames.set! index frame }
+
+private def enterScopedFrame (scopeId : String) : TacticM Nat := do
+  scopedRegistry.atomically do
+    let registry ← get
+    let frameId := registry.nextFrameId
+    set ({
+      nextFrameId := frameId + 1
+      frames := registry.frames.push { frameId, scopeId, attempts := #[] }
+    } : ScopedRegistry)
+    pure frameId
+
+private def leaveScopedFrame (frameId : Nat) : TacticM Unit := do
+  scopedRegistry.atomically do
+    let registry ← get
+    set { registry with frames := registry.frames.filter (·.frameId != frameId) }
+
+private def beginScopedAttempt? : TacticM (Option ScopedAttempt) := withMainContext do
+  let some frame ← currentScopedFrame? | return none
+  let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
+  if occurrenceId.isEmpty then
+    return none
+  let main ← getMainGoal
+  let decl ← main.getDecl
+  let sentinelExpr ← mkFreshExprMVarAt decl.lctx decl.localInstances
+    (mkConst ``True) MetavarKind.syntheticOpaque
+  let reportRef ← IO.mkRef (none : Option RecordingReport)
+  let attemptIndex := frame.attempts.size
+  let attempt : ScopedAttempt := {
+    frameId := frame.frameId
+    occurrenceId
+    attemptToken := s!"{frame.scopeId}:{occurrenceId}:{attemptIndex}"
+    sentinel := sentinelExpr.mvarId!
+    reportRef
+  }
+  replaceScopedFrame { frame with attempts := frame.attempts.push attempt }
+  pure (some attempt)
+
+private def commitScopedAttempt (attempt : ScopedAttempt) : TacticM Unit := do
+  attempt.sentinel.assign (mkConst ``True.intro)
+
 private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (state : RecorderState)
     (result? : Option Simp.Result) (suggestion : String) (positionsNeeded : Bool)
     (failureCategory? : Option String) (failureMessage? : Option String)
@@ -2011,7 +2225,8 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     (premiseEncodings : Array (Array PremiseEncodingInfo) := #[])
     (encodingMetrics : EncodingMetrics := {})
     (encodingFallbackReason? : Option String := none)
-    (localRenames : Array LocalRenameInfo := #[]) : TacticM Unit := do
+    (localRenames : Array LocalRenameInfo := #[])
+    (capture? : Option (IO.Ref (Option RecordingReport)) := none) : TacticM Unit := do
   let declaration := (← Term.getDeclName?).map (·.toString) |>.getD "<unknown>"
   let originalSyntax := toString simpStx.prettyPrint
   let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
@@ -2019,16 +2234,30 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     | some result =>
         let closesGoal ← isReflexiveResult result.expr
         let execution ← executionReport target result state 0 failureCategory? failureMessage?
-          encodings premiseEncodings
+          encodings premiseEncodings (suggestion := suggestion)
+            (positionsNeeded := positionsNeeded) (encodingStatus := encodingStatus)
+            (recordingReason? := recordingReason?) (encodingMetrics := encodingMetrics)
+            (encodingFallbackReason? := encodingFallbackReason?) (localRenames := localRenames)
         pure (closesGoal, result.expr, #[execution])
     | none =>
         let finalTarget ← try
           instantiateMVars (← (← getMainGoal).getType)
         catch _ => pure target
         let execution : ExecutionReport := {
+          attemptToken := ""
           executionIndex := 0
           result := "failed"
           disposition := none
+          certificate := none
+          certificateBytes := 0
+          certificateEventCount := 0
+          positionsNeeded := false
+          encodingStatus := "unavailable"
+          recordingReason := recordingReason?
+          encoding := {}
+          encodingFallbackReason := none
+          localRenames := #[]
+          closesGoal := false
           trace := #[]
           subjects := #[{
             subject := {
@@ -2055,6 +2284,7 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     schemaVersion := reportSchemaVersion
     kind := "simp_explicit.recording"
     occurrenceId
+    bodyScopeId := none
     declaration
     originalSyntax
     closesGoal
@@ -2080,10 +2310,13 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
       finalState
     }
   }
-  logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {(toJson report).compress}"
+  match capture? with
+  | some capture => capture.set (some report)
+  | none => logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {(toJson report).compress}"
 
 private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
-    (category : String) (detail : String) : TacticM Unit := do
+    (category : String) (detail : String)
+    (capture? : Option (IO.Ref (Option RecordingReport)) := none) : TacticM Unit := do
   let state : RecorderState := {}
   try
     evalSimp simpStx
@@ -2092,7 +2325,7 @@ private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
     try
       emitRecordingReport simpStx reportStx target state none "" false
         (some "original_failure") (some failureDetail) none false "unavailable"
-        (some failureDetail)
+        (some failureDetail) (capture? := capture?)
     catch _ => pure ()
     throw ex
   let finalTarget ← try
@@ -2103,6 +2336,7 @@ private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
   try
     emitRecordingReport simpStx reportStx target state (some result) "" false
       (some category) (some detail) none false "unavailable" (some detail)
+      (capture? := capture?)
     catch ex =>
       logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
 
@@ -2199,6 +2433,7 @@ private def contextTransportTraces (traces : Array ContextSubjectTrace)
 
 private def addEncodingMetrics (lhs rhs : EncodingMetrics) : EncodingMetrics := {
   mode := if lhs.mode == "event" && rhs.mode == "event" then "event" else "context"
+  presentationChangeCount := lhs.presentationChangeCount + rhs.presentationChangeCount
   namedRuleEvents := lhs.namedRuleEvents + rhs.namedRuleEvents
   generatedProofEvents := lhs.generatedProofEvents + rhs.generatedProofEvents
   generatedSimprocEvents := lhs.generatedSimprocEvents + rhs.generatedSimprocEvents
@@ -2215,6 +2450,148 @@ private def addEncodingMetrics (lhs rhs : EncodingMetrics) : EncodingMetrics := 
   tickSelectorCount := lhs.tickSelectorCount + rhs.tickSelectorCount
   totalCertificateBytes := lhs.totalCertificateBytes + rhs.totalCertificateBytes
 }
+
+private def scopedDisposition (attempt : ScopedAttempt) : TacticM String := do
+  try
+    if ← attempt.sentinel.isAssigned then
+      pure "committed"
+    else
+      pure "backtracked"
+  catch _ =>
+    pure "backtracked"
+
+private def scopedOccurrenceGroups (attempts : Array ScopedAttempt) :
+    Array (String × Array ScopedAttempt) := Id.run do
+  let mut groups : Array (String × Array ScopedAttempt) := #[]
+  for attempt in attempts do
+    match groups.findIdx? (fun group => group.1 == attempt.occurrenceId) with
+    | some index =>
+        let group := groups[index]!
+        groups := groups.set! index (group.1, group.2.push attempt)
+    | none =>
+        groups := groups.push (attempt.occurrenceId, #[attempt])
+  return groups
+
+private def scopedAggregateReport (scopeId occurrenceId : String)
+    (attempts : Array ScopedAttempt) : TacticM (Option RecordingReport) := do
+  let mut reports : Array RecordingReport := #[]
+  let mut executions : Array ExecutionReport := #[]
+  for attempt in attempts do
+    let disposition ← scopedDisposition attempt
+    let report? ← attempt.reportRef.get
+    match report? with
+    | none => pure ()
+    | some report =>
+        reports := reports.push report
+        for execution in report.executions do
+          executions := executions.push {
+            execution with
+              attemptToken := attempt.attemptToken
+              executionIndex := executions.size
+              disposition := some disposition
+          }
+  let some firstReport := reports[0]? | return none
+  if executions.isEmpty then
+    return none
+  let successful := executions.filter (·.result == "succeeded")
+  let mut aggregateEncoding : EncodingMetrics := {}
+  let mut traceLength := 0
+  let mut certificateEventCount := 0
+  let mut positionsNeeded := false
+  let mut traceAvailable := false
+  for execution in executions do
+    aggregateEncoding := addEncodingMetrics aggregateEncoding execution.encoding
+    traceLength := traceLength + execution.trace.size
+    certificateEventCount := certificateEventCount + execution.certificateEventCount
+    positionsNeeded := positionsNeeded || execution.positionsNeeded
+    traceAvailable := traceAvailable || !execution.trace.isEmpty
+  let committedSuccessful := successful.filter (·.disposition == some "committed")
+  let closesGoal := !committedSuccessful.isEmpty && committedSuccessful.all (·.closesGoal)
+  let singleSuccessful? := if successful.size == 1 then successful[0]? else none
+  let certificate := singleSuccessful?.bind (·.certificate) |>.getD ""
+  let certificateBytes := singleSuccessful?.map (·.certificateBytes) |>.getD 0
+  let encodingStatus := singleSuccessful?.map (·.encodingStatus) |>.getD
+    (if successful.size > 1 then "body_rewrite_required" else "unavailable")
+  let recordingReason := match singleSuccessful? with
+    | some execution => execution.recordingReason
+    | none => if successful.size > 1 then some "multiple_dynamic_executions" else none
+  let encodingFallbackReason := singleSuccessful?.bind (·.encodingFallbackReason)
+  let localRenames := singleSuccessful?.map (·.localRenames) |>.getD #[]
+  let validation := if successful.size == 1 then firstReport.validation else none
+  let report : RecordingReport := {
+    firstReport with
+      schemaVersion := reportSchemaVersion
+      occurrenceId
+      bodyScopeId := some scopeId
+      closesGoal
+      traceLength
+      certificateEventCount
+      positionsNeeded
+      certificateBytes
+      certificate
+      executions
+      traceAvailable
+      encodingStatus
+      recordingReason
+      /- Metrics belong to the dynamic executions.  In particular, a
+         multi-execution occurrence has no single top-level certificate, but
+         its aggregate byte/count metrics remain auditable. -/
+      encoding := aggregateEncoding
+      encodingFallbackReason
+      localRenames
+      validation
+  }
+  pure (some report)
+
+private def publishScopedFrame (scopeId : String) (frameId : Nat)
+    (reportStx : Syntax) : TacticM Unit := do
+  let some frame ← scopedRegistry.atomically do
+    let registry ← get
+    pure (registry.frames.find? (·.frameId == frameId))
+    | return
+  for group in scopedOccurrenceGroups frame.attempts do
+    let some report ← scopedAggregateReport scopeId group.1 group.2 | continue
+    logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {(toJson report).compress}"
+  leaveScopedFrame frameId
+
+private structure FirstOwnerReport where
+  ownerId : String
+  proof : String
+  proofBytes : Nat
+  closesGoal : Bool
+  deriving ToJson
+
+private def runFirstOwnerScope (ownerId : String) (body : Syntax) (reportStx : Syntax) :
+    TacticM Unit := withMainContext do
+  let main ← getMainGoal
+  let initialTarget ← instantiateMVars (← main.getType)
+  let sourceNamespace := ((← Term.getDeclName?).map (·.getPrefix)).getD Name.anonymous
+  evalTactic body
+  let goals ← getGoals
+  unless goals.isEmpty do
+    return
+  unless ← main.isAssigned do
+    return
+  let some proof ← getExprMVarAssignment? main | return
+  let proof ← instantiateMVars proof
+  let proofType ← inferType proof
+  unless ← isDefEq proofType initialTarget do
+    return
+  let some rendered ← try
+      main.withContext do
+        some <$> ProofExport.render proof (type? := some initialTarget) {
+          sourceNamespace
+        }
+    catch _ =>
+      pure none
+    | return
+  let report : FirstOwnerReport := {
+    ownerId
+    proof := rendered.valueText
+    proofBytes := rendered.valueText.utf8ByteSize
+    closesGoal := true
+  }
+  logInfoAt reportStx m!"EXPLICIT_LEAN_FIRST_OWNER_REPORT {(toJson report).compress}"
 
 private def selectorMetrics (selectors : Array ReplaySelector) : EncodingMetrics := Id.run do
   let mut nextSelectorCount := 0
@@ -2329,7 +2706,7 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
     (positionsNeeded : Bool) (encodingMetrics : EncodingMetrics)
     (encodingFallbackReason? : Option String)
     (localRenames : Array LocalRenameInfo) (closesGoal : Bool)
-    (capture? : Option (IO.Ref String) := none) : TacticM Unit := do
+    (capture? : Option (IO.Ref (Option RecordingReport)) := none) : TacticM Unit := do
   let declaration := (← Term.getDeclName?).map (·.toString) |>.getD "<unknown>"
   let originalSyntax := toString simpStx.prettyPrint
   let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
@@ -2356,9 +2733,20 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
       }
     summaries := summaries.push summary
   let execution : ExecutionReport := {
+    attemptToken := ""
     executionIndex := 0
     result := "succeeded"
     disposition := none
+    certificate := if suggestion.isEmpty then none else some suggestion
+    certificateBytes := suggestion.utf8ByteSize
+    certificateEventCount := totalCertificateEventCount
+    positionsNeeded
+    encodingStatus := if suggestion.isEmpty then "unavailable" else "validated"
+    recordingReason := if suggestion.isEmpty then some "context certificate encoding was not validated" else none
+    encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
+    encodingFallbackReason := encodingFallbackReason?
+    localRenames
+    closesGoal
     trace
     subjects := summaries
     initialState
@@ -2371,6 +2759,7 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
     schemaVersion := reportSchemaVersion
     kind := "simp_explicit.recording"
     occurrenceId
+    bodyScopeId := none
     declaration
     originalSyntax
     closesGoal
@@ -2396,10 +2785,9 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
       finalState
     }
   }
-  let payload := (toJson report).compress
   match capture? with
-  | some capture => capture.set payload
-  | none => logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {payload}"
+  | some capture => capture.set (some report)
+  | none => logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {(toJson report).compress}"
 
 private def contextCertificateText (subjects : Array ContextSubjectTrace)
     (bindings : Array GeneratedBinding) : String := Id.run do
@@ -2472,6 +2860,45 @@ private def validateContextCertificate (source : String)
   catch _ =>
     return false
 
+/-- Validate a target certificate, including an optional presentation `change`,
+    against a fresh clone of the original goal.  This is intentionally kept
+    separate from context validation: target certificates must not recreate a
+    context fingerprint from a mutated mvar. -/
+private def validateTargetCertificate (source : String)
+    (initialTarget : Expr) (initialLctx : LocalContext)
+    (initialLocalInstances : LocalInstances) (actualClosed : Bool)
+    (actualTarget : Expr) : TacticM Bool := do
+  try
+    withoutModifyingState do
+      let parsed ← match Parser.runParserCategory (← getEnv)
+          `term s!"by\n{source}" with
+        | .ok stx => pure stx
+        | .error detail =>
+            throwError m!"target certificate parse failed: {detail}"
+      let `(term| by $seq:tacticSeq) := parsed
+        | throwError "target certificate parser returned a non-tactic term"
+      let cloneExpr ← withLCtx' initialLctx do
+        mkFreshExprMVarAt initialLctx initialLocalInstances initialTarget
+          MetavarKind.syntheticOpaque
+      withLCtx' initialLctx do
+        replaceMainGoal [cloneExpr.mvarId!]
+        evalTactic seq.raw
+      let goals ← getGoals
+      let replayClosed := goals.isEmpty
+      unless replayClosed == actualClosed do
+        return false
+      if replayClosed then
+        return true
+      let some replayGoal := goals[0]? | return false
+      let replayTarget ← replayGoal.getType
+      withLCtx' initialLctx do
+        let replayState ← stateFingerprint replayTarget
+        let actualState ← stateFingerprint actualTarget
+        let same := sameStateFingerprint replayState actualState
+        return same
+  catch _ =>
+    return false
+
 private def instantiateRecordedResult (result : Simp.Result) : MetaM Simp.Result := do
   return {
     result with
@@ -2502,9 +2929,57 @@ private def instantiateRecordedState (state : RecorderState) : MetaM RecorderSta
         }
   }
 
+private def buildPresentationPlan? (target : Expr) (mvarId : MVarId)
+    (state : RecorderState) (result : Simp.Result)
+    (runPresentation : Expr → TacticM (Option (Expr × Array (Expr × Expr)))) :
+    TacticM (Option CertificatePlan) := do
+  try
+    let some (wholeCandidate, candidates) ← runPresentation target
+      | return none
+    -- The presentation pass may realize several proofless transitions before
+    -- returning its whole-goal expression.  Remove only matching proofless
+    -- semantic events; proof-bearing events with the same boundary remain
+    -- authoritative replay obligations.
+    let replayEvents := state.events.filter fun event =>
+      !candidates.any (fun candidate =>
+        Expr.equal event.input candidate.1 &&
+        Expr.equal event.result.expr candidate.2 &&
+        event.result.proof?.isNone)
+    let some candidatePlan ← buildCertificatePlan? wholeCandidate replayEvents result
+      | return none
+    let sourceNamespace := ((← Term.getDeclName?).map (·.getPrefix)).getD Name.anonymous
+    let rendered ← ProofExport.renderType wholeCandidate (config := {
+      sourceNamespace
+    })
+    -- ProofExport may use a shared `let` sequence.  Parenthesize it after
+    -- `change` so the semicolon remains inside the term rather than being
+    -- parsed as a tactic-sequence separator.
+    let renderedValueText := indentSource "  " rendered.valueText
+    let source := s!"change (\n{renderedValueText}\n)\n{candidatePlan.source}"
+    let decl ← mvarId.getDecl
+    let actualClosed ← isReflexiveResult result.expr
+    unless ← validateTargetCertificate source target decl.lctx decl.localInstances
+        actualClosed result.expr do
+      return none
+    let metrics := {
+      candidatePlan.metrics with
+        mode := "presentation_change"
+        presentationChangeCount := 1
+        totalCertificateBytes := source.utf8ByteSize
+    }
+    return some {
+      candidatePlan with
+        source
+        metrics
+        positions := candidatePlan.positions
+    }
+  catch _ =>
+    return none
+
 private def encodeRecording? (target : Expr) (mvarId : MVarId)
     (state : RecorderState) (result : Simp.Result)
-    (runAndRecord : Expr → TacticM (Simp.Result × RecorderState)) :
+    (runAndRecord : Expr → TacticM (Simp.Result × RecorderState))
+    (presentation? : Option (Expr → TacticM (Option (Expr × Array (Expr × Expr)))) := none) :
     TacticM (Option EncodingAttempt) := do
   try
     -- Premise-bearing events must go through the certificate-plan encoder so
@@ -2540,9 +3015,17 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
         tickSelectorCount
       }
     else
-      let plan? ← match (← buildCertificatePlan? target state.events result) with
-        | some plan => pure (some plan)
-        | none => buildWholeResultPlan? target result
+      -- Prefer the compact event program whenever it validates.  The
+      -- presentation pass is a bounded fallback for targets whose current
+      -- syntax cannot be replayed from the original presentation.
+      let mut plan? ← buildCertificatePlan? target state.events result
+      if plan?.isNone then
+        plan? ← match presentation? with
+          | some runPresentation =>
+              buildPresentationPlan? target mvarId state result runPresentation
+          | none => pure none
+      if plan?.isNone then
+        plan? ← buildWholeResultPlan? target result
       let some plan := plan?
         | return none
       suggestion := plan.source
@@ -2550,7 +3033,8 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
       premiseEncodingInfos := planPremiseEncodingInfos plan
       encodingMetrics := plan.metrics
       encodingFallbackReason? :=
-        if plan.metrics.mode == "whole_result_proof" then some "presentation_gap" else none
+        if plan.metrics.mode == "whole_result_proof" ||
+            plan.metrics.mode == "presentation_change" then some "presentation_gap" else none
       positionsNeeded := plan.positions
 
     -- Search a bounded certificate-program graph breadth first. A node is the
@@ -2625,7 +3109,8 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
     return none
 
 private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
-    (passive : Bool := false) (capture? : Option (IO.Ref String) := none) :
+    (passive : Bool := false)
+    (capture? : Option (IO.Ref (Option RecordingReport)) := none) :
     TacticM Unit := withMainContext do
   let initialMVarId ← getMainGoal
   let initialTarget ← instantiateMVars (← initialMVarId.getType)
@@ -2858,8 +3343,9 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
     replaceMainGoal [current]
 
 private def passiveContextSimp (simpStx reportStx : Syntax) (target : Expr)
-    (location : Location) : TacticM Unit := do
-  let reportRef ← IO.mkRef ""
+    (location : Location)
+    (capture? : Option (IO.Ref (Option RecordingReport)) := none) : TacticM Unit := do
+  let reportRef ← IO.mkRef (none : Option RecordingReport)
   let recordingError? ← try
     withoutModifyingState do
       recordContextSimp simpStx reportStx location true (some reportRef)
@@ -2868,14 +3354,18 @@ private def passiveContextSimp (simpStx reportStx : Syntax) (target : Expr)
     some <$> exceptionText ex
   match recordingError? with
   | some detail =>
-      passiveOriginalSimp simpStx reportStx target "context" detail
+      passiveOriginalSimp simpStx reportStx target "context" detail capture?
   | none =>
-      let payload ← reportRef.get
-      if payload.isEmpty then
+      let report? ← reportRef.get
+      if report?.isNone then
         passiveOriginalSimp simpStx reportStx target "context"
-          "passive context recorder produced no report"
+          "passive context recorder produced no report" capture?
       else
-        logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {payload}"
+        match capture? with
+        | some capture => capture.set report?
+        | none =>
+            let some report := report? | throwError "passive context recorder produced no report"
+            logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {(toJson report).compress}"
         try
           evalSimp simpStx
         catch ex =>
@@ -2883,7 +3373,7 @@ private def passiveContextSimp (simpStx reportStx : Syntax) (target : Expr)
           try
             emitRecordingReport simpStx reportStx target {} none "" false
               (some "context_original_failure") (some detail) none false "unavailable"
-              (some detail)
+              (some detail) (capture? := capture?)
           catch _ => pure ()
           throw ex
 
@@ -2893,19 +3383,30 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   let mvarId ← getMainGoal
   let target ← instantiateMVars (← mvarId.getType)
   let passive := explicitLean.simpExplicit.passive.get (← getOptions)
+  let scopedAttempt? ← if passive then beginScopedAttempt? else pure none
+  let scopedCapture? := scopedAttempt?.map (·.reportRef)
+  let runScoped := fun (action : TacticM Unit) => do
+    action
+    if let some attempt := scopedAttempt? then
+      commitScopedAttempt attempt
   if !simpStx[1][0].isNone then
     if passive then
-      return ← passiveOriginalSimp simpStx reportStx target "recording" "passive recorder preserves nondefault simp configuration through the original tactic"
+      return ← runScoped (passiveOriginalSimp simpStx reportStx target "recording"
+        "passive recorder preserves nondefault simp configuration through the original tactic"
+        scopedCapture?)
     else
       throwErrorAt simpStx[1] "simp_explicit? does not yet encode nondefault simp configuration"
   if !simpStx[2].isNone then
     if passive then
-      return ← passiveOriginalSimp simpStx reportStx target "premise" "passive recorder preserves custom dischargers through the original tactic"
+      return ← runScoped (passiveOriginalSimp simpStx reportStx target "premise"
+        "passive recorder preserves custom dischargers through the original tactic"
+        scopedCapture?)
     else
       throwErrorAt simpStx[2] "simp_explicit? does not yet encode a custom discharger"
   if !simpStx[5].isNone then
     if passive then
-      return ← passiveContextSimp simpStx reportStx target (expandLocation simpStx[5][0])
+      return ← runScoped (passiveContextSimp simpStx reportStx target
+        (expandLocation simpStx[5][0]) scopedCapture?)
     else
       return ← recordContextSimp simpStx reportStx (expandLocation simpStx[5][0])
   let context? ← try
@@ -2913,7 +3414,8 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   catch ex =>
     if passive then
       let detail ← exceptionText ex
-      return ← passiveOriginalSimp simpStx reportStx target "recording" detail
+      return ← runScoped (passiveOriginalSimp simpStx reportStx target "recording" detail
+        scopedCapture?)
     else
       throw ex
   let some { ctx, simprocs, dischargeWrapper, .. } := context?
@@ -2931,21 +3433,25 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   catch ex =>
     if passive then
       let detail ← exceptionText ex
-      return ← passiveOriginalSimp simpStx reportStx target "recording" detail
+      return ← runScoped (passiveOriginalSimp simpStx reportStx target "recording" detail
+        scopedCapture?)
     else
       throw ex
   let some (result, state) := recording?
     | throwError "simp_explicit recorder did not return a simplifier result"
+  let presentationRunner := some (fun (input : Expr) =>
+    presentationCandidate? input ctx simprocs state.events)
   let mut localRenames : Array LocalRenamePlan := #[]
   let mut reportLctx? : Option LocalContext := none
   let mut attempt? ← encodeRecording? target mvarId state result runAndRecord
+    presentationRunner
   if attempt?.isNone then
     let renamePlan ← localRenamePlan (← mvarId.getDecl).lctx
     if !renamePlan.isEmpty then
       let mvarDecl ← mvarId.getDecl
       let renamedLctx := renamedLocalContext mvarDecl.lctx renamePlan
       let renamedAttempt? ← withLCtx' renamedLctx do
-        encodeRecording? target mvarId state result runAndRecord
+        encodeRecording? target mvarId state result runAndRecord presentationRunner
       if let some renamedAttempt := renamedAttempt? then
         localRenames := renamePlan
         reportLctx? := some renamedLctx
@@ -2980,16 +3486,18 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
               target MetavarKind.syntheticOpaque
             let speculativeMVarId := speculativeExpr.mvarId!
             let (speculativeResult, speculativeState) ← renamedRunAndRecord target
+            let renamedPresentationRunner := some (fun (input : Expr) =>
+              presentationCandidate? input renamedCtx renamedSimprocs speculativeState.events)
             encodeRecording? target speculativeMVarId speculativeState
-              speculativeResult renamedRunAndRecord
+              speculativeResult renamedRunAndRecord renamedPresentationRunner
         if let some speculativeAttempt := speculativeAttempt? then
           localRenames := renamePlan
           reportLctx? := some renamedLctx
           attempt? := some speculativeAttempt
   let some attempt := attempt?
     | if passive then
-        return ← passiveOriginalSimp simpStx reportStx target "recording"
-          "proof-result fallback could not be validated"
+        return ← runScoped (passiveOriginalSimp simpStx reportStx target "recording"
+          "proof-result fallback could not be validated" scopedCapture?)
       else
         throwErrorAt reportStx "simp_explicit recorder cannot encode this simplification as a deterministic replay"
   let suggestion := localRenamePrefix localRenames ++ attempt.suggestion
@@ -3018,6 +3526,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
               (encodingMetrics := encodingMetrics)
               (encodingFallbackReason? := encodingFallbackReason?)
               (localRenames := localRenameInfos localRenames)
+              (capture? := scopedCapture?)
       | none =>
           emitRecordingReport simpStx reportStx target state (some result) suggestion
             positionsNeeded failureCategory? none none
@@ -3027,6 +3536,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
             (encodingMetrics := encodingMetrics)
             (encodingFallbackReason? := encodingFallbackReason?)
             (localRenames := localRenameInfos localRenames)
+            (capture? := scopedCapture?)
     if passive then
       try
         emitReport ()
@@ -3038,12 +3548,33 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
     logInfoAt reportStx m!"Try this deterministic replay:\n{suggestion}"
   mvarId.withContext do
     applyResultToTarget mvarId target result
+  if let some attempt := scopedAttempt? then
+    commitScopedAttempt attempt
+
+private def runBodyScope (scopeId : String) (body : Syntax) (reportStx : Syntax) :
+    TacticM Unit := do
+  let frameId ← enterScopedFrame scopeId
+  try
+    withOptions (·.set `explicitLean.simpExplicit.bodyScopeFrame frameId) do
+      evalTactic body
+    publishScopedFrame scopeId frameId reportStx
+  catch ex =>
+    leaveScopedFrame frameId
+    throw ex
 
 end SimpExplicit
 
 open SimpExplicit
 
 elab_rules : tactic
+  | `(tactic| simp_explicit_body_scope $scope:str in $body:tacticSeq) => do
+      let some scopeId := scope.raw.isStrLit?
+        | throwErrorAt scope "body scope id must be a string literal"
+      runBodyScope scopeId body.raw (← getRef)
+  | `(tactic| simp_explicit_first_scope $owner:str in $body:tacticSeq) => do
+      let some ownerId := owner.raw.isStrLit?
+        | throwErrorAt owner "first owner id must be a string literal"
+      runFirstOwnerScope ownerId body.raw (← getRef)
   | `(tactic| simp_explicit? $args:simpExplicitTraceArgs) => do
       let inner := mkNode ``Lean.Parser.Tactic.simp #[
         mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]

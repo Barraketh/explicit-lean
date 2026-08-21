@@ -87,13 +87,19 @@ def main() -> None:
     for report in passive["reports"]:
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected recording schema: {report!r}")
-        if report.get("schemaVersion") != 5:
+        if report.get("schemaVersion") != 6:
             raise RuntimeError(f"unexpected recording schema version: {report!r}")
+        if not isinstance(report.get("bodyScopeId"), str) or not report["bodyScopeId"]:
+            raise RuntimeError(f"passive report is missing body-scope ownership: {report!r}")
         if report.get("terminalOutcome") is not None:
             raise RuntimeError(
                 "passive reports must not infer terminal outcomes: " f"{report!r}"
             )
         for execution in report.get("executions", []):
+            if not execution.get("attemptToken"):
+                raise RuntimeError(f"passive execution is missing an attempt token: {report!r}")
+            if execution.get("disposition") not in {"committed", "backtracked"}:
+                raise RuntimeError(f"passive execution has no scoped disposition: {report!r}")
             for event in execution.get("trace", []):
                 if len(event.get("origins", [])) > 1:
                     multiple_origins += 1
@@ -150,6 +156,13 @@ def main() -> None:
                 or "generated_proof" not in kinds
             ):
                 raise RuntimeError(f"invalid Package B event encoding: {trial!r}")
+        elif encoding.get("mode") == "presentation_change":
+            if (
+                trial.get("encoding_fallback_reason") != "presentation_gap"
+                or encoding.get("presentationChangeCount") != 1
+                or encoding.get("wholeResultProofCount", 0) != 0
+            ):
+                raise RuntimeError(f"invalid Package B presentation encoding: {trial!r}")
         else:
             raise RuntimeError(f"unknown Package B encoding mode: {trial!r}")
     package_b_aggregate = coverage.aggregate_module(
@@ -179,17 +192,26 @@ def main() -> None:
         if trial.get("local_renames") != []:
             raise RuntimeError(f"Package C ordinary encoding renamed locals: {trial!r}")
         encoding = trial.get("encoding") or {}
-        # These four old premise-classified occurrences also have an earlier
-        # source-level definition unfolding that is not a semantic event. The
-        # event encoder deliberately defers that presentation gap to Package
-        # F; retain the premise provenance and compile-verify the current
-        # whole-result fallback here.
-        if (
-            encoding.get("mode") != "whole_result_proof"
-            or trial.get("encoding_fallback_reason") != "presentation_gap"
-            or encoding.get("wholeResultProofCount") != 1
-        ):
-            raise RuntimeError(f"Package C presentation-gap encoding changed: {trial!r}")
+        # The premise-bearing cases may now use either a compact event
+        # certificate or the bounded presentation-change prepass.  A
+        # whole-result presentation-gap fallback is no longer accepted for
+        # this Package F gate.
+        mode = encoding.get("mode")
+        if mode == "event":
+            if (
+                trial.get("encoding_fallback_reason") is not None
+                or encoding.get("wholeResultProofCount", 0) != 0
+            ):
+                raise RuntimeError(f"Package C event encoding changed: {trial!r}")
+        elif mode == "presentation_change":
+            if (
+                trial.get("encoding_fallback_reason") != "presentation_gap"
+                or encoding.get("presentationChangeCount") != 1
+                or encoding.get("wholeResultProofCount", 0) != 0
+            ):
+                raise RuntimeError(f"Package C presentation encoding changed: {trial!r}")
+        else:
+            raise RuntimeError(f"Package C retained a presentation-gap fallback: {trial!r}")
         if trial.get("premise_event_count") != 1:
             raise RuntimeError(f"Package C did not retain one premise-bearing event: {trial!r}")
         if trial.get("premise_event_outer_origin_kinds") != [["decl"]]:
@@ -233,39 +255,73 @@ def main() -> None:
             raise RuntimeError(f"Package D ordinary encoding renamed locals: {trial!r}")
         if trial.get("recording_schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"Package D recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 5:
+        if trial.get("recording_schema_version") != 6:
             raise RuntimeError(f"Package D recording schema version changed: {trial!r}")
         if trial.get("trace_length", 0) <= 0:
             raise RuntimeError(f"Package D presentation trace was not retained: {trial!r}")
         encoding = trial.get("encoding") or {}
         if (
-            encoding.get("mode") != "whole_result_proof"
+            encoding.get("mode") != "presentation_change"
             or trial.get("encoding_fallback_reason") != "presentation_gap"
-            or encoding.get("wholeResultProofCount") != 1
+            or encoding.get("presentationChangeCount") != 1
+            or encoding.get("wholeResultProofCount", 0) != 0
         ):
-            raise RuntimeError(f"Package D presentation-gap encoding changed: {trial!r}")
+            raise RuntimeError(f"Package D presentation-change encoding changed: {trial!r}")
         selector_counts = {
             key: encoding.get(key)
             for key in ("nextSelectorCount", "matchSelectorCount", "tickSelectorCount")
         }
         if any(not isinstance(value, int) or value < 0 for value in selector_counts.values()):
             raise RuntimeError(f"Package D selector metrics were not schema-consistent: {trial!r}")
-        if any(value != 0 for value in selector_counts.values()):
+        selector_kinds = trial.get("trace_selector_kinds") or []
+        observed_selector_counts = {
+            "nextSelectorCount": selector_kinds.count("next"),
+            "matchSelectorCount": selector_kinds.count("match"),
+            "tickSelectorCount": selector_kinds.count("tick"),
+        }
+        if selector_counts != observed_selector_counts:
             raise RuntimeError(
-                "Package D whole-result fallback falsely claims an event selector: "
-                f"{trial!r}"
+                f"Package D selector metrics disagree with the trace: {trial!r}"
             )
+        if selector_counts["tickSelectorCount"] != 0:
+            raise RuntimeError(f"Package D presentation replay emitted a tick: {trial!r}")
         if trial.get("positions_needed"):
-            raise RuntimeError(f"Package D whole-result fallback emitted an absolute tick: {trial!r}")
-        if trial.get("trace_selector_kinds") != [None] * trial["trace_length"]:
-            raise RuntimeError(f"Package D trace selector kinds were not nullable: {trial!r}")
-        if trial.get("trace_selector_values") != [None] * trial["trace_length"]:
-            raise RuntimeError(f"Package D trace selector values were not nullable: {trial!r}")
+            raise RuntimeError(f"Package D presentation replay emitted an absolute tick: {trial!r}")
+        if len(selector_kinds) != trial["trace_length"]:
+            raise RuntimeError(f"Package D trace selector kinds changed length: {trial!r}")
+        selector_values = trial.get("trace_selector_values") or []
+        if len(selector_values) != trial["trace_length"]:
+            raise RuntimeError(f"Package D trace selector values changed length: {trial!r}")
+        if any(value is not None for value in selector_values):
+            raise RuntimeError(f"Package D next selectors unexpectedly carry values: {trial!r}")
     package_d_aggregate = coverage.aggregate_module(
         modules[0], package_d_entries, package_d_results, timeout=180
     )
     if not package_d_aggregate["compile"]:
         raise RuntimeError(f"Package D aggregate module failed: {package_d_aggregate!r}")
+
+    presentation_ids = package_c_ids + package_d_ids
+    presentation_results = {**package_c_results, **package_d_results}
+    presentation_aggregate = coverage.aggregate_module(
+        modules[0],
+        [*package_c_entries, *package_d_entries],
+        presentation_results,
+        timeout=180,
+    )
+    if not presentation_aggregate["compile"]:
+        raise RuntimeError(
+            f"Package F3 ten-ID presentation aggregate failed: {presentation_aggregate!r}"
+        )
+    for identifier in presentation_ids:
+        trial = presentation_results[identifier]
+        mode = (trial.get("encoding") or {}).get("mode")
+        if mode == "whole_result_proof":
+            raise RuntimeError(f"Package F3 retained whole-result fallback: {trial!r}")
+        if mode == "presentation_change":
+            if (trial.get("encoding") or {}).get("presentationChangeCount") != 1:
+                raise RuntimeError(f"Package F3 change metric missing: {trial!r}")
+        elif mode != "event":
+            raise RuntimeError(f"Package F3 emitted unknown compact mode: {trial!r}")
 
     package_e_ids = [
         "f3d6dce9ae772ce2",
@@ -285,7 +341,7 @@ def main() -> None:
             raise RuntimeError(f"Package E isolated materialization failed: {trial!r}")
         if trial.get("recording_schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"Package E recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 5:
+        if trial.get("recording_schema_version") != 6:
             raise RuntimeError(f"Package E recording schema version changed: {trial!r}")
         if trial.get("trace_length", 0) <= 0:
             raise RuntimeError(f"Package E trace was not retained: {trial!r}")
@@ -300,11 +356,12 @@ def main() -> None:
             raise RuntimeError(f"Package E certificate omitted its rename prefix: {trial!r}")
         encoding = trial.get("encoding") or {}
         if (
-            encoding.get("mode") != "whole_result_proof"
-            or trial.get("encoding_fallback_reason") != "presentation_gap"
-            or encoding.get("wholeResultProofCount") != 1
+            encoding.get("mode") != "event"
+            or trial.get("encoding_fallback_reason") is not None
+            or encoding.get("wholeResultProofCount", 0) != 0
+            or encoding.get("namedRuleEvents", 0) == 0
         ):
-            raise RuntimeError(f"Package E encoding mode changed: {trial!r}")
+            raise RuntimeError(f"Package E compact event encoding changed: {trial!r}")
         metadata_text = json.dumps(trial.get("local_renames"), ensure_ascii=False)
         if any(
             marker in metadata_text

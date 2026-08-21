@@ -725,10 +725,30 @@ passive compile, and the complete `Experiment/run.sh` regression passes.
 
 ### F. Enclosing-body and multi-goal rewriting
 
+Status: implemented on 2026-08-21.
+
 - Store all dynamic executions for one source occurrence.
 - Distinguish committed, failed, and backtracked attempts.
 - Expand common tactic combinators into explicit branches.
 - Add smallest-fragment proof export and presentation-change fallbacks.
+
+Schema v6 assigns attempt tokens inside rollback-aware body scopes and
+classifies each successful execution as committed or backtracked. Syntax
+inventory records exact owners for `<;>`, `all_goals`, `repeat`, `repeat'`, and
+`first`; the materializer expands shared committed executions into explicit
+bullets and reports terminal outcomes for unreached, backtracked-only, and
+originally failing occurrences. A closed `first` owner can export its exact
+input-goal assignment as the smallest enclosing `exact` proof, without
+straightening an outer tactic body.
+
+The encoder also performs one bounded presentation-only simplifier pass. It
+removes recorded proof-bearing theorem origins from the original context,
+rolls back rejected proof-bearing method results, requires a structurally
+different but definitionally equal whole-goal candidate, and validates the
+complete parenthesized `change` plus event program on a fresh clone. Named
+events under traversal binders are constructed without an invalid event-local
+context check, but are accepted only after complete ordered replay and
+fresh-source validation succeed.
 
 Gate: fixtures cover `<;>`, `all_goals`, a repeated occurrence, a backtracking
 branch, and the `DropRight` zero-event presentation failure. It also
@@ -741,6 +761,15 @@ presentation-gap gate also closes compact event programs for
 with `bdfebd4de6e5f543`, `f578fdc66fc0399a`, `e72c0cbdffdb90b1`,
 `7a1c618c3a39b1cb`, `3acd3e1c76ad7f24`, and `e0e91bd09649e027`, whose
 selector layer was completed in Package D.
+
+The gate passes. The three shared `DropRight` owners compile in isolation and
+together after explicit branch expansion. Of the ten deferred presentation
+sites, eight compile with `presentation_change` programs and two with direct
+event programs; none retains a whole-result fallback. The two Package E
+inaccessible-local sites also now compile as renamed event programs. Focused
+fixtures cover all required combinators and terminal classifications, and a
+mutation check rejects a changed smallest-owner proof. The bounded one-compile
+recording regression and the complete `Experiment/run.sh` regression pass.
 
 ### G. Corpus closure
 
