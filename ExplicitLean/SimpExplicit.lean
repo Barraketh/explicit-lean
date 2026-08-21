@@ -33,6 +33,10 @@ syntax "at" ident " => " "[" simpExplicitEvent,* "]" : simpExplicitContextGroup
 
 /-- Replay an ordered simplifier certificate without consulting the simp set. -/
 syntax (name := simpExplicit) "simp_explicit" " [" simpExplicitEvent,* "]" : tactic
+/-- Replay an ordered certificate while preserving a reflexive final goal for
+the following tactic, matching an ordinary `simp` call that did not close. -/
+syntax (name := simpExplicitLeaveOpen) "simp_explicit" " leave_open" " ["
+  simpExplicitEvent,* "]" : tactic
 /-- Replay independent closed certificates against selected local declarations and
 the target, using the same batch staging semantics as `simp at ...`. -/
 syntax (name := simpExplicitContext) "simp_explicit_context" " [" simpExplicitContextGroup,* "]" : tactic
@@ -77,7 +81,7 @@ register_option explicitLean.simpExplicit.bodyScopeFrame : Nat := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 6
+def reportSchemaVersion : Nat := 7
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -510,10 +514,6 @@ private def ruleText (origin : Origin) : MetaM String := do
   | .other name =>
       throwError "simp_explicit cannot yet encode special simp rule '{name}'"
 
-private def isReflexiveClosure : Origin → Bool
-  | .decl name _ _ => name == ``eq_self || name == ``iff_self
-  | _ => false
-
 private inductive ReplaySelector where
   | next
   | matchSite (ordinal : Nat)
@@ -542,6 +542,10 @@ private def selectorSource : ReplaySelector → String
   | .matchSite ordinal => s!"match {ordinal} => "
   | .tickPos position => s!"tick {position} => "
   | .discover .. => ""
+
+private def isReflexiveClosure : Origin → Bool
+  | .decl name _ _ => name == ``eq_self || name == ``iff_self
+  | _ => false
 
 private def certificateEventCount (events : Array RecordedEvent) : Nat := Id.run do
   let mut eventCount := events.size
@@ -580,11 +584,12 @@ private def certificateEventListText (events : Array RecordedEvent)
   return String.intercalate "\n" lines.toList
 
 private def certificateText (events : Array RecordedEvent)
-    (selectors : Array ReplaySelector := #[]) : MetaM String := do
-  return "simp_explicit " ++ (← certificateEventListText events selectors)
+    (selectors : Array ReplaySelector := #[]) (leaveOpen := false) : MetaM String := do
+  let command := if leaveOpen then "simp_explicit leave_open " else "simp_explicit "
+  return command ++ (← certificateEventListText events selectors)
 
 private def applyResultToTarget (mvarId : MVarId) (target : Expr)
-    (result : Simp.Result) : TacticM Unit := do
+    (result : Simp.Result) (closeReflexive := true) : TacticM Unit := do
   if result.expr.isTrue then
     let proof ← match result.proof? with
       | some equality => mkOfEqTrue equality
@@ -594,13 +599,13 @@ private def applyResultToTarget (mvarId : MVarId) (target : Expr)
   else
     let mvarId ← applySimpResultToTarget mvarId target result
     let simplifiedTarget ← instantiateMVars (← mvarId.getType)
-    if simplifiedTarget.isAppOfArity ``Eq 3 then
+    if closeReflexive && simplifiedTarget.isAppOfArity ``Eq 3 then
       try
         mvarId.refl
         replaceMainGoal []
         return
       catch _ => pure ()
-    else if simplifiedTarget.isAppOfArity ``Iff 2 then
+    else if closeReflexive && simplifiedTarget.isAppOfArity ``Iff 2 then
       let lhs := simplifiedTarget.appFn!.appArg!
       let rhs := simplifiedTarget.appArg!
       if (← isDefEq lhs rhs) then
@@ -1288,23 +1293,25 @@ private def certificatePlanEventListText (events : Array EncodedEvent) : String 
     return String.intercalate "\n" lines.toList
 
 private def certificatePlanText (events : Array EncodedEvent)
-    (bindings : Array GeneratedBinding) : String :=
+    (bindings : Array GeneratedBinding) (leaveOpen := false) : String :=
   Id.run do
     let mut lines := #[]
     for binding in bindings do
       lines := lines.push s!"have {binding.name} : {indentSource "  " binding.typeText} :="
       lines := lines.push s!"  {indentSource "  " binding.proofText}"
     let eventList := certificatePlanEventListText events
+    let command := if leaveOpen then "simp_explicit leave_open " else "simp_explicit "
     if bindings.isEmpty then
-      return "simp_explicit " ++ eventList
-    lines := lines.push s!"simp_explicit {eventList}"
+      return command ++ eventList
+    lines := lines.push (command ++ eventList)
     return String.intercalate "\n" lines.toList
 
-private def wholeResultPlanText (binding : GeneratedBinding) : String :=
+private def wholeResultPlanText (binding : GeneratedBinding) (leaveOpen := false) : String :=
   let declaration :=
     s!"have {binding.name} : {indentSource "  " binding.typeText} :="
   let proof := s!"  {indentSource "  " binding.proofText}"
-  let replay := s!"simp_explicit [↓ {binding.name}]"
+  let command := if leaveOpen then "simp_explicit leave_open" else "simp_explicit"
+  let replay := s!"{command} [↓ {binding.name}]"
   String.intercalate "\n" [declaration, proof, replay]
 
 private inductive CertificateSelectorMode where
@@ -1325,8 +1332,6 @@ private def buildEncodedEvents? (recorded : Array RecordedEvent)
     -- Keep the trailing reflexive closure in generated plans: unlike the
     -- compact certificate count, materialized proof bodies need the explicit
     -- closure to finish the rewritten target.
-    -- `recorded.size` intentionally differs from `certificateEventCount`:
-    -- materialized plans retain the final reflexive closure.
     let count := recorded.size
     let mut encoded := #[]
     let mut bindings := #[]
@@ -1449,7 +1454,9 @@ private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEven
     let some selected ← selectCertificateEvents? target searchedResult baseEncoded mode
       | continue
     let encoded := annotateSelectorInfo selected
-    let source := certificatePlanText encoded bindings
+    let leaveOpen ← if searchedResult.expr.isTrue then pure false else
+      isReflexiveResultEarly searchedResult.expr
+    let source := certificatePlanText encoded bindings leaveOpen
     let namedRuleEvents := encoded.foldl (fun n event =>
       if event.info.kind == "named_rule" then n + 1 else n) 0
     let generatedProofEvents := encoded.foldl (fun n event =>
@@ -1538,7 +1545,9 @@ private def buildWholeResultPlan? (target : Expr) (searchedResult : Simp.Result)
       isDefEq searchedResult.expr replayedResult.expr
     unless reachesResult do
       return none
-    let source := wholeResultPlanText binding
+    let leaveOpen ← if searchedResult.expr.isTrue then pure false else
+      isReflexiveResultEarly searchedResult.expr
+    let source := wholeResultPlanText binding leaveOpen
     return some {
       events := #[]
       bindings := #[binding]
@@ -1555,7 +1564,7 @@ private def buildWholeResultPlan? (target : Expr) (searchedResult : Simp.Result)
   catch _ =>
     return none
 
-private def replaySimp (eventSyntax : Array Syntax) : TacticM Unit := withMainContext do
+private def replaySimp (eventSyntax : Array Syntax) (closeReflexive := true) : TacticM Unit := withMainContext do
   let events ← eventSyntax.mapM elaborateEvent
   let mut previousTick? : Option Nat := none
   for event in events do
@@ -1588,7 +1597,7 @@ private def replaySimp (eventSyntax : Array Syntax) : TacticM Unit := withMainCo
             throwErrorAt event.source "internal simp_explicit selector discovery leaked into source replay"
     | none =>
         throwError "simp_explicit replay cursor is inconsistent"
-  applyResultToTarget mvarId target result
+  applyResultToTarget mvarId target result closeReflexive
 
 private def isReflexiveResult (expr : Expr) : MetaM Bool := do
   if expr.isTrue then
@@ -1878,10 +1887,9 @@ private def replayEncoding? (target : Expr) (recorded : Array RecordedEvent)
     return some ticks
   return none
 
-/- Context subjects must retain a trailing reflexive-closure event.  The target
-   certificate intentionally omits `eq_self`/`iff_self` from its printed event
-   count, but dropping that event from a local declaration changes the
-   declaration's final type (`n = n` versus `True`). -/
+/- Context subjects must retain a trailing reflexive-closure event.  Target
+   certificates may omit it because their close-versus-leave-open behavior is
+   explicit in the replay command. -/
 private def contextRecordedReplayEvents (recorded : Array RecordedEvent)
     (selectors : Array ReplaySelector) : TacticM (Option (Array ReplayEvent)) := do
   if selectors.size != recorded.size then
@@ -2130,7 +2138,7 @@ private def executionReport (target : Expr) (result : Simp.Result)
     subject := targetSubject
     initial := ← exprFingerprint target
     result := ← exprFingerprint result.expr
-    closesGoal := ← isReflexiveResultEarly result.expr
+    closesGoal := result.expr.isTrue
     eventCount := state.events.size
     transport := none
   }
@@ -2149,7 +2157,7 @@ private def executionReport (target : Expr) (result : Simp.Result)
     encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
     encodingFallbackReason := encodingFallbackReason?
     localRenames
-    closesGoal := ← isReflexiveResultEarly result.expr
+    closesGoal := result.expr.isTrue
     trace := ← state.events.mapIdxM fun index event =>
       semanticEventReport event encodings[index]? (premiseEncodings[index]?.getD #[])
         targetSubject
@@ -2232,7 +2240,7 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
   let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
   let (closesGoal, finalTarget, executions) ← match result? with
     | some result =>
-        let closesGoal ← isReflexiveResult result.expr
+        let closesGoal := result.expr.isTrue
         let execution ← executionReport target result state 0 failureCategory? failureMessage?
           encodings premiseEncodings (suggestion := suggestion)
             (positionsNeeded := positionsNeeded) (encodingStatus := encodingStatus)
@@ -2957,7 +2965,7 @@ private def buildPresentationPlan? (target : Expr) (mvarId : MVarId)
     let renderedValueText := indentSource "  " rendered.valueText
     let source := s!"change (\n{renderedValueText}\n)\n{candidatePlan.source}"
     let decl ← mvarId.getDecl
-    let actualClosed ← isReflexiveResult result.expr
+    let actualClosed := result.expr.isTrue
     unless ← validateTargetCertificate source target decl.lctx decl.localInstances
         actualClosed result.expr do
       return none
@@ -2990,7 +2998,7 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
     -- empty program: `simp_explicit []` would leave the authored target
     -- unchanged even though the following tactic body observes the unfolded
     -- result.
-    let actualClosed ← isReflexiveResult result.expr
+    let actualClosed := result.expr.isTrue
     let needsPresentation :=
       state.events.isEmpty && !actualClosed && !Expr.equal target result.expr
     let flatEncoding? ← if needsPresentation || state.events.any (·.premises.size > 0) then
@@ -3004,7 +3012,8 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
     let mut encodingFallbackReason? : Option String := none
     let mut positionsNeeded := flatEncoding?.getD #[] |>.any isTickSelector
     if let some flatSelectors := flatEncoding? then
-      suggestion := ← certificateText state.events flatSelectors
+      let leaveOpen ← if actualClosed then pure false else isReflexiveResult result.expr
+      suggestion := ← certificateText state.events flatSelectors leaveOpen
       encodingInfos := namedEncodingInfos state.events flatSelectors
       premiseEncodingInfos := state.events.map (fun _ => #[])
       let mut nextSelectorCount := 0
@@ -3059,7 +3068,7 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
         let mut nextFrontier := #[]
         for (input, previousPhases) in frontier do
           let (nodeResult, nodeState) ← runAndRecord input
-          let closes ← isReflexiveResult nodeResult.expr
+          let closes := nodeResult.expr.isTrue
           let reachesResult ← if closes then pure true else if result.expr.isTrue then
             pure false
           else
@@ -3068,8 +3077,10 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
             if let some selectors ← replayEncoding? input nodeState.events nodeResult then
               let mut phases := previousPhases
               if certificateEventCount nodeState.events > 0 then
+                let leaveOpen ← if nodeResult.expr.isTrue then pure false else
+                  isReflexiveResult nodeResult.expr
                 phases := phases.push
-                  (← certificateText nodeState.events selectors)
+                  (← certificateText nodeState.events selectors leaveOpen)
               let candidate := joinCertificatePhases phases
               if !candidate.isEmpty &&
                   (suggestion.isEmpty || candidate.utf8ByteSize < suggestion.utf8ByteSize) then
@@ -3085,15 +3096,17 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
                   let some (prefixResult, prefixSelectors) ← replayRecorded? input prefixEvents
                     | return none
                   -- A replay phase would close the goal before the normalizer ran.
-                  if prefixCount > 0 && (← isReflexiveResult prefixResult.expr) then
+                  if prefixCount > 0 && prefixResult.expr.isTrue then
                     return none
                   let normalized ← Normalize.categoryTarget mvarId prefixResult.expr
                   if Expr.equal prefixResult.expr normalized.expr then
                     return none
                   let mut phases := previousPhases
                   if prefixCount > 0 then
+                    let leaveOpen ← if prefixResult.expr.isTrue then pure false else
+                      isReflexiveResult prefixResult.expr
                     phases := phases.push
-                      (← certificateText prefixEvents prefixSelectors)
+                      (← certificateText prefixEvents prefixSelectors leaveOpen)
                   phases := phases.push "normalize_category"
                   return some (normalized.expr, phases, ← isReflexiveResult normalized.expr)
               catch _ =>
@@ -3558,7 +3571,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   unless passive do
     logInfoAt reportStx m!"Try this deterministic replay:\n{suggestion}"
   mvarId.withContext do
-    applyResultToTarget mvarId target result
+    applyResultToTarget mvarId target result (closeReflexive := result.expr.isTrue)
   if let some attempt := scopedAttempt? then
     commitScopedAttempt attempt
 
@@ -3592,6 +3605,8 @@ elab_rules : tactic
       recordSimp inner (← getRef)
   | `(tactic| simp_explicit [$events:simpExplicitEvent,*]) =>
       replaySimp (events.getElems.map (·.raw))
+  | `(tactic| simp_explicit leave_open [$events:simpExplicitEvent,*]) =>
+      replaySimp (events.getElems.map (·.raw)) (closeReflexive := false)
   | `(tactic| simp_explicit_context [$groups:simpExplicitContextGroup,*]) =>
       replayContext (groups.getElems.map (·.raw))
 

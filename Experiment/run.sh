@@ -26,6 +26,7 @@ python3 Experiment/check_context_record.py
 python3 Experiment/check_context_passive.py
 python3 Experiment/check_context_locations.py
 python3 Experiment/check_body_scopes.py
+python3 Experiment/check_simp_final_state.py
 python3 Experiment/check_body_materialization.py
 python3 Experiment/check_first_owner.py
 python3 Experiment/check_closure.py

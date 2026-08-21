@@ -93,7 +93,7 @@ def main() -> None:
     for report in passive["reports"]:
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected recording schema: {report!r}")
-        if report.get("schemaVersion") != 6:
+        if report.get("schemaVersion") != 7:
             raise RuntimeError(f"unexpected recording schema version: {report!r}")
         if not isinstance(report.get("bodyScopeId"), str) or not report["bodyScopeId"]:
             raise RuntimeError(f"passive report is missing body-scope ownership: {report!r}")
@@ -285,7 +285,7 @@ def main() -> None:
             raise RuntimeError(f"Package D ordinary encoding renamed locals: {trial!r}")
         if trial.get("recording_schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"Package D recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 6:
+        if trial.get("recording_schema_version") != 7:
             raise RuntimeError(f"Package D recording schema version changed: {trial!r}")
         if trial.get("trace_length", 0) <= 0:
             raise RuntimeError(f"Package D presentation trace was not retained: {trial!r}")
@@ -371,7 +371,7 @@ def main() -> None:
             raise RuntimeError(f"Package E isolated materialization failed: {trial!r}")
         if trial.get("recording_schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"Package E recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 6:
+        if trial.get("recording_schema_version") != 7:
             raise RuntimeError(f"Package E recording schema version changed: {trial!r}")
         if trial.get("trace_length", 0) <= 0:
             raise RuntimeError(f"Package E trace was not retained: {trial!r}")

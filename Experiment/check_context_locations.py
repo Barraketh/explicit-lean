@@ -85,8 +85,8 @@ def main() -> None:
         [("local", "IH"), ("local", "h_explicit_1"), ("target", "target")],
     ]
     for index, (report, expected) in enumerate(zip(reports, expected_subjects)):
-        if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != 6:
-            raise RuntimeError(f"report {index} is not schema-v6: {report!r}")
+        if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != 7:
+            raise RuntimeError(f"report {index} is not schema-v7: {report!r}")
         check_subjects(report, expected)
         certificate = report.get("certificate", "")
         if "at *" in certificate or "simp_explicit_context" not in certificate:

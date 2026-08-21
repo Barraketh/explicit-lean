@@ -316,6 +316,19 @@ The printer omits a selector when ordinary ordered replay validates. It prefers
 `match` over `tick`, and uses `tick` only when the structural selector cannot
 distinguish the recorded event.
 
+When the recorded simplifier leaves a definitionally reflexive target open for
+the following tactic, generated source spells that final-state choice rather
+than silently applying `rfl`:
+
+```lean
+simp_explicit leave_open [rule_1, rule_2]
+```
+
+Ordinary `simp_explicit [...]` retains its compatibility behavior of closing a
+reflexive final target. The recorder selects `leave_open` only when the
+original `simp` execution itself did not close, and full-state validation
+checks the resulting open target before materialization.
+
 Generated proof bindings appear immediately before the certificate in the
 smallest source scope containing all uses:
 

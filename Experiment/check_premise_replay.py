@@ -33,7 +33,7 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected premise report schema: {report!r}")
-    if report.get("schemaVersion") != 6:
+    if report.get("schemaVersion") != 7:
         raise RuntimeError(f"unexpected premise report version: {report!r}")
     if report.get("localRenames") != []:
         raise RuntimeError(f"ordinary premise encoding unexpectedly renamed locals: {report!r}")
