@@ -93,7 +93,7 @@ def main() -> None:
     for report in passive["reports"]:
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected recording schema: {report!r}")
-        if report.get("schemaVersion") != 7:
+        if report.get("schemaVersion") != 8:
             raise RuntimeError(f"unexpected recording schema version: {report!r}")
         if not isinstance(report.get("bodyScopeId"), str) or not report["bodyScopeId"]:
             raise RuntimeError(f"passive report is missing body-scope ownership: {report!r}")
@@ -285,7 +285,7 @@ def main() -> None:
             raise RuntimeError(f"Package D ordinary encoding renamed locals: {trial!r}")
         if trial.get("recording_schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"Package D recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 7:
+        if trial.get("recording_schema_version") != 8:
             raise RuntimeError(f"Package D recording schema version changed: {trial!r}")
         if trial.get("trace_length", 0) <= 0:
             raise RuntimeError(f"Package D presentation trace was not retained: {trial!r}")
@@ -371,17 +371,17 @@ def main() -> None:
             raise RuntimeError(f"Package E isolated materialization failed: {trial!r}")
         if trial.get("recording_schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"Package E recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 7:
+        if trial.get("recording_schema_version") != 8:
             raise RuntimeError(f"Package E recording schema version changed: {trial!r}")
         if trial.get("trace_length", 0) <= 0:
             raise RuntimeError(f"Package E trace was not retained: {trial!r}")
         if trial.get("local_renames") != [
-            {"contextIndex": 6, "generatedName": "h_explicit_1"}
+            {"contextIndex": 6, "generatedName": "h_explicit_7"}
         ]:
             raise RuntimeError(f"Package E local-renaming metadata changed: {trial!r}")
         certificate = trial.get("certificate")
         if not isinstance(certificate, str) or not certificate.startswith(
-            "rename_i h_explicit_1\n"
+            "simp_explicit_rename [6 => h_explicit_7]\n"
         ):
             raise RuntimeError(f"Package E certificate omitted its rename prefix: {trial!r}")
         encoding = trial.get("encoding") or {}

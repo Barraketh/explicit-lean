@@ -30,14 +30,14 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected local-rename report schema: {report!r}")
-    if report.get("schemaVersion") != 7:
+    if report.get("schemaVersion") != 8:
         raise RuntimeError(f"unexpected local-rename report version: {report!r}")
     renames = report.get("localRenames")
-    if renames != [{"contextIndex": 7, "generatedName": "h_explicit_2"}]:
+    if renames != [{"contextIndex": 7, "generatedName": "h_explicit_8_1"}]:
         raise RuntimeError(f"local rename order/collision plan changed: {report!r}")
     certificate = report.get("certificate")
     if not isinstance(certificate, str) or not certificate.startswith(
-        "rename_i h_explicit_2\n"
+        "simp_explicit_rename [7 => h_explicit_8_1]\n"
     ):
         raise RuntimeError(
             "local-rename certificate did not contain the literal rename prefix: "
@@ -56,7 +56,11 @@ def main() -> None:
     needle = "simp_explicit? [List.drop_append, IH]"
     if source.count(needle) != 1:
         raise RuntimeError("local-rename probe tactic occurrence was not unique")
-    materialized = source.replace(needle, certificate.replace("\n", "\n        "), 1)
+    rename_prefix = "simp_explicit_rename [7 => h_explicit_8_1]\n"
+    duplicated_certificate = rename_prefix + certificate
+    materialized = source.replace(
+        needle, duplicated_certificate.replace("\n", "\n        "), 1
+    )
     OUTPUT.mkdir(parents=True, exist_ok=True)
     MATERIALIZED.write_text(materialized, encoding="utf-8")
     replay_code, replay_output, _ = coverage.run(
@@ -64,10 +68,10 @@ def main() -> None:
     )
     if replay_code != 0:
         raise RuntimeError(
-            "literal rename prefix plus certificate failed closed replay compilation:\n"
+            "duplicated exact rename prefix plus certificate failed closed replay compilation:\n"
             + replay_output
         )
-    print("local rename collision/order planning and closed replay passed")
+    print("local rename collision/order planning, idempotence, and closed replay passed")
 
 
 if __name__ == "__main__":

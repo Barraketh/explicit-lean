@@ -719,8 +719,15 @@ fallbacks without falsely reporting selector commands. The complete
 
 Status: implemented on 2026-08-21.
 
-- Deterministic, collision-checked local naming emits one `rename_i` prefix and
-  sanitizes the complete schema-v5 report under the renamed local context.
+- Deterministic, collision-checked local naming emits one exact-index
+  `simp_explicit_rename` prefix and sanitizes the complete report under the
+  renamed local context. Exact-index replay is idempotent: an entry already
+  carrying its requested printable name is a no-op, while an absent index or a
+  collision with another local is an error. Generated base names include that
+  stable context index, so different locals cannot receive the same name from
+  independently recorded certificates. This lets certificates generated
+  independently within one declaration compose without `rename_i` consuming a
+  different set of inaccessible locals on each invocation.
 - Closed `simp_explicit_context` records and replays authored local order,
   target locations, `at *`, dependent-local transport, local closure, and
   zero-event subjects; passive location recording rolls back before running the

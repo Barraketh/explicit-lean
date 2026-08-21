@@ -736,7 +736,8 @@ authored location order, dependent-local transport, local closure, zero-event
 subjects, `at *`, and passive rollback are covered by permanent focused
 fixtures and schema-v5 report checks. The two closed `DropRight` occurrences
 `f3d6dce9ae772ce2` and `54d6b0e3b2ad8e41` materialize with collision-checked
-`rename_i` prefixes in isolation and in one aggregate module. The bounded
+exact-index, idempotent `simp_explicit_rename` prefixes in isolation and in one
+aggregate module. The bounded
 regression retains all 24 stable occurrences and 27 dynamic executions, and
 the complete `sh Experiment/run.sh` regression passes.
 

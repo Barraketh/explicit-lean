@@ -85,7 +85,7 @@ def main() -> None:
         [("local", "IH"), ("local", "h_explicit_1"), ("target", "target")],
     ]
     for index, (report, expected) in enumerate(zip(reports, expected_subjects)):
-        if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != 7:
+        if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != 8:
             raise RuntimeError(f"report {index} is not schema-v7: {report!r}")
         check_subjects(report, expected)
         certificate = report.get("certificate", "")
@@ -119,10 +119,10 @@ def main() -> None:
                 raise RuntimeError("zero-event fixture recorded a semantic event")
         if index == 7:
             renames = report.get("localRenames")
-            if renames != [{"contextIndex": 7, "generatedName": "h_explicit_2"}]:
+            if renames != [{"contextIndex": 7, "generatedName": "h_explicit_8"}]:
                 raise RuntimeError(f"stable context rename plan changed: {renames!r}")
-            if not certificate.startswith("rename_i h_explicit_2\n"):
-                raise RuntimeError("stable context certificate omitted rename_i prefix")
+            if not certificate.startswith("simp_explicit_rename [7 => h_explicit_8]\n"):
+                raise RuntimeError("stable context certificate omitted exact rename prefix")
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
     for index, (anchor, report) in enumerate(zip(ANCHORS, reports)):

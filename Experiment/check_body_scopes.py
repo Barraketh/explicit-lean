@@ -79,7 +79,7 @@ def main() -> None:
         report = by_id[occurrence_id]
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected report schema: {report!r}")
-        if report.get("schemaVersion") != 7:
+        if report.get("schemaVersion") != 8:
             raise RuntimeError(f"unexpected report version: {report!r}")
         if not isinstance(report.get("bodyScopeId"), str) or not report["bodyScopeId"]:
             raise RuntimeError(f"missing body scope identity: {report!r}")

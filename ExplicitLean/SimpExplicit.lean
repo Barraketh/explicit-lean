@@ -40,6 +40,13 @@ syntax (name := simpExplicitLeaveOpen) "simp_explicit" " leave_open" " ["
 /-- Replay independent closed certificates against selected local declarations and
 the target, using the same batch staging semantics as `simp at ...`. -/
 syntax (name := simpExplicitContext) "simp_explicit_context" " [" simpExplicitContextGroup,* "]" : tactic
+declare_syntax_cat simpExplicitLocalRename
+syntax num " => " ident : simpExplicitLocalRename
+/-- Give recorded local-context entries stable printable names. Unlike
+`rename_i`, this operation addresses exact context indices and is idempotent,
+so independently generated certificates can be composed in one declaration. -/
+syntax (name := simpExplicitRename) "simp_explicit_rename" " ["
+  simpExplicitLocalRename,* "]" : tactic
 syntax (name := simpExplicitBodyScope) "simp_explicit_body_scope" str " in " tacticSeq : tactic
 /-- Instrument one closed `first` owner while materializing a body.  This is
     an internal source-rewriter primitive: it records a printable proof only
@@ -81,7 +88,7 @@ register_option explicitLean.simpExplicit.bodyScopeFrame : Nat := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 7
+def reportSchemaVersion : Nat := 8
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -201,7 +208,7 @@ structure ProofResultEncoding where
   encodingReason : Option String
 
 structure LocalRenameInfo where
-  /-- Stable local-context index of the candidate selected by `rename_i`. -/
+  /-- Stable local-context index renamed by `simp_explicit_rename`. -/
   contextIndex : Nat
   generatedName : String
   deriving ToJson
@@ -1072,13 +1079,14 @@ private def localRenamePlan (lctx : LocalContext) : MetaM (Array LocalRenamePlan
         usedNames := usedNames.insert localDecl.userName
         usedNames := usedNames.insert localDecl.userName.eraseMacroScopes
     | none => pure ()
-  let mut next := 1
   let mut result := #[]
   for localDecl in candidates do
-    let mut generatedName := Name.mkSimple s!"h_explicit_{next}"
+    let base := s!"h_explicit_{localDecl.index + 1}"
+    let mut suffix := 0
+    let mut generatedName := Name.mkSimple base
     while usedNames.contains generatedName do
-      next := next + 1
-      generatedName := Name.mkSimple s!"h_explicit_{next}"
+      suffix := suffix + 1
+      generatedName := Name.mkSimple s!"{base}_{suffix}"
     result := result.push {
       contextIndex := localDecl.index
       fvarId := localDecl.fvarId
@@ -1086,7 +1094,6 @@ private def localRenamePlan (lctx : LocalContext) : MetaM (Array LocalRenamePlan
     }
     usedNames := usedNames.insert generatedName
     usedNames := usedNames.insert generatedName.eraseMacroScopes
-    next := next + 1
   return result
 
 private def renamedLocalContext (lctx : LocalContext)
@@ -1103,8 +1110,32 @@ private def localRenamePrefix (plan : Array LocalRenamePlan) : String :=
   if plan.isEmpty then
     ""
   else
-    let names := plan.map (·.generatedName.toString)
-    s!"rename_i {String.intercalate " " names.toList}\n"
+    let entries := plan.map fun rename =>
+      s!"{rename.contextIndex} => {rename.generatedName}"
+    s!"simp_explicit_rename [{String.intercalate ", " entries.toList}]\n"
+
+private def exactLocalRenames (renames : Array (Nat × Name)) : TacticM Unit :=
+  withMainContext do
+    let mvarId ← getMainGoal
+    let mvarDecl ← mvarId.getDecl
+    let mut lctx := mvarDecl.lctx
+    for (contextIndex, requestedName) in renames do
+      let generatedName := requestedName.eraseMacroScopes
+      let some localDecl := lctx.getAt? contextIndex
+        | throwError "simp_explicit_rename: local-context index {contextIndex} is absent"
+      if localDecl.isImplementationDetail then
+        throwError "simp_explicit_rename: local-context index {contextIndex} is an implementation detail"
+      if localDecl.userName.eraseMacroScopes == generatedName then
+        continue
+      for other in lctx do
+        if other.fvarId != localDecl.fvarId &&
+            other.userName.eraseMacroScopes == generatedName then
+          throwError "simp_explicit_rename: name '{generatedName}' is already used by local-context index {other.index}"
+      lctx := lctx.setUserName localDecl.fvarId generatedName
+    let mvarNew ← Meta.mkFreshExprMVarAt lctx mvarDecl.localInstances mvarDecl.type
+      mvarDecl.kind mvarDecl.userName mvarDecl.numScopeArgs
+    mvarId.assign mvarNew
+    replaceMainGoal [mvarNew.mvarId!]
 
 private def fallbackReason (event : RecordedEvent) : TacticM String := do
   if event.origins.isEmpty then
@@ -3609,5 +3640,15 @@ elab_rules : tactic
       replaySimp (events.getElems.map (·.raw)) (closeReflexive := false)
   | `(tactic| simp_explicit_context [$groups:simpExplicitContextGroup,*]) =>
       replayContext (groups.getElems.map (·.raw))
+  | `(tactic| simp_explicit_rename [$renames:simpExplicitLocalRename,*]) => do
+      let mut parsed : Array (Nat × Name) := #[]
+      for rename in renames.getElems do
+        match rename with
+        | `(simpExplicitLocalRename| $index:num => $name:ident) =>
+            let some contextIndex := index.raw.isNatLit?
+              | throwErrorAt index "local-context index must be a natural-number literal"
+            parsed := parsed.push (contextIndex, name.getId)
+        | _ => throwUnsupportedSyntax
+      exactLocalRenames parsed
 
 end ExplicitLean
