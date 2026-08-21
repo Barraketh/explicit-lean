@@ -85,8 +85,8 @@ def main() -> None:
         [("local", "IH"), ("local", "h_explicit_1"), ("target", "target")],
     ]
     for index, (report, expected) in enumerate(zip(reports, expected_subjects)):
-        if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != 10:
-            raise RuntimeError(f"report {index} is not schema-v10: {report!r}")
+        if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
+            raise RuntimeError(f"report {index} is not the expected recording schema: {report!r}")
         check_subjects(report, expected)
         admissibility = report.get("operationalAdmissibility") or {}
         accepted = admissibility.get("code") == "accepted"

@@ -39,7 +39,7 @@ PASSIVE_RECORDING_SCHEMA = "explicitLean.simpModuleRecording"
 PASSIVE_RECORDING_SCHEMA_VERSION = 4
 CLOSURE_SCHEMA = "explicitLean.simpClosure"
 CLOSURE_SCHEMA_VERSION = 2
-EXPECTED_SIMP_REPORT_SCHEMA_VERSION = 10
+EXPECTED_SIMP_REPORT_SCHEMA_VERSION = 11
 
 DEFERRED_ADMISSIBILITY_CODES = {
     "deferred_simproc",
@@ -48,7 +48,7 @@ DEFERRED_ADMISSIBILITY_CODES = {
 
 
 def execution_admissibility(execution: dict[str, Any]) -> tuple[bool, str]:
-    """Read the schema-v10 operational gate conservatively."""
+    """Read the current operational recording-schema gate conservatively."""
     decision = execution.get("operationalAdmissibility")
     if isinstance(decision, dict):
         code = decision.get("code")

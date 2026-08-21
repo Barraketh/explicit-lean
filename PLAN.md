@@ -917,8 +917,17 @@ O1 from [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md) is complete. Schema
 the Centralizer occurrence `161579b1c1009ed4` as a missing transition before
 event 0, with structural path `app.fn/app.arg` and operation hint
 `delta Finsupp.sum`. The complete regression command `Experiment/run.sh`
-passes. The next concrete milestone is O2: add deterministic reduction
-commands and materialize that occurrence as a `Finsupp.sum` reduction followed
-by its ten named theorem events. Complete non-simproc corpus closure follows
-only after the remaining operational packages close the now-visible failure
-cohorts.
+passes. O2 is split at the pinned API boundary. O2a is complete in schema 11:
+the closed reduction IR, exact conservative public named-delta seam, mutation
+suite, historical ten-case DropRight operational aggregate, and full
+`Experiment/run.sh` regression all pass. Bilinear now materializes nine of ten
+occurrences. Centralizer `161579b1c1009ed4` consumes the public `Finsupp.sum`
+delta and first named event, then remains a precise O2b observer gap before
+event 2. O2b instruments or mirrors the pinned simplifier's private transition
+boundaries; only that authoritative observer may close the Centralizer gate as
+a `Finsupp.sum` reduction followed by its ten named theorem events. The split
+is not certificate compression: experiments showed that omitting repeated
+diagnostic theorem events can produce a compiling shorter program, but doing
+so would violate the complete ordered operational-trace invariant. Complete
+non-simproc corpus closure follows only after O2b and the remaining operational
+packages close the now-visible failure cohorts.

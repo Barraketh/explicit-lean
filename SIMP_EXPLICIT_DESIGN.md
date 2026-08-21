@@ -325,6 +325,21 @@ For a reduction command it:
 4. executes exactly that reduction; and
 5. constructs and checks the local equality or iff proof.
 
+The replay traversal uses `Simp.neutralConfig`, so beta, zeta, delta, and other
+built-in reductions cannot run merely because the interpreter is implemented
+on top of `Simp.mainCore`. Pinned Lean 4.32.2 needs iota enabled to expose
+matcher applications to the pre-method hook, and its structural `simpProj`
+path reduces native projections independently of the `proj` flag. Replay
+therefore probes and rejects an iota or native-projection redex unless the
+current command consumes it first. The corresponding command primitive
+locally enables only its named kernel reduction.
+
+Target certificates may omit a final `eq_self` or `iff_self` diagnostic event:
+closing the final reflexive residual goal is fixed behavior of the
+`simp_explicit` command itself. This does not permit an earlier reduction or
+rewrite to be omitted. Context subjects retain their final reflexive event
+because their rewritten declaration must be transported explicitly.
+
 At the end, replay requires complete command and premise consumption and exact
 agreement with the validation envelope.
 
@@ -339,8 +354,12 @@ simp_explicit [
 ]
 ```
 
-Reduction syntax is schematic until the first reduction package fixes its
-parser spelling. A Centralizer certificate should read conceptually as:
+O2a fixes reduction syntax as `reduce delta Name`, `reduce beta`, `reduce
+zeta`, `reduce iota`, `reduce projection Structure field`, and `reduce eta`.
+Reductions default to the pre phase; `↑ reduce ...` selects the post phase.
+Theorem rules retain their existing post-phase default and `↓ theorem`
+pre-phase spelling. Structural selectors apply to both kinds. A Centralizer
+certificate should read conceptually as:
 
 ```lean
 simp_explicit_context [
@@ -482,16 +501,53 @@ proofs. Centralizer `161579b1c1009ed4` now reports event 0, `before_event`, path
 `app.fn/app.arg`, and `delta Finsupp.sum`; direct named-rule fixtures remain
 accepted. `Experiment/run.sh` passes in full.
 
-### O2. Deterministic reduction commands
+### O2a. Deterministic reduction language and conservative public seam
 
 - Add reduction IR, replay, selectors, source syntax, JSON, and mutation tests.
-- Capture and replay named delta unfolding, then beta, zeta, iota, projection,
-  eta, and required fixed special reductions.
-- Record reductions at the same execution boundary used by the original
-  simplifier.
+- Replay named delta, beta, zeta, iota, native projection, and eta as fixed
+  primitives. On pinned Lean 4.32.2 eta is replay-only because `reduceStep`
+  has no eta branch.
+- Capture explicitly selected named delta at the conservative public seam.
+- At the public pre-method boundary, record only reductions whose identity is
+  exact and whose precedence against the pinned simplifier's earlier reduction
+  cases has been checked. This seam is useful evidence, but it is not a claim
+  of complete observation.
 
-Gate: Centralizer `161579b1c1009ed4` materializes as `Finsupp.sum` reduction
-plus its ten named theorem events, with no generated proof or `change`.
+Gate: every reduction command has positive replay and wrong-kind/name/selector/
+order mutation tests; the public seam records an explicitly selected
+`Finsupp.sum` delta without inventing theorem provenance.
+
+Implementation status (2026-08-21): complete. Schema 11 carries the closed
+reduction IR through recording reports, source printing, selector replay, and
+encoding metrics. Replay uses an inert traversal plus explicit guards for the
+pinned iota and native-projection paths, and the conservative public seam
+records only exact explicitly selected named deltas. The historical ten-case
+DropRight presentation cohort now materializes and compiles as one operational
+aggregate; Bilinear materializes nine of ten occurrences, with the remaining
+case classified at the O2b observer boundary. Centralizer
+`161579b1c1009ed4` consumes the public `Finsupp.sum` delta and the first named
+event, then remains an intentional O2b coverage failure before event 2 rather
+than accepting an incomplete trace. `Experiment/run.sh` passes in full.
+
+### O2b. Pinned simplifier transition observer
+
+- Instrument or mirror the pinned Lean simplifier at the private reduction and
+  theorem-application boundaries required by section 5.1.
+- Replace public-boundary diagnostic events with one authoritative ordered
+  transition stream. Do not deduplicate repeated theorem events merely because
+  a shorter program happens to reach the same final expression.
+- Preserve exact subject, phase, structural selector, and local transition for
+  every observed operation.
+
+The split is required by the Centralizer experiment: the public seam observes
+the first `Finsupp.sum` delta, but replay of the resulting diagnostic stream
+consumes only the first four commands. A shorter source program compiles only
+by omitting repeated theorem events, which violates operational completeness;
+therefore source-level compression is not an acceptable repair for this gate.
+
+Gate: Centralizer `161579b1c1009ed4` materializes as the authoritative
+`Finsupp.sum` reduction plus its ten named theorem events, with no generated
+proof, `change`, omitted transition, or diagnostic-only event.
 
 ### O3. Complete theorem-event attribution
 

@@ -25,7 +25,18 @@ declare_syntax_cat simpExplicitSelector
 syntax "match " num : simpExplicitSelector
 syntax atomic(ident num) : simpExplicitSelector
 syntax num : simpExplicitSelector
-syntax simpExplicitEvent := (simpExplicitSelector " => ")? simpExplicitRule
+declare_syntax_cat simpExplicitReduction
+syntax (name := simpExplicitReduceUnary)
+  (simpExplicitPre <|> simpExplicitPost)? "reduce" ident : simpExplicitReduction
+syntax (name := simpExplicitReduceNamed)
+  (simpExplicitPre <|> simpExplicitPost)? "reduce" ident ident : simpExplicitReduction
+syntax (name := simpExplicitReduceProjection)
+  (simpExplicitPre <|> simpExplicitPost)? "reduce" ident ident num : simpExplicitReduction
+declare_syntax_cat simpExplicitEvent
+syntax (name := simpExplicitRuleEvent)
+  (simpExplicitSelector " => ")? simpExplicitRule : simpExplicitEvent
+syntax (name := simpExplicitReductionEvent)
+  (simpExplicitSelector " => ")? simpExplicitReduction : simpExplicitEvent
 syntax simpExplicitTraceArgs := optConfig (discharger)? (&" only")?
   (" [" withoutPosition((simpStar <|> simpErase <|> simpLemma),*,?) "]")? (location)?
 declare_syntax_cat simpExplicitContextGroup
@@ -97,7 +108,7 @@ register_option explicitLean.simpExplicit.bodyScopeFrame : Nat := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 10
+def reportSchemaVersion : Nat := 11
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -219,6 +230,27 @@ structure ValidationEnvelope where
   finalState : StateFingerprint
   deriving ToJson
 
+/-! A reduction is a first-class replay operation.  In particular, it is not
+    represented as `Origin.other`: the latter is reserved for opaque simp
+    provenance and cannot express an ambient-free operation. -/
+inductive ReductionKind where
+  | delta (name : Name)
+  | beta
+  | zeta
+  | iota
+  | projection (structureName : Name) (field : Nat)
+  | eta
+  deriving BEq, Repr
+
+structure ReductionIdentity where
+  kind : ReductionKind
+
+structure ReductionReport where
+  kind : String
+  name : Option String
+  field : Option Nat
+  deriving ToJson
+
 /-! The recorder keeps transition diagnostics separate from certificate source.
     The fingerprints are intentionally bounded, alpha-stable recording data;
     none of these fields is copied into a replacement theorem. -/
@@ -304,6 +336,7 @@ structure SemanticEventReport where
   step : String
   result : ExprFingerprint
   proof : Option ExprFingerprint
+  reduction : Option ReductionReport
   origins : Array OriginCandidate
   premises : Array PremiseReport
   /-- `named_rule` for a compact origin replay, `generated_proof` for the
@@ -322,6 +355,8 @@ structure EncodingMetrics where
   /-- Number of emitted presentation-only `change` prepasses. -/
   presentationChangeCount : Nat := 0
   namedRuleEvents : Nat := 0
+  reductionEvents : Nat := 0
+  deltaReductionEvents : Nat := 0
   generatedProofEvents : Nat := 0
   generatedSimprocEvents : Nat := 0
   generatedSpecialEvents : Nat := 0
@@ -510,6 +545,7 @@ private structure RecordedEvent where
   result : Simp.Result
   origins : Array Origin
   premises : Array RecordedPremise
+  reduction : Option ReductionIdentity := none
 
 private structure EventEncodingInfo where
   kind : String
@@ -558,6 +594,51 @@ private def subtractOrigins (origins removed : Array Origin) : Array Origin := I
     remaining := next
   return result
 
+/-! This is the deliberately narrow recorder seam for named delta.  The
+    private simplifier `reduceStep` is not mirrored: we only inspect a public
+    pre-method boundary after it has declined to rewrite the expression. -/
+private def selectedDeltaReduction? (input : Expr) : Simp.SimpM (Option (Name × Expr)) := do
+  let .const head _ := input.getAppFn | return none
+  let cfg ← Simp.getConfig
+  let ctx ← Simp.getContext
+  if cfg.beta && input.getAppFn.isHeadBetaTargetFn false then
+    return none
+  if input.isProj then
+    return none
+  if ← isProjectionFn head then
+    return none
+  if cfg.autoUnfold then
+    return none
+  if cfg.iota then
+    let metaSnapshot ← liftM Meta.saveState
+    let simpSnapshot ← get
+    try
+      let iota? ← Simp.withSimpMetaConfig <| reduceRecMatcher? input
+      liftM metaSnapshot.restore
+      set simpSnapshot
+      if iota?.isSome then
+        return none
+    catch _ =>
+      liftM metaSnapshot.restore
+      set simpSnapshot
+      return none
+  unless ctx.isDeclToUnfold head do
+    return none
+  if ← isIrreducible head then
+    return none
+  let options ← getOptions
+  let smart := smartUnfolding.get options && (← getEnv).contains (mkSmartUnfoldingNameFor head)
+  unless cfg.unfoldPartialApp || smart do
+    let some cinfo := (← getEnv).find? head | return none
+    let some value := cinfo.value? | return none
+    if value.getNumHeadLambdas > input.getAppNumArgs then
+      return none
+  let some output ← Simp.withSimpMetaConfig <| unfoldDefinition? input (ignoreTransparency := true)
+    | return none
+  if Expr.equal input output then
+    return none
+  return some (head, output)
+
 private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
     (method : Simp.Simproc) : Simp.Simproc := fun input => do
   let state ← ref.get
@@ -566,11 +647,21 @@ private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
   ref.set { state with tick := position, activeDepth := depth + 1 }
   let premiseStart := state.premises.size
   let before := (← get).diag
-  let step ← try
+  let originalStep ← try
     method input
   finally
     let state ← ref.get
     ref.set { state with activeDepth := state.activeDepth - 1 }
+  let mut step := originalStep
+  let mut reduction? : Option ReductionIdentity := none
+  if depth == 0 && phase == .pre then
+    match originalStep with
+    | .continue none =>
+        if let some (head, output) ← selectedDeltaReduction? input then
+          let result : Simp.Result := { expr := output }
+          step := .visit result
+          reduction? := some { kind := .delta head }
+    | _ => pure ()
   let after := (← get).diag
   if depth == 0 then
     if let some result := changedResult? input step then
@@ -585,8 +676,10 @@ private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
             input
             step
             result
-            origins := subtractOrigins (changedOrigins before after) premiseOrigins
+            origins := if reduction?.isSome then #[] else
+              subtractOrigins (changedOrigins before after) premiseOrigins
             premises
+            reduction := reduction?
           }
       }
   return step
@@ -742,6 +835,36 @@ private def selectorSource : ReplaySelector → String
   | .tickPos position => s!"tick {position} => "
   | .discover .. => ""
 
+private def reductionReport (reduction : ReductionIdentity) : ReductionReport :=
+  match reduction.kind with
+  | .delta name => {
+      kind := "delta"
+      name := some name.toString
+      field := none
+    }
+  | .beta => { kind := "beta", name := none, field := none }
+  | .zeta => { kind := "zeta", name := none, field := none }
+  | .iota => { kind := "iota", name := none, field := none }
+  | .projection structureName field => {
+      kind := "projection"
+      name := some structureName.toString
+      field := some field
+    }
+  | .eta => { kind := "eta", name := none, field := none }
+
+private def reductionText (reduction : ReductionIdentity) : String :=
+  match reduction.kind with
+  | .delta name => s!"reduce delta {name}"
+  | .beta => "reduce beta"
+  | .zeta => "reduce zeta"
+  | .iota => "reduce iota"
+  | .projection structureName field => s!"reduce projection {structureName} {field}"
+  | .eta => "reduce eta"
+
+private def reductionSource (reduction : ReductionIdentity) (phase : Phase) : String := by
+  let phasePrefix := if phase == .pre then "" else "↑ "
+  exact phasePrefix ++ reductionText reduction
+
 private def isReflexiveClosure : Origin → Bool
   | .decl name _ _ => name == ``eq_self || name == ``iff_self
   | _ => false
@@ -770,15 +893,19 @@ private def certificateEventListText (events : Array RecordedEvent)
   for index in *...eventCount do
     let some event := events[index]?
       | throwError "simp_explicit recorder produced an inconsistent event count"
-    let some origin := event.origins[0]?
-      | throwError "simp_explicit cannot encode semantic event {index}: no diagnostic origin candidate"
-    unless event.origins.size == 1 do
-      throwError "simp_explicit cannot encode semantic event {index}: observed {event.origins.size} diagnostic origin candidates"
-    let rule ← ruleText origin
     let comma := if index + 1 < eventCount then "," else ""
-    let phase := if event.phase == .pre then "↓ " else ""
     let selector := selectors[index]?.getD .next
-    lines := lines.push s!"  {selectorSource selector}{phase}{rule}{comma}"
+    let command ← match event.reduction with
+      | some reduction => pure (reductionSource reduction event.phase)
+      | none => do
+          let some origin := event.origins[0]?
+            | throwError "simp_explicit cannot encode semantic event {index}: no diagnostic origin candidate"
+          unless event.origins.size == 1 do
+            throwError "simp_explicit cannot encode semantic event {index}: observed {event.origins.size} diagnostic origin candidates"
+          let rule ← ruleText origin
+          let phase := if event.phase == .pre then "↓ " else ""
+          pure (phase ++ rule)
+    lines := lines.push s!"  {selectorSource selector}{command}{comma}"
   lines := lines.push "]"
   return String.intercalate "\n" lines.toList
 
@@ -818,6 +945,7 @@ private structure ReplayEvent where
   phase : Phase
   rules : Array SimpTheorem
   premises : Array Expr := #[]
+  reduction : Option ReductionIdentity := none
   source : Syntax
 
 private structure GeneratedBinding where
@@ -928,6 +1056,28 @@ private def parsePhase (stx : Syntax) : TacticM Phase :=
   else
     throwErrorAt stx "expected `↓` or `↑`"
 
+private def elaborateReduction (stx : Syntax) : TacticM (Phase × ReductionIdentity) := do
+  let phase ← if stx[0].isNone then pure .pre else parsePhase stx[0][0]
+  let operation := stx[2].getId
+  if stx.getNumArgs == 5 then
+    unless operation == `projection do
+      throwErrorAt stx[2] "expected `projection` for a four-argument reduction command"
+    let some field := stx[4].isNatLit?
+      | throwErrorAt stx[4] "expected a numeric projection field index"
+    return (phase, { kind := .projection stx[3].getId field })
+  if stx.getNumArgs == 4 then
+    unless operation == `delta do
+      throwErrorAt stx[2] "expected `delta` for a named reduction command"
+    return (phase, { kind := .delta stx[3].getId })
+  unless stx.getNumArgs == 3 do
+    throwErrorAt stx "invalid simp_explicit reduction command"
+  match operation with
+  | `beta => return (phase, { kind := .beta })
+  | `zeta => return (phase, { kind := .zeta })
+  | `iota => return (phase, { kind := .iota })
+  | `eta => return (phase, { kind := .eta })
+  | _ => throwErrorAt stx[2] "unknown simp_explicit reduction operation"
+
 private def elaborateRule (phase : Phase) (rule : Syntax) : TacticM (Array SimpTheorem) := do
   let inverse := !rule[1].isNone
   let term := rule[2]
@@ -993,13 +1143,28 @@ private def elaborateSelector (stx : Syntax) : TacticM ReplaySelector := do
 private def elaborateEvent (stx : Syntax) : TacticM ReplayEvent := do
   let selector ← if stx[0].isNone then pure .next else elaborateSelector stx[0][0]
   let rule := stx[1]
-  let phase ← if rule[0].isNone then pure .post else parsePhase rule[0][0]
-  let rules ← elaborateRule phase rule
-  let premises ← premiseSyntaxes rule |>.mapM elaboratePremise
-  return { selector, phase, rules, premises, source := stx }
+  if rule.getKind == ``Lean.Parser.Tactic.simpExplicitReduceUnary ||
+      rule.getKind == ``Lean.Parser.Tactic.simpExplicitReduceNamed ||
+      rule.getKind == ``Lean.Parser.Tactic.simpExplicitReduceProjection then
+    let (phase, reduction) ← elaborateReduction rule
+    return { selector, phase, rules := #[], premises := #[], reduction := some reduction, source := stx }
+  else
+    let phase ← if rule[0].isNone then pure .post else parsePhase rule[0][0]
+    let rules ← elaborateRule phase rule
+    let premises ← premiseSyntaxes rule |>.mapM elaboratePremise
+    return { selector, phase, rules, premises, source := stx }
 
 private def recordedReplayEvent (event : RecordedEvent)
     (selector : ReplaySelector := .next) : TacticM ReplayEvent := do
+  if let some reduction := event.reduction then
+    return {
+      selector
+      phase := event.phase
+      rules := #[]
+      premises := #[]
+      reduction := some reduction
+      source := (mkIdent `reduce).raw
+    }
   let post := event.phase == .post
   let some origin := event.origins[0]?
     | throwError "simp_explicit cannot replay a semantic event without a named origin"
@@ -1023,6 +1188,7 @@ private def recordedReplayEvent (event : RecordedEvent)
     phase := event.phase
     rules
     premises := event.premises.map (·.proof)
+    reduction := none
     source
   }
 
@@ -1104,6 +1270,111 @@ private def replayExprMatches? (actual expected : Expr) : Simp.SimpM Bool := do
     liftM metaSnapshot.restore
     return false
 
+private def prooflessReductionResult? (input output : Expr) : Option Simp.Result :=
+  if Expr.equal input output then none else some { expr := output }
+
+/-! Reduction replay deliberately uses only the operation named in the
+    certificate.  It never invokes `Simp.reduceStep`, `Simp.mainCore`, or an
+    ambient simp configuration. -/
+private def replayDelta? (input : Expr) (name : Name) : Simp.SimpM (Option Expr) := do
+  let .const head _ := input.getAppFn | return none
+  unless head == name do
+    return none
+  if ← isIrreducible name then
+    return none
+  let snapshot ← liftM Meta.saveState
+  try
+    let output? ← Simp.withSimpMetaConfig <|
+      unfoldDefinition? input (ignoreTransparency := true)
+    match output? with
+    | some output => return some output
+    | none =>
+        liftM snapshot.restore
+        return none
+  catch _ =>
+    liftM snapshot.restore
+    return none
+
+private def replayBeta? (input : Expr) : MetaM (Option Expr) := do
+  let f := input.getAppFn
+  if f.isHeadBetaTargetFn false then
+    return some (f.betaRev input.getAppRevArgs)
+  return none
+
+private def replayZeta? (input : Expr) : MetaM (Option Expr) := do
+  match input with
+  | .letE _ _ value body _ =>
+      return some (expandLet body #[value] (zetaHave := true))
+  | _ => return none
+
+private def replayIota? (input : Expr) : Simp.SimpM (Option Expr) := do
+  let snapshot ← Meta.saveState
+  try
+    let output? ← Simp.withSimpMetaConfig <|
+      withConfig (fun config => { config with iota := true }) <|
+        reduceRecMatcher? input
+    match output? with
+    | some output => return some output
+    | none =>
+        snapshot.restore
+        return none
+  catch _ =>
+    snapshot.restore
+    return none
+
+private def replayProjection? (input : Expr) (structureName : Name) (field : Nat) : Simp.SimpM (Option Expr) := do
+  match input with
+  | .proj inputStructure inputField _ =>
+      unless inputStructure == structureName && inputField == field do
+        return none
+      let snapshot ← Meta.saveState
+      try
+        let output? ← Simp.withSimpMetaConfig <|
+          withConfig (fun config => { config with proj := .yesWithDelta }) <|
+            reduceProj? input
+        match output? with
+        | some output => return some output
+        | none =>
+            snapshot.restore
+            return none
+      catch _ =>
+        snapshot.restore
+        return none
+  | _ => return none
+
+private def replayEta? (input : Expr) : MetaM (Option Expr) := do
+  let output := input.eta
+  return if Expr.equal input output then none else some output
+
+private def applyRecordedReduction? (input : Expr) (reduction : ReductionIdentity) :
+    Simp.SimpM (Option Simp.Result) := do
+  let output? ← match reduction.kind with
+    | .delta name => replayDelta? input name
+    | .beta => liftM <| replayBeta? input
+    | .zeta => liftM <| replayZeta? input
+    | .iota => replayIota? input
+    | .projection structureName field => replayProjection? input structureName field
+    | .eta => liftM <| replayEta? input
+  return output?.bind (prooflessReductionResult? input)
+
+private def hasUncommandedReduction (input : Expr) : Simp.SimpM Bool := do
+  let iotaSnapshot ← liftM Meta.saveState
+  let iota? ← replayIota? input
+  liftM iotaSnapshot.restore
+  if iota?.isSome then
+    return true
+  let .proj structureName field _ := input | return false
+  let snapshot ← liftM Meta.saveState
+  let output? ← replayProjection? input structureName field
+  liftM snapshot.restore
+  return output?.isSome
+
+private def applyReplayEvent? (input : Expr) (event : ReplayEvent)
+    (ref : IO.Ref ReplayState) : Simp.SimpM (Option Simp.Result) := do
+  match event.reduction with
+  | some reduction => applyRecordedReduction? input reduction
+  | none => applyRecordedRules? input event ref
+
 private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
     (phase : Phase) : Simp.Simproc := fun input => do
   let state ← ref.get
@@ -1118,7 +1389,7 @@ private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
         else if position == state.tick then
           unless event.phase == phase do
             throwErrorAt event.source "simp_explicit traversal phase changed at position {position}"
-          let some result ← applyRecordedRules? input event ref
+          let some result ← applyReplayEvent? input event ref
             | match (← ref.get).premiseFailure? with
               | some reason =>
                   throwErrorAt event.source
@@ -1130,7 +1401,7 @@ private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
           return .visit result
     | .next =>
         if event.phase == phase then
-          if let some result ← applyRecordedRules? input event ref then
+          if let some result ← applyReplayEvent? input event ref then
             ref.set { state with next := state.next + 1, siteCount := 0, premiseNext := 0, premiseFailure? := none }
             return .visit result
           else
@@ -1144,7 +1415,7 @@ private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
           let probeState ← ref.get
           let metaSnapshot ← liftM Meta.saveState
           try
-            let result? ← applyRecordedRules? input event ref
+            let result? ← applyReplayEvent? input event ref
             match result? with
             | none =>
                 -- A failed match probe is observational only. In particular,
@@ -1185,7 +1456,7 @@ private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
           let probeState ← ref.get
           let metaSnapshot ← liftM Meta.saveState
           try
-            let result? ← applyRecordedRules? input event ref
+            let result? ← applyReplayEvent? input event ref
             match result? with
             | none =>
                 -- Discovery probes are observational until the historical
@@ -1228,11 +1499,21 @@ private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
             liftM metaSnapshot.restore
             ref.set probeState
             throw ex
+  if phase == .pre && (← hasUncommandedReduction input) then
+    throwError "simp_explicit encountered a reducible iota or native projection without an explicit reduction command"
   return .continue
 
 private def runReplay (target : Expr) (events : Array ReplayEvent) : TacticM (Simp.Result × ReplayState) := do
   let congrTheorems ← getSimpCongrTheorems
-  let ctx ← Simp.mkContext (simpTheorems := {}) (congrTheorems := congrTheorems)
+  -- Traversal must be operationally inert.  In particular, the underlying
+  -- simplifier may not beta/zeta/iota/project on the certificate's behalf;
+  -- those state changes are available only through explicit replay events.
+  -- The pinned traversal needs iota enabled to expose matcher applications to
+  -- the pre hook.  `replayMethod` rejects any such reduction that is not
+  -- consumed by an explicit command before `reduceStep` can perform it.
+  let replayConfig := { Simp.neutralConfig with iota := true }
+  let ctx ← Simp.mkContext (config := replayConfig)
+    (simpTheorems := {}) (congrTheorems := congrTheorems)
   let ref ← IO.mkRef ({} : ReplayState)
   let methods : Simp.Methods := {
     pre := replayMethod events ref .pre
@@ -1590,16 +1871,17 @@ private def buildEncodedEvents? (recorded : Array RecordedEvent)
       -- context.  Construct the named rule without claiming that this local
       -- probe validates it; the complete ordered program below remains the
       -- acceptance check.
-      let namedReplay? ← if event.origins.size == 1 then
-        try
-          let replay ← recordedReplayEvent event .next
-          let rule ← ruleText event.origins[0]!
-          pure (some (replay, rule))
-        catch _ =>
-          pure none
-      else
+      let replay? ← try
+        some <$> recordedReplayEvent event .next
+      catch _ =>
         pure none
-      if let some (replay, rule) := namedReplay? then
+      if let some replay := replay? then
+        let rule ← match event.reduction with
+          | some reduction => pure (reductionSource reduction event.phase)
+          | none => do
+              unless event.origins.size == 1 do
+                throwError "simp_explicit cannot encode semantic event {index}: observed {event.origins.size} diagnostic origin candidates"
+              ruleText event.origins[0]!
         let mut premiseNames := #[]
         let mut premiseEncodings := #[]
         for premiseIndex in *...event.premises.size do
@@ -1612,7 +1894,10 @@ private def buildEncodedEvents? (recorded : Array RecordedEvent)
         encoded := encoded.push {
           event
           replay
-          info := { kind := "named_rule", reason := none }
+          info := {
+            kind := if event.reduction.isSome then "reduction" else "named_rule"
+            reason := none
+          }
           ruleText := rule
           premiseNames
           premiseEncodings
@@ -1712,6 +1997,12 @@ private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEven
       if event.info.reason == some "simproc" then n + 1 else n) 0
     let generatedSpecialEvents := encoded.foldl (fun n event =>
       if event.info.reason == some "special_rule" then n + 1 else n) 0
+    let reductionEvents := encoded.foldl (fun n event =>
+      if event.info.kind == "reduction" then n + 1 else n) 0
+    let deltaReductionEvents := encoded.foldl (fun n event =>
+      match event.event.reduction with
+      | some { kind := .delta .. } => n + 1
+      | _ => n) 0
     let generatedBindingBytes := bindings.foldl (fun n binding => n + binding.bytes) 0
     let premiseEncodings := encoded.foldl (fun result event => result ++ event.premiseEncodings) #[]
     let premiseBindingCount := premiseEncodings.foldl (fun n encoding =>
@@ -1737,6 +2028,8 @@ private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEven
       source
       metrics := {
         namedRuleEvents
+        reductionEvents
+        deltaReductionEvents
         generatedProofEvents
         generatedSimprocEvents
         generatedSpecialEvents
@@ -2634,6 +2927,7 @@ private def semanticEventReport (event : RecordedEvent)
     step := stepName event.step
     result := ← exprFingerprint event.result.expr
     proof := ← event.result.proof?.mapM exprFingerprint
+    reduction := event.reduction.map reductionReport
     origins
     premises
     encodingKind := encoding?.map (·.kind)
@@ -2943,8 +3237,11 @@ private def namedEncodingInfos (events : Array RecordedEvent)
   let mut result := #[]
   for index in *...count do
     let selector := selectors[index]?.getD .next
+    let kind := match events[index]? with
+      | some event => if event.reduction.isSome then "reduction" else "named_rule"
+      | none => "named_rule"
     result := result.push {
-      kind := "named_rule"
+      kind
       reason := none
       selectorKind := selectorKind? selector
       selectorValue := selectorValue? selector
@@ -3032,6 +3329,8 @@ private def addEncodingMetrics (lhs rhs : EncodingMetrics) : EncodingMetrics := 
   mode := if lhs.mode == "event" && rhs.mode == "event" then "event" else "context"
   presentationChangeCount := lhs.presentationChangeCount + rhs.presentationChangeCount
   namedRuleEvents := lhs.namedRuleEvents + rhs.namedRuleEvents
+  reductionEvents := lhs.reductionEvents + rhs.reductionEvents
+  deltaReductionEvents := lhs.deltaReductionEvents + rhs.deltaReductionEvents
   generatedProofEvents := lhs.generatedProofEvents + rhs.generatedProofEvents
   generatedSimprocEvents := lhs.generatedSimprocEvents + rhs.generatedSimprocEvents
   generatedSpecialEvents := lhs.generatedSpecialEvents + rhs.generatedSpecialEvents
@@ -3218,18 +3517,35 @@ private def runFirstOwnerScope (ownerId : String) (body : Syntax) (reportStx : S
   }
   logInfoAt reportStx m!"EXPLICIT_LEAN_FIRST_OWNER_REPORT {(toJson report).compress}"
 
-private def selectorMetrics (selectors : Array ReplaySelector) : EncodingMetrics := Id.run do
+private def selectorMetrics (events : Array RecordedEvent)
+    (selectors : Array ReplaySelector) : EncodingMetrics := Id.run do
   let mut nextSelectorCount := 0
   let mut matchSelectorCount := 0
   let mut tickSelectorCount := 0
-  for selector in selectors do
+  let mut namedRuleEvents := 0
+  let mut reductionEvents := 0
+  let mut deltaReductionEvents := 0
+  for index in *...selectors.size do
+    let some selector := selectors[index]? | continue
     match selector with
     | .next => nextSelectorCount := nextSelectorCount + 1
     | .matchSite _ => matchSelectorCount := matchSelectorCount + 1
     | .tickPos _ => tickSelectorCount := tickSelectorCount + 1
     | .discover .. => pure ()
+    match events[index]? with
+    | some event =>
+        match event.reduction with
+        | some reduction =>
+            reductionEvents := reductionEvents + 1
+            match reduction.kind with
+            | .delta _ => deltaReductionEvents := deltaReductionEvents + 1
+            | _ => pure ()
+        | none => namedRuleEvents := namedRuleEvents + 1
+    | none => namedRuleEvents := namedRuleEvents + 1
   return {
-    namedRuleEvents := selectors.size
+    namedRuleEvents
+    reductionEvents
+    deltaReductionEvents
     nextSelectorCount
     matchSelectorCount
     tickSelectorCount
@@ -3248,7 +3564,7 @@ private def contextSubjectEncoding? (target : Expr)
       if let some selectors := selectors? then
         let eventText ← certificateEventListText state.events selectors includeTrailingReflexive
         let infos := namedEncodingInfos state.events selectors includeTrailingReflexive
-        let metrics := selectorMetrics selectors
+        let metrics := selectorMetrics state.events selectors
         return some ({
           eventText
           bindings := #[]
@@ -3672,21 +3988,7 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
       suggestion := ← certificateText state.events flatSelectors leaveOpen
       encodingInfos := namedEncodingInfos state.events flatSelectors
       premiseEncodingInfos := state.events.map (fun _ => #[])
-      let mut nextSelectorCount := 0
-      let mut matchSelectorCount := 0
-      let mut tickSelectorCount := 0
-      for selector in flatSelectors do
-        match selector with
-        | .next => nextSelectorCount := nextSelectorCount + 1
-        | .matchSite _ => matchSelectorCount := matchSelectorCount + 1
-        | .tickPos _ => tickSelectorCount := tickSelectorCount + 1
-        | .discover .. => pure ()
-      encodingMetrics := {
-        namedRuleEvents := encodingInfos.size
-        nextSelectorCount
-        matchSelectorCount
-        tickSelectorCount
-      }
+      encodingMetrics := selectorMetrics state.events flatSelectors
     else
       -- Prefer the compact event program whenever it validates.  The
       -- presentation pass is a bounded fallback for targets whose current

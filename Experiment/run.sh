@@ -8,6 +8,7 @@ lake env lean Experiment/PremiseReplayProbe.lean
 lake env lean Experiment/GuardedPremiseProbe.lean
 lake env lean Experiment/TermPremiseProbe.lean
 lake env lean Experiment/SelectorProbe.lean
+lake env lean Experiment/ReductionProbe.lean
 lake env lean Experiment/LocalRenameProbe.lean
 lake env lean Experiment/ContextReplayProbe.lean
 lake env lean Experiment/ContextRecordProbe.lean
@@ -20,6 +21,7 @@ lake env lean Experiment/ClosureProbe.lean
 lake env lean Experiment/SpecialFallbackProbe.lean
 python3 Experiment/check_premise_replay.py
 python3 Experiment/check_selectors.py
+python3 Experiment/check_reductions.py
 python3 Experiment/check_local_renames.py
 python3 Experiment/check_context_replay.py
 python3 Experiment/check_context_record.py

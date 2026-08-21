@@ -29,7 +29,7 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected report schema: {report.get('schema')!r}")
-    if report.get("schemaVersion") != 10:
+    if report.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
         raise RuntimeError(f"unexpected report schema version: {report.get('schemaVersion')!r}")
     certificate = report.get("certificate", "")
     if "simp_explicit_context" not in certificate or "at h" not in certificate:
@@ -83,8 +83,8 @@ def main() -> None:
     if any(event.get("selectorKind") != "next" for event in trace):
         raise RuntimeError(f"expected position-free next selectors: {trace!r}")
     validation = report.get("validation")
-    if not validation or validation.get("schemaVersion") != 10:
-        raise RuntimeError("missing schema-v10 validation envelope")
+    if not validation or validation.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
+        raise RuntimeError("missing expected-schema validation envelope")
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
     source = PROBE.read_text(encoding="utf-8")
@@ -102,7 +102,7 @@ def main() -> None:
         raise RuntimeError(
             f"materialized named context certificate failed: exit={code}\n{materialized_output}"
         )
-    print("named-hypothesis context recording, schema-v10 transport, and materialization passed")
+    print("named-hypothesis context recording, schema transport, and materialization passed")
 
 
 if __name__ == "__main__":

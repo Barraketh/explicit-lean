@@ -25,8 +25,8 @@ def main() -> None:
     if "Try this deterministic replay" in output:
         raise RuntimeError("passive context emitted a suggestion")
     report = reports[0]
-    if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != 10:
-        raise RuntimeError("passive context report is not schema-v10")
+    if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
+        raise RuntimeError("passive context report is not the expected recording schema")
     if report.get("encodingStatus") != "validated":
         raise RuntimeError(f"passive context report was not validated: {report!r}")
     execution = report.get("executions", [])[0]

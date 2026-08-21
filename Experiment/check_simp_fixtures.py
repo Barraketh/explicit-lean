@@ -29,7 +29,7 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected simproc report schema: {report!r}")
-    if report.get("schemaVersion") != 10:
+    if report.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
         raise RuntimeError(f"unexpected simproc report version: {report!r}")
     if report.get("localRenames") != []:
         raise RuntimeError(f"ordinary simproc encoding unexpectedly renamed locals: {report!r}")

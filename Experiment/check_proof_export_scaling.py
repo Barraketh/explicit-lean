@@ -62,7 +62,7 @@ def load_entries() -> tuple[dict, list[dict], str]:
     return target, entries, document["mathlib_revision"]
 
 
-def check_transition_gate(record: dict) -> None:
+def check_public_delta_seam(record: dict) -> None:
     reports = {
         report.get("occurrenceId"): report
         for report in record.get("reports", [])
@@ -75,33 +75,60 @@ def check_transition_gate(record: dict) -> None:
         raise RuntimeError(f"Centralizer target source changed: {report!r}")
     if report.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
         raise RuntimeError(f"Centralizer report schema changed: {report!r}")
-    accepted, code = coverage.report_admissibility(report)
-    if accepted or code != "missing_transition":
-        raise RuntimeError(f"Centralizer transition was not rejected as missing_transition: {report!r}")
-    continuity = report.get("transitionContinuity")
-    if not isinstance(continuity, dict):
-        raise RuntimeError(f"Centralizer continuity diagnostic is missing: {report!r}")
-    if continuity.get("firstUnconsumedEventIndex") != 0:
-        raise RuntimeError(f"Centralizer gap index was not zero: {continuity!r}")
-    if continuity.get("gapLocation") != "before_event":
-        raise RuntimeError(f"Centralizer gap location changed: {continuity!r}")
-    if continuity.get("operationHint") != "delta Finsupp.sum":
-        raise RuntimeError(f"Centralizer delta hint changed: {continuity!r}")
-    if continuity.get("operationKind") != "delta":
-        raise RuntimeError(f"Centralizer operation kind changed: {continuity!r}")
-    if not continuity.get("matchedSubexpressionPath"):
-        raise RuntimeError(f"Centralizer matched-subexpression path is missing: {continuity!r}")
-    if not continuity.get("matchedSubexpressionFingerprint"):
+    # O2a deliberately stops at the public pre-method seam.  The trace is
+    # evidence that the named delta was observed; O2b owns the pinned private
+    # observer needed to validate/materialize the complete context sequence.
+    committed = [
+        execution
+        for execution in report.get("executions", [])
+        if execution.get("disposition") == "committed"
+    ]
+    if len(committed) != 1:
         raise RuntimeError(
-            f"Centralizer matched-subexpression fingerprint is missing: {continuity!r}"
+            f"Centralizer public seam did not retain exactly one committed execution: {report!r}"
         )
-    if "Finset.mul_sum" not in (continuity.get("expectedEventOrigins") or []):
-        raise RuntimeError(f"Centralizer first-event provenance changed: {continuity!r}")
+    execution = committed[0]
+    accepted, code = coverage.report_admissibility(execution)
+    if accepted or code != "unidentified_theorem_application":
+        raise RuntimeError(
+            f"Centralizer public seam unexpectedly closed the O2b observer gap: {execution!r}"
+        )
+    if execution.get("encodingStatus") != "inadmissible":
+        raise RuntimeError(f"Centralizer observer gap was not retained: {execution!r}")
+    if execution.get("encodingFallbackReason") != "context_subject_encoding":
+        raise RuntimeError(f"Centralizer observer-gap classification changed: {execution!r}")
+    continuity = execution.get("transitionContinuity") or {}
+    if (
+        continuity.get("reasonCode") != "unidentified_theorem_application"
+        or continuity.get("firstUnconsumedEventIndex") != 2
+        or continuity.get("gapLocation") != "between_events"
+    ):
+        raise RuntimeError(f"Centralizer public-seam continuity changed: {execution!r}")
+    trace = execution.get("trace") or []
+    if len(trace) != 11:
+        raise RuntimeError(f"Centralizer event count changed: {report!r}")
+    reduction = trace[0]
+    if reduction.get("reduction") != {
+        "kind": "delta",
+        "name": "Finsupp.sum",
+        "field": None,
+    }:
+        raise RuntimeError(f"Centralizer first event is not named delta: {reduction!r}")
+    if reduction.get("origins"):
+        raise RuntimeError(f"Centralizer delta carried theorem provenance: {reduction!r}")
+    if any(event.get("encodingKind") is not None for event in trace):
+        raise RuntimeError(f"Centralizer diagnostic events were mislabeled as encoded: {trace!r}")
+    encoding = execution.get("encoding") or {}
+    if any(
+        encoding.get(field) != 0
+        for field in ("reductionEvents", "deltaReductionEvents", "namedRuleEvents")
+    ):
+        raise RuntimeError(f"Centralizer diagnostic trace leaked into encoding metrics: {report!r}")
     if report.get("acceptedCertificate") is not None or report.get("certificate"):
-        raise RuntimeError(f"Centralizer emitted an accepted certificate: {report!r}")
+        raise RuntimeError(f"O2a unexpectedly materialized the Centralizer context: {report!r}")
     validation = report.get("validation") or {}
     if validation.get("certificate") is not None:
-        raise RuntimeError(f"Centralizer validation exported a certificate: {report!r}")
+        raise RuntimeError(f"O2a unexpectedly exported a Centralizer certificate: {report!r}")
 
 
 def check_module_recording(entries: list[dict], revision: str) -> dict:
@@ -142,10 +169,10 @@ def main() -> None:
     configure_output()
     target, entries, revision = load_entries()
     record = check_module_recording(entries, revision)
-    check_transition_gate(record)
+    check_public_delta_seam(record)
     print(
-        "O1 transition gate passed: Centralizer passive recording observed all 13 "
-        "occurrences and rejected the Finsupp.sum gap before proof export"
+        "O2a public seam passed: Centralizer observed named Finsupp.sum delta "
+        "with the complete context observer gap retained for O2b"
     )
 
 

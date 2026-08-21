@@ -21,8 +21,10 @@ REWRITES: dict[str, tuple[str, str]] = {
     "Mathlib/CategoryTheory/Yoneda.lean": (
         "  simp only [Category.comp_id, ← Category.assoc, hg, Category.id_comp]",
         """  simp_explicit [
+    reduce beta,
     ← CategoryTheory.Category.assoc,
-    hg
+    hg,
+    reduce beta
   ]
   normalize_category""",
     ),

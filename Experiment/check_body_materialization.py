@@ -222,14 +222,32 @@ def check_drop_right() -> None:
         executions = report.get("executions", [])
         if [execution.get("disposition") for execution in executions] != ["committed", "committed"]:
             raise RuntimeError(f"DropRight dispositions changed: {report!r}")
-        if coverage.committed_certificates(report):
-            raise RuntimeError(f"DropRight exposed fallback branches as accepted: {report!r}")
-        if any(
-            execution.get("operationalAdmissibility", {}).get("code") == "accepted"
-            or execution.get("acceptedCertificate") is not None
-            for execution in executions
-        ):
-            raise RuntimeError(f"DropRight fallback branch passed the operational gate: {report!r}")
+        certificates = coverage.committed_certificates(report)
+        if entry["id"] != "c9eca03fcd0280ed":
+            if certificates or any(
+                execution.get("operationalAdmissibility", {}).get("code") == "accepted"
+                or execution.get("acceptedCertificate") is not None
+                for execution in executions
+            ):
+                raise RuntimeError(f"DropRight fallback branch passed the operational gate: {report!r}")
+        else:
+            if len(certificates) != 1:
+                raise RuntimeError(f"DropRight c9 did not expose exactly one operational branch: {report!r}")
+            first, second = executions
+            if (
+                first.get("operationalAdmissibility", {}).get("code") != "accepted"
+                or first.get("encoding", {}).get("mode") != "event"
+                or first.get("encoding", {}).get("deltaReductionEvents") != 1
+                or "reduce delta List.rtakeWhile" not in certificates[0]
+            ):
+                raise RuntimeError(f"DropRight c9 named-delta branch changed: {report!r}")
+            if (
+                second.get("operationalAdmissibility", {}).get("code")
+                != "unidentified_theorem_application"
+                or second.get("acceptedCertificate") is not None
+                or second.get("encoding", {}).get("generatedProofEvents") != 1
+            ):
+                raise RuntimeError(f"DropRight c9 observer-gap branch changed: {report!r}")
         if report.get("certificate") != "" or report.get("certificateBytes") != 0:
             raise RuntimeError(f"DropRight fabricated an aggregate certificate: {report!r}")
         if report.get("encodingStatus") != "body_rewrite_required":
@@ -243,13 +261,6 @@ def check_drop_right() -> None:
                 for execution in executions
             ):
                 raise RuntimeError(f"DropRight event encoding changed: {report!r}")
-        if entry["id"] == "c9eca03fcd0280ed":
-            if any(
-                execution.get("encoding", {}).get("mode") != "whole_result_proof"
-                or execution.get("encodingFallbackReason") != "presentation_gap"
-                for execution in executions
-            ):
-                raise RuntimeError(f"DropRight c9 per-branch fallback changed: {report!r}")
         if coverage.closure_terminal_classification(report) != "coverage_failure":
             raise RuntimeError(f"DropRight fallback did not fail the completion gate: {report!r}")
 
@@ -258,7 +269,7 @@ def main() -> None:
     check_terminal_helpers()
     check_fixture()
     check_drop_right()
-    print("operational owners materialized; DropRight fallback owners were rejected")
+    print("operational owners materialized; DropRight fallbacks were rejected and one named-delta branch closed")
 
 
 if __name__ == "__main__":

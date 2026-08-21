@@ -37,6 +37,25 @@ def assert_aggregate_rejected(
     )
 
 
+def assert_aggregate_accepted(
+    module: str,
+    entries: list[dict],
+    results: dict[str, dict],
+) -> None:
+    if any(
+        (results[entry["id"]].get("operational_admissibility") or {}).get("code")
+        != "accepted"
+        for entry in entries
+    ):
+        raise RuntimeError(
+            "operational aggregate contains an inadmissible trial: "
+            f"entries={[entry['id'] for entry in entries]!r}"
+        )
+    aggregate = coverage.aggregate_module(module, entries, results, timeout=180)
+    if aggregate.get("compile") is not True:
+        raise RuntimeError(f"operational aggregate failed to compile: {aggregate!r}")
+
+
 def main() -> None:
     smoke = coverage.ROOT / ".lake" / "simp-coverage-smoke"
     coverage.OUTPUT = smoke
@@ -122,7 +141,7 @@ def main() -> None:
     for report in passive["reports"]:
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected recording schema: {report!r}")
-        if report.get("schemaVersion") != 10:
+        if report.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
             raise RuntimeError(f"unexpected recording schema version: {report!r}")
         if not isinstance(report.get("bodyScopeId"), str) or not report["bodyScopeId"]:
             raise RuntimeError(f"passive report is missing body-scope ownership: {report!r}")
@@ -185,10 +204,10 @@ def main() -> None:
             raise RuntimeError(f"Package B trace audit was malformed: {trial!r}")
     assert_aggregate_rejected(modules[0], package_b_entries, package_b_results)
 
-    # A zero-event, non-closing simplification can still change the target's
-    # presentation through proofless unfolding.  The replacement must retain
-    # that presentation for the following `rw`, rather than validating an
-    # inert `simp_explicit []` only up to definitional equality.
+    # This non-closing simplification used to appear as a zero-event
+    # presentation gap. O2a identifies both proofless unfoldings, and the
+    # resulting two-delta program must preserve the target for the following
+    # `rw` without a generated `change`.
     zero_event_id = "7fc5f61da8b87de6"
     zero_event_entry = next(
         entry for entry in drop_entries if entry["id"] == zero_event_id
@@ -197,14 +216,22 @@ def main() -> None:
         zero_event_entry, coverage.TrialConfig(timeout=180, keep_copies=True)
     )
     zero_event_encoding = zero_event_trial.get("encoding") or {}
-    assert_rejected_fallback(zero_event_trial)
     if (
-        zero_event_encoding.get("mode") != "presentation_change"
-        or zero_event_encoding.get("presentationChangeCount") != 1
+        zero_event_trial.get("status") != "passed"
+        or zero_event_trial.get("materialized_compile") is not True
+        or zero_event_trial.get("operational_admissibility", {}).get("code") != "accepted"
+        or zero_event_trial.get("accepted_certificate")
+        != "simp_explicit [\n  reduce delta List.rdropWhile,\n  reduce delta List.rtakeWhile\n]"
+        or zero_event_trial.get("legacy_certificate") is not None
+        or zero_event_encoding.get("mode") != "event"
+        or zero_event_encoding.get("reductionEvents") != 2
+        or zero_event_encoding.get("deltaReductionEvents") != 2
         or zero_event_encoding.get("namedRuleEvents") != 0
-        or zero_event_trial.get("encoding_fallback_reason") != "presentation_gap"
+        or zero_event_encoding.get("presentationChangeCount") != 0
+        or zero_event_trial.get("encoding_fallback_reason") is not None
+        or zero_event_trial.get("trace_length") != 2
     ):
-        raise RuntimeError(f"zero-event presentation audit changed: {zero_event_trial!r}")
+        raise RuntimeError(f"two-delta presentation materialization changed: {zero_event_trial!r}")
 
     package_c_ids = [
         "03210e4a7b3567e3",
@@ -264,7 +291,7 @@ def main() -> None:
             for count in event_counts
         ):
             raise RuntimeError(f"Package C premise provenance was empty: {trial!r}")
-    assert_aggregate_rejected(modules[0], package_c_entries, package_c_results)
+    assert_aggregate_accepted(modules[0], package_c_entries, package_c_results)
 
     package_d_ids = [
         "bdfebd4de6e5f543",
@@ -284,23 +311,39 @@ def main() -> None:
             entry, coverage.TrialConfig(timeout=180, keep_copies=True)
         )
         package_d_results[entry["id"]] = trial
-        assert_rejected_fallback(trial)
         if trial.get("local_renames") != []:
             raise RuntimeError(f"Package D ordinary encoding renamed locals: {trial!r}")
         if trial.get("recording_schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"Package D recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 10:
+        if trial.get("recording_schema_version") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
             raise RuntimeError(f"Package D recording schema version changed: {trial!r}")
         if trial.get("trace_length", 0) <= 0:
             raise RuntimeError(f"Package D presentation trace was not retained: {trial!r}")
         encoding = trial.get("encoding") or {}
-        if (
-            encoding.get("mode") != "presentation_change"
-            or trial.get("encoding_fallback_reason") != "presentation_gap"
-            or encoding.get("presentationChangeCount") != 1
-            or encoding.get("wholeResultProofCount", 0) != 0
-        ):
-            raise RuntimeError(f"Package D presentation-change encoding changed: {trial!r}")
+        if (trial.get("operational_admissibility") or {}).get("code") == "accepted":
+            if (
+                trial.get("status") != "passed"
+                or trial.get("materialized_compile") is not True
+                or not trial.get("accepted_certificate")
+                or trial.get("legacy_certificate") is not None
+                or trial.get("encoding_fallback_reason") is not None
+                or encoding.get("mode") != "event"
+                or encoding.get("reductionEvents", 0) < 1
+                or encoding.get("deltaReductionEvents", 0) < 1
+                or encoding.get("generatedProofEvents", 0) != 0
+                or encoding.get("presentationChangeCount", 0) != 0
+                or encoding.get("wholeResultProofCount", 0) != 0
+            ):
+                raise RuntimeError(f"Package D operational reduction changed: {trial!r}")
+        else:
+            assert_rejected_fallback(trial)
+            if (
+                encoding.get("mode") != "presentation_change"
+                or trial.get("encoding_fallback_reason") != "presentation_gap"
+                or encoding.get("presentationChangeCount") != 1
+                or encoding.get("wholeResultProofCount", 0) != 0
+            ):
+                raise RuntimeError(f"Package D presentation-change encoding changed: {trial!r}")
         selector_counts = {
             key: encoding.get(key)
             for key in ("nextSelectorCount", "matchSelectorCount", "tickSelectorCount")
@@ -328,11 +371,11 @@ def main() -> None:
             raise RuntimeError(f"Package D trace selector values changed length: {trial!r}")
         if any(value is not None for value in selector_values):
             raise RuntimeError(f"Package D next selectors unexpectedly carry values: {trial!r}")
-    assert_aggregate_rejected(modules[0], package_d_entries, package_d_results)
+    assert_aggregate_accepted(modules[0], package_d_entries, package_d_results)
 
     presentation_ids = package_c_ids + package_d_ids
     presentation_results = {**package_c_results, **package_d_results}
-    assert_aggregate_rejected(
+    assert_aggregate_accepted(
         modules[0], [*package_c_entries, *package_d_entries], presentation_results
     )
     for identifier in presentation_ids:

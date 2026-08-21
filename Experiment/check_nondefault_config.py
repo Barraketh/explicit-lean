@@ -28,7 +28,7 @@ EXPECTED_SOURCES = {
 def check_configuration(report: dict, identifier: str) -> None:
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"{identifier} report schema changed: {report!r}")
-    if report.get("schemaVersion") != 10:
+    if report.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
         raise RuntimeError(f"{identifier} report schema version changed: {report!r}")
     configuration = report.get("configuration")
     normalized = configuration.get("normalized") if isinstance(configuration, dict) else None
@@ -185,20 +185,22 @@ def main() -> None:
         occurrence.get("terminal_outcome")
         for occurrence in record["occurrences"]
     )
-    if outcomes != Counter({"materialized": 7, "coverage_failure": 3}):
+    if outcomes != Counter({"materialized": 9, "coverage_failure": 1}):
         raise RuntimeError(f"Bilinear terminal outcomes changed: {outcomes!r}")
 
     contextual = occurrences.get(CONTEXTUAL_ID)
-    if contextual is None or contextual.get("terminal_outcome") != "coverage_failure":
-        raise RuntimeError(f"contextual occurrence passed the O1 gate unexpectedly: {record!r}")
-    report = contextual.get("report")
-    if not isinstance(report, dict) or contextual.get("candidate") is not None:
-        raise RuntimeError(f"contextual occurrence gained an accepted candidate: {contextual!r}")
-    if contextual.get("failure_reason") != "unidentified_theorem_application":
-        raise RuntimeError(f"contextual O1 failure changed: {contextual!r}")
-    if report.get("acceptedCertificate") is not None or not report.get("legacyCertificate"):
-        raise RuntimeError(f"contextual legacy proof was accepted: {contextual!r}")
-
+    if contextual is None or contextual.get("terminal_outcome") != "materialized":
+        raise RuntimeError(f"contextual named-delta occurrence regressed: {record!r}")
+    report = contextual.get("report") or {}
+    certificate = report.get("acceptedCertificate") or report.get("certificate")
+    if (
+        contextual.get("failure_reason") is not None
+        or not isinstance(contextual.get("candidate"), dict)
+        or not isinstance(certificate, str)
+        or "reduce delta LinearMap.mul'" not in certificate
+        or report.get("legacyCertificate") is not None
+    ):
+        raise RuntimeError(f"contextual named-delta materialization changed: {contextual!r}")
     check_configuration(report, CONTEXTUAL_ID)
 
     context_local = occurrences.get(CONTEXT_LOCAL_REPORT_ID)
@@ -216,16 +218,21 @@ def main() -> None:
     missing = occurrences.get(MISSING_TRANSITION_ID)
     if (
         missing is None
-        or missing.get("terminal_outcome") != "coverage_failure"
-        or missing.get("failure_reason") != "missing_transition"
+        or missing.get("terminal_outcome") != "materialized"
+        or missing.get("failure_reason") is not None
     ):
-        raise RuntimeError(f"Bilinear transition failure changed: {record!r}")
+        raise RuntimeError(f"Bilinear named-delta closure changed: {record!r}")
     missing_report = missing.get("report") or {}
-    continuity = missing_report.get("transitionContinuity") or {}
-    if continuity.get("gapLocation") != "before_event":
-        raise RuntimeError(f"Bilinear transition location changed: {missing!r}")
+    missing_certificate = missing_report.get("acceptedCertificate") or missing_report.get("certificate")
+    if (
+        not isinstance(missing.get("candidate"), dict)
+        or not isinstance(missing_certificate, str)
+        or "reduce delta LinearMap.mul'" not in missing_certificate
+        or missing_report.get("operationalAdmissibility", {}).get("code") != "accepted"
+    ):
+        raise RuntimeError(f"Bilinear named-delta certificate changed: {missing!r}")
 
-    print("nondefault configuration provenance and Bilinear O1 gate passed")
+    print("nondefault configuration provenance and Bilinear O2a named-delta gate passed")
 
 
 if __name__ == "__main__":
