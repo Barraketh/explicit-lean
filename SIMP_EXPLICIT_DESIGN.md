@@ -576,12 +576,16 @@ The bounded gate records 27 dynamic executions under the 24 stable occurrence
 IDs in one compile. The versioned report retains proof-producing
 `Simp.Result`s, candidate-origin arrays, premise observations, alpha-stable
 state fingerprints, nullable execution disposition, and validation envelopes.
-Fifteen events have multiple candidate origins and seven carry discharged
-premises. Raw recording deliberately leaves terminal outcomes unset; the
+Nine top-level events have multiple candidate origins and four carry
+discharged premises. Reentrant method activity is retained in its enclosing
+event's provenance rather than duplicated as a main-cursor event. Raw
+recording deliberately leaves terminal outcomes unset; the
 coverage driver may assign them only after materialization and, for branching
 uses, after Package F can establish commitment.
 
 ### B. Generated rewrite-proof fallback
+
+Status: implemented on 2026-08-20.
 
 - Promote and harden the proof exporter from `Experiment/Main.lean` as a
   renderer for proof terms and types.
@@ -589,9 +593,26 @@ uses, after Package F can establish commitment.
   when possible and proof bindings otherwise.
 - Add source-size and encoding-kind metrics.
 
-Gate: all eight multiple-origin failures in the `DropRight` baseline
-materialize, and dedicated simproc and special-rule fixtures replay with an
-empty ambient simp/simproc environment.
+Gate: the four target-local multiple-origin failures in the `DropRight`
+baseline (`df0c0dff00516f2a`, `f582f1aac3e05ab2`, `22c673bcce0f227e`, and
+`220c8550c1042081`) materialize, and dedicated simproc and special-rule
+fixtures replay with an empty ambient simp/simproc environment. The original
+eight-way diagnostic bucket also contained two executions whose whole-result
+proof mentions an inaccessible case binder; those close in Package E. Its two
+remaining occurrences execute under `<;>` on more than one branch and close in
+Package F. This partition is based on the semantic recorder, not on the old
+diagnostic-origin count.
+
+The reusable exporter now renders both proof terms and their declared types in
+the replacement namespace, preserves the recorded redex type for
+definitionally reflexive proofs, shares profitable subterms, and rejects
+metavariables, synthetic `sorry`, inaccessible locals, and residual private
+constants. Schema version 2 reports event and whole-result proof fallbacks with
+source-size metrics. All four Package B `DropRight` replacements compile both
+in isolation and together. A real `pushFun` simproc fixture materializes a
+certificate that contains no ambient simproc invocation, and a lower-level
+`Origin.other` fixture validates the same public proof-result encoder and
+closed replayer. The complete `Experiment/run.sh` regression passes.
 
 ### C. Recorded premise proofs
 
@@ -623,6 +644,9 @@ position-free.
 
 Gate: focused fixtures cover a single hypothesis, multiple hypotheses, a
 dependent later hypothesis, an inaccessible local fact, and `at *`.
+The gate also materializes `f3d6dce9ae772ce2` and `54d6b0e3b2ad8e41` from the
+`DropRight` baseline, whose generated whole-result proofs require naming an
+inaccessible `cases` binder.
 
 ### F. Enclosing-body and multi-goal rewriting
 
@@ -632,7 +656,9 @@ dependent later hypothesis, an inaccessible local fact, and `at *`.
 - Add smallest-fragment proof export and presentation-change fallbacks.
 
 Gate: fixtures cover `<;>`, `all_goals`, a repeated occurrence, a backtracking
-branch, and the `DropRight` zero-event presentation failure.
+branch, and the `DropRight` zero-event presentation failure. It also
+materializes `c485b5d0b1a08fac` and `754e9f44f095fc5d`, the two baseline
+occurrences whose one source `simp` executes in both branches of `<;>`.
 
 ### G. Corpus closure
 

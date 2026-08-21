@@ -34,7 +34,7 @@ REPORT_MARKER = "EXPLICIT_LEAN_SIMP_REPORT "
 PARSE_FAILURE_MARKER = "EXPLICIT_LEAN_INVENTORY_PARSE_FAILURE "
 SUPPORTED_KINDS = {"simp", "simp_only"}
 PASSIVE_RECORDING_SCHEMA = "explicitLean.simpModuleRecording"
-PASSIVE_RECORDING_SCHEMA_VERSION = 1
+PASSIVE_RECORDING_SCHEMA_VERSION = 2
 
 
 def run(
@@ -529,6 +529,20 @@ def run_trial(entry: dict[str, Any], config: TrialConfig) -> dict[str, Any]:
             positions_needed=report["positionsNeeded"],
             certificate=report["certificate"],
             certificate_bytes=report["certificateBytes"],
+            encoding=report.get("encoding"),
+            encoding_fallback_reason=report.get("encodingFallbackReason"),
+            trace_encoding_kinds=[
+                event.get("encodingKind")
+                for execution in report.get("executions", [])
+                for event in execution.get("trace", [])
+                if event.get("encodingKind") is not None
+            ],
+            trace_encoding_reasons=[
+                event.get("encodingReason")
+                for execution in report.get("executions", [])
+                for event in execution.get("trace", [])
+                if event.get("encodingReason") is not None
+            ],
         )
         materialized_path = write_copy(
             work_root / "materialized", entry, report["certificate"]

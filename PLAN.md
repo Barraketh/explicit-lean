@@ -675,11 +675,33 @@ all 83,015 supported calls remains the recorder work below.
 Package A of the design is now implemented. One passive copied-module compile
 records all 24 stable `DropRight` occurrence IDs and 27 dynamic executions
 without aborting on unsupported compact encodings. Its versioned semantic
-reports retain 15 multiple-origin events and seven premise-bearing events,
-along with validation envelopes and alpha-stable state fingerprints. The
+reports retain nine top-level multiple-origin events and four top-level
+premise-bearing events; reentrant method activity remains provenance of its
+enclosing event rather than becoming a duplicate replay command. The reports
+also retain validation envelopes and alpha-stable state fingerprints. The
 existing isolated and aggregate materialization paths remain available, and
 the bounded check asserts that passive recording uses exactly one module
 compile.
+
+Package B's semantic-event work refined the baseline's eight
+`multiple_recorded_origins` failures. Four are target-local proof-result
+fallbacks owned by Package B. Two are zero-event executions whose
+whole-result proof refers to an inaccessible `cases` binder and therefore
+close with Package E's stable-local work. The other two are shared `<;>`
+occurrences with multiple dynamic executions and close with Package F's
+enclosing-body rewriting. The old category remains useful as provenance, but
+it is not a valid package boundary.
+
+Package B is now implemented. `ExplicitLean.ProofExport` renders proof terms
+and declared types in the replacement namespace and preserves explicit redex
+types even when Lean's proof is definitionally reflexive. Schema version 2
+distinguishes event proof bindings from whole-result presentation fallbacks
+and reports their source sizes and origin categories. The four Package B
+`DropRight` occurrences materialize alone and in one aggregate module; the
+real `pushFun` simproc fixture materializes without retaining an ambient
+simproc invocation, and the synthetic special-origin fixture passes through
+the same public encoder and closed replayer. The full `Experiment/run.sh`
+regression passes.
 
 The known recorder failures are the staged work packages in sections 8 and 11
 of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result
@@ -777,7 +799,7 @@ All three directions retain the same project rules:
   original body; and
 - `Experiment/run.sh` remains the single end-to-end verification command.
 
-The next concrete milestone is package B from
-[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): promote the expression
-renderer into a proof-source fallback and materialize the eight multiple-origin
-`DropRight` failures without consulting ambient simp or simproc registrations.
+The next concrete milestone is package C from
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): replay recorded
+side-condition proposition/proof pairs through a closed ordered premise
+provider and materialize the five discharged-premise `DropRight` failures.

@@ -2,6 +2,7 @@ module
 
 public import ExplicitLean.Normalize
 public meta import ExplicitLean.Normalize
+public meta import ExplicitLean.ProofExport
 public meta import Lean.Elab.Tactic.Simp
 public import Lean.Elab.Tactic.Simp
 public meta import Lean.Elab.Tactic.Location
@@ -54,7 +55,7 @@ register_option explicitLean.simpExplicit.occurrenceId : String := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 1
+def reportSchemaVersion : Nat := 2
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -103,7 +104,34 @@ structure SemanticEventReport where
   proof : Option ExprFingerprint
   origins : Array OriginCandidate
   premises : Array PremiseReport
+  /-- `named_rule` for a compact origin replay, `generated_proof` for the
+      authoritative result-proof fallback. -/
+  encodingKind : Option String
+  /-- Why a generated proof binding was needed, when applicable. -/
+  encodingReason : Option String
   deriving ToJson
+
+structure EncodingMetrics where
+  mode : String := "event"
+  namedRuleEvents : Nat := 0
+  generatedProofEvents : Nat := 0
+  generatedSimprocEvents : Nat := 0
+  generatedSpecialEvents : Nat := 0
+  wholeResultProofCount : Nat := 0
+  generatedBindingCount : Nat := 0
+  generatedBindingBytes : Nat := 0
+  totalCertificateBytes : Nat := 0
+  deriving ToJson
+
+/- A proof-result encoder is intentionally the only public surface needed by
+   other tactic producers.  The recorder's semantic event and replay state
+   remain private; callers receive the validated source and its compact
+   encoding diagnostics. -/
+structure ProofResultEncoding where
+  source : String
+  metrics : EncodingMetrics
+  encodingKind : String
+  encodingReason : Option String
 
 structure ExecutionReport where
   executionIndex : Nat
@@ -138,6 +166,8 @@ structure RecordingReport where
   traceAvailable : Bool
   encodingStatus : String
   recordingReason : Option String
+  encoding : EncodingMetrics
+  encodingFallbackReason : Option String
   validation : Option ValidationEnvelope
   deriving ToJson
 
@@ -159,8 +189,16 @@ private structure RecordedEvent where
   origins : Array Origin
   premises : Array RecordedPremise
 
+private structure EventEncodingInfo where
+  kind : String
+  reason : Option String
+
 private structure RecorderState where
   tick : Nat := 0
+  /-- Number of reentrant simplifier methods currently executing. Nested
+      calls contribute ticks and diagnostics to their enclosing method, but
+      are not independent semantic replay events. -/
+  activeDepth : Nat := 0
   events : Array RecordedEvent := #[]
   premises : Array RecordedPremise := #[]
 
@@ -184,26 +222,32 @@ private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
     (method : Simp.Simproc) : Simp.Simproc := fun input => do
   let state ← ref.get
   let tick := state.tick + 1
-  ref.set { state with tick }
+  let depth := state.activeDepth
+  ref.set { state with tick, activeDepth := depth + 1 }
   let premiseStart := state.premises.size
   let before := (← get).diag
-  let step ← method input
-  let after := (← get).diag
-  if let some result := changedResult? input step then
+  let step ← try
+    method input
+  finally
     let state ← ref.get
-    let premises := state.premises.extract premiseStart state.premises.size
-    ref.set {
-      state with
-        events := state.events.push {
-          tick
-          phase
-          input
-          step
-          result
-          origins := changedOrigins before after
-          premises
-        }
-    }
+    ref.set { state with activeDepth := state.activeDepth - 1 }
+  let after := (← get).diag
+  if depth == 0 then
+    if let some result := changedResult? input step then
+      let state ← ref.get
+      let premises := state.premises.extract premiseStart state.premises.size
+      ref.set {
+        state with
+          events := state.events.push {
+            tick
+            phase
+            input
+            step
+            result
+            origins := changedOrigins before after
+            premises
+          }
+      }
   return step
 
 private def recordingMethods (ref : IO.Ref RecorderState)
@@ -312,6 +356,28 @@ private structure ReplayEvent where
   phase : Phase
   rules : Array SimpTheorem
   source : Syntax
+
+private structure GeneratedBinding where
+  name : Name
+  type : Expr
+  proof : Expr
+  typeText : String
+  proofText : String
+  bytes : Nat
+
+private structure EncodedEvent where
+  event : RecordedEvent
+  replay : ReplayEvent
+  info : EventEncodingInfo
+  ruleText : String
+  binding? : Option GeneratedBinding
+
+private structure CertificatePlan where
+  events : Array EncodedEvent
+  bindings : Array GeneratedBinding
+  positions : Bool
+  source : String
+  metrics : EncodingMetrics
 
 private structure ReplayState where
   tick : Nat := 0
@@ -422,6 +488,257 @@ private def runReplay (target : Expr) (events : Array ReplayEvent) : TacticM (Si
   }
   let (result, _) ← Simp.mainCore target ctx (methods := methods)
   return (result, ← ref.get)
+
+private def freshBindingName (eventIndex : Nat) (used : Array Name) : MetaM Name := do
+  let lctx ← getLCtx
+  let mut suffix := 0
+  while true do
+    let base := s!"h_explicit_{eventIndex + 1}"
+    let candidate := Name.mkSimple (if suffix == 0 then base else s!"{base}_{suffix}")
+    if (lctx.findFromUserName? candidate).isNone && !used.contains candidate then
+      return candidate
+    suffix := suffix + 1
+  throwError "unreachable generated binding name search"
+
+private def fallbackReason (event : RecordedEvent) : TacticM String := do
+  if event.origins.isEmpty then
+    return "no_origin"
+  let mut hasSimproc := false
+  let mut hasSpecial := false
+  for origin in event.origins do
+    match origin with
+    | .decl name _ _ =>
+        if (← Simp.isBuiltinSimproc name) || (← Simp.isSimproc name) then
+          hasSimproc := true
+    | .other _ => hasSpecial := true
+    | _ => pure ()
+  if hasSimproc then
+    return "simproc"
+  if hasSpecial then
+    return "special_rule"
+  if event.origins.size > 1 then
+    return "multiple_origins"
+  match event.origins[0]! with
+  | .fvar fvarId =>
+      if (← fvarId.getDecl).userName.isInaccessibleUserName then
+        return "unprintable_local_fact"
+  | _ => pure ()
+  return "unvalidated_named_rule"
+
+private def compactReplayEvent? (event : RecordedEvent) : TacticM (Option ReplayEvent) := do
+  if event.origins.size != 1 then
+    return none
+  try
+    let replay ← recordedReplayEvent event (withPosition := false)
+    let (result, state) ← runReplay event.input #[replay]
+    if state.next == 1 && (← isDefEq result.expr event.result.expr) then
+      return some replay
+  catch _ => pure ()
+  return none
+
+private def isReflexiveResultEarly (expr : Expr) : MetaM Bool := do
+  if expr.isTrue then
+    return true
+  if expr.isAppOfArity ``Eq 3 then
+    return ← isDefEq expr.appFn!.appArg! expr.appArg!
+  if expr.isAppOfArity ``Iff 2 then
+    return ← isDefEq expr.appFn!.appArg! expr.appArg!
+  return false
+
+private def generatedProofBinding (input : Expr) (result : Simp.Result)
+    (eventIndex : Nat) (phase : Phase) (tick? : Option Nat)
+    (usedNames : Array Name) : TacticM (GeneratedBinding × ReplayEvent) := do
+  let relation ← mkEq input result.expr
+  let proof ← Simp.Result.getProof' input result
+  let proof ← mkExpectedTypeHint proof relation
+  let proofType ← inferType proof
+  unless ← isDefEq proofType relation do
+    throwError "simp_explicit generated proof did not check against its recorded equality"
+  let name ← freshBindingName eventIndex usedNames
+  let sourceNamespace := ((← Term.getDeclName?).map (·.getPrefix)).getD Name.anonymous
+  let rendered ← ProofExport.render proof (type? := some relation) (config := {
+    sourceNamespace
+  })
+  let binding : GeneratedBinding := {
+    name
+    type := relation
+    proof
+    typeText := rendered.typeText
+    proofText := rendered.valueText
+    bytes := rendered.typeText.utf8ByteSize + rendered.valueText.utf8ByteSize
+  }
+  let rules ← mkSimpTheoremFromExpr (.other name) #[] proof
+    (post := phase == .post)
+  let replay : ReplayEvent := {
+    tick?
+    phase
+    rules
+    source := (mkIdent name).raw
+  }
+  return (binding, replay)
+
+private def generatedBinding (event : RecordedEvent) (eventIndex : Nat)
+    (usedNames : Array Name) (withPosition : Bool) : TacticM (GeneratedBinding × ReplayEvent) :=
+  generatedProofBinding event.input event.result eventIndex event.phase
+    (if withPosition then some event.tick else none) usedNames
+
+private def indentSource (indent : String) (text : String) : String :=
+  text.replace "\n" ("\n" ++ indent)
+
+private def certificatePlanText (events : Array EncodedEvent)
+    (bindings : Array GeneratedBinding) (withPositions : Bool) : String :=
+  Id.run do
+    let mut lines := #[]
+    for binding in bindings do
+      lines := lines.push s!"have {binding.name} : {indentSource "  " binding.typeText} :="
+      lines := lines.push s!"  {indentSource "  " binding.proofText}"
+    if events.isEmpty then
+      if lines.isEmpty then
+        return "simp_explicit []"
+      lines := lines.push "simp_explicit []"
+      return String.intercalate "\n" lines.toList
+    lines := lines.push "simp_explicit ["
+    for index in *...events.size do
+      let some event := events[index]? | continue
+      let comma := if index + 1 < events.size then "," else ""
+      let phase := if event.event.phase == .pre then "↓ " else ""
+      let position := if withPositions then s!"{event.event.tick} => " else ""
+      lines := lines.push s!"  {position}{phase}{event.ruleText}{comma}"
+    lines := lines.push "]"
+    return String.intercalate "\n" lines.toList
+
+private def wholeResultPlanText (binding : GeneratedBinding) : String :=
+  let declaration :=
+    s!"have {binding.name} : {indentSource "  " binding.typeText} :="
+  let proof := s!"  {indentSource "  " binding.proofText}"
+  let replay := s!"simp_explicit [↓ {binding.name}]"
+  String.intercalate "\n" [declaration, proof, replay]
+
+private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEvent)
+    (searchedResult : Simp.Result) (withPositions : Bool) : TacticM (Option CertificatePlan) := do
+  try
+    -- Keep the trailing reflexive closure in generated plans: unlike the
+    -- compact certificate count, materialized proof bodies need the explicit
+    -- closure to finish the rewritten target.
+    let count := recorded.size
+    let mut encoded := #[]
+    let mut bindings := #[]
+    let mut usedNames := #[]
+    for index in *...count do
+      let some event := recorded[index]? | return none
+      if let some replay ← compactReplayEvent? event then
+        let rule ← ruleText event.origins[0]!
+        encoded := encoded.push {
+          event
+          replay := if withPositions then { replay with tick? := some event.tick } else replay
+          info := { kind := "named_rule", reason := none }
+          ruleText := rule
+          binding? := none
+        }
+      else
+        let reason ← fallbackReason event
+        let (binding, replay) ← generatedBinding event index usedNames withPositions
+        usedNames := usedNames.push binding.name
+        bindings := bindings.push binding
+        encoded := encoded.push {
+          event
+          replay
+          info := { kind := "generated_proof", reason := some reason }
+          ruleText := binding.name.toString
+          binding? := some binding
+        }
+    let replayEvents := encoded.map (·.replay)
+    let (replayedResult, replayState) ← runReplay target replayEvents
+    unless replayState.next == replayEvents.size do
+      return none
+    let reachesResult ← if searchedResult.expr.isTrue then
+      isReflexiveResultEarly replayedResult.expr
+    else
+      isDefEq searchedResult.expr replayedResult.expr
+    unless reachesResult do
+      return none
+    let source := certificatePlanText encoded bindings withPositions
+    let namedRuleEvents := encoded.foldl (fun n event =>
+      if event.info.kind == "named_rule" then n + 1 else n) 0
+    let generatedProofEvents := encoded.foldl (fun n event =>
+      if event.info.kind == "generated_proof" then n + 1 else n) 0
+    let generatedSimprocEvents := encoded.foldl (fun n event =>
+      if event.info.reason == some "simproc" then n + 1 else n) 0
+    let generatedSpecialEvents := encoded.foldl (fun n event =>
+      if event.info.reason == some "special_rule" then n + 1 else n) 0
+    let generatedBindingBytes := bindings.foldl (fun n binding => n + binding.bytes) 0
+    return some {
+      events := encoded
+      bindings
+      positions := withPositions
+      source
+      metrics := {
+        namedRuleEvents
+        generatedProofEvents
+        generatedSimprocEvents
+        generatedSpecialEvents
+        generatedBindingCount := bindings.size
+        generatedBindingBytes
+        totalCertificateBytes := source.utf8ByteSize
+      }
+    }
+  catch _ =>
+    return none
+
+/-- Encode one semantic simp result using the same event fallback and closed
+    replay validation used by `simp_explicit?`.  `origins` is diagnostic input
+    only; the resulting source never invokes ambient simp or simproc search. -/
+def encodeProofResult (input : Expr) (result : Simp.Result)
+    (origins : Array Origin) (phase : Phase) : TacticM ProofResultEncoding := do
+  let event : RecordedEvent := {
+    tick := 1
+    phase
+    input
+    step := .done result
+    result
+    origins
+    premises := #[]
+  }
+  let some plan ← buildCertificatePlan? input #[event] result (withPositions := false)
+    | throwError "proof-result encoder could not validate an event replay"
+  let some encoded := plan.events[0]?
+    | throwError "proof-result encoder produced no event encoding"
+  return {
+    source := plan.source
+    metrics := plan.metrics
+    encodingKind := encoded.info.kind
+    encodingReason := encoded.info.reason
+  }
+
+private def buildWholeResultPlan? (target : Expr) (searchedResult : Simp.Result) :
+    TacticM (Option CertificatePlan) := do
+  try
+    let (binding, replay) ← generatedProofBinding target searchedResult 0 .pre none #[]
+    let (replayedResult, replayState) ← runReplay target #[replay]
+    unless replayState.next == 1 do
+      return none
+    let reachesResult ← if searchedResult.expr.isTrue then
+      isReflexiveResultEarly replayedResult.expr
+    else
+      isDefEq searchedResult.expr replayedResult.expr
+    unless reachesResult do
+      return none
+    let source := wholeResultPlanText binding
+    return some {
+      events := #[]
+      bindings := #[binding]
+      positions := false
+      source
+      metrics := {
+        mode := "whole_result_proof"
+        wholeResultProofCount := 1
+        generatedBindingCount := 1
+        generatedBindingBytes := binding.bytes
+        totalCertificateBytes := source.utf8ByteSize
+      }
+    }
+  catch _ =>
+    return none
 
 private def replaySimp (eventSyntax : Array Syntax) : TacticM Unit := withMainContext do
   let events ← eventSyntax.mapM elaborateEvent
@@ -636,7 +953,8 @@ private def originCandidate (origin : Origin) : MetaM OriginCandidate := do
   | .other name =>
       return { kind := "other", name := name.toString, inverse := false, source := none }
 
-private def semanticEventReport (event : RecordedEvent) : MetaM SemanticEventReport := do
+private def semanticEventReport (event : RecordedEvent)
+    (encoding? : Option EventEncodingInfo := none) : MetaM SemanticEventReport := do
   let origins ← event.origins.mapM originCandidate
   let premises ← event.premises.mapM fun premise => do
     return {
@@ -652,17 +970,21 @@ private def semanticEventReport (event : RecordedEvent) : MetaM SemanticEventRep
     proof := ← event.result.proof?.mapM exprFingerprint
     origins
     premises
+    encodingKind := encoding?.map (·.kind)
+    encodingReason := encoding?.bind (·.reason)
   }
 
 private def executionReport (target : Expr) (result : Simp.Result)
     (state : RecorderState) (executionIndex : Nat) (failureCategory? : Option String)
     (failureMessage? : Option String := none)
+    (encodings : Array EventEncodingInfo := #[])
     : MetaM ExecutionReport := do
   return {
     executionIndex
     result := "succeeded"
     disposition := none
-    trace := ← state.events.mapM semanticEventReport
+    trace := ← state.events.mapIdxM fun index event =>
+      semanticEventReport event encodings[index]?
     initialState := ← stateFingerprint target
     finalState := ← stateFingerprint result.expr
     failureCategory := failureCategory?
@@ -676,14 +998,17 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     (result? : Option Simp.Result) (suggestion : String) (positionsNeeded : Bool)
     (failureCategory? : Option String) (failureMessage? : Option String)
     (terminalOutcome? : Option String) (traceAvailable := true)
-    (encodingStatus := "validated") (recordingReason? : Option String := none) : TacticM Unit := do
+    (encodingStatus := "validated") (recordingReason? : Option String := none)
+    (encodings : Array EventEncodingInfo := #[])
+    (encodingMetrics : EncodingMetrics := {})
+    (encodingFallbackReason? : Option String := none) : TacticM Unit := do
   let declaration := (← Term.getDeclName?).map (·.toString) |>.getD "<unknown>"
   let originalSyntax := toString simpStx.prettyPrint
   let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
   let (closesGoal, finalTarget, executions) ← match result? with
     | some result =>
         let closesGoal ← isReflexiveResult result.expr
-        let execution ← executionReport target result state 0 failureCategory? failureMessage?
+        let execution ← executionReport target result state 0 failureCategory? failureMessage? encodings
         pure (closesGoal, result.expr, #[execution])
     | none =>
         let finalTarget ← try
@@ -722,6 +1047,8 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     traceAvailable
     encodingStatus
     recordingReason := recordingReason?
+    encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
+    encodingFallbackReason := encodingFallbackReason?
     validation := some {
       schemaVersion := reportSchemaVersion
       certificate := if suggestion.isEmpty then none else some 0
@@ -754,6 +1081,24 @@ private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
       (some category) (some detail) none false "unavailable" (some detail)
   catch ex =>
     logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
+
+private def packageCPremiseEvent (event : RecordedEvent) : Bool :=
+  if event.premises.isEmpty || event.origins.size != 1 then
+    false
+  else
+    match event.origins[0]! with
+    | .decl .. => true
+    | _ => false
+
+private def namedEncodingInfos (events : Array RecordedEvent) : Array EventEncodingInfo := Id.run do
+  let count := certificateEventCount events
+  let mut result := #[]
+  for _ in *...count do
+    result := result.push { kind := "named_rule", reason := none }
+  return result
+
+private def planEncodingInfos (plan : CertificatePlan) : Array EventEncodingInfo :=
+  plan.events.map (·.info)
 
 private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainContext do
   unless simpStx.getKind == ``Lean.Parser.Tactic.simp do
@@ -804,11 +1149,46 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   let some (result, state) := recording?
     | throwError "simp_explicit recorder did not return a simplifier result"
   let flatEncoding? ← replayEncoding? target state.events result
-  if flatEncoding?.isNone && !passive then
-    throwErrorAt reportStx "simp_explicit recorder cannot encode this simplification as a deterministic replay"
   let mut suggestion := ""
+  let mut encodingInfos : Array EventEncodingInfo := #[]
+  let mut encodingMetrics : EncodingMetrics := {}
+  let mut encodingFallbackReason? : Option String := none
+  let mut positionsNeeded := flatEncoding?.getD false
   if let some flatWithPositions := flatEncoding? then
     suggestion := ← certificateText state.events (withPositions := flatWithPositions)
+    encodingInfos := namedEncodingInfos state.events
+    encodingMetrics := {
+      namedRuleEvents := encodingInfos.size
+    }
+  else
+    if state.events.any packageCPremiseEvent then
+      if passive then
+        return ← passiveOriginalSimp simpStx reportStx target "premise"
+          "cannot yet encode a discharged side condition"
+      else
+        throwErrorAt reportStx "simp_explicit cannot yet encode a discharged side condition"
+    let plan? ← buildCertificatePlan? target state.events result (withPositions := false)
+    let plan? ← if plan?.isSome then
+      pure plan?
+    else
+      buildCertificatePlan? target state.events result (withPositions := true)
+    let plan? ← match plan? with
+      | some plan => pure (some plan)
+      | none => buildWholeResultPlan? target result
+    match plan? with
+    | none =>
+        if passive then
+          return ← passiveOriginalSimp simpStx reportStx target "recording"
+            "proof-result fallback could not be validated"
+        else
+          throwErrorAt reportStx "simp_explicit recorder cannot encode this simplification as a deterministic replay"
+    | some plan =>
+        suggestion := plan.source
+        encodingInfos := planEncodingInfos plan
+        encodingMetrics := plan.metrics
+        encodingFallbackReason? :=
+          if plan.metrics.mode == "whole_result_proof" then some "presentation_gap" else none
+        positionsNeeded := plan.positions
 
   -- Search a bounded certificate-program graph breadth first. A node is the
   -- current target plus the phases that produced it. Its outgoing edges replay
@@ -874,21 +1254,27 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   if shouldReport then
     -- Recording cannot assign a terminal outcome: `materialized` requires the
     -- coverage driver to compile the replacement in its complete body.
-    let failureCategory? := none
-    let terminalOutcome? := none
+    let failureCategory? : Option String := none
+    let terminalOutcome? : Option String := none
     let encodingStatus := if suggestion.isEmpty then "unavailable" else "validated"
     let recordingReason? := if suggestion.isEmpty then some "compact certificate encoding was not validated" else none
     if passive then
       try
         emitRecordingReport simpStx reportStx target state (some result) suggestion
-          (flatEncoding?.getD false) failureCategory? none terminalOutcome? true encodingStatus
-          recordingReason?
+          positionsNeeded failureCategory? none none
+          (traceAvailable := true) (encodingStatus := encodingStatus)
+          (recordingReason? := recordingReason?) (encodings := encodingInfos)
+          (encodingMetrics := encodingMetrics)
+          (encodingFallbackReason? := encodingFallbackReason?)
       catch ex =>
         logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
     else
       emitRecordingReport simpStx reportStx target state (some result) suggestion
-        (flatEncoding?.getD false) failureCategory? none terminalOutcome? true encodingStatus
-        recordingReason?
+        positionsNeeded failureCategory? none none
+        (traceAvailable := true) (encodingStatus := encodingStatus)
+        (recordingReason? := recordingReason?) (encodings := encodingInfos)
+        (encodingMetrics := encodingMetrics)
+        (encodingFallbackReason? := encodingFallbackReason?)
   unless passive do
     logInfoAt reportStx m!"Try this deterministic replay:\n{suggestion}"
   applyResultToTarget mvarId target result
