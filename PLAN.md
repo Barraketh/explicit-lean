@@ -347,13 +347,16 @@ position. The `first_num_eq` certificate block is 98 bytes, compared with
 `commute_eps_left`, including the surrounding `ext`, occupy 507 bytes, compared
 with 4,782 bytes for the shared elaborated body.
 
-The current recorder rejects nondefault simp configuration, custom dischargers,
-successful side-condition discharge, simprocs, special rules, inaccessible
-local hypotheses, and locations other than the target. Replay still uses Lean's
-ordinary deterministic expression traversal and congruence machinery; only
-the simp theorem set and simproc search have been removed. Absolute traversal
-positions, when required as a fallback, are intentionally strict and therefore
-sensitive to changes in the simplifier implementation or congruence traversal.
+The recorder now preserves nondefault simp configuration during recording and
+reports its normalized built-in fields as provenance; generated replay still
+uses no configuration mode or ambient simp state. Recorded side-condition
+proofs, simproc and special-rule fallbacks, inaccessible local hypotheses, and
+explicit locations are handled by the later packages below. Custom discharger
+syntax remains a separate recorder gap. Replay still uses Lean's ordinary
+deterministic expression traversal and congruence machinery; only the simp
+theorem set and simproc search have been removed. Absolute traversal positions,
+when required as a fallback, are intentionally strict and therefore sensitive
+to changes in the simplifier implementation or congruence traversal.
 
 ### Simp-heavy module experiment
 
@@ -762,6 +765,14 @@ Unresolved elaboration metavariables are abstracted to inferred arguments, and
 inaccessible locals are printed through exact context-index naming. The final
 aggregate compile is the acceptance check; the failed optimistic aggregate and
 the fallback attempts remain in the audit record.
+
+The nondefault-configuration step is now implemented. Recording reports use
+schema version 9 and retain the original `optConfig` syntax plus every built-in
+`Simp.Config` field as normalized JSON provenance; certificates compile the
+configuration away and contain no replay configuration mode. The production
+`Mathlib/Algebra/Algebra/Bilinear.lean` regression keeps the stable contextual
+IDs `af1f3238d87dcae6` and `5795dc0135cc7db3`, and closes its ten-entry module
+with nine materialized replacements and one `not_reached` terminal outcome.
 
 The known recorder failures are the staged work packages in sections 8 and 11
 of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result

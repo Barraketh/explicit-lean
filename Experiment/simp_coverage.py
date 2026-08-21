@@ -39,7 +39,7 @@ PASSIVE_RECORDING_SCHEMA = "explicitLean.simpModuleRecording"
 PASSIVE_RECORDING_SCHEMA_VERSION = 4
 CLOSURE_SCHEMA = "explicitLean.simpClosure"
 CLOSURE_SCHEMA_VERSION = 2
-EXPECTED_SIMP_REPORT_SCHEMA_VERSION = 8
+EXPECTED_SIMP_REPORT_SCHEMA_VERSION = 9
 
 
 def run(
@@ -715,14 +715,19 @@ def closure_nonoverlapping_candidates(
 
 def apply_closure_candidates(source: bytes, candidates: list[dict[str, Any]]) -> bytes:
     rewritten = source
-    for candidate in sorted(candidates, key=lambda item: item["startByte"], reverse=True):
-        rewritten = replace_range_bytes(
+    offset = 0
+    for candidate in sorted(candidates, key=lambda item: item["startByte"]):
+        start = candidate["startByte"] + offset
+        end = candidate["endByte"] + offset
+        updated = replace_range_bytes(
             rewritten,
-            candidate["startByte"],
-            candidate["endByte"],
+            start,
+            end,
             candidate["expected"],
             candidate["replacement"],
         )
+        offset += len(updated) - len(rewritten)
+        rewritten = updated
     return inject_import(rewritten)
 
 

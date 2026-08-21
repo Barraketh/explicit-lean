@@ -436,6 +436,16 @@ for provenance. If a configuration changes a result that cannot be reconstructed
 by compact commands, proof-result fallback is used. Custom dischargers follow
 the premise-proof design above.
 
+The implementation records the original `optConfig` syntax and all built-in
+`Simp.Config` fields available in the pinned Lean toolchain as primitive JSON
+values (including stable strings for enum fields and nullable values for
+options); opaque plugin options remain represented by their original syntax.
+This provenance is schema version 9 and is populated from the elaborated simp
+context for target and location recording. The focused
+`Mathlib/Algebra/Algebra/Bilinear.lean` regression verifies `+contextual`
+recording, configuration-free generated replay, and complete terminal
+classification of its same-body pair.
+
 ### 8.7 Unprintable local facts
 
 The body rewriter, rather than the event printer, owns local naming. It assigns

@@ -30,7 +30,7 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected local-rename report schema: {report!r}")
-    if report.get("schemaVersion") != 8:
+    if report.get("schemaVersion") != 9:
         raise RuntimeError(f"unexpected local-rename report version: {report!r}")
     renames = report.get("localRenames")
     if renames != [{"contextIndex": 7, "generatedName": "h_explicit_8_1"}]:

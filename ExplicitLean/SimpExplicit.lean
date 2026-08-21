@@ -97,7 +97,7 @@ register_option explicitLean.simpExplicit.bodyScopeFrame : Nat := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 8
+def reportSchemaVersion : Nat := 9
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -105,6 +105,100 @@ structure ExprFingerprint where
   /-- A canonical, alpha-stable expression fingerprint. -/
   fingerprint : String
   deriving ToJson
+
+/- The recorder compiles the source simp configuration into the generated
+   event program.  Keep its provenance separately from the certificate: the
+   replay tactic deliberately has no configuration mode and never consults
+   ambient simp state.  Every built-in `Simp.Config` field is represented with
+   JSON primitives; plugin-specific options remain available through `optConfig`.
+-/
+structure SimpConfigSummary where
+  maxSteps : Nat
+  maxDischargeDepth : Nat
+  contextual : Bool
+  memoize : Bool
+  singlePass : Bool
+  zeta : Bool
+  beta : Bool
+  eta : Bool
+  etaStruct : String
+  iota : Bool
+  proj : Bool
+  decide : Bool
+  arith : Bool
+  autoUnfold : Bool
+  dsimp : Bool
+  failIfUnchanged : Bool
+  ground : Bool
+  unfoldPartialApp : Bool
+  zetaDelta : Bool
+  index : Bool
+  implicitDefEqProofs : Bool
+  zetaUnused : Bool
+  catchRuntime : Bool
+  zetaHave : Bool
+  letToHave : Bool
+  congrConsts : Bool
+  bitVecOfNat : Bool
+  warnExponents : Bool
+  suggestions : Bool
+  maxSuggestions : Option Nat
+  locals : Bool
+  instances : Bool
+  deriving ToJson
+
+structure SimpConfigurationReport where
+  /-- Pretty-printed `optConfig` syntax, retained even if elaboration failed. -/
+  optConfig : String
+  /-- The elaborated built-in configuration, when context construction succeeded. -/
+  normalized : Option SimpConfigSummary
+  deriving ToJson
+
+private def etaStructModeText : EtaStructMode → String
+  | .all => "all"
+  | .notClasses => "notClasses"
+  | .none => "none"
+
+private def simpConfigSummary (config : Simp.Config) : SimpConfigSummary := {
+  maxSteps := config.maxSteps
+  maxDischargeDepth := config.maxDischargeDepth
+  contextual := config.contextual
+  memoize := config.memoize
+  singlePass := config.singlePass
+  zeta := config.zeta
+  beta := config.beta
+  eta := config.eta
+  etaStruct := etaStructModeText config.etaStruct
+  iota := config.iota
+  proj := config.proj
+  decide := config.decide
+  arith := config.arith
+  autoUnfold := config.autoUnfold
+  dsimp := config.dsimp
+  failIfUnchanged := config.failIfUnchanged
+  ground := config.ground
+  unfoldPartialApp := config.unfoldPartialApp
+  zetaDelta := config.zetaDelta
+  index := config.index
+  implicitDefEqProofs := config.implicitDefEqProofs
+  zetaUnused := config.zetaUnused
+  catchRuntime := config.catchRuntime
+  zetaHave := config.zetaHave
+  letToHave := config.letToHave
+  congrConsts := config.congrConsts
+  bitVecOfNat := config.bitVecOfNat
+  warnExponents := config.warnExponents
+  suggestions := config.suggestions
+  maxSuggestions := config.maxSuggestions
+  locals := config.locals
+  instances := config.instances
+}
+
+private def simpConfigurationReport (simpStx : Syntax)
+    (config? : Option Simp.Config := none) : SimpConfigurationReport := {
+  optConfig := toString simpStx[1].prettyPrint
+  normalized := config?.map simpConfigSummary
+}
 
 structure LocalFingerprint where
   index : Nat
@@ -257,6 +351,7 @@ structure RecordingReport where
   bodyScopeId : Option String
   declaration : String
   originalSyntax : String
+  configuration : SimpConfigurationReport
   closesGoal : Bool
   traceLength : Nat
   certificateEventCount : Nat
@@ -2274,7 +2369,8 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     (encodingMetrics : EncodingMetrics := {})
     (encodingFallbackReason? : Option String := none)
     (localRenames : Array LocalRenameInfo := #[])
-    (capture? : Option (IO.Ref (Option RecordingReport)) := none) : TacticM Unit := do
+    (capture? : Option (IO.Ref (Option RecordingReport)) := none)
+    (config? : Option Simp.Config := none) : TacticM Unit := do
   let declaration := (← Term.getDeclName?).map (·.toString) |>.getD "<unknown>"
   let originalSyntax := toString simpStx.prettyPrint
   let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
@@ -2335,6 +2431,7 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     bodyScopeId := none
     declaration
     originalSyntax
+    configuration := simpConfigurationReport simpStx config?
     closesGoal
     traceLength := state.events.size
     certificateEventCount := certificateEventCount state.events
@@ -2364,7 +2461,8 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
 
 private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
     (category : String) (detail : String)
-    (capture? : Option (IO.Ref (Option RecordingReport)) := none) : TacticM Unit := do
+    (capture? : Option (IO.Ref (Option RecordingReport)) := none)
+    (config? : Option Simp.Config := none) : TacticM Unit := do
   let state : RecorderState := {}
   try
     evalSimp simpStx
@@ -2373,7 +2471,7 @@ private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
     try
       emitRecordingReport simpStx reportStx target state none "" false
         (some "original_failure") (some failureDetail) none false "unavailable"
-        (some failureDetail) (capture? := capture?)
+        (some failureDetail) (capture? := capture?) (config? := config?)
     catch _ => pure ()
     throw ex
   let finalTarget ← try
@@ -2384,7 +2482,7 @@ private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
   try
     emitRecordingReport simpStx reportStx target state (some result) "" false
       (some category) (some detail) none false "unavailable" (some detail)
-      (capture? := capture?)
+      (capture? := capture?) (config? := config?)
     catch ex =>
       logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
 
@@ -2763,7 +2861,8 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
     (positionsNeeded : Bool) (encodingMetrics : EncodingMetrics)
     (encodingFallbackReason? : Option String)
     (localRenames : Array LocalRenameInfo) (closesGoal : Bool)
-    (capture? : Option (IO.Ref (Option RecordingReport)) := none) : TacticM Unit := do
+    (capture? : Option (IO.Ref (Option RecordingReport)) := none)
+    (config? : Option Simp.Config := none) : TacticM Unit := do
   let declaration := (← Term.getDeclName?).map (·.toString) |>.getD "<unknown>"
   let originalSyntax := toString simpStx.prettyPrint
   let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
@@ -2819,6 +2918,7 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
     bodyScopeId := none
     declaration
     originalSyntax
+    configuration := simpConfigurationReport simpStx config?
     closesGoal
     traceLength := trace.size
     certificateEventCount := totalCertificateEventCount
@@ -3409,7 +3509,7 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
   if shouldReport then
     emitContextRecordingReport simpStx reportStx initialTarget report.initialLctx finalTarget
       report.finalLctx report.traces report.suggestion report.positionsNeeded finalMetrics
-      report.fallbackReason? report.localRenames closed capture?
+      report.fallbackReason? report.localRenames closed capture? (some ctx.config)
   if closed then
     replaceMainGoal []
   else
@@ -3462,13 +3562,6 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
     action
     if let some attempt := scopedAttempt? then
       commitScopedAttempt attempt
-  if !simpStx[1][0].isNone then
-    if passive then
-      return ← runScoped (passiveOriginalSimp simpStx reportStx target "recording"
-        "passive recorder preserves nondefault simp configuration through the original tactic"
-        scopedCapture?)
-    else
-      throwErrorAt simpStx[1] "simp_explicit? does not yet encode nondefault simp configuration"
   if !simpStx[2].isNone then
     if passive then
       return ← runScoped (passiveOriginalSimp simpStx reportStx target "premise"
@@ -3507,7 +3600,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
     if passive then
       let detail ← exceptionText ex
       return ← runScoped (passiveOriginalSimp simpStx reportStx target "recording" detail
-        scopedCapture?)
+        scopedCapture? (some ctx.config))
     else
       throw ex
   let some (result, state) := recording?
@@ -3570,7 +3663,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   let some attempt := attempt?
     | if passive then
         return ← runScoped (passiveOriginalSimp simpStx reportStx target "recording"
-          "proof-result fallback could not be validated" scopedCapture?)
+          "proof-result fallback could not be validated" scopedCapture? (some ctx.config))
       else
         throwErrorAt reportStx "simp_explicit recorder cannot encode this simplification as a deterministic replay"
   let suggestion := localRenamePrefix localRenames ++ attempt.suggestion
@@ -3599,7 +3692,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
               (encodingMetrics := encodingMetrics)
               (encodingFallbackReason? := encodingFallbackReason?)
               (localRenames := localRenameInfos localRenames)
-              (capture? := scopedCapture?)
+              (capture? := scopedCapture?) (config? := some ctx.config)
       | none =>
           emitRecordingReport simpStx reportStx target state (some result) suggestion
             positionsNeeded failureCategory? none none
@@ -3609,7 +3702,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
             (encodingMetrics := encodingMetrics)
             (encodingFallbackReason? := encodingFallbackReason?)
             (localRenames := localRenameInfos localRenames)
-            (capture? := scopedCapture?)
+            (capture? := scopedCapture?) (config? := some ctx.config)
     if passive then
       try
         emitReport ()
