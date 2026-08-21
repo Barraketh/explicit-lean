@@ -33,7 +33,7 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected premise report schema: {report!r}")
-    if report.get("schemaVersion") != 9:
+    if report.get("schemaVersion") != 10:
         raise RuntimeError(f"unexpected premise report version: {report!r}")
     if report.get("localRenames") != []:
         raise RuntimeError(f"ordinary premise encoding unexpectedly renamed locals: {report!r}")
@@ -166,26 +166,25 @@ def main() -> None:
         raise RuntimeError(f"term-premise binding did not use ProofExport: {term_report!r}")
     if term_premise.get("bindingName") != "h_premise_1":
         raise RuntimeError(f"term-premise binding name was not deterministic: {term_report!r}")
-    term_certificate = term_report.get("certificate")
-    if not isinstance(term_certificate, str) or "guardedEqConj using [h_premise_1]" not in term_certificate:
-        raise RuntimeError(f"term-premise certificate omitted explicit premise syntax: {term_report!r}")
+    if term_report.get("encodingStatus") != "inadmissible":
+        raise RuntimeError(f"term-premise fallback was not rejected: {term_report!r}")
+    if term_report.get("operationallyAdmissible") is not False:
+        raise RuntimeError(f"term-premise fallback was marked admissible: {term_report!r}")
+    term_admissibility = term_report.get("operationalAdmissibility") or {}
+    if term_admissibility.get("code") != "inadmissible_direct_term_premise":
+        raise RuntimeError(f"term-premise rejection code changed: {term_report!r}")
+    if term_report.get("acceptedCertificate") is not None or term_report.get("certificate"):
+        raise RuntimeError(f"term-premise fallback exposed an accepted certificate: {term_report!r}")
+    if (term_report.get("validation") or {}).get("certificate") is not None:
+        raise RuntimeError(f"term-premise fallback exposed validation certificate metadata: {term_report!r}")
+    term_legacy = term_report.get("legacyCertificate")
+    if not isinstance(term_legacy, str) or "guardedEqConj using [h_premise_1]" not in term_legacy:
+        raise RuntimeError(f"term-premise migration source was not retained: {term_report!r}")
     term_source = TERM_PROBE.read_text(encoding="utf-8")
     term_needle = "simp_explicit? only [guardedEqConj, eq_self, and_self]"
     if term_source.count(term_needle) != 1:
         raise RuntimeError("term-premise probe tactic occurrence was not unique")
-    term_materialized = term_source.replace(
-        term_needle, term_certificate.replace("\n", "\n  "), 1
-    )
-    TERM_MATERIALIZED.write_text(term_materialized, encoding="utf-8")
-    term_replay_code, term_replay_output, _ = coverage.run(
-        ["lake", "env", "lean", str(TERM_MATERIALIZED)], timeout=180
-    )
-    if term_replay_code != 0:
-        raise RuntimeError(
-            "materialized term-premise certificate failed closed replay compilation:\n"
-            + term_replay_output
-        )
-    print("premise provenance, guarded nested/term encodings, mutations, and closed replay passed")
+    print("premise provenance passed; nested premise accepted and direct term premise rejected")
 
 
 if __name__ == "__main__":

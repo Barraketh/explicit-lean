@@ -912,10 +912,13 @@ All three directions retain the same project rules:
   original body; and
 - `Experiment/run.sh` remains the single end-to-end verification command.
 
-The next concrete milestones are O1 and O2 from
-[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): reject missing transitions
-before proof export, add deterministic reduction commands, and materialize
-Centralizer occurrence `161579b1c1009ed4` as a `Finsupp.sum` reduction followed
+O1 from [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md) is complete. Schema
+10 rejects every proof/presentation fallback before materialization and reports
+the Centralizer occurrence `161579b1c1009ed4` as a missing transition before
+event 0, with structural path `app.fn/app.arg` and operation hint
+`delta Finsupp.sum`. The complete regression command `Experiment/run.sh`
+passes. The next concrete milestone is O2: add deterministic reduction
+commands and materialize that occurrence as a `Finsupp.sum` reduction followed
 by its ten named theorem events. Complete non-simproc corpus closure follows
-only after the fallback encoders have ceased to be accepted materialization
-paths.
+only after the remaining operational packages close the now-visible failure
+cohorts.

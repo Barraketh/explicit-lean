@@ -468,6 +468,20 @@ Gate: the Centralizer occurrence is reported specifically as a missing
 `Finsupp.sum` transition before any proof export is attempted, and existing
 direct named-rule certificates remain accepted.
 
+Implementation status (2026-08-21): complete. Report schema 10 separates
+`acceptedCertificate` from `legacyCertificate`, applies one structured
+operational-admissibility decision at recording and materialization, and
+retains the first continuity gap with bounded fingerprints, selector counts,
+structural path, theorem origins, and an operation hint. Speculative continuity
+expressions and temporary simplifier locals do not escape their owning Meta
+state; when a detailed passive report cannot render such a local, a closed,
+permanently inadmissible report still preserves execution disposition. The
+coverage driver never selects generated event proofs, direct premise terms,
+whole-result proofs, presentation changes, first-owner proofs, or body-scope
+proofs. Centralizer `161579b1c1009ed4` now reports event 0, `before_event`, path
+`app.fn/app.arg`, and `delta Finsupp.sum`; direct named-rule fixtures remain
+accepted. `Experiment/run.sh` passes in full.
+
 ### O2. Deterministic reduction commands
 
 - Add reduction IR, replay, selectors, source syntax, JSON, and mutation tests.

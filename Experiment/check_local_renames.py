@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Package E local-name planning and literal closed replay."""
+"""Check local-name planning on a simproc-deferred migration source."""
 
 from __future__ import annotations
 
@@ -13,8 +13,6 @@ import simp_coverage as coverage
 
 ROOT = coverage.ROOT
 PROBE = ROOT / "Experiment" / "LocalRenameProbe.lean"
-OUTPUT = ROOT / ".lake" / "simp-explicit-local-renames"
-MATERIALIZED = OUTPUT / "LocalRenameMaterialized.lean"
 
 
 def main() -> None:
@@ -30,17 +28,22 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected local-rename report schema: {report!r}")
-    if report.get("schemaVersion") != 9:
+    if report.get("schemaVersion") != 10:
         raise RuntimeError(f"unexpected local-rename report version: {report!r}")
     renames = report.get("localRenames")
     if renames != [{"contextIndex": 7, "generatedName": "h_explicit_8_1"}]:
         raise RuntimeError(f"local rename order/collision plan changed: {report!r}")
-    certificate = report.get("certificate")
+    if report.get("acceptedCertificate") is not None or report.get("certificate"):
+        raise RuntimeError(f"deferred local-rename report exposed accepted source: {report!r}")
+    admissibility = report.get("operationalAdmissibility") or {}
+    if admissibility.get("code") != "deferred_simproc":
+        raise RuntimeError(f"local-rename fixture was not deferred as a simproc: {report!r}")
+    certificate = report.get("legacyCertificate")
     if not isinstance(certificate, str) or not certificate.startswith(
         "simp_explicit_rename [7 => h_explicit_8_1]\n"
     ):
         raise RuntimeError(
-            "local-rename certificate did not contain the literal rename prefix: "
+            "local-rename migration source did not contain the literal rename prefix: "
             f"{report!r}"
         )
     serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
@@ -52,26 +55,7 @@ def main() -> None:
             f"identifiers: {leaked!r}"
         )
 
-    source = PROBE.read_text(encoding="utf-8")
-    needle = "simp_explicit? [List.drop_append, IH]"
-    if source.count(needle) != 1:
-        raise RuntimeError("local-rename probe tactic occurrence was not unique")
-    rename_prefix = "simp_explicit_rename [7 => h_explicit_8_1]\n"
-    duplicated_certificate = rename_prefix + certificate
-    materialized = source.replace(
-        needle, duplicated_certificate.replace("\n", "\n        "), 1
-    )
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    MATERIALIZED.write_text(materialized, encoding="utf-8")
-    replay_code, replay_output, _ = coverage.run(
-        ["lake", "env", "lean", str(MATERIALIZED)], timeout=180
-    )
-    if replay_code != 0:
-        raise RuntimeError(
-            "duplicated exact rename prefix plus certificate failed closed replay compilation:\n"
-            + replay_output
-        )
-    print("local rename collision/order planning, idempotence, and closed replay passed")
+    print("local rename collision/order planning retained in deferred simproc diagnostics")
 
 
 if __name__ == "__main__":

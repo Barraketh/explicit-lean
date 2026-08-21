@@ -13,21 +13,22 @@ import simp_coverage as coverage
 MODULE = "Mathlib/Algebra/Algebra/Bilinear.lean"
 FIXTURE = coverage.ROOT / "Experiment" / "NondefaultConfigProbe.lean"
 CONTEXTUAL_ID = "af1f3238d87dcae6"
-NOT_REACHED_ID = "5795dc0135cc7db3"
+CONTEXT_LOCAL_REPORT_ID = "5795dc0135cc7db3"
+MISSING_TRANSITION_ID = "a532105822c38f91"
 TARGET_ID = "nd-target"
 HYPOTHESIS_ID = "nd-hyp"
 MULTI_GOAL_ID = "nd-multi"
 MULTI_BODY_ID = "nd-multi-body"
 EXPECTED_SOURCES = {
     CONTEXTUAL_ID: "simp +contextual [mul', smul_tmul', mul_assoc]",
-    NOT_REACHED_ID: "simp +contextual [mul_add]",
+    CONTEXT_LOCAL_REPORT_ID: "simp +contextual [mul_add]",
 }
 
 
 def check_configuration(report: dict, identifier: str) -> None:
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"{identifier} report schema changed: {report!r}")
-    if report.get("schemaVersion") != 9:
+    if report.get("schemaVersion") != 10:
         raise RuntimeError(f"{identifier} report schema version changed: {report!r}")
     configuration = report.get("configuration")
     normalized = configuration.get("normalized") if isinstance(configuration, dict) else None
@@ -174,53 +175,57 @@ def main() -> None:
     aggregate = record.get("aggregate", {})
     if aggregate.get("compile") is not True:
         raise RuntimeError(f"Bilinear aggregate did not compile: {record!r}")
-    if aggregate.get("closure_complete") is not True:
-        raise RuntimeError(f"Bilinear closure was not complete: {record!r}")
-    if aggregate.get("terminal_classification_complete") is not True:
-        raise RuntimeError(f"Bilinear terminal classifications are incomplete: {record!r}")
+    if aggregate.get("closure_complete") is not False:
+        raise RuntimeError(f"Bilinear unexpectedly passed the O1 operational gate: {record!r}")
+    if aggregate.get("terminal_classification_complete") is not False:
+        raise RuntimeError(f"Bilinear terminal gate unexpectedly completed: {record!r}")
 
     occurrences = {occurrence["id"]: occurrence for occurrence in record["occurrences"]}
     outcomes = Counter(
         occurrence.get("terminal_outcome")
         for occurrence in record["occurrences"]
     )
-    if outcomes != Counter({"materialized": 9, "not_reached": 1}):
+    if outcomes != Counter({"materialized": 7, "coverage_failure": 3}):
         raise RuntimeError(f"Bilinear terminal outcomes changed: {outcomes!r}")
 
     contextual = occurrences.get(CONTEXTUAL_ID)
-    if contextual is None or contextual.get("terminal_outcome") != "materialized":
-        raise RuntimeError(f"contextual occurrence was not materialized: {record!r}")
-    candidate = contextual.get("candidate")
+    if contextual is None or contextual.get("terminal_outcome") != "coverage_failure":
+        raise RuntimeError(f"contextual occurrence passed the O1 gate unexpectedly: {record!r}")
     report = contextual.get("report")
-    if not isinstance(candidate, dict) or not isinstance(report, dict):
-        raise RuntimeError(f"contextual occurrence lost candidate/report: {contextual!r}")
-    executions = report.get("executions", [])
-    if not any(
-        execution.get("result") == "succeeded"
-        and execution.get("disposition") == "committed"
-        and execution.get("encodingStatus") == "validated"
-        for execution in executions
-        if isinstance(execution, dict)
-    ):
-        raise RuntimeError(f"contextual occurrence has no validated execution: {report!r}")
+    if not isinstance(report, dict) or contextual.get("candidate") is not None:
+        raise RuntimeError(f"contextual occurrence gained an accepted candidate: {contextual!r}")
+    if contextual.get("failure_reason") != "unidentified_theorem_application":
+        raise RuntimeError(f"contextual O1 failure changed: {contextual!r}")
+    if report.get("acceptedCertificate") is not None or not report.get("legacyCertificate"):
+        raise RuntimeError(f"contextual legacy proof was accepted: {contextual!r}")
 
     check_configuration(report, CONTEXTUAL_ID)
 
-    certificate = report.get("certificate")
-    replacement = candidate.get("replacement")
-    if not isinstance(certificate, str) or not isinstance(replacement, str):
-        raise RuntimeError(f"contextual replacement is not printable: {contextual!r}")
-    for generated_source in (certificate, replacement):
-        if "+contextual" in generated_source:
-            raise RuntimeError(
-                f"generated contextual replay retained configuration mode: {contextual!r}"
-            )
+    context_local = occurrences.get(CONTEXT_LOCAL_REPORT_ID)
+    if (
+        context_local is None
+        or context_local.get("terminal_outcome") != "coverage_failure"
+        or context_local.get("failure_reason") != "unclassified_recorder_failure"
+    ):
+        raise RuntimeError(f"context-local report failure changed: {record!r}")
+    context_local_report = context_local.get("report") or {}
+    if context_local_report.get("acceptedCertificate") is not None:
+        raise RuntimeError(f"conservative contextual report was accepted: {context_local!r}")
+    check_configuration(context_local_report, CONTEXT_LOCAL_REPORT_ID)
 
-    not_reached = occurrences.get(NOT_REACHED_ID)
-    if not_reached is None or not_reached.get("terminal_outcome") != "not_reached":
-        raise RuntimeError(f"same-body contextual occurrence was reached unexpectedly: {record!r}")
+    missing = occurrences.get(MISSING_TRANSITION_ID)
+    if (
+        missing is None
+        or missing.get("terminal_outcome") != "coverage_failure"
+        or missing.get("failure_reason") != "missing_transition"
+    ):
+        raise RuntimeError(f"Bilinear transition failure changed: {record!r}")
+    missing_report = missing.get("report") or {}
+    continuity = missing_report.get("transitionContinuity") or {}
+    if continuity.get("gapLocation") != "before_event":
+        raise RuntimeError(f"Bilinear transition location changed: {missing!r}")
 
-    print("nondefault simp configuration provenance and Bilinear closure passed")
+    print("nondefault configuration provenance and Bilinear O1 gate passed")
 
 
 if __name__ == "__main__":

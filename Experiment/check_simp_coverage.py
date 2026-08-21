@@ -8,6 +8,35 @@ import re
 import simp_coverage as coverage
 
 
+def assert_rejected_fallback(trial: dict, *, deferred: bool = False) -> None:
+    expected_status = "deferred" if deferred else "rejected"
+    if trial.get("status") != expected_status or trial.get("materialized_compile"):
+        raise RuntimeError(f"inadmissible fallback was materialized: {trial!r}")
+    if trial.get("accepted_certificate") is not None:
+        raise RuntimeError(f"inadmissible fallback retained an accepted certificate: {trial!r}")
+    if trial.get("operationally_admissible") is not False:
+        raise RuntimeError(f"inadmissible fallback has an admissible status: {trial!r}")
+    if not trial.get("legacy_certificate"):
+        raise RuntimeError(f"fallback migration source was not retained for audit: {trial!r}")
+    if not isinstance(trial.get("operational_admissibility"), dict):
+        raise RuntimeError(f"fallback omitted structured admissibility: {trial!r}")
+
+
+def assert_aggregate_rejected(
+    module: str,
+    entries: list[dict],
+    results: dict[str, dict],
+) -> None:
+    try:
+        coverage.aggregate_module(module, entries, results, timeout=180)
+    except RuntimeError:
+        return
+    raise RuntimeError(
+        "aggregate unexpectedly accepted an inadmissible fallback certificate: "
+        f"entries={[entry['id'] for entry in entries]!r}"
+    )
+
+
 def main() -> None:
     smoke = coverage.ROOT / ".lake" / "simp-coverage-smoke"
     coverage.OUTPUT = smoke
@@ -93,7 +122,7 @@ def main() -> None:
     for report in passive["reports"]:
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected recording schema: {report!r}")
-        if report.get("schemaVersion") != 9:
+        if report.get("schemaVersion") != 10:
             raise RuntimeError(f"unexpected recording schema version: {report!r}")
         if not isinstance(report.get("bodyScopeId"), str) or not report["bodyScopeId"]:
             raise RuntimeError(f"passive report is missing body-scope ownership: {report!r}")
@@ -141,41 +170,20 @@ def main() -> None:
             entry, coverage.TrialConfig(timeout=180, keep_copies=True)
         )
         package_b_results[entry["id"]] = trial
-        if trial.get("status") != "passed" or not trial.get("materialized_compile"):
-            raise RuntimeError(f"Package B isolated materialization failed: {trial!r}")
+        assert_rejected_fallback(trial)
         if trial.get("local_renames") != []:
             raise RuntimeError(f"Package B ordinary encoding renamed locals: {trial!r}")
         encoding = trial.get("encoding") or {}
-        kinds = set(trial.get("trace_encoding_kinds", []))
-        if encoding.get("mode") == "whole_result_proof":
-            if (
-                trial.get("encoding_fallback_reason") != "presentation_gap"
-                or encoding.get("wholeResultProofCount") != 1
-                or kinds
-            ):
-                raise RuntimeError(f"invalid Package B presentation encoding: {trial!r}")
-        elif encoding.get("mode") == "event":
-            if (
-                trial.get("encoding_fallback_reason") is not None
-                or encoding.get("wholeResultProofCount", 0) != 0
-                or encoding.get("generatedProofEvents", 0) < 1
-                or "generated_proof" not in kinds
-            ):
-                raise RuntimeError(f"invalid Package B event encoding: {trial!r}")
-        elif encoding.get("mode") == "presentation_change":
-            if (
-                trial.get("encoding_fallback_reason") != "presentation_gap"
-                or encoding.get("presentationChangeCount") != 1
-                or encoding.get("wholeResultProofCount", 0) != 0
-            ):
-                raise RuntimeError(f"invalid Package B presentation encoding: {trial!r}")
-        else:
+        if encoding.get("mode") not in {"event", "presentation_change", "whole_result_proof"}:
             raise RuntimeError(f"unknown Package B encoding mode: {trial!r}")
-    package_b_aggregate = coverage.aggregate_module(
-        modules[0], package_b_entries, package_b_results, timeout=180
-    )
-    if not package_b_aggregate["compile"]:
-        raise RuntimeError(f"Package B aggregate module failed: {package_b_aggregate!r}")
+        trace_length = trial.get("trace_length")
+        if (
+            not isinstance(trace_length, int)
+            or trace_length < 0
+            or len(trial.get("trace_selector_kinds") or []) != trace_length
+        ):
+            raise RuntimeError(f"Package B trace audit was malformed: {trial!r}")
+    assert_aggregate_rejected(modules[0], package_b_entries, package_b_results)
 
     # A zero-event, non-closing simplification can still change the target's
     # presentation through proofless unfolding.  The replacement must retain
@@ -189,17 +197,14 @@ def main() -> None:
         zero_event_entry, coverage.TrialConfig(timeout=180, keep_copies=True)
     )
     zero_event_encoding = zero_event_trial.get("encoding") or {}
+    assert_rejected_fallback(zero_event_trial)
     if (
-        zero_event_trial.get("status") != "passed"
-        or not zero_event_trial.get("materialized_compile")
-        or zero_event_encoding.get("mode") != "presentation_change"
+        zero_event_encoding.get("mode") != "presentation_change"
         or zero_event_encoding.get("presentationChangeCount") != 1
         or zero_event_encoding.get("namedRuleEvents") != 0
         or zero_event_trial.get("encoding_fallback_reason") != "presentation_gap"
     ):
-        raise RuntimeError(
-            f"zero-event presentation materialization failed: {zero_event_trial!r}"
-        )
+        raise RuntimeError(f"zero-event presentation audit changed: {zero_event_trial!r}")
 
     package_c_ids = [
         "03210e4a7b3567e3",
@@ -217,8 +222,12 @@ def main() -> None:
             entry, coverage.TrialConfig(timeout=180, keep_copies=True)
         )
         package_c_results[entry["id"]] = trial
+        admissibility = trial.get("operational_admissibility") or {}
+        if admissibility.get("code") != "accepted":
+            assert_rejected_fallback(trial)
+            continue
         if trial.get("status") != "passed" or not trial.get("materialized_compile"):
-            raise RuntimeError(f"Package C isolated materialization failed: {trial!r}")
+            raise RuntimeError(f"accepted Package C nested premise failed materialization: {trial!r}")
         if trial.get("local_renames") != []:
             raise RuntimeError(f"Package C ordinary encoding renamed locals: {trial!r}")
         encoding = trial.get("encoding") or {}
@@ -241,7 +250,7 @@ def main() -> None:
             ):
                 raise RuntimeError(f"Package C presentation encoding changed: {trial!r}")
         else:
-            raise RuntimeError(f"Package C retained a presentation-gap fallback: {trial!r}")
+            raise RuntimeError(f"accepted Package C emitted an unknown encoding mode: {trial!r}")
         if trial.get("premise_event_count") != 1:
             raise RuntimeError(f"Package C did not retain one premise-bearing event: {trial!r}")
         if trial.get("premise_event_outer_origin_kinds") != [["decl"]]:
@@ -255,11 +264,7 @@ def main() -> None:
             for count in event_counts
         ):
             raise RuntimeError(f"Package C premise provenance was empty: {trial!r}")
-    package_c_aggregate = coverage.aggregate_module(
-        modules[0], package_c_entries, package_c_results, timeout=180
-    )
-    if not package_c_aggregate["compile"]:
-        raise RuntimeError(f"Package C aggregate module failed: {package_c_aggregate!r}")
+    assert_aggregate_rejected(modules[0], package_c_entries, package_c_results)
 
     package_d_ids = [
         "bdfebd4de6e5f543",
@@ -279,13 +284,12 @@ def main() -> None:
             entry, coverage.TrialConfig(timeout=180, keep_copies=True)
         )
         package_d_results[entry["id"]] = trial
-        if trial.get("status") != "passed" or not trial.get("materialized_compile"):
-            raise RuntimeError(f"Package D isolated materialization failed: {trial!r}")
+        assert_rejected_fallback(trial)
         if trial.get("local_renames") != []:
             raise RuntimeError(f"Package D ordinary encoding renamed locals: {trial!r}")
         if trial.get("recording_schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"Package D recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 9:
+        if trial.get("recording_schema_version") != 10:
             raise RuntimeError(f"Package D recording schema version changed: {trial!r}")
         if trial.get("trace_length", 0) <= 0:
             raise RuntimeError(f"Package D presentation trace was not retained: {trial!r}")
@@ -324,24 +328,13 @@ def main() -> None:
             raise RuntimeError(f"Package D trace selector values changed length: {trial!r}")
         if any(value is not None for value in selector_values):
             raise RuntimeError(f"Package D next selectors unexpectedly carry values: {trial!r}")
-    package_d_aggregate = coverage.aggregate_module(
-        modules[0], package_d_entries, package_d_results, timeout=180
-    )
-    if not package_d_aggregate["compile"]:
-        raise RuntimeError(f"Package D aggregate module failed: {package_d_aggregate!r}")
+    assert_aggregate_rejected(modules[0], package_d_entries, package_d_results)
 
     presentation_ids = package_c_ids + package_d_ids
     presentation_results = {**package_c_results, **package_d_results}
-    presentation_aggregate = coverage.aggregate_module(
-        modules[0],
-        [*package_c_entries, *package_d_entries],
-        presentation_results,
-        timeout=180,
+    assert_aggregate_rejected(
+        modules[0], [*package_c_entries, *package_d_entries], presentation_results
     )
-    if not presentation_aggregate["compile"]:
-        raise RuntimeError(
-            f"Package F3 ten-ID presentation aggregate failed: {presentation_aggregate!r}"
-        )
     for identifier in presentation_ids:
         trial = presentation_results[identifier]
         mode = (trial.get("encoding") or {}).get("mode")
@@ -367,44 +360,11 @@ def main() -> None:
             entry, coverage.TrialConfig(timeout=180, keep_copies=True)
         )
         package_e_results[entry["id"]] = trial
-        if trial.get("status") != "passed" or not trial.get("materialized_compile"):
-            raise RuntimeError(f"Package E isolated materialization failed: {trial!r}")
-        if trial.get("recording_schema") != "explicitLean.simpRecording":
-            raise RuntimeError(f"Package E recording schema changed: {trial!r}")
-        if trial.get("recording_schema_version") != 9:
-            raise RuntimeError(f"Package E recording schema version changed: {trial!r}")
-        if trial.get("trace_length", 0) <= 0:
-            raise RuntimeError(f"Package E trace was not retained: {trial!r}")
-        if trial.get("local_renames") != [
-            {"contextIndex": 6, "generatedName": "h_explicit_7"}
-        ]:
-            raise RuntimeError(f"Package E local-renaming metadata changed: {trial!r}")
-        certificate = trial.get("certificate")
-        if not isinstance(certificate, str) or not certificate.startswith(
-            "simp_explicit_rename [6 => h_explicit_7]\n"
-        ):
-            raise RuntimeError(f"Package E certificate omitted its rename prefix: {trial!r}")
+        assert_rejected_fallback(trial, deferred=True)
         encoding = trial.get("encoding") or {}
-        if (
-            encoding.get("mode") != "event"
-            or trial.get("encoding_fallback_reason") is not None
-            or encoding.get("wholeResultProofCount", 0) != 0
-            or encoding.get("namedRuleEvents", 0) == 0
-        ):
-            raise RuntimeError(f"Package E compact event encoding changed: {trial!r}")
-        metadata_text = json.dumps(trial.get("local_renames"), ensure_ascii=False)
-        if any(
-            marker in metadata_text
-            for marker in ("FVarId", "Syntax", "Expr", "mvar", "✝")
-        ):
-            raise RuntimeError(
-                f"Package E local-renaming metadata leaked an unstable identity: {trial!r}"
-            )
-    package_e_aggregate = coverage.aggregate_module(
-        modules[0], package_e_entries, package_e_results, timeout=180
-    )
-    if not package_e_aggregate["compile"]:
-        raise RuntimeError(f"Package E aggregate module failed: {package_e_aggregate!r}")
+        if encoding.get("generatedSimprocEvents", 0) < 1:
+            raise RuntimeError(f"Package E did not retain simproc audit metrics: {trial!r}")
+    assert_aggregate_rejected(modules[0], package_e_entries, package_e_results)
 
     target = next(
         entry
@@ -417,6 +377,17 @@ def main() -> None:
     )
     if result["status"] != "passed" or result["trace_length"] != 10:
         raise RuntimeError(f"unexpected isolated trial result: {result!r}")
+    if (result.get("operational_admissibility") or {}).get("code") != "accepted":
+        raise RuntimeError(f"direct named-rule certificate was not accepted: {result!r}")
+    if not result.get("accepted_certificate") or result.get("legacy_certificate"):
+        raise RuntimeError(f"direct named-rule certificate fields changed: {result!r}")
+    target_encoding = result.get("encoding") or {}
+    if (
+        target_encoding.get("mode") != "event"
+        or target_encoding.get("generatedProofEvents", 0) != 0
+        or target_encoding.get("namedRuleEvents", 0) == 0
+    ):
+        raise RuntimeError(f"direct named-rule encoding changed: {result!r}")
     aggregate = coverage.aggregate_module(
         modules[0], [target], {target["id"]: result}, timeout=180
     )

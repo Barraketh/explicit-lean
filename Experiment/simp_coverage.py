@@ -39,7 +39,45 @@ PASSIVE_RECORDING_SCHEMA = "explicitLean.simpModuleRecording"
 PASSIVE_RECORDING_SCHEMA_VERSION = 4
 CLOSURE_SCHEMA = "explicitLean.simpClosure"
 CLOSURE_SCHEMA_VERSION = 2
-EXPECTED_SIMP_REPORT_SCHEMA_VERSION = 9
+EXPECTED_SIMP_REPORT_SCHEMA_VERSION = 10
+
+DEFERRED_ADMISSIBILITY_CODES = {
+    "deferred_simproc",
+    "deferred_custom_discharger",
+}
+
+
+def execution_admissibility(execution: dict[str, Any]) -> tuple[bool, str]:
+    """Read the schema-v10 operational gate conservatively."""
+    decision = execution.get("operationalAdmissibility")
+    if isinstance(decision, dict):
+        code = decision.get("code")
+        accepted = decision.get("accepted")
+        if isinstance(code, str) and isinstance(accepted, bool):
+            return accepted and code == "accepted", code
+    # A report without the bumped structured decision is not eligible for
+    # materialization.  In particular, never revive its legacy `certificate`.
+    return False, "unavailable"
+
+
+def report_admissibility(report: dict[str, Any] | None) -> tuple[bool, str]:
+    if not isinstance(report, dict):
+        return False, "unavailable"
+    decision = report.get("operationalAdmissibility")
+    if isinstance(decision, dict):
+        code = decision.get("code")
+        accepted = decision.get("accepted")
+        if isinstance(code, str) and isinstance(accepted, bool):
+            return accepted and code == "accepted", code
+    return False, "unavailable"
+
+
+def accepted_execution_certificate(execution: dict[str, Any]) -> str | None:
+    accepted, code = execution_admissibility(execution)
+    if not accepted or code != "accepted":
+        return None
+    certificate = execution.get("acceptedCertificate")
+    return certificate if isinstance(certificate, str) and certificate else None
 
 
 def run(
@@ -434,8 +472,10 @@ def committed_certificates(report: dict[str, Any]) -> list[str]:
             continue
         if execution.get("disposition") != "committed":
             continue
-        certificate = execution.get("certificate")
-        if not isinstance(certificate, str) or not certificate:
+        if not execution_admissibility(execution)[0]:
+            continue
+        certificate = accepted_execution_certificate(execution)
+        if certificate is None:
             raise RuntimeError("committed execution has no certificate")
         if not execution.get("closesGoal"):
             raise RuntimeError("committed execution does not close its input goal")
@@ -460,6 +500,12 @@ def closure_terminal_classification(report: dict[str, Any] | None) -> str:
         and execution.get("disposition") == "committed"
     ]
     if committed:
+        committed_codes = [execution_admissibility(execution)[1] for execution in committed]
+        deferred = [code for code in committed_codes if code in DEFERRED_ADMISSIBILITY_CODES]
+        if deferred:
+            return deferred[0]
+        if any(not execution_admissibility(execution)[0] for execution in committed):
+            return "coverage_failure"
         return "committed_pending"
     if any(execution.get("result") == "succeeded" for execution in executions):
         return "attempted_backtracked"
@@ -470,6 +516,25 @@ def closure_result_base(
     entry: dict[str, Any], report: dict[str, Any] | None
 ) -> dict[str, Any]:
     executions = scoped_executions(report)
+    terminal_outcome = closure_terminal_classification(report)
+    failure_reason = None
+    if terminal_outcome == "coverage_failure":
+        committed_codes = [
+            execution_admissibility(execution)[1]
+            for execution in executions
+            if execution.get("result") == "succeeded"
+            and execution.get("disposition") == "committed"
+            and not execution_admissibility(execution)[0]
+        ]
+        if committed_codes:
+            failure_reason = committed_codes[0]
+        elif any(
+            execution.get("disposition") not in {"committed", "backtracked"}
+            for execution in executions
+        ):
+            failure_reason = "malformed_recording_result"
+        else:
+            failure_reason = "missing_certificate"
     return {
         "id": entry["id"],
         "module": entry["module"],
@@ -478,9 +543,9 @@ def closure_result_base(
         "column": entry.get("column"),
         "kind": entry.get("kind"),
         "original_syntax": entry.get("source"),
-        "terminal_outcome": closure_terminal_classification(report),
+        "terminal_outcome": terminal_outcome,
         "materialized_compile": None,
-        "failure_reason": None,
+        "failure_reason": failure_reason,
         "dispositions": [execution.get("disposition") for execution in executions],
         "execution_summaries": [
             {
@@ -488,12 +553,17 @@ def closure_result_base(
                 "attemptToken": execution.get("attemptToken"),
                 "result": execution.get("result"),
                 "disposition": execution.get("disposition"),
-                "certificate": execution.get("certificate"),
+                "certificate": accepted_execution_certificate(execution),
+                "acceptedCertificate": execution.get("acceptedCertificate"),
+                "legacyCertificate": execution.get("legacyCertificate"),
                 "certificateBytes": execution.get("certificateBytes"),
                 "closesGoal": execution.get("closesGoal"),
                 "encodingStatus": execution.get("encodingStatus"),
                 "encoding": execution.get("encoding"),
                 "encodingFallbackReason": execution.get("encodingFallbackReason"),
+                "operationallyAdmissible": execution.get("operationallyAdmissible"),
+                "operationalAdmissibility": execution.get("operationalAdmissibility"),
+                "transitionContinuity": execution.get("transitionContinuity"),
             }
             for execution in executions
         ],
@@ -537,6 +607,8 @@ def _closure_committed_executions(report: dict[str, Any] | None) -> list[dict[st
         for execution in scoped_executions(report)
         if execution.get("result") == "succeeded"
         and execution.get("disposition") == "committed"
+        and execution_admissibility(execution)[0]
+        and accepted_execution_certificate(execution) is not None
     ]
 
 
@@ -569,18 +641,10 @@ def closure_candidate_plan(
             key = _closure_owner_key(entry)
             if key is not None:
                 first_groups.setdefault(key, []).append(entry)
-    first_reports = {
-        report.get("ownerId"): report
-        for report in recording.get("first_owner_reports", [])
-        if isinstance(report.get("ownerId"), str)
-    }
     for group in first_groups.values():
         representative = group[0]
-        key = _closure_owner_key(representative)
-        assert key is not None
         group_ids = [entry["id"] for entry in group]
         handled.update(group_ids)
-        owner_report = first_reports.get(first_owner_id(representative))
         committed_ids = [
             entry["id"]
             for entry in group
@@ -588,34 +652,12 @@ def closure_candidate_plan(
         ]
         if not committed_ids:
             continue
-        if owner_report is None:
-            for identifier in committed_ids:
-                by_id[identifier]["terminal_outcome"] = "coverage_failure"
-                by_id[identifier]["failure_reason"] = "unsupported_owner_materialization"
-            continue
-        try:
-            owner_start, owner_end = key
-            owner_source = representative.get("ownerSource")
-            if not isinstance(owner_source, str):
-                raise RuntimeError("first owner source is missing")
-            replacement = first_owner_replacement(source, representative, owner_report)
-            candidate = _closure_candidate(
-                kind="first_owner",
-                start=owner_start,
-                end=owner_end,
-                expected=owner_source,
-                replacement=replacement,
-                declaration=representative.get("declaration"),
-                entry_ids=committed_ids,
-            )
-            candidates.append(candidate)
-            for identifier in committed_ids:
-                by_id[identifier]["candidate"] = candidate.copy()
-        except Exception as error:
-            for identifier in committed_ids:
-                by_id[identifier]["terminal_outcome"] = "coverage_failure"
-                by_id[identifier]["failure_reason"] = "unsupported_owner_materialization"
-                by_id[identifier]["candidate_error"] = str(error)
+        for identifier in committed_ids:
+            by_id[identifier]["terminal_outcome"] = "coverage_failure"
+            by_id[identifier]["failure_reason"] = "inadmissible_enclosing_body_proof"
+        # A `first` owner is an enclosing body proof boundary.  Its encoder
+        # remains useful for diagnostics, but O1 never turns it into a source
+        # replacement candidate.
 
     for entry in entries:
         identifier = entry["id"]
@@ -667,8 +709,8 @@ def closure_candidate_plan(
             result["terminal_outcome"] = "coverage_failure"
             result["failure_reason"] = "unsupported_owner_materialization"
             continue
-        certificate = committed[0].get("certificate")
-        if not isinstance(certificate, str) or not certificate:
+        certificate = accepted_execution_certificate(committed[0])
+        if certificate is None:
             result["terminal_outcome"] = "coverage_failure"
             result["failure_reason"] = "missing_certificate"
             continue
@@ -1289,6 +1331,10 @@ def run_trial(entry: dict[str, Any], config: TrialConfig) -> dict[str, Any]:
             return base
 
         base["declaration"] = report["declaration"]
+        report_is_admissible, admissibility_code = report_admissibility(report)
+        accepted_certificate = report.get("acceptedCertificate")
+        if not isinstance(accepted_certificate, str):
+            accepted_certificate = None
         trace_events = [
             event
             for execution in report.get("executions", [])
@@ -1303,8 +1349,13 @@ def run_trial(entry: dict[str, Any], config: TrialConfig) -> dict[str, Any]:
             trace_length=report["traceLength"],
             certificate_event_count=report["certificateEventCount"],
             positions_needed=report["positionsNeeded"],
-            certificate=report["certificate"],
+            certificate=accepted_certificate,
+            accepted_certificate=accepted_certificate,
+            legacy_certificate=report.get("legacyCertificate"),
             certificate_bytes=report["certificateBytes"],
+            operationally_admissible=report_is_admissible,
+            operational_admissibility=report.get("operationalAdmissibility"),
+            transition_continuity=report.get("transitionContinuity"),
             encoding=report.get("encoding"),
             encoding_fallback_reason=report.get("encodingFallbackReason"),
             trace_encoding_kinds=[
@@ -1344,8 +1395,18 @@ def run_trial(entry: dict[str, Any], config: TrialConfig) -> dict[str, Any]:
                 for premise in event.get("premises", [])
             ],
         )
+        if not report_is_admissible or not accepted_certificate:
+            base.update(
+                status=("deferred" if admissibility_code in DEFERRED_ADMISSIBILITY_CODES else "rejected"),
+                failure_category=admissibility_code,
+                materialized_compile=False,
+                materialized_seconds=0.0,
+            )
+            log_path.write_text(recording_output, encoding="utf-8")
+            result_path.write_text(json.dumps(base, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            return base
         materialized_path = write_copy(
-            work_root / "materialized", entry, report["certificate"]
+            work_root / "materialized", entry, accepted_certificate
         )
         materialized_code, materialized_output, materialized_seconds = run(
             lean_command(materialized_path), timeout=config.timeout
@@ -1419,7 +1480,12 @@ def apply_all(source: bytes, entries: list[dict[str, Any]], results: dict[str, d
     rewritten = source
     for entry in sorted(entries, key=lambda item: item["startByte"], reverse=True):
         result = results[entry["id"]]
-        rewritten = replace_bytes(rewritten, entry, result["certificate"])
+        certificate = result.get("accepted_certificate")
+        if not isinstance(certificate, str) or not certificate:
+            raise RuntimeError(
+                f"occurrence {entry['id']} has no operationally accepted certificate"
+            )
+        rewritten = replace_bytes(rewritten, entry, certificate)
     return inject_import(rewritten)
 
 
@@ -2110,141 +2176,16 @@ def run_closure_module(
                     if not failed_ids.intersection(candidate["entry_ids"])
                 ]
 
-                # A committed occurrence whose ordinary certificate is
-                # rejected in the complete body gets one deliberately narrow
-                # whole-body proof attempt.  The fallback is eligible only for
-                # a singleton occurrence body; all other singleton failures
-                # retain their original reason code.
-                eligible, eligibility_failures = _eligible_body_scope_proof_candidates(
-                    source,
-                    entries,
-                    candidates,
-                    failed_ids,
-                    singleton_failures,
-                )
-                body_scope_fallback_failures.update(eligibility_failures)
-                fallback_candidates: list[dict[str, Any]] = []
-                if eligible:
-                    try:
-                        body_scope_fallback = compile_body_scope_proofs(
-                            module,
-                            source,
-                            eligible,
-                            timeout,
-                            keep_copy=keep_copy,
-                        )
-                        attempts.append(body_scope_fallback)
-                        fallback_candidates, report_failures = body_scope_proof_candidates(
-                            source, eligible, body_scope_fallback
-                        )
-                        body_scope_fallback_failures.update(report_failures)
-                    except Exception as error:
-                        # This is a bounded source-rewrite/report failure for
-                        # the eligible singleton set.  Keep the diagnostic
-                        # artifact as an uninvoked attempt and continue with
-                        # the ordinary survivor path.
-                        body_scope_fallback = {
-                            "label": "body-scope-proof-fallback",
-                            "candidate_ids": [item["entry"]["id"] for item in eligible],
-                            "declarations": sorted(
-                                {item["entry"].get("declaration") for item in eligible}
-                            ),
-                            "scope_ids": [item["scope_id"] for item in eligible],
-                            "compile_invoked": False,
-                            "compile": False,
-                            "seconds": 0,
-                            "failure_reason": "body_scope_proof_source_rewrite_failure",
-                            "report_count": 0,
-                            "reports": [],
-                            "valid_scope_ids": [],
-                            "invalid_scope_ids": [item["scope_id"] for item in eligible],
-                            "error": str(error),
-                        }
-                        attempts.append(body_scope_fallback)
-                        body_scope_fallback_failures.update(
-                            {
-                                item["entry"]["id"]: body_scope_fallback["failure_reason"]
-                                for item in eligible
-                            }
-                        )
-
-                fallback_ids = {
-                    identifier
-                    for candidate in fallback_candidates
-                    for identifier in candidate["entry_ids"]
-                }
-                # Replace each eligible failed occurrence in the candidate
-                # aggregate, and retain the exact body candidate on its
-                # occurrence record even if the final aggregate later rejects
-                # it.  The aggregate compile below is the only acceptance
-                # criterion for marking it materialized.
-                for candidate in fallback_candidates:
-                    for identifier in candidate["entry_ids"]:
-                        by_id[identifier]["candidate"] = candidate.copy()
-
-                aggregate_candidates = survivor_candidates + fallback_candidates
-                if fallback_candidates:
-                    body_scope_fallback_aggregate = compile_closure_candidates(
-                        module,
-                        source,
-                        aggregate_candidates,
-                        timeout,
-                        label="body-scope-proof-aggregate",
-                        keep_copy=keep_copy,
-                    )
-                    attempts.append(body_scope_fallback_aggregate)
-                    if body_scope_fallback_aggregate["compile"]:
-                        for candidate in aggregate_candidates:
-                            for identifier in candidate["entry_ids"]:
-                                result = by_id[identifier]
-                                result["terminal_outcome"] = "materialized"
-                                result["materialized_compile"] = True
-                                result["failure_reason"] = None
-                        unresolved_ids = failed_ids - fallback_ids
-                        for identifier in unresolved_ids:
-                            if identifier in by_id:
-                                _closure_failure_reason_for_report(
-                                    by_id[identifier],
-                                    body_scope_fallback_failures.get(
-                                        identifier, singleton_failures.get(identifier, "singleton_candidate_failures")
-                                    ),
-                                )
-                        all_candidate_ids = {
-                            identifier
-                            for candidate in candidates
-                            for identifier in candidate["entry_ids"]
-                        }
-                        aggregate_candidate_ids = {
-                            identifier
-                            for candidate in aggregate_candidates
-                            for identifier in candidate["entry_ids"]
-                        }
-                        if aggregate_candidate_ids == all_candidate_ids:
-                            # The fallback aggregate is now the accepted
-                            # complete aggregate.  The failed optimistic
-                            # attempt remains in `attempts` for auditability.
-                            aggregate_compile = True
-                            aggregate_failure_reason = None
-                        else:
-                            aggregate_failure_reason = "singleton_candidate_failures"
-                    else:
-                        body_scope_fallback_failures.update(
-                            {
-                                identifier: "body_scope_proof_rejected"
-                                for candidate in fallback_candidates
-                                for identifier in candidate["entry_ids"]
-                            }
-                        )
-
-                # If no fallback aggregate was accepted, compile the ordinary
-                # survivors exactly as before.  This keeps unresolved
-                # singleton failures attributable without pretending that a
-                # body proof was materialized in isolation.
-                fallback_aggregate_accepted = (
-                    body_scope_fallback_aggregate is not None
-                    and body_scope_fallback_aggregate.get("compile") is True
-                )
-                if not fallback_aggregate_accepted and survivor_candidates:
+                # Whole-body proof exporters remain callable as standalone
+                # migration diagnostics, but the operational closure driver
+                # never invokes or accepts them.  Attribute every rejected
+                # singleton explicitly and continue only with ordinary
+                # operational survivors.
+                body_scope_fallback_failures.update({
+                    identifier: "inadmissible_body_scope_proof"
+                    for identifier in failed_ids
+                })
+                if survivor_candidates:
                     survivor_optimistic = compile_closure_candidates(
                         module,
                         source,
@@ -2254,20 +2195,7 @@ def run_closure_module(
                         keep_copy=keep_copy,
                     )
                     attempts.append(survivor_optimistic)
-                if fallback_aggregate_accepted:
-                    # The accepted body aggregate already materialized all
-                    # candidates it contains.  Any failed singleton outside
-                    # that aggregate remains a coverage failure.
-                    for identifier in failed_ids - fallback_ids:
-                        if identifier in by_id:
-                            _closure_failure_reason_for_report(
-                                by_id[identifier],
-                                body_scope_fallback_failures.get(
-                                    identifier,
-                                    singleton_failures.get(identifier, "singleton_candidate_failures"),
-                                ),
-                            )
-                elif survivor_optimistic is not None and survivor_optimistic["compile"]:
+                if survivor_optimistic is not None and survivor_optimistic["compile"]:
                     # The requested all-candidate aggregate remains failed:
                     # only the survivor aggregate is independently proven.
                     aggregate_failure_reason = "singleton_candidate_failures"
@@ -2444,7 +2372,10 @@ def aggregate(args: argparse.Namespace) -> None:
     passed = {
         result["id"]: result
         for result in load_results()
-        if result["id"] in entries_by_id and result["status"] == "passed"
+        if result["id"] in entries_by_id
+        and result["status"] == "passed"
+        and isinstance(result.get("accepted_certificate"), str)
+        and result.get("operationally_admissible") is True
     }
     by_module: dict[str, list[dict[str, Any]]] = {}
     for identifier in passed:

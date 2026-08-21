@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused schema-v9 checks for dynamic body-scope execution ownership."""
+"""Focused schema-v10 checks for dynamic body-scope execution ownership."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def main() -> None:
         report = by_id[occurrence_id]
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected report schema: {report!r}")
-        if report.get("schemaVersion") != 9:
+        if report.get("schemaVersion") != 10:
             raise RuntimeError(f"unexpected report version: {report!r}")
         if not isinstance(report.get("bodyScopeId"), str) or not report["bodyScopeId"]:
             raise RuntimeError(f"missing body scope identity: {report!r}")

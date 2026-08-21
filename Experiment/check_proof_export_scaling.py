@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded proof-export scaling regression on a production Mathlib module.
-
-The isolated target checks the proof-export path that previously spent most of
-its time measuring a fully expanded proof.  The module check is intentionally
-recording-only: it verifies that one passive compile observes the complete
-supported inventory while leaving the separately classified context replay
-gap to its own work package.
-"""
+"""Bounded O1 transition-gate check on the production Centralizer module."""
 
 from __future__ import annotations
 
@@ -17,8 +10,8 @@ import simp_coverage as coverage
 
 
 MODULE = "Mathlib/Algebra/Algebra/Subalgebra/Centralizer.lean"
-TARGET_ID = "8a9d921fe307a652"
-TARGET_SOURCE = "simp [includeRight]"
+TARGET_ID = "161579b1c1009ed4"
+TARGET_SOURCE = "simp only [Finsupp.sum, Finset.mul_sum, Algebra.TensorProduct.tmul_mul_tmul, one_mul,\n      Finset.sum_mul, mul_one] at hw"
 EXPECTED_IDS = {
     "9dfed3d35b21d42b",
     "02c373b34fee842e",
@@ -30,10 +23,16 @@ EXPECTED_IDS = {
     "bdac2d92f098d472",
     "5a645f761cfac920",
     "46987a3107ce3007",
+    "8a9d921fe307a652",
     TARGET_ID,
     "db06a893b3ae282f",
     "3653fb23244c9406",
 }
+
+
+def normalized_source(source: str) -> str:
+    """Ignore pretty-printer indentation while preserving authored tokens."""
+    return " ".join(source.split())
 
 
 def configure_output() -> None:
@@ -63,30 +62,49 @@ def load_entries() -> tuple[dict, list[dict], str]:
     return target, entries, document["mathlib_revision"]
 
 
-def check_isolated_target(target: dict) -> None:
-    result = coverage.run_trial(
-        target,
-        coverage.TrialConfig(timeout=30, keep_copies=True),
-    )
-    if result.get("recording_compile") is not True:
-        raise RuntimeError(f"Centralizer target recording exceeded the 30s gate: {result!r}")
-    if result.get("materialized_compile") is not True or result.get("status") != "passed":
-        raise RuntimeError(f"Centralizer target did not materialize: {result!r}")
-    if result.get("recording_seconds", 30) >= 30:
-        raise RuntimeError(f"Centralizer target recording used the entire budget: {result!r}")
-    encoding = result.get("encoding")
-    if not isinstance(encoding, dict) or encoding.get("mode") != "whole_result_proof":
-        raise RuntimeError(f"Centralizer target encoding changed: {result!r}")
-    if result.get("encoding_fallback_reason") != "presentation_gap":
-        raise RuntimeError(f"Centralizer target fallback changed: {result!r}")
-    certificate = result.get("certificate")
-    if not isinstance(certificate, str) or not certificate.strip():
-        raise RuntimeError(f"Centralizer target certificate is empty: {result!r}")
-    if TARGET_SOURCE in certificate or "simp +" in certificate:
-        raise RuntimeError(f"Centralizer target certificate retained ambient simp syntax: {result!r}")
+def check_transition_gate(record: dict) -> None:
+    reports = {
+        report.get("occurrenceId"): report
+        for report in record.get("reports", [])
+        if isinstance(report, dict)
+    }
+    report = reports.get(TARGET_ID)
+    if report is None:
+        raise RuntimeError(f"Centralizer transition-gate report is missing: {record!r}")
+    if normalized_source(report.get("originalSyntax", "")) != normalized_source(TARGET_SOURCE):
+        raise RuntimeError(f"Centralizer target source changed: {report!r}")
+    if report.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
+        raise RuntimeError(f"Centralizer report schema changed: {report!r}")
+    accepted, code = coverage.report_admissibility(report)
+    if accepted or code != "missing_transition":
+        raise RuntimeError(f"Centralizer transition was not rejected as missing_transition: {report!r}")
+    continuity = report.get("transitionContinuity")
+    if not isinstance(continuity, dict):
+        raise RuntimeError(f"Centralizer continuity diagnostic is missing: {report!r}")
+    if continuity.get("firstUnconsumedEventIndex") != 0:
+        raise RuntimeError(f"Centralizer gap index was not zero: {continuity!r}")
+    if continuity.get("gapLocation") != "before_event":
+        raise RuntimeError(f"Centralizer gap location changed: {continuity!r}")
+    if continuity.get("operationHint") != "delta Finsupp.sum":
+        raise RuntimeError(f"Centralizer delta hint changed: {continuity!r}")
+    if continuity.get("operationKind") != "delta":
+        raise RuntimeError(f"Centralizer operation kind changed: {continuity!r}")
+    if not continuity.get("matchedSubexpressionPath"):
+        raise RuntimeError(f"Centralizer matched-subexpression path is missing: {continuity!r}")
+    if not continuity.get("matchedSubexpressionFingerprint"):
+        raise RuntimeError(
+            f"Centralizer matched-subexpression fingerprint is missing: {continuity!r}"
+        )
+    if "Finset.mul_sum" not in (continuity.get("expectedEventOrigins") or []):
+        raise RuntimeError(f"Centralizer first-event provenance changed: {continuity!r}")
+    if report.get("acceptedCertificate") is not None or report.get("certificate"):
+        raise RuntimeError(f"Centralizer emitted an accepted certificate: {report!r}")
+    validation = report.get("validation") or {}
+    if validation.get("certificate") is not None:
+        raise RuntimeError(f"Centralizer validation exported a certificate: {report!r}")
 
 
-def check_module_recording(entries: list[dict], revision: str) -> None:
+def check_module_recording(entries: list[dict], revision: str) -> dict:
     started = time.monotonic()
     record = coverage.passive_module_recording(
         MODULE,
@@ -117,16 +135,17 @@ def check_module_recording(entries: list[dict], revision: str) -> None:
         raise RuntimeError(f"Centralizer passive inventory count changed: {record!r}")
     if revision != coverage.load_inventory()["mathlib_revision"]:
         raise RuntimeError("Centralizer Mathlib revision changed during the check")
+    return record
 
 
 def main() -> None:
     configure_output()
     target, entries, revision = load_entries()
-    check_isolated_target(target)
-    check_module_recording(entries, revision)
+    record = check_module_recording(entries, revision)
+    check_transition_gate(record)
     print(
-        "proof-export scaling passed: isolated Centralizer target materialized "
-        "and one passive compile observed all 13 supported occurrences"
+        "O1 transition gate passed: Centralizer passive recording observed all 13 "
+        "occurrences and rejected the Finsupp.sum gap before proof export"
     )
 
 

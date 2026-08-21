@@ -206,7 +206,6 @@ def check_drop_right() -> None:
         raise RuntimeError(f"F2 DropRight IDs missing from inventory: {entries!r}")
     source = (coverage.MATHLIB / DROP_MODULE).read_bytes()
     check_owner_ranges(source, entries)
-    results: dict[str, dict] = {}
     for entry in sorted(entries, key=lambda item: item["startByte"]):
         if entry.get("ownerKind") != "and_then" or entry.get("ownerRole") != "and_then_right":
             raise RuntimeError(f"DropRight owner shape is not distributed andThen: {entry!r}")
@@ -223,12 +222,20 @@ def check_drop_right() -> None:
         executions = report.get("executions", [])
         if [execution.get("disposition") for execution in executions] != ["committed", "committed"]:
             raise RuntimeError(f"DropRight dispositions changed: {report!r}")
-        if len(coverage.committed_certificates(report)) != 2:
-            raise RuntimeError(f"DropRight did not retain two closing certificates: {report!r}")
+        if coverage.committed_certificates(report):
+            raise RuntimeError(f"DropRight exposed fallback branches as accepted: {report!r}")
+        if any(
+            execution.get("operationalAdmissibility", {}).get("code") == "accepted"
+            or execution.get("acceptedCertificate") is not None
+            for execution in executions
+        ):
+            raise RuntimeError(f"DropRight fallback branch passed the operational gate: {report!r}")
         if report.get("certificate") != "" or report.get("certificateBytes") != 0:
             raise RuntimeError(f"DropRight fabricated an aggregate certificate: {report!r}")
         if report.get("encodingStatus") != "body_rewrite_required":
             raise RuntimeError(f"DropRight aggregate status changed: {report!r}")
+        if report.get("operationalAdmissibility", {}).get("code") != "source_rewrite_required":
+            raise RuntimeError(f"DropRight aggregate ownership classification changed: {report!r}")
         top_mode = report.get("encoding", {}).get("mode")
         if entry["id"] != "c9eca03fcd0280ed":
             if top_mode != "event" or any(
@@ -243,38 +250,15 @@ def check_drop_right() -> None:
                 for execution in executions
             ):
                 raise RuntimeError(f"DropRight c9 per-branch fallback changed: {report!r}")
-        replacement = coverage.owner_replacement(source, entry, report, sibling_entries=[entry])
-        materialized = coverage.materialize_owner_source(
-            source, entry, report, sibling_entries=[entry]
-        )
-        output_path = coverage.OUTPUT / "materialized" / f"{entry['id']}.lean"
-        write_materialized(output_path, materialized)
-        compiled, output = compile_copy(output_path)
-        if not compiled:
-            raise RuntimeError(f"DropRight isolated materialization failed for {entry['id']}:\n{output}")
-        if coverage.classify_terminal_outcome(report, materialized_compile=True) != "materialized":
-            raise RuntimeError(f"DropRight terminal outcome was not materialized: {report!r}")
-        results[entry["id"]] = report
-        if replacement.count("·") != 2:
-            raise RuntimeError(f"DropRight explicit bullet count changed: {replacement!r}")
-
-    aggregate = source
-    for entry in sorted(entries, key=lambda item: item["ownerStartByte"], reverse=True):
-        aggregate = coverage.materialize_owner_source(
-            aggregate, entry, results[entry["id"]], sibling_entries=[entry]
-        )
-    aggregate_path = coverage.OUTPUT / "materialized" / "aggregate.lean"
-    write_materialized(aggregate_path, aggregate)
-    compiled, output = compile_copy(aggregate_path)
-    if not compiled:
-        raise RuntimeError(f"DropRight F2 aggregate failed:\n{output}")
+        if coverage.closure_terminal_classification(report) != "coverage_failure":
+            raise RuntimeError(f"DropRight fallback did not fail the completion gate: {report!r}")
 
 
 def main() -> None:
     check_terminal_helpers()
     check_fixture()
     check_drop_right()
-    print("F2 structural owner materialization and terminal outcome checks passed")
+    print("operational owners materialized; DropRight fallback owners were rejected")
 
 
 if __name__ == "__main__":

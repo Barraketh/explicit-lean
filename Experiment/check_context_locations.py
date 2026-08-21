@@ -85,12 +85,20 @@ def main() -> None:
         [("local", "IH"), ("local", "h_explicit_1"), ("target", "target")],
     ]
     for index, (report, expected) in enumerate(zip(reports, expected_subjects)):
-        if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != 9:
-            raise RuntimeError(f"report {index} is not schema-v9: {report!r}")
+        if report.get("schema") != "explicitLean.simpRecording" or report.get("schemaVersion") != 10:
+            raise RuntimeError(f"report {index} is not schema-v10: {report!r}")
         check_subjects(report, expected)
-        certificate = report.get("certificate", "")
-        if "at *" in certificate or "simp_explicit_context" not in certificate:
+        admissibility = report.get("operationalAdmissibility") or {}
+        accepted = admissibility.get("code") == "accepted"
+        certificate = report.get("acceptedCertificate") if accepted else report.get("legacyCertificate")
+        if not isinstance(certificate, str) or "at *" in certificate or "simp_explicit_context" not in certificate:
             raise RuntimeError(f"report {index} printed an invalid context certificate")
+        if accepted != (report.get("operationallyAdmissible") is True):
+            raise RuntimeError(f"report {index} has inconsistent admissibility metadata")
+        if accepted and report.get("certificate") != certificate:
+            raise RuntimeError(f"report {index} did not expose its accepted context certificate")
+        if not accepted and (report.get("acceptedCertificate") is not None or report.get("certificate")):
+            raise RuntimeError(f"report {index} exposed deferred context source as accepted")
         serialized = json.dumps(report, ensure_ascii=False)
         for forbidden in (
             "✝",
@@ -118,6 +126,8 @@ def main() -> None:
             if summary.get("eventCount") != 0:
                 raise RuntimeError("zero-event fixture recorded a semantic event")
         if index == 7:
+            if admissibility.get("code") != "deferred_simproc":
+                raise RuntimeError(f"stable-rename context fixture was not simproc-deferred: {report!r}")
             renames = report.get("localRenames")
             if renames != [{"contextIndex": 7, "generatedName": "h_explicit_8"}]:
                 raise RuntimeError(f"stable context rename plan changed: {renames!r}")
@@ -126,11 +136,13 @@ def main() -> None:
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
     for index, (anchor, report) in enumerate(zip(ANCHORS, reports)):
+        if (report.get("operationalAdmissibility") or {}).get("code") != "accepted":
+            continue
         set_option_line = next(
             line for line in anchor.splitlines() if "set_option" in line
         )
         indent = set_option_line[: len(set_option_line) - len(set_option_line.lstrip())]
-        replacement = textwrap.indent(report["certificate"], indent)
+        replacement = textwrap.indent(report["acceptedCertificate"], indent)
         if anchor.startswith("example "):
             prefix = anchor.split("set_option", 1)[0].rstrip()
             replacement = prefix + "\n" + replacement
@@ -145,7 +157,7 @@ def main() -> None:
                 f"materialized context report {index} failed closed compilation:\n"
                 + replay_output
             )
-    print("context location order, dependent transport, closure, rename, and materialization passed")
+    print("accepted context locations materialized; simproc-dependent rename remained deferred")
 
 
 if __name__ == "__main__":

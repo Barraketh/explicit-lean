@@ -97,7 +97,7 @@ register_option explicitLean.simpExplicit.bodyScopeFrame : Nat := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 9
+def reportSchemaVersion : Nat := 10
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -219,6 +219,42 @@ structure ValidationEnvelope where
   finalState : StateFingerprint
   deriving ToJson
 
+/-! The recorder keeps transition diagnostics separate from certificate source.
+    The fingerprints are intentionally bounded, alpha-stable recording data;
+    none of these fields is copied into a replacement theorem. -/
+structure TransitionContinuityReport where
+  firstUnconsumedEventIndex : Option Nat
+  /-- `before_event`, `between_events`, or `after_events`.  The index is
+      `recorded.size` for a trailing transition. -/
+  gapLocation : String
+  noNamedSelectorCandidate : Bool
+  nextConsumedCount : Nat
+  matchConsumedCount : Nat
+  tickConsumedCount : Nat
+  initialSubjectFingerprint : Option ExprFingerprint
+  replayedPrefixFingerprint : Option ExprFingerprint
+  expectedEventInputFingerprint : Option ExprFingerprint
+  expectedEventResultFingerprint : Option ExprFingerprint
+  matchedSubexpressionFingerprint : Option ExprFingerprint
+  /-- Stable, diagnostic-only path from the replayed prefix subject to the
+      matched subexpression.  Labels identify expression-child positions;
+      this is never used as certificate source. -/
+  matchedSubexpressionPath : Array String
+  recordedFinalStateFingerprint : Option ExprFingerprint
+  replayedFinalStateFingerprint : Option ExprFingerprint
+  expectedEventOrigins : Array String
+  reasonCode : String
+  operationHint : Option String
+  operationKind : Option String
+  hintClassification : Option String
+  deriving ToJson
+
+structure OperationalAdmissibility where
+  accepted : Bool
+  code : String
+  reason : Option String
+  deriving ToJson
+
 structure OriginCandidate where
   kind : String
   name : String
@@ -256,6 +292,8 @@ structure SubjectSummary where
   closesGoal : Bool
   eventCount : Nat
   transport : Option SubjectTransportReport
+  transitionContinuity : Option TransitionContinuityReport
+  operationalAdmissibility : OperationalAdmissibility
   deriving ToJson
 
 structure SemanticEventReport where
@@ -300,6 +338,41 @@ structure EncodingMetrics where
   totalCertificateBytes : Nat := 0
   deriving ToJson
 
+private def computeOperationalAdmissibility
+    (metrics : EncodingMetrics)
+    (suggestion : String)
+    (overrideCode? : Option String := none)
+    (transitionContinuity? : Option TransitionContinuityReport := none) : OperationalAdmissibility :=
+  let inferredCode? :=
+    if metrics.generatedSimprocEvents > 0 then
+      some "deferred_simproc"
+    else if let some continuity := transitionContinuity? then
+      some continuity.reasonCode
+    else if let some overrideCode := overrideCode? then
+      some overrideCode
+    else if metrics.termPremiseBindings > 0 then
+      some "inadmissible_direct_term_premise"
+    else if metrics.wholeResultProofCount > 0 || metrics.mode == "whole_result_proof" then
+      some "inadmissible_whole_result_proof"
+    else if metrics.presentationChangeCount > 0 || metrics.mode == "presentation_change" then
+      some "inadmissible_presentation_change"
+    else if metrics.generatedSpecialEvents > 0 then
+      some "inadmissible_generated_special_rule"
+    else if metrics.generatedProofEvents > 0 then
+      some "inadmissible_generated_proof"
+    else if suggestion.isEmpty then
+      some "unavailable"
+    else
+      some "accepted"
+  match inferredCode? with
+  | some "accepted" => { accepted := true, code := "accepted", reason := none }
+  | some code => {
+      accepted := false
+      code
+      reason := some code
+    }
+  | none => { accepted := false, code := "unavailable", reason := some "unavailable" }
+
 /- A proof-result encoder is intentionally the only public surface needed by
    other tactic producers.  The recorder's semantic event and replay state
    remain private; callers receive the validated source and its compact
@@ -326,6 +399,12 @@ structure ExecutionReport where
   disposition : Option String
   /-- The certificate owned by this dynamic execution, when one was encoded. -/
   certificate : Option String
+  /-- Certificate source accepted by the operational materializer.  Legacy
+      fallback source, when present, is retained separately for migration
+      diagnostics and must never be selected as a replacement. -/
+  acceptedCertificate : Option String
+  legacyCertificate : Option String
+  legacyCertificateBytes : Nat
   certificateBytes : Nat
   certificateEventCount : Nat
   positionsNeeded : Bool
@@ -333,6 +412,9 @@ structure ExecutionReport where
   recordingReason : Option String
   encoding : EncodingMetrics
   encodingFallbackReason : Option String
+  operationallyAdmissible : Bool
+  operationalAdmissibility : OperationalAdmissibility
+  transitionContinuity : Option TransitionContinuityReport
   localRenames : Array LocalRenameInfo
   closesGoal : Bool
   trace : Array SemanticEventReport
@@ -358,6 +440,9 @@ structure RecordingReport where
   positionsNeeded : Bool
   certificateBytes : Nat
   certificate : String
+  acceptedCertificate : Option String
+  legacyCertificate : Option String
+  legacyCertificateBytes : Nat
   executions : Array ExecutionReport
   terminalOutcome : Option String
   failureCategory : Option String
@@ -367,6 +452,9 @@ structure RecordingReport where
   recordingReason : Option String
   encoding : EncodingMetrics
   encodingFallbackReason : Option String
+  operationallyAdmissible : Bool
+  operationalAdmissibility : OperationalAdmissibility
+  transitionContinuity : Option TransitionContinuityReport
   localRenames : Array LocalRenameInfo
   validation : Option ValidationEnvelope
   deriving ToJson
@@ -778,6 +866,7 @@ private structure EncodingAttempt where
   encodingMetrics : EncodingMetrics
   encodingFallbackReason? : Option String
   positionsNeeded : Bool
+  transitionContinuity? : Option TransitionContinuityReport
 
 private def premiseDefEqHeartbeatBudget : Nat := 20000
 
@@ -974,6 +1063,29 @@ private def applyRecordedRules? (input : Expr) (event : ReplayEvent)
   let state ← ref.get
   ref.set { state with premiseFailure? := lastFailure? }
   return none
+
+/- A continuity comparison is diagnostic-only and may unfold ordinary
+   definitions such as `Finsupp.sum`.  Keep it separately bounded from the
+   stricter premise/certificate validation relation above. -/
+private def diagnosticDefEq? (actual expected : Expr) : MetaM Bool := do
+  if actual.hasLooseBVars || expected.hasLooseBVars then
+    return false
+  let lctx ← getLCtx
+  let actualWellFormed ← MetavarContext.isWellFormed lctx actual
+  let expectedWellFormed ← MetavarContext.isWellFormed lctx expected
+  if !actualWellFormed || !expectedWellFormed then
+    return false
+  let metaSnapshot ← Meta.saveState
+  try
+    let equal ← withTheReader Core.Context
+        (fun context => { context with maxHeartbeats := premiseDefEqHeartbeatBudget }) do
+      withCurrHeartbeats do
+        withTransparency .default <| isDefEq actual expected
+    metaSnapshot.restore
+    return equal
+  catch _ =>
+    metaSnapshot.restore
+    return false
 
 private def replayExprMatches? (actual expected : Expr) : Simp.SimpM Bool := do
   if Expr.equal actual expected then
@@ -1787,6 +1899,7 @@ private structure ContextSubjectTrace where
   eventText : String
   bindings : Array GeneratedBinding
   transport : Option SubjectTransportReport
+  transitionContinuity : Option TransitionContinuityReport
 
 private def contextRecordSubject (fvarId : FVarId) : TacticM ContextRecordSubject := do
   let decl ← fvarId.getDecl
@@ -2058,6 +2171,106 @@ private def contextReplayEncoding? (target : Expr) (recorded : Array RecordedEve
     return some ticks
   return none
 
+private def continuityReplayCount? (target : Expr) (recorded : Array RecordedEvent)
+    (selectors : Array ReplaySelector) : TacticM (Option Nat) := do
+  try
+    withoutModifyingState do
+      let some events ← contextRecordedReplayEvents recorded selectors | return none
+      let (_, state) ← runReplay target events
+      return some state.next
+  catch _ =>
+    return none
+
+private def continuityPrefixReplay? (target : Expr) (recorded : Array RecordedEvent)
+    (selectors : Array ReplaySelector) (prefixCount : Nat) : TacticM (Option Expr) := do
+  if prefixCount == 0 then
+    return some target
+  if prefixCount > recorded.size || prefixCount > selectors.size then
+    return none
+  try
+    let prefixRecorded := recorded.take prefixCount
+    let prefixSelectors := selectors.take prefixCount
+    let some events ← contextRecordedReplayEvents prefixRecorded prefixSelectors | return none
+    let (result, state) ← runReplay target events
+    unless state.next == prefixCount do
+      return none
+    return some result.expr
+  catch _ =>
+    return none
+
+private def namedRuleReplayable? (event : RecordedEvent) : TacticM Bool := do
+  try
+    let some replay ← contextRecordedReplayEvents #[event] #[.next] | return false
+    let (result, state) ← runReplay event.input replay
+    unless state.next == 1 do
+      return false
+    match ← premiseDefEq? result.expr event.result.expr with
+    | .ok equal => return equal
+    | .error _ => return false
+  catch _ =>
+    return false
+
+private structure DefEqSubexpression where
+  expression : Expr
+  path : Array String
+
+private def expressionChildren (expression : Expr) : Array (String × Expr) :=
+  match expression with
+  | .app fn arg => #[ ("app.fn", fn), ("app.arg", arg) ]
+  | .lam _ type body _ => #[ ("lam.type", type), ("lam.body", body) ]
+  | .forallE _ type body _ => #[ ("forall.type", type), ("forall.body", body) ]
+  | .letE _ type value body _ =>
+      #[ ("let.type", type), ("let.value", value), ("let.body", body) ]
+  | .mdata _ expression => #[ ("mdata.value", expression) ]
+  | .proj _ _ expression => #[ ("proj.value", expression) ]
+  | _ => #[]
+
+/- Search outermost-first so a large closed subject is preferred to a binder
+   body.  Binder bodies can contain loose bvars when visited as standalone
+   expressions; such candidates are skipped, while their closed children may
+   still be inspected.  In particular, neither `isDefEq` nor fingerprints are
+   attempted on a loose-bvar expression. -/
+private partial def firstDefEqSubexpression? (subject expected : Expr)
+    (path : Array String := #[]) (fuel : Nat := 256) : MetaM (Option DefEqSubexpression) := do
+  if fuel == 0 || expected.hasLooseBVars then
+    return none
+  if !subject.hasLooseBVars && !Expr.equal subject expected then
+    if ← diagnosticDefEq? subject expected then
+      return some { expression := subject, path }
+  for (label, child) in expressionChildren subject do
+    if let some found ← firstDefEqSubexpression? child expected (path.push label) (fuel - 1) then
+      return some found
+  return none
+
+private def originName? : Origin → Option Name
+  | .decl name _ _ => some name
+  | _ => none
+
+private partial def containsConstant (expression : Expr) (name : String) : Bool :=
+  match expression with
+  | .const candidate _ => candidate.toString == name
+  | .app fn arg => containsConstant fn name || containsConstant arg name
+  | .lam _ type body _ => containsConstant type name || containsConstant body name
+  | .forallE _ type body _ => containsConstant type name || containsConstant body name
+  | .letE _ type value body _ =>
+      containsConstant type name || containsConstant value name || containsConstant body name
+  | .mdata _ expression => containsConstant expression name
+  | .proj _ _ expression => containsConstant expression name
+  | _ => false
+
+private def transitionOperationHint (initial expected : Expr)
+    (event : RecordedEvent) : (Option String × Option String × Option String) :=
+  let initialHasFinsupp := containsConstant initial "Finsupp.sum"
+  let expectedHasFinsupp := containsConstant expected "Finsupp.sum"
+  let firstOriginIsMulSum := event.origins.any fun origin =>
+    (originName? origin |>.map Name.toString).getD "" == "Finset.mul_sum"
+  if initialHasFinsupp && !expectedHasFinsupp && firstOriginIsMulSum then
+    (some "delta Finsupp.sum", some "delta", some "diagnostic_candidate")
+  else if !Expr.equal initial expected then
+    (some "definitional reduction", some "reduction", some "diagnostic_candidate")
+  else
+    (none, none, none)
+
 /-- Replay a recorded prefix using the same selector order as a complete
 certificate. The result is the complete target after that prefix and the
 selectors that validated it. -/
@@ -2215,6 +2428,184 @@ private def originCandidate (origin : Origin) : MetaM OriginCandidate := do
   | .other name =>
       return { kind := "other", name := name.toString, inverse := false, source := none }
 
+/- Report the first event that no known selector can consume.  This is a
+   bounded comparison aid for migration diagnostics; it does not infer or
+   serialize a replay command. -/
+private def buildTransitionContinuityCore? (target : Expr) (recorded : Array RecordedEvent)
+    (recordedFinal : Expr) : TacticM (Option TransitionContinuityReport) := do
+  let initialFingerprint ← exprFingerprint target
+  if recorded.isEmpty then
+    if Expr.equal target recordedFinal then
+      return none
+    let recordedFinalFingerprint ← exprFingerprint recordedFinal
+    let replayedFinalFingerprint ← exprFingerprint target
+    return some {
+      firstUnconsumedEventIndex := some 0
+      gapLocation := "after_events"
+      noNamedSelectorCandidate := true
+      nextConsumedCount := 0
+      matchConsumedCount := 0
+      tickConsumedCount := 0
+      initialSubjectFingerprint := some initialFingerprint
+      replayedPrefixFingerprint := some replayedFinalFingerprint
+      expectedEventInputFingerprint := none
+      expectedEventResultFingerprint := some recordedFinalFingerprint
+      matchedSubexpressionFingerprint := none
+      matchedSubexpressionPath := #[]
+      recordedFinalStateFingerprint := some recordedFinalFingerprint
+      replayedFinalStateFingerprint := some replayedFinalFingerprint
+      expectedEventOrigins := #[]
+      reasonCode := "missing_transition"
+      operationHint := some "whole-subject transition"
+      operationKind := some "transition"
+      hintClassification := some "diagnostic_candidate"
+    }
+  let nextSelectors : Array ReplaySelector := Array.replicate recorded.size (.next : ReplaySelector)
+  let matchSelectors : Array ReplaySelector := recorded.map
+    (fun event => .discover event.input event.result.expr)
+  let tickSelectors : Array ReplaySelector := recorded.map
+    (fun event => .tickPos event.tick)
+  let nextConsumedCount := (← continuityReplayCount? target recorded nextSelectors).getD 0
+  let matchConsumedCount := (← continuityReplayCount? target recorded matchSelectors).getD 0
+  let tickConsumedCount := (← continuityReplayCount? target recorded tickSelectors).getD 0
+  let bestCount := max nextConsumedCount (max matchConsumedCount tickConsumedCount)
+  let bestSelectors :=
+    if nextConsumedCount >= matchConsumedCount && nextConsumedCount >= tickConsumedCount then
+      nextSelectors
+    else if matchConsumedCount >= tickConsumedCount then
+      matchSelectors
+    else
+      tickSelectors
+  if bestCount >= recorded.size then
+    let some events ← contextRecordedReplayEvents recorded bestSelectors | return none
+    let (replayedResult, replayState) ← runReplay target events
+    unless replayState.next == recorded.size do
+      return none
+    if Expr.equal replayedResult.expr recordedFinal then
+      return none
+    let recordedFinalFingerprint ← exprFingerprint recordedFinal
+    let replayedFinalFingerprint ← exprFingerprint replayedResult.expr
+    return some {
+      firstUnconsumedEventIndex := some recorded.size
+      gapLocation := "after_events"
+      noNamedSelectorCandidate := true
+      nextConsumedCount
+      matchConsumedCount
+      tickConsumedCount
+      initialSubjectFingerprint := some initialFingerprint
+      replayedPrefixFingerprint := some replayedFinalFingerprint
+      expectedEventInputFingerprint := none
+      expectedEventResultFingerprint := some recordedFinalFingerprint
+      matchedSubexpressionFingerprint := none
+      matchedSubexpressionPath := #[]
+      recordedFinalStateFingerprint := some recordedFinalFingerprint
+      replayedFinalStateFingerprint := some replayedFinalFingerprint
+      expectedEventOrigins := #[]
+      reasonCode := "missing_transition"
+      operationHint := some "trailing transition"
+      operationKind := some "transition"
+      hintClassification := some "diagnostic_candidate"
+    }
+  let firstUnconsumed := bestCount
+  let some event := recorded[firstUnconsumed]? | return none
+  let prefixExpr := (← continuityPrefixReplay? target recorded bestSelectors firstUnconsumed).getD target
+  let matched? ← firstDefEqSubexpression? prefixExpr event.input
+  let replayable ← namedRuleReplayable? event
+  let hasDefinitionalEvidence := matched?.isSome
+  let reasonCode := if replayable && hasDefinitionalEvidence then
+      "missing_transition"
+    else
+      "unidentified_theorem_application"
+  let (operationHint, operationKind, hintClassification) := if hasDefinitionalEvidence then
+      let matchedExpression := match matched? with
+        | some found => found.expression
+        | none => prefixExpr
+      transitionOperationHint matchedExpression event.input event
+    else
+      (none, none, none)
+  let expectedFingerprint? ← if event.input.hasLooseBVars then
+      pure none
+    else
+      some <$> exprFingerprint event.input
+  let expectedResultFingerprint? ← if event.result.expr.hasLooseBVars then
+      pure none
+    else
+      some <$> exprFingerprint event.result.expr
+  let prefixFingerprint? ← if prefixExpr.hasLooseBVars then
+      pure none
+    else
+      some <$> exprFingerprint prefixExpr
+  let expectedOrigins ← event.origins.mapM fun origin => do
+    return (← originCandidate origin).name
+  return some {
+    firstUnconsumedEventIndex := some firstUnconsumed
+    gapLocation := if firstUnconsumed == 0 then "before_event" else "between_events"
+    noNamedSelectorCandidate :=
+      nextConsumedCount <= firstUnconsumed &&
+      matchConsumedCount <= firstUnconsumed &&
+      tickConsumedCount <= firstUnconsumed
+    nextConsumedCount
+    matchConsumedCount
+    tickConsumedCount
+    initialSubjectFingerprint := some initialFingerprint
+    replayedPrefixFingerprint := prefixFingerprint?
+    expectedEventInputFingerprint := expectedFingerprint?
+    expectedEventResultFingerprint := expectedResultFingerprint?
+    matchedSubexpressionFingerprint := ← matched?.mapM (fun found =>
+      liftM (exprFingerprint found.expression))
+    matchedSubexpressionPath := matched?.map (·.path) |>.getD #[]
+    recordedFinalStateFingerprint := none
+    replayedFinalStateFingerprint := none
+    expectedEventOrigins := expectedOrigins
+    reasonCode
+    operationHint
+    operationKind
+    hintClassification
+  }
+
+private def diagnosticFallbackContinuity (target : Expr) (recorded : Array RecordedEvent)
+    (recordedFinal : Expr) : TacticM (Option TransitionContinuityReport) := do
+  let initialFingerprint? ← try
+    some <$> exprFingerprint target
+  catch _ =>
+    pure none
+  let finalFingerprint? ← try
+    some <$> exprFingerprint recordedFinal
+  catch _ =>
+    pure none
+  return some {
+    firstUnconsumedEventIndex := some 0
+    gapLocation := if recorded.isEmpty then "after_events" else "before_event"
+    noNamedSelectorCandidate := true
+    nextConsumedCount := 0
+    matchConsumedCount := 0
+    tickConsumedCount := 0
+    initialSubjectFingerprint := initialFingerprint?
+    replayedPrefixFingerprint := initialFingerprint?
+    expectedEventInputFingerprint := none
+    expectedEventResultFingerprint := none
+    matchedSubexpressionFingerprint := none
+    matchedSubexpressionPath := #[]
+    recordedFinalStateFingerprint := finalFingerprint?
+    replayedFinalStateFingerprint := initialFingerprint?
+    expectedEventOrigins := #[]
+    reasonCode := "unidentified_theorem_application"
+    operationHint := none
+    operationKind := none
+    hintClassification := some "diagnostic_failure"
+  }
+
+/- Continuity is migration diagnostics only.  A failure in bounded replay or
+   metadata inspection must never discard the recorder trace or fall through
+   to passive execution; preserve a structured, conservative diagnosis. -/
+private def buildTransitionContinuity? (target : Expr) (recorded : Array RecordedEvent)
+    (recordedFinal : Expr) : TacticM (Option TransitionContinuityReport) := do
+  try
+    withoutModifyingState do
+      buildTransitionContinuityCore? target recorded recordedFinal
+  catch _ =>
+    diagnosticFallbackContinuity target recorded recordedFinal
+
 private def semanticEventReport (event : RecordedEvent)
     (encoding? : Option EventEncodingInfo := none)
     (premiseEncodings : Array PremiseEncodingInfo := #[])
@@ -2263,12 +2654,16 @@ private def executionReport (target : Expr) (result : Simp.Result)
     (encodingMetrics : EncodingMetrics := {})
     (encodingFallbackReason? : Option String := none)
     (localRenames : Array LocalRenameInfo := #[])
+    (transitionContinuity? : Option TransitionContinuityReport := none)
+    (admissibilityCode? : Option String := none)
     : MetaM ExecutionReport := do
   let targetSubject : SubjectReport := {
     kind := "target"
     name := some "target"
     contextIndex := none
   }
+  let admissibility := computeOperationalAdmissibility encodingMetrics suggestion
+    admissibilityCode? transitionContinuity?
   let targetSummary : SubjectSummary := {
     subject := targetSubject
     initial := ← exprFingerprint target
@@ -2276,21 +2671,38 @@ private def executionReport (target : Expr) (result : Simp.Result)
     closesGoal := result.expr.isTrue
     eventCount := state.events.size
     transport := none
+    transitionContinuity := transitionContinuity?
+    operationalAdmissibility := admissibility
   }
   let subjects := if subjects.isEmpty then #[targetSummary] else subjects
+  let acceptedCertificate := if admissibility.accepted then
+      if suggestion.isEmpty then none else some suggestion
+    else
+      none
+  let effectiveStatus := if admissibility.accepted then encodingStatus
+    else if admissibility.code.startsWith "deferred_" then "deferred"
+    else if admissibility.code == "unavailable" then "unavailable"
+    else "inadmissible"
   return {
     attemptToken := ""
     executionIndex
     result := "succeeded"
     disposition := none
-    certificate := if suggestion.isEmpty then none else some suggestion
-    certificateBytes := suggestion.utf8ByteSize
+    certificate := acceptedCertificate
+    acceptedCertificate
+    legacyCertificate := if admissibility.accepted || suggestion.isEmpty then
+        none else some suggestion
+    legacyCertificateBytes := if admissibility.accepted then 0 else suggestion.utf8ByteSize
+    certificateBytes := acceptedCertificate.map String.utf8ByteSize |>.getD 0
     certificateEventCount := certificateEventCount state.events
     positionsNeeded
-    encodingStatus
+    encodingStatus := effectiveStatus
     recordingReason := recordingReason?
     encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
     encodingFallbackReason := encodingFallbackReason?
+    operationallyAdmissible := admissibility.accepted
+    operationalAdmissibility := admissibility
+    transitionContinuity := transitionContinuity?
     localRenames
     closesGoal := result.expr.isTrue
     trace := ← state.events.mapIdxM fun index event =>
@@ -2369,6 +2781,8 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     (encodingMetrics : EncodingMetrics := {})
     (encodingFallbackReason? : Option String := none)
     (localRenames : Array LocalRenameInfo := #[])
+    (transitionContinuity? : Option TransitionContinuityReport := none)
+    (admissibilityCode? : Option String := none)
     (capture? : Option (IO.Ref (Option RecordingReport)) := none)
     (config? : Option Simp.Config := none) : TacticM Unit := do
   let declaration := (← Term.getDeclName?).map (·.toString) |>.getD "<unknown>"
@@ -2382,6 +2796,8 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
             (positionsNeeded := positionsNeeded) (encodingStatus := encodingStatus)
             (recordingReason? := recordingReason?) (encodingMetrics := encodingMetrics)
             (encodingFallbackReason? := encodingFallbackReason?) (localRenames := localRenames)
+            (transitionContinuity? := transitionContinuity?)
+            (admissibilityCode? := admissibilityCode?)
         pure (closesGoal, result.expr, #[execution])
     | none =>
         let finalTarget ← try
@@ -2393,6 +2809,9 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
           result := "failed"
           disposition := none
           certificate := none
+          acceptedCertificate := none
+          legacyCertificate := none
+          legacyCertificateBytes := 0
           certificateBytes := 0
           certificateEventCount := 0
           positionsNeeded := false
@@ -2400,6 +2819,13 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
           recordingReason := recordingReason?
           encoding := {}
           encodingFallbackReason := none
+          operationallyAdmissible := false
+          operationalAdmissibility := {
+            accepted := false
+            code := "unavailable"
+            reason := some "unavailable"
+          }
+          transitionContinuity := none
           localRenames := #[]
           closesGoal := false
           trace := #[]
@@ -2414,6 +2840,12 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
             closesGoal := false
             eventCount := 0
             transport := none
+            transitionContinuity := none
+            operationalAdmissibility := {
+              accepted := false
+              code := "unavailable"
+              reason := some "unavailable"
+            }
           }]
           initialState := ← stateFingerprint target
           finalState := ← stateFingerprint finalTarget
@@ -2423,6 +2855,7 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
         pure (false, finalTarget, #[execution])
   let initialState ← stateFingerprint target
   let finalState ← stateFingerprint finalTarget
+  let acceptedCertificate := executions[0]?.bind (·.acceptedCertificate)
   let report : RecordingReport := {
     schema := reportSchema
     schemaVersion := reportSchemaVersion
@@ -2436,21 +2869,31 @@ private def emitRecordingReport (simpStx reportStx : Syntax) (target : Expr) (st
     traceLength := state.events.size
     certificateEventCount := certificateEventCount state.events
     positionsNeeded
-    certificateBytes := suggestion.utf8ByteSize
-    certificate := suggestion
+    certificateBytes := executions[0]?.map (·.certificateBytes) |>.getD 0
+    certificate := executions[0]?.bind (·.certificate) |>.getD ""
+    acceptedCertificate
+    legacyCertificate := executions[0]?.bind (·.legacyCertificate)
+    legacyCertificateBytes := executions[0]?.map (·.legacyCertificateBytes) |>.getD 0
     executions
     terminalOutcome := terminalOutcome?
     failureCategory := failureCategory?
     failureMessage := failureMessage?
     traceAvailable
-    encodingStatus
+    encodingStatus := executions[0]?.map (·.encodingStatus) |>.getD encodingStatus
     recordingReason := recordingReason?
     encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
     encodingFallbackReason := encodingFallbackReason?
+    operationallyAdmissible := executions[0]?.map (·.operationallyAdmissible) |>.getD false
+    operationalAdmissibility := executions[0]?.map (·.operationalAdmissibility) |>.getD {
+      accepted := false
+      code := "unavailable"
+      reason := some "unavailable"
+    }
+    transitionContinuity := executions[0]?.bind (·.transitionContinuity)
     localRenames
     validation := some {
       schemaVersion := reportSchemaVersion
-      certificate := if suggestion.isEmpty then none else some 0
+      certificate := if acceptedCertificate.isSome then some 0 else none
       initialState
       finalState
     }
@@ -2480,8 +2923,15 @@ private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
     pure (mkConst ``True)
   let result : Simp.Result := { expr := finalTarget }
   try
+    let admissibilityCode? := if category == "deferred_simproc" then
+        some "deferred_simproc"
+      else if category == "deferred_custom_discharger" then
+        some "deferred_custom_discharger"
+      else
+        none
     emitRecordingReport simpStx reportStx target state (some result) "" false
       (some category) (some detail) none false "unavailable" (some detail)
+      (admissibilityCode? := admissibilityCode?)
       (capture? := capture?) (config? := config?)
     catch ex =>
       logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
@@ -2516,6 +2966,7 @@ private structure ContextSubjectEncoding where
   metrics : EncodingMetrics
   fallbackReason? : Option String
   positionsNeeded : Bool
+  transitionContinuity? : Option TransitionContinuityReport
 
 private structure ContextEncodingBundle where
   traces : Array ContextSubjectTrace
@@ -2656,6 +3107,8 @@ private def scopedAggregateReport (scopeId occurrenceId : String)
   let singleSuccessful? := if successful.size == 1 then successful[0]? else none
   let certificate := singleSuccessful?.bind (·.certificate) |>.getD ""
   let certificateBytes := singleSuccessful?.map (·.certificateBytes) |>.getD 0
+  let legacyCertificate := singleSuccessful?.bind (·.legacyCertificate)
+  let legacyCertificateBytes := singleSuccessful?.map (·.legacyCertificateBytes) |>.getD 0
   let encodingStatus := singleSuccessful?.map (·.encodingStatus) |>.getD
     (if successful.size > 1 then "body_rewrite_required" else "unavailable")
   let recordingReason := match singleSuccessful? with
@@ -2664,6 +3117,16 @@ private def scopedAggregateReport (scopeId occurrenceId : String)
   let encodingFallbackReason := singleSuccessful?.bind (·.encodingFallbackReason)
   let localRenames := singleSuccessful?.map (·.localRenames) |>.getD #[]
   let validation := if successful.size == 1 then firstReport.validation else none
+  let aggregateAdmissibility := if successful.size > 1 then {
+      accepted := false
+      code := "source_rewrite_required"
+      reason := some "multiple_dynamic_executions"
+    } else
+    singleSuccessful?.map (·.operationalAdmissibility) |>.getD {
+      accepted := false
+      code := "unavailable"
+      reason := some "unavailable"
+    }
   let report : RecordingReport := {
     firstReport with
       schemaVersion := reportSchemaVersion
@@ -2675,9 +3138,16 @@ private def scopedAggregateReport (scopeId occurrenceId : String)
       positionsNeeded
       certificateBytes
       certificate
+      acceptedCertificate := if aggregateAdmissibility.accepted then
+        singleSuccessful?.bind (·.acceptedCertificate) else none
+      legacyCertificate
+      legacyCertificateBytes
       executions
       traceAvailable
       encodingStatus
+      operationallyAdmissible := aggregateAdmissibility.accepted
+      operationalAdmissibility := aggregateAdmissibility
+      transitionContinuity := singleSuccessful?.bind (·.transitionContinuity)
       recordingReason
       /- Metrics belong to the dynamic executions.  In particular, a
          multi-execution occurrence has no single top-level certificate, but
@@ -2787,11 +3257,19 @@ private def contextSubjectEncoding? (target : Expr)
           metrics
           fallbackReason? := none
           positionsNeeded := metrics.tickSelectorCount > 0
+          transitionContinuity? := none
         }, usedNames)
     let plan? ← match (← buildCertificatePlan? target state.events result usedNames) with
       | some plan => pure (some plan)
       | none => buildWholeResultPlan? target result usedNames
     let some plan := plan? | return none
+    let continuity? ← if plan.metrics.mode == "event" &&
+        plan.metrics.generatedProofEvents == 0 && plan.metrics.termPremiseBindings == 0 then
+        pure none
+      else if plan.metrics.generatedSimprocEvents > 0 then
+        pure none
+      else
+        buildTransitionContinuity? target state.events result.expr
     let eventText := if plan.metrics.mode == "whole_result_proof" && plan.events.isEmpty then
       match plan.bindings[0]? with
       | some binding => s!"[↓ {binding.name}]"
@@ -2808,6 +3286,7 @@ private def contextSubjectEncoding? (target : Expr)
       fallbackReason? :=
         if plan.metrics.mode == "whole_result_proof" then some "presentation_gap" else none
       positionsNeeded := plan.positions
+      transitionContinuity? := continuity?
     }, allUsedNames)
   catch _ =>
     return none
@@ -2843,7 +3322,8 @@ private def reencodeContextTraces? (traces : Array ContextSubjectTrace)
           metrics := encoding.metrics
           eventText := encoding.eventText
           bindings := encoding.bindings
-      }
+          transitionContinuity := encoding.transitionContinuity?
+        }
     return some {
       traces := renamedTraces
       bindings := allBindings
@@ -2868,6 +3348,17 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
   let occurrenceId := explicitLean.simpExplicit.occurrenceId.get (← getOptions)
   let initialState ← withLCtx' initialLctx do stateFingerprint initialTarget
   let finalState ← withLCtx' finalLctx do stateFingerprint finalTarget
+  let transitionContinuity? := subjects.foldl
+    (fun current subject => current.or subject.transitionContinuity) none
+  let admissibility := computeOperationalAdmissibility encodingMetrics suggestion
+    none transitionContinuity?
+  let acceptedCertificate := if admissibility.accepted && !suggestion.isEmpty then
+      some suggestion else none
+  let effectiveStatus := if admissibility.accepted then
+      if suggestion.isEmpty then "unavailable" else "validated"
+    else if admissibility.code.startsWith "deferred_" then "deferred"
+    else if admissibility.code == "unavailable" then "unavailable"
+    else "inadmissible"
   let mut trace := #[]
   let mut summaries := #[]
   let mut totalCertificateEventCount := 0
@@ -2886,6 +3377,9 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
         closesGoal := ← isReflexiveResultEarly subject.result.expr
         eventCount := subject.state.events.size
         transport := subject.transport
+        transitionContinuity := subject.transitionContinuity
+        operationalAdmissibility := computeOperationalAdmissibility subject.metrics
+          subject.eventText none subject.transitionContinuity
       }
     summaries := summaries.push summary
   let execution : ExecutionReport := {
@@ -2893,14 +3387,20 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
     executionIndex := 0
     result := "succeeded"
     disposition := none
-    certificate := if suggestion.isEmpty then none else some suggestion
-    certificateBytes := suggestion.utf8ByteSize
+    certificate := acceptedCertificate
+    acceptedCertificate
+    legacyCertificate := if admissibility.accepted || suggestion.isEmpty then none else some suggestion
+    legacyCertificateBytes := if admissibility.accepted then 0 else suggestion.utf8ByteSize
+    certificateBytes := acceptedCertificate.map (·.utf8ByteSize) |>.getD 0
     certificateEventCount := totalCertificateEventCount
     positionsNeeded
-    encodingStatus := if suggestion.isEmpty then "unavailable" else "validated"
+    encodingStatus := effectiveStatus
     recordingReason := if suggestion.isEmpty then some "context certificate encoding was not validated" else none
     encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
     encodingFallbackReason := encodingFallbackReason?
+    operationallyAdmissible := admissibility.accepted
+    operationalAdmissibility := admissibility
+    transitionContinuity := transitionContinuity?
     localRenames
     closesGoal
     trace
@@ -2923,21 +3423,27 @@ private def emitContextRecordingReport (simpStx reportStx : Syntax)
     traceLength := trace.size
     certificateEventCount := totalCertificateEventCount
     positionsNeeded
-    certificateBytes := suggestion.utf8ByteSize
-    certificate := suggestion
+    certificateBytes := execution.certificateBytes
+    certificate := execution.certificate |>.getD ""
+    acceptedCertificate := execution.acceptedCertificate
+    legacyCertificate := execution.legacyCertificate
+    legacyCertificateBytes := execution.legacyCertificateBytes
     executions := #[execution]
     terminalOutcome := none
     failureCategory := none
     failureMessage := none
     traceAvailable := true
-    encodingStatus := if suggestion.isEmpty then "unavailable" else "validated"
+    encodingStatus := effectiveStatus
     recordingReason := if suggestion.isEmpty then some "context certificate encoding was not validated" else none
     encoding := { encodingMetrics with totalCertificateBytes := suggestion.utf8ByteSize }
     encodingFallbackReason := encodingFallbackReason?
+    operationallyAdmissible := admissibility.accepted
+    operationalAdmissibility := admissibility
+    transitionContinuity := transitionContinuity?
     localRenames
     validation := some {
       schemaVersion := reportSchemaVersion
-      certificate := if suggestion.isEmpty then none else some 0
+      certificate := if acceptedCertificate.isSome then some 0 else none
       initialState
       finalState
     }
@@ -3159,6 +3665,7 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
     let mut premiseEncodingInfos : Array (Array PremiseEncodingInfo) := #[]
     let mut encodingMetrics : EncodingMetrics := {}
     let mut encodingFallbackReason? : Option String := none
+    let mut transitionContinuity? : Option TransitionContinuityReport := none
     let mut positionsNeeded := flatEncoding?.getD #[] |>.any isTickSelector
     if let some flatSelectors := flatEncoding? then
       let leaveOpen ← if actualClosed then pure false else isReflexiveResult result.expr
@@ -3205,6 +3712,9 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
         if plan.metrics.mode == "whole_result_proof" ||
             plan.metrics.mode == "presentation_change" then some "presentation_gap" else none
       positionsNeeded := plan.positions
+      if plan.metrics.generatedSimprocEvents == 0 &&
+          (plan.metrics.mode != "event" || plan.metrics.termPremiseBindings > 0) then
+        transitionContinuity? ← buildTransitionContinuity? target state.events result.expr
 
     -- Search a bounded certificate-program graph breadth first. A node is the
     -- current target plus the phases that produced it. Its outgoing edges
@@ -3277,6 +3787,7 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
       encodingMetrics
       encodingFallbackReason?
       positionsNeeded
+      transitionContinuity?
     }
   catch _ =>
     return none
@@ -3339,6 +3850,7 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
           metrics := {}
           fallbackReason? := some "context_subject_encoding"
           positionsNeeded := false
+          transitionContinuity? := ← buildTransitionContinuity? type state.events result.expr
         }
         if encoding?.isNone then
           ordinaryEncodingFailed := true
@@ -3360,6 +3872,7 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
           eventText := encoding.eventText
           bindings := encoding.bindings
           transport := none
+          transitionContinuity := encoding.transitionContinuity?
         }
         if result.proof?.isSome then
           if result.expr.isFalse && index + 1 < subjects.size then
@@ -3412,6 +3925,7 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
           metrics := {}
           fallbackReason? := some "context_subject_encoding"
           positionsNeeded := false
+          transitionContinuity? := ← buildTransitionContinuity? target state.events result.expr
         }
         if encoding?.isNone then
           ordinaryEncodingFailed := true
@@ -3433,6 +3947,7 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
           eventText := encoding.eventText
           bindings := encoding.bindings
           transport := none
+          transitionContinuity := encoding.transitionContinuity?
         }
         let current? ← current.withContext do
           applyContextTargetResult current target result
@@ -3472,6 +3987,22 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
         suggestion := ordinarySuggestion
         localRenames := #[]
       }
+    else if passive then
+      -- Passive recording must not turn a recorder validation gap into a
+      -- copied-module failure.  Preserve the observed traces and continuity
+      -- diagnostics, but withhold every candidate source; the caller runs the
+      -- original `simp` exactly once after this speculative pass.
+      pure {
+        initialLctx
+        finalLctx
+        traces := ordinaryTraces
+        bindings := #[]
+        metrics := aggregateMetrics
+        fallbackReason? := fallbackReason?.or (some "context_certificate_unavailable")
+        positionsNeeded
+        suggestion := ""
+        localRenames := #[]
+      }
     else do
       let renamePlan := stableRenamePlan
       if renamePlan.isEmpty then
@@ -3502,9 +4033,14 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
         suggestion
         localRenames := localRenameInfos renamePlan
       }
-  unless explicitLean.simpExplicit.passive.get (← getOptions) do
-    logInfoAt reportStx m!"Try this deterministic replay:\n{report.suggestion}"
   let finalMetrics := { report.metrics with totalCertificateBytes := report.suggestion.utf8ByteSize }
+  let reportContinuity? := report.traces.foldl
+    (fun current trace => current.or trace.transitionContinuity) none
+  let reportAdmissibility := computeOperationalAdmissibility finalMetrics report.suggestion
+    none reportContinuity?
+  unless explicitLean.simpExplicit.passive.get (← getOptions) do
+    if reportAdmissibility.accepted then
+      logInfoAt reportStx m!"Try this deterministic replay:\n{report.suggestion}"
   let shouldReport := passive || explicitLean.simpExplicit.report.get (← getOptions)
   if shouldReport then
     emitContextRecordingReport simpStx reportStx initialTarget report.initialLctx finalTarget
@@ -3564,7 +4100,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
       commitScopedAttempt attempt
   if !simpStx[2].isNone then
     if passive then
-      return ← runScoped (passiveOriginalSimp simpStx reportStx target "premise"
+      return ← runScoped (passiveOriginalSimp simpStx reportStx target "deferred_custom_discharger"
         "passive recorder preserves custom dischargers through the original tactic"
         scopedCapture?)
     else
@@ -3671,6 +4207,9 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   let premiseEncodingInfos := attempt.premiseEncodingInfos
   let encodingMetrics := attempt.encodingMetrics
   let encodingFallbackReason? := attempt.encodingFallbackReason?
+  let transitionContinuity? := attempt.transitionContinuity?
+  let operationalAdmissibility := computeOperationalAdmissibility encodingMetrics suggestion
+    none transitionContinuity?
   let positionsNeeded := attempt.positionsNeeded
   let shouldReport := passive || explicitLean.simpExplicit.report.get (← getOptions)
   if shouldReport then
@@ -3678,7 +4217,10 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
     -- coverage driver to compile the replacement in its complete body.
     let failureCategory? : Option String := none
     let terminalOutcome? : Option String := none
-    let encodingStatus := if suggestion.isEmpty then "unavailable" else "validated"
+    let encodingStatus := if operationalAdmissibility.accepted then
+        if suggestion.isEmpty then "unavailable" else "validated"
+      else if operationalAdmissibility.code.startsWith "deferred_" then "deferred"
+      else "inadmissible"
     let recordingReason? := if suggestion.isEmpty then some "compact certificate encoding was not validated" else none
     let emitReport := fun () => do
       match reportLctx? with
@@ -3692,6 +4234,8 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
               (encodingMetrics := encodingMetrics)
               (encodingFallbackReason? := encodingFallbackReason?)
               (localRenames := localRenameInfos localRenames)
+              (transitionContinuity? := transitionContinuity?)
+              (admissibilityCode? := transitionContinuity?.map (·.reasonCode))
               (capture? := scopedCapture?) (config? := some ctx.config)
       | none =>
           emitRecordingReport simpStx reportStx target state (some result) suggestion
@@ -3702,16 +4246,34 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
             (encodingMetrics := encodingMetrics)
             (encodingFallbackReason? := encodingFallbackReason?)
             (localRenames := localRenameInfos localRenames)
+            (transitionContinuity? := transitionContinuity?)
+            (admissibilityCode? := transitionContinuity?.map (·.reasonCode))
             (capture? := scopedCapture?) (config? := some ctx.config)
     if passive then
       try
         emitReport ()
       catch ex =>
-        logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
+        let detail ← exceptionText ex
+        -- A trace may mention locals introduced only inside the simplifier's
+        -- temporary binder context.  If those locals cannot be rendered in
+        -- the surrounding tactic context, retain a conservative execution
+        -- record so the enclosing body scope can still classify committed
+        -- versus backtracked execution.  The closed placeholder state and
+        -- empty suggestion make this report permanently inadmissible.
+        try
+          let placeholder := mkConst ``True
+          let placeholderResult : Simp.Result := { expr := placeholder }
+          emitRecordingReport simpStx reportStx placeholder {} (some placeholderResult) "" false
+            (some "recording_report") (some detail) none false "unavailable"
+            (some detail) (admissibilityCode? := some "unclassified_recorder_failure")
+            (capture? := scopedCapture?) (config? := some ctx.config)
+        catch fallbackEx =>
+          logWarningAt reportStx m!"passive simp recording report failed: {detail}; conservative report failed: {← exceptionText fallbackEx}"
     else
       emitReport ()
   unless passive do
-    logInfoAt reportStx m!"Try this deterministic replay:\n{suggestion}"
+    if operationalAdmissibility.accepted then
+      logInfoAt reportStx m!"Try this deterministic replay:\n{suggestion}"
   mvarId.withContext do
     applyResultToTarget mvarId target result (closeReflexive := result.expr.isTrue)
   if let some attempt := scopedAttempt? then

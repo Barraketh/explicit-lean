@@ -29,12 +29,23 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected simproc report schema: {report!r}")
-    if report.get("schemaVersion") != 9:
+    if report.get("schemaVersion") != 10:
         raise RuntimeError(f"unexpected simproc report version: {report!r}")
     if report.get("localRenames") != []:
         raise RuntimeError(f"ordinary simproc encoding unexpectedly renamed locals: {report!r}")
-    if report.get("encodingStatus") != "validated":
-        raise RuntimeError(f"simproc recording was not validated: {report!r}")
+    if report.get("encodingStatus") != "deferred":
+        raise RuntimeError(f"simproc recording was not deferred: {report!r}")
+    if report.get("operationallyAdmissible") is not False:
+        raise RuntimeError(f"simproc fallback was marked operationally admissible: {report!r}")
+    admissibility = report.get("operationalAdmissibility") or {}
+    if admissibility.get("code") != "deferred_simproc":
+        raise RuntimeError(f"simproc fallback classification changed: {report!r}")
+    if report.get("acceptedCertificate") is not None or report.get("certificate"):
+        raise RuntimeError(f"simproc fallback exposed an accepted certificate: {report!r}")
+    if (report.get("validation") or {}).get("certificate") is not None:
+        raise RuntimeError(f"simproc fallback exposed validation certificate metadata: {report!r}")
+    if not report.get("legacyCertificate"):
+        raise RuntimeError(f"simproc migration source was not retained for diagnostics: {report!r}")
     encoding = report.get("encoding") or {}
     if encoding.get("generatedSimprocEvents") != 1:
         raise RuntimeError(f"simproc fallback count was not one: {report!r}")
@@ -61,31 +72,11 @@ def main() -> None:
         raise RuntimeError(f"simproc event did not report a nullable next selector: {report!r}")
     if any(event.get("selectorKind") != "next" or event.get("selectorValue") is not None for event in events):
         raise RuntimeError(f"simple certificate did not report next selectors for every event: {report!r}")
-    certificate = report.get("certificate")
-    if not isinstance(certificate, str) or not certificate:
-        raise RuntimeError(f"simproc report did not contain a certificate: {report!r}")
-    if "match " in certificate or "tick " in certificate:
-        raise RuntimeError(f"simple simproc certificate unexpectedly emitted a positional selector: {report!r}")
-    if "pushFun" in certificate:
-        raise RuntimeError("simproc certificate still depends on ambient pushFun")
-
     source = PROBE.read_text(encoding="utf-8")
     needle = "simp_explicit? [↓pushFun]"
     if source.count(needle) != 1:
         raise RuntimeError("simproc probe tactic occurrence was not unique")
-    replacement = certificate.replace("\n", "\n  ")
-    materialized = source.replace(needle, replacement, 1)
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    MATERIALIZED.write_text(materialized, encoding="utf-8")
-    replay_code, replay_output, _ = coverage.run(
-        ["lake", "env", "lean", str(MATERIALIZED)], timeout=180
-    )
-    if replay_code != 0:
-        raise RuntimeError(
-            "materialized simproc certificate failed closed replay compilation:\n"
-            + replay_output
-        )
-    print("simproc fallback recording and closed replay passed")
+    print("simproc fallback was classified deferred and withheld from materialization")
 
 
 if __name__ == "__main__":
