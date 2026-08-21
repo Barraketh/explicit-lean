@@ -2985,7 +2985,15 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
     -- Premise-bearing events must go through the certificate-plan encoder so
     -- their closed provider bindings are printed next to the rule.  The flat
     -- path has no source representation for `using [...]`.
-    let flatEncoding? ← if state.events.any (·.premises.size > 0) then
+    -- A non-closing, zero-event simplification may still have performed
+    -- proofless unfolding in the theorem engine.  It must bypass the flat
+    -- empty program: `simp_explicit []` would leave the authored target
+    -- unchanged even though the following tactic body observes the unfolded
+    -- result.
+    let actualClosed ← isReflexiveResult result.expr
+    let needsPresentation :=
+      state.events.isEmpty && !actualClosed && !Expr.equal target result.expr
+    let flatEncoding? ← if needsPresentation || state.events.any (·.premises.size > 0) then
       pure none
     else
       replayEncoding? target state.events result
@@ -3018,7 +3026,10 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
       -- Prefer the compact event program whenever it validates.  The
       -- presentation pass is a bounded fallback for targets whose current
       -- syntax cannot be replayed from the original presentation.
-      let mut plan? ← buildCertificatePlan? target state.events result
+      let mut plan? ← if needsPresentation then
+        pure none
+      else
+        buildCertificatePlan? target state.events result
       if plan?.isNone then
         plan? ← match presentation? with
           | some runPresentation =>

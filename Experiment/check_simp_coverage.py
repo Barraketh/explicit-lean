@@ -171,6 +171,30 @@ def main() -> None:
     if not package_b_aggregate["compile"]:
         raise RuntimeError(f"Package B aggregate module failed: {package_b_aggregate!r}")
 
+    # A zero-event, non-closing simplification can still change the target's
+    # presentation through proofless unfolding.  The replacement must retain
+    # that presentation for the following `rw`, rather than validating an
+    # inert `simp_explicit []` only up to definitional equality.
+    zero_event_id = "7fc5f61da8b87de6"
+    zero_event_entry = next(
+        entry for entry in drop_entries if entry["id"] == zero_event_id
+    )
+    zero_event_trial = coverage.run_trial(
+        zero_event_entry, coverage.TrialConfig(timeout=180, keep_copies=True)
+    )
+    zero_event_encoding = zero_event_trial.get("encoding") or {}
+    if (
+        zero_event_trial.get("status") != "passed"
+        or not zero_event_trial.get("materialized_compile")
+        or zero_event_encoding.get("mode") != "presentation_change"
+        or zero_event_encoding.get("presentationChangeCount") != 1
+        or zero_event_encoding.get("namedRuleEvents") != 0
+        or zero_event_trial.get("encoding_fallback_reason") != "presentation_gap"
+    ):
+        raise RuntimeError(
+            f"zero-event presentation materialization failed: {zero_event_trial!r}"
+        )
+
     package_c_ids = [
         "03210e4a7b3567e3",
         "aaf54961bf787d28",
