@@ -35,6 +35,26 @@ After isolated trials, compile all successful replacements together per module:
 python3 Experiment/simp_coverage.py aggregate --jobs 4
 ```
 
+For resumable corpus closure, use the separate module-batched path.  It
+records each module once, materializes one optimistic candidate module, and
+uses declaration-group bisection only when that aggregate fails:
+
+```sh
+python3 Experiment/simp_coverage.py closure --jobs 4 --timeout 600
+python3 Experiment/simp_coverage.py closure --resume --jobs 4
+```
+
+Closure records and summaries are written below
+`.lake/simp-coverage/closure-results` and include source/inventory/recorder
+fingerprints, terminal outcomes, candidate compile provenance, and actual
+materialization compile counts.  `--resume` skips only complete records whose
+module source, expected occurrence-ID digest, passive-recording schema, and
+expected `simp` report schema still match.  A failed recording compile is a
+coverage failure for every occurrence; missing reports after a successful
+recording are conservatively treated as `not_reached`.  Candidate aggregate
+compilation is reported independently from `candidate_plan_complete`, so an
+unrelated planning failure does not invalidate candidates that compiled.
+
 Regenerate the compact report at any point:
 
 ```sh

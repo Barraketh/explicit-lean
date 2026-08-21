@@ -36,6 +36,9 @@ PARSE_FAILURE_MARKER = "EXPLICIT_LEAN_INVENTORY_PARSE_FAILURE "
 SUPPORTED_KINDS = {"simp", "simp_only"}
 PASSIVE_RECORDING_SCHEMA = "explicitLean.simpModuleRecording"
 PASSIVE_RECORDING_SCHEMA_VERSION = 3
+CLOSURE_SCHEMA = "explicitLean.simpClosure"
+CLOSURE_SCHEMA_VERSION = 1
+EXPECTED_SIMP_REPORT_SCHEMA_VERSION = 6
 
 
 def run(
@@ -437,6 +440,289 @@ def committed_certificates(report: dict[str, Any]) -> list[str]:
             raise RuntimeError("committed execution does not close its input goal")
         result.append(certificate)
     return result
+
+
+def closure_terminal_classification(report: dict[str, Any] | None) -> str:
+    """Classify an occurrence before a source replacement is attempted."""
+    executions = scoped_executions(report)
+    if report is None or not executions:
+        return "not_reached"
+    if any(
+        execution.get("disposition") not in {"committed", "backtracked"}
+        for execution in executions
+    ):
+        return "coverage_failure"
+    committed = [
+        execution
+        for execution in executions
+        if execution.get("result") == "succeeded"
+        and execution.get("disposition") == "committed"
+    ]
+    if committed:
+        return "committed_pending"
+    if any(execution.get("result") == "succeeded" for execution in executions):
+        return "attempted_backtracked"
+    return "original_failure"
+
+
+def closure_result_base(
+    entry: dict[str, Any], report: dict[str, Any] | None
+) -> dict[str, Any]:
+    executions = scoped_executions(report)
+    return {
+        "id": entry["id"],
+        "module": entry["module"],
+        "declaration": entry.get("declaration"),
+        "line": entry.get("line"),
+        "column": entry.get("column"),
+        "kind": entry.get("kind"),
+        "original_syntax": entry.get("source"),
+        "terminal_outcome": closure_terminal_classification(report),
+        "materialized_compile": None,
+        "failure_reason": None,
+        "dispositions": [execution.get("disposition") for execution in executions],
+        "execution_summaries": [
+            {
+                "executionIndex": execution.get("executionIndex"),
+                "attemptToken": execution.get("attemptToken"),
+                "result": execution.get("result"),
+                "disposition": execution.get("disposition"),
+                "certificate": execution.get("certificate"),
+                "certificateBytes": execution.get("certificateBytes"),
+                "closesGoal": execution.get("closesGoal"),
+                "encodingStatus": execution.get("encodingStatus"),
+                "encoding": execution.get("encoding"),
+                "encodingFallbackReason": execution.get("encodingFallbackReason"),
+            }
+            for execution in executions
+        ],
+        "report": report,
+        "candidate": None,
+    }
+
+
+def _closure_candidate(
+    *,
+    kind: str,
+    start: int,
+    end: int,
+    expected: str,
+    replacement: str,
+    declaration: str | None,
+    entry_ids: list[str],
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "startByte": start,
+        "endByte": end,
+        "expected": expected,
+        "replacement": replacement,
+        "declaration": declaration,
+        "entry_ids": entry_ids,
+    }
+
+
+def _closure_owner_key(entry: dict[str, Any]) -> tuple[int, int] | None:
+    start = entry.get("ownerStartByte")
+    end = entry.get("ownerEndByte")
+    if isinstance(start, int) and isinstance(end, int):
+        return (start, end)
+    return None
+
+
+def _closure_committed_executions(report: dict[str, Any] | None) -> list[dict[str, Any]]:
+    return [
+        execution
+        for execution in scoped_executions(report)
+        if execution.get("result") == "succeeded"
+        and execution.get("disposition") == "committed"
+    ]
+
+
+def closure_candidate_plan(
+    source: bytes,
+    entries: list[dict[str, Any]],
+    recording: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build source-range candidates and per-occurrence closure results.
+
+    The plan intentionally handles only the source owners already validated by
+    the F2/F3 materializers.  Unsupported owners become structured failures;
+    they are never guessed into a replacement.
+    """
+    reports = {
+        report.get("occurrenceId"): report
+        for report in recording.get("reports", [])
+        if isinstance(report.get("occurrenceId"), str)
+    }
+    occurrence_results = [
+        closure_result_base(entry, reports.get(entry["id"])) for entry in entries
+    ]
+    by_id = {result["id"]: result for result in occurrence_results}
+    candidates: list[dict[str, Any]] = []
+    handled: set[str] = set()
+
+    first_groups: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for entry in entries:
+        if entry.get("ownerKind") == "first":
+            key = _closure_owner_key(entry)
+            if key is not None:
+                first_groups.setdefault(key, []).append(entry)
+    first_reports = {
+        report.get("ownerId"): report
+        for report in recording.get("first_owner_reports", [])
+        if isinstance(report.get("ownerId"), str)
+    }
+    for group in first_groups.values():
+        representative = group[0]
+        key = _closure_owner_key(representative)
+        assert key is not None
+        group_ids = [entry["id"] for entry in group]
+        handled.update(group_ids)
+        owner_report = first_reports.get(first_owner_id(representative))
+        committed_ids = [
+            entry["id"]
+            for entry in group
+            if _closure_committed_executions(reports.get(entry["id"]))
+        ]
+        if not committed_ids:
+            continue
+        if owner_report is None:
+            for identifier in committed_ids:
+                by_id[identifier]["terminal_outcome"] = "coverage_failure"
+                by_id[identifier]["failure_reason"] = "unsupported_owner_materialization"
+            continue
+        try:
+            owner_start, owner_end = key
+            owner_source = representative.get("ownerSource")
+            if not isinstance(owner_source, str):
+                raise RuntimeError("first owner source is missing")
+            replacement = first_owner_replacement(source, representative, owner_report)
+            candidate = _closure_candidate(
+                kind="first_owner",
+                start=owner_start,
+                end=owner_end,
+                expected=owner_source,
+                replacement=replacement,
+                declaration=representative.get("declaration"),
+                entry_ids=committed_ids,
+            )
+            candidates.append(candidate)
+            for identifier in committed_ids:
+                by_id[identifier]["candidate"] = candidate.copy()
+        except Exception as error:
+            for identifier in committed_ids:
+                by_id[identifier]["terminal_outcome"] = "coverage_failure"
+                by_id[identifier]["failure_reason"] = "unsupported_owner_materialization"
+                by_id[identifier]["candidate_error"] = str(error)
+
+    for entry in entries:
+        identifier = entry["id"]
+        if identifier in handled:
+            continue
+        result = by_id[identifier]
+        if result["terminal_outcome"] != "committed_pending":
+            continue
+        report = reports.get(identifier)
+        committed = _closure_committed_executions(report)
+        owner_kind = entry.get("ownerKind")
+        if len(committed) > 1:
+            if owner_kind not in {"and_then", "all_goals"}:
+                result["terminal_outcome"] = "coverage_failure"
+                result["failure_reason"] = "unsupported_owner_materialization"
+                continue
+            try:
+                owner_start = entry.get("ownerStartByte")
+                owner_end = entry.get("ownerEndByte")
+                owner_source = entry.get("ownerSource")
+                if not isinstance(owner_start, int) or not isinstance(owner_end, int):
+                    raise RuntimeError("owner range is missing")
+                if not isinstance(owner_source, str):
+                    raise RuntimeError("owner source is missing")
+                replacement = owner_replacement(
+                    source, entry, report or {}, sibling_entries=[entry]
+                )
+                candidate = _closure_candidate(
+                    kind="syntax_owner",
+                    start=owner_start,
+                    end=owner_end,
+                    expected=owner_source,
+                    replacement=replacement,
+                    declaration=entry.get("declaration"),
+                    entry_ids=[identifier],
+                )
+                candidates.append(candidate)
+                result["candidate"] = candidate.copy()
+            except Exception as error:
+                result["terminal_outcome"] = "coverage_failure"
+                result["failure_reason"] = "unsupported_owner_materialization"
+                result["candidate_error"] = str(error)
+            continue
+        if len(committed) != 1:
+            result["terminal_outcome"] = "coverage_failure"
+            result["failure_reason"] = "missing_certificate"
+            continue
+        if owner_kind == "first":
+            result["terminal_outcome"] = "coverage_failure"
+            result["failure_reason"] = "unsupported_owner_materialization"
+            continue
+        certificate = committed[0].get("certificate")
+        if not isinstance(certificate, str) or not certificate:
+            result["terminal_outcome"] = "coverage_failure"
+            result["failure_reason"] = "missing_certificate"
+            continue
+        candidate = _closure_candidate(
+            kind="occurrence",
+            start=entry["startByte"],
+            end=entry["endByte"],
+            expected=entry["source"],
+            replacement=certificate,
+            declaration=entry.get("declaration"),
+            entry_ids=[identifier],
+        )
+        candidates.append(candidate)
+        result["candidate"] = candidate.copy()
+
+    return candidates, occurrence_results
+
+
+def closure_nonoverlapping_candidates(
+    candidates: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Drop overlapping candidate clusters and return stable per-id reasons."""
+    ordered = sorted(candidates, key=lambda candidate: (candidate["startByte"], candidate["endByte"]))
+    invalid_ids: dict[str, str] = {}
+    valid: list[dict[str, Any]] = []
+    for candidate in ordered:
+        overlapping = [
+            previous
+            for previous in valid
+            if previous["startByte"] < candidate["endByte"]
+            and candidate["startByte"] < previous["endByte"]
+        ]
+        if overlapping:
+            for conflicting in overlapping:
+                for identifier in conflicting["entry_ids"]:
+                    invalid_ids[identifier] = "overlapping_candidate_edits"
+            for identifier in candidate["entry_ids"]:
+                invalid_ids[identifier] = "overlapping_candidate_edits"
+            valid = [item for item in valid if item not in overlapping]
+        else:
+            valid.append(candidate)
+    return valid, invalid_ids
+
+
+def apply_closure_candidates(source: bytes, candidates: list[dict[str, Any]]) -> bytes:
+    rewritten = source
+    for candidate in sorted(candidates, key=lambda item: item["startByte"], reverse=True):
+        rewritten = replace_range_bytes(
+            rewritten,
+            candidate["startByte"],
+            candidate["endByte"],
+            candidate["expected"],
+            candidate["replacement"],
+        )
+    return inject_import(rewritten)
 
 
 def owner_replacement(
@@ -1117,6 +1403,548 @@ def aggregate_module(
     return record
 
 
+def closure_results_dir() -> Path:
+    directory = OUTPUT / "closure-results"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def closure_module_key(module: str) -> str:
+    return hashlib.sha256(module.encode()).hexdigest()[:16]
+
+
+def closure_module_path(module: str) -> Path:
+    return closure_results_dir() / f"{closure_module_key(module)}.json"
+
+
+def closure_occurrence_ids_digest(entries: list[dict[str, Any]]) -> str:
+    payload = json.dumps(
+        sorted(entry["id"] for entry in entries),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def closure_source_sha256(source: bytes) -> str:
+    return hashlib.sha256(source).hexdigest()
+
+
+def write_json_atomic(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def closure_record_complete(
+    path: Path,
+    module: str,
+    revision: str,
+    *,
+    source_sha256: str,
+    expected_occurrence_ids_digest: str,
+) -> bool:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(record, dict)
+        and record.get("schema") == CLOSURE_SCHEMA
+        and record.get("schemaVersion") == CLOSURE_SCHEMA_VERSION
+        and record.get("module") == module
+        and record.get("mathlib_revision") == revision
+        and record.get("complete") is True
+        and record.get("source_sha256") == source_sha256
+        and record.get("expected_occurrence_ids_digest") == expected_occurrence_ids_digest
+        and record.get("passive_recording_schema_version") == PASSIVE_RECORDING_SCHEMA_VERSION
+        and record.get("expected_simp_report_schema_version")
+        == EXPECTED_SIMP_REPORT_SCHEMA_VERSION
+    )
+
+
+def closure_record_matches_inventory(
+    record: dict[str, Any],
+    module: str,
+    entries: list[dict[str, Any]],
+    revision: str,
+    *,
+    source_path: Path | None = None,
+) -> bool:
+    """Validate a loaded record against the current full inventory module."""
+    try:
+        source = source_path.read_bytes() if source_path is not None else (MATHLIB / module).read_bytes()
+    except OSError:
+        return False
+    expected_ids = sorted(entry["id"] for entry in entries)
+    occurrences = record.get("occurrences")
+    actual_ids = [
+        occurrence.get("id")
+        for occurrence in occurrences
+        if isinstance(occurrence, dict)
+    ] if isinstance(occurrences, list) else []
+    return (
+        record.get("schema") == CLOSURE_SCHEMA
+        and record.get("schemaVersion") == CLOSURE_SCHEMA_VERSION
+        and record.get("module") == module
+        and record.get("mathlib_revision") == revision
+        and record.get("complete") is True
+        and record.get("source_sha256") == closure_source_sha256(source)
+        and record.get("expected_occurrence_ids_digest")
+        == closure_occurrence_ids_digest(entries)
+        and record.get("passive_recording_schema_version")
+        == PASSIVE_RECORDING_SCHEMA_VERSION
+        and record.get("expected_simp_report_schema_version")
+        == EXPECTED_SIMP_REPORT_SCHEMA_VERSION
+        and record.get("expected_occurrence_ids") == expected_ids
+        and len(actual_ids) == len(expected_ids)
+        and len(set(actual_ids)) == len(expected_ids)
+        and sorted(actual_ids) == expected_ids
+    )
+
+
+def compile_closure_candidates(
+    module: str,
+    source: bytes,
+    candidates: list[dict[str, Any]],
+    timeout: int,
+    *,
+    label: str,
+    keep_copy: bool,
+) -> dict[str, Any]:
+    """Compile one exact candidate subset and retain its provenance."""
+    started = time.monotonic()
+    try:
+        rewritten = apply_closure_candidates(source, candidates)
+    except Exception as error:
+        return {
+            "label": label,
+            "candidate_ids": [identifier for candidate in candidates for identifier in candidate["entry_ids"]],
+            "declarations": sorted({candidate.get("declaration") for candidate in candidates}),
+            "compile_invoked": False,
+            "compile": False,
+            "seconds": round(time.monotonic() - started, 3),
+            "failure_reason": "source_rewrite_failure",
+            "error": str(error),
+        }
+    destination = OUTPUT / "closure-attempts" / module / f"{label}.lean"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(rewritten)
+    for suffix in (".olean", ".ilean", ".c", ".trace", ".hash"):
+        destination.with_suffix(suffix).unlink(missing_ok=True)
+    code, output, elapsed = run(lean_command(destination), timeout=timeout)
+    result = {
+        "label": label,
+        "candidate_ids": [identifier for candidate in candidates for identifier in candidate["entry_ids"]],
+        "declarations": sorted({candidate.get("declaration") for candidate in candidates}),
+        "compile_invoked": True,
+        "compile": code == 0,
+        "seconds": round(elapsed, 3),
+        "failure_reason": None if code == 0 else classify_failure(output, "materialized"),
+    }
+    if not keep_copy and code == 0:
+        destination.unlink(missing_ok=True)
+    (OUTPUT / "closure-attempts" / module / f"{label}.log").write_text(
+        output, encoding="utf-8"
+    )
+    return result
+
+
+def diagnose_closure_candidates(
+    module: str,
+    source: bytes,
+    candidates: list[dict[str, Any]],
+    timeout: int,
+    *,
+    keep_copy: bool,
+) -> dict[str, Any]:
+    """Bisect failing declaration groups and classify failing singletons.
+
+    A failed optimistic module is not necessarily an interaction failure.  A
+    singleton failure identified by the declaration bisection is an
+    independently attributable candidate failure; callers can then compile
+    the remaining candidates as one survivor aggregate.
+    """
+    attempts: list[dict[str, Any]] = []
+    by_declaration: dict[str | None, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        by_declaration.setdefault(candidate.get("declaration"), []).append(candidate)
+    counter = 0
+
+    def visit(group: list[dict[str, Any]], label: str) -> None:
+        nonlocal counter
+        counter += 1
+        attempt = compile_closure_candidates(
+            module,
+            source,
+            group,
+            timeout,
+            label=f"diagnostic-{counter:04}-{label}",
+            keep_copy=keep_copy,
+        )
+        attempts.append(attempt)
+        if attempt["compile"] or len(group) <= 1:
+            return
+        midpoint = max(1, len(group) // 2)
+        visit(group[:midpoint], label + "-a")
+        visit(group[midpoint:], label + "-b")
+
+    for index, (declaration, group) in enumerate(sorted(by_declaration.items(), key=lambda item: str(item[0]))):
+        visit(group, f"decl-{index:04}")
+    singleton_failures: dict[str, str] = {}
+    for attempt in attempts:
+        if attempt.get("compile"):
+            continue
+        candidate_ids = attempt.get("candidate_ids", [])
+        if len(candidate_ids) != 1:
+            continue
+        identifier = candidate_ids[0]
+        singleton_failures[identifier] = (
+            attempt.get("failure_reason") or "unclassified_materialized_failure"
+        )
+    return {
+        "attempts": attempts,
+        "singleton_failures": singleton_failures,
+    }
+
+
+def _closure_failure_reason_for_report(
+    result: dict[str, Any], reason: str
+) -> None:
+    result["terminal_outcome"] = "coverage_failure"
+    result["failure_reason"] = reason
+    result["materialized_compile"] = False
+
+
+def validate_closure_recording(
+    recording: dict[str, Any], entries: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Validate the stable identity/result envelope before planning edits."""
+    expected_ids = {entry["id"] for entry in entries}
+    observed_ids = {
+        report.get("occurrenceId")
+        for report in recording.get("reports", [])
+        if isinstance(report, dict) and isinstance(report.get("occurrenceId"), str)
+    }
+    unexpected_ids = sorted(observed_ids - expected_ids)
+    malformed_result_ids: set[str] = set()
+    schema_mismatch_ids: set[str] = set()
+    for report in recording.get("reports", []):
+        if not isinstance(report, dict):
+            continue
+        identifier = report.get("occurrenceId")
+        if not isinstance(identifier, str) or identifier not in expected_ids:
+            continue
+        if (
+            report.get("schema") != "explicitLean.simpRecording"
+            or report.get("schemaVersion") != EXPECTED_SIMP_REPORT_SCHEMA_VERSION
+        ):
+            schema_mismatch_ids.add(identifier)
+        for execution in report.get("executions", []):
+            if not isinstance(execution, dict):
+                malformed_result_ids.add(identifier)
+                continue
+            if (
+                execution.get("result") not in {"succeeded", "failed"}
+                or execution.get("disposition") not in {"committed", "backtracked"}
+            ):
+                malformed_result_ids.add(identifier)
+    return {
+        "unexpected_ids": unexpected_ids,
+        "malformed_result_ids": sorted(malformed_result_ids),
+        "schema_mismatch_ids": sorted(schema_mismatch_ids),
+    }
+
+
+def run_closure_module(
+    module: str,
+    entries: list[dict[str, Any]],
+    revision: str,
+    timeout: int,
+    *,
+    keep_copy: bool,
+    source_path: Path | None = None,
+) -> dict[str, Any]:
+    """Run the one-recording, optimistic-then-diagnostic module closure path."""
+    started = time.monotonic()
+    recording = passive_module_recording(
+        module,
+        entries,
+        timeout=timeout,
+        keep_copy=keep_copy,
+        source_path=source_path,
+    )
+    candidates: list[dict[str, Any]] = []
+    occurrence_results: list[dict[str, Any]]
+    planning_failures: dict[str, str] = {}
+    recording_validation = validate_closure_recording(recording, entries)
+    unexpected_recording_ids = set(recording_validation["unexpected_ids"])
+    invalid_recording_reasons = {
+        identifier: "malformed_recording_result"
+        for identifier in recording_validation["malformed_result_ids"]
+    }
+    invalid_recording_reasons.update(
+        {
+            identifier: "recording_schema_mismatch"
+            for identifier in recording_validation["schema_mismatch_ids"]
+        }
+    )
+    if recording.get("compile") and not unexpected_recording_ids:
+        source = source_path.read_bytes() if source_path is not None else (MATHLIB / module).read_bytes()
+        candidates, occurrence_results = closure_candidate_plan(source, entries, recording)
+        invalid_ids = set(invalid_recording_reasons)
+        if invalid_ids:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if not invalid_ids.intersection(candidate["entry_ids"])
+            ]
+            planning_failures.update(invalid_recording_reasons)
+        candidates, overlapping = closure_nonoverlapping_candidates(candidates)
+        planning_failures.update(overlapping)
+    else:
+        reports = {
+            report.get("occurrenceId"): report
+            for report in recording.get("reports", [])
+            if isinstance(report.get("occurrenceId"), str)
+        }
+        occurrence_results = [
+            closure_result_base(entry, reports.get(entry["id"])) for entry in entries
+        ]
+        if not recording.get("compile"):
+            # A failed copied-module compile cannot establish reachability or
+            # commitment for any occurrence, even if partial diagnostics were
+            # emitted before the failure.
+            planning_failures.update(
+                {entry["id"]: "recording_compile_failure" for entry in entries}
+            )
+        elif unexpected_recording_ids:
+            planning_failures.update(
+                {entry["id"]: "recording_identity_mismatch" for entry in entries}
+            )
+
+    by_id = {result["id"]: result for result in occurrence_results}
+    for identifier, reason in planning_failures.items():
+        _closure_failure_reason_for_report(by_id[identifier], reason)
+    for candidate in candidates:
+        for identifier in candidate["entry_ids"]:
+            by_id[identifier]["candidate"] = candidate.copy()
+    incomplete_candidate_plan = any(
+        result.get("terminal_outcome") == "coverage_failure"
+        for result in occurrence_results
+    )
+    # This describes planning before any candidate compilation.  It must not
+    # be recomputed from later singleton/aggregate materialization failures.
+    candidate_plan_complete = not incomplete_candidate_plan
+
+    source = source_path.read_bytes() if source_path is not None else (MATHLIB / module).read_bytes()
+    source_sha256 = closure_source_sha256(source)
+    expected_occurrence_ids_digest = closure_occurrence_ids_digest(entries)
+    attempts: list[dict[str, Any]] = []
+    optimistic: dict[str, Any] | None = None
+    survivor_optimistic: dict[str, Any] | None = None
+    singleton_failures: dict[str, str] = {}
+    aggregate_compile: bool | None = None
+    aggregate_failure_reason: str | None = None
+    if recording.get("compile") and candidates:
+        optimistic = compile_closure_candidates(
+            module,
+            source,
+            candidates,
+            timeout,
+            label="optimistic",
+            keep_copy=keep_copy,
+        )
+        attempts.append(optimistic)
+        aggregate_compile = optimistic["compile"]
+        if optimistic["compile"]:
+            # aggregate_compile describes exactly this candidate subset.  A
+            # separate candidate_plan_complete flag preserves any unrelated
+            # planning failure without invalidating candidates that compiled.
+            for candidate in candidates:
+                for identifier in candidate["entry_ids"]:
+                    result = by_id[identifier]
+                    result["terminal_outcome"] = "materialized"
+                    result["materialized_compile"] = True
+                    result["failure_reason"] = None
+        else:
+            diagnostics = diagnose_closure_candidates(
+                module, source, candidates, timeout, keep_copy=keep_copy
+            )
+            attempts.extend(diagnostics["attempts"])
+            singleton_failures = diagnostics["singleton_failures"]
+            failed_ids = set(singleton_failures)
+            if failed_ids:
+                survivor_candidates = [
+                    candidate
+                    for candidate in candidates
+                    if not failed_ids.intersection(candidate["entry_ids"])
+                ]
+                if survivor_candidates:
+                    survivor_optimistic = compile_closure_candidates(
+                        module,
+                        source,
+                        survivor_candidates,
+                        timeout,
+                        label="survivor-optimistic",
+                        keep_copy=keep_copy,
+                    )
+                    attempts.append(survivor_optimistic)
+                if survivor_optimistic is not None and survivor_optimistic["compile"]:
+                    # The requested all-candidate aggregate remains failed:
+                    # only the survivor aggregate is independently proven.
+                    aggregate_failure_reason = "singleton_candidate_failures"
+                    for candidate in survivor_candidates:
+                        for identifier in candidate["entry_ids"]:
+                            result = by_id[identifier]
+                            result["terminal_outcome"] = "materialized"
+                            result["materialized_compile"] = True
+                            result["failure_reason"] = None
+                    for identifier, reason in singleton_failures.items():
+                        if identifier in by_id:
+                            _closure_failure_reason_for_report(by_id[identifier], reason)
+                else:
+                    aggregate_failure_reason = "aggregate_interaction"
+                    for candidate in candidates:
+                        for identifier in candidate["entry_ids"]:
+                            if identifier in singleton_failures:
+                                _closure_failure_reason_for_report(
+                                    by_id[identifier], singleton_failures[identifier]
+                                )
+                            else:
+                                _closure_failure_reason_for_report(
+                                    by_id[identifier], aggregate_failure_reason
+                                )
+            else:
+                # No independently failing singleton was found, so the
+                # optimistic failure is a genuine cross-candidate
+                # interaction (or an unresolved multi-candidate failure).
+                aggregate_failure_reason = "aggregate_interaction"
+                for candidate in candidates:
+                    for identifier in candidate["entry_ids"]:
+                        _closure_failure_reason_for_report(
+                            by_id[identifier], aggregate_failure_reason
+                        )
+    elif recording.get("compile") and not candidates:
+        aggregate_compile = None
+        if incomplete_candidate_plan:
+            aggregate_failure_reason = "candidate_plan_incomplete"
+
+    for result in occurrence_results:
+        if result["terminal_outcome"] == "committed_pending":
+            _closure_failure_reason_for_report(
+                result,
+                planning_failures.get(result["id"], "missing_certificate"),
+            )
+
+    # Candidate compilation and overall closure completeness are separate
+    # facts.  A successful recording with only legitimate non-success
+    # outcomes (not_reached, attempted_backtracked, or original_failure) has
+    # no replacement work and is complete even though aggregate compilation
+    # is skipped because there are no candidates.
+    terminal_classification_complete = not any(
+        result.get("terminal_outcome") in {"coverage_failure", "committed_pending"}
+        for result in occurrence_results
+    )
+    candidate_materialization_complete = all(
+        result.get("candidate") is None
+        or (
+            result.get("terminal_outcome") == "materialized"
+            and result.get("materialized_compile") is True
+        )
+        for result in occurrence_results
+    )
+    closure_complete = (
+        recording.get("compile") is True
+        and terminal_classification_complete
+        and candidate_materialization_complete
+    )
+    materialization_compile_count = sum(
+        bool(attempt.get("compile_invoked")) for attempt in attempts
+    )
+
+    module_compile_provenance = {
+        "aggregateCompile": aggregate_compile,
+        "aggregateFailureReason": aggregate_failure_reason,
+        "candidatePlanComplete": candidate_plan_complete,
+        "terminalClassificationComplete": terminal_classification_complete,
+        "closureComplete": closure_complete,
+        "recordingValidation": recording_validation,
+        "survivorCompile": (
+            survivor_optimistic.get("compile")
+            if survivor_optimistic is not None
+            else None
+        ),
+        "survivorCandidateCount": (
+            len(survivor_optimistic.get("candidate_ids", []))
+            if survivor_optimistic is not None
+            else 0
+        ),
+        "singletonFailures": singleton_failures,
+        "attemptCount": len(attempts),
+        "attemptLabels": [attempt.get("label") for attempt in attempts],
+    }
+    for result in occurrence_results:
+        result["module_compile"] = module_compile_provenance.copy()
+
+    materialization_seconds = sum(attempt.get("seconds", 0) for attempt in attempts)
+    record: dict[str, Any] = {
+        "schema": CLOSURE_SCHEMA,
+        "schemaVersion": CLOSURE_SCHEMA_VERSION,
+        "complete": True,
+        "mathlib_revision": revision,
+        "module": module,
+        "source_sha256": source_sha256,
+        "expected_occurrence_ids_digest": expected_occurrence_ids_digest,
+        "passive_recording_schema_version": PASSIVE_RECORDING_SCHEMA_VERSION,
+        "expected_simp_report_schema_version": EXPECTED_SIMP_REPORT_SCHEMA_VERSION,
+        "expected_occurrence_count": len(entries),
+        "expected_occurrence_ids": sorted(entry["id"] for entry in entries),
+        "observed_occurrence_ids": recording.get("observed_occurrence_ids", []),
+        "recording_validation": recording_validation,
+        "recording": {
+            "compile": recording.get("compile"),
+            "compile_count": recording.get("compile_count", 0),
+            "elapsed_seconds": recording.get("elapsed_seconds", 0),
+            "report_count": recording.get("report_count", 0),
+            "observed_occurrence_ids": recording.get("observed_occurrence_ids", []),
+            "first_owner_reports": recording.get("first_owner_reports", []),
+            "failure_category": recording.get("failure_category"),
+        },
+        "occurrences": occurrence_results,
+        "aggregate": {
+            "compile": aggregate_compile,
+            "failure_reason": aggregate_failure_reason,
+            "candidate_plan_complete": candidate_plan_complete,
+            "terminal_classification_complete": terminal_classification_complete,
+            "closure_complete": closure_complete,
+            "singleton_failures": singleton_failures,
+            "survivor_compile": (
+                survivor_optimistic.get("compile")
+                if survivor_optimistic is not None
+                else None
+            ),
+            "survivor_candidate_count": (
+                len(survivor_optimistic.get("candidate_ids", []))
+                if survivor_optimistic is not None
+                else 0
+            ),
+            "replacement_count": len(candidates),
+            "attempts": attempts,
+            "materialization_compile_count": materialization_compile_count,
+            "seconds": round(materialization_seconds, 3),
+        },
+        "timings": {
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+            "recording_seconds": recording.get("elapsed_seconds", 0),
+            "materialization_seconds": round(materialization_seconds, 3),
+        },
+    }
+    write_json_atomic(closure_module_path(module), record)
+    return record
+
+
 def aggregate(args: argparse.Namespace) -> None:
     AGGREGATE_RESULTS.mkdir(parents=True, exist_ok=True)
     inventory_entries = selected_entries(args)
@@ -1142,6 +1970,260 @@ def aggregate(args: argparse.Namespace) -> None:
                 f"({result['replacement_count']} replacements)"
             )
     write_summary()
+
+
+def load_closure_records() -> list[dict[str, Any]]:
+    directory = closure_results_dir()
+    records: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            records.append(value)
+    return records
+
+
+def write_closure_summary(revision: str) -> dict[str, Any]:
+    inventory = load_inventory()
+    expected_entries = [
+        entry for entry in inventory["entries"] if entry["kind"] in SUPPORTED_KINDS
+    ]
+    expected_by_module: dict[str, list[dict[str, Any]]] = {}
+    for entry in expected_entries:
+        expected_by_module.setdefault(entry["module"], []).append(entry)
+    valid_by_module: dict[str, dict[str, Any]] = {}
+    for record in load_closure_records():
+        module = record.get("module")
+        if not isinstance(module, str) or module not in expected_by_module:
+            continue
+        if closure_record_matches_inventory(
+            record, module, expected_by_module[module], revision
+        ):
+            valid_by_module[module] = record
+    records = [valid_by_module[module] for module in sorted(valid_by_module)]
+    expected_module_ids = sorted(expected_by_module)
+    valid_module_ids = sorted(valid_by_module)
+    missing_module_ids = [
+        module for module in expected_module_ids if module not in valid_by_module
+    ]
+    expected_occurrence_ids = {
+        entry["id"] for entry in expected_entries
+    }
+    occurrence_values = [
+        occurrence
+        for record in records
+        for occurrence in record.get("occurrences", [])
+    ]
+    valid_occurrence_ids = {
+        occurrence.get("id")
+        for occurrence in occurrence_values
+        if isinstance(occurrence.get("id"), str)
+    }
+    missing_occurrence_ids = sorted(expected_occurrence_ids - valid_occurrence_ids)
+    outcome_counts = counts(
+        occurrence.get("terminal_outcome", "unclassified")
+        for occurrence in occurrence_values
+    )
+    reason_counts = counts(
+        occurrence.get("failure_reason")
+        for occurrence in occurrence_values
+        if occurrence.get("failure_reason") is not None
+    )
+    aggregate_values = [record.get("aggregate", {}) for record in records]
+    aggregate_passed = sum(value.get("compile") is True for value in aggregate_values)
+    aggregate_failed = sum(value.get("compile") is False for value in aggregate_values)
+    aggregate_skipped = sum(value.get("compile") is None for value in aggregate_values)
+    closure_complete_modules = sum(
+        value.get("closure_complete") is True for value in aggregate_values
+    )
+    closure_incomplete_modules = len(expected_module_ids) - closure_complete_modules
+    summary: dict[str, Any] = {
+        "schema": CLOSURE_SCHEMA,
+        "schemaVersion": CLOSURE_SCHEMA_VERSION,
+        "mathlib_revision": revision,
+        "modules": len(records),
+        "occurrences": len(occurrence_values),
+        "expected_modules": len(expected_module_ids),
+        "expected_occurrences": len(expected_occurrence_ids),
+        "valid_recorded_modules": len(valid_module_ids),
+        "valid_recorded_occurrences": len(valid_occurrence_ids),
+        "missing_modules": missing_module_ids,
+        "missing_occurrences": missing_occurrence_ids,
+        "closure_modules": {
+            "complete": closure_complete_modules,
+            "incomplete": closure_incomplete_modules,
+        },
+        "terminal_outcomes": outcome_counts,
+        "reason_clusters": reason_counts,
+        "compile_counts": {
+            "recording": sum(
+                record.get("recording", {}).get("compile_count", 0) for record in records
+            ),
+            "materialization": sum(
+                record.get("aggregate", {}).get("materialization_compile_count", 0)
+                for record in records
+            ),
+        },
+        "materialized_replacements": outcome_counts.get("materialized", 0),
+        "aggregate_modules": {
+            "passed": aggregate_passed,
+            "failed": aggregate_failed,
+            "skipped": aggregate_skipped,
+        },
+        "timings": {
+            "recording_seconds": round(
+                sum(record.get("timings", {}).get("recording_seconds", 0) for record in records),
+                3,
+            ),
+            "materialization_seconds": round(
+                sum(
+                    record.get("timings", {}).get("materialization_seconds", 0)
+                    for record in records
+                ),
+                3,
+            ),
+            "elapsed_seconds": round(
+                sum(record.get("timings", {}).get("elapsed_seconds", 0) for record in records),
+                3,
+            ),
+        },
+    }
+    summary_path = OUTPUT / "closure-summary.json"
+    write_json_atomic(summary_path, summary)
+    lines = [
+        "| Closure stage | Count |",
+        "| --- | ---: |",
+        f"| Expected modules | {summary['expected_modules']} |",
+        f"| Valid recorded modules | {summary['valid_recorded_modules']} |",
+        f"| Missing modules | {len(summary['missing_modules'])} |",
+        f"| Expected occurrences | {summary['expected_occurrences']} |",
+        f"| Valid recorded occurrences | {summary['valid_recorded_occurrences']} |",
+        f"| Missing occurrences | {len(summary['missing_occurrences'])} |",
+        f"| Closure modules complete | {summary['closure_modules']['complete']} |",
+        f"| Closure modules incomplete | {summary['closure_modules']['incomplete']} |",
+        f"| Recording compiles | {summary['compile_counts']['recording']} |",
+        f"| Materialization compiles | {summary['compile_counts']['materialization']} |",
+        f"| Materialized replacements | {summary['materialized_replacements']} |",
+        f"| Aggregate modules passed | {aggregate_passed} |",
+        f"| Aggregate modules failed | {aggregate_failed} |",
+        f"| Aggregate modules skipped | {aggregate_skipped} |",
+        "",
+        "| Terminal outcome | Count |",
+        "| --- | ---: |",
+    ]
+    lines.extend(f"| `{kind}` | {count} |" for kind, count in outcome_counts.items())
+    lines.extend(["", "| Failure reason | Count |", "| --- | ---: |"])
+    if reason_counts:
+        lines.extend(f"| `{kind}` | {count} |" for kind, count in reason_counts.items())
+    else:
+        lines.append("| — | 0 |")
+    (OUTPUT / "closure-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return summary
+
+
+def closure(args: argparse.Namespace) -> None:
+    inventory_document = load_inventory()
+    revision = inventory_document["mathlib_revision"]
+    entries = [
+        entry
+        for entry in inventory_document["entries"]
+        if entry["kind"] in SUPPORTED_KINDS
+        and (not args.modules or entry["module"] in set(args.modules))
+    ]
+    by_module: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        by_module.setdefault(entry["module"], []).append(entry)
+    modules = sorted(by_module)
+    if args.limit is not None:
+        modules = modules[: args.limit]
+    pending: list[str] = []
+    for module in modules:
+        path = closure_module_path(module)
+        module_entries = by_module[module]
+        module_source = (MATHLIB / module).read_bytes()
+        if args.resume and closure_record_complete(
+            path,
+            module,
+            revision,
+            source_sha256=closure_source_sha256(module_source),
+            expected_occurrence_ids_digest=closure_occurrence_ids_digest(module_entries),
+        ):
+            print(f"resume-skip {module}")
+            continue
+        pending.append(module)
+    completed = 0
+    with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+        futures = {
+            executor.submit(
+                run_closure_module,
+                module,
+                by_module[module],
+                revision,
+                args.timeout,
+                keep_copy=args.keep_copies,
+            ): module
+            for module in pending
+        }
+        for future in as_completed(futures):
+            module = futures[future]
+            try:
+                record = future.result()
+            except Exception as error:
+                module_source = (MATHLIB / module).read_bytes()
+                record = {
+                    "schema": CLOSURE_SCHEMA,
+                    "schemaVersion": CLOSURE_SCHEMA_VERSION,
+                    "complete": True,
+                    "mathlib_revision": revision,
+                    "module": module,
+                    "source_sha256": closure_source_sha256(module_source),
+                    "expected_occurrence_ids_digest": closure_occurrence_ids_digest(
+                        by_module[module]
+                    ),
+                    "passive_recording_schema_version": PASSIVE_RECORDING_SCHEMA_VERSION,
+                    "expected_simp_report_schema_version": EXPECTED_SIMP_REPORT_SCHEMA_VERSION,
+                    "expected_occurrence_count": len(by_module[module]),
+                    "expected_occurrence_ids": sorted(entry["id"] for entry in by_module[module]),
+                    "observed_occurrence_ids": [],
+                    "recording": {
+                        "compile": False,
+                        "compile_count": 0,
+                        "failure_category": "harness_error",
+                    },
+                    "occurrences": [
+                        {
+                            **closure_result_base(entry, None),
+                            "terminal_outcome": "coverage_failure",
+                            "failure_reason": "harness_error",
+                            "materialized_compile": False,
+                        }
+                        for entry in by_module[module]
+                    ],
+                    "aggregate": {
+                        "compile": False,
+                        "failure_reason": "harness_error",
+                        "replacement_count": 0,
+                        "attempts": [],
+                        "materialization_compile_count": 0,
+                    },
+                    "timings": {"elapsed_seconds": 0, "recording_seconds": 0, "materialization_seconds": 0},
+                    "error": str(error),
+                }
+                write_json_atomic(closure_module_path(module), record)
+            completed += 1
+            aggregate = record.get("aggregate", {})
+            print(
+                f"[{completed}/{len(pending)}] {module} "
+                f"aggregate={'passed' if aggregate.get('compile') else 'failed' if aggregate.get('compile') is False else 'skipped'} "
+                f"outcomes={counts(item.get('terminal_outcome') for item in record.get('occurrences', []))}"
+            )
+    summary = write_closure_summary(revision)
+    print(
+        f"closure summary: {summary['modules']} modules, "
+        f"{summary['materialized_replacements']} materialized replacements"
+    )
 
 
 def write_summary() -> None:
@@ -1235,6 +2317,21 @@ def parser() -> argparse.ArgumentParser:
     aggregate_parser.add_argument("--jobs", type=int, default=max(1, min(4, os.cpu_count() or 1)))
     aggregate_parser.add_argument("--timeout", type=int, default=600)
     aggregate_parser.set_defaults(function=aggregate)
+
+    closure_parser = subparsers.add_parser(
+        "closure", help="run one resumable passive-recording/materialization pass per module"
+    )
+    closure_parser.add_argument("--module", dest="modules", action="append", default=[])
+    closure_parser.add_argument(
+        "--limit", type=int, help="limit the number of modules processed"
+    )
+    closure_parser.add_argument(
+        "--jobs", type=int, default=max(1, min(4, os.cpu_count() or 1))
+    )
+    closure_parser.add_argument("--timeout", type=int, default=600)
+    closure_parser.add_argument("--resume", action="store_true")
+    closure_parser.add_argument("--keep-copies", action="store_true")
+    closure_parser.set_defaults(function=closure)
 
     report_parser = subparsers.add_parser("report", help="regenerate machine and Markdown summaries")
     report_parser.set_defaults(function=report)

@@ -16,6 +16,7 @@ lake env lean Experiment/ContextLocationProbe.lean
 lake env lean Experiment/BodyScopeProbe.lean
 lake env lean Experiment/BodyMaterializationProbe.lean
 lake env lean Experiment/FirstOwnerProbe.lean
+lake env lean Experiment/ClosureProbe.lean
 lake env lean Experiment/SpecialFallbackProbe.lean
 python3 Experiment/check_premise_replay.py
 python3 Experiment/check_selectors.py
@@ -27,6 +28,7 @@ python3 Experiment/check_context_locations.py
 python3 Experiment/check_body_scopes.py
 python3 Experiment/check_body_materialization.py
 python3 Experiment/check_first_owner.py
+python3 Experiment/check_closure.py
 python3 Experiment/check_simp_fixtures.py
 python3 Experiment/check_mixed_certificates.py
 python3 Experiment/check_simp_coverage.py
