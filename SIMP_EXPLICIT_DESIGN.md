@@ -661,14 +661,46 @@ and together through the deferred whole-result fallback. The complete
 
 ### D. Structural selectors
 
+Status: implemented on 2026-08-21.
+
 - Implement side-effect-free rule probing whose ordinal counts applications
   and does not inspect a recorded expected expression.
 - Add `match` and explicit `tick` syntax while retaining numeric compatibility.
 - Prefer the shortest validated selector during printing.
 
-Gate: all six traversal failures in `DropRight` materialize, selector mutation
-tests fail at the exact command, and existing position-free certificates remain
-position-free.
+Gate: focused fixtures require a structural `match` selector, exercise explicit
+`tick` and legacy numeric compatibility, verify skipped probes do not leak
+metavariable assignments or consume premise proofs, and make selector
+mutations fail at the exact command. Existing position-free certificates must
+remain position-free.
+
+The six `DropRight` occurrences originally classified as traversal failures
+(`bdfebd4de6e5f543`, `f578fdc66fc0399a`, `e72c0cbdffdb90b1`,
+`7a1c618c3a39b1cb`, `3acd3e1c76ad7f24`, and `e0e91bd09649e027`) also begin
+with an unrecorded unfold of `rdropWhile` or `rtakeWhile`. Their selector layer
+is implemented here and their existing whole-result fallbacks remain
+compile-checked; compact event closure moves to Package F with the other
+presentation gaps.
+
+Replay now distinguishes selector-free `next`, structural `match n`, and
+absolute `tick n` commands. A structural probe counts only exact-premise,
+proof-carrying applications that change the expression, and restores both
+metavariables and premise-provider state at every rejected or skipped site.
+The encoder first validates a selector-free program, then discovers structural
+ordinals using the recorded input and result only inside the encoder, replays
+the emitted expression-free program, and finally falls back to explicit ticks.
+Legacy numeric ticks still parse, while newly generated source always spells
+`tick` explicitly.
+
+Schema version 4 reports the nullable selector kind and value for each encoded
+event, aggregate counts for `next`, `match`, and `tick`, and treats
+`positionsNeeded` as meaning that an absolute tick was actually emitted.
+Permanent fixtures cover `match`, explicit and legacy ticks, phase and ordinal
+mutations, zero selectors, theorem-metavariable rollback, and premise-provider
+rollback. The six layered `DropRight` cases retain nonempty semantic traces and
+compile individually and together through their documented whole-result
+fallbacks without falsely reporting selector commands. The complete
+`Experiment/run.sh` regression passes.
 
 ### E. Stable locals and context programs
 
@@ -696,7 +728,10 @@ occurrences whose one source `simp` executes in both branches of `<;>`, plus
 the similarly shared premise-bearing occurrence `c9eca03fcd0280ed`. Its
 presentation-gap gate also closes compact event programs for
 `03210e4a7b3567e3`, `aaf54961bf787d28`, `739c7ac9dd3cd521`, and
-`90925e8b6e53287f`, whose premise layer was completed in Package C.
+`90925e8b6e53287f`, whose premise layer was completed in Package C, together
+with `bdfebd4de6e5f543`, `f578fdc66fc0399a`, `e72c0cbdffdb90b1`,
+`7a1c618c3a39b1cb`, `3acd3e1c76ad7f24`, and `e0e91bd09649e027`, whose
+selector layer was completed in Package D.
 
 ### G. Corpus closure
 

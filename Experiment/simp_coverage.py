@@ -529,6 +529,8 @@ def run_trial(entry: dict[str, Any], config: TrialConfig) -> dict[str, Any]:
         ]
         premise_events = [event for event in trace_events if event.get("premises")]
         base.update(
+            recording_schema=report.get("schema"),
+            recording_schema_version=report.get("schemaVersion"),
             closes_goal=report["closesGoal"],
             trace_length=report["traceLength"],
             certificate_event_count=report["certificateEventCount"],
@@ -545,6 +547,8 @@ def run_trial(entry: dict[str, Any], config: TrialConfig) -> dict[str, Any]:
                 event.get("encodingReason") for event in trace_events
                 if event.get("encodingReason") is not None
             ],
+            trace_selector_kinds=[event.get("selectorKind") for event in trace_events],
+            trace_selector_values=[event.get("selectorValue") for event in trace_events],
             premise_event_count=len(premise_events),
             premise_event_encoding_kinds=[
                 event.get("encodingKind") for event in premise_events

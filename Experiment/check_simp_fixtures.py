@@ -29,13 +29,19 @@ def main() -> None:
     report = reports[0]
     if report.get("schema") != "explicitLean.simpRecording":
         raise RuntimeError(f"unexpected simproc report schema: {report!r}")
-    if report.get("schemaVersion") != 3:
+    if report.get("schemaVersion") != 4:
         raise RuntimeError(f"unexpected simproc report version: {report!r}")
     if report.get("encodingStatus") != "validated":
         raise RuntimeError(f"simproc recording was not validated: {report!r}")
     encoding = report.get("encoding") or {}
     if encoding.get("generatedSimprocEvents") != 1:
         raise RuntimeError(f"simproc fallback count was not one: {report!r}")
+    if (
+        encoding.get("nextSelectorCount", 0) < 1
+        or encoding.get("matchSelectorCount") != 0
+        or encoding.get("tickSelectorCount") != 0
+    ):
+        raise RuntimeError(f"simproc certificate did not report a selector-free next event: {report!r}")
     events = [
         event
         for execution in report.get("executions", [])
@@ -49,9 +55,15 @@ def main() -> None:
     ]
     if len(simproc_events) != 1:
         raise RuntimeError(f"simproc fallback event encoding was not reported: {report!r}")
+    if simproc_events[0].get("selectorKind") != "next" or simproc_events[0].get("selectorValue") is not None:
+        raise RuntimeError(f"simproc event did not report a nullable next selector: {report!r}")
+    if any(event.get("selectorKind") != "next" or event.get("selectorValue") is not None for event in events):
+        raise RuntimeError(f"simple certificate did not report next selectors for every event: {report!r}")
     certificate = report.get("certificate")
     if not isinstance(certificate, str) or not certificate:
         raise RuntimeError(f"simproc report did not contain a certificate: {report!r}")
+    if "match " in certificate or "tick " in certificate:
+        raise RuntimeError(f"simple simproc certificate unexpectedly emitted a positional selector: {report!r}")
     if "pushFun" in certificate:
         raise RuntimeError("simproc certificate still depends on ambient pushFun")
 

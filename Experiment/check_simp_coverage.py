@@ -87,7 +87,7 @@ def main() -> None:
     for report in passive["reports"]:
         if report.get("schema") != "explicitLean.simpRecording":
             raise RuntimeError(f"unexpected recording schema: {report!r}")
-        if report.get("schemaVersion") != 3:
+        if report.get("schemaVersion") != 4:
             raise RuntimeError(f"unexpected recording schema version: {report!r}")
         if report.get("terminalOutcome") is not None:
             raise RuntimeError(
@@ -204,6 +204,63 @@ def main() -> None:
     )
     if not package_c_aggregate["compile"]:
         raise RuntimeError(f"Package C aggregate module failed: {package_c_aggregate!r}")
+
+    package_d_ids = [
+        "bdfebd4de6e5f543",
+        "f578fdc66fc0399a",
+        "e72c0cbdffdb90b1",
+        "7a1c618c3a39b1cb",
+        "3acd3e1c76ad7f24",
+        "e0e91bd09649e027",
+    ]
+    package_d_entries = [
+        next(entry for entry in drop_entries if entry["id"] == identifier)
+        for identifier in package_d_ids
+    ]
+    package_d_results = {}
+    for entry in package_d_entries:
+        trial = coverage.run_trial(
+            entry, coverage.TrialConfig(timeout=180, keep_copies=True)
+        )
+        package_d_results[entry["id"]] = trial
+        if trial.get("status") != "passed" or not trial.get("materialized_compile"):
+            raise RuntimeError(f"Package D isolated materialization failed: {trial!r}")
+        if trial.get("recording_schema") != "explicitLean.simpRecording":
+            raise RuntimeError(f"Package D recording schema changed: {trial!r}")
+        if trial.get("recording_schema_version") != 4:
+            raise RuntimeError(f"Package D recording schema version changed: {trial!r}")
+        if trial.get("trace_length", 0) <= 0:
+            raise RuntimeError(f"Package D presentation trace was not retained: {trial!r}")
+        encoding = trial.get("encoding") or {}
+        if (
+            encoding.get("mode") != "whole_result_proof"
+            or trial.get("encoding_fallback_reason") != "presentation_gap"
+            or encoding.get("wholeResultProofCount") != 1
+        ):
+            raise RuntimeError(f"Package D presentation-gap encoding changed: {trial!r}")
+        selector_counts = {
+            key: encoding.get(key)
+            for key in ("nextSelectorCount", "matchSelectorCount", "tickSelectorCount")
+        }
+        if any(not isinstance(value, int) or value < 0 for value in selector_counts.values()):
+            raise RuntimeError(f"Package D selector metrics were not schema-consistent: {trial!r}")
+        if any(value != 0 for value in selector_counts.values()):
+            raise RuntimeError(
+                "Package D whole-result fallback falsely claims an event selector: "
+                f"{trial!r}"
+            )
+        if trial.get("positions_needed"):
+            raise RuntimeError(f"Package D whole-result fallback emitted an absolute tick: {trial!r}")
+        if trial.get("trace_selector_kinds") != [None] * trial["trace_length"]:
+            raise RuntimeError(f"Package D trace selector kinds were not nullable: {trial!r}")
+        if trial.get("trace_selector_values") != [None] * trial["trace_length"]:
+            raise RuntimeError(f"Package D trace selector values were not nullable: {trial!r}")
+    package_d_aggregate = coverage.aggregate_module(
+        modules[0], package_d_entries, package_d_results, timeout=180
+    )
+    if not package_d_aggregate["compile"]:
+        raise RuntimeError(f"Package D aggregate module failed: {package_d_aggregate!r}")
+
     target = next(
         entry
         for entry in document["entries"]

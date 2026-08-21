@@ -20,7 +20,11 @@ syntax simpExplicitPost := "↑"
 syntax simpExplicitPremiseArgs := " using " "[" term,* "]"
 syntax simpExplicitRule := (simpExplicitPre <|> simpExplicitPost)? "← "? term
   (simpExplicitPremiseArgs)?
-syntax simpExplicitEvent := (num " => ")? simpExplicitRule
+declare_syntax_cat simpExplicitSelector
+syntax "match " num : simpExplicitSelector
+syntax atomic(ident num) : simpExplicitSelector
+syntax num : simpExplicitSelector
+syntax simpExplicitEvent := (simpExplicitSelector " => ")? simpExplicitRule
 syntax simpExplicitTraceArgs := optConfig (discharger)? (&" only")?
   (" [" withoutPosition((simpStar <|> simpErase <|> simpLemma),*,?) "]")? (location)?
 
@@ -57,7 +61,7 @@ register_option explicitLean.simpExplicit.occurrenceId : String := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 3
+def reportSchemaVersion : Nat := 4
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -115,6 +119,10 @@ structure SemanticEventReport where
   encodingKind : Option String
   /-- Why a generated proof binding was needed, when applicable. -/
   encodingReason : Option String
+  /-- Selector emitted for this event, when the certificate has been encoded. -/
+  selectorKind : Option String
+  /-- Ordinal for `match`, or absolute traversal position for `tick`. -/
+  selectorValue : Option Nat
   deriving ToJson
 
 structure EncodingMetrics where
@@ -130,6 +138,9 @@ structure EncodingMetrics where
   premiseBindingBytes : Nat := 0
   nestedPremiseBindings : Nat := 0
   termPremiseBindings : Nat := 0
+  nextSelectorCount : Nat := 0
+  matchSelectorCount : Nat := 0
+  tickSelectorCount : Nat := 0
   totalCertificateBytes : Nat := 0
   deriving ToJson
 
@@ -209,6 +220,8 @@ private structure RecordedEvent where
 private structure EventEncodingInfo where
   kind : String
   reason : Option String
+  selectorKind : Option String := none
+  selectorValue : Option Nat := none
 
 private structure RecorderState where
   tick : Nat := 0
@@ -254,9 +267,9 @@ private def subtractOrigins (origins removed : Array Origin) : Array Origin := I
 private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
     (method : Simp.Simproc) : Simp.Simproc := fun input => do
   let state ← ref.get
-  let tick := state.tick + 1
+  let position := state.tick + 1
   let depth := state.activeDepth
-  ref.set { state with tick, activeDepth := depth + 1 }
+  ref.set { state with tick := position, activeDepth := depth + 1 }
   let premiseStart := state.premises.size
   let before := (← get).diag
   let step ← try
@@ -273,7 +286,7 @@ private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
       ref.set {
         state with
           events := state.events.push {
-            tick
+            tick := position
             phase
             input
             step
@@ -334,6 +347,35 @@ private def isReflexiveClosure : Origin → Bool
   | .decl name _ _ => name == ``eq_self || name == ``iff_self
   | _ => false
 
+private inductive ReplaySelector where
+  | next
+  | matchSite (ordinal : Nat)
+  | tickPos (position : Nat)
+  /-- Internal-only selector used while discovering a stable match ordinal. -/
+  | discover (input : Expr) (result : Expr)
+
+private def selectorKind? : ReplaySelector → Option String
+  | .next => some "next"
+  | .matchSite _ => some "match"
+  | .tickPos _ => some "tick"
+  | .discover .. => none
+
+private def selectorValue? : ReplaySelector → Option Nat
+  | .next => none
+  | .matchSite ordinal => some ordinal
+  | .tickPos position => some position
+  | .discover .. => none
+
+private def isTickSelector : ReplaySelector → Bool
+  | .tickPos _ => true
+  | _ => false
+
+private def selectorSource : ReplaySelector → String
+  | .next => ""
+  | .matchSite ordinal => s!"match {ordinal} => "
+  | .tickPos position => s!"tick {position} => "
+  | .discover .. => ""
+
 private def certificateEventCount (events : Array RecordedEvent) : Nat := Id.run do
   let mut eventCount := events.size
   while true do
@@ -348,7 +390,8 @@ private def certificateEventCount (events : Array RecordedEvent) : Nat := Id.run
     | none => break
   return eventCount
 
-private def certificateText (events : Array RecordedEvent) (withPositions := false) : MetaM String := do
+private def certificateText (events : Array RecordedEvent)
+    (selectors : Array ReplaySelector := #[]) : MetaM String := do
   let eventCount := certificateEventCount events
   if eventCount == 0 then
     return "simp_explicit []"
@@ -363,8 +406,8 @@ private def certificateText (events : Array RecordedEvent) (withPositions := fal
     let rule ← ruleText origin
     let comma := if index + 1 < eventCount then "," else ""
     let phase := if event.phase == .pre then "↓ " else ""
-    let position := if withPositions then s!"{event.tick} => " else ""
-    lines := lines.push s!"  {position}{phase}{rule}{comma}"
+    let selector := selectors[index]?.getD .next
+    lines := lines.push s!"  {selectorSource selector}{phase}{rule}{comma}"
   lines := lines.push "]"
   return String.intercalate "\n" lines.toList
 
@@ -395,7 +438,7 @@ private def applyResultToTarget (mvarId : MVarId) (target : Expr)
     replaceMainGoal [mvarId]
 
 private structure ReplayEvent where
-  tick? : Option Nat
+  selector : ReplaySelector
   phase : Phase
   rules : Array SimpTheorem
   premises : Array Expr := #[]
@@ -429,8 +472,11 @@ private structure CertificatePlan where
 private structure ReplayState where
   tick : Nat := 0
   next : Nat := 0
+  siteCount : Nat := 0
   premiseNext : Nat := 0
   premiseFailure? : Option String := none
+  /-- Ordinals discovered for committed internal discovery events, in cursor order. -/
+  discoveredOrdinals : Array Nat := #[]
 
 private def premiseDefEqHeartbeatBudget : Nat := 20000
 
@@ -529,17 +575,41 @@ private def elaboratePremise (term : Syntax) : TacticM Expr := do
       throwErrorAt term "could not elaborate explicit simp premise"
     return proof
 
+private def elaborateSelector (stx : Syntax) : TacticM ReplaySelector := do
+  match stx with
+  | `(simpExplicitSelector| match $n:num) =>
+      let some ordinal := n.raw.isNatLit?
+        | throwErrorAt n "expected a numeric match ordinal"
+      if ordinal == 0 then
+        throwErrorAt stx "simp_explicit match ordinals start at 1"
+      return .matchSite ordinal
+  | `(simpExplicitSelector| $kind:ident $n:num) =>
+      unless kind.getId == `tick do
+        throwErrorAt kind "expected `tick n` as the explicit traversal selector"
+      let some position := n.raw.isNatLit?
+        | throwErrorAt n "expected a numeric traversal position"
+      if position == 0 then
+        throwErrorAt stx "simp_explicit traversal positions start at 1"
+      return .tickPos position
+  | `(simpExplicitSelector| $n:num) =>
+      let some position := n.raw.isNatLit?
+        | throwErrorAt n "expected a numeric traversal position"
+      if position == 0 then
+        throwErrorAt stx "simp_explicit traversal positions start at 1"
+      return .tickPos position
+  | _ =>
+      throwErrorAt stx "expected `match n`, `tick n`, or a numeric traversal position"
+
 private def elaborateEvent (stx : Syntax) : TacticM ReplayEvent := do
-  let tick? := if stx[0].isNone then none else stx[0][0].isNatLit?
-  if tick? == some 0 then
-    throwErrorAt stx[0] "simp_explicit traversal positions start at 1"
+  let selector ← if stx[0].isNone then pure .next else elaborateSelector stx[0][0]
   let rule := stx[1]
   let phase ← if rule[0].isNone then pure .post else parsePhase rule[0][0]
   let rules ← elaborateRule phase rule
   let premises ← premiseSyntaxes rule |>.mapM elaboratePremise
-  return { tick?, phase, rules, premises, source := stx }
+  return { selector, phase, rules, premises, source := stx }
 
-private def recordedReplayEvent (event : RecordedEvent) (withPosition : Bool) : TacticM ReplayEvent := do
+private def recordedReplayEvent (event : RecordedEvent)
+    (selector : ReplaySelector := .next) : TacticM ReplayEvent := do
   let post := event.phase == .post
   let some origin := event.origins[0]?
     | throwError "simp_explicit cannot replay a semantic event without a named origin"
@@ -559,7 +629,7 @@ private def recordedReplayEvent (event : RecordedEvent) (withPosition : Bool) : 
     | .other name =>
         throwError "simp_explicit cannot yet encode special simp rule '{name}'"
   return {
-    tick? := if withPosition then some event.tick else none
+    selector
     phase := event.phase
     rules
     premises := event.premises.map (·.proof)
@@ -604,6 +674,23 @@ private def applyRecordedRules? (input : Expr) (event : ReplayEvent)
   ref.set { state with premiseFailure? := lastFailure? }
   return none
 
+private def replayExprMatches? (actual expected : Expr) : Simp.SimpM Bool := do
+  if Expr.equal actual expected then
+    return true
+  -- Discovery is allowed a bounded reducible-definitional fallback, but the
+  -- comparison itself must not leak assignments into either a skipped probe
+  -- or the selected theorem application.
+  let metaSnapshot ← liftM Meta.saveState
+  try
+    let result ← liftM (premiseDefEq? actual expected)
+    liftM metaSnapshot.restore
+    match result with
+    | .ok equal => return equal
+    | .error _ => return false
+  catch _ =>
+    liftM metaSnapshot.restore
+    return false
+
 private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
     (phase : Phase) : Simp.Simproc := fun input => do
   let state ← ref.get
@@ -611,27 +698,27 @@ private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
   ref.set state
   if h : state.next < events.size then
     let event := events[state.next]
-    match event.tick? with
-    | some tick =>
-        if tick < state.tick then
-          throwErrorAt event.source "simp_explicit passed recorded traversal position {tick} without applying its rule"
-        else if tick == state.tick then
+    match event.selector with
+    | .tickPos position =>
+        if position < state.tick then
+          throwErrorAt event.source "simp_explicit passed recorded traversal position {position} without applying its rule"
+        else if position == state.tick then
           unless event.phase == phase do
-            throwErrorAt event.source "simp_explicit traversal phase changed at position {tick}"
+            throwErrorAt event.source "simp_explicit traversal phase changed at position {position}"
           let some result ← applyRecordedRules? input event ref
             | match (← ref.get).premiseFailure? with
               | some reason =>
                   throwErrorAt event.source
-                    "simp_explicit {reason} at traversal position {tick}"
+                    "simp_explicit {reason} at traversal position {position}"
               | none =>
                   throwErrorAt event.source
-                    "recorded simp rule no longer rewrites the expression at traversal position {tick}"
-          ref.set { state with next := state.next + 1, premiseNext := 0, premiseFailure? := none }
+                    "recorded simp rule no longer rewrites the expression at traversal position {position}"
+          ref.set { state with next := state.next + 1, siteCount := 0, premiseNext := 0, premiseFailure? := none }
           return .visit result
-    | none =>
+    | .next =>
         if event.phase == phase then
           if let some result ← applyRecordedRules? input event ref then
-            ref.set { state with next := state.next + 1, premiseNext := 0, premiseFailure? := none }
+            ref.set { state with next := state.next + 1, siteCount := 0, premiseNext := 0, premiseFailure? := none }
             return .visit result
           else
             -- Position-free events are tried at every traversal callback. A
@@ -639,6 +726,95 @@ private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
             -- callback may be the exact recorded site. Keep the latest
             -- structured reason for the final cursor diagnostic instead.
             pure ()
+    | .matchSite ordinal =>
+        if event.phase == phase then
+          let probeState ← ref.get
+          let metaSnapshot ← liftM Meta.saveState
+          try
+            let result? ← applyRecordedRules? input event ref
+            match result? with
+            | none =>
+                -- A failed match probe is observational only. In particular,
+                -- premise cursors and diagnostics must not leak to a later
+                -- callback site.
+                liftM metaSnapshot.restore
+                ref.set probeState
+            | some result =>
+                if Expr.equal result.expr input then
+                  -- A proof-carrying result which leaves the callback input
+                  -- unchanged is not a match site. Restore both snapshots so
+                  -- it cannot consume a premise or assign a theorem mvar.
+                  liftM metaSnapshot.restore
+                  ref.set probeState
+                else
+                  let observed := probeState.siteCount + 1
+                  if observed < ordinal then
+                    -- The successful site is deliberately skipped. Restore
+                    -- theorem metavariables and event-local state, retaining
+                    -- only ordinal progress for the next probe.
+                    liftM metaSnapshot.restore
+                    ref.set { probeState with siteCount := observed, premiseNext := 0, premiseFailure? := none }
+                  else if observed == ordinal then
+                    let after ← ref.get
+                    ref.set { after with next := state.next + 1, siteCount := 0, premiseNext := 0, premiseFailure? := none }
+                    return .visit result
+                  else
+                    liftM metaSnapshot.restore
+                    ref.set probeState
+                    throwErrorAt event.source
+                      "simp_explicit match ordinal {ordinal} was passed unexpectedly"
+          catch ex =>
+            liftM metaSnapshot.restore
+            ref.set probeState
+            throw ex
+    | .discover expectedInput expectedResult =>
+        if event.phase == phase then
+          let probeState ← ref.get
+          let metaSnapshot ← liftM Meta.saveState
+          try
+            let result? ← applyRecordedRules? input event ref
+            match result? with
+            | none =>
+                -- Discovery probes are observational until the historical
+                -- input/result pair agrees.  Preserve no premise cursor,
+                -- failure, or metavariable effects from a failed site.
+                liftM metaSnapshot.restore
+                ref.set probeState
+            | some result =>
+                if Expr.equal result.expr input then
+                  -- A structurally unchanged result is not a successful
+                  -- application site and must not advance the ordinal.
+                  liftM metaSnapshot.restore
+                  ref.set probeState
+                else
+                  let observed := probeState.siteCount + 1
+                  let inputMatches ← replayExprMatches? input expectedInput
+                  let resultMatches ← replayExprMatches? result.expr expectedResult
+                  if inputMatches && resultMatches then
+                    let after ← ref.get
+                    ref.set {
+                      after with
+                        next := state.next + 1
+                        siteCount := 0
+                        premiseNext := 0
+                        premiseFailure? := none
+                        discoveredOrdinals := after.discoveredOrdinals.push observed
+                    }
+                    return .visit result
+                  else
+                    -- This was a changing, exact-premise site, but not the
+                    -- historical event.  Commit only its ordinal progress.
+                    liftM metaSnapshot.restore
+                    ref.set {
+                      probeState with
+                        siteCount := observed
+                        premiseNext := 0
+                        premiseFailure? := none
+                    }
+          catch ex =>
+            liftM metaSnapshot.restore
+            ref.set probeState
+            throw ex
   return .continue
 
 private def runReplay (target : Expr) (events : Array ReplayEvent) : TacticM (Simp.Result × ReplayState) := do
@@ -704,7 +880,7 @@ private def compactReplayEvent? (event : RecordedEvent) : TacticM (Option Replay
   if event.origins.size != 1 then
     return none
   try
-    let replay ← recordedReplayEvent event (withPosition := false)
+    let replay ← recordedReplayEvent event .next
     let (result, state) ← runReplay event.input #[replay]
     if state.next == 1 && (← isDefEq result.expr event.result.expr) then
       return some replay
@@ -801,8 +977,8 @@ private def isReflexiveResultEarly (expr : Expr) : MetaM Bool := do
   return false
 
 private def generatedProofBinding (input : Expr) (result : Simp.Result)
-    (eventIndex : Nat) (phase : Phase) (tick? : Option Nat)
-    (usedNames : Array Name) : TacticM (GeneratedBinding × ReplayEvent) := do
+    (eventIndex : Nat) (phase : Phase) (usedNames : Array Name) :
+    TacticM (GeneratedBinding × ReplayEvent) := do
   let relation ← mkEq input result.expr
   let proof ← Simp.Result.getProof' input result
   let proof ← mkExpectedTypeHint proof relation
@@ -826,7 +1002,7 @@ private def generatedProofBinding (input : Expr) (result : Simp.Result)
   let rules ← mkSimpTheoremFromExpr (.other name) #[] proof
     (post := phase == .post)
   let replay : ReplayEvent := {
-    tick?
+    selector := .next
     phase
     rules
     source := (mkIdent name).raw
@@ -834,15 +1010,14 @@ private def generatedProofBinding (input : Expr) (result : Simp.Result)
   return (binding, replay)
 
 private def generatedBinding (event : RecordedEvent) (eventIndex : Nat)
-    (usedNames : Array Name) (withPosition : Bool) : TacticM (GeneratedBinding × ReplayEvent) :=
-  generatedProofBinding event.input event.result eventIndex event.phase
-    (if withPosition then some event.tick else none) usedNames
+    (usedNames : Array Name) : TacticM (GeneratedBinding × ReplayEvent) :=
+  generatedProofBinding event.input event.result eventIndex event.phase usedNames
 
 private def indentSource (indent : String) (text : String) : String :=
   text.replace "\n" ("\n" ++ indent)
 
 private def certificatePlanText (events : Array EncodedEvent)
-    (bindings : Array GeneratedBinding) (withPositions : Bool) : String :=
+    (bindings : Array GeneratedBinding) : String :=
   Id.run do
     let mut lines := #[]
     for binding in bindings do
@@ -858,14 +1033,13 @@ private def certificatePlanText (events : Array EncodedEvent)
       let some event := events[index]? | continue
       let comma := if index + 1 < events.size then "," else ""
       let phase := if event.event.phase == .pre then "↓ " else ""
-      let position := if withPositions then s!"{event.event.tick} => " else ""
       let premises :=
         if event.premiseNames.isEmpty then
           ""
         else
           let names := event.premiseNames.map Name.toString
           s!" using [{String.intercalate ", " names.toList}]"
-      lines := lines.push s!"  {position}{phase}{event.ruleText}{premises}{comma}"
+      lines := lines.push s!"  {selectorSource event.replay.selector}{phase}{event.ruleText}{premises}{comma}"
     lines := lines.push "]"
     return String.intercalate "\n" lines.toList
 
@@ -876,8 +1050,19 @@ private def wholeResultPlanText (binding : GeneratedBinding) : String :=
   let replay := s!"simp_explicit [↓ {binding.name}]"
   String.intercalate "\n" [declaration, proof, replay]
 
-private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEvent)
-    (searchedResult : Simp.Result) (withPositions : Bool) : TacticM (Option CertificatePlan) := do
+private inductive CertificateSelectorMode where
+  | next
+  | discover
+  | ticks
+
+private def reachesSearchedResult? (searchedResult replayedResult : Simp.Result) : TacticM Bool := do
+  if searchedResult.expr.isTrue then
+    isReflexiveResultEarly replayedResult.expr
+  else
+    isDefEq searchedResult.expr replayedResult.expr
+
+private def buildEncodedEvents? (recorded : Array RecordedEvent) :
+    TacticM (Option (Array EncodedEvent × Array GeneratedBinding)) := do
   try
     -- Keep the trailing reflexive closure in generated plans: unlike the
     -- compact certificate count, materialized proof bodies need the explicit
@@ -903,7 +1088,7 @@ private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEven
           premiseEncodings := premiseEncodings.push premiseEncoding
         encoded := encoded.push {
           event
-          replay := if withPositions then { replay with tick? := some event.tick } else replay
+          replay
           info := { kind := "named_rule", reason := none }
           ruleText := rule
           premiseNames
@@ -912,7 +1097,7 @@ private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEven
         }
       else
         let reason ← fallbackReason event
-        let (binding, replay) ← generatedBinding event index usedNames withPositions
+        let (binding, replay) ← generatedBinding event index usedNames
         usedNames := usedNames.push binding.name
         bindings := bindings.push binding
         let premiseEncodings := event.premises.map fun _ => {
@@ -929,17 +1114,70 @@ private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEven
           premiseEncodings
           binding? := some binding
         }
-    let replayEvents := encoded.map (·.replay)
+    return some (encoded, bindings)
+  catch _ =>
+    return none
+
+private def selectCertificateEvents? (target : Expr) (searchedResult : Simp.Result)
+    (encoded : Array EncodedEvent) (mode : CertificateSelectorMode) :
+    TacticM (Option (Array EncodedEvent)) := do
+  try
+    let selected ← match mode with
+      | .next => pure encoded
+      | .ticks =>
+          pure <| encoded.map fun item =>
+            { item with replay := { item.replay with selector := .tickPos item.event.tick } }
+      | .discover =>
+          let mut discoveryEvents := #[]
+          for item in encoded do
+            discoveryEvents := discoveryEvents.push {
+              item.replay with
+                selector := .discover item.event.input item.event.result.expr
+            }
+          let (_, discoveryState) ← runReplay target (discoveryEvents.map id)
+          unless discoveryState.next == encoded.size do
+            return none
+          unless discoveryState.discoveredOrdinals.size == encoded.size do
+            return none
+          let mut selectors := #[]
+          for ordinal in discoveryState.discoveredOrdinals do
+            selectors := selectors.push (if ordinal == 1 then .next else .matchSite ordinal)
+          let mut result := #[]
+          for index in *...encoded.size do
+            let some item := encoded[index]? | return none
+            let some selector := selectors[index]? | return none
+            result := result.push { item with replay := { item.replay with selector } }
+          pure result
+    let replayEvents := selected.map (·.replay)
     let (replayedResult, replayState) ← runReplay target replayEvents
     unless replayState.next == replayEvents.size do
       return none
-    let reachesResult ← if searchedResult.expr.isTrue then
-      isReflexiveResultEarly replayedResult.expr
-    else
-      isDefEq searchedResult.expr replayedResult.expr
-    unless reachesResult do
+    unless ← reachesSearchedResult? searchedResult replayedResult do
       return none
-    let source := certificatePlanText encoded bindings withPositions
+    return some selected
+  catch _ =>
+    return none
+
+private def annotateSelectorInfo (events : Array EncodedEvent) : Array EncodedEvent :=
+  events.map fun event => {
+    event with
+      info := {
+        event.info with
+          selectorKind := selectorKind? event.replay.selector
+          selectorValue := selectorValue? event.replay.selector
+      }
+  }
+
+private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEvent)
+    (searchedResult : Simp.Result) : TacticM (Option CertificatePlan) := do
+  let some (baseEncoded, bindings) ← buildEncodedEvents? recorded
+    | return none
+  for mode in #[CertificateSelectorMode.next, CertificateSelectorMode.discover,
+      CertificateSelectorMode.ticks] do
+    let some selected ← selectCertificateEvents? target searchedResult baseEncoded mode
+      | continue
+    let encoded := annotateSelectorInfo selected
+    let source := certificatePlanText encoded bindings
     let namedRuleEvents := encoded.foldl (fun n event =>
       if event.info.kind == "named_rule" then n + 1 else n) 0
     let generatedProofEvents := encoded.foldl (fun n event =>
@@ -957,10 +1195,19 @@ private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEven
       if encoding.kind == "premise_nested" then n + 1 else n) 0
     let termPremiseBindings := premiseEncodings.foldl (fun n encoding =>
       if encoding.kind == "premise_term" then n + 1 else n) 0
+    let mut nextSelectorCount := 0
+    let mut matchSelectorCount := 0
+    let mut tickSelectorCount := 0
+    for event in encoded do
+      match event.replay.selector with
+      | .next => nextSelectorCount := nextSelectorCount + 1
+      | .matchSite _ => matchSelectorCount := matchSelectorCount + 1
+      | .tickPos _ => tickSelectorCount := tickSelectorCount + 1
+      | .discover .. => pure ()
     return some {
       events := encoded
       bindings
-      positions := withPositions
+      positions := tickSelectorCount > 0
       source
       metrics := {
         namedRuleEvents
@@ -973,11 +1220,13 @@ private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEven
         premiseBindingBytes
         nestedPremiseBindings
         termPremiseBindings
+        nextSelectorCount
+        matchSelectorCount
+        tickSelectorCount
         totalCertificateBytes := source.utf8ByteSize
       }
     }
-  catch _ =>
-    return none
+  return none
 
 /-- Encode one semantic simp result using the same event fallback and closed
     replay validation used by `simp_explicit?`.  `origins` is diagnostic input
@@ -993,7 +1242,7 @@ def encodeProofResult (input : Expr) (result : Simp.Result)
     origins
     premises := #[]
   }
-  let some plan ← buildCertificatePlan? input #[event] result (withPositions := false)
+  let some plan ← buildCertificatePlan? input #[event] result
     | throwError "proof-result encoder could not validate an event replay"
   let some encoded := plan.events[0]?
     | throwError "proof-result encoder produced no event encoding"
@@ -1007,7 +1256,7 @@ def encodeProofResult (input : Expr) (result : Simp.Result)
 private def buildWholeResultPlan? (target : Expr) (searchedResult : Simp.Result) :
     TacticM (Option CertificatePlan) := do
   try
-    let (binding, replay) ← generatedProofBinding target searchedResult 0 .pre none #[]
+    let (binding, replay) ← generatedProofBinding target searchedResult 0 .pre #[]
     let (replayedResult, replayState) ← runReplay target #[replay]
     unless replayState.next == 1 do
       return none
@@ -1038,26 +1287,33 @@ private def replaySimp (eventSyntax : Array Syntax) : TacticM Unit := withMainCo
   let events ← eventSyntax.mapM elaborateEvent
   let mut previousTick? : Option Nat := none
   for event in events do
-    if let some tick := event.tick? then
-      if let some previousTick := previousTick? then
-        if previousTick >= tick then
-          throwErrorAt event.source "explicit traversal positions must be strictly increasing"
-      previousTick? := some tick
+    match event.selector with
+    | .tickPos position =>
+        if let some previousTick := previousTick? then
+          if previousTick >= position then
+            throwErrorAt event.source "explicit traversal positions must be strictly increasing"
+        previousTick? := some position
+    | .next | .matchSite _ | .discover .. => pure ()
   let mvarId ← getMainGoal
   let target ← instantiateMVars (← mvarId.getType)
   let (result, state) ← runReplay target events
   unless state.next == events.size do
     match events[state.next]? with
     | some event =>
-        match event.tick? with
-        | some tick =>
-            throwErrorAt event.source "simp_explicit ended before recorded traversal position {tick}"
-        | none =>
+        match event.selector with
+        | .tickPos position =>
+            throwErrorAt event.source "simp_explicit ended before recorded traversal position {position}"
+        | .matchSite ordinal =>
+            throwErrorAt event.source
+              "simp_explicit match ordinal {ordinal} not reached; observed {state.siteCount} successful sites"
+        | .next =>
             match state.premiseFailure? with
             | some reason =>
                 throwErrorAt event.source "simp_explicit {reason}; ordered simp rule did not match anywhere in the remaining traversal"
             | none =>
                 throwErrorAt event.source "ordered simp rule did not match anywhere in the remaining traversal"
+        | .discover .. =>
+            throwErrorAt event.source "internal simp_explicit selector discovery leaked into source replay"
     | none =>
         throwError "simp_explicit replay cursor is inconsistent"
   applyResultToTarget mvarId target result
@@ -1071,50 +1327,88 @@ private def isReflexiveResult (expr : Expr) : MetaM Bool := do
     return ← isDefEq expr.appFn!.appArg! expr.appArg!
   return false
 
-private def canReplay (target : Expr) (recorded : Array RecordedEvent)
-    (searchedResult : Simp.Result) (withPositions : Bool) : TacticM Bool := do
+private def recordedReplayEvents (recorded : Array RecordedEvent)
+    (selectors : Array ReplaySelector) : TacticM (Option (Array ReplayEvent)) := do
+  let count := certificateEventCount recorded
+  if selectors.size != count then
+    return none
+  let mut events := #[]
+  for index in *...count do
+    let some event := recorded[index]? | return none
+    let some selector := selectors[index]? | return none
+    events := events.push (← recordedReplayEvent event selector)
+  return some events
+
+private def tickSelectors (recorded : Array RecordedEvent) : Array ReplaySelector := Id.run do
+  let count := certificateEventCount recorded
+  let mut selectors := #[]
+  for index in *...count do
+    if let some event := recorded[index]? then
+      selectors := selectors.push (.tickPos event.tick)
+  return selectors
+
+private def nextSelectors (recorded : Array RecordedEvent) : Array ReplaySelector :=
+  Array.replicate (certificateEventCount recorded) (.next : ReplaySelector)
+
+private def discoverSelectors? (target : Expr) (recorded : Array RecordedEvent) :
+    TacticM (Option (Array ReplaySelector)) := do
+  try
+    let count := certificateEventCount recorded
+    let mut events := #[]
+    for index in *...count do
+      let some event := recorded[index]? | return none
+      let replay ← recordedReplayEvent event (.discover event.input event.result.expr)
+      events := events.push replay
+    let (_, state) ← runReplay target events
+    unless state.next == events.size && state.discoveredOrdinals.size == events.size do
+      return none
+    let mut selectors := #[]
+    for ordinal in state.discoveredOrdinals do
+      selectors := selectors.push (if ordinal == 1 then .next else .matchSite ordinal)
+    return some selectors
+  catch _ =>
+    return none
+
+private def canReplayWithSelectors (target : Expr) (recorded : Array RecordedEvent)
+    (searchedResult : Simp.Result) (selectors : Array ReplaySelector) : TacticM Bool := do
   try
     withoutModifyingState do
-      let count := certificateEventCount recorded
-      let mut events := #[]
-      for index in *...count do
-        let some event := recorded[index]? | return false
-        events := events.push (← recordedReplayEvent event (withPosition := withPositions))
+      let some events ← recordedReplayEvents recorded selectors | return false
       let (replayedResult, replayState) ← runReplay target events
       unless replayState.next == events.size do
         return false
-      if searchedResult.expr.isTrue then
-        isReflexiveResult replayedResult.expr
-      else
-        -- A certificate is a replacement proof program, not a promise to
-        -- preserve the simplifier's internal expression representation.
-        return ← isDefEq searchedResult.expr replayedResult.expr
+      return ← reachesSearchedResult? searchedResult replayedResult
   catch _ =>
     return false
 
 private def replayEncoding? (target : Expr) (recorded : Array RecordedEvent)
-    (searchedResult : Simp.Result) : TacticM (Option Bool) := do
-  if ← canReplay target recorded searchedResult (withPositions := false) then
-    return some false
-  if ← canReplay target recorded searchedResult (withPositions := true) then
-    return some true
+    (searchedResult : Simp.Result) : TacticM (Option (Array ReplaySelector)) := do
+  let next := nextSelectors recorded
+  if ← canReplayWithSelectors target recorded searchedResult next then
+    return some next
+  if let some mixed ← discoverSelectors? target recorded then
+    if ← canReplayWithSelectors target recorded searchedResult mixed then
+      return some mixed
+  let ticks := tickSelectors recorded
+  if ← canReplayWithSelectors target recorded searchedResult ticks then
+    return some ticks
   return none
 
-/-- Replay a recorded prefix, preferring a position-free encoding. The result
-is the complete target after that prefix and whether absolute positions were
-needed. -/
+/-- Replay a recorded prefix using the same selector order as a complete
+certificate. The result is the complete target after that prefix and the
+selectors that validated it. -/
 private def replayRecorded? (target : Expr)
-    (recorded : Array RecordedEvent) : TacticM (Option (Simp.Result × Bool)) := do
-  for withPositions in #[false, true] do
+    (recorded : Array RecordedEvent) : TacticM (Option (Simp.Result × Array ReplaySelector)) := do
+  let mut candidates := #[nextSelectors recorded]
+  if let some mixed ← discoverSelectors? target recorded then
+    candidates := candidates.push mixed
+  candidates := candidates.push (tickSelectors recorded)
+  for selectors in candidates do
     try
-      let count := certificateEventCount recorded
-      let mut events := #[]
-      for index in *...count do
-        let some event := recorded[index]? | return none
-        events := events.push (← recordedReplayEvent event withPositions)
+      let some events ← recordedReplayEvents recorded selectors | continue
       let (result, state) ← runReplay target events
       if state.next == events.size then
-        return some (result, withPositions)
+        return some (result, selectors)
     catch _ =>
       pure ()
   return none
@@ -1277,6 +1571,8 @@ private def semanticEventReport (event : RecordedEvent)
     premises
     encodingKind := encoding?.map (·.kind)
     encodingReason := encoding?.bind (·.reason)
+    selectorKind := encoding?.bind (·.selectorKind)
+    selectorValue := encoding?.bind (·.selectorValue)
   }
 
 private def executionReport (target : Expr) (result : Simp.Result)
@@ -1390,11 +1686,18 @@ private def passiveOriginalSimp (simpStx reportStx : Syntax) (target : Expr)
   catch ex =>
     logWarningAt reportStx m!"passive simp recording report failed: {← exceptionText ex}"
 
-private def namedEncodingInfos (events : Array RecordedEvent) : Array EventEncodingInfo := Id.run do
+private def namedEncodingInfos (events : Array RecordedEvent)
+    (selectors : Array ReplaySelector) : Array EventEncodingInfo := Id.run do
   let count := certificateEventCount events
   let mut result := #[]
-  for _ in *...count do
-    result := result.push { kind := "named_rule", reason := none }
+  for index in *...count do
+    let selector := selectors[index]?.getD .next
+    result := result.push {
+      kind := "named_rule"
+      reason := none
+      selectorKind := selectorKind? selector
+      selectorValue := selectorValue? selector
+    }
   return result
 
 private def planEncodingInfos (plan : CertificatePlan) : Array EventEncodingInfo :=
@@ -1495,21 +1798,28 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   let mut premiseEncodingInfos : Array (Array PremiseEncodingInfo) := #[]
   let mut encodingMetrics : EncodingMetrics := {}
   let mut encodingFallbackReason? : Option String := none
-  let mut positionsNeeded := flatEncoding?.getD false
-  if let some flatWithPositions := flatEncoding? then
-    suggestion := ← certificateText state.events (withPositions := flatWithPositions)
-    encodingInfos := namedEncodingInfos state.events
+  let mut positionsNeeded := flatEncoding?.getD #[] |>.any isTickSelector
+  if let some flatSelectors := flatEncoding? then
+    suggestion := ← certificateText state.events flatSelectors
+    encodingInfos := namedEncodingInfos state.events flatSelectors
     premiseEncodingInfos := state.events.map (fun _ => #[])
+    let mut nextSelectorCount := 0
+    let mut matchSelectorCount := 0
+    let mut tickSelectorCount := 0
+    for selector in flatSelectors do
+      match selector with
+      | .next => nextSelectorCount := nextSelectorCount + 1
+      | .matchSite _ => matchSelectorCount := matchSelectorCount + 1
+      | .tickPos _ => tickSelectorCount := tickSelectorCount + 1
+      | .discover .. => pure ()
     encodingMetrics := {
       namedRuleEvents := encodingInfos.size
+      nextSelectorCount
+      matchSelectorCount
+      tickSelectorCount
     }
   else
-    let plan? ← buildCertificatePlan? target state.events result (withPositions := false)
-    let plan? ← if plan?.isSome then
-      pure plan?
-    else
-      buildCertificatePlan? target state.events result (withPositions := true)
-    let plan? ← match plan? with
+    let plan? ← match (← buildCertificatePlan? target state.events result) with
       | some plan => pure (some plan)
       | none => buildWholeResultPlan? target result
     match plan? with
@@ -1545,11 +1855,11 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
         else
           isDefEq nodeResult.expr result.expr
         if reachesResult then
-          if let some withPositions ← replayEncoding? input nodeState.events nodeResult then
+          if let some selectors ← replayEncoding? input nodeState.events nodeResult then
             let mut phases := previousPhases
             if certificateEventCount nodeState.events > 0 then
               phases := phases.push
-                (← certificateText nodeState.events (withPositions := withPositions))
+                (← certificateText nodeState.events selectors)
             let candidate := joinCertificatePhases phases
             if !candidate.isEmpty &&
                 (suggestion.isEmpty || candidate.utf8ByteSize < suggestion.utf8ByteSize) then
@@ -1562,7 +1872,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
             let transition? ← try
               withoutModifyingState do
                 let prefixEvents := nodeState.events.extract 0 prefixCount
-                let some (prefixResult, prefixWithPositions) ← replayRecorded? input prefixEvents
+                let some (prefixResult, prefixSelectors) ← replayRecorded? input prefixEvents
                   | return none
                 -- A replay phase would close the goal before the normalizer ran.
                 if prefixCount > 0 && (← isReflexiveResult prefixResult.expr) then
@@ -1573,7 +1883,7 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
                 let mut phases := previousPhases
                 if prefixCount > 0 then
                   phases := phases.push
-                    (← certificateText prefixEvents (withPositions := prefixWithPositions))
+                    (← certificateText prefixEvents prefixSelectors)
                 phases := phases.push "normalize_category"
                 return some (normalized.expr, phases, ← isReflexiveResult normalized.expr)
             catch _ =>

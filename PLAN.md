@@ -717,6 +717,20 @@ require an earlier unrecorded definitional unfold; their current whole-result
 fallbacks compile alone and together, while compact event closure is assigned
 to Package F. The full `Experiment/run.sh` regression passes.
 
+Package D is now implemented. `simp_explicit` accepts structural `match n`,
+explicit `tick n`, and legacy numeric tick selectors. Structural probing counts
+only proof-carrying, expression-changing applications with exact premise
+consumption and rolls back both metavariables and premise-provider state at
+every skipped site. The encoder validates selector-free replay first, then a
+discovered mixed `next`/`match` program, and uses absolute ticks only as the
+last fallback; historical expressions used during discovery never enter the
+printed certificate or JSON. Schema version 4 reports nullable per-event
+selectors and aggregate selector counts. Focused syntax, rollback, and mutation
+fixtures pass, existing position-free certificates remain position-free, and
+the six layered `DropRight` traversal cases compile alone and together through
+their deferred whole-result presentation fallback. The complete
+`Experiment/run.sh` regression passes.
+
 The known recorder failures are the staged work packages in sections 8 and 11
 of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result
 fallback, recorded side-condition proofs, structural selectors, hypothesis and
@@ -813,8 +827,8 @@ All three directions retain the same project rules:
   original body; and
 - `Experiment/run.sh` remains the single end-to-end verification command.
 
-The next concrete milestone is package D from
-[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): add side-effect-free
-structural `match` selectors, retain explicit `tick` as the absolute fallback,
-and materialize the six `DropRight` traversal failures with selector mutation
-tests.
+The next concrete milestone is package E from
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md): add stable local naming and
+deterministic context programs for hypothesis, multi-location, dependent-local,
+and `at *` simplification, then materialize the two `DropRight` occurrences
+whose exported proofs currently mention inaccessible case binders.
