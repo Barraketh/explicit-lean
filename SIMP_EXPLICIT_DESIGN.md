@@ -255,6 +255,17 @@ or transport fallbacks. Before printing, it must:
 The fallback is allowed to be verbose. Its purpose is to make coverage
 complete; named rules and later normalizers provide compression.
 
+Proof-export source-size diagnostics are deliberately bounded. Sharing first
+computes an exact expanded expression-tree size using the memoized structural
+size traversal. When that size is at most the fixed internal threshold of
+100,000 nodes, `Metrics.unsharedBytes` is `some` of the exact UTF-8 size of
+the fully expanded pretty-print; above the threshold it is `none`. The exact
+public `Metrics.unsharedNodes` value makes omission auditable. This bound
+applies only to the unused diagnostic pretty-print: repeated-subterm sharing,
+shared value/type rendering, and kernel validation always run. The permanent
+large-DAG proof-export probe checks both branches and re-elaborates the shared
+source.
+
 ## 6. Replay model
 
 Replay uses fixed, certificate-specific simplifier methods. There is no ambient
@@ -827,6 +838,15 @@ the same body. Proof export abstracts unresolved elaboration metavariables to
 inferred arguments and emits exact-index local naming for inaccessible locals;
 the final aggregate compile, rather than the optimistic attempt, is the
 acceptance check and both attempts are retained in the audit record.
+
+The bounded proof-export scaling regression is separate from context replay.
+It verifies the production Centralizer occurrence `8a9d921fe307a652`
+(`simp [includeRight]`) in isolation through the `whole_result_proof` /
+`presentation_gap` path with a 30-second recording budget, then performs one
+passive recording compile of the module and checks all 13 stable supported
+occurrence IDs within a 180-second budget. The full module closure is not
+claimed by this diagnostic: occurrence `161579b1c1009ed4` is retained as the
+next separately classified context-encoding work item.
 
 Gate: every occurrence has a terminal outcome; every committed successful
 execution is materialized and compiles in its complete module; aggregate

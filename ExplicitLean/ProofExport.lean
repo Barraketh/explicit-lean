@@ -26,7 +26,12 @@ structure Metrics where
   bindingCount : Nat := 0
   haveCount : Nat := 0
   prunedCount : Nat := 0
-  unsharedBytes : Nat := 0
+  /-- Exact UTF-8 size of the fully expanded source, when measuring it is
+      bounded.  Large expressions deliberately report `none` rather than
+      spending unbounded time constructing an otherwise unused diagnostic. -/
+  unsharedBytes : Option Nat := none
+  /-- Exact structural size of the expanded expression tree. -/
+  unsharedNodes : Nat := 0
   sharedBytes : Nat := 0
   deriving Inhabited
 
@@ -153,8 +158,15 @@ private structure SharingResult where
   bindingCount : Nat
   haveCount : Nat
   prunedCount : Nat
-  unsharedBytes : Nat := 0
+  unsharedNodes : Nat := 0
+  unsharedBytes : Option Nat := none
   sharedBytes : Nat := 0
+
+/-- The full unshared pretty-print is a diagnostic metric only.  Keep that
+    work bounded by the exact expanded-node estimate computed during sharing;
+    semantic sharing, shared-source rendering, and validation remain
+    unconditional. -/
+private def unsharedMetricNodeThreshold : Nat := 100000
 
 private def sharedBinderName (expr : Expr) (index : Nat)
     (isProof isType : Bool) : Name :=
@@ -284,7 +296,10 @@ private def shareRepeatedSubterms (body : Expr) (minSize : Nat := 12)
     lhs.estimatedSavings > rhs.estimatedSavings
   candidates := candidates.extract 0 (min candidates.size maxBindings)
   candidates := candidates.qsort fun lhs rhs => lhs.size < rhs.size
-  introduceSharedBindings candidates 0 {} #[] body
+  let result ← introduceSharedBindings candidates 0 {} #[] body
+  let bodyKey : ExprStructEq := ⟨body⟩
+  let unsharedNodes := sizes[bodyKey]?.getD 1
+  pure { result with unsharedNodes }
 
 private def renderBody (value : Expr) (binderNames : Array Name)
     (opts : Lean.Options) : MetaM (String × String × SharingResult) := do
@@ -297,25 +312,35 @@ private def renderBody (value : Expr) (binderNames : Array Name)
     Meta.withLCtx lctx (← getLocalInstances) do
       withOptions (fun _ => opts) do
         let typeText := toString (← Meta.ppExpr (← inferType body))
-        let unsharedText := toString (← Meta.ppExpr body)
         let shared ← shareRepeatedSubterms body
         let sharedText := toString (← Meta.ppExpr shared.body)
+        let unsharedBytes ←
+          if shared.unsharedNodes ≤ unsharedMetricNodeThreshold then
+            let unsharedText := toString (← Meta.ppExpr body)
+            pure (some unsharedText.utf8ByteSize)
+          else
+            pure none
         pure (typeText, sharedText, {
           shared with
-            unsharedBytes := unsharedText.utf8ByteSize
+            unsharedBytes
             sharedBytes := sharedText.utf8ByteSize
         })
 
 private def renderExpr (value type : Expr) (opts : Lean.Options) : MetaM (String × String × SharingResult) := do
   withOptions (fun _ => opts) do
-    let unsharedText := toString (← Meta.ppExpr value)
     let shared ← shareRepeatedSubterms value
     let sharedText := toString (← Meta.ppExpr shared.body)
     let typeText := toString (← Meta.ppExpr type)
+    let unsharedBytes ←
+      if shared.unsharedNodes ≤ unsharedMetricNodeThreshold then
+        let unsharedText := toString (← Meta.ppExpr value)
+        pure (some unsharedText.utf8ByteSize)
+      else
+        pure none
     pure (typeText, sharedText, {
         shared with
         body := shared.body
-        unsharedBytes := unsharedText.utf8ByteSize
+        unsharedBytes
         sharedBytes := sharedText.utf8ByteSize
     })
 
@@ -400,6 +425,7 @@ meta def render (value : Expr) (type? : Option Expr := none)
       haveCount := sharing.haveCount
       prunedCount := sharing.prunedCount
       unsharedBytes := sharing.unsharedBytes
+      unsharedNodes := sharing.unsharedNodes
       sharedBytes := valueText.utf8ByteSize
     }
   }

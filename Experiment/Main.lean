@@ -31,13 +31,17 @@ private def exportTheorem (name : Name) (binderNames : Array Name)
   IO.FS.createDirAll dir
   let stem := name.toString.replace "." "_"
   IO.FS.writeFile (dir / s!"{stem}.shared-body.lean") (rendered.valueText ++ "\n")
+  let unsharedBytes := match rendered.metrics.unsharedBytes with
+    | some bytes => toString bytes
+    | none => "omitted"
   let statsText :=
     s!"private constants inlined: {rendered.metrics.privateConstantsInlined}\n" ++
     s!"shared bindings: {rendered.metrics.bindingCount}\n" ++
     s!"proof haves: {rendered.metrics.haveCount}\n" ++
     s!"value lets: {rendered.metrics.bindingCount - rendered.metrics.haveCount}\n" ++
     s!"pruned candidates: {rendered.metrics.prunedCount}\n" ++
-    s!"unshared body bytes: {rendered.metrics.unsharedBytes}\n" ++
+    s!"unshared body bytes: {unsharedBytes}\n" ++
+    s!"unshared body nodes: {rendered.metrics.unsharedNodes}\n" ++
     s!"shared body bytes: {rendered.valueText.utf8ByteSize}\n"
   IO.FS.writeFile (dir / s!"{stem}.stats") statsText
 

@@ -774,6 +774,21 @@ configuration away and contain no replay configuration mode. The production
 IDs `af1f3238d87dcae6` and `5795dc0135cc7db3`, and closes its ten-entry module
 with nine materialized replacements and one `not_reached` terminal outcome.
 
+The proof-export scaling diagnostic is now bounded. `ProofExport.Metrics`
+reports `unsharedBytes : Option Nat`: it retains an exact byte count for small
+expressions and deliberately omits that diagnostic for expressions whose exact
+expanded tree has more than 100,000 nodes. The public `unsharedNodes` metric
+is exact and comes from the memoized sharing traversal; semantic sharing,
+shared-source rendering, and kernel validation are unaffected. The permanent
+large-DAG probe checks omission, compact shared output, and materialization.
+`Experiment/check_proof_export_scaling.py` also checks that the Centralizer
+target `8a9d921fe307a652` (`simp [includeRight]`) materializes through the
+whole-result proof/presentation-gap path within the 30-second isolated budget,
+and that one passive compile observes all 13 supported Centralizer occurrences
+within the 180-second module budget. Full Centralizer closure remains deferred
+to the separately classified context occurrence `161579b1c1009ed4`, so this
+regression does not claim aggregate closure.
+
 The known recorder failures are the staged work packages in sections 8 and 11
 of [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). They cover proof-result
 fallback, recorded side-condition proofs, structural selectors, hypothesis and
