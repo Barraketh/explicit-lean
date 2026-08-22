@@ -42,6 +42,31 @@ set_option explicitLean.simpExplicit.report true in
 example (n : Nat) : reductionDelta n = n + 1 := by
   simp_explicit? only [reductionDelta]
 
+set_option explicitLean.simpExplicit.report true in
+example (n : Nat) : (fun x : Nat => x + 1) n = n + 1 := by
+  simp_explicit?
+
+set_option explicitLean.simpExplicit.report true in
+example (n : Nat) : (let x := n + 1; x) = n + 1 := by
+  simp_explicit?
+
+set_option explicitLean.simpExplicit.report true in
+example (n : Nat) :
+    @ReductionInductive.rec (fun _ => Nat) (fun left _ => left)
+      (ReductionInductive.mk n 0) = n := by
+  simp_explicit?
+
+set_option explicitLean.simpExplicit.report true in
+example (n : Nat) : (ReductionInductive.mk n 0).1 = n := by
+  simp_explicit?
+
+/- Iota replay must retain the beta capability needed by matcher reduction
+   after an earlier pre-phase rewrite exposes the constructor discriminant. -/
+set_option explicitLean.simpExplicit.report true in
+example {α : Type} (p : α → Bool) (x : α) (n : Nat) (h : p x = true) :
+    (match p x with | true => n | false => 0) = n := by
+  simp_explicit? [h]
+
 /- Wrong operation identity, kind, selector, order, missing command, and
    duplicate command must all fail rather than being silently skipped. -/
 example (n : Nat) : reductionDelta n = n + 1 := by

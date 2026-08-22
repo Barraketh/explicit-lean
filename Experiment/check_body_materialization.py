@@ -224,12 +224,14 @@ def check_drop_right() -> None:
             raise RuntimeError(f"DropRight dispositions changed: {report!r}")
         certificates = coverage.committed_certificates(report)
         if entry["id"] != "c9eca03fcd0280ed":
-            if certificates or any(
-                execution.get("operationalAdmissibility", {}).get("code") == "accepted"
-                or execution.get("acceptedCertificate") is not None
+            if len(certificates) != 2 or any(
+                execution.get("operationalAdmissibility", {}).get("code") != "accepted"
+                or execution.get("encoding", {}).get("mode") != "event"
+                or execution.get("encoding", {}).get("generatedProofEvents") != 0
+                or "reduce iota" not in (execution.get("acceptedCertificate") or "")
                 for execution in executions
             ):
-                raise RuntimeError(f"DropRight fallback branch passed the operational gate: {report!r}")
+                raise RuntimeError(f"DropRight iota branches did not close operationally: {report!r}")
         else:
             if len(certificates) != 1:
                 raise RuntimeError(f"DropRight c9 did not expose exactly one operational branch: {report!r}")
@@ -261,15 +263,24 @@ def check_drop_right() -> None:
                 for execution in executions
             ):
                 raise RuntimeError(f"DropRight event encoding changed: {report!r}")
-        if coverage.closure_terminal_classification(report) != "coverage_failure":
-            raise RuntimeError(f"DropRight fallback did not fail the completion gate: {report!r}")
+        expected_terminal = (
+            "coverage_failure" if entry["id"] == "c9eca03fcd0280ed"
+            else "committed_pending"
+        )
+        if coverage.closure_terminal_classification(report) != expected_terminal:
+            raise RuntimeError(
+                f"DropRight terminal classification changed from {expected_terminal}: {report!r}"
+            )
 
 
 def main() -> None:
     check_terminal_helpers()
     check_fixture()
     check_drop_right()
-    print("operational owners materialized; DropRight fallbacks were rejected and one named-delta branch closed")
+    print(
+        "operational owners materialized; DropRight iota branches closed and "
+        "the remaining named-delta observer gap stayed classified"
+    )
 
 
 if __name__ == "__main__":

@@ -923,11 +923,23 @@ suite, historical ten-case DropRight operational aggregate, and full
 `Experiment/run.sh` regression all pass. Bilinear now materializes nine of ten
 occurrences. Centralizer `161579b1c1009ed4` consumes the public `Finsupp.sum`
 delta and first named event, then remains a precise O2b observer gap before
-event 2. O2b instruments or mirrors the pinned simplifier's private transition
-boundaries; only that authoritative observer may close the Centralizer gate as
-a `Finsupp.sum` reduction followed by its ten named theorem events. The split
-is not certificate compression: experiments showed that omitting repeated
-diagnostic theorem events can produce a compiling shorter program, but doing
-so would violate the complete ordered operational-trace invariant. Complete
-non-simproc corpus closure follows only after O2b and the remaining operational
-packages close the now-visible failure cohorts.
+event 2. O2b is implemented in schema 12 by an exact recursive pre-method
+interposer at the public boundary immediately before private `reduceStep`, plus
+exact classification of the pinned hardwired `simpMatch` iota path. The
+Centralizer raw trace contains 12 callbacks: named `Finsupp.sum` and beta
+reductions followed by ten named-theorem callbacks. Four repeated theorem
+callbacks arise from speculative versus committed congruence sites. They
+remain aligned in the raw report as `nonmaterial_internal_execution`; the
+eight-command executable projection uses four `match 2` selectors and must
+reach the exact recorded final state before fresh full-module materialization.
+The bounded one-copy Centralizer gate passes with no generated proof or
+`change`. Enabling beta internally for the fixed iota primitive also turns both
+dynamic branches of the historical DropRight `simp [h]` fixtures into accepted
+event-only certificates; their enclosing owner rewrite remains O5 work. O2b
+intentionally does not yet encode private `reduceStep` branches
+for metavariable instantiation, projection-function reduction, general
+`autoUnfold`, or raw natural-literal folding; exact replay makes those precise
+coverage failures, and O6 must add any fixed operations reached by the corpus.
+The complete `Experiment/run.sh` regression passes. Complete non-simproc corpus
+closure follows only after the remaining
+operational packages close the now-visible failure cohorts.

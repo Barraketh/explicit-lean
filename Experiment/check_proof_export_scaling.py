@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded O1 transition-gate check on the production Centralizer module."""
+"""Bounded O2b projection and materialization gate on Centralizer."""
 
 from __future__ import annotations
 
@@ -62,7 +62,16 @@ def load_entries() -> tuple[dict, list[dict], str]:
     return target, entries, document["mathlib_revision"]
 
 
-def check_public_delta_seam(record: dict) -> None:
+def _event_label(event: dict) -> tuple[str, str | None]:
+    reduction = event.get("reduction")
+    if isinstance(reduction, dict):
+        return "reduction", reduction.get("name") or reduction.get("kind")
+    origins = event.get("origins") or []
+    names = [origin.get("name") for origin in origins if isinstance(origin, dict)]
+    return "named_rule", names[0] if len(names) == 1 else None
+
+
+def check_public_delta_seam(record: dict, target: dict) -> dict:
     reports = {
         report.get("occurrenceId"): report
         for report in record.get("reports", [])
@@ -75,9 +84,6 @@ def check_public_delta_seam(record: dict) -> None:
         raise RuntimeError(f"Centralizer target source changed: {report!r}")
     if report.get("schemaVersion") != coverage.EXPECTED_SIMP_REPORT_SCHEMA_VERSION:
         raise RuntimeError(f"Centralizer report schema changed: {report!r}")
-    # O2a deliberately stops at the public pre-method seam.  The trace is
-    # evidence that the named delta was observed; O2b owns the pinned private
-    # observer needed to validate/materialize the complete context sequence.
     committed = [
         execution
         for execution in report.get("executions", [])
@@ -89,46 +95,104 @@ def check_public_delta_seam(record: dict) -> None:
         )
     execution = committed[0]
     accepted, code = coverage.report_admissibility(execution)
-    if accepted or code != "unidentified_theorem_application":
-        raise RuntimeError(
-            f"Centralizer public seam unexpectedly closed the O2b observer gap: {execution!r}"
-        )
-    if execution.get("encodingStatus") != "inadmissible":
-        raise RuntimeError(f"Centralizer observer gap was not retained: {execution!r}")
-    if execution.get("encodingFallbackReason") != "context_subject_encoding":
-        raise RuntimeError(f"Centralizer observer-gap classification changed: {execution!r}")
-    continuity = execution.get("transitionContinuity") or {}
-    if (
-        continuity.get("reasonCode") != "unidentified_theorem_application"
-        or continuity.get("firstUnconsumedEventIndex") != 2
-        or continuity.get("gapLocation") != "between_events"
-    ):
-        raise RuntimeError(f"Centralizer public-seam continuity changed: {execution!r}")
+    if not accepted or code != "accepted":
+        raise RuntimeError(f"Centralizer O2b certificate was not accepted: {execution!r}")
+    if execution.get("encodingStatus") != "validated":
+        raise RuntimeError(f"Centralizer O2b certificate was not validated: {execution!r}")
     trace = execution.get("trace") or []
-    if len(trace) != 11:
-        raise RuntimeError(f"Centralizer event count changed: {report!r}")
-    reduction = trace[0]
-    if reduction.get("reduction") != {
-        "kind": "delta",
-        "name": "Finsupp.sum",
-        "field": None,
-    }:
-        raise RuntimeError(f"Centralizer first event is not named delta: {reduction!r}")
-    if reduction.get("origins"):
-        raise RuntimeError(f"Centralizer delta carried theorem provenance: {reduction!r}")
-    if any(event.get("encodingKind") is not None for event in trace):
-        raise RuntimeError(f"Centralizer diagnostic events were mislabeled as encoded: {trace!r}")
-    encoding = execution.get("encoding") or {}
+    if len(trace) != 12 or execution.get("certificateEventCount") != 12:
+        raise RuntimeError(f"Centralizer raw event count changed: {report!r}")
+    raw_expected = [
+        ("reduction", "Finsupp.sum"),
+        ("reduction", "beta"),
+        ("named_rule", "Finset.mul_sum"),
+        ("named_rule", "Algebra.TensorProduct.tmul_mul_tmul"),
+        ("named_rule", "one_mul"),
+        ("named_rule", "Algebra.TensorProduct.tmul_mul_tmul"),
+        ("named_rule", "one_mul"),
+        ("named_rule", "Finset.sum_mul"),
+        ("named_rule", "Algebra.TensorProduct.tmul_mul_tmul"),
+        ("named_rule", "mul_one"),
+        ("named_rule", "Algebra.TensorProduct.tmul_mul_tmul"),
+        ("named_rule", "mul_one"),
+    ]
+    raw_actual = [_event_label(event) for event in trace]
+    if raw_actual != raw_expected:
+        raise RuntimeError(f"Centralizer raw event sequence changed: {raw_actual!r}")
+    selected_kinds = {"reduction", "named_rule"}
+    selected = [event for event in trace if event.get("encodingKind") in selected_kinds]
+    omitted = [
+        event for event in trace
+        if event.get("encodingKind") == "nonmaterial_internal_execution"
+    ]
+    if len(selected) != 8 or len(omitted) != 4:
+        raise RuntimeError(
+            f"Centralizer selected/raw projection counts changed: "
+            f"selected={len(selected)} omitted={len(omitted)} trace={trace!r}"
+        )
+    selected_actual = [_event_label(event) for event in selected]
+    selected_expected = [
+        ("reduction", "Finsupp.sum"),
+        ("reduction", "beta"),
+        ("named_rule", "Finset.mul_sum"),
+        ("named_rule", "Algebra.TensorProduct.tmul_mul_tmul"),
+        ("named_rule", "one_mul"),
+        ("named_rule", "Finset.sum_mul"),
+        ("named_rule", "Algebra.TensorProduct.tmul_mul_tmul"),
+        ("named_rule", "mul_one"),
+    ]
+    if selected_actual != selected_expected:
+        raise RuntimeError(f"Centralizer selected event sequence changed: {selected_actual!r}")
     if any(
-        encoding.get(field) != 0
-        for field in ("reductionEvents", "deltaReductionEvents", "namedRuleEvents")
+        event.get("encodingReason") != "nonmaterial_internal_execution"
+        or event.get("selectorKind") is not None
+        or event.get("selectorValue") is not None
+        for event in omitted
     ):
-        raise RuntimeError(f"Centralizer diagnostic trace leaked into encoding metrics: {report!r}")
-    if report.get("acceptedCertificate") is not None or report.get("certificate"):
-        raise RuntimeError(f"O2a unexpectedly materialized the Centralizer context: {report!r}")
-    validation = report.get("validation") or {}
-    if validation.get("certificate") is not None:
-        raise RuntimeError(f"O2a unexpectedly exported a Centralizer certificate: {report!r}")
+        raise RuntimeError(f"Centralizer omitted event metadata is not aligned: {omitted!r}")
+    if any(event.get("encodingKind") not in selected_kinds for event in selected):
+        raise RuntimeError(f"Centralizer selected event metadata is invalid: {selected!r}")
+    encoding = execution.get("encoding") or {}
+    expected_metrics = {
+        "reductionEvents": 2,
+        "deltaReductionEvents": 1,
+        "namedRuleEvents": 6,
+        "nonmaterialInternalEvents": 4,
+        "generatedProofEvents": 0,
+        "generatedBindingCount": 0,
+        "presentationChangeCount": 0,
+        "wholeResultProofCount": 0,
+    }
+    for field, expected in expected_metrics.items():
+        if encoding.get(field) != expected:
+            raise RuntimeError(f"Centralizer metric {field} changed: {encoding!r}")
+    certificate = execution.get("acceptedCertificate")
+    if not isinstance(certificate, str) or not certificate.strip():
+        raise RuntimeError(f"Centralizer accepted certificate is missing: {execution!r}")
+    forbidden = ("change", "generated_proof", "whole_result_proof", "have ")
+    if any(token in certificate for token in forbidden):
+        raise RuntimeError(f"Centralizer certificate contains forbidden encoding: {certificate!r}")
+
+    materialized_root = coverage.OUTPUT / "centralizer-materialized"
+    materialized_path = coverage.write_copy(materialized_root, target, certificate)
+    for suffix in (".olean", ".ilean", ".c", ".trace", ".hash"):
+        materialized_path.with_suffix(suffix).unlink(missing_ok=True)
+    code, output, elapsed = coverage.run(
+        coverage.lean_command(materialized_path), timeout=180
+    )
+    if code != 0:
+        raise RuntimeError(
+            f"Centralizer accepted certificate failed full-module compilation "
+            f"after {elapsed:.3f}s:\n{output}"
+        )
+    return {
+        "rawEventCount": len(trace),
+        "selectedEventCount": len(selected),
+        "nonmaterialInternalEvents": len(omitted),
+        "certificate": certificate,
+        "materializedCompile": True,
+        "materializedSeconds": round(elapsed, 3),
+    }
 
 
 def check_module_recording(entries: list[dict], revision: str) -> dict:
@@ -169,11 +233,8 @@ def main() -> None:
     configure_output()
     target, entries, revision = load_entries()
     record = check_module_recording(entries, revision)
-    check_public_delta_seam(record)
-    print(
-        "O2a public seam passed: Centralizer observed named Finsupp.sum delta "
-        "with the complete context observer gap retained for O2b"
-    )
+    result = check_public_delta_seam(record, target)
+    print(f"O2b Centralizer projection and full-module materialization passed: {result!r}")
 
 
 if __name__ == "__main__":

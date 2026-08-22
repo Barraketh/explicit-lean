@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check O2a reduction replay and mutation fixtures."""
+"""Check O2b reduction observation, replay, and mutation fixtures."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def main() -> None:
     if code != 0:
         raise RuntimeError(f"reduction fixture failed: exit={code}\n{output}")
     reports = coverage.parse_recording_reports(output)
-    if len(reports) != 2:
+    if len(reports) != 7:
         raise RuntimeError(f"reduction recorder fixtures emitted {len(reports)} reports")
     for report in reports:
         if report.get("schema") != "explicitLean.simpRecording":
@@ -93,21 +93,99 @@ def main() -> None:
     ):
         raise RuntimeError(f"named-delta metrics changed: {delta_report!r}")
 
-    report = next(
-        report for report in reports if report is not delta_report
+    def trace(report: dict) -> list[dict]:
+        return [
+            event
+            for execution in report.get("executions", [])
+            for event in execution.get("trace", [])
+        ]
+
+    def reduction_events(report: dict) -> list[dict]:
+        return [event for event in trace(report) if event.get("reduction") is not None]
+
+    exposed_iota = next(
+        report for report in reports if "[h]" in report.get("originalSyntax", "")
     )
-    # Lean 4.32.2's pinned private reduceStep still has no eta branch.  The
-    # replay command is covered above; recording must not invent an eta event.
-    events = [
-        event
-        for execution in report.get("executions", [])
-        for event in execution.get("trace", [])
-    ]
-    if any((event.get("reduction") or {}).get("kind") == "eta" for event in events):
-        raise RuntimeError(f"pinned recorder unexpectedly observed eta: {report!r}")
-    encoding = report.get("encoding") or {}
-    if encoding.get("reductionEvents") != 0 or encoding.get("deltaReductionEvents") != 0:
-        raise RuntimeError(f"eta-only recorder report invented reduction metrics: {report!r}")
+    exposed_trace = trace(exposed_iota)
+    if [
+        event.get("reduction", {}).get("kind")
+        if event.get("reduction") is not None
+        else (event.get("origins") or [{}])[0].get("name")
+        for event in exposed_trace[:-1]
+    ] != ["syntax", "iota"]:
+        raise RuntimeError(f"pre-rewrite iota sequence changed: {exposed_iota!r}")
+    exposed_certificate = exposed_iota.get("acceptedCertificate") or ""
+    if "↓ h" not in exposed_certificate or "reduce iota" not in exposed_certificate:
+        raise RuntimeError(f"pre-rewrite iota certificate was not validated: {exposed_iota!r}")
+
+    observed_reports = {
+        (reduction_events(report)[0].get("reduction") or {}).get("kind"): report
+        for report in reports
+        if report is not exposed_iota and reduction_events(report)
+    }
+    expected_kinds = {"beta", "zeta", "iota", "projection", "delta"}
+    if set(observed_reports) != expected_kinds:
+        raise RuntimeError(f"reduction observer kinds changed: {observed_reports!r}")
+
+    expected_sequences = {
+        "delta": ["delta"],
+        "beta": ["beta"],
+        "zeta": ["zeta"],
+        "iota": ["iota", "beta", "beta"],
+        "projection": ["projection"],
+    }
+    for kind, report in observed_reports.items():
+        events = reduction_events(report)
+        sequence = [(event.get("reduction") or {}).get("kind") for event in events]
+        if sequence != expected_sequences[kind]:
+            raise RuntimeError(f"{kind} reduction ordering changed: {report!r}")
+        ticks = [event.get("tick") for event in events]
+        if ticks != sorted(ticks) or len(set(ticks)) != len(ticks):
+            raise RuntimeError(f"{kind} reduction ticks are not ordered: {report!r}")
+        for event in events:
+            if event.get("phase") != "pre" or event.get("step") != "visit":
+                raise RuntimeError(f"{kind} reduction phase/step changed: {report!r}")
+            if event.get("origins") or event.get("premises") or event.get("proof") is not None:
+                raise RuntimeError(f"{kind} reduction carried semantic provenance: {report!r}")
+        encoding = report.get("encoding") or {}
+        if encoding.get("reductionEvents") != len(events):
+            raise RuntimeError(f"{kind} reduction metrics changed: {report!r}")
+        if encoding.get("deltaReductionEvents") != (1 if kind == "delta" else 0):
+            raise RuntimeError(f"{kind} delta metrics changed: {report!r}")
+
+    projection = observed_reports["projection"]
+    projection_event = reduction_events(projection)[0].get("reduction")
+    if projection_event != {
+        "kind": "projection",
+        "name": "ReductionInductive",
+        "field": 0,
+    }:
+        raise RuntimeError(f"native projection identity changed: {projection!r}")
+
+    iota = observed_reports["iota"]
+    if not iota.get("acceptedCertificate"):
+        raise RuntimeError(f"iota recording did not validate its replay certificate: {iota!r}")
+
+    # The eta fixture remains replay-only: pinned reduceStep has no eta branch.
+    eta_report = next(
+        report
+        for report in reports
+        if not reduction_events(report) and "reductionDelta" not in report.get("originalSyntax", "")
+    )
+    if any((event.get("reduction") or {}).get("kind") == "eta" for event in trace(eta_report)):
+        raise RuntimeError(f"pinned recorder unexpectedly observed eta: {eta_report!r}")
+    eta_encoding = eta_report.get("encoding") or {}
+    if eta_encoding.get("reductionEvents") != 0 or eta_encoding.get("deltaReductionEvents") != 0:
+        raise RuntimeError(f"eta-only recorder report invented reduction metrics: {eta_report!r}")
+
+    # Each recorder execution must agree with its replay validation envelope.
+    for report in reports:
+        execution = (report.get("executions") or [None])[0]
+        validation = report.get("validation") or {}
+        if execution is None or execution.get("initialState") != validation.get("initialState"):
+            raise RuntimeError(f"recording validation initial state changed: {report!r}")
+        if execution.get("finalState") != validation.get("finalState"):
+            raise RuntimeError(f"recording validation final state changed: {report!r}")
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
     expect_failure(
@@ -145,7 +223,7 @@ def main() -> None:
             1,
         ),
     )
-    print("O2a reduction replay, rollback mutations, and pinned eta observation passed")
+    print("O2b reduction observation, replay, rollback mutations, and pinned eta observation passed")
 
 
 if __name__ == "__main__":

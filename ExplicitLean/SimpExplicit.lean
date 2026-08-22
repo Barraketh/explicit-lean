@@ -108,7 +108,7 @@ register_option explicitLean.simpExplicit.bodyScopeFrame : Nat := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 11
+def reportSchemaVersion : Nat := 12
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -357,6 +357,9 @@ structure EncodingMetrics where
   namedRuleEvents : Nat := 0
   reductionEvents : Nat := 0
   deltaReductionEvents : Nat := 0
+  /-- Raw callbacks whose exact local transition was represented by another
+      member of the same structural-match group. -/
+  nonmaterialInternalEvents : Nat := 0
   generatedProofEvents : Nat := 0
   generatedSimprocEvents : Nat := 0
   generatedSpecialEvents : Nat := 0
@@ -594,50 +597,129 @@ private def subtractOrigins (origins removed : Array Origin) : Array Origin := I
     remaining := next
   return result
 
-/-! This is the deliberately narrow recorder seam for named delta.  The
-    private simplifier `reduceStep` is not mirrored: we only inspect a public
-    pre-method boundary after it has declined to rewrite the expression. -/
-private def selectedDeltaReduction? (input : Expr) : Simp.SimpM (Option (Name × Expr)) := do
-  let .const head _ := input.getAppFn | return none
-  let cfg ← Simp.getConfig
-  let ctx ← Simp.getContext
-  if cfg.beta && input.getAppFn.isHeadBetaTargetFn false then
-    return none
-  if input.isProj then
-    return none
-  if ← isProjectionFn head then
-    return none
-  if cfg.autoUnfold then
-    return none
-  if cfg.iota then
-    let metaSnapshot ← liftM Meta.saveState
-    let simpSnapshot ← get
-    try
-      let iota? ← Simp.withSimpMetaConfig <| reduceRecMatcher? input
-      liftM metaSnapshot.restore
-      set simpSnapshot
-      if iota?.isSome then
+private def replayZeta? (input : Expr) : MetaM (Option Expr) := do
+  match input with
+  | .letE _ _ value body _ =>
+      return some (expandLet body #[value] (zetaHave := true))
+  | _ => return none
+
+/-! This public pre-method interposer implements the supported prefix branches
+    in pinned `reduceStep` precedence. The upstream `Simp.mainCore` remains
+    authoritative; a successful `.visit` makes it recurse on the observed
+    result, so its private transition is not run a second time. Unsupported
+    private branches remain unrecorded and therefore fail exact closed replay;
+    they cannot become accepted certificates accidentally. -/
+private def selectedReduction? (input : Expr) : Simp.SimpM (Option (ReductionIdentity × Expr)) := do
+  let metaSnapshot ← liftM Meta.saveState
+  let simpSnapshot ← get
+  let restore := do
+    liftM metaSnapshot.restore
+    set simpSnapshot
+  try
+    let cfg ← Simp.getConfig
+    let f := input.getAppFn
+    if cfg.beta && f.isHeadBetaTargetFn false then
+      let output := f.betaRev input.getAppRevArgs
+      if !Expr.equal input output then
+        return some ({ kind := .beta }, output)
+      restore
+      return none
+    if cfg.proj then
+      match input with
+      | .proj structureName field _ =>
+          match (← Simp.withSimpMetaConfig <| reduceProj? input) with
+          | some output =>
+              if !Expr.equal input output then
+                return some ({ kind := .projection structureName field }, output)
+              restore
+              return none
+          | none => pure ()
+      | _ => pure ()
+    if cfg.iota then
+      match (← Simp.withSimpMetaConfig <| reduceRecMatcher? input) with
+      | some output =>
+          if !Expr.equal input output then
+            return some ({ kind := .iota }, output)
+          restore
+          return none
+      | none => pure ()
+    if let .letE _ _ value body nondep := input then
+      let zetaOutput? ← if cfg.zeta && (!nondep || cfg.zetaHave) then
+          pure (some (expandLet body #[value] (zetaHave := cfg.zetaHave)))
+        else if cfg.zetaUnused && !body.hasLooseBVars then
+          pure (some (consumeUnusedLet body))
+        else
+          pure none
+      if let some zetaOutput := zetaOutput? then
+        if !Expr.equal input zetaOutput then
+          let replayOutput? ← liftM <| replayZeta? input
+          if let some replayOutput := replayOutput? then
+            if Expr.equal zetaOutput replayOutput then
+              return some ({ kind := .zeta }, zetaOutput)
+        restore
         return none
-    catch _ =>
-      liftM metaSnapshot.restore
-      set simpSnapshot
+    let .const head _ := f | restore; return none
+    let ctx ← Simp.getContext
+    if input.isProj then
+      restore
       return none
-  unless ctx.isDeclToUnfold head do
-    return none
-  if ← isIrreducible head then
-    return none
-  let options ← getOptions
-  let smart := smartUnfolding.get options && (← getEnv).contains (mkSmartUnfoldingNameFor head)
-  unless cfg.unfoldPartialApp || smart do
-    let some cinfo := (← getEnv).find? head | return none
-    let some value := cinfo.value? | return none
-    if value.getNumHeadLambdas > input.getAppNumArgs then
+    if ← isProjectionFn head then
+      restore
       return none
-  let some output ← Simp.withSimpMetaConfig <| unfoldDefinition? input (ignoreTransparency := true)
-    | return none
-  if Expr.equal input output then
+    if cfg.autoUnfold then
+      restore
+      return none
+    unless ctx.isDeclToUnfold head do
+      restore
+      return none
+    if ← isIrreducible head then
+      restore
+      return none
+    let options ← getOptions
+    let smart := smartUnfolding.get options && (← getEnv).contains (mkSmartUnfoldingNameFor head)
+    unless cfg.unfoldPartialApp || smart do
+      let some cinfo := (← getEnv).find? head
+        | restore
+          return none
+      let some value := cinfo.value?
+        | restore
+          return none
+      if value.getNumHeadLambdas > input.getAppNumArgs then
+        restore
+        return none
+    let some output ← Simp.withSimpMetaConfig <| unfoldDefinition? input (ignoreTransparency := true)
+      | restore
+        return none
+    if Expr.equal input output then
+      restore
+      return none
+    Simp.recordSimpTheorem (.decl head)
+    return some ({ kind := .delta head }, output)
+  catch _ =>
+    restore
     return none
-  return some (head, output)
+
+/- The pinned `Simp.simpMatch` pre-simproc invokes the same
+   `reduceRecMatcher?` operation before the private `reduceStep` boundary.
+   Classify only that exact proofless, origin-free result; the original
+   simproc step remains authoritative and the probe's temporary state is
+   restored before recording continues. -/
+private def classifyObservedIota? (input : Expr) (result : Simp.Result)
+    (preMeta postMeta : Meta.SavedState) (preSimp postSimp : Simp.State) : Simp.SimpM Bool := do
+  let isMatch ← try
+    liftM preMeta.restore
+    set preSimp
+    let cfg ← Simp.getConfig
+    if !cfg.iota then
+      pure false
+    else
+      let output? ← Simp.withSimpMetaConfig <| reduceRecMatcher? input
+      pure <| output?.any (Expr.equal result.expr)
+  catch _ =>
+    pure false
+  liftM postMeta.restore
+  set postSimp
+  return isMatch
 
 private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
     (method : Simp.Simproc) : Simp.Simproc := fun input => do
@@ -647,6 +729,8 @@ private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
   ref.set { state with tick := position, activeDepth := depth + 1 }
   let premiseStart := state.premises.size
   let before := (← get).diag
+  let preMetaSnapshot ← liftM Meta.saveState
+  let preSimpSnapshot ← get
   let originalStep ← try
     method input
   finally
@@ -657,17 +741,24 @@ private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
   if depth == 0 && phase == .pre then
     match originalStep with
     | .continue none =>
-        if let some (head, output) ← selectedDeltaReduction? input then
+        if let some (reduction, output) ← selectedReduction? input then
           let result : Simp.Result := { expr := output }
           step := .visit result
-          reduction? := some { kind := .delta head }
+          reduction? := some reduction
     | _ => pure ()
   let after := (← get).diag
+  let postMetaSnapshot ← liftM Meta.saveState
+  let postSimpSnapshot ← get
   if depth == 0 then
     if let some result := changedResult? input step then
       let state ← ref.get
       let premises := state.premises.extract premiseStart state.premises.size
       let premiseOrigins := premises.foldl (fun result premise => result ++ premise.origins) #[]
+      let origins := subtractOrigins (changedOrigins before after) premiseOrigins
+      if reduction?.isNone && phase == .pre && result.proof?.isNone && origins.isEmpty then
+        if ← classifyObservedIota? input result preMetaSnapshot postMetaSnapshot
+            preSimpSnapshot postSimpSnapshot then
+          reduction? := some { kind := .iota }
       ref.set {
         state with
           events := state.events.push {
@@ -676,8 +767,7 @@ private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
             input
             step
             result
-            origins := if reduction?.isSome then #[] else
-              subtractOrigins (changedOrigins before after) premiseOrigins
+            origins := if reduction?.isSome then #[] else origins
             premises
             reduction := reduction?
           }
@@ -972,6 +1062,11 @@ private structure CertificatePlan where
   positions : Bool
   source : String
   metrics : EncodingMetrics
+  /-- Event metadata remains aligned with the complete recorder trace.  The
+      executable certificate in `events` may be an order-preserving projection
+      of that trace. -/
+  rawEncodingInfos : Array EventEncodingInfo := #[]
+  rawPremiseEncodingInfos : Array (Array PremiseEncodingInfo) := #[]
 
 private structure ReplayState where
   tick : Nat := 0
@@ -1253,6 +1348,107 @@ private def diagnosticDefEq? (actual expected : Expr) : MetaM Bool := do
     metaSnapshot.restore
     return false
 
+/- Recorded callback expressions below structural binders contain fvar ids
+   whose local declarations no longer exist when certificate discovery runs.
+   Compare those expressions modulo a first-occurrence renaming of free and
+   metavariables.  This is only a selector anchor: the chosen operation still
+   has to reproduce both the local result and the exact final subject state. -/
+private structure ReplayCanonicalState where
+  /-- Free variables from the tactic's ambient local context are semantic
+      identities, not traversal binders, and must never be alpha-renamed. -/
+  ambientFVars : Array FVarId := #[]
+  fvars : Std.HashMap FVarId Nat := {}
+  mvars : Std.HashMap MVarId Nat := {}
+  levelMVars : Std.HashMap LMVarId Nat := {}
+  nextFVar : Nat := 0
+  nextMVar : Nat := 0
+  nextLevelMVar : Nat := 0
+
+private abbrev ReplayCanonicalM := StateM ReplayCanonicalState
+
+private def replayCanonicalLevel : Level → ReplayCanonicalM String
+  | .zero => pure "0"
+  | .succ level => return s!"(succ {← replayCanonicalLevel level})"
+  | .max lhs rhs => return s!"(max {← replayCanonicalLevel lhs} {← replayCanonicalLevel rhs})"
+  | .imax lhs rhs => return s!"(imax {← replayCanonicalLevel lhs} {← replayCanonicalLevel rhs})"
+  | .param name => pure s!"(param {name})"
+  | .mvar mvarId => do
+      let state ← get
+      if let some ordinal := state.levelMVars.get? mvarId then
+        return s!"l{ordinal}"
+      modify fun _ => { state with
+        levelMVars := state.levelMVars.insert mvarId state.nextLevelMVar
+        nextLevelMVar := state.nextLevelMVar + 1 }
+      return s!"l{state.nextLevelMVar}"
+
+private partial def replayCanonicalExpr : Expr → ReplayCanonicalM String
+  | .bvar index => pure s!"b{index}"
+  | .fvar fvarId => do
+      let state ← get
+      if state.ambientFVars.contains fvarId then
+        return s!"ambient:{repr fvarId}"
+      if let some ordinal := state.fvars.get? fvarId then
+        return s!"f{ordinal}"
+      modify fun _ => { state with
+        fvars := state.fvars.insert fvarId state.nextFVar
+        nextFVar := state.nextFVar + 1 }
+      return s!"f{state.nextFVar}"
+  | .mvar mvarId => do
+      let state ← get
+      if let some ordinal := state.mvars.get? mvarId then
+        return s!"m{ordinal}"
+      modify fun _ => { state with
+        mvars := state.mvars.insert mvarId state.nextMVar
+        nextMVar := state.nextMVar + 1 }
+      return s!"m{state.nextMVar}"
+  | .sort level => return s!"(sort {← replayCanonicalLevel level})"
+  | .const name levels =>
+      return s!"(const {name} [{String.intercalate "," (← levels.mapM replayCanonicalLevel)}])"
+  | .app fn arg => return s!"(app {← replayCanonicalExpr fn} {← replayCanonicalExpr arg})"
+  | .lam _ type body binderInfo =>
+      return s!"(lam {← replayCanonicalExpr type} {← replayCanonicalExpr body} {repr binderInfo})"
+  | .forallE _ type body binderInfo =>
+      return s!"(forall {← replayCanonicalExpr type} {← replayCanonicalExpr body} {repr binderInfo})"
+  | .letE _ type value body nondep =>
+      return s!"(let {← replayCanonicalExpr type} {← replayCanonicalExpr value} {← replayCanonicalExpr body} {nondep})"
+  | .lit literal => pure s!"(lit {repr literal})"
+  | .mdata _ expression => replayCanonicalExpr expression
+  | .proj name index expression =>
+      return s!"(proj {name} {index} {← replayCanonicalExpr expression})"
+
+/- The projection key is deliberately local to one recording run.  It keeps
+   the exact operation provenance, while the expression portions use the
+   first-occurrence binder normalization above so callback-local fvar/mvar
+   identifiers do not make identical transitions look different. -/
+private def replayCanonicalOrigin : Origin → String
+  | .decl name post inverse => s!"decl:{name}:{post}:{inverse}"
+  | .fvar fvarId => s!"fvar:{repr fvarId}"
+  | .stx id ref => s!"stx:{id}:{toString ref.prettyPrint}"
+  | .other name => s!"other:{name}"
+
+private def replayCanonicalReduction : ReductionKind → String
+  | .delta name => s!"delta:{name}"
+  | .beta => "beta"
+  | .zeta => "zeta"
+  | .iota => "iota"
+  | .projection structureName field => s!"projection:{structureName}:{field}"
+  | .eta => "eta"
+
+private def replayCanonicalEventKey (ambientFVars : Array FVarId)
+    (event : RecordedEvent) : String :=
+  let phase := match event.phase with
+    | .pre => "pre"
+    | .post => "post"
+  let operation := match event.reduction with
+    | some reduction => s!"reduction:{replayCanonicalReduction reduction.kind}"
+    | none =>
+        let origins := event.origins.map replayCanonicalOrigin
+        s!"theorem:{String.intercalate "," origins.toList}"
+  let initialState : ReplayCanonicalState := { ambientFVars }
+  let (input, state) := (replayCanonicalExpr event.input).run initialState
+  let (result, _) := (replayCanonicalExpr event.result.expr).run state
+  s!"{phase}|{operation}|input={input}|result={result}"
+
 private def replayExprMatches? (actual expected : Expr) : Simp.SimpM Bool := do
   if Expr.equal actual expected then
     return true
@@ -1264,8 +1460,8 @@ private def replayExprMatches? (actual expected : Expr) : Simp.SimpM Bool := do
     let result ← liftM (premiseDefEq? actual expected)
     liftM metaSnapshot.restore
     match result with
-    | .ok equal => return equal
-    | .error _ => return false
+    | .ok true => return true
+    | .ok false | .error _ => return false
   catch _ =>
     liftM metaSnapshot.restore
     return false
@@ -1301,17 +1497,11 @@ private def replayBeta? (input : Expr) : MetaM (Option Expr) := do
     return some (f.betaRev input.getAppRevArgs)
   return none
 
-private def replayZeta? (input : Expr) : MetaM (Option Expr) := do
-  match input with
-  | .letE _ _ value body _ =>
-      return some (expandLet body #[value] (zetaHave := true))
-  | _ => return none
-
 private def replayIota? (input : Expr) : Simp.SimpM (Option Expr) := do
   let snapshot ← Meta.saveState
   try
     let output? ← Simp.withSimpMetaConfig <|
-      withConfig (fun config => { config with iota := true }) <|
+      withConfig (fun config => { config with beta := true, iota := true }) <|
         reduceRecMatcher? input
     match output? with
     | some output => return some output
@@ -1960,7 +2150,8 @@ private def selectCertificateEvents? (target : Expr) (searchedResult : Simp.Resu
     let (replayedResult, replayState) ← runReplay target replayEvents
     unless replayState.next == replayEvents.size do
       return none
-    unless ← reachesSearchedResult? searchedResult replayedResult do
+    let reaches ← reachesSearchedResult? searchedResult replayedResult
+    unless reaches do
       return none
     return some selected
   catch _ =>
@@ -1976,75 +2167,185 @@ private def annotateSelectorInfo (events : Array EncodedEvent) : Array EncodedEv
       }
   }
 
+private structure ProjectedCertificateEvents where
+  selected : Array EncodedEvent
+  rawEncodingInfos : Array EventEncodingInfo
+  rawPremiseEncodingInfos : Array (Array PremiseEncodingInfo)
+  nonmaterialInternalEvents : Nat
+
+/-- Select an order-preserving executable projection of the raw trace.
+    Repeated callbacks with the same exact canonical local transition are
+    represented by one command selecting the last successful matching site;
+    this skips speculative congruence executions while retaining the committed
+    transition. Ambient free-variable identities remain part of the key. The
+    complete projected sequence must still reach the exact recorded result. -/
+private def projectCertificateEvents? (target : Expr) (searchedResult : Simp.Result)
+    (encoded : Array EncodedEvent) : TacticM (Option ProjectedCertificateEvents) := do
+  try
+    -- Projection is deliberately limited to the compact event IR.  Premises
+    -- and generated fallbacks retain their existing O4/legacy handling.
+    if encoded.any (fun event => event.event.premises.size > 0) then
+      return none
+    if encoded.any (fun event => event.info.kind == "generated_proof") then
+      return none
+    let mut deduplicated : Array EncodedEvent := #[]
+    let mut seen : Array String := #[]
+    let mut selectedRawIndices : Array Nat := #[]
+    let ambientFVars := (← getLCtx).getFVarIds
+    for index in *...encoded.size do
+      let some event := encoded[index]? | return none
+      let key := replayCanonicalEventKey ambientFVars event.event
+      match seen.findIdx? (· == key) with
+      | some groupIndex =>
+          -- The executable command selects the last successful site in this
+          -- equivalence class, so align its raw metadata with that callback.
+          deduplicated := deduplicated.set! groupIndex event
+          selectedRawIndices := selectedRawIndices.set! groupIndex index
+      | none =>
+          seen := seen.push key
+          deduplicated := deduplicated.push event
+          selectedRawIndices := selectedRawIndices.push index
+    deduplicated := deduplicated.map fun event =>
+      let key := replayCanonicalEventKey ambientFVars event.event
+      let multiplicity := encoded.foldl (fun count candidate =>
+        if replayCanonicalEventKey ambientFVars candidate.event == key then count + 1 else count) (0 : Nat)
+      if multiplicity > 1 then
+        { event with replay := { event.replay with selector := .matchSite multiplicity } }
+      else
+        event
+    let next? ← selectCertificateEvents? target searchedResult deduplicated .next
+    let selected? := next?
+    let selected? ← match selected? with
+      | some selected => pure (some selected)
+      | none => do
+          let discover? ← selectCertificateEvents? target searchedResult deduplicated .discover
+          pure discover?
+    let selected? ← match selected? with
+      | some selected => pure (some selected)
+      | none => do
+          let ticks? ← selectCertificateEvents? target searchedResult deduplicated .ticks
+          pure ticks?
+    let some selected := selected? | return none
+    let selected := annotateSelectorInfo selected
+    let mut rawInfos : Array EventEncodingInfo := #[]
+    let mut rawPremiseInfos : Array (Array PremiseEncodingInfo) := #[]
+    let mut nonmaterialInternalEvents := 0
+    for index in *...encoded.size do
+      let some rawEvent := encoded[index]? | return none
+      let key := replayCanonicalEventKey ambientFVars rawEvent.event
+      let some groupIndex := seen.findIdx? (· == key) | return none
+      if selectedRawIndices[groupIndex]? == some index then
+        let some selectedEvent := selected[groupIndex]? | return none
+        rawInfos := rawInfos.push selectedEvent.info
+        rawPremiseInfos := rawPremiseInfos.push selectedEvent.premiseEncodings
+      else
+        nonmaterialInternalEvents := nonmaterialInternalEvents + 1
+        rawInfos := rawInfos.push {
+          kind := "nonmaterial_internal_execution"
+          reason := some "nonmaterial_internal_execution"
+        }
+        rawPremiseInfos := rawPremiseInfos.push #[]
+    return some {
+      selected
+      rawEncodingInfos := rawInfos
+      rawPremiseEncodingInfos := rawPremiseInfos
+      nonmaterialInternalEvents
+    }
+  catch _ =>
+    return none
+
+private def makeCertificatePlan (searchedResult : Simp.Result)
+    (encoded : Array EncodedEvent) (bindings : Array GeneratedBinding)
+    (rawEncodingInfos : Array EventEncodingInfo := #[])
+    (rawPremiseEncodingInfos : Array (Array PremiseEncodingInfo) := #[])
+    (nonmaterialInternalEvents : Nat := 0) : TacticM CertificatePlan := do
+  let leaveOpen ← if searchedResult.expr.isTrue then pure false else
+    isReflexiveResultEarly searchedResult.expr
+  let source := certificatePlanText encoded bindings leaveOpen
+  let namedRuleEvents := encoded.foldl (fun n event =>
+    if event.info.kind == "named_rule" then n + 1 else n) 0
+  let generatedProofEvents := encoded.foldl (fun n event =>
+    if event.info.kind == "generated_proof" then n + 1 else n) 0
+  let generatedSimprocEvents := encoded.foldl (fun n event =>
+    if event.info.reason == some "simproc" then n + 1 else n) 0
+  let generatedSpecialEvents := encoded.foldl (fun n event =>
+    if event.info.reason == some "special_rule" then n + 1 else n) 0
+  let reductionEvents := encoded.foldl (fun n event =>
+    if event.info.kind == "reduction" then n + 1 else n) 0
+  let deltaReductionEvents := encoded.foldl (fun n event =>
+    match event.event.reduction with
+    | some { kind := .delta .. } => n + 1
+    | _ => n) 0
+  let generatedBindingBytes := bindings.foldl (fun n binding => n + binding.bytes) 0
+  let premiseEncodings := encoded.foldl (fun result event => result ++ event.premiseEncodings) #[]
+  let premiseBindingCount := premiseEncodings.foldl (fun n encoding =>
+    if encoding.bindingName.isSome then n + 1 else n) 0
+  let premiseBindingBytes := premiseEncodings.foldl (fun n encoding => n + encoding.bytes) 0
+  let nestedPremiseBindings := premiseEncodings.foldl (fun n encoding =>
+    if encoding.kind == "premise_nested" then n + 1 else n) 0
+  let termPremiseBindings := premiseEncodings.foldl (fun n encoding =>
+    if encoding.kind == "premise_term" then n + 1 else n) 0
+  let mut nextSelectorCount := 0
+  let mut matchSelectorCount := 0
+  let mut tickSelectorCount := 0
+  for event in encoded do
+    match event.replay.selector with
+    | .next => nextSelectorCount := nextSelectorCount + 1
+    | .matchSite _ => matchSelectorCount := matchSelectorCount + 1
+    | .tickPos _ => tickSelectorCount := tickSelectorCount + 1
+    | .discover .. => pure ()
+  let rawEncodingInfos := if rawEncodingInfos.isEmpty && !encoded.isEmpty then
+      encoded.map (·.info)
+    else
+      rawEncodingInfos
+  let rawPremiseEncodingInfos := if rawPremiseEncodingInfos.isEmpty && !encoded.isEmpty then
+      encoded.map (·.premiseEncodings)
+    else
+      rawPremiseEncodingInfos
+  return {
+    events := encoded
+    bindings
+    positions := tickSelectorCount > 0
+    source
+    metrics := {
+      namedRuleEvents
+      reductionEvents
+      deltaReductionEvents
+      nonmaterialInternalEvents
+      generatedProofEvents
+      generatedSimprocEvents
+      generatedSpecialEvents
+      generatedBindingCount := bindings.size
+      generatedBindingBytes
+      premiseBindingCount
+      premiseBindingBytes
+      nestedPremiseBindings
+      termPremiseBindings
+      nextSelectorCount
+      matchSelectorCount
+      tickSelectorCount
+      totalCertificateBytes := source.utf8ByteSize
+    }
+    rawEncodingInfos
+    rawPremiseEncodingInfos
+  }
+
 private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEvent)
     (searchedResult : Simp.Result) (initialUsedNames : Array Name := #[]) :
     TacticM (Option CertificatePlan) := do
   let some (baseEncoded, bindings, _) ← buildEncodedEvents? recorded initialUsedNames
     | return none
+  if let some projection ← projectCertificateEvents? target searchedResult baseEncoded then
+    let encoded := projection.selected
+    return some (← makeCertificatePlan searchedResult encoded bindings
+      projection.rawEncodingInfos projection.rawPremiseEncodingInfos
+      projection.nonmaterialInternalEvents)
   for mode in #[CertificateSelectorMode.next, CertificateSelectorMode.discover,
       CertificateSelectorMode.ticks] do
     let some selected ← selectCertificateEvents? target searchedResult baseEncoded mode
       | continue
     let encoded := annotateSelectorInfo selected
-    let leaveOpen ← if searchedResult.expr.isTrue then pure false else
-      isReflexiveResultEarly searchedResult.expr
-    let source := certificatePlanText encoded bindings leaveOpen
-    let namedRuleEvents := encoded.foldl (fun n event =>
-      if event.info.kind == "named_rule" then n + 1 else n) 0
-    let generatedProofEvents := encoded.foldl (fun n event =>
-      if event.info.kind == "generated_proof" then n + 1 else n) 0
-    let generatedSimprocEvents := encoded.foldl (fun n event =>
-      if event.info.reason == some "simproc" then n + 1 else n) 0
-    let generatedSpecialEvents := encoded.foldl (fun n event =>
-      if event.info.reason == some "special_rule" then n + 1 else n) 0
-    let reductionEvents := encoded.foldl (fun n event =>
-      if event.info.kind == "reduction" then n + 1 else n) 0
-    let deltaReductionEvents := encoded.foldl (fun n event =>
-      match event.event.reduction with
-      | some { kind := .delta .. } => n + 1
-      | _ => n) 0
-    let generatedBindingBytes := bindings.foldl (fun n binding => n + binding.bytes) 0
-    let premiseEncodings := encoded.foldl (fun result event => result ++ event.premiseEncodings) #[]
-    let premiseBindingCount := premiseEncodings.foldl (fun n encoding =>
-      if encoding.bindingName.isSome then n + 1 else n) 0
-    let premiseBindingBytes := premiseEncodings.foldl (fun n encoding => n + encoding.bytes) 0
-    let nestedPremiseBindings := premiseEncodings.foldl (fun n encoding =>
-      if encoding.kind == "premise_nested" then n + 1 else n) 0
-    let termPremiseBindings := premiseEncodings.foldl (fun n encoding =>
-      if encoding.kind == "premise_term" then n + 1 else n) 0
-    let mut nextSelectorCount := 0
-    let mut matchSelectorCount := 0
-    let mut tickSelectorCount := 0
-    for event in encoded do
-      match event.replay.selector with
-      | .next => nextSelectorCount := nextSelectorCount + 1
-      | .matchSite _ => matchSelectorCount := matchSelectorCount + 1
-      | .tickPos _ => tickSelectorCount := tickSelectorCount + 1
-      | .discover .. => pure ()
-    return some {
-      events := encoded
-      bindings
-      positions := tickSelectorCount > 0
-      source
-      metrics := {
-        namedRuleEvents
-        reductionEvents
-        deltaReductionEvents
-        generatedProofEvents
-        generatedSimprocEvents
-        generatedSpecialEvents
-        generatedBindingCount := bindings.size
-        generatedBindingBytes
-        premiseBindingCount
-        premiseBindingBytes
-        nestedPremiseBindings
-        termPremiseBindings
-        nextSelectorCount
-        matchSelectorCount
-        tickSelectorCount
-        totalCertificateBytes := source.utf8ByteSize
-      }
-    }
+    return some (← makeCertificatePlan searchedResult encoded bindings)
   return none
 
 /-- Encode one semantic simp result using the same event fallback and closed
@@ -3249,11 +3550,14 @@ private def namedEncodingInfos (events : Array RecordedEvent)
   return result
 
 private def planEncodingInfos (plan : CertificatePlan) : Array EventEncodingInfo :=
-  plan.events.map (·.info)
+  if plan.rawEncodingInfos.isEmpty then plan.events.map (·.info) else plan.rawEncodingInfos
 
 private def planPremiseEncodingInfos (plan : CertificatePlan) :
     Array (Array PremiseEncodingInfo) :=
-  plan.events.map (·.premiseEncodings)
+  if plan.rawPremiseEncodingInfos.isEmpty then
+    plan.events.map (·.premiseEncodings)
+  else
+    plan.rawPremiseEncodingInfos
 
 private structure ContextSubjectEncoding where
   eventText : String
@@ -3331,6 +3635,7 @@ private def addEncodingMetrics (lhs rhs : EncodingMetrics) : EncodingMetrics := 
   namedRuleEvents := lhs.namedRuleEvents + rhs.namedRuleEvents
   reductionEvents := lhs.reductionEvents + rhs.reductionEvents
   deltaReductionEvents := lhs.deltaReductionEvents + rhs.deltaReductionEvents
+  nonmaterialInternalEvents := lhs.nonmaterialInternalEvents + rhs.nonmaterialInternalEvents
   generatedProofEvents := lhs.generatedProofEvents + rhs.generatedProofEvents
   generatedSimprocEvents := lhs.generatedSimprocEvents + rhs.generatedSimprocEvents
   generatedSpecialEvents := lhs.generatedSpecialEvents + rhs.generatedSpecialEvents
@@ -3553,8 +3858,33 @@ private def selectorMetrics (events : Array RecordedEvent)
 
 private def contextSubjectEncoding? (target : Expr)
     (state : RecorderState) (result : Simp.Result) (usedNames : Array Name := #[]) :
-    TacticM (Option (ContextSubjectEncoding × Array Name)) := do
+  TacticM (Option (ContextSubjectEncoding × Array Name)) := do
   try
+    -- Use the same anchored event projection as ordinary target encoding
+    -- before considering the legacy flat context selector path.  This keeps
+    -- raw context metadata aligned when internal theorem callbacks are
+    -- omitted from the executable whole-subject certificate.
+    if !state.events.any (·.premises.size > 0) then
+      if let some plan ← buildCertificatePlan? target state.events result usedNames then
+        let continuity? ← if plan.metrics.mode == "event" &&
+            plan.metrics.generatedProofEvents == 0 && plan.metrics.termPremiseBindings == 0 then
+            pure none
+          else if plan.metrics.generatedSimprocEvents > 0 then
+            pure none
+          else
+            buildTransitionContinuity? target state.events result.expr
+        let eventText := certificatePlanEventListText plan.events
+        let allUsedNames := usedNames ++ plan.bindings.map (·.name)
+        return some ({
+          eventText
+          bindings := plan.bindings
+          encodingInfos := planEncodingInfos plan
+          premiseEncodingInfos := planPremiseEncodingInfos plan
+          metrics := plan.metrics
+          fallbackReason? := none
+          positionsNeeded := plan.positions
+          transitionContinuity? := continuity?
+        }, allUsedNames)
     if !state.events.any (·.premises.size > 0) then
       let includeTrailingReflexive := state.events.size > certificateEventCount state.events
       let selectors? ← if includeTrailingReflexive then
@@ -4289,23 +4619,11 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
         suggestion := ordinarySuggestion
         localRenames := #[]
       }
-    else if passive then
-      -- Passive recording must not turn a recorder validation gap into a
-      -- copied-module failure.  Preserve the observed traces and continuity
-      -- diagnostics, but withhold every candidate source; the caller runs the
-      -- original `simp` exactly once after this speculative pass.
-      pure {
-        initialLctx
-        finalLctx
-        traces := ordinaryTraces
-        bindings := #[]
-        metrics := aggregateMetrics
-        fallbackReason? := fallbackReason?.or (some "context_certificate_unavailable")
-        positionsNeeded
-        suggestion := ""
-        localRenames := #[]
-      }
     else do
+      -- Passive context recording is already enclosed by
+      -- `withoutModifyingState`, so it can validate the same stable-renaming
+      -- certificate as the interactive recorder without affecting the
+      -- original simp execution that follows.
       let renamePlan := stableRenamePlan
       if renamePlan.isEmpty then
         throwErrorAt reportStx

@@ -56,9 +56,12 @@ separately inventoried inputs to later phases.
 
 ### 3.1 Operational completeness
 
-Every state-changing simplifier transition is represented by a certificate
-command. This includes proofless or definitionally equal transitions that only
-expose the next theorem redex.
+Every state change that contributes to the committed subject is represented by
+a certificate command. This includes proofless or definitionally equal
+transitions that only expose the next theorem redex. A successful callback in
+a speculative congruence traversal is retained in the raw execution trace, but
+it is not itself a committed subject transition and is classified explicitly
+rather than printed as another command.
 
 For each subject, the recorder validates transition continuity:
 
@@ -108,6 +111,16 @@ operations and traversal.
 Every command is consumed exactly once and in order. Replay fails when a
 command is not reached, is reached at the wrong phase or subject, consumes the
 wrong premise program, or needs an unrecorded transition.
+
+The raw observer stream and executable command stream are intentionally
+distinct. Repeated raw callbacks may be projected to one structural command
+only when their phase, operation identity, input, and result are identical
+modulo temporary traversal-binder identifiers. Ambient local variables retain
+their identities. The command selects the last successful site in the group,
+and the projection is accepted only when closed replay reaches the exact
+recorded final subject. Omitted callbacks receive the terminal encoding
+classification `nonmaterial_internal_execution`; they are never silently
+dropped.
 
 Generated source uses structural selectors. Absolute callback ticks remain
 useful diagnostics while developing the recorder, but a final corpus
@@ -332,7 +345,10 @@ matcher applications to the pre-method hook, and its structural `simpProj`
 path reduces native projections independently of the `proj` flag. Replay
 therefore probes and rejects an iota or native-projection redex unless the
 current command consumes it first. The corresponding command primitive
-locally enables only its named kernel reduction.
+locally enables only the machinery required by its named kernel reduction.
+In particular, pinned `reduceRecMatcher?` needs beta enabled internally to
+reduce a matcher after an earlier pre-phase theorem exposes its constructor;
+this does not authorize a separate ambient beta transition.
 
 Target certificates may omit a final `eq_self` or `iff_self` diagnostic event:
 closing the final reflexive residual goal is fixed behavior of the
@@ -364,15 +380,12 @@ certificate should read conceptually as:
 ```lean
 simp_explicit_context [
   at hw => [
-    reduce delta Finsupp.sum,
+    ↓ reduce delta Finsupp.sum,
+    ↓ reduce beta,
     Finset.mul_sum,
-    Algebra.TensorProduct.tmul_mul_tmul,
-    one_mul,
     match 2 => Algebra.TensorProduct.tmul_mul_tmul,
     match 2 => one_mul,
     Finset.sum_mul,
-    Algebra.TensorProduct.tmul_mul_tmul,
-    mul_one,
     match 2 => Algebra.TensorProduct.tmul_mul_tmul,
     match 2 => mul_one
   ]
@@ -531,23 +544,48 @@ than accepting an incomplete trace. `Experiment/run.sh` passes in full.
 
 ### O2b. Pinned simplifier transition observer
 
-- Instrument or mirror the pinned Lean simplifier at the private reduction and
-  theorem-application boundaries required by section 5.1.
-- Replace public-boundary diagnostic events with one authoritative ordered
-  transition stream. Do not deduplicate repeated theorem events merely because
-  a shorter program happens to reach the same final expression.
-- Preserve exact subject, phase, structural selector, and local transition for
-  every observed operation.
+- Interpose after the pinned public pre method and before private `reduceStep`,
+  preserving its supported reduction precedence and returning `.visit` for an
+  observed reduction so the private path cannot perform it twice.
+- Classify the hardwired `simpMatch` path as iota only when its origin-free,
+  proofless result exactly equals an isolated `reduceRecMatcher?` probe.
+- Preserve the complete raw callback stream, including speculative congruence
+  executions, while deriving an executable stream of committed operations.
+- Project exact repeated local transitions to a structural `match n` command
+  only when exact final-state replay validates the projection.
+
+O2b does not claim every private `reduceStep` branch. The pinned branches for
+metavariable instantiation, projection-function reduction (`reduceProjFn?`),
+general `autoUnfold`, and raw natural-literal folding still lack certificate
+operations. If one changes a subject, closed replay cannot reach the recorded
+final state, so the occurrence remains a coverage failure rather than being
+materialized. O6 must add fixed operations for any such branches reached by
+the non-simproc corpus.
 
 The split is required by the Centralizer experiment: the public seam observes
-the first `Finsupp.sum` delta, but replay of the resulting diagnostic stream
-consumes only the first four commands. A shorter source program compiles only
-by omitting repeated theorem events, which violates operational completeness;
-therefore source-level compression is not an acceptable repair for this gate.
+the first `Finsupp.sum` delta, but not the recursive reductions needed under
+congruence traversal. The raw observer later reports 12 successful callbacks.
+Four theorem callbacks are duplicate local transitions from speculative and
+committed congruence sites. Replaying the first site changes no final subject;
+selecting the second site does. Consequently the operational certificate has
+eight commands with four `match 2` selectors, while the report retains and
+classifies all 12 callbacks.
 
 Gate: Centralizer `161579b1c1009ed4` materializes as the authoritative
-`Finsupp.sum` reduction plus its ten named theorem events, with no generated
-proof, `change`, omitted transition, or diagnostic-only event.
+`Finsupp.sum` and beta reductions plus six named theorem commands. Its raw
+trace contains all ten named theorem callbacks, with four classified as
+`nonmaterial_internal_execution`. No generated proof, `change`, or
+unclassified callback is permitted.
+
+Implementation status (2026-08-21): schema 12 implements the supported
+recursive pre-method interposer, exact hardwired-`simpMatch` iota
+classification, raw/executable callback projection, stable local-name
+validation in passive context recording, and the bounded Centralizer gate.
+The gate records 12 raw callbacks, emits eight operational commands with four
+`match 2` selectors, and compiles the materialized full module. The same fixed
+iota primitive closes both dynamic branches of the historical DropRight
+`simp [h]` fixtures as event-only certificates; their enclosing source-owner
+rewrite remains O5 work. `Experiment/run.sh` passes in full.
 
 ### O3. Complete theorem-event attribution
 
