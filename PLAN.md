@@ -792,6 +792,14 @@ and body-proof audit fields remain empty compatibility fields. See
 [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md), section O5, for the bounded
 gate and current focused-check status.
 
+O6a raises the recorder's still-bounded local definitional-equality allowance
+from 20 to 2,000 user-facing heartbeats. A fresh schema-14 pilot showed that
+five instance-heavy sites in Unitization, Finset, and Expect exceeded the old
+cap even though ordinary `simp` completed them. Those exact sites now compile
+and produce classified schema-14 reports in one recording compile per module;
+their independent transition-coverage outcomes remain in the corresponding O6
+clusters tracked by the design document.
+
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
 `Simp.Config` field as normalized JSON provenance; certificates compile the

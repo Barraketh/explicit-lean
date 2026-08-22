@@ -1326,7 +1326,11 @@ private structure EncodingAttempt where
   positionsNeeded : Bool
   transitionContinuity? : Option TransitionContinuityReport
 
-private def premiseDefEqHeartbeatBudget : Nat := 20000
+/-- Premise-provider and diagnostic definitional equality must remain bounded,
+    but the bound must also accommodate instance-heavy propositions reached by
+    ordinary Mathlib `simp`.  Core heartbeat counts are 1000 times the
+    user-facing value, so this is a 2000-heartbeat local budget. -/
+private def premiseDefEqHeartbeatBudget : Nat := 2000000
 
 private def premiseDefEq? (actual expected : Expr) : MetaM (Except String Bool) := do
   let actual ← instantiateMVars actual

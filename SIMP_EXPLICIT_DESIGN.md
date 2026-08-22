@@ -742,6 +742,16 @@ Gate: every non-deferred occurrence has a terminal outcome; every committed
 successful non-simproc execution is materialized from operational commands;
 there are no fallback encodings, coverage failures, or unclassified outcomes.
 
+O6a implementation status (2026-08-22): a fresh schema-14 pilot stopped at 50
+finalized modules when three module recordings exposed five deterministic
+timeouts in the recorder's local premise/diagnostic definitional-equality
+check. The historical 20-heartbeat cap was below the work already performed by
+ordinary `simp` on these instance-heavy propositions. The check remains local
+and bounded at 2,000 user-facing heartbeats, while the Unitization, Finset, and
+Expect production sites now form a permanent one-compile-per-module regression.
+The interrupted pilot's remaining truncated logs were cancellation artifacts,
+not additional recorder failures. Full corpus closure remains O6 work.
+
 ### S. Simproc design
 
 Simproc handling begins only after a separate design discussion and document.
