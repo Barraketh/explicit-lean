@@ -245,11 +245,13 @@ def check_drop_right() -> None:
                 raise RuntimeError(f"DropRight c9 named-delta branch changed: {report!r}")
             if (
                 second.get("operationalAdmissibility", {}).get("code")
-                != "unidentified_theorem_application"
+                != "inadmissible_direct_term_premise"
                 or second.get("acceptedCertificate") is not None
-                or second.get("encoding", {}).get("generatedProofEvents") != 1
+                or second.get("encoding", {}).get("generatedProofEvents") != 0
+                or second.get("encoding", {}).get("termPremiseBindings") != 1
+                or any(len(event.get("origins", [])) > 1 for event in second.get("trace", []))
             ):
-                raise RuntimeError(f"DropRight c9 observer-gap branch changed: {report!r}")
+                raise RuntimeError(f"DropRight c9 O4 premise branch changed: {report!r}")
         if report.get("certificate") != "" or report.get("certificateBytes") != 0:
             raise RuntimeError(f"DropRight fabricated an aggregate certificate: {report!r}")
         if report.get("encodingStatus") != "body_rewrite_required":
@@ -257,12 +259,11 @@ def check_drop_right() -> None:
         if report.get("operationalAdmissibility", {}).get("code") != "source_rewrite_required":
             raise RuntimeError(f"DropRight aggregate ownership classification changed: {report!r}")
         top_mode = report.get("encoding", {}).get("mode")
-        if entry["id"] != "c9eca03fcd0280ed":
-            if top_mode != "event" or any(
-                execution.get("encoding", {}).get("mode") != "event"
-                for execution in executions
-            ):
-                raise RuntimeError(f"DropRight event encoding changed: {report!r}")
+        if top_mode != "event" or any(
+            execution.get("encoding", {}).get("mode") != "event"
+            for execution in executions
+        ):
+            raise RuntimeError(f"DropRight event encoding changed: {report!r}")
         expected_terminal = (
             "coverage_failure" if entry["id"] == "c9eca03fcd0280ed"
             else "committed_pending"
@@ -279,7 +280,7 @@ def main() -> None:
     check_drop_right()
     print(
         "operational owners materialized; DropRight iota branches closed and "
-        "the remaining named-delta observer gap stayed classified"
+        "the remaining c9 direct-premise branch stayed classified for O4"
     )
 
 

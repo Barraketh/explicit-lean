@@ -108,7 +108,7 @@ register_option explicitLean.simpExplicit.bodyScopeFrame : Nat := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 12
+def reportSchemaVersion : Nat := 13
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -564,6 +564,10 @@ private structure RecorderState where
   activeDepth : Nat := 0
   events : Array RecordedEvent := #[]
   premises : Array RecordedPremise := #[]
+  /-- Exact theorem origins captured by the committed rewrite interposer.
+      Slots are scoped by `trackedMethod`, so nested discharge rewrites do not
+      overwrite the enclosing method's selected candidate. -/
+  rewriteOrigins : Array (Option Origin) := #[]
 
 private def stepResult? : Simp.Step → Option Simp.Result
   | .done result | .visit result => some result
@@ -596,6 +600,88 @@ private def subtractOrigins (origins removed : Array Origin) : Array Origin := I
       result := result.push origin
     remaining := next
   return result
+
+/-! `Simp.rewrite?` records the selected theorem in the simplifier state, but
+    that state is intentionally an aggregate diagnostic.  The recorder needs
+    the candidate that actually returned `some result`, including when an
+    earlier candidate was tried and abandoned.  Keep that one bit of
+    provenance in a slot owned by the tracked method invocation. -/
+private def rememberRewriteOrigin (ref : IO.Ref RecorderState) (origin : Origin) :
+    Simp.SimpM Unit := do
+  let state ← ref.get
+  if !state.rewriteOrigins.isEmpty then
+    let index := state.rewriteOrigins.size - 1
+    ref.set { state with rewriteOrigins := state.rewriteOrigins.set! index (some origin) }
+
+/-! This is a public-API mirror of the pinned `Simp.rewrite?` candidate loop.
+    It deliberately delegates theorem matching and proof construction to
+    `Simp.tryTheoremWithExtraArgs?`; the recorder only captures the origin of
+    the candidate for which that operation returned `some`. -/
+private def exactRewrite? (ref : IO.Ref RecorderState) (e : Expr)
+    (s : DiscrTree SimpTheorem) (erased : PHashSet Origin) (tag : String) :
+    Simp.SimpM (Option Simp.Result) := do
+  if (← Simp.getConfig).index then
+    let candidates ← Simp.withSimpIndexConfig <| DiscrTree.getMatchWithExtra s e
+    if candidates.isEmpty then
+      trace[Debug.Meta.Tactic.simp] "no theorems found for {tag}-rewriting {e}"
+      return none
+    let candidates := Array.insertionSort candidates fun e₁ e₂ => e₁.1.priority > e₂.1.priority
+    for (thm, numExtraArgs) in candidates do
+      checkSystem "simp"
+      if erased.contains thm.origin then
+        continue
+      if let some result ← Simp.tryTheoremWithExtraArgs? e thm numExtraArgs then
+        trace[Debug.Meta.Tactic.simp] "rewrite result {e} => {result.expr}"
+        rememberRewriteOrigin ref thm.origin
+        return some result
+    return none
+  else
+    let (candidates, numArgs) ← Simp.withSimpIndexConfig <| DiscrTree.getMatchLiberal s e
+    if candidates.isEmpty then
+      trace[Debug.Meta.Tactic.simp] "no theorems found for {tag}-rewriting {e}"
+      return none
+    let candidates := Array.insertionSort candidates fun e₁ e₂ => e₁.priority > e₂.priority
+    for thm in candidates do
+      checkSystem "simp"
+      unless erased.contains thm.origin do
+        -- `getMatchLiberal` gives the number of root application arguments,
+        -- while `tryTheoremWithExtraArgs?` needs the number of arguments past
+        -- the theorem lhs.  Derive it in an isolated metavariable probe and
+        -- explicitly restore that probe before trying the authoritative
+        -- candidate, so no inferred telescope state can leak between them.
+        let probeMetaSnapshot ← liftM Meta.saveState
+        let numExtraArgs? ← try
+          withNewMCtxDepth do
+            let val ← thm.getValue
+            let type ← inferType val
+            let (_, _, type) ← forallMetaTelescopeReducing type
+            let type ← whnf (← instantiateMVars type)
+            let lhs := type.appFn!.appArg!
+            pure (some (numArgs - lhs.getAppNumArgs))
+        finally
+          liftM probeMetaSnapshot.restore
+        let some numExtraArgs := numExtraArgs? | continue
+        if let some result ← Simp.tryTheoremWithExtraArgs? e thm numExtraArgs then
+          trace[Debug.Meta.Tactic.simp] "rewrite result {e} => {result.expr}"
+          if (← isDiagnosticsEnabled) then
+            let indexed ← Simp.withSimpIndexConfig <| DiscrTree.getMatchWithExtra s e
+            unless indexed.any (fun candidate => unsafe ptrEq thm candidate.1) do
+              Simp.recordTheoremWithBadKeys thm
+          rememberRewriteOrigin ref thm.origin
+          return some result
+    return none
+
+private def exactRewritePre (ref : IO.Ref RecorderState) : Simp.Simproc := fun e => do
+  for thms in (← Simp.getContext).simpTheorems do
+    if let some result ← exactRewrite? ref e thms.pre thms.erased "pre" then
+      return .visit result
+  return .continue
+
+private def exactRewritePost (ref : IO.Ref RecorderState) : Simp.Simproc := fun e => do
+  for thms in (← Simp.getContext).simpTheorems do
+    if let some result ← exactRewrite? ref e thms.post thms.erased "post" then
+      return .visit result
+  return .continue
 
 private def replayZeta? (input : Expr) : MetaM (Option Expr) := do
   match input with
@@ -722,66 +808,98 @@ private def classifyObservedIota? (input : Expr) (result : Simp.Result)
   return isMatch
 
 private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
-    (method : Simp.Simproc) : Simp.Simproc := fun input => do
+    (method : Simp.Simproc) (captureRewriteOrigin : Bool := false)
+    (detectReduction : Bool := true) : Simp.Simproc := fun input => do
   let state ← ref.get
   let position := state.tick + 1
   let depth := state.activeDepth
-  ref.set { state with tick := position, activeDepth := depth + 1 }
+  ref.set {
+    state with
+      tick := position
+      activeDepth := depth + 1
+      rewriteOrigins := state.rewriteOrigins.push none
+  }
   let premiseStart := state.premises.size
-  let before := (← get).diag
-  let preMetaSnapshot ← liftM Meta.saveState
-  let preSimpSnapshot ← get
-  let originalStep ← try
-    method input
-  finally
-    let state ← ref.get
-    ref.set { state with activeDepth := state.activeDepth - 1 }
-  let mut step := originalStep
-  let mut reduction? : Option ReductionIdentity := none
-  if depth == 0 && phase == .pre then
-    match originalStep with
-    | .continue none =>
-        if let some (reduction, output) ← selectedReduction? input then
-          let result : Simp.Result := { expr := output }
-          step := .visit result
-          reduction? := some reduction
-    | _ => pure ()
-  let after := (← get).diag
-  let postMetaSnapshot ← liftM Meta.saveState
-  let postSimpSnapshot ← get
-  if depth == 0 then
-    if let some result := changedResult? input step then
+  try
+    let before := (← get).diag
+    let preMetaSnapshot ← liftM Meta.saveState
+    let preSimpSnapshot ← get
+    let originalStep ← try
+      method input
+    finally
       let state ← ref.get
-      let premises := state.premises.extract premiseStart state.premises.size
-      let premiseOrigins := premises.foldl (fun result premise => result ++ premise.origins) #[]
-      let origins := subtractOrigins (changedOrigins before after) premiseOrigins
-      if reduction?.isNone && phase == .pre && result.proof?.isNone && origins.isEmpty then
-        if ← classifyObservedIota? input result preMetaSnapshot postMetaSnapshot
-            preSimpSnapshot postSimpSnapshot then
-          reduction? := some { kind := .iota }
-      ref.set {
-        state with
-          events := state.events.push {
-            tick := position
-            phase
-            input
-            step
-            result
-            origins := if reduction?.isSome then #[] else origins
-            premises
-            reduction := reduction?
-          }
-      }
-  return step
+      ref.set { state with activeDepth := state.activeDepth - 1 }
+    let mut step := originalStep
+    let mut reduction? : Option ReductionIdentity := none
+    if detectReduction && depth == 0 && phase == .pre then
+      match originalStep with
+      | .continue none =>
+          if let some (reduction, output) ← selectedReduction? input then
+            let result : Simp.Result := { expr := output }
+            step := .visit result
+            reduction? := some reduction
+      | _ => pure ()
+    let after := (← get).diag
+    let postMetaSnapshot ← liftM Meta.saveState
+    let postSimpSnapshot ← get
+    let stateAfterMethod ← ref.get
+    let selectedOrigin? :=
+      if captureRewriteOrigin then stateAfterMethod.rewriteOrigins.back? |>.bind id else none
+    if depth == 0 then
+      if let some result := changedResult? input step then
+        let state ← ref.get
+        let premises := state.premises.extract premiseStart state.premises.size
+        let premiseOrigins := premises.foldl (fun result premise => result ++ premise.origins) #[]
+        let origins := if captureRewriteOrigin then
+            selectedOrigin?.toArray
+          else
+            subtractOrigins (changedOrigins before after) premiseOrigins
+        if reduction?.isNone && phase == .pre && result.proof?.isNone && origins.isEmpty then
+          if ← classifyObservedIota? input result preMetaSnapshot postMetaSnapshot
+              preSimpSnapshot postSimpSnapshot then
+            reduction? := some { kind := .iota }
+        ref.set {
+          state with
+            events := state.events.push {
+              tick := position
+              phase
+              input
+              step
+              result
+              origins := if reduction?.isSome then #[] else origins
+              premises
+              reduction := reduction?
+            }
+        }
+    let state ← ref.get
+    ref.set { state with rewriteOrigins := state.rewriteOrigins.pop }
+    return step
+  catch ex =>
+    -- A recovered recorder must not retain a stale outer candidate slot when
+    -- a method exits exceptionally before the normal pop below.
+    let state ← ref.get
+    ref.set { state with rewriteOrigins := state.rewriteOrigins.pop }
+    throw ex
 
 private def recordingMethods (ref : IO.Ref RecorderState)
     (simprocs : Simp.SimprocsArray) (discharge? : Option Simp.Discharge) : Simp.Methods :=
   let methods := match discharge? with
     | none => Simp.mkDefaultMethodsCore simprocs
     | some discharge => Simp.mkMethods simprocs discharge (wellBehavedDischarge := false)
+  let pre :=
+    trackedMethod ref .pre (exactRewritePre ref)
+        (captureRewriteOrigin := true) (detectReduction := false) >>
+      trackedMethod ref .pre
+        (Simp.simpMatch >> Simp.userPreSimprocs simprocs >> Simp.simpUsingDecide)
+  let post :=
+    trackedMethod ref .post (exactRewritePost ref)
+        (captureRewriteOrigin := true) (detectReduction := false) >>
+      trackedMethod ref .post
+        (Simp.userPostSimprocs simprocs >> Simp.simpGround >> Simp.simpArith >>
+          Simp.simpUsingDecide)
   { methods with
-    pre := trackedMethod ref .pre methods.pre
-    post := trackedMethod ref .post methods.post
+    pre
+    post
     discharge? := fun proposition => do
       let before := (← get).diag
       let result? ← methods.discharge? proposition
@@ -2095,6 +2213,11 @@ private def buildEncodedEvents? (recorded : Array RecordedEvent)
         }
       else
         let reason ← fallbackReason event
+        if reason == "multiple_origins" || reason == "special_rule" then
+          -- These are precise coverage failures.  They must not be hidden by
+          -- a generated theorem binding: either candidate attribution was
+          -- incomplete or the rule has no source-reachable identity.
+          return none
         let (binding, replay) ← generatedBinding event index usedNames
         usedNames := usedNames.push binding.name
         bindings := bindings.push binding

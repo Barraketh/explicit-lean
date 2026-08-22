@@ -164,8 +164,10 @@ def main() -> None:
                     if fingerprint is not None and len(fingerprint.get("printable", "")) > 513:
                         raise RuntimeError(f"unbounded diagnostic rendering: {fingerprint!r}")
 
-    if multiple_origins == 0:
-        raise RuntimeError("DropRight passive trace did not retain a multiple-origin event")
+    if multiple_origins != 0:
+        raise RuntimeError(
+            f"DropRight passive trace retained {multiple_origins} ambiguous theorem events"
+        )
     if discharged_premises == 0:
         raise RuntimeError("DropRight passive trace did not retain a discharged-premise event")
 
@@ -189,12 +191,22 @@ def main() -> None:
             entry, coverage.TrialConfig(timeout=180, keep_copies=True)
         )
         package_b_results[entry["id"]] = trial
-        assert_rejected_fallback(trial)
         if trial.get("local_renames") != []:
             raise RuntimeError(f"Package B ordinary encoding renamed locals: {trial!r}")
         encoding = trial.get("encoding") or {}
-        if encoding.get("mode") not in {"event", "presentation_change", "whole_result_proof"}:
-            raise RuntimeError(f"unknown Package B encoding mode: {trial!r}")
+        if (
+            (trial.get("operational_admissibility") or {}).get("code") != "accepted"
+            or trial.get("status") != "passed"
+            or trial.get("materialized_compile") is not True
+            or not trial.get("accepted_certificate")
+            or trial.get("legacy_certificate") is not None
+            or encoding.get("mode") != "event"
+            or encoding.get("generatedProofEvents", 0) != 0
+            or encoding.get("presentationChangeCount", 0) != 0
+            or encoding.get("wholeResultProofCount", 0) != 0
+            or "multiple_origins" in (trial.get("trace_encoding_reasons") or [])
+        ):
+            raise RuntimeError(f"Package B exact attribution did not materialize: {trial!r}")
         trace_length = trial.get("trace_length")
         if (
             not isinstance(trace_length, int)
@@ -202,7 +214,7 @@ def main() -> None:
             or len(trial.get("trace_selector_kinds") or []) != trace_length
         ):
             raise RuntimeError(f"Package B trace audit was malformed: {trial!r}")
-    assert_aggregate_rejected(modules[0], package_b_entries, package_b_results)
+    assert_aggregate_accepted(modules[0], package_b_entries, package_b_results)
 
     # This non-closing simplification used to appear as a zero-event
     # presentation gap. O2a identifies both proofless unfoldings, and the

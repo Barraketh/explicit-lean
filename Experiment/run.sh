@@ -19,6 +19,7 @@ lake env lean Experiment/BodyMaterializationProbe.lean
 lake env lean Experiment/FirstOwnerProbe.lean
 lake env lean Experiment/ClosureProbe.lean
 lake env lean Experiment/SpecialFallbackProbe.lean
+python3 Experiment/check_o3_attribution.py
 python3 Experiment/check_premise_replay.py
 python3 Experiment/check_selectors.py
 python3 Experiment/check_reductions.py

@@ -163,6 +163,20 @@ only when its complete declaration compiles. A module is accepted only when
 all replacements compile together. Validation compares exact final state,
 not merely provable equivalence of the final target.
 
+### 3.9 Exact theorem attribution
+
+An expression-changing theorem event records exactly one `SimpTheorem.origin`:
+the candidate whose authoritative `tryTheoremWithExtraArgs?` call returned a
+result. Candidate provenance is not reconstructed from proof terms or from
+aggregate diagnostic deltas. The candidate loop retains the pinned
+descending-priority order, erased filtering, and index-specific matching. For
+`index := false`, extra arguments are derived under a saved and restored Meta
+state before the authoritative candidate call. The exact pre and post theorem
+passes are separate tracked methods; their residual methods retain the pinned
+`simpMatch`, user-simproc, ground, arithmetic, and decide order. Rewrites used
+while discharging a theorem premise remain premise activity, not top-level
+events. Simproc transitions remain deferred.
+
 ## 4. Operational certificate model
 
 The following Lean-like types are schematic:
@@ -597,6 +611,26 @@ rewrite remains O5 work. `Experiment/run.sh` passes in full.
 
 Gate: all non-simproc multiple-origin fixtures replay as individual named or
 fixed builtin operations.
+
+Implementation status (2026-08-21): complete for the pinned public rewrite
+seam. Schema 13 adds exact pre/post theorem interposers that mirror Lean
+4.32.2's indexed and liberal candidate loops, including stable priority order,
+erased filtering, and explicit Meta-state rollback around index-false
+extra-argument derivation. Each committed theorem event retains only the
+selected theorem origin; abandoned candidates remain diagnostic-only, and
+premise rewrites remain nested premise events. The bounded DropRight and
+Subalgebra/Lattice checks compile one copied module each: the 16 historical
+non-simproc multi-origin post events are now single-origin named events (with
+the conditional `sup_of_le_right` event retaining `bot_le`), while two
+simproc-tagged events remain deferred. The focused attribution checker asserts
+schema 13, exact `Nat.sub_zero`, `List.take_length_add_append`, and
+`sup_of_le_right`/`bot_le` provenance, plus an `index := false` theorem probe.
+Generated proof encoding is rejected for `multiple_origins` and `special_rule`;
+the synthetic `Origin.other` fixture confirms that no generated special
+fallback is accepted. Exact attribution also removes the historical c9
+unidentified-theorem gap: its remaining non-operational branch is now
+classified precisely as an O4 direct-premise program. Lattice continuity,
+reduction gaps, and simproc design remain outside O3.
 
 ### O4. Operational premise programs
 
