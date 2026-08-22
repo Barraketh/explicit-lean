@@ -19,8 +19,12 @@ namespace Lean.Parser.Tactic
 syntax simpExplicitPre := "↓"
 syntax simpExplicitPost := "↑"
 syntax simpExplicitPremiseArgs := " using " "[" term,* "]"
-syntax simpExplicitRule := (simpExplicitPre <|> simpExplicitPost)? "← "? term
-  (simpExplicitPremiseArgs)?
+declare_syntax_cat simpExplicitRule
+syntax (name := simpExplicitLocalRule)
+  (simpExplicitPre <|> simpExplicitPost)? "local_rule " num
+  (simpExplicitPremiseArgs)? : simpExplicitRule
+syntax (name := simpExplicitOrdinaryRule)
+  (simpExplicitPre <|> simpExplicitPost)? "← "? term (simpExplicitPremiseArgs)? : simpExplicitRule
 declare_syntax_cat simpExplicitSelector
 syntax "match " num : simpExplicitSelector
 syntax atomic(ident num) : simpExplicitSelector
@@ -595,6 +599,8 @@ mutual
     origins : Array Origin
     premises : Array RecordedPremise
     reduction : Option ReductionIdentity := none
+    /-- Positive declaration-index slot for a callback-local simp theorem. -/
+    localRuleSlot : Option Nat := none
 end
 
 private structure PremiseFrame where
@@ -1029,6 +1035,24 @@ private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
     let stateAfterMethod ← ref.get
     let selectedOrigin? :=
       if captureRewriteOrigin then stateAfterMethod.rewriteOrigins.back? |>.bind id else none
+    let localRuleSlot? ← if captureRewriteOrigin then
+        match selectedOrigin? with
+        | some (.fvar fvarId) => do
+            let context ← Simp.getContext
+            let localDecl? ← try
+              some <$> fvarId.getDecl
+            catch _ =>
+              pure none
+            match localDecl? with
+            | some localDecl =>
+                if localDecl.index >= context.lctxInitIndices then
+                  pure (some (localDecl.index - context.lctxInitIndices + 1))
+                else
+                  pure none
+            | none => pure none
+        | _ => pure none
+      else
+        pure none
     if depth == 0 || premiseFrameIndex?.isSome then
       if let some result := changedResult? input step then
         let state ← ref.get
@@ -1064,6 +1088,7 @@ private def trackedMethod (ref : IO.Ref RecorderState) (phase : Phase)
           origins := if reduction?.isSome then #[] else origins
           premises
           reduction := reduction?
+          localRuleSlot := if reduction?.isSome then none else localRuleSlot?
         }
         match premiseFrameIndex? with
         | some frameIndex =>
@@ -1130,6 +1155,13 @@ private def ruleText (origin : Origin) : MetaM String := do
       return (if inverse then "← " else "") ++ term
   | .other name =>
       throwError "simp_explicit cannot yet encode special simp rule '{name}'"
+
+private def recordedRuleText (event : RecordedEvent) : MetaM String := do
+  if let some slot := event.localRuleSlot then
+    return s!"local_rule {slot}"
+  let some origin := event.origins[0]?
+    | throwError "simp_explicit cannot encode a semantic event without a named origin"
+  ruleText origin
 
 private inductive ReplaySelector where
   | next
@@ -1223,11 +1255,9 @@ private def certificateEventListText (events : Array RecordedEvent)
     let command ← match event.reduction with
       | some reduction => pure (reductionSource reduction event.phase)
       | none => do
-          let some origin := event.origins[0]?
-            | throwError "simp_explicit cannot encode semantic event {index}: no diagnostic origin candidate"
-          unless event.origins.size == 1 do
+          unless event.localRuleSlot.isSome || event.origins.size == 1 do
             throwError "simp_explicit cannot encode semantic event {index}: observed {event.origins.size} diagnostic origin candidates"
-          let rule ← ruleText origin
+          let rule ← recordedRuleText event
           let phase := if event.phase == .pre then "↓ " else ""
           pure (phase ++ rule)
     lines := lines.push s!"  {selectorSource selector}{command}{comma}"
@@ -1271,6 +1301,8 @@ private structure ReplayEvent where
   rules : Array SimpTheorem
   premises : Array Expr := #[]
   reduction : Option ReductionIdentity := none
+  /-- Deferred identity for a theorem local to the current simplifier traversal. -/
+  localRuleSlot : Option Nat := none
   source : Syntax
 
 private structure GeneratedBinding where
@@ -1482,6 +1514,21 @@ private def elaborateEvent (stx : Syntax) : TacticM ReplayEvent := do
       rule.getKind == ``Lean.Parser.Tactic.simpExplicitReduceProjection then
     let (phase, reduction) ← elaborateReduction rule
     return { selector, phase, rules := #[], premises := #[], reduction := some reduction, source := stx }
+  else if rule.getKind == ``Lean.Parser.Tactic.simpExplicitLocalRule then
+    let phase ← if rule[0].isNone then pure .post else parsePhase rule[0][0]
+    let some slot := rule[2].isNatLit?
+      | throwErrorAt rule[2] "expected a positive local simp-rule slot"
+    if slot == 0 then
+      throwErrorAt rule[2] "local simp-rule slots start at 1"
+    let premises ← premiseSyntaxes rule |>.mapM elaboratePremise
+    return {
+      selector
+      phase
+      rules := #[]
+      premises
+      localRuleSlot := some slot
+      source := stx
+    }
   else
     let phase ← if rule[0].isNone then pure .post else parsePhase rule[0][0]
     let rules ← elaborateRule phase rule
@@ -1499,6 +1546,15 @@ private def recordedReplayEvent (event : RecordedEvent)
       premises := #[]
       reduction := some reduction
       source := (mkIdent `reduce).raw
+    }
+  if let some slot := event.localRuleSlot then
+    return {
+      selector
+      phase := event.phase
+      rules := #[]
+      premises := premiseProofs?.getD (event.premises.map (·.proof))
+      localRuleSlot := some slot
+      source := (mkIdent `local_rule).raw
     }
   let post := event.phase == .post
   let some origin := event.origins[0]?
@@ -1527,11 +1583,34 @@ private def recordedReplayEvent (event : RecordedEvent)
     source
   }
 
+private def traversalLocalRules? (slot : Nat) (phase : Phase) : Simp.SimpM (Array SimpTheorem) := do
+  if slot == 0 then
+    return #[]
+  let context ← Simp.getContext
+  let declarationIndex := context.lctxInitIndices + slot - 1
+  let localContext ← getLCtx
+  if declarationIndex >= localContext.numIndices then
+    return #[]
+  let some localDecl := localContext.getAt? declarationIndex
+    | return #[]
+  unless localDecl.index == declarationIndex do
+    return #[]
+  let metaSnapshot ← liftM Meta.saveState
+  try
+    liftM <| mkSimpTheoremFromExpr (.fvar localDecl.fvarId) #[] (mkFVar localDecl.fvarId)
+      (post := phase == .post)
+  catch _ =>
+    liftM metaSnapshot.restore
+    return #[]
+
 private def applyRecordedRules? (input : Expr) (event : ReplayEvent)
     (ref : IO.Ref ReplayState) : Simp.SimpM (Option Simp.Result) := do
   let initial ← ref.get
   let mut lastFailure? : Option String := initial.premiseFailure?
-  for rule in event.rules do
+  let rules ← match event.localRuleSlot with
+    | some slot => traversalLocalRules? slot event.phase
+    | none => pure event.rules
+  for rule in rules do
     let snapshot ← ref.get
     ref.set { snapshot with premiseNext := 0, premiseFailure? := none }
     let metaSnapshot ← liftM Meta.saveState
@@ -1551,7 +1630,7 @@ private def applyRecordedRules? (input : Expr) (event : ReplayEvent)
     | some result =>
         if after.premiseNext == event.premises.size then
           ref.set { after with premiseFailure? := none }
-          return some result
+          return some (if event.localRuleSlot.isSome then { result with cache := false } else result)
         lastFailure? := some "premise_unconsumed"
         liftM metaSnapshot.restore
         ref.set { snapshot with premiseFailure? := lastFailure? }
@@ -1805,8 +1884,43 @@ private def applyReplayEvent? (input : Expr) (event : ReplayEvent)
   | some reduction => applyRecordedReduction? input reduction
   | none => applyRecordedRules? input event ref
 
-private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
-    (phase : Phase) : Simp.Simproc := fun input => do
+/- `Simp.neutralConfig` deliberately keeps `contextual := false`, because
+   enabling it would install every implication hypothesis into the ambient
+   simp theorem collection.  A certificate containing `local_rule` still
+   needs the pinned contextual implication *traversal* so that its exact slot
+   exists.  Mirror that one congruence branch without `withNewLemmas`: the
+   hypothesis enters the local context, but only an explicit `local_rule n`
+   command can use it. -/
+private def replayContextualArrow (input : Expr) : Simp.SimpM Simp.Result := do
+  let .forallE binderName proposition consequence _ := input
+    | return { expr := input }
+  let propositionResult ← Simp.simp proposition
+  withLocalDeclD binderName propositionResult.expr fun hypothesis => do
+    -- Pinned `withNewLemmas` gives each contextual binder a fresh cache. Keep
+    -- that structural boundary even though this replay deliberately omits
+    -- its ambient-theorem insertion branch.
+    Simp.withFreshCache do
+      let consequenceResult ← Simp.simp consequence
+      match consequenceResult.proof? with
+      | none =>
+          Simp.mkImpCongr input propositionResult consequenceResult
+      | some consequenceProof =>
+          let consequenceProof ← mkLambdaFVars #[hypothesis] consequenceProof
+          if consequenceResult.expr.containsFVar hypothesis.fvarId! then
+            return {
+              expr := ← mkForallFVars #[hypothesis] consequenceResult.expr
+              proof? := ← withDefault <|
+                mkImpDepCongrCtx (← propositionResult.getProof) consequenceProof
+            }
+          else
+            return {
+              expr := input.updateForallE! propositionResult.expr consequenceResult.expr
+              proof? := ← withDefault <|
+                mkImpCongrCtx (← propositionResult.getProof) consequenceProof
+            }
+
+private def replayMethod (events : Array ReplayEvent) (hasLocalRules : Bool)
+    (ref : IO.Ref ReplayState) (phase : Phase) : Simp.Simproc := fun input => do
   let state ← ref.get
   let state := { state with tick := state.tick + 1 }
   ref.set state
@@ -1931,6 +2045,14 @@ private def replayMethod (events : Array ReplayEvent) (ref : IO.Ref ReplayState)
             throw ex
   if phase == .pre && (← hasUncommandedReduction input) then
     throwError "simp_explicit encountered a reducible iota or native projection without an explicit reduction command"
+  if phase == .pre && hasLocalRules then
+    match input with
+    | .forallE _ proposition consequence _ =>
+        if !consequence.hasLooseBVars && (← isProp proposition) && (← isProp consequence) then
+          -- `continue` preserves the contextual congruence proof while allowing the
+          -- ordinary post hook to consume a following command on the rebuilt arrow.
+          return .continue (some (← replayContextualArrow input))
+    | _ => pure ()
   return .continue
 
 private def runReplay (target : Expr) (events : Array ReplayEvent) : TacticM (Simp.Result × ReplayState) := do
@@ -1945,9 +2067,10 @@ private def runReplay (target : Expr) (events : Array ReplayEvent) : TacticM (Si
   let ctx ← Simp.mkContext (config := replayConfig)
     (simpTheorems := {}) (congrTheorems := congrTheorems)
   let ref ← IO.mkRef ({} : ReplayState)
+  let hasLocalRules := events.any (fun event => event.localRuleSlot.isSome)
   let methods : Simp.Methods := {
-    pre := replayMethod events ref .pre
-    post := replayMethod events ref .post
+    pre := replayMethod events hasLocalRules ref .pre
+    post := replayMethod events hasLocalRules ref .post
     discharge? := fun _ => return none
   }
   let (result, _) ← Simp.mainCore target ctx (methods := methods)
@@ -2054,6 +2177,8 @@ private def exactLocalRenames (renames : Array (Nat × Name)) : TacticM Unit :=
     replaceMainGoal [mvarNew.mvarId!]
 
 private def fallbackReason (event : RecordedEvent) : TacticM String := do
+  if event.localRuleSlot.isSome then
+    return "unvalidated_named_rule"
   if event.origins.isEmpty then
     return "no_origin"
   let mut hasSimproc := false
@@ -2438,9 +2563,9 @@ private partial def buildEncodedEvents? (recorded : Array RecordedEvent)
         let rule ← match event.reduction with
           | some reduction => pure (reductionSource reduction event.phase)
           | none => do
-              unless event.origins.size == 1 do
+              unless event.localRuleSlot.isSome || event.origins.size == 1 do
                 throwError "simp_explicit cannot encode semantic event {index}: observed {event.origins.size} diagnostic origin candidates"
-              ruleText event.origins[0]!
+              recordedRuleText event
         let mut premiseNames := #[]
         let mut premiseEncodings := #[]
         let mut premiseProofs := #[]

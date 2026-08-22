@@ -175,17 +175,19 @@ def main() -> None:
     aggregate = record.get("aggregate", {})
     if aggregate.get("compile") is not True:
         raise RuntimeError(f"Bilinear aggregate did not compile: {record!r}")
-    if aggregate.get("closure_complete") is not False:
-        raise RuntimeError(f"Bilinear unexpectedly passed the O1 operational gate: {record!r}")
-    if aggregate.get("terminal_classification_complete") is not False:
-        raise RuntimeError(f"Bilinear terminal gate unexpectedly completed: {record!r}")
+    if (
+        aggregate.get("closure_complete") is not True
+        or aggregate.get("terminal_classification_complete") is not True
+        or aggregate.get("materialization_compile_count") != 1
+    ):
+        raise RuntimeError(f"Bilinear O6 closure did not complete: {record!r}")
 
     occurrences = {occurrence["id"]: occurrence for occurrence in record["occurrences"]}
     outcomes = Counter(
         occurrence.get("terminal_outcome")
         for occurrence in record["occurrences"]
     )
-    if outcomes != Counter({"materialized": 9, "coverage_failure": 1}):
+    if outcomes != Counter({"materialized": 10}):
         raise RuntimeError(f"Bilinear terminal outcomes changed: {outcomes!r}")
 
     contextual = occurrences.get(CONTEXTUAL_ID)
@@ -206,23 +208,28 @@ def main() -> None:
     context_local = occurrences.get(CONTEXT_LOCAL_REPORT_ID)
     if (
         context_local is None
-        or context_local.get("terminal_outcome") != "coverage_failure"
-        or context_local.get("failure_reason") != "unidentified_theorem_application"
+        or context_local.get("terminal_outcome") != "materialized"
+        or context_local.get("failure_reason") is not None
     ):
         raise RuntimeError(
-            "context-local report classification changed: "
+            "context-local report did not materialize: "
             f"outcome={context_local and context_local.get('terminal_outcome')!r}, "
             f"reason={context_local and context_local.get('failure_reason')!r}"
         )
     context_local_report = context_local.get("report") or {}
-    if context_local_report.get("acceptedCertificate") is not None:
-        raise RuntimeError(f"conservative contextual report was accepted: {context_local!r}")
+    context_local_certificate = (
+        context_local_report.get("acceptedCertificate")
+        or context_local_report.get("certificate")
+    )
     if (
-        context_local_report.get("traceAvailable") is not True
-        or not context_local_report.get("traceLength")
-        or context_local_report.get("failureCategory") is not None
+        not isinstance(context_local.get("candidate"), dict)
+        or not isinstance(context_local_certificate, str)
+        or "local_rule 3" not in context_local_certificate
+        or "local_rule 4" not in context_local_certificate
+        or context_local_report.get("legacyCertificate") is not None
+        or context_local_report.get("operationalAdmissibility", {}).get("code") != "accepted"
     ):
-        raise RuntimeError("context-local raw trace was not retained and classified")
+        raise RuntimeError(f"context-local operational certificate changed: {context_local!r}")
     check_configuration(context_local_report, CONTEXT_LOCAL_REPORT_ID)
 
     missing = occurrences.get(MISSING_TRANSITION_ID)
@@ -242,7 +249,7 @@ def main() -> None:
     ):
         raise RuntimeError(f"Bilinear named-delta certificate changed: {missing!r}")
 
-    print("nondefault configuration provenance and Bilinear O2a named-delta gate passed")
+    print("nondefault configuration provenance and Bilinear O2a/O6c gate passed")
 
 
 if __name__ == "__main__":

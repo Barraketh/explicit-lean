@@ -808,14 +808,27 @@ scope-less execution is normalized as committed by closure, allowing Tower's
 direct `by simp` occurrence to materialize without inventing body rollback
 metadata. Focused production regressions cover both cases under schema 14.
 
+O6c implementation status (2026-08-22): callback-local hypotheses now have an
+explicit operational source identity. When contextual congruence descent
+introduces a theorem local, the recorder stores its positive declaration-index
+offset from the simplifier's initial local-context boundary while that local is
+alive. Certificates print `local_rule n`; replay resolves exactly that
+traversal-local slot, marks its rewrite non-cacheable, and fails closed for a
+missing, stale, or non-theorem slot. The pinned implication traversal introduces
+the binder without `withNewLemmas` or contextual simp search; consequence
+simplification uses a fresh cache boundary. The schema-14 Bilinear gate
+`5795dc0135cc7db3` materializes with `local_rule 3` and `local_rule 4`, and its
+focused source mutation rejects a wrong positive slot with the ordered-rule
+mismatch diagnostic.
+
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
 `Simp.Config` field as normalized JSON provenance; certificates compile the
 configuration away and contain no replay configuration mode. The production
 `Mathlib/Algebra/Algebra/Bilinear.lean` regression keeps the stable contextual
 IDs `af1f3238d87dcae6` and `5795dc0135cc7db3`, and closes its ten-entry module
-with nine materialized replacements and one precise
-`unidentified_theorem_application` coverage failure.
+with ten materialized operational replacements; the contextual occurrence now
+uses the O6c `local_rule 3`/`local_rule 4` certificate.
 
 The proof-export scaling diagnostic is now bounded. `ProofExport.Metrics`
 reports `unsharedBytes : Option Nat`: it retains an exact byte count for small
@@ -945,9 +958,10 @@ event 0, with structural path `app.fn/app.arg` and operation hint
 passes. O2 is split at the pinned API boundary. O2a is complete in schema 11:
 the closed reduction IR, exact conservative public named-delta seam, mutation
 suite, historical ten-case DropRight operational aggregate, and full
-`Experiment/run.sh` regression all pass. Bilinear now materializes nine of ten
-occurrences; its contextual-binder case retains its full trace in the O6
-unidentified-theorem cluster. Centralizer `161579b1c1009ed4` consumes the
+`Experiment/run.sh` regression all pass. The O2a gate originally materialized
+nine of ten Bilinear occurrences and retained the contextual-binder trace for
+O6; O6c now materializes that final occurrence with traversal-local rules.
+Centralizer `161579b1c1009ed4` consumes the
 public `Finsupp.sum` delta and first named event, then remains a precise O2b
 observer gap before event 2. O2b is implemented in schema 12 by an exact recursive pre-method
 interposer at the public boundary immediately before private `reduceStep`, plus

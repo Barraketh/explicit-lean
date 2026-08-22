@@ -201,6 +201,7 @@ structure RuleTerm where
 inductive RuleRef where
   | theorem (term : RuleTerm) (inverse : Bool)
   | localRule (subject : SubjectRef) (inverse : Bool)
+  | traversalLocalRule (slot : Nat)
 
 inductive ReductionKind where
   | beta
@@ -362,6 +363,16 @@ result proof into a rewrite command.
 
 Replay uses an empty simp theorem collection, no registered simprocs, and no
 ambient discharger. It interprets the certificate as a closed program.
+
+A `traversalLocalRule` is the exact one-based declaration-index offset from
+the simplifier context's recorded `lctxInitIndices`. It represents a theorem
+hypothesis introduced temporarily by congruence descent (for example beneath
+an implication while recording `simp +contextual`). It is not a type- or
+name-based local search. Replay resolves exactly that slot in the callback's
+current local context, constructs only that simp theorem, and marks the result
+non-cacheable so a proof depending on one traversal binder cannot escape into
+another binder scope. Ambient locals continue to use stable `SubjectRef.local`
+identity and printable names.
 
 For a rewrite command it:
 
@@ -588,9 +599,8 @@ encoding metrics. Replay uses an inert traversal plus explicit guards for the
 pinned iota and native-projection paths, and the conservative public seam
 records only exact explicitly selected named deltas. The historical ten-case
 DropRight presentation cohort now materializes and compiles as one operational
-aggregate; Bilinear materializes nine of ten occurrences, with the remaining
-contextual-binder case now retaining its complete trace in the O6
-`unidentified_theorem_application` cluster. Centralizer
+aggregate; Bilinear now materializes all ten occurrences, including its
+contextual-binder case through the O6c local-rule certificate. Centralizer
 `161579b1c1009ed4` consumes the public `Finsupp.sum` delta and the first named
 event, then remains an intentional O2b coverage failure before event 2 rather
 than accepting an incomplete trace. `Experiment/run.sh` passes in full.
@@ -757,13 +767,27 @@ O6b implementation status (2026-08-22): persistent event diagnostics now
 render expressions below expired contextual binders through their canonical,
 raw-id-free form instead of replacing the entire recording with an
 unclassified placeholder. The Bilinear contextual occurrence
-`5795dc0135cc7db3` therefore retains its complete raw trace and joins the
-precise `unidentified_theorem_application` cluster. Separately, closure treats
+`5795dc0135cc7db3` therefore retains its complete raw trace for the subsequent
+O6c operational replay. Separately, closure treats
 a sole successful execution with no body scope or attempt token as committed:
 that is the direct `by simp` case, not missing rollback metadata. The Tower
 occurrence `f27035b0710b8604` now materializes and permanently guards this
 distinction. Schema 14 is unchanged because neither the report shape nor the
 fingerprint algorithm changed.
+
+O6c implementation status (2026-08-22): contextual simp hypotheses introduced
+only inside congruence traversal are operational rules, not proof fallbacks.
+The recorder captures their positive declaration-index offset from
+`Simp.Context.lctxInitIndices` while the callback local still exists. Source
+prints this identity as `local_rule n`; replay resolves exactly that slot at a
+matching callback, never searches the local context, and disables caching for
+the resulting local-dependent rewrite. The pinned implication traversal uses
+`contextual := false` and introduces the binder without `withNewLemmas` or
+contextual simp search; consequence simplification runs under a fresh cache
+boundary. Missing, stale, or non-theorem slots fail closed. The schema-14
+Bilinear occurrence `5795dc0135cc7db3` now materializes with `local_rule 3`
+and `local_rule 4`; the focused source gate rejects a wrong positive slot with
+the ordered-rule mismatch diagnostic. Schema 14 is unchanged.
 
 ### S. Simproc design
 
