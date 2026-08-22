@@ -26,6 +26,7 @@ python3 Experiment/check_o3_attribution.py
 python3 Experiment/check_premise_replay.py
 python3 Experiment/check_o4_premises.py
 python3 Experiment/check_o6_heartbeat_budget.py
+python3 Experiment/check_o6_reporting_integrity.py
 python3 Experiment/check_selectors.py
 python3 Experiment/check_reductions.py
 python3 Experiment/check_local_renames.py

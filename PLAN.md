@@ -800,13 +800,22 @@ and produce classified schema-14 reports in one recording compile per module;
 their independent transition-coverage outcomes remain in the corresponding O6
 clusters tracked by the design document.
 
+O6b removes the pilot's two reporting-integrity failures. Contextual callback
+expressions whose temporary binders have expired are rendered from the same
+canonical, raw-id-free diagnostic form, so Bilinear retains its trace and is
+classified in the precise unidentified-theorem cluster. A single successful
+scope-less execution is normalized as committed by closure, allowing Tower's
+direct `by simp` occurrence to materialize without inventing body rollback
+metadata. Focused production regressions cover both cases under schema 14.
+
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
 `Simp.Config` field as normalized JSON provenance; certificates compile the
 configuration away and contain no replay configuration mode. The production
 `Mathlib/Algebra/Algebra/Bilinear.lean` regression keeps the stable contextual
 IDs `af1f3238d87dcae6` and `5795dc0135cc7db3`, and closes its ten-entry module
-with nine materialized replacements and one `not_reached` terminal outcome.
+with nine materialized replacements and one precise
+`unidentified_theorem_application` coverage failure.
 
 The proof-export scaling diagnostic is now bounded. `ProofExport.Metrics`
 reports `unsharedBytes : Option Nat`: it retains an exact byte count for small
@@ -937,9 +946,10 @@ passes. O2 is split at the pinned API boundary. O2a is complete in schema 11:
 the closed reduction IR, exact conservative public named-delta seam, mutation
 suite, historical ten-case DropRight operational aggregate, and full
 `Experiment/run.sh` regression all pass. Bilinear now materializes nine of ten
-occurrences. Centralizer `161579b1c1009ed4` consumes the public `Finsupp.sum`
-delta and first named event, then remains a precise O2b observer gap before
-event 2. O2b is implemented in schema 12 by an exact recursive pre-method
+occurrences; its contextual-binder case retains its full trace in the O6
+unidentified-theorem cluster. Centralizer `161579b1c1009ed4` consumes the
+public `Finsupp.sum` delta and first named event, then remains a precise O2b
+observer gap before event 2. O2b is implemented in schema 12 by an exact recursive pre-method
 interposer at the public boundary immediately before private `reduceStep`, plus
 exact classification of the pinned hardwired `simpMatch` iota path. The
 Centralizer raw trace contains 12 callbacks: named `Finsupp.sum` and beta

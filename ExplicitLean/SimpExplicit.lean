@@ -3325,16 +3325,24 @@ private partial def canonicalExpr (lctx : LocalContext) : Expr → CanonicalM St
 
 private def exprFingerprint (expression : Expr) : MetaM ExprFingerprint := do
   let expression ← instantiateMVars expression
-  let printable ← withOptions
-      (pp.mvars.set · false |>.set pp.mvars.levels.name false
-        |>.set pp.fvars.anonymous.name false) <| ppExpr expression
+  let lctx ← getLCtx
+  let (canonical, _) := (canonicalExpr lctx expression).run {}
+  let printable ← try
+    let rendered ← withOptions
+        (pp.mvars.set · false |>.set pp.mvars.levels.name false
+          |>.set pp.fvars.anonymous.name false) <| ppExpr expression
+    pure (toString rendered)
+  catch _ =>
+    -- Contextual simplification records callbacks below temporary binders.
+    -- Their local declarations are gone by report time, but their normalized
+    -- expression remains useful diagnostic data and contains no raw ids.
+    pure s!"<callback-local expression> {canonical}"
   -- A free variable that is not present in the diagnostic reader can otherwise
   -- be rendered as Lean's internal `_fvar._` placeholder.  Keep that
   -- diagnostic stable and explicitly non-identity-bearing in persistent JSON;
   -- source rendering uses the original expression and is unaffected.
-  let printable := (toString printable).replace "_fvar._" "<free-variable>"
+  let printable := printable.replace "_fvar._" "<free-variable>"
   let printable := if printable.length > 512 then (printable.take 512).toString ++ "…" else printable
-  let (canonical, _) := (canonicalExpr (← getLCtx) expression).run {}
   return {
     printable
     fingerprint := s!"expr-v1:{hash canonical}"
@@ -3367,13 +3375,28 @@ private def originCandidate (origin : Origin) : MetaM OriginCandidate := do
   | .decl name _ inverse =>
       return { kind := "decl", name := name.toString, inverse, source := none }
   | .fvar fvarId =>
-      let decl ← fvarId.getDecl
-      return {
-        kind := "fvar"
-        name := decl.userName.toString
-        inverse := false
-        source := none
-      }
+      let decl? ← try
+        some <$> fvarId.getDecl
+      catch _ =>
+        pure none
+      match decl? with
+      | some decl =>
+          return {
+            kind := "fvar"
+            name := decl.userName.toString
+            inverse := false
+            source := none
+          }
+      | none =>
+          -- The source certificate encoder has already decided whether this
+          -- origin is replayable.  Persistent diagnostics must not fail only
+          -- because a contextual callback's binder has left the local context.
+          return {
+            kind := "fvar"
+            name := "<callback-local>"
+            inverse := false
+            source := none
+          }
   | .stx _ ref =>
       let inverse := !ref[1].isNone
       return {

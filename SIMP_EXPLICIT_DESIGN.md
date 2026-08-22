@@ -589,7 +589,8 @@ pinned iota and native-projection paths, and the conservative public seam
 records only exact explicitly selected named deltas. The historical ten-case
 DropRight presentation cohort now materializes and compiles as one operational
 aggregate; Bilinear materializes nine of ten occurrences, with the remaining
-case classified at the O2b observer boundary. Centralizer
+contextual-binder case now retaining its complete trace in the O6
+`unidentified_theorem_application` cluster. Centralizer
 `161579b1c1009ed4` consumes the public `Finsupp.sum` delta and the first named
 event, then remains an intentional O2b coverage failure before event 2 rather
 than accepting an incomplete trace. `Experiment/run.sh` passes in full.
@@ -751,6 +752,18 @@ and bounded at 2,000 user-facing heartbeats, while the Unitization, Finset, and
 Expect production sites now form a permanent one-compile-per-module regression.
 The interrupted pilot's remaining truncated logs were cancellation artifacts,
 not additional recorder failures. Full corpus closure remains O6 work.
+
+O6b implementation status (2026-08-22): persistent event diagnostics now
+render expressions below expired contextual binders through their canonical,
+raw-id-free form instead of replacing the entire recording with an
+unclassified placeholder. The Bilinear contextual occurrence
+`5795dc0135cc7db3` therefore retains its complete raw trace and joins the
+precise `unidentified_theorem_application` cluster. Separately, closure treats
+a sole successful execution with no body scope or attempt token as committed:
+that is the direct `by simp` case, not missing rollback metadata. The Tower
+occurrence `f27035b0710b8604` now materializes and permanently guards this
+distinction. Schema 14 is unchanged because neither the report shape nor the
+fingerprint algorithm changed.
 
 ### S. Simproc design
 

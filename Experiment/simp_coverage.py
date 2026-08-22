@@ -433,6 +433,31 @@ def scoped_executions(report: dict[str, Any] | None) -> list[dict[str, Any]]:
     ]
 
 
+def execution_disposition(
+    report: dict[str, Any] | None, execution: dict[str, Any]
+) -> str | None:
+    """Return rollback disposition, normalizing a direct scope-less success.
+
+    Body-scoped calls carry sentinel-derived committed/backtracked metadata.
+    A direct `by simp` with no combinator owner has no body scope or attempt
+    token; if its sole execution succeeds during a successful module compile,
+    that execution is necessarily committed.
+    """
+    disposition = execution.get("disposition")
+    if disposition in {"committed", "backtracked"}:
+        return disposition
+    executions = scoped_executions(report)
+    if (
+        report is not None
+        and report.get("bodyScopeId") is None
+        and len(executions) == 1
+        and execution.get("attemptToken") == ""
+        and execution.get("result") == "succeeded"
+    ):
+        return "committed"
+    return None
+
+
 def classify_terminal_outcome(
     report: dict[str, Any] | None, *, materialized_compile: bool | None = None
 ) -> str:
@@ -441,7 +466,7 @@ def classify_terminal_outcome(
     if report is None or not executions:
         return "not_reached"
     if any(
-        execution.get("disposition") not in {"committed", "backtracked"}
+        execution_disposition(report, execution) not in {"committed", "backtracked"}
         for execution in executions
     ):
         return "coverage_failure"
@@ -449,7 +474,7 @@ def classify_terminal_outcome(
         execution
         for execution in executions
         if execution.get("result") == "succeeded"
-        and execution.get("disposition") == "committed"
+        and execution_disposition(report, execution) == "committed"
     ]
     if committed_successes:
         if materialized_compile is True:
@@ -468,7 +493,7 @@ def committed_certificates(report: dict[str, Any]) -> list[str]:
     for execution in scoped_executions(report):
         if execution.get("result") != "succeeded":
             continue
-        if execution.get("disposition") != "committed":
+        if execution_disposition(report, execution) != "committed":
             continue
         if not execution_admissibility(execution)[0]:
             continue
@@ -487,7 +512,7 @@ def closure_terminal_classification(report: dict[str, Any] | None) -> str:
     if report is None or not executions:
         return "not_reached"
     if any(
-        execution.get("disposition") not in {"committed", "backtracked"}
+        execution_disposition(report, execution) not in {"committed", "backtracked"}
         for execution in executions
     ):
         return "coverage_failure"
@@ -495,7 +520,7 @@ def closure_terminal_classification(report: dict[str, Any] | None) -> str:
         execution
         for execution in executions
         if execution.get("result") == "succeeded"
-        and execution.get("disposition") == "committed"
+        and execution_disposition(report, execution) == "committed"
     ]
     if committed:
         committed_codes = [execution_admissibility(execution)[1] for execution in committed]
@@ -521,13 +546,13 @@ def closure_result_base(
             execution_admissibility(execution)[1]
             for execution in executions
             if execution.get("result") == "succeeded"
-            and execution.get("disposition") == "committed"
+            and execution_disposition(report, execution) == "committed"
             and not execution_admissibility(execution)[0]
         ]
         if committed_codes:
             failure_reason = committed_codes[0]
         elif any(
-            execution.get("disposition") not in {"committed", "backtracked"}
+            execution_disposition(report, execution) not in {"committed", "backtracked"}
             for execution in executions
         ):
             failure_reason = "malformed_recording_result"
@@ -544,13 +569,13 @@ def closure_result_base(
         "terminal_outcome": terminal_outcome,
         "materialized_compile": None,
         "failure_reason": failure_reason,
-        "dispositions": [execution.get("disposition") for execution in executions],
+        "dispositions": [execution_disposition(report, execution) for execution in executions],
         "execution_summaries": [
             {
                 "executionIndex": execution.get("executionIndex"),
                 "attemptToken": execution.get("attemptToken"),
                 "result": execution.get("result"),
-                "disposition": execution.get("disposition"),
+                "disposition": execution_disposition(report, execution),
                 "certificate": accepted_execution_certificate(execution),
                 "acceptedCertificate": execution.get("acceptedCertificate"),
                 "legacyCertificate": execution.get("legacyCertificate"),
@@ -604,7 +629,7 @@ def _closure_committed_executions(report: dict[str, Any] | None) -> list[dict[st
         execution
         for execution in scoped_executions(report)
         if execution.get("result") == "succeeded"
-        and execution.get("disposition") == "committed"
+        and execution_disposition(report, execution) == "committed"
         and execution_admissibility(execution)[0]
         and accepted_execution_certificate(execution) is not None
     ]
@@ -1663,7 +1688,8 @@ def validate_closure_recording(
                 continue
             if (
                 execution.get("result") not in {"succeeded", "failed"}
-                or execution.get("disposition") not in {"committed", "backtracked"}
+                or execution_disposition(report, execution)
+                not in {"committed", "backtracked"}
             ):
                 malformed_result_ids.add(identifier)
     return {

@@ -207,12 +207,22 @@ def main() -> None:
     if (
         context_local is None
         or context_local.get("terminal_outcome") != "coverage_failure"
-        or context_local.get("failure_reason") != "unclassified_recorder_failure"
+        or context_local.get("failure_reason") != "unidentified_theorem_application"
     ):
-        raise RuntimeError(f"context-local report failure changed: {record!r}")
+        raise RuntimeError(
+            "context-local report classification changed: "
+            f"outcome={context_local and context_local.get('terminal_outcome')!r}, "
+            f"reason={context_local and context_local.get('failure_reason')!r}"
+        )
     context_local_report = context_local.get("report") or {}
     if context_local_report.get("acceptedCertificate") is not None:
         raise RuntimeError(f"conservative contextual report was accepted: {context_local!r}")
+    if (
+        context_local_report.get("traceAvailable") is not True
+        or not context_local_report.get("traceLength")
+        or context_local_report.get("failureCategory") is not None
+    ):
+        raise RuntimeError("context-local raw trace was not retained and classified")
     check_configuration(context_local_report, CONTEXT_LOCAL_REPORT_ID)
 
     missing = occurrences.get(MISSING_TRANSITION_ID)
