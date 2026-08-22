@@ -43,8 +43,8 @@ def main() -> None:
         raise RuntimeError(f"closure recording was not singular: {record!r}")
     if not record.get("aggregate", {}).get("compile"):
         raise RuntimeError(f"closure fixture optimistic aggregate failed: {record!r}")
-    if record.get("aggregate", {}).get("closure_complete") is not False:
-        raise RuntimeError(f"fallback-dependent fixture was marked closure-complete: {record!r}")
+    if record.get("aggregate", {}).get("closure_complete") is not True:
+        raise RuntimeError(f"operational closure was not complete: {record!r}")
     if record.get("aggregate", {}).get("materialization_compile_count") != 1:
         raise RuntimeError(f"closure fixture did not use one optimistic materialization: {record!r}")
 
@@ -61,12 +61,10 @@ def main() -> None:
         raise RuntimeError("dead first branch was not classified as not_reached")
     if by_id[abandoned["id"]]["terminal_outcome"] != "attempted_backtracked":
         raise RuntimeError("abandoned first branch was not classified as attempted_backtracked")
-    if by_id[committed_first["id"]]["terminal_outcome"] != "coverage_failure":
-        raise RuntimeError("closed first owner bypassed the operational completion gate")
-    if by_id[committed_first["id"]].get("failure_reason") != "inadmissible_enclosing_body_proof":
-        raise RuntimeError("closed first owner lost its fallback rejection reason")
-    if by_id[committed_first["id"]].get("candidate") is not None:
-        raise RuntimeError("closed first owner produced a materialization candidate")
+    if by_id[committed_first["id"]]["terminal_outcome"] != "materialized":
+        raise RuntimeError("committed first child was not materialized at its occurrence")
+    if by_id[committed_first["id"]].get("candidate", {}).get("kind") != "occurrence":
+        raise RuntimeError("committed first child did not use an occurrence candidate")
     if by_id[failed_first["id"]]["terminal_outcome"] != "attempted_backtracked":
         raise RuntimeError("failed first candidate was not retained as backtracked")
 
@@ -79,7 +77,7 @@ def main() -> None:
         for occurrence in record["occurrences"]
         if occurrence.get("candidate") is not None
     ]
-    if len(candidates) != 2:
+    if len(candidates) != 3:
         raise RuntimeError(f"unexpected closure candidate count: {candidates!r}")
     mutated = [dict(candidate) for candidate in candidates]
     mutated[0]["replacement"] = "exact True.intro"
@@ -208,8 +206,11 @@ def main() -> None:
         coverage.RESULTS = fixture_results
         coverage.AGGREGATE_RESULTS = fixture_aggregate_results
     mutation_aggregate = mutation_record["aggregate"]
-    if mutation_aggregate.get("candidate_plan_complete") is not False:
-        raise RuntimeError(f"body-proof rejection was lost from planning completeness: {mutation_record!r}")
+    # The mutation changes only an already planned occurrence replacement.  It
+    # must fail at materialization while leaving the operational candidate plan
+    # itself complete; proof/body fallback is not a planning escape hatch.
+    if mutation_aggregate.get("candidate_plan_complete") is not True:
+        raise RuntimeError(f"operational candidate planning was not complete: {mutation_record!r}")
     if mutation_aggregate.get("closure_complete") is not False:
         raise RuntimeError(f"singleton rejection was marked closure-complete: {mutation_record!r}")
     if mutation_aggregate.get("compile") is not False:
@@ -226,8 +227,8 @@ def main() -> None:
     }
     if mutation_outcomes.get(driver_mutated_id) != "coverage_failure":
         raise RuntimeError(f"driver did not classify the mutated occurrence: {mutation_record!r}")
-    if sum(outcome == "materialized" for outcome in mutation_outcomes.values()) != 1:
-        raise RuntimeError(f"driver did not materialize the operational survivor: {mutation_record!r}")
+    if sum(outcome == "materialized" for outcome in mutation_outcomes.values()) != 2:
+        raise RuntimeError(f"driver did not materialize both operational survivors: {mutation_record!r}")
 
     rewrite_failure = coverage.compile_closure_candidates(
         MODULE,
@@ -276,7 +277,7 @@ def main() -> None:
     failed_planning = planning_by_id[planned_failure["id"]]
     if failed_planning["terminal_outcome"] != "coverage_failure":
         raise RuntimeError("deliberate planning failure was not retained")
-    if failed_planning.get("failure_reason") != "inadmissible_enclosing_body_proof":
+    if failed_planning.get("failure_reason") != "unsupported_owner_materialization":
         raise RuntimeError(f"planning failure reason changed: {failed_planning!r}")
     if planning_record["aggregate"].get("replacement_count") != 1:
         raise RuntimeError(f"unexpected planned candidate count: {planning_record!r}")
@@ -399,10 +400,10 @@ def main() -> None:
         raise RuntimeError(f"summary did not retain the valid module: {summary!r}")
     if summary.get("missing_modules") or summary.get("missing_occurrences"):
         raise RuntimeError(f"summary reported valid fixture data as missing: {summary!r}")
-    if summary.get("closure_modules") != {"complete": 0, "incomplete": 1}:
+    if summary.get("closure_modules") != {"complete": 1, "incomplete": 0}:
         raise RuntimeError(f"summary closure gate counts are wrong: {summary!r}")
 
-    print("G1 closure retained operational survivors and rejected proof fallbacks")
+    print("O5 closure retained operational survivors and rejected fallback paths")
 
 
 if __name__ == "__main__":

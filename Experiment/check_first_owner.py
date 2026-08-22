@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused F3 check for the smallest closed `first` owner fallback."""
+"""Focused O5 check for operational source ownership inside `first`."""
 
 from __future__ import annotations
 
@@ -23,7 +23,8 @@ def compile_copy(path: Path) -> tuple[bool, str]:
 
 def write_copy(path: Path, source: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(coverage.inject_import(source))
+    # apply_closure_candidates already injects ExplicitLean.SimpExplicit.
+    path.write_bytes(source)
 
 
 def main() -> None:
@@ -47,79 +48,71 @@ def main() -> None:
     }
     if len(owner_ranges) != 1:
         raise RuntimeError(f"expected one smallest enclosing first owner: {entries!r}")
-    owner = entries[0]
-    owner_id = coverage.first_owner_id(owner)
-    source = FIXTURE.read_bytes()
-    if source[owner["ownerStartByte"] : owner["ownerEndByte"]].decode("utf-8") != owner[
-        "ownerSource"
-    ]:
-        raise RuntimeError("first-owner inventory range is stale")
 
     coverage.OUTPUT = ROOT / ".lake" / "f3-first-owner"
     coverage.RESULTS = coverage.OUTPUT / "results"
     coverage.AGGREGATE_RESULTS = coverage.OUTPUT / "aggregate-results"
-    record = coverage.passive_module_recording(
+    record = coverage.run_closure_module(
         FIXTURE_MODULE,
         entries,
-        timeout=180,
+        coverage.mathlib_revision(),
+        180,
         keep_copy=True,
         source_path=FIXTURE,
     )
-    if not record["compile"] or record["compile_count"] != 1:
+    if not record["recording"]["compile"]:
         raise RuntimeError(f"first-owner passive recording failed: {record!r}")
-    reports = {
-        report.get("occurrenceId"): report
-        for report in record.get("reports", [])
-        if isinstance(report.get("occurrenceId"), str)
-    }
-    if len(reports) != 2:
-        raise RuntimeError(f"first-owner reports were not retained: {record!r}")
-    dispositions = {
-        tuple(execution.get("disposition") for execution in report.get("executions", []))
-        for report in reports.values()
-    }
-    if dispositions != {("backtracked",), ("committed",)}:
-        raise RuntimeError(f"unexpected first-branch dispositions: {record!r}")
-
-    owner_reports = record.get("first_owner_reports", [])
-    if len(owner_reports) != 1 or owner_reports[0].get("ownerId") != owner_id:
-        raise RuntimeError(f"closed first owner proof report missing: {owner_reports!r}")
-    serialized = json.dumps(owner_reports, ensure_ascii=False, sort_keys=True)
+    if record["recording"].get("first_owner_reports") != []:
+        raise RuntimeError("first-owner proof report unexpectedly survived")
+    serialized = json.dumps(record, ensure_ascii=False, sort_keys=True)
     if FORBIDDEN.search(serialized):
-        raise RuntimeError("first-owner proof report contains a raw internal identity")
-    owner_report = owner_reports[0]
-    replacement = coverage.first_owner_replacement(source, owner, owner_report)
-    if re.search(r"(?<![A-Za-z0-9_])simp(?!_)", replacement):
-        raise RuntimeError(f"first-owner replacement retained ambient simp: {replacement!r}")
-    materialized = coverage.replace_range_bytes(
-        source,
-        owner["ownerStartByte"],
-        owner["ownerEndByte"],
-        owner["ownerSource"],
-        replacement,
-    )
+        raise RuntimeError("first-owner report contains a raw internal identity")
+
+    occurrences = {occurrence["id"]: occurrence for occurrence in record["occurrences"]}
+    if len(occurrences) != 2:
+        raise RuntimeError(f"first-owner closure did not retain both occurrences: {record!r}")
+    outcomes = {occurrence["terminal_outcome"] for occurrence in occurrences.values()}
+    if outcomes != {"materialized", "attempted_backtracked"}:
+        raise RuntimeError(f"unexpected first-branch closure outcomes: {record!r}")
+    committed = [
+        occurrence
+        for occurrence in occurrences.values()
+        if occurrence["terminal_outcome"] == "materialized"
+    ]
+    if len(committed) != 1:
+        raise RuntimeError(f"expected one committed first branch: {record!r}")
+    candidate = committed[0].get("candidate")
+    if not isinstance(candidate, dict) or candidate.get("kind") != "occurrence":
+        raise RuntimeError(f"committed first branch was not an occurrence candidate: {record!r}")
+    committed_entry = next(entry for entry in entries if entry["id"] == committed[0]["id"])
+    if (
+        candidate.get("startByte") != committed_entry["startByte"]
+        or candidate.get("endByte") != committed_entry["endByte"]
+        or candidate.get("expected") != committed_entry["source"]
+    ):
+        raise RuntimeError(f"first branch candidate escaped its occurrence range: {candidate!r}")
+    if record["aggregate"].get("closure_complete") is not True:
+        raise RuntimeError(f"operational first-owner closure did not complete: {record!r}")
+
+    source = FIXTURE.read_bytes()
+    materialized = coverage.apply_closure_candidates(source, [candidate])
     materialized_path = coverage.OUTPUT / "materialized" / "first-owner.lean"
     write_copy(materialized_path, materialized)
     compiled, output = compile_copy(materialized_path)
     if not compiled:
-        raise RuntimeError(f"smallest first-owner materialization failed:\n{output}")
+        raise RuntimeError(f"operational first-owner materialization failed:\n{output}")
+    if "exact " in candidate.get("replacement", ""):
+        raise RuntimeError("first-owner candidate exported an enclosing proof")
 
-    bad_report = dict(owner_report)
-    bad_report["proof"] = "True.intro"
-    bad_replacement = coverage.first_owner_replacement(source, owner, bad_report)
-    mutated = coverage.replace_range_bytes(
-        source,
-        owner["ownerStartByte"],
-        owner["ownerEndByte"],
-        owner["ownerSource"],
-        bad_replacement,
-    )
+    mutated_candidate = dict(candidate)
+    mutated_candidate["replacement"] = "exact True.intro"
+    mutated = coverage.apply_closure_candidates(source, [mutated_candidate])
     mutated_path = coverage.OUTPUT / "materialized" / "first-owner-mutated.lean"
     write_copy(mutated_path, mutated)
     mutated_compiled, _ = compile_copy(mutated_path)
     if mutated_compiled:
-        raise RuntimeError("mutated first-owner proof unexpectedly compiled")
-    print("F3 smallest closed first-owner proof fallback passed")
+        raise RuntimeError("mutated first-owner operational candidate unexpectedly compiled")
+    print("O5 first-owner operational source ownership passed")
 
 
 if __name__ == "__main__":

@@ -60,14 +60,9 @@ so independently generated certificates can be composed in one declaration. -/
 syntax (name := simpExplicitRename) "simp_explicit_rename" " ["
   simpExplicitLocalRename,* "]" : tactic
 syntax (name := simpExplicitBodyScope) "simp_explicit_body_scope" str " in " tacticSeq : tactic
-/-- On-demand variant of the body recorder that also exports a proof when the
-complete inventoried body closes its input goal. Coverage uses this only after
-an occurrence-level certificate fails source materialization. -/
-syntax (name := simpExplicitBodyScopeProof) "simp_explicit_body_scope_proof" str
-  " in " tacticSeq : tactic
-/-- Instrument one closed `first` owner while materializing a body.  This is
-    an internal source-rewriter primitive: it records a printable proof only
-    when the wrapped owner closes its input goal. -/
+/-- Instrument one closed `first` owner while materializing a body. Child
+    occurrences are recorded in a scoped frame; the enclosing owner proof is
+    never inspected or exported. -/
 syntax (name := simpExplicitFirstScope) "simp_explicit_first_scope" str " in " tacticSeq : tactic
 /-- Internal passive-recorder entry point used by source rewriting. The source
 identity is an argument rather than nested `set_option ... in` syntax so the
@@ -388,6 +383,10 @@ structure EncodingMetrics where
       could be validated.  These remain explicit coverage failures and may
       never fall through to an exported event or whole-result proof. -/
   premiseProgramFailures : Nat := 0
+  /-- Recorded events for which no source-replayable operational program could
+      be constructed.  This is a fail-closed coverage result, never a proof
+      or presentation fallback. -/
+  operationalProgramFailures : Nat := 0
   nextSelectorCount : Nat := 0
   matchSelectorCount : Nat := 0
   tickSelectorCount : Nat := 0
@@ -410,6 +409,8 @@ private def computeOperationalAdmissibility
       some "inadmissible_direct_term_premise"
     else if metrics.premiseProgramFailures > 0 then
       some "inadmissible_premise_program"
+    else if metrics.operationalProgramFailures > 0 then
+      some "inadmissible_operational_program"
     else if metrics.wholeResultProofCount > 0 || metrics.mode == "whole_result_proof" then
       some "inadmissible_whole_result_proof"
     else if metrics.presentationChangeCount > 0 || metrics.mode == "presentation_change" then
@@ -1107,82 +1108,6 @@ private def recordingMethods (ref : IO.Ref RecorderState)
     pre
     post
     discharge? := recordedDischarge? ref }
-
-/-- State for the one bounded presentation probe used by the F3 encoder.  The
-    probe deliberately suppresses proof-producing/default rewrites while one
-    deterministic `Simp.mainCore` pass commits every proofless,
-    expression-changing method result. -/
-private structure PresentationProbeState where
-  candidates : Array (Expr × Expr) := #[]
-
-private def presentationMethod (ref : IO.Ref PresentationProbeState)
-    (method : Simp.Simproc) : Simp.Simproc := fun input => do
-  let metaSnapshot ← liftM Meta.saveState
-  let simpSnapshot ← get
-  try
-    let step ← method input
-    match stepResult? step with
-    | some result =>
-        let state ← ref.get
-        if result.proof?.isNone && !Expr.equal result.expr input then
-          ref.set {
-            candidates := state.candidates.push (input, result.expr)
-          }
-          return step
-        else
-          -- A rejected method is observational only. Restore both Meta and
-          -- Simp state: default dischargers and caches may have assigned
-          -- metavariables or consumed diagnostics before returning a result.
-          liftM metaSnapshot.restore
-          set simpSnapshot
-          return .continue
-    | none =>
-        liftM metaSnapshot.restore
-        set simpSnapshot
-        return .continue
-  catch _ =>
-    liftM metaSnapshot.restore
-    set simpSnapshot
-    return .continue
-
-private def presentationCandidate? (target : Expr) (ctx : Simp.Context)
-    (simprocs : Simp.SimprocsArray) (recorded : Array RecordedEvent) :
-    TacticM (Option (Expr × Array (Expr × Expr))) := do
-  try
-    -- The theorem engine is independent of `Simp.Methods`; method wrappers
-    -- alone cannot suppress recorded proof-bearing rewrites.  Remove exactly
-    -- the origins of those events from this speculative context, preserving
-    -- all original definition/unfolding entries and proofless rules.
-    let presentationTheorems := recorded.foldl (fun theorems event =>
-      if event.result.proof?.isSome then
-        event.origins.foldl (fun theorems origin => theorems.eraseTheorem origin) theorems
-      else
-        theorems) ctx.simpTheorems
-    let presentationCtx := ctx.setSimpTheorems presentationTheorems
-    withoutModifyingState do
-      let ref ← IO.mkRef ({} : PresentationProbeState)
-      let methods := Simp.mkDefaultMethodsCore simprocs
-      let methods : Simp.Methods := {
-        methods with
-          pre := presentationMethod ref methods.pre
-          post := presentationMethod ref methods.post
-      }
-      let (result, _) ← withOptions (·.setBool `diagnostics true) do
-        Simp.mainCore target presentationCtx (methods := methods)
-      let probe ← ref.get
-      -- Return the complete target produced by the probe. The accepted local
-      -- pairs are only boundary evidence for removing presentation events
-      -- already realized by this pass.
-      -- The candidate must be a genuine presentation change, but remain
-      -- definitionally equal to the original target so `change` is checked by
-      -- the kernel at the replacement site.
-      unless !Expr.equal result.expr target do
-        return none
-      unless ← isDefEq result.expr target do
-        return none
-      return some (result.expr, probe.candidates)
-  catch _ =>
-    return none
 
 private def ruleText (origin : Origin) : MetaM String := do
   match origin with
@@ -2024,17 +1949,6 @@ private def runReplay (target : Expr) (events : Array ReplayEvent) : TacticM (Si
   let (result, _) ← Simp.mainCore target ctx (methods := methods)
   return (result, ← ref.get)
 
-private def freshBindingName (eventIndex : Nat) (used : Array Name) : MetaM Name := do
-  let lctx ← getLCtx
-  let mut suffix := 0
-  while true do
-    let base := s!"h_explicit_{eventIndex + 1}"
-    let candidate := Name.mkSimple (if suffix == 0 then base else s!"{base}_{suffix}")
-    if (lctx.findFromUserName? candidate).isNone && !used.contains candidate then
-      return candidate
-    suffix := suffix + 1
-  throwError "unreachable generated binding name search"
-
 private def freshPremiseBindingName (premiseIndex : Nat) (used : Array Name) : MetaM Name := do
   let lctx ← getLCtx
   let mut suffix := 0
@@ -2314,43 +2228,6 @@ private def isReflexiveResultEarly (expr : Expr) : MetaM Bool := do
     return ← isDefEq expr.appFn!.appArg! expr.appArg!
   return false
 
-private def generatedProofBinding (input : Expr) (result : Simp.Result)
-    (eventIndex : Nat) (phase : Phase) (usedNames : Array Name) :
-    TacticM (GeneratedBinding × ReplayEvent) := do
-  let relation ← mkEq input result.expr
-  let proof ← Simp.Result.getProof' input result
-  let proof ← mkExpectedTypeHint proof relation
-  let proofType ← inferType proof
-  unless ← isDefEq proofType relation do
-    throwError "simp_explicit generated proof did not check against its recorded equality"
-  let name ← freshBindingName eventIndex usedNames
-  let sourceNamespace := ((← Term.getDeclName?).map (·.getPrefix)).getD Name.anonymous
-  let rendered ← ProofExport.render proof (type? := some relation) (config := {
-    sourceNamespace
-  })
-  let binding : GeneratedBinding := {
-    name
-    kind := "rewrite"
-    type := relation
-    proof
-    typeText := rendered.typeText
-    proofText := rendered.valueText
-    bytes := rendered.typeText.utf8ByteSize + rendered.valueText.utf8ByteSize
-  }
-  let rules ← mkSimpTheoremFromExpr (.other name) #[] proof
-    (post := phase == .post)
-  let replay : ReplayEvent := {
-    selector := .next
-    phase
-    rules
-    source := (mkIdent name).raw
-  }
-  return (binding, replay)
-
-private def generatedBinding (event : RecordedEvent) (eventIndex : Nat)
-    (usedNames : Array Name) : TacticM (GeneratedBinding × ReplayEvent) :=
-  generatedProofBinding event.input event.result eventIndex event.phase usedNames
-
 private def indentSource (indent : String) (text : String) : String :=
   text.replace "\n" ("\n" ++ indent)
 
@@ -2386,14 +2263,6 @@ private def certificatePlanText (events : Array EncodedEvent)
       return command ++ eventList
     lines := lines.push (command ++ eventList)
     return String.intercalate "\n" lines.toList
-
-private def wholeResultPlanText (binding : GeneratedBinding) (leaveOpen := false) : String :=
-  let declaration :=
-    s!"have {binding.name} : (\n{indentSource "  " binding.typeText}\n) :="
-  let proof := s!"  {indentSource "  " binding.proofText}"
-  let command := if leaveOpen then "simp_explicit leave_open" else "simp_explicit"
-  let replay := s!"{command} [↓ {binding.name}]"
-  String.intercalate "\n" [declaration, proof, replay]
 
 private inductive CertificateSelectorMode where
   | next
@@ -2677,20 +2546,11 @@ private partial def buildEncodedEvents? (recorded : Array RecordedEvent)
           -- terminal program; an authoritative proof-term fallback is never
           -- an admissible encoding.
           return none
-        let (binding, replay) ← generatedBinding event index usedNames
-        usedNames := usedNames.push binding.name
-        bindings := bindings.push binding
-        encoded := encoded.push {
-          event
-          replay
-          info := {
-            kind := "generated_proof"
-            reason := some reason
-            selectorKind := some "next"
-          }
-          ruleText := binding.name.toString
-          binding? := some binding
-        }
+        -- Every accepted event must be replayable from a recorded theorem or
+        -- explicit reduction.  The historical generated-proof branch is
+        -- deliberately removed: its authoritative proof is not an
+        -- operational certificate and must never become source.
+        return none
     return some (encoded, bindings, usedNames)
   catch _ =>
     return none
@@ -2903,38 +2763,6 @@ def encodeProofResult (input : Expr) (result : Simp.Result)
     encodingKind := encoded.info.kind
     encodingReason := encoded.info.reason
   }
-
-private def buildWholeResultPlan? (target : Expr) (searchedResult : Simp.Result)
-    (initialUsedNames : Array Name := #[]) : TacticM (Option CertificatePlan) := do
-  try
-    let (binding, replay) ← generatedProofBinding target searchedResult 0 .pre initialUsedNames
-    let (replayedResult, replayState) ← runReplay target #[replay]
-    unless replayState.next == 1 do
-      return none
-    let reachesResult ← if searchedResult.expr.isTrue then
-      isReflexiveResultEarly replayedResult.expr
-    else
-      isDefEq searchedResult.expr replayedResult.expr
-    unless reachesResult do
-      return none
-    let leaveOpen ← if searchedResult.expr.isTrue then pure false else
-      isReflexiveResultEarly searchedResult.expr
-    let source := wholeResultPlanText binding leaveOpen
-    return some {
-      events := #[]
-      bindings := #[binding]
-      positions := false
-      source
-      metrics := {
-        mode := "whole_result_proof"
-        wholeResultProofCount := 1
-        generatedBindingCount := 1
-        generatedBindingBytes := binding.bytes
-        totalCertificateBytes := source.utf8ByteSize
-      }
-    }
-  catch _ =>
-    return none
 
 private def replaySimp (eventSyntax : Array Syntax) (closeReflexive := true) : TacticM Unit := withMainContext do
   let events ← eventSyntax.mapM elaborateEvent
@@ -4120,6 +3948,30 @@ private structure ContextSubjectEncoding where
   positionsNeeded : Bool
   transitionContinuity? : Option TransitionContinuityReport
 
+private def operationalUnavailableContextEncoding (target : Expr)
+    (state : RecorderState) (result : Simp.Result) (usedNames : Array Name) :
+    TacticM (ContextSubjectEncoding × Array Name) := do
+  let (rawInfos, rawPremiseInfos) ← unencodedHierarchy state.events
+  let hasPremises := state.events.any (·.premises.size > 0)
+  let transitionContinuity? ← try
+    buildTransitionContinuity? target state.events result.expr
+  catch _ =>
+    pure none
+  pure ({
+    eventText := ""
+    bindings := #[]
+    encodingInfos := rawInfos
+    premiseEncodingInfos := rawPremiseInfos
+    metrics := if hasPremises then
+      { premiseProgramFailures := 1 }
+    else
+      { operationalProgramFailures := 1 }
+    fallbackReason? := some (if hasPremises then
+      "premise_program_unavailable" else "operational_program_unavailable")
+    positionsNeeded := false
+    transitionContinuity?
+  }, usedNames)
+
 private structure ContextEncodingBundle where
   traces : Array ContextSubjectTrace
   bindings : Array GeneratedBinding
@@ -4199,6 +4051,7 @@ private def addEncodingMetrics (lhs rhs : EncodingMetrics) : EncodingMetrics := 
   nestedPremiseBindings := lhs.nestedPremiseBindings + rhs.nestedPremiseBindings
   termPremiseBindings := lhs.termPremiseBindings + rhs.termPremiseBindings
   premiseProgramFailures := lhs.premiseProgramFailures + rhs.premiseProgramFailures
+  operationalProgramFailures := lhs.operationalProgramFailures + rhs.operationalProgramFailures
   nextSelectorCount := lhs.nextSelectorCount + rhs.nextSelectorCount
   matchSelectorCount := lhs.matchSelectorCount + rhs.matchSelectorCount
   tickSelectorCount := lhs.tickSelectorCount + rhs.tickSelectorCount
@@ -4327,53 +4180,18 @@ private def publishScopedFrame (scopeId : String) (frameId : Nat)
     logInfoAt reportStx m!"EXPLICIT_LEAN_SIMP_REPORT {(toJson report).compress}"
   leaveScopedFrame frameId
 
-private structure FirstOwnerReport where
-  ownerId : String
-  proof : String
-  proofBytes : Nat
-  closesGoal : Bool
-  deriving ToJson
-
-private structure BodyScopeProofReport where
-  scopeId : String
-  proof : Option String
-  proofBytes : Nat
-  closesGoal : Bool
-  failureReason : Option String
-  localRenames : Array LocalRenameInfo := #[]
-  deriving ToJson
-
 private def runFirstOwnerScope (ownerId : String) (body : Syntax) (reportStx : Syntax) :
     TacticM Unit := withMainContext do
-  let main ← getMainGoal
-  let initialTarget ← instantiateMVars (← main.getType)
-  let sourceNamespace := ((← Term.getDeclName?).map (·.getPrefix)).getD Name.anonymous
-  evalTactic body
-  let goals ← getGoals
-  unless goals.isEmpty do
-    return
-  unless ← main.isAssigned do
-    return
-  let some proof ← getExprMVarAssignment? main | return
-  let proof ← instantiateMVars proof
-  let proofType ← inferType proof
-  unless ← isDefEq proofType initialTarget do
-    return
-  let some rendered ← try
-      main.withContext do
-        some <$> ProofExport.render proof (type? := some initialTarget) {
-          sourceNamespace
-        }
-    catch _ =>
-      pure none
-    | return
-  let report : FirstOwnerReport := {
-    ownerId
-    proof := rendered.valueText
-    proofBytes := rendered.valueText.utf8ByteSize
-    closesGoal := true
-  }
-  logInfoAt reportStx m!"EXPLICIT_LEAN_FIRST_OWNER_REPORT {(toJson report).compress}"
+  let frameId ← enterScopedFrame ownerId
+  try
+    -- A `first` owner is only a scope for its child occurrences.  Its
+    -- enclosing proof is deliberately not inspected or exported.
+    withOptions (·.set `explicitLean.simpExplicit.bodyScopeFrame frameId) do
+      evalTactic body
+    publishScopedFrame ownerId frameId reportStx
+  catch ex =>
+    leaveScopedFrame frameId
+    throw ex
 
 private def selectorMetrics (events : Array RecordedEvent)
     (selectors : Array ReplaySelector) : EncodingMetrics := Id.run do
@@ -4472,20 +4290,9 @@ private def contextSubjectEncoding? (target : Expr)
         }, usedNames)
     let mut plan? ← buildCertificatePlan? target state.events result usedNames
     if plan?.isNone && state.events.any (·.premises.size > 0) then
-      let (rawInfos, rawPremiseInfos) ← unencodedHierarchy state.events
-      return some ({
-        eventText := ""
-        bindings := #[]
-        encodingInfos := rawInfos
-        premiseEncodingInfos := rawPremiseInfos
-        metrics := { premiseProgramFailures := 1 }
-        fallbackReason? := some "premise_program_unavailable"
-        positionsNeeded := false
-        transitionContinuity? := none
-      }, usedNames)
-    if plan?.isNone then
-      plan? ← buildWholeResultPlan? target result usedNames
-    let some plan := plan? | return none
+      return some (← operationalUnavailableContextEncoding target state result usedNames)
+    let some plan := plan? |
+      return some (← operationalUnavailableContextEncoding target state result usedNames)
     let continuity? ← if plan.metrics.mode == "event" &&
         plan.metrics.generatedProofEvents == 0 && plan.metrics.termPremiseBindings == 0 then
         pure none
@@ -4493,12 +4300,7 @@ private def contextSubjectEncoding? (target : Expr)
         pure none
       else
         buildTransitionContinuity? target state.events result.expr
-    let eventText := if plan.metrics.mode == "whole_result_proof" && plan.events.isEmpty then
-      match plan.bindings[0]? with
-      | some binding => s!"[↓ {binding.name}]"
-      | none => "[]"
-    else
-      certificatePlanEventListText plan.events
+    let eventText := certificatePlanEventListText plan.events
     let allUsedNames := usedNames ++ plan.bindings.map (·.name)
     return some ({
       eventText
@@ -4506,13 +4308,15 @@ private def contextSubjectEncoding? (target : Expr)
       encodingInfos := planEncodingInfos plan
       premiseEncodingInfos := planPremiseEncodingInfos plan
       metrics := plan.metrics
-      fallbackReason? :=
-        if plan.metrics.mode == "whole_result_proof" then some "presentation_gap" else none
+      fallbackReason? := none
       positionsNeeded := plan.positions
       transitionContinuity? := continuity?
     }, allUsedNames)
   catch _ =>
-    return none
+    try
+      return some (← operationalUnavailableContextEncoding target state result usedNames)
+    catch _ =>
+      return none
 
 private def reencodeContextTraces? (traces : Array ContextSubjectTrace)
     (plan : Array LocalRenamePlan) : TacticM (Option ContextEncodingBundle) := do
@@ -4746,45 +4550,6 @@ private def validateContextCertificate (source : String)
   catch _ =>
     return false
 
-/-- Validate a target certificate, including an optional presentation `change`,
-    against a fresh clone of the original goal.  This is intentionally kept
-    separate from context validation: target certificates must not recreate a
-    context fingerprint from a mutated mvar. -/
-private def validateTargetCertificate (source : String)
-    (initialTarget : Expr) (initialLctx : LocalContext)
-    (initialLocalInstances : LocalInstances) (actualClosed : Bool)
-    (actualTarget : Expr) : TacticM Bool := do
-  try
-    withoutModifyingState do
-      let parsed ← match Parser.runParserCategory (← getEnv)
-          `term s!"by\n{source}" with
-        | .ok stx => pure stx
-        | .error detail =>
-            throwError m!"target certificate parse failed: {detail}"
-      let `(term| by $seq:tacticSeq) := parsed
-        | throwError "target certificate parser returned a non-tactic term"
-      let cloneExpr ← withLCtx' initialLctx do
-        mkFreshExprMVarAt initialLctx initialLocalInstances initialTarget
-          MetavarKind.syntheticOpaque
-      withLCtx' initialLctx do
-        replaceMainGoal [cloneExpr.mvarId!]
-        evalTactic seq.raw
-      let goals ← getGoals
-      let replayClosed := goals.isEmpty
-      unless replayClosed == actualClosed do
-        return false
-      if replayClosed then
-        return true
-      let some replayGoal := goals[0]? | return false
-      let replayTarget ← replayGoal.getType
-      withLCtx' initialLctx do
-        let replayState ← stateFingerprint replayTarget
-        let actualState ← stateFingerprint actualTarget
-        let same := sameStateFingerprint replayState actualState
-        return same
-  catch _ =>
-    return false
-
 private def instantiateRecordedResult (result : Simp.Result) : MetaM Simp.Result := do
   return {
     result with
@@ -4833,57 +4598,31 @@ private def instantiateRecordedState (state : RecorderState) : MetaM RecorderSta
       premises := ← state.premises.mapM instantiateRecordedPremise
   }
 
-private def buildPresentationPlan? (target : Expr) (mvarId : MVarId)
-    (state : RecorderState) (result : Simp.Result)
-    (runPresentation : Expr → TacticM (Option (Expr × Array (Expr × Expr)))) :
-    TacticM (Option CertificatePlan) := do
-  try
-    let some (wholeCandidate, candidates) ← runPresentation target
-      | return none
-    -- The presentation pass may realize several proofless transitions before
-    -- returning its whole-goal expression.  Remove only matching proofless
-    -- semantic events; proof-bearing events with the same boundary remain
-    -- authoritative replay obligations.
-    let replayEvents := state.events.filter fun event =>
-      !candidates.any (fun candidate =>
-        Expr.equal event.input candidate.1 &&
-        Expr.equal event.result.expr candidate.2 &&
-        event.result.proof?.isNone)
-    let some candidatePlan ← buildCertificatePlan? wholeCandidate replayEvents result
-      | return none
-    let sourceNamespace := ((← Term.getDeclName?).map (·.getPrefix)).getD Name.anonymous
-    let rendered ← ProofExport.renderType wholeCandidate (config := {
-      sourceNamespace
-    })
-    -- ProofExport may use a shared `let` sequence.  Parenthesize it after
-    -- `change` so the semicolon remains inside the term rather than being
-    -- parsed as a tactic-sequence separator.
-    let renderedValueText := indentSource "  " rendered.valueText
-    let source := s!"change (\n{renderedValueText}\n)\n{candidatePlan.source}"
-    let decl ← mvarId.getDecl
-    let actualClosed := result.expr.isTrue
-    unless ← validateTargetCertificate source target decl.lctx decl.localInstances
-        actualClosed result.expr do
-      return none
-    let metrics := {
-      candidatePlan.metrics with
-        mode := "presentation_change"
-        presentationChangeCount := 1
-        totalCertificateBytes := source.utf8ByteSize
-    }
-    return some {
-      candidatePlan with
-        source
-        metrics
-        positions := candidatePlan.positions
-    }
+private def operationalUnavailableAttempt (target : Expr) (state : RecorderState)
+    (result : Simp.Result) : TacticM EncodingAttempt := do
+  let (rawInfos, rawPremiseInfos) ← unencodedHierarchy state.events
+  let hasPremises := state.events.any (·.premises.size > 0)
+  let transitionContinuity? ← try
+    buildTransitionContinuity? target state.events result.expr
   catch _ =>
-    return none
+    pure none
+  pure {
+    suggestion := ""
+    encodingInfos := rawInfos
+    premiseEncodingInfos := rawPremiseInfos
+    encodingMetrics := if hasPremises then
+      { premiseProgramFailures := 1 }
+    else
+      { operationalProgramFailures := 1 }
+    encodingFallbackReason? := some (if hasPremises then
+      "premise_program_unavailable" else "operational_program_unavailable")
+    positionsNeeded := false
+    transitionContinuity?
+  }
 
 private def encodeRecording? (target : Expr) (mvarId : MVarId)
     (state : RecorderState) (result : Simp.Result)
-    (runAndRecord : Expr → TacticM (Simp.Result × RecorderState))
-    (presentation? : Option (Expr → TacticM (Option (Expr × Array (Expr × Expr)))) := none) :
+    (runAndRecord : Expr → TacticM (Simp.Result × RecorderState)) :
     TacticM (Option EncodingAttempt) := do
   try
     let deferred? ← deferredSimprocEncoding state.events
@@ -4929,48 +4668,20 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
       premiseEncodingInfos := state.events.map (fun _ => #[])
       encodingMetrics := selectorMetrics state.events flatSelectors
     else
-      -- Prefer the compact event program whenever it validates.  The
-      -- presentation pass is a bounded fallback for targets whose current
-      -- syntax cannot be replayed from the original presentation.
+      -- Prefer the compact event program whenever it validates.  A failed
+      -- operational plan is a coverage result; presentation and whole-result
+      -- proof exporters are intentionally outside the materialization path.
       let mut plan? ← if needsPresentation then
         pure none
       else
         buildCertificatePlan? target state.events result
-      if plan?.isNone then
-        plan? ← match presentation? with
-          | some runPresentation =>
-              buildPresentationPlan? target mvarId state result runPresentation
-          | none => pure none
-      if plan?.isNone && state.events.any (·.premises.size > 0) then
-        -- O4's premise contract is fail-closed.  If the recorded child
-        -- program cannot be replayed operationally, retain its hierarchy as
-        -- a precise coverage failure; never erase it behind the historical
-        -- whole-result proof exporter.
-        let (rawInfos, rawPremiseInfos) ← unencodedHierarchy state.events
-        return some {
-          suggestion := ""
-          encodingInfos := rawInfos
-          premiseEncodingInfos := rawPremiseInfos
-          encodingMetrics := { premiseProgramFailures := 1 }
-          encodingFallbackReason? := some "premise_program_unavailable"
-          positionsNeeded := false
-          transitionContinuity? := none
-        }
-      if plan?.isNone then
-        plan? ← buildWholeResultPlan? target result
       let some plan := plan?
-        | return none
+        | return some (← operationalUnavailableAttempt target state result)
       suggestion := plan.source
       encodingInfos := planEncodingInfos plan
       premiseEncodingInfos := planPremiseEncodingInfos plan
       encodingMetrics := plan.metrics
-      encodingFallbackReason? :=
-        if plan.metrics.mode == "whole_result_proof" ||
-            plan.metrics.mode == "presentation_change" then some "presentation_gap" else none
       positionsNeeded := plan.positions
-      if plan.metrics.generatedSimprocEvents == 0 &&
-          (plan.metrics.mode != "event" || plan.metrics.termPremiseBindings > 0) then
-        transitionContinuity? ← buildTransitionContinuity? target state.events result.expr
 
     -- Search a bounded certificate-program graph breadth first. A node is the
     -- current target plus the phases that produced it. Its outgoing edges
@@ -5046,7 +4757,10 @@ private def encodeRecording? (target : Expr) (mvarId : MVarId)
       transitionContinuity?
     }
   catch _ =>
-    return none
+    try
+      return some (← operationalUnavailableAttempt target state result)
+    catch _ =>
+      return none
 
 private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
     (passive : Bool := false)
@@ -5108,7 +4822,8 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
           positionsNeeded := false
           transitionContinuity? := ← buildTransitionContinuity? type state.events result.expr
         }
-        if encoding?.isNone then
+        if encoding?.isNone || encoding.metrics.operationalProgramFailures > 0 ||
+            encoding.metrics.premiseProgramFailures > 0 then
           ordinaryEncodingFailed := true
         usedNames := usedNames ++ encoding.bindings.map (·.name)
         allBindings := allBindings ++ encoding.bindings
@@ -5183,7 +4898,8 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
           positionsNeeded := false
           transitionContinuity? := ← buildTransitionContinuity? target state.events result.expr
         }
-        if encoding?.isNone then
+        if encoding?.isNone || encoding.metrics.operationalProgramFailures > 0 ||
+            encoding.metrics.premiseProgramFailures > 0 then
           ordinaryEncodingFailed := true
         usedNames := usedNames ++ encoding.bindings.map (·.name)
         allBindings := allBindings ++ encoding.bindings
@@ -5279,40 +4995,98 @@ private def recordContextSimp (simpStx reportStx : Syntax) (location : Location)
         suggestion := ordinarySuggestion
         localRenames := #[]
       }
+    else if (aggregateMetrics.operationalProgramFailures > 0 ||
+        aggregateMetrics.premiseProgramFailures > 0) && stableRenamePlan.isEmpty then
+      -- Keep the complete raw context trace, but never synthesize a context
+      -- tactic containing empty subject programs or an enclosing proof.
+      pure {
+        initialLctx
+        finalLctx
+        traces := ordinaryTraces
+        bindings := #[]
+        metrics := aggregateMetrics
+        fallbackReason?
+        positionsNeeded := false
+        suggestion := ""
+        localRenames := #[]
+      }
     else do
       -- Passive context recording is already enclosed by
       -- `withoutModifyingState`, so it can validate the same stable-renaming
       -- certificate as the interactive recorder without affecting the
       -- original simp execution that follows.
       let renamePlan := stableRenamePlan
-      if renamePlan.isEmpty then
-        throwErrorAt reportStx
-          "simp_explicit recorder could not encode or validate the complete context certificate"
-      let some encoded ← reencodeContextTraces? traces renamePlan
-        | throwErrorAt reportStx
-            "simp_explicit recorder could not encode the context under stable local names"
-      let renamedInitialLctx := renamedLocalContext initialLctx renamePlan
-      let renamePairs := contextReportRenamePairs traces resultingFVars renamePlan
-      let renamedFinalLctx := renamedLocalContextByFVars
-        (renamedLocalContext finalLctx renamePlan) renamePairs
-      let renamedTraces := contextTransportTraces encoded.traces resultingFVars renamedFinalLctx
-      let suggestion := localRenamePrefix renamePlan ++
-        contextCertificateText encoded.traces encoded.bindings
-      unless ← validateContextCertificate suggestion initialTarget initialLctx
-          initialLocalInstances closed renamedFinalLctx finalTarget do
-        throwErrorAt reportStx
-          "simp_explicit recorder could not validate the renamed context certificate"
-      pure {
-        initialLctx := renamedInitialLctx
-        finalLctx := renamedFinalLctx
-        traces := renamedTraces
-        bindings := encoded.bindings
-        metrics := encoded.metrics
-        fallbackReason? := encoded.fallbackReason?
-        positionsNeeded := encoded.positionsNeeded
-        suggestion
-        localRenames := localRenameInfos renamePlan
+      let fallbackMetrics := if aggregateMetrics.operationalProgramFailures == 0 &&
+          aggregateMetrics.premiseProgramFailures == 0 then
+          { aggregateMetrics with operationalProgramFailures := 1 }
+        else
+          aggregateMetrics
+      let fallback : ContextReportBundle := {
+        initialLctx
+        finalLctx
+        traces := ordinaryTraces
+        bindings := #[]
+        metrics := fallbackMetrics
+        fallbackReason? := some "operational_program_unavailable"
+        positionsNeeded := false
+        suggestion := ""
+        localRenames := #[]
       }
+      if renamePlan.isEmpty then
+        pure fallback
+      else
+        let encoded? ← reencodeContextTraces? traces renamePlan
+        match encoded? with
+        | none => pure fallback
+        | some encoded =>
+            let renamedInitialLctx := renamedLocalContext initialLctx renamePlan
+            let renamePairs := contextReportRenamePairs traces resultingFVars renamePlan
+            let renamedFinalLctx := renamedLocalContextByFVars
+              (renamedLocalContext finalLctx renamePlan) renamePairs
+            let renamedTraces := contextTransportTraces encoded.traces resultingFVars renamedFinalLctx
+            if encoded.metrics.operationalProgramFailures > 0 ||
+                encoded.metrics.premiseProgramFailures > 0 then
+              pure {
+                initialLctx := renamedInitialLctx
+                finalLctx := renamedFinalLctx
+                traces := renamedTraces
+                bindings := #[]
+                metrics := encoded.metrics
+                fallbackReason? := encoded.fallbackReason?.or
+                  (some "operational_program_unavailable")
+                positionsNeeded := false
+                suggestion := ""
+                localRenames := localRenameInfos renamePlan
+              }
+            else
+              let suggestion := localRenamePrefix renamePlan ++
+                contextCertificateText encoded.traces encoded.bindings
+              let valid ← validateContextCertificate suggestion initialTarget initialLctx
+                initialLocalInstances closed renamedFinalLctx finalTarget
+              if !valid then
+                pure {
+                  initialLctx := renamedInitialLctx
+                  finalLctx := renamedFinalLctx
+                  traces := renamedTraces
+                  bindings := #[]
+                  metrics := fallbackMetrics
+                  fallbackReason? := some "operational_program_unavailable"
+                  positionsNeeded := false
+                  suggestion := ""
+                  localRenames := localRenameInfos renamePlan
+                }
+              else
+                pure {
+                  initialLctx := renamedInitialLctx
+                  finalLctx := renamedFinalLctx
+                  traces := renamedTraces
+                  bindings := encoded.bindings
+                  metrics := encoded.metrics
+                  fallbackReason? := encoded.fallbackReason?
+                  positionsNeeded := encoded.positionsNeeded
+                  suggestion
+                  localRenames := localRenameInfos renamePlan
+                }
   let finalMetrics := { report.metrics with totalCertificateBytes := report.suggestion.utf8ByteSize }
   let reportContinuity? := report.traces.foldl
     (fun current trace => current.or trace.transitionContinuity) none
@@ -5421,22 +5195,22 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
       throw ex
   let some (result, state) := recording?
     | throwError "simp_explicit recorder did not return a simplifier result"
-  let presentationRunner := some (fun (input : Expr) =>
-    presentationCandidate? input ctx simprocs state.events)
   let mut localRenames : Array LocalRenamePlan := #[]
   let mut reportLctx? : Option LocalContext := none
   let mut attempt? ← encodeRecording? target mvarId state result runAndRecord
-    presentationRunner
   let shouldProbeRenamed := match attempt? with
     | none => true
-    | some attempt => attempt.encodingMetrics.deferredSimprocEvents > 0
+    | some attempt =>
+        attempt.encodingMetrics.deferredSimprocEvents > 0 ||
+        attempt.encodingMetrics.operationalProgramFailures > 0 ||
+        attempt.encodingMetrics.premiseProgramFailures > 0
   if shouldProbeRenamed then
     let renamePlan ← localRenamePlan (← mvarId.getDecl).lctx
     if !renamePlan.isEmpty then
       let mvarDecl ← mvarId.getDecl
       let renamedLctx := renamedLocalContext mvarDecl.lctx renamePlan
       let renamedAttempt? ← withLCtx' renamedLctx do
-        encodeRecording? target mvarId state result runAndRecord presentationRunner
+        encodeRecording? target mvarId state result runAndRecord
       if let some renamedAttempt := renamedAttempt? then
         localRenames := renamePlan
         reportLctx? := some renamedLctx
@@ -5471,26 +5245,31 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
               target MetavarKind.syntheticOpaque
             let speculativeMVarId := speculativeExpr.mvarId!
             let (speculativeResult, speculativeState) ← renamedRunAndRecord target
-            let renamedPresentationRunner := some (fun (input : Expr) =>
-              presentationCandidate? input renamedCtx renamedSimprocs speculativeState.events)
             encodeRecording? target speculativeMVarId speculativeState
-              speculativeResult renamedRunAndRecord renamedPresentationRunner
+              speculativeResult renamedRunAndRecord
         if let some speculativeAttempt := speculativeAttempt? then
           localRenames := renamePlan
           reportLctx? := some renamedLctx
           attempt? := some speculativeAttempt
-  let some attempt := attempt?
-    | if passive then
-        return ← runScoped (passiveOriginalSimp simpStx reportStx target "recording"
-          "proof-result fallback could not be validated" scopedCapture? (some ctx.config))
-      else
-        throwErrorAt reportStx "simp_explicit recorder cannot encode this simplification as a deterministic replay"
-  let suggestion := localRenamePrefix localRenames ++ attempt.suggestion
+  let attempt ← match attempt? with
+    | some attempt => pure attempt
+    | none => operationalUnavailableAttempt target state result
   let encodingInfos := attempt.encodingInfos
   let premiseEncodingInfos := attempt.premiseEncodingInfos
   let encodingMetrics := attempt.encodingMetrics
   let encodingFallbackReason? := attempt.encodingFallbackReason?
   let transitionContinuity? := attempt.transitionContinuity?
+  let operationalFailure := encodingMetrics.operationalProgramFailures > 0 ||
+    encodingMetrics.premiseProgramFailures > 0 ||
+    encodingMetrics.termPremiseBindings > 0 ||
+    encodingMetrics.generatedProofEvents > 0 ||
+    encodingMetrics.generatedSpecialEvents > 0 ||
+    encodingMetrics.wholeResultProofCount > 0 ||
+    encodingMetrics.presentationChangeCount > 0
+  let suggestion := if operationalFailure then
+      ""
+    else
+      localRenamePrefix localRenames ++ attempt.suggestion
   let operationalAdmissibility := computeOperationalAdmissibility encodingMetrics suggestion
     none transitionContinuity?
   let positionsNeeded := attempt.positionsNeeded
@@ -5562,103 +5341,13 @@ private def recordSimp (simpStx reportStx : Syntax) : TacticM Unit := withMainCo
   if let some attempt := scopedAttempt? then
     commitScopedAttempt attempt
 
-private def runBodyScope (scopeId : String) (body : Syntax) (reportStx : Syntax)
-    (exportProof := false) : TacticM Unit := withMainContext do
-  let main ← getMainGoal
-  let initialTarget ← instantiateMVars (← main.getType)
-  let sourceNamespace := ((← Term.getDeclName?).map (·.getPrefix)).getD Name.anonymous
+private def runBodyScope (scopeId : String) (body : Syntax) (reportStx : Syntax) :
+    TacticM Unit := withMainContext do
   let frameId ← enterScopedFrame scopeId
   try
     withOptions (·.set `explicitLean.simpExplicit.bodyScopeFrame frameId) do
       evalTactic body
-    if exportProof then
-      Term.synthesizeSyntheticMVars (postpone := .no) (ignoreStuckTC := true)
-    let bodyRenamePlan ← if exportProof then
-      localRenamePlan (← main.getDecl).lctx
-    else
-      pure #[]
-    let bodyProofReport? ← if exportProof then
-      let goals ← getGoals
-      if !goals.isEmpty then
-        pure (some ({
-          scopeId
-          proof := none
-          proofBytes := 0
-          closesGoal := false
-          failureReason := some "body_did_not_close"
-          localRenames := localRenameInfos bodyRenamePlan
-        } : BodyScopeProofReport))
-      else if !(← main.isAssigned) then
-        pure (some ({
-          scopeId
-          proof := none
-          proofBytes := 0
-          closesGoal := false
-          failureReason := some "body_goal_unassigned"
-          localRenames := localRenameInfos bodyRenamePlan
-        } : BodyScopeProofReport))
-      else
-        let some proof ← getExprMVarAssignment? main
-          | pure (some ({
-              scopeId
-              proof := none
-              proofBytes := 0
-              closesGoal := false
-              failureReason := some "body_assignment_missing"
-              localRenames := localRenameInfos bodyRenamePlan
-            } : BodyScopeProofReport))
-        let proof ← instantiateMVars proof
-        let proofType ← inferType proof
-        if !(← isDefEq proofType initialTarget) then
-          pure (some ({
-            scopeId
-            proof := none
-            proofBytes := 0
-            closesGoal := true
-            failureReason := some "body_proof_type_mismatch"
-            localRenames := localRenameInfos bodyRenamePlan
-          } : BodyScopeProofReport))
-        else
-          try
-            let (exportedProof, exportedType?, argumentCount) ← if proof.hasMVar then
-              let abstracted ← abstractMVars proof
-              if abstracted.expr.hasMVar then
-                throwError "whole-body proof contains metavariables from an outer elaboration depth"
-              pure (abstracted.expr, none, abstracted.mvars.size)
-            else
-              pure (proof, some initialTarget, 0)
-            let renamedLctx := renamedLocalContext (← main.getDecl).lctx bodyRenamePlan
-            let rendered ← withLCtx' renamedLctx do
-              ProofExport.render exportedProof (type? := exportedType?) {
-                sourceNamespace
-              }
-            let proofText := if argumentCount == 0 then
-              rendered.valueText
-            else
-              let arguments := Array.replicate argumentCount "_"
-              s!"({rendered.valueText}) {String.intercalate " " arguments.toList}"
-            pure (some ({
-              scopeId
-              proof := some proofText
-              proofBytes := proofText.utf8ByteSize
-              closesGoal := true
-              failureReason := none
-              localRenames := localRenameInfos bodyRenamePlan
-            } : BodyScopeProofReport))
-          catch ex =>
-            pure (some ({
-              scopeId
-              proof := none
-              proofBytes := 0
-              closesGoal := true
-              failureReason := some (← exceptionText ex)
-              localRenames := localRenameInfos bodyRenamePlan
-            } : BodyScopeProofReport))
-    else
-      pure none
     publishScopedFrame scopeId frameId reportStx
-    if let some report := bodyProofReport? then
-      logInfoAt reportStx m!"EXPLICIT_LEAN_BODY_SCOPE_PROOF_REPORT {(toJson report).compress}"
   catch ex =>
     leaveScopedFrame frameId
     throw ex
@@ -5683,10 +5372,6 @@ elab_rules : tactic
       let some scopeId := scope.raw.isStrLit?
         | throwErrorAt scope "body scope id must be a string literal"
       runBodyScope scopeId body.raw (← getRef)
-  | `(tactic| simp_explicit_body_scope_proof $scope:str in $body:tacticSeq) => do
-      let some scopeId := scope.raw.isStrLit?
-        | throwErrorAt scope "body scope id must be a string literal"
-      runBodyScope scopeId body.raw (← getRef) (exportProof := true)
   | `(tactic| simp_explicit_first_scope $owner:str in $body:tacticSeq) => do
       let some ownerId := owner.raw.isStrLit?
         | throwErrorAt owner "first owner id must be a string literal"

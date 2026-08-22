@@ -16,8 +16,27 @@ def assert_rejected_fallback(trial: dict, *, deferred: bool = False) -> None:
         raise RuntimeError(f"inadmissible fallback retained an accepted certificate: {trial!r}")
     if trial.get("operationally_admissible") is not False:
         raise RuntimeError(f"inadmissible fallback has an admissible status: {trial!r}")
-    if not trial.get("legacy_certificate"):
-        raise RuntimeError(f"fallback migration source was not retained for audit: {trial!r}")
+    if not deferred:
+        # O5 fallback paths are fail-closed.  They retain the raw diagnostic
+        # trace and precise admissibility reason, but no proof/presentation
+        # source or legacy certificate may leak into closure materialization.
+        if trial.get("certificate") not in (None, ""):
+            raise RuntimeError(f"rejected fallback retained a certificate source: {trial!r}")
+        if trial.get("legacy_certificate") not in (None, ""):
+            raise RuntimeError(f"rejected fallback retained a legacy certificate: {trial!r}")
+        if trial.get("certificate_bytes") != 0:
+            raise RuntimeError(f"rejected fallback retained certificate bytes: {trial!r}")
+        encoding = trial.get("encoding") or {}
+        forbidden_metrics = (
+            "generatedProofEvents",
+            "generatedSpecialEvents",
+            "generatedBindingCount",
+            "generatedBindingBytes",
+            "presentationChangeCount",
+            "wholeResultProofCount",
+        )
+        if any(encoding.get(key, 0) != 0 for key in forbidden_metrics):
+            raise RuntimeError(f"rejected fallback retained proof/presentation metrics: {trial!r}")
     if not isinstance(trial.get("operational_admissibility"), dict):
         raise RuntimeError(f"fallback omitted structured admissibility: {trial!r}")
 
@@ -270,26 +289,18 @@ def main() -> None:
         if trial.get("local_renames") != []:
             raise RuntimeError(f"Package C ordinary encoding renamed locals: {trial!r}")
         encoding = trial.get("encoding") or {}
-        # The premise-bearing cases may now use either a compact event
-        # certificate or the bounded presentation-change prepass.  A
-        # whole-result presentation-gap fallback is no longer accepted for
-        # this Package F gate.
-        mode = encoding.get("mode")
-        if mode == "event":
-            if (
-                trial.get("encoding_fallback_reason") is not None
-                or encoding.get("wholeResultProofCount", 0) != 0
-            ):
-                raise RuntimeError(f"Package C event encoding changed: {trial!r}")
-        elif mode == "presentation_change":
-            if (
-                trial.get("encoding_fallback_reason") != "presentation_gap"
-                or encoding.get("presentationChangeCount") != 1
-                or encoding.get("wholeResultProofCount", 0) != 0
-            ):
-                raise RuntimeError(f"Package C presentation encoding changed: {trial!r}")
-        else:
-            raise RuntimeError(f"accepted Package C emitted an unknown encoding mode: {trial!r}")
+        # O5 accepts only the operational event program.  Presentation-change
+        # and whole-result plans are diagnostic-only and must be rejected by
+        # the recorder rather than materialized.
+        if (
+            trial.get("encoding_fallback_reason") is not None
+            or encoding.get("mode") != "event"
+            or encoding.get("presentationChangeCount", 0) != 0
+            or encoding.get("wholeResultProofCount", 0) != 0
+            or encoding.get("generatedProofEvents", 0) != 0
+            or encoding.get("generatedSpecialEvents", 0) != 0
+        ):
+            raise RuntimeError(f"Package C emitted a non-operational certificate: {trial!r}")
         if trial.get("premise_event_count") != 1:
             raise RuntimeError(f"Package C did not retain one premise-bearing event: {trial!r}")
         if trial.get("premise_event_outer_origin_kinds") != [["decl"]]:
@@ -303,7 +314,14 @@ def main() -> None:
             for count in event_counts
         ):
             raise RuntimeError(f"Package C premise provenance was empty: {trial!r}")
-    assert_aggregate_accepted(modules[0], package_c_entries, package_c_results)
+    if all(
+        (package_c_results[entry["id"]].get("operational_admissibility") or {}).get("code")
+        == "accepted"
+        for entry in package_c_entries
+    ):
+        assert_aggregate_accepted(modules[0], package_c_entries, package_c_results)
+    else:
+        assert_aggregate_rejected(modules[0], package_c_entries, package_c_results)
 
     package_d_ids = [
         "bdfebd4de6e5f543",
@@ -349,13 +367,8 @@ def main() -> None:
                 raise RuntimeError(f"Package D operational reduction changed: {trial!r}")
         else:
             assert_rejected_fallback(trial)
-            if (
-                encoding.get("mode") != "presentation_change"
-                or trial.get("encoding_fallback_reason") != "presentation_gap"
-                or encoding.get("presentationChangeCount") != 1
-                or encoding.get("wholeResultProofCount", 0) != 0
-            ):
-                raise RuntimeError(f"Package D presentation-change encoding changed: {trial!r}")
+            if encoding.get("mode") in {"presentation_change", "whole_result_proof"}:
+                raise RuntimeError(f"Package D retained a fallback encoding mode: {trial!r}")
         selector_counts = {
             key: encoding.get(key)
             for key in ("nextSelectorCount", "matchSelectorCount", "tickSelectorCount")
@@ -383,22 +396,35 @@ def main() -> None:
             raise RuntimeError(f"Package D trace selector values changed length: {trial!r}")
         if any(value is not None for value in selector_values):
             raise RuntimeError(f"Package D next selectors unexpectedly carry values: {trial!r}")
-    assert_aggregate_accepted(modules[0], package_d_entries, package_d_results)
+    if all(
+        (package_d_results[entry["id"]].get("operational_admissibility") or {}).get("code")
+        == "accepted"
+        for entry in package_d_entries
+    ):
+        assert_aggregate_accepted(modules[0], package_d_entries, package_d_results)
+    else:
+        assert_aggregate_rejected(modules[0], package_d_entries, package_d_results)
 
     presentation_ids = package_c_ids + package_d_ids
     presentation_results = {**package_c_results, **package_d_results}
-    assert_aggregate_accepted(
-        modules[0], [*package_c_entries, *package_d_entries], presentation_results
-    )
+    if all(
+        (presentation_results[identifier].get("operational_admissibility") or {}).get("code")
+        == "accepted"
+        for identifier in presentation_ids
+    ):
+        assert_aggregate_accepted(
+            modules[0], [*package_c_entries, *package_d_entries], presentation_results
+        )
+    else:
+        assert_aggregate_rejected(
+            modules[0], [*package_c_entries, *package_d_entries], presentation_results
+        )
     for identifier in presentation_ids:
         trial = presentation_results[identifier]
         mode = (trial.get("encoding") or {}).get("mode")
-        if mode == "whole_result_proof":
-            raise RuntimeError(f"Package F3 retained whole-result fallback: {trial!r}")
-        if mode == "presentation_change":
-            if (trial.get("encoding") or {}).get("presentationChangeCount") != 1:
-                raise RuntimeError(f"Package F3 change metric missing: {trial!r}")
-        elif mode != "event":
+        if mode in {"whole_result_proof", "presentation_change"}:
+            raise RuntimeError(f"Package F3 retained a fallback encoding: {trial!r}")
+        if mode not in {None, "event"}:
             raise RuntimeError(f"Package F3 emitted unknown compact mode: {trial!r}")
 
     package_e_ids = [

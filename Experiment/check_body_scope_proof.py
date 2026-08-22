@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded rejection regression for the singleton whole-body proof fallback."""
+"""Bounded rejection regression for singleton operational source ownership."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def main() -> None:
     occurrence = occurrences[0]
     if occurrence.get("terminal_outcome") != "coverage_failure":
         raise RuntimeError(f"fallback occurrence bypassed the completion gate: {record!r}")
-    if occurrence.get("failure_reason") != "inadmissible_body_scope_proof":
+    if occurrence.get("failure_reason") != "source_rewrite":
         raise RuntimeError(f"fallback rejection reason changed: {record!r}")
     candidate = occurrence.get("candidate")
     if not isinstance(candidate, dict) or candidate.get("kind") != "occurrence":
@@ -74,7 +74,7 @@ def main() -> None:
     if fallback is not None or final_attempt is not None:
         raise RuntimeError(f"body-proof fallback was still selected: {record!r}")
     if aggregate.get("body_scope_proof_failures") != {
-        TARGET_ID: "inadmissible_body_scope_proof"
+        TARGET_ID: "source_rewrite"
     }:
         raise RuntimeError(f"body-proof rejection audit changed: {record!r}")
     labels = [attempt.get("label") for attempt in aggregate.get("attempts", [])]

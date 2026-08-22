@@ -784,6 +784,14 @@ inaccessible locals are printed through exact context-index naming. The final
 aggregate compile is the acceptance check; the failed optimistic aggregate and
 the fallback attempts remain in the audit record.
 
+The current O5 implementation removes those proof/presentation completion
+paths. Target and context replacements are operational event/reduction/premise
+programs; failed plans remain empty, recursively reported coverage failures.
+First-owner replacements are distributed to committed child occurrence ranges,
+and body-proof audit fields remain empty compatibility fields. See
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md), section O5, for the bounded
+gate and current focused-check status.
+
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
 `Simp.Config` field as normalized JSON provenance; certificates compile the

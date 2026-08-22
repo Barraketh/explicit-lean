@@ -717,6 +717,18 @@ Gate: the existing DropRight presentation, inaccessible-local, shared-body,
 and first-owner fixtures materialize operationally or remain precise coverage
 failures; none passes via proof export.
 
+Implementation status (2026-08-22): the O5 gate is implemented. Target and
+context subjects now use the same operational event/reduction/premise encoder;
+presentation and whole-result builders are no longer called or available as
+materialization paths. Non-replayable plans preserve their recursive raw trace
+and report `inadmissible_operational_program` (or the more precise continuity
+or premise reason) with an empty certificate. Committed `first` branches are
+replaced at their own occurrence ranges while backtracked siblings remain
+classified, and enclosing-body proof syntax, reports, and Python materializers
+are removed. The bounded first-owner, body-scope, context, DropRight, O4, and
+simp-coverage checks pass; schema 14 is unchanged apart from the explicit
+`operationalProgramFailures` metric.
+
 ### O6. Non-simproc Mathlib closure
 
 - Run the complete 83,015-occurrence `simp`/`simp only` inventory.
