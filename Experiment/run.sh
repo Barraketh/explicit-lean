@@ -7,6 +7,9 @@ lake env lean Experiment/ProofExportProbe.lean
 lake env lean Experiment/PremiseReplayProbe.lean
 lake env lean Experiment/GuardedPremiseProbe.lean
 lake env lean Experiment/TermPremiseProbe.lean
+lake env lean Experiment/O4TerminalProbe.lean
+lake env lean Experiment/CustomDischargerProbe.lean
+lake env lean Experiment/RecursivePremiseProbe.lean
 lake env lean Experiment/SelectorProbe.lean
 lake env lean Experiment/ReductionProbe.lean
 lake env lean Experiment/LocalRenameProbe.lean
@@ -21,6 +24,7 @@ lake env lean Experiment/ClosureProbe.lean
 lake env lean Experiment/SpecialFallbackProbe.lean
 python3 Experiment/check_o3_attribution.py
 python3 Experiment/check_premise_replay.py
+python3 Experiment/check_o4_premises.py
 python3 Experiment/check_selectors.py
 python3 Experiment/check_reductions.py
 python3 Experiment/check_local_renames.py

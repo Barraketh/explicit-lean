@@ -245,10 +245,13 @@ def check_drop_right() -> None:
                 raise RuntimeError(f"DropRight c9 named-delta branch changed: {report!r}")
             if (
                 second.get("operationalAdmissibility", {}).get("code")
-                != "inadmissible_direct_term_premise"
+                != "inadmissible_premise_program"
                 or second.get("acceptedCertificate") is not None
                 or second.get("encoding", {}).get("generatedProofEvents") != 0
-                or second.get("encoding", {}).get("termPremiseBindings") != 1
+                or second.get("encoding", {}).get("wholeResultProofCount") != 0
+                or second.get("encoding", {}).get("termPremiseBindings") != 0
+                or second.get("encoding", {}).get("premiseProgramFailures") != 1
+                or second.get("encodingFallbackReason") != "premise_program_unavailable"
                 or any(len(event.get("origins", [])) > 1 for event in second.get("trace", []))
             ):
                 raise RuntimeError(f"DropRight c9 O4 premise branch changed: {report!r}")
@@ -280,7 +283,7 @@ def main() -> None:
     check_drop_right()
     print(
         "operational owners materialized; DropRight iota branches closed and "
-        "the remaining c9 direct-premise branch stayed classified for O4"
+        "the remaining c9 premise-program gap stayed fail-closed for O4"
     )
 
 

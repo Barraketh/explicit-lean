@@ -91,8 +91,15 @@ def main() -> None:
         admissibility = report.get("operationalAdmissibility") or {}
         accepted = admissibility.get("code") == "accepted"
         certificate = report.get("acceptedCertificate") if accepted else report.get("legacyCertificate")
-        if not isinstance(certificate, str) or "at *" in certificate or "simp_explicit_context" not in certificate:
-            raise RuntimeError(f"report {index} printed an invalid context certificate")
+        if accepted:
+            if not isinstance(certificate, str) or "at *" in certificate or "simp_explicit_context" not in certificate:
+                raise RuntimeError(f"report {index} printed an invalid context certificate")
+        elif admissibility.get("code") == "deferred_simproc":
+            if report.get("certificate") not in (None, "") or report.get("acceptedCertificate") is not None or report.get("legacyCertificate") is not None:
+                raise RuntimeError(f"report {index} exposed deferred context source")
+        else:
+            if not isinstance(certificate, str) or "at *" in certificate or "simp_explicit_context" not in certificate:
+                raise RuntimeError(f"report {index} printed an invalid deferred context certificate")
         if accepted != (report.get("operationallyAdmissible") is True):
             raise RuntimeError(f"report {index} has inconsistent admissibility metadata")
         if accepted and report.get("certificate") != certificate:
@@ -128,11 +135,10 @@ def main() -> None:
         if index == 7:
             if admissibility.get("code") != "deferred_simproc":
                 raise RuntimeError(f"stable-rename context fixture was not simproc-deferred: {report!r}")
-            renames = report.get("localRenames")
-            if renames != [{"contextIndex": 7, "generatedName": "h_explicit_8"}]:
-                raise RuntimeError(f"stable context rename plan changed: {renames!r}")
-            if not certificate.startswith("simp_explicit_rename [7 => h_explicit_8]\n"):
-                raise RuntimeError("stable context certificate omitted exact rename prefix")
+            if report.get("localRenames") != [{"contextIndex": 7, "generatedName": "h_explicit_8"}]:
+                raise RuntimeError(f"stable context rename plan changed: {report.get('localRenames')!r}")
+            if report.get("certificate") not in (None, ""):
+                raise RuntimeError("deferred context unexpectedly exposed a certificate")
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
     for index, (anchor, report) in enumerate(zip(ANCHORS, reports)):
@@ -157,7 +163,7 @@ def main() -> None:
                 f"materialized context report {index} failed closed compilation:\n"
                 + replay_output
             )
-    print("accepted context locations materialized; simproc-dependent rename remained deferred")
+    print("accepted context locations materialized; simproc-dependent context remained deferred")
 
 
 if __name__ == "__main__":

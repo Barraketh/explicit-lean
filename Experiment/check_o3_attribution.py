@@ -108,7 +108,10 @@ def main() -> None:
     if len(add_zero.get("origins", [])) != 1:
         raise RuntimeError(f"index=false add_zero was not exact: {add_zero!r}")
 
-    print("O3 attribution fixtures validated: schema 13, exact origins, bot_le premise, and index=false")
+    print(
+        "O3 attribution fixtures validated under the current schema: exact origins, "
+        "bot_le premise, and index=false"
+    )
 
 
 if __name__ == "__main__":

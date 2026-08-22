@@ -20,6 +20,10 @@ structure Options where
   sourceNamespace : Name := .anonymous
   /-- Source names for binders opened while rendering a theorem body. -/
   binderNames : Array Name := #[]
+  /-- Share repeated subterms in rendered values.  Premise proposition types
+      may disable this so their operational replay sees exactly the recorded
+      proposition, without an exporter-introduced let/zeta transition. -/
+  shareSubterms : Bool := true
 
 structure Metrics where
   privateConstantsInlined : Nat := 0
@@ -301,8 +305,20 @@ private def shareRepeatedSubterms (body : Expr) (minSize : Nat := 12)
   let unsharedNodes := sizes[bodyKey]?.getD 1
   pure { result with unsharedNodes }
 
+private def unsharedResult (value : Expr) (valueText : String) : SharingResult :=
+  let (unsharedNodes, _) := (exprTreeSize value).run ({} : ExprStructMap Nat)
+  {
+    body := value
+    bindingCount := 0
+    haveCount := 0
+    prunedCount := 0
+    unsharedNodes
+    unsharedBytes := some valueText.utf8ByteSize
+    sharedBytes := valueText.utf8ByteSize
+  }
+
 private def renderBody (value : Expr) (binderNames : Array Name)
-    (opts : Lean.Options) : MetaM (String × String × SharingResult) := do
+    (opts : Lean.Options) (shareSubterms : Bool) : MetaM (String × String × SharingResult) := do
   Meta.lambdaTelescope value fun fvars body => do
     unless fvars.size = binderNames.size do
       throwError "expected {binderNames.size} binders, found {fvars.size}"
@@ -312,44 +328,53 @@ private def renderBody (value : Expr) (binderNames : Array Name)
     Meta.withLCtx lctx (← getLocalInstances) do
       withOptions (fun _ => opts) do
         let typeText := toString (← Meta.ppExpr (← inferType body))
-        let shared ← shareRepeatedSubterms body
-        let sharedText := toString (← Meta.ppExpr shared.body)
-        let unsharedBytes ←
-          if shared.unsharedNodes ≤ unsharedMetricNodeThreshold then
-            let unsharedText := toString (← Meta.ppExpr body)
-            pure (some unsharedText.utf8ByteSize)
-          else
-            pure none
-        pure (typeText, sharedText, {
-          shared with
-            unsharedBytes
-            sharedBytes := sharedText.utf8ByteSize
-        })
+        if shareSubterms then
+          let shared ← shareRepeatedSubterms body
+          let sharedText := toString (← Meta.ppExpr shared.body)
+          let unsharedBytes ←
+            if shared.unsharedNodes ≤ unsharedMetricNodeThreshold then
+              let unsharedText := toString (← Meta.ppExpr body)
+              pure (some unsharedText.utf8ByteSize)
+            else
+              pure none
+          pure (typeText, sharedText, {
+            shared with
+              unsharedBytes
+              sharedBytes := sharedText.utf8ByteSize
+          })
+        else
+          let valueText := toString (← Meta.ppExpr body)
+          pure (typeText, valueText, unsharedResult body valueText)
 
-private def renderExpr (value type : Expr) (opts : Lean.Options) : MetaM (String × String × SharingResult) := do
+private def renderExpr (value type : Expr) (opts : Lean.Options)
+    (shareSubterms : Bool) : MetaM (String × String × SharingResult) := do
   withOptions (fun _ => opts) do
-    let shared ← shareRepeatedSubterms value
-    let sharedText := toString (← Meta.ppExpr shared.body)
     let typeText := toString (← Meta.ppExpr type)
-    let unsharedBytes ←
-      if shared.unsharedNodes ≤ unsharedMetricNodeThreshold then
-        let unsharedText := toString (← Meta.ppExpr value)
-        pure (some unsharedText.utf8ByteSize)
-      else
-        pure none
-    pure (typeText, sharedText, {
-        shared with
-        body := shared.body
-        unsharedBytes
-        sharedBytes := sharedText.utf8ByteSize
-    })
+    if shareSubterms then
+      let shared ← shareRepeatedSubterms value
+      let sharedText := toString (← Meta.ppExpr shared.body)
+      let unsharedBytes ←
+        if shared.unsharedNodes ≤ unsharedMetricNodeThreshold then
+          let unsharedText := toString (← Meta.ppExpr value)
+          pure (some unsharedText.utf8ByteSize)
+        else
+          pure none
+      pure (typeText, sharedText, {
+          shared with
+          body := shared.body
+          unsharedBytes
+          sharedBytes := sharedText.utf8ByteSize
+      })
+    else
+      let valueText := toString (← Meta.ppExpr value)
+      pure (typeText, valueText, unsharedResult value valueText)
 
 private def withSourceNames (value type : Expr) (binderNames : Array Name)
-    (opts : Lean.Options) : MetaM (String × String × SharingResult) := do
+    (opts : Lean.Options) (shareSubterms : Bool) : MetaM (String × String × SharingResult) := do
   if binderNames.isEmpty then
-    renderExpr value type opts
+    renderExpr value type opts shareSubterms
   else
-    renderBody value binderNames opts
+    renderBody value binderNames opts shareSubterms
 
 private partial def validateSourceExpr (env : Environment) (e : Expr) : MetaM Unit := do
   if e.hasMVar then
@@ -414,7 +439,7 @@ meta def render (value : Expr) (type? : Option Expr := none)
   let opts := namedBodyOptions baseOptions
   let result ← withTheReader Core.Context (fun context =>
       { context with currNamespace := config.sourceNamespace }) do
-    withSourceNames value type config.binderNames opts
+    withSourceNames value type config.binderNames opts config.shareSubterms
   let (typeText, valueText, sharing) := result
   return {
     typeText

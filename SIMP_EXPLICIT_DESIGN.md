@@ -212,9 +212,16 @@ inductive ReductionKind where
   | builtin (name : Name)
 
 mutual
+  inductive PremiseTerminal where
+    | isTrue
+    | dischargeRfl
+    | localAssumption (subject : SubjectRef)
+    | equationHypothesis
+
   structure PremiseProgram where
     propositionFingerprint : String
     commands : Array Command
+    terminal : PremiseTerminal
 
   structure RewriteCommand where
     subject : SubjectRef
@@ -322,6 +329,27 @@ returned proof term because its derivation was not recorded is prohibited.
 An arbitrary custom discharger that cannot be decomposed this way is deferred,
 not papered over.
 
+For the built-in discharger, recording mirrors Lean 4.32.2's fixed branch
+order. An equation-theorem premise first tries a particular eligible local
+assumption and then the fixed equation-hypothesis solver. Otherwise the
+recorder captures the complete recursive `simp` execution and records whether
+the residual proposition closed as `True` or by `dischargeRfl`. The selected
+terminal is part of the program; replay does not rediscover one by searching
+the local context or trying several closure procedures.
+
+Premise recording is hierarchical. Events executed by recursive `simp` belong
+to that premise program, including recursively requested premise programs, and
+do not also appear in the enclosing subject's command stream. Candidate
+failure and selector probing restore the whole hierarchy together with Meta
+state.
+
+When the source `simp` supplied a custom discharger, a successful returned
+proof is not evidence that the built-in operational derivation was used. Such
+a request is classified `deferred_custom_discharger`; its proof may be retained
+ephemerally for diagnostics but is neither serialized nor accepted as a
+certificate. This boundary can be narrowed later only by giving a particular
+custom discharger its own deterministic operational specification.
+
 ### 5.5 Simprocs
 
 The operational semantics of simprocs are intentionally not specified here.
@@ -409,6 +437,16 @@ simp_explicit_context [
 The exact selectors above are illustrative; the generated program is accepted
 only after discovery and fresh-source validation. No intermediate expression
 or final expression appears in the source.
+
+Premise programs print as deterministic `have` bindings consumed by the
+existing ordered `using [...]` provider. A `True` terminal prints a nested
+`simp_explicit` program; `dischargeRfl` and a recorded local assumption print
+their corresponding fixed Lean term or dedicated primitive; and the equation-hypothesis terminal
+uses a dedicated fixed replay primitive. These forms describe the recorded
+operation and are allowed to construct a kernel proof during elaboration. The
+printer may not invoke `simp`, `assumption`, or another search tactic, and may
+not render the authoritative proof returned by the recorder. Generated
+bindings are validated with a deliberately failing ambient discharger.
 
 For `simp at h`, multiple locations, and `at *`, source uses the existing
 explicit context program. Stable local renames may precede it, but no generated
@@ -634,13 +672,38 @@ reduction gaps, and simproc design remain outside O3.
 
 ### O4. Operational premise programs
 
-- Compile built-in discharge behavior and nested simplification into closed
-  premise programs.
-- Remove premise proof-term export as an accepted encoding.
-- Classify irreducible custom dischargers at the deferred boundary.
+- Mirror the pinned built-in discharger's branch order and record an explicit
+  `isTrue`, `dischargeRfl`, `localAssumption`, or `equationHypothesis` terminal.
+- Capture recursive simplifier events hierarchically and compile them into
+  closed nested premise programs, including recursive premise programs.
+- Remove premise proof-term export from accepted source and persistent JSON.
+- Classify every source-supplied custom discharger at
+  `deferred_custom_discharger` until it has a separate operational design.
 
 Gate: premise fixtures pass with a failing ambient discharger and contain no
-generated premise proof term.
+generated premise proof term. The multi-event `guardedEqConj` fixture is an
+accepted nested program rather than `inadmissible_direct_term_premise`, and a
+focused custom-discharger fixture is deferred rather than materialized.
+
+If any recorded child transition is not yet operationally expressible, the
+enclosing event is classified `inadmissible_premise_program`. Its recursive
+trace remains available for coverage work, but neither an event proof nor a
+whole-result proof may replace the missing child command.
+
+Implementation status (2026-08-22): schema 14 records premise programs as a
+recursive event hierarchy with explicit `isTrue`, `dischargeRfl`,
+`localAssumption`, and `equationHypothesis` terminals.  Built-in discharge
+follows the pinned branch order with complete recorder, Meta, and Simp
+rollback at premise and candidate boundaries; source custom dischargers are
+classified as `deferred_custom_discharger` without certificate or proof-term
+serialization.  Accepted premise bindings rebuild their proofs from the
+recorded terminal and nested commands, and proposition types use an unshared
+export path so the printer cannot introduce an unrecorded zeta transition.
+The focused O4 fixtures cover all four terminals, recursive premise nesting,
+closed materialization, terminal-selector mutation, and passive custom
+discharger classification. Premise-program gaps fail closed as
+`inadmissible_premise_program` without invoking either proof exporter. Full
+corpus closure and remaining simproc and context packages remain outside O4.
 
 ### O5. Fallback-free contexts and source ownership
 

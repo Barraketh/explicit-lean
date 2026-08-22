@@ -417,8 +417,8 @@ def main() -> None:
         package_e_results[entry["id"]] = trial
         assert_rejected_fallback(trial, deferred=True)
         encoding = trial.get("encoding") or {}
-        if encoding.get("generatedSimprocEvents", 0) < 1:
-            raise RuntimeError(f"Package E did not retain simproc audit metrics: {trial!r}")
+        if encoding.get("deferredSimprocEvents", 0) < 1 or encoding.get("generatedSimprocEvents", 0) != 0:
+            raise RuntimeError(f"Package E did not retain deferred simproc audit metrics: {trial!r}")
     assert_aggregate_rejected(modules[0], package_e_entries, package_e_results)
 
     target = next(

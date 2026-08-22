@@ -44,17 +44,11 @@ def main() -> None:
         raise RuntimeError(f"simproc fallback exposed an accepted certificate: {report!r}")
     if (report.get("validation") or {}).get("certificate") is not None:
         raise RuntimeError(f"simproc fallback exposed validation certificate metadata: {report!r}")
-    if not report.get("legacyCertificate"):
-        raise RuntimeError(f"simproc migration source was not retained for diagnostics: {report!r}")
+    if report.get("legacyCertificate") is not None:
+        raise RuntimeError(f"simproc fallback retained a proof source: {report!r}")
     encoding = report.get("encoding") or {}
-    if encoding.get("generatedSimprocEvents") != 1:
-        raise RuntimeError(f"simproc fallback count was not one: {report!r}")
-    if (
-        encoding.get("nextSelectorCount", 0) < 1
-        or encoding.get("matchSelectorCount") != 0
-        or encoding.get("tickSelectorCount") != 0
-    ):
-        raise RuntimeError(f"simproc certificate did not report a selector-free next event: {report!r}")
+    if encoding.get("deferredSimprocEvents") != 1 or encoding.get("generatedSimprocEvents") != 0:
+        raise RuntimeError(f"simproc fallback was not deferred before proof encoding: {report!r}")
     events = [
         event
         for execution in report.get("executions", [])
@@ -63,15 +57,13 @@ def main() -> None:
     simproc_events = [
         event
         for event in events
-        if event.get("encodingKind") == "generated_proof"
+        if event.get("encodingKind") == "deferred_simproc"
         and event.get("encodingReason") == "simproc"
     ]
     if len(simproc_events) != 1:
         raise RuntimeError(f"simproc fallback event encoding was not reported: {report!r}")
-    if simproc_events[0].get("selectorKind") != "next" or simproc_events[0].get("selectorValue") is not None:
-        raise RuntimeError(f"simproc event did not report a nullable next selector: {report!r}")
-    if any(event.get("selectorKind") != "next" or event.get("selectorValue") is not None for event in events):
-        raise RuntimeError(f"simple certificate did not report next selectors for every event: {report!r}")
+    if simproc_events[0].get("selectorKind") is not None or simproc_events[0].get("selectorValue") is not None:
+        raise RuntimeError(f"deferred simproc event exposed an executable selector: {report!r}")
     source = PROBE.read_text(encoding="utf-8")
     needle = "simp_explicit? [↓pushFun]"
     if source.count(needle) != 1:

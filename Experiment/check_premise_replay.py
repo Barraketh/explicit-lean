@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Package C premise provenance, encoding, and closed materialization."""
+"""Check O4 premise programs, provenance, and closed materialization."""
 
 from __future__ import annotations
 
@@ -67,6 +67,10 @@ def main() -> None:
     certificate = report.get("certificate")
     if not isinstance(certificate, str) or " using [h_premise_1]" not in certificate:
         raise RuntimeError(f"premise certificate did not use the explicit provider: {report!r}")
+    if "let Eq_type_0" in certificate:
+        raise RuntimeError(
+            "premise proposition printer reintroduced exporter sharing in the guarded certificate"
+        )
 
     source = PROBE.read_text(encoding="utf-8")
     needle = "simp_explicit?"
@@ -143,10 +147,10 @@ def main() -> None:
     if (
         term_encoding.get("mode") != "event"
         or term_encoding.get("premiseBindingCount") != 1
-        or term_encoding.get("termPremiseBindings") != 1
-        or term_encoding.get("nestedPremiseBindings") != 0
+        or term_encoding.get("termPremiseBindings") != 0
+        or term_encoding.get("nestedPremiseBindings") != 1
     ):
-        raise RuntimeError(f"term-premise binding metrics were not selected: {term_report!r}")
+        raise RuntimeError(f"guarded conjunction was not operationally nested: {term_report!r}")
     term_events = [
         event
         for execution in term_report.get("executions", [])
@@ -162,29 +166,44 @@ def main() -> None:
     term_origin_names = {origin.get("name") for origin in term_premise.get("origins", [])}
     if not {"eq_self", "and_self"}.issubset(term_origin_names):
         raise RuntimeError(f"term-premise provenance did not retain eq_self/and_self: {term_report!r}")
-    if term_premise.get("encodingKind") != "premise_term":
-        raise RuntimeError(f"term-premise binding did not use ProofExport: {term_report!r}")
+    if "proof" in term_premise:
+        raise RuntimeError(f"premise proof leaked into persistent JSON: {term_report!r}")
+    if term_premise.get("encodingKind") != "premise_nested":
+        raise RuntimeError(f"guarded conjunction did not use nested encoding: {term_report!r}")
     if term_premise.get("bindingName") != "h_premise_1":
         raise RuntimeError(f"term-premise binding name was not deterministic: {term_report!r}")
-    if term_report.get("encodingStatus") != "inadmissible":
-        raise RuntimeError(f"term-premise fallback was not rejected: {term_report!r}")
-    if term_report.get("operationallyAdmissible") is not False:
-        raise RuntimeError(f"term-premise fallback was marked admissible: {term_report!r}")
-    term_admissibility = term_report.get("operationalAdmissibility") or {}
-    if term_admissibility.get("code") != "inadmissible_direct_term_premise":
-        raise RuntimeError(f"term-premise rejection code changed: {term_report!r}")
-    if term_report.get("acceptedCertificate") is not None or term_report.get("certificate"):
-        raise RuntimeError(f"term-premise fallback exposed an accepted certificate: {term_report!r}")
-    if (term_report.get("validation") or {}).get("certificate") is not None:
-        raise RuntimeError(f"term-premise fallback exposed validation certificate metadata: {term_report!r}")
-    term_legacy = term_report.get("legacyCertificate")
-    if not isinstance(term_legacy, str) or "guardedEqConj using [h_premise_1]" not in term_legacy:
-        raise RuntimeError(f"term-premise migration source was not retained: {term_report!r}")
+    if "proof" in term_premise:
+        raise RuntimeError(f"premise proof leaked into persistent JSON: {term_report!r}")
+    if (term_premise.get("terminal") or {}).get("kind") != "isTrue":
+        raise RuntimeError(f"guarded conjunction terminal was not isTrue: {term_report!r}")
+    command_names = [
+        origin.get("name")
+        for command in term_premise.get("commands", [])
+        for origin in command.get("origins", [])
+    ]
+    if command_names != ["eq_self", "and_self"]:
+        raise RuntimeError(f"guarded conjunction premise command order changed: {term_report!r}")
+    if term_report.get("encodingStatus") != "validated":
+        raise RuntimeError(f"guarded conjunction was not accepted: {term_report!r}")
+    if term_report.get("operationallyAdmissible") is not True:
+        raise RuntimeError(f"guarded conjunction was not operationally admissible: {term_report!r}")
     term_source = TERM_PROBE.read_text(encoding="utf-8")
     term_needle = "simp_explicit? only [guardedEqConj, eq_self, and_self]"
     if term_source.count(term_needle) != 1:
         raise RuntimeError("term-premise probe tactic occurrence was not unique")
-    print("premise provenance passed; nested premise accepted and direct term premise rejected")
+    term_materialized = term_source.replace(
+        term_needle, term_report["certificate"].replace("\n", "\n  "), 1
+    )
+    TERM_MATERIALIZED.write_text(term_materialized, encoding="utf-8")
+    term_replay_code, term_replay_output, _ = coverage.run(
+        ["lake", "env", "lean", str(TERM_MATERIALIZED)], timeout=180
+    )
+    if term_replay_code != 0:
+        raise RuntimeError(
+            "materialized guarded conjunction certificate failed closed replay compilation:\n"
+            + term_replay_output
+        )
+    print("premise provenance passed; nested True and guarded conjunction programs materialized")
 
 
 if __name__ == "__main__":

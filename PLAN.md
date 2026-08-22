@@ -948,3 +948,6 @@ O3 is implemented at the pinned public theorem-rewrite seam in schema 13;
 see [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md), section O3, for the
 exact-origin invariants and bounded attribution gate. Full corpus closure and
 the deferred simproc boundary remain unchanged.
+
+O4 is implemented in schema 14; see [SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md),
+section O4, for the operational premise-program and terminal invariants.
