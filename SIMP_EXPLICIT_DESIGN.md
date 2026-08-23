@@ -878,6 +878,19 @@ transition and final-state validation. Lattice occurrence
 and four named rules; deletion, reordering, and identity substitution fail
 closed. Schema 15 is unchanged.
 
+O6j implementation status (2026-08-22): the local-definition continuity
+bridge enumerates local-let fvars structurally occurring within the already
+matched expression. It does not enumerate the ambient context. Candidates are
+deduplicated by exact fvar identity and capped at eight, matching the existing
+projection-bridge bound; each is accepted only after the augmented trace runs
+bounded selector discovery and exact final-result validation. This covers the
+case where the continuity matcher selects an entire hom composition but the
+missing operation is its nested `algHom` or `starAlgHom` let. Stable
+Unitization IDs `9725589ca802bdbe` and `1734864b48394331` materialize with one
+explicit nested local-def expansion and seven recorded named rules apiece.
+Deletion, reordering, and wrong-local mutations fail closed. No new vocabulary
+or fallback is introduced, and schema 15 is unchanged.
+
 ### S. Simproc design
 
 Simproc handling begins only after a separate design discussion and document.

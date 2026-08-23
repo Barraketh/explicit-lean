@@ -906,6 +906,20 @@ materializes with one `reduce projection_fn Inhabited.default` command and four
 named rules. Delete, reorder, and wrong-projection mutations fail closed, with
 zero fallback metrics. Schema 15 is unchanged.
 
+O6j implementation status (2026-08-22): local-definition bridge synthesis now
+finds accessible local-let fvars structurally nested inside the continuity
+match, rather than requiring the matched expression itself to be that fvar.
+The search never scans the ambient local context: it traverses only the already
+matched expression, deduplicates exact fvar identities, and tries at most the
+existing eight bridge candidates. Each candidate still inserts the same exact
+`reduce local_def <local>` operation and reruns bounded historical-selector and
+full final-state validation. Subalgebra Unitization occurrences
+`9725589ca802bdbe` and `1734864b48394331` now materialize with `local_def
+algHom` and `local_def starAlgHom`, respectively, followed by their original
+seven named rules. One passive recording compile and one aggregate compile
+cover both sites; delete, reorder, and wrong-local mutations fail closed. No
+new command, ambient search, or fallback was added. Schema 15 is unchanged.
+
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
 `Simp.Config` field as normalized JSON provenance; certificates compile the

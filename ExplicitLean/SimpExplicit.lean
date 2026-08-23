@@ -3595,7 +3595,7 @@ private partial def firstDefEqSubexpression? (subject expected : Expr)
       return some found
   return none
 
-private def maxBridgeProjectionCandidates : Nat := 8
+private def maxBridgeCandidates : Nat := 8
 
 private partial def projectionFunctionNameOccurrences (expression : Expr)
     (fuel : Nat := 256) : MetaM (Array Name) := do
@@ -3613,15 +3613,16 @@ private def boundedProjectionFunctionCandidates (expression : Expr) : MetaM (Arr
   let occurrences ← projectionFunctionNameOccurrences expression
   let mut result := #[]
   for name in occurrences do
-    if result.size >= maxBridgeProjectionCandidates then
+    if result.size >= maxBridgeCandidates then
       break
     unless result.contains name do
       result := result.push name
   return result
 
 /- The local-definition bridge is deliberately not a search over the ambient
-   context.  It is available only when the already matched gap expression is
-   itself an ambient fvar whose declaration is a let with a value. -/
+   context.  A candidate must be an fvar structurally present in the already
+   matched gap expression, and its declaration must be an accessible local
+   let with a value. -/
 private def localDefReduction? (expression : Expr) : MetaM (Option ReductionIdentity) := do
   let .fvar fvarId := expression | return none
   let localDecl ← try
@@ -3635,6 +3636,32 @@ private def localDefReduction? (expression : Expr) : MetaM (Option ReductionIden
       return none
   | .cdecl .. =>
       return none
+
+private partial def localDefOccurrences (expression : Expr)
+    (fuel : Nat := 256) : MetaM (Array (Expr × ReductionIdentity)) := do
+  if fuel == 0 then
+    return #[]
+  let mut result := #[]
+  if let some reduction ← localDefReduction? expression then
+    result := result.push (expression, reduction)
+  for (_, child) in expressionChildren expression do
+    result := result ++ (← localDefOccurrences child (fuel - 1))
+  return result
+
+private def boundedLocalDefCandidates (expression : Expr) : MetaM
+    (Array (Expr × ReductionIdentity)) := do
+  let occurrences ← localDefOccurrences expression
+  let mut result := #[]
+  let mut seen : Array FVarId := #[]
+  for occurrence in occurrences do
+    if result.size >= maxBridgeCandidates then
+      break
+    let (_, reduction) := occurrence
+    let .localDef fvarId _ _ _ := reduction.kind | continue
+    unless seen.contains fvarId do
+      seen := seen.push fvarId
+      result := result.push occurrence
+  return result
 
 private structure CertificateBridgePrefix where
   firstUnconsumed : Nat
@@ -4120,11 +4147,13 @@ private def bridgeCertificatePlan? (target : Expr) (searchedResult : Simp.Result
     { event with replay := { event.replay with selector := .next } }
   let rawEncodingInfos := baseEncoded.map (·.info)
   let rawPremiseEncodingInfos := baseEncoded.map (·.premiseEncodings)
-  -- A local let is the shortest possible continuity bridge.  Its identity is
-  -- taken only from the already matched fvar; no ambient declaration search is
-  -- performed.  Validate the complete augmented program before returning it.
-  if let some reduction ← localDefReduction? bridge.matched.expression then
-    let localDef0 ← syntheticBridgeReductionEvent bridge.matched.expression reduction
+  -- A local let is the shortest possible continuity bridge. Its identity is
+  -- taken only from fvars structurally present in the matched expression; no
+  -- ambient declaration search is performed. Validate the complete augmented
+  -- program before returning it.
+  let localDefCandidates ← boundedLocalDefCandidates bridge.matched.expression
+  for (subject, reduction) in localDefCandidates do
+    let localDef0 ← syntheticBridgeReductionEvent subject reduction
     let .localDef _ _ _ value := reduction.kind | return none
     -- Discovery needs the real transition endpoints.  Unlike the older
     -- projection bridge, this operation knows its exact output without

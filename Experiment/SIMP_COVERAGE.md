@@ -95,3 +95,12 @@ ambient theorem. Lattice target `02a5cd6ee869c03d` materializes with `reduce
 projection_fn Inhabited.default` and four named rules. The focused gate rejects
 deletion, reordering, and a different projection identity and asserts zero
 fallback metrics. Schema 15 is unchanged.
+
+O6j implementation status (2026-08-22): local-def bridge candidates may now
+come from accessible local-let fvars nested in the already matched continuity
+expression. The traversal is structural, deduplicated, capped at eight, and
+never searches the ambient context. Subalgebra Unitization targets
+`9725589ca802bdbe` and `1734864b48394331` materialize together in one recording
+and one aggregate compile; focused gates reject deletion, reordering, and a
+wrong local for both sites and assert zero fallback metrics. Schema 15 is
+unchanged.
