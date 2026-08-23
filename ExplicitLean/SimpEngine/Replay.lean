@@ -14,9 +14,6 @@ syntax simpEngineReplayArgs := optConfig (discharger)? (&" only")?
 syntax (name := simpEngineReplay)
   "simp_engine_replay" simpEngineReplayArgs : tactic
 
-syntax (name := simpEngineReplayId)
-  "simp_engine_replay_id" str simpEngineReplayArgs : tactic
-
 end Lean.Parser.Tactic
 
 namespace ExplicitLean.SimpEngine.Replay
@@ -159,9 +156,4 @@ elab_rules : tactic
       let inner := mkNode ``Lean.Parser.Tactic.simp #[
         mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
       recordAndReplay inner
-  | `(tactic| simp_engine_replay_id $id:str $args:simpEngineReplayArgs) => withMainContext do
-      let inner := mkNode ``Lean.Parser.Tactic.simp #[
-        mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
-      recordAndReplay inner (some id.getString)
-
 end ExplicitLean.SimpEngine.Replay

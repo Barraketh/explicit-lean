@@ -37,17 +37,17 @@ REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine/Inventory.lean":
         "d08cefcb506f63b29c8c91f53fa089177d17b501473af554c4adf6c4002a44e8",
     "ExplicitLean/SimpEngine/Recording.lean":
-        "b53b7aee50fbfb7b42e692816dc35abbed73dfa7b44125b9f7f0a367a5d8409b",
+        "ec6b4819a847ce71039c198e123506f2d31d130522d7e1e357ae17412959ddea",
     "ExplicitLean/SimpEngine/Reference.lean":
         "e3f59c3a7c5f01dec5a700eda0dad5d08199df7adee4ff557e548f4b5fca6bb0",
     "ExplicitLean/SimpEngine/Replay.lean":
-        "6d32c261860778f5401e2128b127eaef2f0b86e052546d94634b7c1538ebe7ee",
+        "ea34fe5b55040403cae4c38812afcc0fe36233bf87cd09e5f9a2253c725a5477",
     "ExplicitLean/SimpEngine/Runtime.lean":
         "533c27c3f2b3e95fe2a5490ee564c3bcf27457a88441d252caf52d59391ebbfb",
     "ExplicitLean/SimpEngine/Source.lean":
         "351e26bf4736dd77dfdcb0ad9d3c3c3c6bfaf8467907323a451d5514320dce56",
     "SIMP_ENGINE_COVERAGE.md":
-        "94ebd98c9a5c98d5ec06ea6409b2bbb4a73b8726ad16a7abe22adfc61ba57c90",
+        "ce0195efac3d1326e931c17400727a40b06a1f42ea3a43b0f15af7d4e6ca460b",
 }
 EXPECTED_LINEAGE_DIGEST = (
     "958e73db5698bd153dd304c02b7137966da2f4d5de2a05fbf48ab43e27de34ee"

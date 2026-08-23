@@ -9,10 +9,7 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROBES = (
-    "Experiment/SimpEngineReplayProbe.lean",
-    "Experiment/SimpEngineReplayProductionProbe.lean",
-)
+PROBE = "Experiment/SimpEngineReplayProbe.lean"
 REQUIRED = {
     "rewrite.commit",
     "reduce.beta",
@@ -55,24 +52,21 @@ def main() -> None:
     if query.returncode:
         raise RuntimeError(query.stdout + query.stderr)
     dylib = json.loads(query.stdout.strip())
+    run = subprocess.run(
+        ["lake", "env", "lean", f"--load-dynlib={dylib}", PROBE],
+        cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        timeout=300,
+    )
+    if run.returncode:
+        raise RuntimeError(run.stdout)
     observed: set[str] = set()
-    outputs: list[str] = []
-    for probe in PROBES:
-        run = subprocess.run(
-            ["lake", "env", "lean", f"--load-dynlib={dylib}", probe],
-            cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            timeout=300,
-        )
-        outputs.append(run.stdout)
-        if run.returncode:
-            raise RuntimeError(run.stdout)
-        for line in run.stdout.splitlines():
-            marker = "SIMP_ENGINE_REPLAY branches="
-            if marker in line:
-                observed.update(filter(None, line.split(marker, 1)[1].split(",")))
+    for line in run.stdout.splitlines():
+        marker = "SIMP_ENGINE_REPLAY branches="
+        if marker in line:
+            observed.update(filter(None, line.split(marker, 1)[1].split(",")))
     missing = sorted(REQUIRED - observed)
     if missing:
-        raise RuntimeError("unreplayed_transition: " + ", ".join(missing) + "\n" + "".join(outputs))
+        raise RuntimeError("unreplayed_transition: " + ", ".join(missing) + "\n" + run.stdout)
     print(f"schema-16 focused closed replay: {len(observed)} dynamic branches: ok")
 
 

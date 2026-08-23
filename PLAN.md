@@ -39,8 +39,8 @@ Each package is committed before work begins on the next.
 
 - The authoritative Lean source surface is version- and hash-pinned.
 - Focused `simp` and `dsimp` probes compare the fork with upstream.
-- Two syntax-instrumented Mathlib modules compare 57 real `simp`/`simp only`
-  calls with upstream.
+- The source gate verifies upstream/fork final-state equivalence while compiling
+  complete instrumented Mathlib modules; there is no separate bounded adapter.
 
 ### E2. Total structured recorder — complete
 
@@ -51,8 +51,8 @@ Each package is committed before work begins on the next.
   classification rather than converted to proof fallbacks.
 - Failed candidates that execute recursive work are retained as explicit failed
   attempts; candidates with no executable progress are omitted.
-- Focused static and dynamic branch gates plus the two production modules test
-  the recorder.
+- Focused static and dynamic branch gates test the recorder; the source gate
+  exercises the same recorder in complete modules.
 
 ### E3. Closed structural replay — complete
 
@@ -65,11 +65,10 @@ Each package is committed before work begins on the next.
 
 Gate: every focused non-deferred recording replays; every mutation is rejected.
 
-Status: complete. The focused suite replays 39 dynamic branch classes, 20
-single-field mutations are rejected, and one batched recording plus one batched
-replay compile cover 55 non-deferred occurrences (58 executions) across the 57
-bounded production occurrences. The remaining two occurrences are explicitly
-simproc-deferred.
+Status: complete. The focused suite replays 36 dynamic branch classes and 20
+single-field mutations are rejected. Complete-module recording, replay, and
+classification are owned by the source gate below rather than a second replay
+harness.
 
 ### E4. Certificate source and materializer — complete
 
@@ -100,8 +99,8 @@ engine identity is rejected before replay.
 - Mechanically diff the fork against pinned upstream, allowing only namespace,
   recursion, observer, and replay-driver changes.
 - Require every changing return and structural decision to map to the IR.
-- Run reference, recording, replay, mutation, source, and bounded production
-  gates from a clean commit.
+- Run reference, recording, replay, mutation, and complete-module source gates
+  from a clean commit.
 
 Gate: the implementation-to-IR matrix has no partial, implicit, or absent row.
 
@@ -112,8 +111,8 @@ staged simp/dsimp cache provenance, binder and metadata paths, exact
 theorem-variant selection, stable
 lazy-equation origins, generated- and user-congruence identity, match-attempt
 rollback, ground-context isolation, and reduction/builtin eligibility. The
-focused recorder and replay suites now cover 39 dynamic branch classes, and 20
-independent certificate mutations are rejected.
+focused recorder covers 39 dynamic branch classes, focused replay covers 36,
+and 20 independent certificate mutations are rejected.
 
 ### E6. Full cloud closure
 
@@ -149,11 +148,11 @@ only tests that provide confidence in that engine:
 5. focused dynamic recording coverage;
 6. focused closed replay;
 7. single-field replay mutation rejection;
-8. bounded Mathlib reference equivalence;
-9. batched bounded recording/classification/replay;
-10. schema-16 source round-trip and complete-module materialization; and
-11. cloud shard assignment and strict reducer mutation rejection.
+8. schema-16 source round-trip and complete-module upstream comparison,
+   classification, replay, and materialization; and
+9. cloud shard assignment and strict reducer mutation rejection.
 
 Historical proof exporters, schema-15 bridges, fallback materializers, and
-their regression tests have been removed. Git history remains the record of
-those experiments.
+their regression tests have been removed. Standalone bounded reference/replay
+harnesses were also removed once the complete-module source gate subsumed them.
+Git history remains the record of those experiments.

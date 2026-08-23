@@ -14,9 +14,6 @@ syntax simpEngineRecordingArgs := optConfig (discharger)? (&" only")?
 syntax (name := simpEngineRecording)
   "simp_engine_recording" simpEngineRecordingArgs : tactic
 
-syntax (name := simpEngineRecordingId)
-  "simp_engine_recording_id" str simpEngineRecordingArgs : tactic
-
 syntax (name := simpEngineObserve)
   "simp_engine_observe" simpEngineRecordingArgs : tactic
 
@@ -296,10 +293,6 @@ elab_rules : tactic
       let inner := mkNode ``Lean.Parser.Tactic.simp #[
         mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
       recordTactic inner
-  | `(tactic| simp_engine_recording_id $id:str $args:simpEngineRecordingArgs) => withMainContext do
-      let inner := mkNode ``Lean.Parser.Tactic.simp #[
-        mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
-      recordTactic inner (some id.getString)
   | `(tactic| simp_engine_observe $args:simpEngineRecordingArgs) => withMainContext do
       let target ← instantiateMVars (← (← getMainGoal).getType)
       let inner := mkNode ``Lean.Parser.Tactic.simp #[

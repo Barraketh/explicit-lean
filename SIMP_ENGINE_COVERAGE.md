@@ -579,8 +579,8 @@ Each stage is committed before the next begins.
 ### E1. Reference engine
 
 - Add the pinned fork in reference mode.
-- Compare upstream and fork results for every existing focused fixture and a
-  bounded production module set.
+- Compare upstream and fork results for every focused fixture, then compare
+  final proof states while the source gate records complete modules.
 - Compare expression, proof presence, cache flag, used theorems, diagnostics,
   subject closure, and final state.
 
@@ -588,8 +588,8 @@ Gate: zero equivalence mismatches; no certificate or corpus behavior changes.
 
 Status: complete. The fork is pinned by hashes of the complete authoritative
 source surface, the focused reference probe covers both `simp` and `dsimp`
-branches, and 57 supported calls across two syntax-instrumented Mathlib modules
-agree exactly.
+branches, and the complete-module source gate rejects any upstream/fork final
+proof-state mismatch.
 
 ### E2. Total structured recorder
 
@@ -605,7 +605,7 @@ call causes its focused test to fail with `unobserved_transition`.
 Status: complete. The recorder covers every matrix row, retains stateful failed
 candidate attempts, emits nested premise programs, observes all
 simproc/dsimproc phases without accepting them, and matches reference-mode
-results on the focused probe and 57 bounded production calls.
+results on the focused probe and complete-module source gate.
 
 ### E3. Closed structural replay
 
@@ -618,11 +618,10 @@ Gate: every branch-focused certificate replays; mutations of path, phase,
 operation, rule variant, congruence choice, config, premise order, or terminal
 fail at the mutated item.
 
-Status: complete. The focused suite replays 39 dynamic branch classes and
-rejects 20 targeted mutations. The batched bounded gate records each module
-once, classifies every execution by occurrence ID, then replays 55 wholly
-non-deferred occurrences across 58 executions in one replay compile per module;
-two occurrences are explicitly simproc-deferred and none are unclassified.
+Status: complete. The focused suite replays 36 dynamic branch classes and
+rejects 20 targeted mutations. Complete-module classification and replay are
+tested once through the source materialization gate instead of a parallel
+record/replay harness.
 
 ### E4. Source and materializer migration
 
@@ -638,7 +637,7 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused and two bounded production modules contain 66
+copies are compiled. The focused fixture and two complete Mathlib modules contain 66
 occurrences: 63 materialize across 67 successful executions, two remain
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
@@ -653,7 +652,8 @@ before replay.
   with an event or structural witness.
 - Diff the fork against the pinned upstream sources, allowing only namespace,
   recursion, observer, and replay-driver changes.
-- Run the bounded equivalence, mutation, coverage, and aggregate suites.
+- Run the focused equivalence, mutation, coverage, and complete-module source
+  suites.
 
 Gate: the implementation-to-IR matrix has no `partial`, `implicit`, or `absent`
 entry; all review checks are machine-enforced.

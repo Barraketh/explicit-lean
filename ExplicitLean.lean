@@ -1,6 +1,1 @@
-import ExplicitLean.SimpEngine
-import ExplicitLean.SimpEngine.Inventory
-import ExplicitLean.SimpEngine.Reference
-import ExplicitLean.SimpEngine.Recording
-import ExplicitLean.SimpEngine.Replay
 import ExplicitLean.SimpEngine.Source
