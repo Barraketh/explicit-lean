@@ -106,6 +106,15 @@ inductive ArithHandler where
   | intDivisibility
   deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
 
+inductive GeneratedCongruenceArgKind where
+  | fixed
+  | fixedNoParam
+  | eq
+  | cast
+  | heq
+  | subsingletonInst
+  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+
 inductive PremiseTerminal where
   | localAssumption (contextIndex : Nat)
   | equationHypothesis
@@ -133,6 +142,7 @@ structure ScopedLocalRef where
 
 inductive RuleOrigin where
   | decl (name : Name)
+  | equation (declaration : Name) (index : Nat)
   | syntax (source : String)
   | local (subject : LocalRef)
   | other (name : Name)
@@ -152,8 +162,9 @@ inductive PathStep where
   | matchDiscriminant (index : Nat) (mode : ChildMode)
   | lambdaDomain (index : Nat)
   | lambdaBody
-  | forallDomain
+  | forallDomain (index : Nat)
   | forallBody
+  | metadataBody
   | implicationDomain
   | implicationBody
   | letType (index : Nat)
@@ -205,41 +216,45 @@ inductive Builtin where
   | arith (handler : ArithHandler)
   deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
 
-inductive CongruenceChoice where
-  | user (theoremName : Name) (priority : Nat) (hypothesisPositions : Array Nat)
-  | userAttemptFailed (theoremName : Name) (priority : Nat)
-      (hypothesisPositions : Array Nat)
-  | generated (shapeFingerprint : String) (arguments : Array ChildMode)
-      (synthesizedAssignments : Array String)
-  | generatedAttemptFailed
-  | generic (arguments : Array ChildMode)
-  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
-
-inductive Structural where
-  | phaseOutcome (phase : Phase) (invocationOrdinal : Nat)
-      (disposition : StepDisposition) (outputFingerprint : String) (proofPresent : Bool)
-  | proofSkip (invocationOrdinal : Nat) (typeFingerprint : String)
-  | unassignedMVarStop (simpStepOrdinal : Nat)
-  | cacheHit (sourcePath : ExecutionPath)
-  | congruence (invocationOrdinal : Nat) (choice : CongruenceChoice)
-  | projectionMajor (structureName : Name) (field : Nat) (mode : ChildMode)
-  | matchDiscriminants (count : Nat)
-  | matchDiscriminantsAttemptFailed (count : Nat)
-  | lambdaTelescope (count : Nat)
-  | forallBranch (choice : ForallBranch)
-  | contextualScope (locals : Array ScopedLocalRef)
-  | letToHave
-  | haveTelescope (fixed used : Array Bool)
-  | dropUnusedHave (index : Nat)
-  | dsimpCacheHit (sourcePath : ExecutionPath)
-  | dsimpTransform (usedLetOnly skipInstances : Bool)
-  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
-
 mutual
   structure PremiseProgram where
     propositionFingerprint : String
     program : Program
     terminal : PremiseTerminal
+    deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+  inductive CongruenceChoice where
+    | user (theoremName : Name) (priority : Nat) (hypothesisPositions : Array Nat)
+        (theoremFingerprint : String) (matchEnvelope : MatchEnvelope)
+        (premises : Array PremiseProgram)
+    | userAttemptFailed (theoremName : Name) (priority : Nat)
+        (hypothesisPositions : Array Nat) (theoremFingerprint : String)
+        (matchEnvelope : MatchEnvelope) (premises : Array PremiseProgram)
+    | generated (theoremTypeFingerprint proofFingerprint : String)
+        (argumentKinds : Array GeneratedCongruenceArgKind)
+        (arguments : Array ChildMode) (synthesizedAssignments : Array String)
+    | generatedAttemptFailed
+    | generic (arguments : Array ChildMode)
+    deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+  inductive Structural where
+    | phaseOutcome (phase : Phase) (invocationOrdinal : Nat)
+        (disposition : StepDisposition) (outputFingerprint : String) (proofPresent : Bool)
+    | proofSkip (invocationOrdinal : Nat) (typeFingerprint : String)
+    | unassignedMVarStop (simpStepOrdinal : Nat)
+    | cacheHit (sourcePath : ExecutionPath) (sourceIndex : Nat)
+    | congruence (invocationOrdinal : Nat) (choice : CongruenceChoice)
+    | projectionMajor (structureName : Name) (field : Nat) (mode : ChildMode)
+    | matchDiscriminants (count : Nat)
+    | matchDiscriminantsAttemptFailed (count : Nat)
+    | lambdaTelescope (count : Nat)
+    | forallBranch (choice : ForallBranch)
+    | contextualScope (locals : Array ScopedLocalRef)
+    | letToHave
+    | haveTelescope (fixed used : Array Bool)
+    | dropUnusedHave (index : Nat)
+    | dsimpCacheHit (sourcePath : ExecutionPath) (sourceIndex : Nat)
+    | dsimpTransform (usedLetOnly skipInstances : Bool)
     deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
   inductive Operation where
@@ -275,6 +290,8 @@ mutual
 end
 
 instance : Inhabited Program := ⟨{}⟩
+instance : Inhabited CongruenceChoice := ⟨.generatedAttemptFailed⟩
+instance : Inhabited Structural := ⟨.matchDiscriminants 0⟩
 
 inductive DeferredReason where
   | simproc (name : Name) (phase : Phase)

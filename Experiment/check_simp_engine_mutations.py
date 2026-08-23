@@ -34,10 +34,12 @@ def main() -> None:
     if run.returncode:
         raise RuntimeError(run.stdout)
     if "SIMP_ENGINE_MUTATIONS core=9" not in run.stdout or \
-            "SIMP_ENGINE_MUTATIONS structural=5" not in run.stdout or \
-            "SIMP_ENGINE_MUTATIONS arithmetic=1" not in run.stdout:
+            "SIMP_ENGINE_MUTATIONS structural=7" not in run.stdout or \
+            "SIMP_ENGINE_MUTATIONS generated=1" not in run.stdout or \
+            "SIMP_ENGINE_MUTATIONS equation=1" not in run.stdout or \
+            "SIMP_ENGINE_MUTATIONS arithmetic=2" not in run.stdout:
         raise RuntimeError("mutation probe did not run all cases\n" + run.stdout)
-    print("schema-16 replay mutations: 15 rejected: ok")
+    print("schema-16 replay mutations: 20 rejected: ok")
 
 
 if __name__ == "__main__":

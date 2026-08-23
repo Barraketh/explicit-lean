@@ -176,15 +176,53 @@ opaque MethodsRef.toMethods (methods : MethodsRef) : Methods
 @[inline] def withUserConfig (f : Options → Options) (x : EngineM α) : EngineM α :=
   mapSimpM (Simp.withUserConfig f) x
 
-@[inline] def withFreshCache (x : EngineM α) : EngineM α :=
-  mapSimpM Simp.withFreshCache x
+@[inline] def withFreshCache (x : EngineM α) : EngineM α := do
+  let runtime : Runtime ← readThe Runtime
+  if runtime.mode == .reference then
+    mapSimpM Simp.withFreshCache x
+  else
+    let saved ← runtime.state.get
+    runtime.state.set { saved with simpCacheSources := {} }
+    try mapSimpM Simp.withFreshCache x finally
+      runtime.state.modify fun current => {
+        current with simpCacheSources := saved.simpCacheSources
+      }
 
-@[inline] def withPreservedCache (x : EngineM α) : EngineM α :=
-  mapSimpM Simp.withPreservedCache x
+@[inline] def withPreservedCache (x : EngineM α) : EngineM α := do
+  let runtime : Runtime ← readThe Runtime
+  if runtime.mode == .reference then
+    mapSimpM Simp.withPreservedCache x
+  else
+    let saved := (← runtime.state.get).simpCacheSources
+    runtime.state.modify fun current => {
+      current with simpCacheSources := current.simpCacheSources.switch
+    }
+    try mapSimpM Simp.withPreservedCache x finally
+      runtime.state.modify fun current => {
+        current with simpCacheSources := {
+          current.simpCacheSources with map₂ := saved.map₂, stage₁ := saved.stage₁
+        }
+      }
 
 @[inline] def withInDSimpWithCache
     (k : ExprStructMap Expr → EngineM (α × ExprStructMap Expr)) : EngineM α :=
-  fun methods runtime => Simp.withInDSimpWithCache fun cache => k cache methods runtime
+  fun methods runtime => Simp.withInDSimpWithCache fun cache => do
+    if runtime.mode == .reference then
+      k cache methods runtime
+    else
+      let saved ← runtime.state.get
+      runtime.state.set {
+        saved with
+        dsimpCacheSources := saved.dsimpStateCacheSources
+        dsimpStateCacheSources := {}
+      }
+      let (result, cache) ← k cache methods runtime
+      runtime.state.modify fun current => {
+        current with
+        dsimpStateCacheSources := current.dsimpCacheSources
+        dsimpCacheSources := saved.dsimpCacheSources
+      }
+      return (result, cache)
 
 @[inline] def recordTriedSimpTheorem (origin : Origin) : EngineM Unit :=
   liftSimpM (Simp.recordTriedSimpTheorem origin)
@@ -196,6 +234,14 @@ opaque MethodsRef.toMethods (methods : MethodsRef) : Methods
   liftSimpM (Simp.recordCongrTheorem name)
 
 @[inline] def getRuntime : EngineM Runtime := readThe Runtime
+
+private def getOperationSourceContext : EngineM Context := do
+  let runtime ← getRuntime
+  let state ← runtime.state.get
+  if runtime.mode == .replay && state.path.steps.contains .ground then
+    getContext
+  else
+    pure <| runtime.ruleContext.getD (← getContext)
 
 @[inline] def getRecorderState : EngineM RecorderState := do
   return ← (← getRuntime).state.get
@@ -656,10 +702,15 @@ private def unfold? (e : Expr) : EngineM (Option (Expr × DeltaStrategy)) := do
 private def exactProjectionFunction (e : Expr) (name : Name)
     (branch : ProjectionBranch) : EngineM (Option Expr) := do
   unless e.getAppFn.isConstOf name do return none
+  let sourceContext ← getOperationSourceContext
   match branch with
   | .requestedClass =>
+      let some projection ← getProjectionFnInfo? name | return none
+      unless projection.fromClass && sourceContext.isDeclToUnfold name do return none
       withReducibleAndInstances <| unfoldDefinition? e
   | .constructorClass | .structure =>
+      if branch == .constructorClass && sourceContext.isDeclToUnfold name then
+        return none
       match ← reduceProjFn? e with
       | some (output, .projectionFunction actualName actualBranch) =>
           if actualName == name && actualBranch == branch then return some output
@@ -668,56 +719,128 @@ private def exactProjectionFunction (e : Expr) (name : Name)
 
 private def exactDelta (e : Expr) (name : Name) (strategy : DeltaStrategy) : EngineM (Option Expr) := do
   unless e.getAppFn.isConstOf name do return none
+  let sourceContext ← getOperationSourceContext
+  let cfg ← getConfig
+  let smart := smartUnfolding.get (← getOptions)
+  if !(strategy matches .ground) && (← isProjectionFn name) then return none
   match strategy with
-  | .requestedSmart | .requestedPartial | .requestedOrdinary | .autoSmart =>
+  | .requestedSmart =>
+      unless !sourceContext.config.autoUnfold && sourceContext.isDeclToUnfold name &&
+          smart && (← getEnv).contains (mkSmartUnfoldingNameFor name) do
+        return none
+      unfoldDefinitionAny? e
+  | .requestedPartial =>
+      unless !sourceContext.config.autoUnfold && sourceContext.isDeclToUnfold name &&
+          !(smart && (← getEnv).contains (mkSmartUnfoldingNameFor name)) &&
+          cfg.unfoldPartialApp do
+        return none
+      unfoldDefinitionAny? e
+  | .requestedOrdinary =>
+      unless !sourceContext.config.autoUnfold && sourceContext.isDeclToUnfold name &&
+          !(smart && (← getEnv).contains (mkSmartUnfoldingNameFor name)) &&
+          !cfg.unfoldPartialApp do
+        return none
+      let some cinfo := (← getEnv).find? name | return none
+      let some value := cinfo.value? | return none
+      if value.getNumHeadLambdas > e.getAppNumArgs then return none
+      unfoldDefinitionAny? e
+  | .autoSmart =>
+      unless sourceContext.config.autoUnfold &&
+          !sourceContext.simpTheorems.isErased (.decl name) &&
+          hasSmartUnfoldingDecl (← getEnv) name do
+        return none
       unfoldDefinitionAny? e
   | .autoMatch =>
+      unless sourceContext.config.autoUnfold &&
+          !sourceContext.simpTheorems.isErased (.decl name) &&
+          !hasSmartUnfoldingDecl (← getEnv) name && (← isMatchDef name) do
+        return none
       let some unfolded ← unfoldDefinitionAny? e | return none
       match ← withSimpMetaConfig <| reduceMatcher? unfolded with
       | .reduced output => return some output
       | _ => return none
   | .ground =>
+      unless cfg.ground do return none
+      unless !e.hasExprMVar && !e.hasFVar do return none
       let .const declName levels := e.getAppFn | return none
+      if sourceContext.simpTheorems.isErased (.decl declName) then return none
+      if (← isMatcher declName) then return none
+      if (← getEqnsFor? declName).isSome then return none
+      if e.isConst then
+        if let .forallE .. ← whnfD (← inferType e) then return none
       let info ← getConstInfo declName
       unless info.hasValue && info.levelParams.length == levels.length do return none
       let body ← instantiateValueLevelParams info levels
       return some (body.betaRev e.getAppRevArgs (useZeta := true))
 
-private def exactLocalDef (e : Expr) (expected : LocalRef) : EngineM (Option Expr) := do
+private def exactLocalDef (e : Expr) (expected : LocalRef)
+    (expectedReason : LocalDefReason) : EngineM (Option Expr) := do
   unless e.isFVar do return none
   let localDecl ← getFVarLocalDecl e
   let actual ← localRefOfDecl localDecl
   unless actual == expected do return none
+  let cfg ← getConfig
+  let sourceContext ← getOperationSourceContext
+  let sourceTheorems := sourceContext.simpTheorems
+  let actualReason? :=
+    if cfg.zetaDelta then some LocalDefReason.zetaDelta
+    else if sourceTheorems.isLetDeclToUnfold localDecl.fvarId then some .requested
+    else if localDecl.isImplementationDetail then some .implementationDetail
+    else none
+  unless actualReason? == some expectedReason do return none
   return localDecl.value?
 
 private def executeRecordedReduction (e : Expr) (reduction : Reduction) : EngineM (Option Expr) := do
+  let cfg ← getConfig
   match reduction with
-  | .instantiateMVars => return some (← instantiateMVars e)
+  | .instantiateMVars =>
+      unless e.getAppFn.isMVar do return none
+      return some (← instantiateMVars e)
   | .beta =>
+      unless cfg.beta do return none
       let fn := e.getAppFn
       unless fn.isHeadBetaTargetFn false do return none
       return some (fn.betaRev e.getAppRevArgs)
   | .projection structureName field =>
+      unless cfg.proj do return none
       match e with
       | .proj actualStructure actualField _ =>
           unless actualStructure == structureName && actualField == field do return none
       | _ => return none
       withSimpMetaConfig <| reduceProj? e
-  | .projectionFunction name branch => exactProjectionFunction e name branch
-  | .iota => withSimpMetaConfig <| reduceRecMatcher? e
+  | .projectionFunction name branch =>
+      unless cfg.proj do return none
+      exactProjectionFunction e name branch
+  | .iota =>
+      unless cfg.iota do return none
+      withSimpMetaConfig <| reduceRecMatcher? e
   | .zetaUsed zetaHave =>
+      unless cfg.zeta && zetaHave == cfg.zetaHave do return none
       let .letE _ _ value body nondep := e | return none
       unless !nondep || zetaHave do return none
       return some (expandLet body #[value] (zetaHave := zetaHave))
   | .zetaUnused =>
-      let .letE _ _ _ body _ := e | return none
+      unless cfg.zetaUnused do return none
+      let .letE _ _ _ body nondep := e | return none
+      if cfg.zeta && (!nondep || cfg.zetaHave) then return none
       unless !body.hasLooseBVars do return none
       return some (consumeUnusedLet body)
   | .delta name strategy => exactDelta e name strategy
   | .foldRawNatLit =>
+      let sourceContext ← getOperationSourceContext
+      if sourceContext.isDeclToUnfold ``OfNat.ofNat then return none
       let some value := e.rawNatLit? | return none
       return some (toExpr value)
-  | .localDef subject _ => exactLocalDef e subject
+  | .localDef subject reason => exactLocalDef e subject reason
+
+private def validateReductionDisposition (reduction : Reduction)
+    (disposition : StepDisposition) : EngineM Unit := do
+  let valid : Bool := match reduction with
+    | .iota => disposition == .continueSome || disposition == .visit
+    | .delta _ .ground => disposition == .visit
+    | _ => disposition == .continueSome
+  unless valid do
+    throwError "replay_reduction_disposition_mismatch: {repr reduction}, {repr disposition}"
 
 private def replayReductionStep? (e : Expr) : EngineM (Option Expr) := do
   let runtime ← getRuntime
@@ -725,6 +848,7 @@ private def replayReductionStep? (e : Expr) : EngineM (Option Expr) := do
   let some expected ← peekReplayEvent? | return none
   unless ← isCurrentReplayEvent expected do return none
   let .reduce reduction := expected.operation | return none
+  validateReductionDisposition reduction expected.stepDisposition
   let actualInput ← liftM (exprFingerprintHash e)
   unless actualInput == expected.inputFingerprint do
     throwError "replay_event_input_mismatch: expected {expected.inputFingerprint}, got {actualInput}"
@@ -758,7 +882,7 @@ private def reduceStep (e : Expr) : EngineM Expr := do
     | some eNew =>
       let reduction := match e with
         | .proj structureName field _ => Reduction.projection structureName field
-        | _ => Reduction.projection `_unknown 0
+        | _ => unreachable!
       commitReduction "reduce.projection" e eNew reduction
       return eNew
     | none =>
@@ -1014,6 +1138,14 @@ def simpAppUsingCongr (e : Expr) (invocationOrdinal : Nat) : EngineM Result := d
 /--
 Try to use automatically generated congruence theorems. See `mkCongrSimp?`.
 -/
+private def generatedCongruenceArgKind : CongrArgKind → GeneratedCongruenceArgKind
+  | .fixed => .fixed
+  | .fixedNoParam => .fixedNoParam
+  | .eq => .eq
+  | .cast => .cast
+  | .heq => .heq
+  | .subsingletonInst => .subsingletonInst
+
 def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option Result) := do
   let f := e.getAppFn
   -- TODO: cache
@@ -1033,7 +1165,9 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
       | .cast | .subsingletonInst => .fixed
       | _ => .fixed
     childModes := childModes.push mode
-  let shapeFingerprint ← liftM (exprFingerprintHash cgrThm.type)
+  let theoremTypeFingerprint ← liftM (exprFingerprintHash cgrThm.type)
+  let proofFingerprint ← liftM (exprStructuralFingerprintHash cgrThm.proof)
+  let argumentKinds := cgrThm.argKinds.map generatedCongruenceArgKind
   let mut synthesizedAssignments := #[]
   let mut simplified := false
   let mut hasProof   := false
@@ -1067,7 +1201,8 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
     i := i + 1
   if !simplified then
     emitStructural (.congruence invocationOrdinal
-      (.generated shapeFingerprint childModes synthesizedAssignments))
+      (.generated theoremTypeFingerprint proofFingerprint argumentKinds childModes
+        synthesizedAssignments))
     recordBranch "struct.congruence.generated"
     return some { expr := e }
   /-
@@ -1096,7 +1231,8 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
   -/
   if !hasProof && !hasCast then
     emitStructural (.congruence invocationOrdinal
-      (.generated shapeFingerprint childModes synthesizedAssignments))
+      (.generated theoremTypeFingerprint proofFingerprint argumentKinds childModes
+        synthesizedAssignments))
     recordBranch "struct.congruence.generated"
     return some { expr := mkAppN f argsNew }
   let mut proof := cgrThm.proof
@@ -1143,7 +1279,8 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
   let some (_, _, rhs) := type.instantiateRev subst |>.eq? | unreachable!
   let rhs ← if hasCast then removeUnnecessaryCasts rhs else pure rhs
   emitStructural (.congruence invocationOrdinal
-    (.generated shapeFingerprint childModes synthesizedAssignments))
+    (.generated theoremTypeFingerprint proofFingerprint argumentKinds childModes
+      synthesizedAssignments))
   recordBranch "struct.congruence.generated"
   if hasProof then
     return some { expr := rhs, proof? := proof }
@@ -1156,7 +1293,7 @@ def simpProj (e : Expr) : EngineM Result := do
   | some eNew =>
     let reduction := match e with
       | .proj structureName field _ => Reduction.projection structureName field
-      | _ => Reduction.projection `_unknown 0
+      | _ => unreachable!
     commitReduction "reduce.simpProjection" e eNew reduction
     return { expr := eNew }
   | none =>
@@ -1244,7 +1381,7 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
       The domain of the forall is also a proposition, and we can use `forall_prop_domain_congr`
       IF we can simplify the domain.
       -/
-      let rd ← withPath .forallDomain <| simp domain
+      let rd ← withPath (.forallDomain 0) <| simp domain
       if let some h₁ := rd.proof? then
         emitStructural (.forallBranch .propositionDomainTransport)
         recordBranch "struct.forall.propositionDomainTransport"
@@ -1274,7 +1411,7 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
         return result
     emitStructural (.forallBranch .propositionDomainDSimp)
     recordBranch "struct.forall.propositionDomainDSimp"
-    let domain ← withPath .forallDomain <| dsimp domain
+    let domain ← withPath (.forallDomain 0) <| dsimp domain
     withLocalDecl e.bindingName! e.bindingInfo! domain fun x => withNewLemmas #[x] do
       let b := e.bindingBody!.instantiate1 x
       let rb ← withPath .forallBody <| simp b
@@ -1421,33 +1558,40 @@ where
     if runtime.mode == .replay then
       if let some expected ← peekReplayStructural? then
         if ← isCurrentReplayStructural expected then
-          if let .dsimpCacheHit sourcePath := expected.witness then
+          if let .dsimpCacheHit sourcePath sourceIndex := expected.witness then
             let state ← getRecorderState
-            let mut sourceResult? := none
-            for (path, _, result) in state.dsimpReplayCache do
-              if path == sourcePath then
-                sourceResult? := some result
-            let some sourceResult := sourceResult?
+            let fingerprint ← liftM (exprFingerprintHash e)
+            let some (actualPath, sourceFingerprint, sourceResult) :=
+                state.dsimpReplayCache[sourceIndex]?
               | throwError "replay_expected_dsimp_cache_hit: source={repr sourcePath}, path={repr state.path}, cached={state.dsimpReplayCache.size}"
-            let result := cache.get? { val := e } |>.getD sourceResult
-            emitStructural (.dsimpCacheHit sourcePath)
-            return (result, cache)
+            unless actualPath == sourcePath && sourceFingerprint == fingerprint do
+              throwError "replay_dsimp_cache_source_mismatch: source={repr sourcePath}, index={sourceIndex}"
+            unless (cache.get? { val := e }).isSome do
+              throwError "replay_dsimp_cache_miss: source={repr sourcePath}, index={sourceIndex}"
+            unless state.dsimpCacheSources.get? { val := e } == some (sourcePath, sourceIndex) do
+              throwError "replay_dsimp_cache_provenance_mismatch: source={repr sourcePath}, index={sourceIndex}"
+            emitStructural (.dsimpCacheHit sourcePath sourceIndex)
+            return (sourceResult, cache)
     else if let some result := cache.get? { val := e } then
-      let state ← getRecorderState
-      emitStructural (.dsimpCacheHit
-        (state.dsimpCachePaths.get? { val := e } |>.getD {}))
-      recordBranch "struct.dsimpCacheHit"
+      if runtime.mode == .record then
+        let state ← getRecorderState
+        let some (sourcePath, sourceIndex) := state.dsimpCacheSources.get? { val := e }
+          | throwError "record_dsimp_cache_source_missing: path={repr state.path}"
+        emitStructural (.dsimpCacheHit sourcePath sourceIndex)
+        recordBranch "struct.dsimpCacheHit"
       return (result, cache)
     withIncRecDepth do
       checkSystem "transform"
       let (result, cache) ← visitUncached e cache
       let cache := cache.insert { val := e } result
-      let fingerprint ← liftM (exprFingerprintHash e)
-      modifyRecorderState fun state => {
-        state with
-          dsimpCachePaths := state.dsimpCachePaths.insert { val := e } state.path
-          dsimpReplayCache := state.dsimpReplayCache.push (state.path, fingerprint, result)
-      }
+      if runtime.mode != .reference then
+        let fingerprint ← liftM (exprFingerprintHash e)
+        modifyRecorderState fun state => {
+          state with
+            dsimpCacheSources := state.dsimpCacheSources.insert { val := e }
+              (state.path, state.dsimpReplayCache.size)
+            dsimpReplayCache := state.dsimpReplayCache.push (state.path, fingerprint, result)
+        }
       return (result, cache)
 
   visitPost (e : Expr) (cache : ExprStructMap Expr) : EngineM (Expr × ExprStructMap Expr) := do
@@ -1476,7 +1620,7 @@ where
     match e with
     | .forallE name domain body binderInfo =>
       let index := fvars.size
-      let (domain, cache) ← withPath (.lambdaDomain index) <|
+      let (domain, cache) ← withPath (.forallDomain index) <|
         visit (domain.instantiateRev fvars) cache
       withLocalDecl name binderInfo domain fun x =>
         visitForall (fvars.push x) body cache
@@ -1530,7 +1674,8 @@ where
       | .letE .. => visitLet #[] expression cache
       | .app .. => visitApp expression cache
       | .mdata metadata body =>
-        let (body, cache) ← visit body cache
+        recordBranch "struct.metadataBody"
+        let (body, cache) ← withPath .metadataBody <| visit body cache
         visitPost (expression.updateMData! body) cache
       | .proj structureName field major =>
         let (major, cache) ← withPath (.projectionMajor .dsimp) <| visit major cache
@@ -1581,6 +1726,175 @@ private def recorderStateProgressed (before after : RecorderState) : Bool :=
   before.simpInvocationOrdinal != after.simpInvocationOrdinal ||
   before.dsimpInvocationOrdinal != after.dsimpInvocationOrdinal ||
   before.simpStepOrdinal != after.simpStepOrdinal
+
+private def expressionFingerprints (expressions : Array Expr) : EngineM (Array String) :=
+  expressions.mapM fun expression => do
+    liftM (exprFingerprintHash (← instantiateMVars expression))
+
+private def beginPremiseProgram (type : Expr) (index : Nat)
+    (expectedPremises? : Option (Array PremiseProgram)) : EngineM RecorderState := do
+  let outer ← getRecorderState
+  let runtime ← getRuntime
+  if runtime.mode == .record then
+    let fingerprint ← liftM (exprFingerprintHash type)
+    runtime.state.set {
+      outer with
+      program := { initialFingerprint := fingerprint, finalFingerprint := fingerprint }
+      path.steps := outer.path.steps.push (.premise index)
+      lastPremiseTerminal := none
+      phaseInvocationOrdinal := 0
+      currentPhaseInvocationOrdinal := 0
+      congruenceInvocationOrdinal := 0
+      simpInvocationOrdinal := 0
+      dsimpInvocationOrdinal := 0
+      simpStepOrdinal := 0
+    }
+  else if runtime.mode == .replay then
+    let premises ← match expectedPremises? with
+      | some premises => pure premises
+      | none => do
+          let some event := outer.program.events[outer.eventCursor]?
+            | throwError "replay_missing_parent_rewrite_for_premise"
+          pure <| match event.operation with
+            | .rewrite _ _ premises | .rewriteAttemptFailed _ _ premises => premises
+            | _ => #[]
+    if premises.isEmpty then
+      throwError "replay_expected_parent_rewrite_for_premise"
+    let some premise := premises[index]?
+      | throwError "replay_missing_premise_program: {index}"
+    let actualFingerprint ← liftM (exprFingerprintHash type)
+    unless actualFingerprint == premise.propositionFingerprint do
+      throwError "replay_premise_fingerprint_mismatch: expected {premise.propositionFingerprint}, got {actualFingerprint}"
+    runtime.state.set {
+      outer with
+      program := premise.program
+      eventCursor := 0
+      structuralCursor := 0
+      path.steps := outer.path.steps.push (.premise index)
+      lastPremiseTerminal := none
+      expectedPremiseTerminal := some premise.terminal
+      phaseInvocationOrdinal := 0
+      currentPhaseInvocationOrdinal := 0
+      congruenceInvocationOrdinal := 0
+      simpInvocationOrdinal := 0
+      dsimpInvocationOrdinal := 0
+      simpStepOrdinal := 0
+    }
+  return outer
+
+private def finishPremiseProgram (outer : RecorderState) (type : Expr) : EngineM PremiseProgram := do
+  let runtime ← getRuntime
+  if runtime.mode == .record then
+    let inner ← runtime.state.get
+    runtime.state.set {
+      outer with
+      deferred := inner.deferred.orElse fun _ => outer.deferred
+      simprocs := outer.simprocs ++ inner.simprocs
+      coveredBranches := outer.coveredBranches ++ inner.coveredBranches
+      simpCacheSources := inner.simpCacheSources
+      dsimpStateCacheSources := inner.dsimpStateCacheSources
+      dsimpCacheSources := inner.dsimpCacheSources
+      simpReplayCache := inner.simpReplayCache
+      dsimpReplayCache := inner.dsimpReplayCache
+    }
+    return {
+      propositionFingerprint := ← liftM (exprFingerprintHash type)
+      program := inner.program
+      terminal := inner.lastPremiseTerminal.getD .isTrue
+    }
+  else if runtime.mode == .replay then
+    let inner ← runtime.state.get
+    liftM <| assertReplayProgramConsumed inner
+    let actualFingerprint ← liftM (exprFingerprintHash type)
+    let some terminal := inner.lastPremiseTerminal
+      | throwError "replay_missing_premise_terminal"
+    unless inner.expectedPremiseTerminal == some terminal do
+      throwError "replay_premise_terminal_mismatch"
+    if terminal matches .localAssumption _ | .equationHypothesis then
+      unless inner.program.finalFingerprint == actualFingerprint do
+        throwError "replay_premise_final_fingerprint_mismatch: expected {inner.program.finalFingerprint}, got {actualFingerprint}"
+    runtime.state.set {
+      outer with
+      simpCacheSources := inner.simpCacheSources
+      dsimpStateCacheSources := inner.dsimpStateCacheSources
+      dsimpCacheSources := inner.dsimpCacheSources
+      simpReplayCache := inner.simpReplayCache
+      dsimpReplayCache := inner.dsimpReplayCache
+    }
+    return {
+      propositionFingerprint := actualFingerprint
+      program := inner.program
+      terminal
+    }
+  else
+    return {
+      propositionFingerprint := ""
+      program := {}
+      terminal := .isTrue
+    }
+
+private def setProgramFinal (expression : Expr) : EngineM Unit := do
+  let fingerprint ← liftM (exprFingerprintHash expression)
+  let runtime ← getRuntime
+  if runtime.mode == .record then
+    runtime.state.modify fun state => { state with program.finalFingerprint := fingerprint }
+  else if runtime.mode == .replay then
+    let state ← runtime.state.get
+    unless state.program.finalFingerprint == fingerprint do
+      throwError "replay_final_fingerprint_mismatch: expected {state.program.finalFingerprint}, got {fingerprint}"
+
+private def dischargeRecorded? (_thmId : Origin) (x type : Expr)
+    (premiseIndex : Nat) (expectedPremises? : Option (Array PremiseProgram)) :
+    EngineM (Option (PremiseProgram × Bool)) := do
+  let outer ← beginPremiseProgram type premiseIndex expectedPremises?
+  let usedTheorems := (← get).usedTheorems
+  let ctx ← getContext
+  if ctx.dischargeDepth >= ctx.maxDischargeDepth then
+    restoreRecorderState outer
+    return none
+  let methods ← getMethods
+  let proof? ← withIncDischargeDepth <| withPreservedCache <| methods.discharge? type
+  let some proof := proof? | do
+    modify fun state => { state with usedTheorems }
+    setPremiseTerminal .failed
+    return some (← finishPremiseProgram outer type, false)
+  unless (← isDefEq x proof) do
+    modify fun state => { state with usedTheorems }
+    setPremiseTerminal .failed
+    return some (← finishPremiseProgram outer type, false)
+  if methods.customDischarger then
+    deferRecording .customDischarger
+  recordBranch "rewrite.premise"
+  return some (← finishPremiseProgram outer type, true)
+
+private inductive ArgumentSynthesis where
+  | success (premises : Array PremiseProgram)
+  | failed (premises : Array PremiseProgram)
+
+private def synthesizeRecordedArgs (thmId : Origin) (bis : Array BinderInfo)
+    (xs : Array Expr) (expectedPremises? : Option (Array PremiseProgram) := none) :
+    EngineM ArgumentSynthesis := do
+  let skipAssignedInstances := tactic.skipAssignedInstances.get (← getOptions)
+  let mut premises := #[]
+  for x in xs, bi in bis do
+    let type ← inferType x
+    if !skipAssignedInstances && bi.isInstImplicit then
+      unless (← synthesizeInstance x type) do return .failed premises
+    if (← instantiateMVars x).isMVar then
+      if (← isClass? type).isSome then
+        if (← synthesizeInstance x type) then continue
+      if (← isProp type) then
+        let some (premise, succeeded) ← dischargeRecorded? thmId x type premises.size
+            expectedPremises?
+          | return .failed premises
+        premises := premises.push premise
+        unless succeeded do return .failed premises
+  return .success premises
+where
+  synthesizeInstance (x type : Expr) : EngineM Bool := do
+    match (← trySynthInstance type) with
+    | .some value => withReducibleAndInstances <| isDefEq x value
+    | _ => return false
 
 partial def congrDefault (e : Expr) (invocationOrdinal : Nat) : EngineM Result := do
   if (← getRuntime).mode == .replay then
@@ -1647,14 +1961,39 @@ def processCongrHypothesis (h : Expr) (hType : Expr) : EngineM Bool := do
       -/
       return r.proof?.isSome || (xs.size > 0 && lhs != r.expr)
 
-/-- Try to rewrite `e` children using the given congruence theorem -/
-def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr) : EngineM (Option Result) := withNewMCtxDepth do withParent e do
+private structure UserCongruenceAttempt where
+  result? : Option Result
+  theoremFingerprint : String
+  matchEnvelope : MatchEnvelope
+  premises : Array PremiseProgram
+
+/-- Try to rewrite `e` children using the given congruence theorem. -/
+private def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr)
+    (expectedPremises? : Option (Array PremiseProgram) := none) :
+    EngineM (Option UserCongruenceAttempt) := withNewMCtxDepth do withParent e do
   recordCongrTheorem c.theoremName
   trace[Debug.Meta.Tactic.simp.congr] "{c.theoremName}, {e}"
   let thm ← mkConstWithFreshMVarLevels c.theoremName
   let thmType ← inferType thm
+  let theoremFingerprint ← liftM (exprFingerprintHash thmType)
   let thmHasBinderNameHint := thmType.hasBinderNameHint
   let (xs, bis, type) ← forallMetaTelescopeReducing thmType
+  let makeAttempt (result? : Option Result) (premises : Array PremiseProgram) :
+      EngineM UserCongruenceAttempt := do
+    let binderAssignments ← expressionFingerprints xs
+    let instanceAssignments ← expressionFingerprints <|
+      (xs.zip bis).foldl (init := #[]) fun assignments (x, bi) =>
+        if bi.isInstImplicit then assignments.push x else assignments
+    return {
+      result?
+      theoremFingerprint
+      matchEnvelope := {
+        binderAssignments
+        instanceAssignments
+        proofPresent := result?.bind (fun result => result.proof?) |>.isSome
+      }
+      premises
+    }
   if c.hypothesesPos.any (· ≥ xs.size) then
     return none
   let isIff := type.isAppOf ``Iff
@@ -1681,22 +2020,26 @@ def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr) : EngineM (Option Res
         trace[Meta.Tactic.simp.congr] "processCongrHypothesis {c.theoremName} failed {hType}"
         -- Remark: we don't need to check ex.isMaxRecDepth anymore since `try .. catch ..`
         -- does not catch runtime exceptions by default.
-        return none
+        return some (← makeAttempt none #[])
     unless modified do
       trace[Meta.Tactic.simp.congr] "{c.theoremName} not modified"
-      return none
-    unless (← synthesizeArgs (.decl c.theoremName) bis xs) do
+      return some (← makeAttempt none #[])
+    let synthesis ← synthesizeRecordedArgs (.decl c.theoremName) bis xs expectedPremises?
+    let premises := match synthesis with
+      | .success premises | .failed premises => premises
+    unless synthesis matches .success _ do
       trace[Meta.Tactic.simp.congr] "{c.theoremName} synthesizeArgs failed"
-      return none
+      return some (← makeAttempt none premises)
     let eNew ← instantiateMVars rhs
     let mut proof ← instantiateMVars (mkAppN thm xs)
     if isIff then
       try proof ← mkAppM ``propext #[proof]
-      catch _ => return none
+      catch _ => return some (← makeAttempt none premises)
     if (← hasAssignableMVar proof <||> hasAssignableMVar eNew) then
       trace[Meta.Tactic.simp.congr] "{c.theoremName} has unassigned metavariables"
-      return none
-    congrArgs { expr := eNew, proof? := proof } extraArgs
+      return some (← makeAttempt none premises)
+    let result ← congrArgs { expr := eNew, proof? := proof } extraArgs
+    return some (← makeAttempt (some result) premises)
   else
     return none
 
@@ -1705,22 +2048,34 @@ private partial def replayCongruence (e : Expr) (invocationOrdinal : Nat) : Engi
       | let state ← getRecorderState
         throwError "replay_missing_congruence_choice: invocation={invocationOrdinal}, path={repr state.path}, structuralCursor={state.structuralCursor}"
     match choice with
-    | .user theoremName priority hypotheses =>
+    | .user theoremName priority hypotheses theoremFingerprint envelope premises =>
         let candidate ← mkSimpCongrTheorem theoremName priority
         unless candidate.hypothesesPos == hypotheses do
           throwError "replay_user_congruence_shape_mismatch: {theoremName}"
-        let some result ← trySimpCongrTheorem? candidate e
+        let some attempt ← trySimpCongrTheorem? candidate e (some premises)
           | throwError "replay_user_congruence_failed: {theoremName}"
-        emitStructural (.congruence invocationOrdinal (.user theoremName priority hypotheses))
+        unless attempt.theoremFingerprint == theoremFingerprint &&
+            attempt.matchEnvelope == envelope do
+          throwError "replay_user_congruence_match_mismatch: {theoremName}"
+        let some result := attempt.result?
+          | throwError "replay_user_congruence_failed: {theoremName}"
+        emitStructural (.congruence invocationOrdinal (.user theoremName priority hypotheses
+          attempt.theoremFingerprint attempt.matchEnvelope attempt.premises))
         return result
-    | .userAttemptFailed theoremName priority hypotheses =>
+    | .userAttemptFailed theoremName priority hypotheses theoremFingerprint envelope premises =>
         let candidate ← mkSimpCongrTheorem theoremName priority
         unless candidate.hypothesesPos == hypotheses do
           throwError "replay_user_congruence_shape_mismatch: {theoremName}"
-        if (← trySimpCongrTheorem? candidate e).isSome then
+        let some attempt ← trySimpCongrTheorem? candidate e (some premises)
+          | throwError "replay_expected_user_congruence_attempt: {theoremName}"
+        unless attempt.theoremFingerprint == theoremFingerprint &&
+            attempt.matchEnvelope == envelope do
+          throwError "replay_user_congruence_match_mismatch: {theoremName}"
+        if attempt.result?.isSome then
           throwError "replay_expected_user_congruence_failure: {theoremName}"
         emitStructural (.congruence invocationOrdinal
-          (.userAttemptFailed theoremName priority hypotheses))
+          (.userAttemptFailed theoremName priority hypotheses attempt.theoremFingerprint
+            attempt.matchEnvelope attempt.premises))
         replayCongruence e invocationOrdinal
     | _ => return ← congrDefault e invocationOrdinal
 
@@ -1736,18 +2091,23 @@ def congr (e : Expr) : EngineM Result := do
       let recorderSaved ← saveRecorderState
       match (← trySimpCongrTheorem? c e) with
       | none =>
-        let after ← getRecorderState
-        if recorderStateProgressed recorderSaved after then
-          emitStructural (.congruence invocationOrdinal
-            (.userAttemptFailed c.theoremName c.priority c.hypothesesPos))
-          recordBranch "struct.congruence.userAttemptFailed"
-        else
-          restoreRecorderState recorderSaved
-      | some r =>
-        emitStructural (.congruence invocationOrdinal
-          (.user c.theoremName c.priority c.hypothesesPos))
-        recordBranch "struct.congruence.user"
-        return r
+        restoreRecorderState recorderSaved
+      | some attempt => match attempt.result? with
+        | none =>
+            let after ← getRecorderState
+            if recorderStateProgressed recorderSaved after then
+              emitStructural (.congruence invocationOrdinal
+                (.userAttemptFailed c.theoremName c.priority c.hypothesesPos
+                  attempt.theoremFingerprint attempt.matchEnvelope attempt.premises))
+              recordBranch "struct.congruence.userAttemptFailed"
+            else
+              restoreRecorderState recorderSaved
+        | some r =>
+            emitStructural (.congruence invocationOrdinal
+              (.user c.theoremName c.priority c.hypothesesPos
+                attempt.theoremFingerprint attempt.matchEnvelope attempt.premises))
+            recordBranch "struct.congruence.user"
+            return r
     congrDefault e invocationOrdinal
   else
     congrDefault e invocationOrdinal
@@ -1761,7 +2121,10 @@ def simpApp (e : Expr) : EngineM Result := do
 
 def simpStep (e : Expr) (simpStepOrdinal : Nat) : EngineM Result := do
   match e with
-  | .mdata m e   => let r ← simp e; return { r with expr := mkMData m r.expr }
+  | .mdata m e   =>
+      recordBranch "struct.metadataBody"
+      let r ← withPath .metadataBody <| simp e
+      return { r with expr := mkMData m r.expr }
   | .proj ..     => simpProj e
   | .app ..      => simpApp e
   | .lam ..      => simpLambda e
@@ -1784,12 +2147,14 @@ def simpStep (e : Expr) (simpStepOrdinal : Nat) : EngineM Result := do
 def cacheResult (e : Expr) (cfg : Config) (r : Result) : EngineM Result := do
   if cfg.memoize && r.cache then
     modify fun s => { s with cache := s.cache.insert e r }
-    let fingerprint ← liftM (exprFingerprintHash e)
-    modifyRecorderState fun state => {
-      state with
-        simpCachePaths := state.simpCachePaths.insert e state.path
-        simpReplayCache := state.simpReplayCache.push (state.path, fingerprint, r)
-    }
+    if (← getRuntime).mode != .reference then
+      let fingerprint ← liftM (exprFingerprintHash e)
+      modifyRecorderState fun state => {
+        state with
+          simpCacheSources := state.simpCacheSources.insert e
+            (state.path, state.simpReplayCache.size)
+          simpReplayCache := state.simpReplayCache.push (state.path, fingerprint, r)
+      }
   return r
 
 partial def simpLoop (e : Expr) : EngineM Result := withIncRecDepth do
@@ -1800,22 +2165,27 @@ partial def simpLoop (e : Expr) : EngineM Result := withIncRecDepth do
     if runtime.mode == .replay then
       if let some expected ← peekReplayStructural? then
         if ← isCurrentReplayStructural expected then
-          if let .cacheHit sourcePath := expected.witness then
+          if let .cacheHit sourcePath sourceIndex := expected.witness then
             let state ← getRecorderState
-            let mut sourceResult? := none
-            for (path, _, result) in state.simpReplayCache do
-              if path == sourcePath then
-                sourceResult? := some result
-            let some sourceResult := sourceResult?
+            let fingerprint ← liftM (exprFingerprintHash e)
+            let some (actualPath, sourceFingerprint, sourceResult) :=
+                state.simpReplayCache[sourceIndex]?
               | throwError "replay_expected_simp_cache_hit: source={repr sourcePath}, path={repr state.path}, cached={state.simpReplayCache.size}"
-            let result := cache.find? e |>.getD sourceResult
-            emitStructural (.cacheHit sourcePath)
-            return result
+            unless actualPath == sourcePath && sourceFingerprint == fingerprint do
+              throwError "replay_simp_cache_source_mismatch: source={repr sourcePath}, index={sourceIndex}"
+            unless (cache.find? e).isSome do
+              throwError "replay_simp_cache_miss: source={repr sourcePath}, index={sourceIndex}"
+            unless state.simpCacheSources.find? e == some (sourcePath, sourceIndex) do
+              throwError "replay_simp_cache_provenance_mismatch: source={repr sourcePath}, index={sourceIndex}"
+            emitStructural (.cacheHit sourcePath sourceIndex)
+            return sourceResult
     else if let some result := cache.find? e then
-      let state ← getRecorderState
-      let sourcePath := state.simpCachePaths.get? e |>.getD {}
-      recordBranch "struct.cacheHit"
-      emitStructural (.cacheHit sourcePath)
+      if runtime.mode == .record then
+        let state ← getRecorderState
+        let some (sourcePath, sourceIndex) := state.simpCacheSources.find? e
+          | throwError "record_simp_cache_source_missing: path={repr state.path}"
+        recordBranch "struct.cacheHit"
+        emitStructural (.cacheHit sourcePath sourceIndex)
       return result
   if (← get).numSteps > cfg.maxSteps then
     throwError "`simp` failed: maximum number of steps exceeded"
@@ -1960,7 +2330,16 @@ def dsimpMain (e : Expr) (ctx : Context) (stats : Stats := {}) (methods : Method
   let (r, s) ← dsimpMainCore e ctx { stats with } methods
   return (r, { s with })
 
-private def ruleOrigin (origin : Origin) : EngineM (RuleOrigin × String × Bool) := do
+private def ruleOrigin (origin : Origin) (override? : Option RuleOrigin := none) :
+    EngineM (RuleOrigin × String × Bool) := do
+  if let some override := override? then
+    return match override with
+      | .equation declaration index =>
+          (override, s!"equation:{declaration}:{index}", false)
+      | .decl name => (override, toString name, false)
+      | .syntax source => (override, source, false)
+      | .local subject => (override, s!"local:{subject.contextIndex}", false)
+      | .other name => (override, toString name, false)
   match origin with
   | .decl name _ inverse => return (.decl name, toString name, inverse)
   | .fvar fvarId =>
@@ -1971,174 +2350,33 @@ private def ruleOrigin (origin : Origin) : EngineM (RuleOrigin × String × Bool
     return (.syntax source, source, false)
   | .other name => return (.other name, toString name, false)
 
-private def expressionFingerprints (expressions : Array Expr) : EngineM (Array String) :=
-  expressions.mapM fun expression => do
-    liftM (exprFingerprintHash (← instantiateMVars expression))
-
-private def beginPremiseProgram (type : Expr) (index : Nat) : EngineM RecorderState := do
-  let outer ← getRecorderState
-  let runtime ← getRuntime
-  if runtime.mode == .record then
-    let fingerprint ← liftM (exprFingerprintHash type)
-    runtime.state.set {
-      outer with
-      program := { initialFingerprint := fingerprint, finalFingerprint := fingerprint }
-      path.steps := outer.path.steps.push (.premise index)
-      lastPremiseTerminal := none
-      phaseInvocationOrdinal := 0
-      currentPhaseInvocationOrdinal := 0
-      congruenceInvocationOrdinal := 0
-      simpInvocationOrdinal := 0
-      dsimpInvocationOrdinal := 0
-      simpStepOrdinal := 0
-    }
-  else if runtime.mode == .replay then
-    let some event := outer.program.events[outer.eventCursor]?
-      | throwError "replay_missing_parent_rewrite_for_premise"
-    let premises := match event.operation with
-      | .rewrite _ _ premises | .rewriteAttemptFailed _ _ premises => premises
-      | _ => #[]
-    if premises.isEmpty then
-      throwError "replay_expected_parent_rewrite_for_premise"
-    let some premise := premises[index]?
-      | throwError "replay_missing_premise_program: {index}"
-    let actualFingerprint ← liftM (exprFingerprintHash type)
-    unless actualFingerprint == premise.propositionFingerprint do
-      throwError "replay_premise_fingerprint_mismatch: expected {premise.propositionFingerprint}, got {actualFingerprint}"
-    runtime.state.set {
-      outer with
-      program := premise.program
-      eventCursor := 0
-      structuralCursor := 0
-      path.steps := outer.path.steps.push (.premise index)
-      lastPremiseTerminal := none
-      expectedPremiseTerminal := some premise.terminal
-      phaseInvocationOrdinal := 0
-      currentPhaseInvocationOrdinal := 0
-      congruenceInvocationOrdinal := 0
-      simpInvocationOrdinal := 0
-      dsimpInvocationOrdinal := 0
-      simpStepOrdinal := 0
-    }
-  return outer
-
-private def finishPremiseProgram (outer : RecorderState) (type : Expr) : EngineM PremiseProgram := do
-  let runtime ← getRuntime
-  if runtime.mode == .record then
-    let inner ← runtime.state.get
-    runtime.state.set {
-      outer with
-      deferred := inner.deferred.orElse fun _ => outer.deferred
-      simprocs := outer.simprocs ++ inner.simprocs
-      coveredBranches := outer.coveredBranches ++ inner.coveredBranches
-      simpCachePaths := inner.simpCachePaths
-      dsimpCachePaths := inner.dsimpCachePaths
-      simpReplayCache := inner.simpReplayCache
-      dsimpReplayCache := inner.dsimpReplayCache
-    }
-    return {
-      propositionFingerprint := ← liftM (exprFingerprintHash type)
-      program := inner.program
-      terminal := inner.lastPremiseTerminal.getD .isTrue
-    }
-  else if runtime.mode == .replay then
-    let inner ← runtime.state.get
-    liftM <| assertReplayProgramConsumed inner
-    let actualFingerprint ← liftM (exprFingerprintHash type)
-    let some terminal := inner.lastPremiseTerminal
-      | throwError "replay_missing_premise_terminal"
-    unless inner.expectedPremiseTerminal == some terminal do
-      throwError "replay_premise_terminal_mismatch"
-    if terminal matches .localAssumption _ | .equationHypothesis then
-      unless inner.program.finalFingerprint == actualFingerprint do
-        throwError "replay_premise_final_fingerprint_mismatch: expected {inner.program.finalFingerprint}, got {actualFingerprint}"
-    runtime.state.set {
-      outer with
-      simpCachePaths := inner.simpCachePaths
-      dsimpCachePaths := inner.dsimpCachePaths
-      simpReplayCache := inner.simpReplayCache
-      dsimpReplayCache := inner.dsimpReplayCache
-    }
-    return {
-      propositionFingerprint := actualFingerprint
-      program := inner.program
-      terminal
-    }
-  else
-    return {
-      propositionFingerprint := ""
-      program := {}
-      terminal := .isTrue
-    }
-
-private def setProgramFinal (expression : Expr) : EngineM Unit := do
-  let fingerprint ← liftM (exprFingerprintHash expression)
-  let runtime ← getRuntime
-  if runtime.mode == .record then
-    runtime.state.modify fun state => { state with program.finalFingerprint := fingerprint }
-  else if runtime.mode == .replay then
-    let state ← runtime.state.get
-    unless state.program.finalFingerprint == fingerprint do
-      throwError "replay_final_fingerprint_mismatch: expected {state.program.finalFingerprint}, got {fingerprint}"
-
-private def dischargeRecorded? (_thmId : Origin) (x type : Expr)
-    (premiseIndex : Nat) : EngineM (Option (PremiseProgram × Bool)) := do
-  let outer ← beginPremiseProgram type premiseIndex
-  let usedTheorems := (← get).usedTheorems
-  let ctx ← getContext
-  if ctx.dischargeDepth >= ctx.maxDischargeDepth then
-    restoreRecorderState outer
-    return none
-  let methods ← getMethods
-  let proof? ← withIncDischargeDepth <| withPreservedCache <| methods.discharge? type
-  let some proof := proof? | do
-    modify fun state => { state with usedTheorems }
-    setPremiseTerminal .failed
-    return some (← finishPremiseProgram outer type, false)
-  unless (← isDefEq x proof) do
-    modify fun state => { state with usedTheorems }
-    setPremiseTerminal .failed
-    return some (← finishPremiseProgram outer type, false)
-  if methods.customDischarger then
-    deferRecording .customDischarger
-  recordBranch "rewrite.premise"
-  return some (← finishPremiseProgram outer type, true)
-
-private inductive ArgumentSynthesis where
-  | success (premises : Array PremiseProgram)
-  | failed (premises : Array PremiseProgram)
-
-private def synthesizeRecordedArgs (thmId : Origin) (bis : Array BinderInfo)
-    (xs : Array Expr) : EngineM ArgumentSynthesis := do
-  let skipAssignedInstances := tactic.skipAssignedInstances.get (← getOptions)
-  let mut premises := #[]
-  for x in xs, bi in bis do
-    let type ← inferType x
-    if !skipAssignedInstances && bi.isInstImplicit then
-      unless (← synthesizeInstance x type) do return .failed premises
-    if (← instantiateMVars x).isMVar then
-      if (← isClass? type).isSome then
-        if (← synthesizeInstance x type) then continue
-      if (← isProp type) then
-        let some (premise, succeeded) ← dischargeRecorded? thmId x type premises.size
-          | return .failed premises
-        premises := premises.push premise
-        unless succeeded do return .failed premises
-  return .success premises
-where
-  synthesizeInstance (x type : Expr) : EngineM Bool := do
-    match (← trySynthInstance type) with
-    | .some value => withReducibleAndInstances <| isDefEq x value
-    | _ => return false
-
 private def useImplicitDefEqProofRecorded (thm : SimpTheorem) : EngineM Bool := do
   if thm.rfl || (thm.backwardRfl && backward.defeqAttrib.useBackward.get (← getOptions)) then
     return (← getConfig).implicitDefEqProofs
   return false
 
+private def ruleShape (thm : SimpTheorem) : EngineM (String × String) := do
+  let value ← thm.getValue
+  let ruleFingerprint ← liftM (exprFingerprintHash (← inferType value))
+  let type ← inferType value
+  let (_, _, type) ← forallMetaTelescopeReducing type
+  let type ← whnf (← instantiateMVars type)
+  let lhs := type.appFn!.appArg!
+  return (ruleFingerprint, ← liftM (exprFingerprintHash lhs))
+
+private def exactRuleVariant (preceding : Array SimpTheorem)
+    (selected : SimpTheorem) : EngineM Nat := do
+  let selectedShape ← ruleShape selected
+  let mut ordinal := 0
+  for candidate in preceding do
+    if candidate.origin == selected.origin && (← ruleShape candidate) == selectedShape then
+      ordinal := ordinal + 1
+  return ordinal
+
 private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
     (bis : Array BinderInfo) (value type e : Expr) (thm : SimpTheorem)
-    (numExtraArgs variant : Nat) (indexMode : Bool) : EngineM (Option Result) := do
+    (numExtraArgs variant : Nat) (indexMode : Bool)
+    (originOverride? : Option RuleOrigin := none) : EngineM (Option Result) := do
   let recorderSaved ← saveRecorderState
   recordTriedSimpTheorem thm.origin
   let ruleFingerprint ← liftM (exprFingerprintHash (← inferType value))
@@ -2153,7 +2391,7 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
     restoreRecorderState recorderSaved
     return none
   let makeMetadata (proofPresent : Bool) : EngineM (RuleRef × MatchEnvelope) := do
-    let (origin, source, inverse) ← ruleOrigin thm.origin
+    let (origin, source, inverse) ← ruleOrigin thm.origin originOverride?
     let state ← getRecorderState
     let binderAssignments ← expressionFingerprints xs
     let instanceAssignments ← expressionFingerprints <|
@@ -2213,7 +2451,8 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
   return some result
 
 private def tryTheoremWithExtraArgsRecorded? (e : Expr) (thm : SimpTheorem)
-    (numExtraArgs variant : Nat) (indexMode : Bool) : EngineM (Option Result) :=
+    (numExtraArgs variant : Nat) (indexMode : Bool)
+    (originOverride? : Option RuleOrigin := none) : EngineM (Option Result) :=
   withNewMCtxDepth do
     let value ← thm.getValue
     let type ← inferType value
@@ -2221,24 +2460,36 @@ private def tryTheoremWithExtraArgsRecorded? (e : Expr) (thm : SimpTheorem)
     let type ← whnf (← instantiateMVars type)
     let lhs := type.appFn!.appArg!
     tryTheoremCoreRecorded lhs xs bis value type e thm numExtraArgs variant indexMode
+      originOverride?
 
 private def tryTheoremRecorded? (e : Expr) (thm : SimpTheorem)
-    (variant := 0) (indexMode := true) : EngineM (Option Result) := do
+    (variant := 0) (indexMode := true)
+    (originOverride? : Option RuleOrigin := none) : EngineM (Option Result) := do
   withNewMCtxDepth do
     let value ← thm.getValue
     let type ← inferType value
     let (xs, bis, type) ← forallMetaTelescopeReducing type
     let type ← whnf (← instantiateMVars type)
     let lhs := type.appFn!.appArg!
-    match ← tryTheoremCoreRecorded lhs xs bis value type e thm 0 variant indexMode with
+    match ← tryTheoremCoreRecorded lhs xs bis value type e thm 0 variant indexMode
+        originOverride? with
     | some result => return some result
     | none =>
       let lhsNumArgs := lhs.getAppNumArgs
       let eNumArgs := e.getAppNumArgs
       if eNumArgs > lhsNumArgs then
-        tryTheoremCoreRecorded lhs xs bis value type e thm (eNumArgs - lhsNumArgs) variant indexMode
+        tryTheoremCoreRecorded lhs xs bis value type e thm (eNumArgs - lhsNumArgs) variant
+          indexMode originOverride?
       else
         return none
+
+private def diagnoseWhenNoIndex (e : Expr) (theorems : SimpTheoremTree)
+    (thm : SimpTheorem) : EngineM Unit := do
+  if (← isDiagnosticsEnabled) then
+    let candidates ← withSimpIndexConfig <| theorems.getMatchWithExtra e
+    for (candidate, _) in candidates do
+      if unsafe ptrEq thm candidate then return
+    recordTheoremWithBadKeys thm
 
 private def rewriteRecorded? (e : Expr) (theorems : SimpTheoremTree)
     (erased : PHashSet Origin) (rflOnly : Bool) : EngineM (Option Result) := do
@@ -2249,8 +2500,8 @@ private def rewriteRecorded? (e : Expr) (theorems : SimpTheoremTree)
     let candidates := candidates.insertionSort fun lhs rhs => lhs.1.priority > rhs.1.priority
     for h : candidateIndex in *...candidates.size do
       let (thm, numExtraArgs) := candidates[candidateIndex]
-      let variant := (candidates.extract 0 candidateIndex).foldl (init := 0)
-        fun count candidate => if candidate.1.origin == thm.origin then count + 1 else count
+      let variant ← exactRuleVariant
+        ((candidates.extract 0 candidateIndex).map (·.1)) thm
       checkSystem "simp"
       if erased.contains thm.origin then continue
       if rflOnly && !(thm.rfl || (useBackward && thm.backwardRfl)) then continue
@@ -2261,8 +2512,7 @@ private def rewriteRecorded? (e : Expr) (theorems : SimpTheoremTree)
     let candidates := candidates.insertionSort fun lhs rhs => lhs.priority > rhs.priority
     for h : candidateIndex in *...candidates.size do
       let thm := candidates[candidateIndex]
-      let variant := (candidates.extract 0 candidateIndex).foldl (init := 0)
-        fun count candidate => if candidate.origin == thm.origin then count + 1 else count
+      let variant ← exactRuleVariant (candidates.extract 0 candidateIndex) thm
       checkSystem "simp"
       unless erased.contains thm.origin ||
           (rflOnly && !(thm.rfl || (useBackward && thm.backwardRfl))) do
@@ -2274,7 +2524,9 @@ private def rewriteRecorded? (e : Expr) (theorems : SimpTheoremTree)
           let lhs := type.appFn!.appArg!
           tryTheoremCoreRecorded lhs xs bis value type e thm
             (numArgs - lhs.getAppNumArgs) variant false
-        if let some result := result? then return some result
+        if let some result := result? then
+          diagnoseWhenNoIndex e theorems thm
+          return some result
   return none
 
 private def phaseIsPost : Phase → Bool
@@ -2284,6 +2536,9 @@ private def phaseIsPost : Phase → Bool
 private def originMatchesRule (expected : RuleOrigin) (actual : Origin) : EngineM Bool := do
   match expected, actual with
   | .decl expectedName, .decl actualName _ _ => return expectedName == actualName
+  | .equation declaration index, .decl actualName _ _ =>
+      let some equations ← getEqnsFor? declaration | return false
+      return equations[index]? == some actualName
   | .local expectedRef, .fvar fvarId =>
       let actualDecl ← getFVarLocalDecl (.fvar fvarId)
       return expectedRef == (← localRefOfDecl actualDecl)
@@ -2292,15 +2547,6 @@ private def originMatchesRule (expected : RuleOrigin) (actual : Origin) : Engine
       return expectedSource == actualSource
   | .other expectedName, .other actualName => return expectedName == actualName
   | _, _ => return false
-
-private def ruleShape (thm : SimpTheorem) : EngineM (String × String) := do
-  let value ← thm.getValue
-  let ruleFingerprint ← liftM (exprFingerprintHash (← inferType value))
-  let type ← inferType value
-  let (_, _, type) ← forallMetaTelescopeReducing type
-  let type ← whnf (← instantiateMVars type)
-  let lhs := type.appFn!.appArg!
-  return (ruleFingerprint, ← liftM (exprFingerprintHash lhs))
 
 private def ruleMatches (expected : RuleRef) (thm : SimpTheorem) : EngineM Bool := do
   unless ← originMatchesRule expected.origin thm.origin do return false
@@ -2330,6 +2576,12 @@ private def candidatesForRule (e : Expr) (rule : RuleRef) : EngineM (Array SimpT
   match rule.origin with
   | .decl name =>
       mkSimpTheoremFromConst name (post := phaseIsPost rule.phase) (inv := rule.inverse)
+  | .equation declaration index =>
+      let some equations ← getEqnsFor? declaration
+        | throwError "replay_equation_source_missing: {declaration}"
+      let some equation := equations[index]?
+        | throwError "replay_equation_index_missing: {declaration}:{index}"
+      mkSimpTheoremFromConst equation (post := phaseIsPost rule.phase)
   | .local subject =>
       let mut found? : Option LocalDecl := none
       for localDecl in (← getLCtx) do
@@ -2345,21 +2597,29 @@ private def candidatesForRule (e : Expr) (rule : RuleRef) : EngineM (Array SimpT
 
 private def applyRecordedRule (e : Expr) (rule : RuleRef) : EngineM Result := do
   let candidates ← candidatesForRule e rule
-  for h : index in *...candidates.size do
-    let thm := candidates[index]
-    if index == rule.variant && (← ruleMatches rule thm) then
-      let some result ← tryTheoremRecorded? e thm rule.variant rule.indexMode
+  let mut matchingOrdinal := 0
+  for thm in candidates do
+    if ← ruleMatches rule thm then
+      if matchingOrdinal != rule.variant then
+        matchingOrdinal := matchingOrdinal + 1
+        continue
+      let override? := if rule.origin matches .equation .. then some rule.origin else none
+      let some result ← tryTheoremRecorded? e thm rule.variant rule.indexMode override?
         | throwError "replay_recorded_rule_did_not_apply: {rule.source}"
       return result
   throwError "replay_recorded_rule_not_resolved: {rule.source}"
 
 private def applyRecordedRuleAttempt (e : Expr) (rule : RuleRef) : EngineM Unit := do
   let candidates ← candidatesForRule e rule
-  for h : index in *...candidates.size do
-    let thm := candidates[index]
-    if index == rule.variant && (← ruleMatches rule thm) then
+  let mut matchingOrdinal := 0
+  for thm in candidates do
+    if ← ruleMatches rule thm then
+      if matchingOrdinal != rule.variant then
+        matchingOrdinal := matchingOrdinal + 1
+        continue
       let cursor := (← getRecorderState).eventCursor
-      if (← tryTheoremRecorded? e thm rule.variant rule.indexMode).isSome then
+      let override? := if rule.origin matches .equation .. then some rule.origin else none
+      if (← tryTheoremRecorded? e thm rule.variant rule.indexMode override?).isSome then
         throwError "replay_expected_failed_rule_attempt: {rule.source}"
       unless (← getRecorderState).eventCursor > cursor do
         throwError "replay_failed_rule_attempt_not_consumed: {rule.source}"
@@ -2594,6 +2854,7 @@ def simpMatchDiscrs? (info : MatcherInfo) (e : Expr) : EngineM (Option Result) :
   let mut modified := false
   emitStructural (.matchDiscriminants info.numDiscrs)
   recordBranch "struct.matchDiscriminants"
+  let attemptBaseline ← saveRecorderState
   for i in *...info.numDiscrs do
     let arg := args[i]!
     if i < infos.size && !infos[i]!.hasFwdDeps then
@@ -2610,7 +2871,7 @@ def simpMatchDiscrs? (info : MatcherInfo) (e : Expr) : EngineM (Option Result) :
       r ← mkCongrFun r argNew
   unless modified do
     let after ← getRecorderState
-    if recorderStateProgressed recorderSaved after then
+    if recorderStateProgressed attemptBaseline after then
       emitStructural (.matchDiscriminantsAttemptFailed info.numDiscrs)
       recordBranch "struct.matchDiscriminantsAttemptFailed"
     else
@@ -2631,7 +2892,7 @@ def simpMatchCore (matcherName : Name) (e : Expr) : EngineM Step := do
         proof := mkConst matchEq
         rfl := (← isRflTheorem matchEq)
         backwardRfl := (← isBackwardRflTheorem matchEq)
-      } 0) with
+      } 0 (originOverride? := some (.equation matcherName equationIndex))) with
     | none   => pure ()
     | some r => return .visit r
   return .continue
@@ -2689,7 +2950,7 @@ def sevalGround : Simproc := fun e => do
           proof := mkConst eqn
           rfl := (← isRflTheorem eqn)
           backwardRfl := (← isBackwardRflTheorem eqn)
-        } 0 then
+        } 0 (originOverride? := some (.equation declName equationIndex)) then
         trace[Meta.Tactic.simp.ground] "unfolded, {e} => {result.expr}"
         return .visit result
     return .continue
@@ -2744,15 +3005,16 @@ It uses the `seval` theorems and simprocs.
 def seval (e : Expr) : EngineM Result := do
   let m ← mkSEvalMethods
   let ctx ← mkSEvalContext
-  let cacheSaved := (← get).cache
   let usedTheoremsSaved := (← get).usedTheorems
   try
-    withReader (fun _ => m.toMethodsRef) do
-    withTheReader Simp.Context (fun _ => ctx) do
-    modify fun s => { s with cache := {}, usedTheorems := {} }
-    withPath .ground <| simp e
+    withFreshCache do
+      withReader (fun _ => m.toMethodsRef) do
+      withTheReader Simp.Context (fun _ => ctx) do
+      modify fun s => { s with usedTheorems := {} }
+      recordBranch "struct.ground"
+      withPath .ground <| simp e
   finally
-    modify fun s => { s with cache := cacheSaved, usedTheorems := usedTheoremsSaved }
+    modify fun s => { s with usedTheorems := usedTheoremsSaved }
 
 /--
 Try to unfold ground term in the ground/symbolic evaluator.
@@ -2898,6 +3160,8 @@ private def assertReplayEventInput (e : Expr) (expected : Event) : EngineM Unit 
     throwError "replay_event_input_mismatch: expected {expected.inputFingerprint}, got {actual}; input={e}; operation={repr expected.operation}"
 
 private def executeRecordedDecide (e : Expr) (expected : Builtin) : EngineM Result := do
+  unless (← getConfig).decide && !e.hasFVar && !e.hasMVar && !e.isTrue && !e.isFalse do
+    throwError "replay_decide_ineligible"
   let decision ← mkDecide e
   let value ← withDefault <| whnf decision
   match expected with
@@ -2918,6 +3182,7 @@ private def executeRecordedDecide (e : Expr) (expected : Builtin) : EngineM Resu
   | .arith _ => throwError "replay_expected_arithmetic_builtin"
 
 private def executeRecordedArith (e : Expr) (handler : ArithHandler) : EngineM Result := do
+  unless (← getConfig).arith do throwError "replay_arithmetic_ineligible"
   let selected? ← if Arith.isLinearCnstr e then
     if let some (output, proof) ← Arith.Nat.simpCnstr? e then
       pure <| some (natConstraintHandler e, output, proof)
@@ -2928,6 +3193,8 @@ private def executeRecordedArith (e : Expr) (handler : ArithHandler) : EngineM R
     else
       pure none
   else if let some type := Arith.isLinearTerm? e then
+    if Arith.parentIsTarget (← getContext).parent? then
+      throwError "replay_arithmetic_parent_is_target"
     match_expr type with
     | Nat =>
         let result? ← Arith.Nat.simpExpr? e
@@ -2952,6 +3219,14 @@ private def executeRecordedBuiltin (e : Expr) : Builtin → EngineM Result
   | builtin@(.decideFalse) => executeRecordedDecide e builtin
   | .arith handler => executeRecordedArith e handler
 
+private def validateBuiltinDisposition (builtin : Builtin)
+    (disposition : StepDisposition) : EngineM Unit := do
+  let valid : Bool := match builtin with
+    | .decideTrue | .decideFalse => disposition == .done
+    | .arith _ => disposition == .visit
+  unless valid do
+    throwError "replay_builtin_disposition_mismatch: {repr builtin}, {repr disposition}"
+
 private def pathHasChild (path parent : ExecutionPath) (child : PathStep) : Bool :=
   path.steps.size > parent.steps.size &&
     path.steps.extract 0 parent.steps.size == parent.steps &&
@@ -2964,6 +3239,18 @@ private def replayHasGroundChild : EngineM Bool := do
   if let some structural ← peekReplayStructural? then
     if pathHasChild structural.path state.path .ground then return true
   return false
+
+private def replayGround (e : Expr) : EngineM Result := do
+  let ctx ← mkContext (simpTheorems := {}) (congrTheorems := {})
+    (config := { ground := true })
+  let usedTheoremsSaved := (← get).usedTheorems
+  try
+    withFreshCache do
+      withTheReader Simp.Context (fun _ => ctx) do
+      modify fun state => { state with usedTheorems := {} }
+      withPath .ground <| simp e
+  finally
+    modify fun state => { state with usedTheorems := usedTheoremsSaved }
 
 private def consumeReplayPhaseOutcome (input : Expr)
     (actual? : Option Step := none) : EngineM Step := do
@@ -3077,6 +3364,7 @@ private partial def replayPhaseStepCore (origin current : Expr)
           applyRecordedRuleAttempt current rule
           return ← replayPhaseStepCore origin current accumulated?
       | .reduce reduction =>
+          validateReductionDisposition reduction expected.stepDisposition
           let some output ← executeRecordedReduction current reduction
             | throwError "replay_phase_reduction_failed: {repr reduction}"
           emitEvent current output (.reduce reduction) expected.stepDisposition
@@ -3088,6 +3376,7 @@ private partial def replayPhaseStepCore (origin current : Expr)
               return ← replayPhaseStepCore origin accumulated.expr (some accumulated)
           | step => return ← consumeReplayPhaseOutcome origin (some step)
       | .builtin builtin =>
+          validateBuiltinDisposition builtin expected.stepDisposition
           let result ← executeRecordedBuiltin current builtin
           emitEvent current result.expr (.builtin builtin) expected.stepDisposition
           let step ← composePhaseStep accumulated?
@@ -3111,7 +3400,7 @@ private partial def replayPhaseStepCore (origin current : Expr)
           return ← finishAccumulatedPhaseOutcome origin accumulated?
       | _ => pure ()
   if ← replayHasGroundChild then
-    let result ← withPath .ground <| simp current
+    let result ← replayGround current
     let step ← composePhaseStep accumulated? (.done result)
     return ← consumeReplayPhaseOutcome origin (some step)
   throwError "replay_missing_phase_operation_or_outcome: phase={repr (← getRecorderState).phase}, path={repr (← getRecorderState).path}"
@@ -3133,6 +3422,7 @@ private partial def replayDPhaseStepCore (origin current : Expr)
           applyRecordedRuleAttempt current rule
           return ← replayDPhaseStepCore origin current hasAccumulated
       | .reduce reduction =>
+          validateReductionDisposition reduction expected.stepDisposition
           let some output ← executeRecordedReduction current reduction
             | throwError "replay_dphase_reduction_failed: {repr reduction}"
           emitEvent current output (.reduce reduction) expected.stepDisposition

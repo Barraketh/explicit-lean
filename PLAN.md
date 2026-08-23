@@ -1,6 +1,6 @@
 # Explicit Lean implementation plan
 
-Status: E1 through E4 complete; E5 is next.
+Status: E1 through E5 complete; E6 is next.
 
 ## 1. Current goal
 
@@ -65,7 +65,7 @@ Each package is committed before work begins on the next.
 
 Gate: every focused non-deferred recording replays; every mutation is rejected.
 
-Status: complete. The focused suite replays 36 dynamic branch classes, 15
+Status: complete. The focused suite replays 39 dynamic branch classes, 20
 single-field mutations are rejected, and one batched recording plus one batched
 replay compile cover 55 non-deferred occurrences (58 executions) across the 57
 bounded production occurrences. The remaining two occurrences are explicitly
@@ -88,7 +88,7 @@ recorded certificate before it is written; `Name` values use lossless
 string/numeric components rather than Lean's lossy default JSON codec. A source
 occurrence that executes more than once carries one certificate per distinct
 initial proof state and selects without a mutable execution counter. The source
-gate materializes 60 non-deferred occurrences across 64 executions in three
+gate materializes 61 non-deferred occurrences across 65 executions in three
 complete module copies; the other two bounded occurrences are explicitly
 simproc-deferred. A mutated engine identity is rejected before replay.
 
@@ -101,6 +101,16 @@ simproc-deferred. A mutated engine identity is rejected before replay.
   gates from a clean commit.
 
 Gate: the implementation-to-IR matrix has no partial, implicit, or absent row.
+
+Status: complete. The source-level review maps 120 semantic fork declarations
+to their pinned upstream declarations, separately audits 101 controlled
+declarations, and locks every semantic module by hash. The review corrected
+staged simp/dsimp cache provenance, binder and metadata paths, exact
+theorem-variant selection, stable
+lazy-equation origins, generated- and user-congruence identity, match-attempt
+rollback, ground-context isolation, and reduction/builtin eligibility. The
+focused recorder and replay suites now cover 39 dynamic branch classes, and 20
+independent certificate mutations are rejected.
 
 ### E6. Full cloud closure
 
@@ -122,12 +132,13 @@ only tests that provide confidence in that engine:
 1. upstream source pinning;
 2. focused upstream/reference equivalence;
 3. implementation-to-IR observer audit;
-4. focused dynamic recording coverage;
-5. focused closed replay;
-6. single-field replay mutation rejection;
-7. bounded Mathlib reference equivalence;
-8. batched bounded recording/classification/replay; and
-9. schema-16 source round-trip and complete-module materialization.
+4. locked fork-to-upstream source review;
+5. focused dynamic recording coverage;
+6. focused closed replay;
+7. single-field replay mutation rejection;
+8. bounded Mathlib reference equivalence;
+9. batched bounded recording/classification/replay; and
+10. schema-16 source round-trip and complete-module materialization.
 
 Historical proof exporters, schema-15 bridges, fallback materializers, and
 their regression tests have been removed. Git history remains the record of

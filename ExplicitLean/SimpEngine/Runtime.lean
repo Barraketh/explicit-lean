@@ -26,8 +26,13 @@ structure RecorderState where
   deferred : Option DeferredReason := none
   lastPremiseTerminal : Option PremiseTerminal := none
   simprocs : Array SimprocObservation := #[]
-  simpCachePaths : ExprMap ExecutionPath := {}
-  dsimpCachePaths : ExprStructMap ExecutionPath := {}
+  /-- Provenance for Lean's staged `Simp.Cache`; it must switch and restore with the cache. -/
+  simpCacheSources : SExprMap (ExecutionPath × Nat) := {}
+  /-- Provenance for the `State.dsimpCache` value outside the active dsimp traversal. -/
+  dsimpStateCacheSources : ExprStructMap (ExecutionPath × Nat) := {}
+  /-- Provenance for the cache threaded locally through the active dsimp traversal. -/
+  dsimpCacheSources : ExprStructMap (ExecutionPath × Nat) := {}
+  /-- Append-only registries used to resolve exact producer ordinals during replay. -/
   simpReplayCache : Array (ExecutionPath × String × Simp.Result) := #[]
   dsimpReplayCache : Array (ExecutionPath × String × Expr) := #[]
   congruenceInvocationOrdinal : Nat := 0

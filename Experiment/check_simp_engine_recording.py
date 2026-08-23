@@ -23,6 +23,7 @@ REQUIRED = {
     "struct.forall.propositionDomainTransport",
     "struct.haveTelescope",
     "struct.lambdaTelescope",
+    "struct.ground",
     "simproc.dsimp",
     "builtin.decideTrue",
     "builtin.arith.intEquality",

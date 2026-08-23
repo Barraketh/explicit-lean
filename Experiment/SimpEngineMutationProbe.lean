@@ -5,6 +5,14 @@ open Lean Meta Elab Tactic
 opaque replayPairAdd : Nat → Nat → Nat
 axiom replayTwoPremises {a b : Nat} (ha : a = 0) (hb : b = 0) :
   replayPairAdd a b = 0
+opaque mutationSeeFin {n : Nat} : Fin n → Prop
+inductive MutationGroundBox where
+  | value
+opaque mutationSeeGroundBox : MutationGroundBox → Prop
+def mutationGroundValue : MutationGroundBox :=
+  let box := MutationGroundBox.value
+  box
+axiom mutationSeeGroundValue : mutationSeeGroundBox .value
 
 private def expectReplayReject (label : String)
     (recording : ExplicitLean.SimpEngine.Recording.TacticRecording) : TacticM Unit := do
@@ -101,13 +109,16 @@ elab "check_replay_structural_mutations" : tactic => withMainContext do
   let mut phase? : Option (Nat × Simp.Engine.StructuralWitness) := none
   let mut congruence? : Option (Nat × Simp.Engine.StructuralWitness × Nat) := none
   let mut cache? : Option (Nat × Simp.Engine.StructuralWitness) := none
+  let mut dsimpCache? : Option (Nat × Simp.Engine.StructuralWitness) := none
   for h : index in *...subject.program.structural.size do
     let structural := subject.program.structural[index]
     match structural.witness with
     | .phaseOutcome .. => if phase?.isNone then phase? := some (index, structural)
     | .congruence ordinal _ =>
         if congruence?.isNone then congruence? := some (index, structural, ordinal)
-    | .cacheHit _ => if cache?.isNone then cache? := some (index, structural)
+    | .cacheHit _ _ => if cache?.isNone then cache? := some (index, structural)
+    | .dsimpCacheHit _ _ =>
+        if dsimpCache?.isNone then dsimpCache? := some (index, structural)
     | _ => pure ()
   let some (phaseIndex, phase) := phase?
     | throwError "structural fixture has no phase outcome"
@@ -115,24 +126,58 @@ elab "check_replay_structural_mutations" : tactic => withMainContext do
     | throwError "structural fixture has no congruence choice"
   let some (cacheIndex, cache) := cache?
     | throwError "structural fixture has no cache hit"
+  let some (dsimpCacheIndex, dsimpCache) := dsimpCache?
+    | throwError "structural fixture has no dsimp cache hit"
   expectReplayReject "structural path" <| replaceStructural recording phaseIndex {
     phase with path.steps := phase.path.steps.push .ground }
-  let .phaseOutcome phaseName phaseOrdinal disposition output proof := phase.witness
+  let .phaseOutcome phaseName phaseOrdinal disposition output phaseProof := phase.witness
     | throwError "unreachable phase witness"
   let mutatedDisposition := match disposition with
     | .done => Simp.Engine.StepDisposition.visit
     | _ => .done
   expectReplayReject "phase disposition" <| replaceStructural recording phaseIndex {
-    phase with witness := .phaseOutcome phaseName phaseOrdinal mutatedDisposition output proof }
+    phase with witness := .phaseOutcome phaseName phaseOrdinal mutatedDisposition output phaseProof }
   expectReplayReject "congruence choice" <| replaceStructural recording congruenceIndex {
     congruence with witness := .congruence ordinal .generatedAttemptFailed }
   expectReplayReject "cache source" <| replaceStructural recording cacheIndex {
-    cache with witness := .cacheHit { steps := #[.ground] } }
+    cache with witness := .cacheHit { steps := #[.ground] } 0 }
+  let .cacheHit cacheSource cacheSourceIndex := cache.witness
+    | throwError "unreachable cache witness"
+  expectReplayReject "cache source index" <| replaceStructural recording cacheIndex {
+    cache with witness := .cacheHit cacheSource (cacheSourceIndex + 1) }
+  let .dsimpCacheHit dsimpSource dsimpSourceIndex := dsimpCache.witness
+    | throwError "unreachable dsimp cache witness"
+  expectReplayReject "dsimp cache source index" <|
+    replaceStructural recording dsimpCacheIndex {
+      dsimpCache with witness := .dsimpCacheHit dsimpSource (dsimpSourceIndex + 1) }
   let some event := subject.program.events[0]?
     | throwError "structural fixture has no event"
   expectReplayReject "event output" <| replaceFirstEvent recording {
     event with outputFingerprint := "mutated" }
-  logInfo "SIMP_ENGINE_MUTATIONS structural=5"
+  logInfo "SIMP_ENGINE_MUTATIONS structural=7"
+
+elab "check_replay_generated_mutation" : tactic => withMainContext do
+  let simpStx ← `(tactic| simp)
+  let recording ← ExplicitLean.SimpEngine.Recording.recordCertificate simpStx.raw
+  let some subject := recording.certificate.subjects[0]?
+    | throwError "generated congruence fixture has no subject"
+  let mut selected? : Option (Nat × Simp.Engine.StructuralWitness × Nat × String ×
+      String × Array Simp.Engine.GeneratedCongruenceArgKind ×
+      Array Simp.Engine.ChildMode × Array String) := none
+  for h : index in *...subject.program.structural.size do
+    let structural := subject.program.structural[index]
+    if let .congruence ordinal (.generated theoremType proof kinds modes assignments) :=
+        structural.witness then
+      if selected?.isNone then
+        selected? := some (index, structural, ordinal, theoremType, proof, kinds, modes,
+          assignments)
+  let some (index, structural, ordinal, theoremType, proof, kinds, modes, assignments) :=
+      selected?
+    | throwError "generated congruence fixture has no generated choice"
+  expectReplayReject "generated congruence proof" <| replaceStructural recording index {
+    structural with witness := (.congruence ordinal
+      (.generated theoremType (proof ++ "-mutated") kinds modes assignments)) }
+  logInfo "SIMP_ENGINE_MUTATIONS generated=1"
 
 elab "check_replay_arithmetic_mutation" : tactic => withMainContext do
   let simpStx ← `(tactic| simp (config := { arith := true }))
@@ -151,7 +196,31 @@ elab "check_replay_arithmetic_mutation" : tactic => withMainContext do
     | _ => .intEquality
   expectReplayReject "arithmetic handler" <| replaceEvent recording eventIndex {
     event with operation := .builtin (.arith mutatedHandler) }
-  logInfo "SIMP_ENGINE_MUTATIONS arithmetic=1"
+  expectReplayReject "arithmetic disposition" <| replaceEvent recording eventIndex {
+    event with stepDisposition := .done }
+  logInfo "SIMP_ENGINE_MUTATIONS arithmetic=2"
+
+elab "check_replay_equation_mutation" : tactic => withMainContext do
+  let simpStx ← `(tactic| simp (config := { zeta := false }) +ground)
+  let recording ← ExplicitLean.SimpEngine.Recording.recordCertificate simpStx.raw
+  let some subject := recording.certificate.subjects[0]?
+    | throwError "equation fixture has no subject"
+  let mut selected? : Option (Nat × Simp.Engine.Event × Simp.Engine.RuleRef ×
+      Simp.Engine.MatchEnvelope × Array Simp.Engine.PremiseProgram × Name × Nat) := none
+  for h : index in *...subject.program.events.size do
+    let event := subject.program.events[index]
+    if let .rewrite rule envelope premises := event.operation then
+      if let .equation declaration equationIndex := rule.origin then
+        selected? := some (index, event, rule, envelope, premises, declaration,
+          equationIndex)
+  let some (index, event, rule, envelope, premises, declaration, equationIndex) :=
+      selected?
+    | throwError "equation fixture has no stable equation rule"
+  let mutatedRule := {
+    rule with origin := Simp.Engine.RuleOrigin.equation declaration (equationIndex + 1) }
+  expectReplayReject "equation index" <| replaceEvent recording index {
+    event with operation := .rewrite mutatedRule envelope premises }
+  logInfo "SIMP_ENGINE_MUTATIONS equation=1"
 
 example (a b : Nat) (ha : a = 0) (hb : b = 0) : replayPairAdd a b = 0 := by
   check_replay_mutations ha hb
@@ -164,3 +233,12 @@ example (x : Nat) : (x + 0, x + 0) = (x, x) := by
 example (x : Int) : x + x + 0 = 2 * x := by
   check_replay_arithmetic_mutation
   simp_engine_replay +arith
+
+example {n : Nat} (a : Fin n) (h : mutationSeeFin (Fin.mk a.val a.isLt)) :
+    mutationSeeFin (Fin.mk a.val a.isLt) := by
+  check_replay_generated_mutation
+  exact h
+
+example : mutationSeeGroundBox mutationGroundValue := by
+  check_replay_equation_mutation
+  exact mutationSeeGroundValue

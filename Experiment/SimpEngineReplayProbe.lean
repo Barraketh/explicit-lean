@@ -10,8 +10,24 @@ axiom replayHoldsTrue : ReplayHolds True
 opaque ReplaySeeProp : Prop → Prop
 opaque ReplaySeeFin {n : Nat} : Fin n → Prop
 opaque ReplayDepends {p : Prop} : p → Prop
+inductive ReplayGroundBox where
+  | value
+opaque ReplaySeeGroundBox : ReplayGroundBox → Prop
+def replayGroundValue : ReplayGroundBox :=
+  let box := ReplayGroundBox.value
+  box
 axiom replaySeePropTrue : ReplaySeeProp (∀ x : True, ReplayDepends x)
 axiom replaySeeArrow (p q : Prop) : ReplaySeeProp (p → q)
+axiom replaySeeGroundValue : ReplaySeeGroundBox .value
+
+private def programUsesMetadataBody (program : Simp.Engine.Program) : Bool :=
+  program.events.any (fun event => event.path.steps.contains .metadataBody) ||
+    program.structural.any (fun witness => witness.path.steps.contains .metadataBody)
+
+private def programUsesPathStep (program : Simp.Engine.Program)
+    (step : Simp.Engine.PathStep) : Bool :=
+  program.events.any (fun event => event.path.steps.contains step) ||
+    program.structural.any (fun witness => witness.path.steps.contains step)
 
 elab "check_engine_terminals_replay" : tactic => withMainContext do
   let ctx ← Simp.mkContext (simpTheorems := {}) (congrTheorems := {})
@@ -29,15 +45,87 @@ elab "check_engine_terminals_replay" : tactic => withMainContext do
   unless mvarRecording.coveredBranches.contains "struct.unassignedMVarStop" do
     throwError "unassigned mvar fixture missed its structural terminal"
   let _ ← Simp.Engine.mainCoreReplay mvarExpression ctx config mvarRecording.program
-  let branches := proofRecording.coveredBranches ++ mvarRecording.coveredBranches
+  let metadataExpression := mkMData MData.empty (mkConst ``True)
+  let (_, _, metadataRecording) ←
+    Simp.Engine.mainCoreRecording metadataExpression ctx (methods := methods)
+  unless programUsesMetadataBody metadataRecording.program do
+    throwError "simp metadata fixture did not qualify its recursive path"
+  let _ ← Simp.Engine.mainCoreReplay metadataExpression ctx config metadataRecording.program
+  let (_, _, metadataDSimpRecording) ←
+    Simp.Engine.dsimpMainCoreRecording metadataExpression ctx (methods := methods)
+  unless programUsesMetadataBody metadataDSimpRecording.program do
+    throwError "dsimp metadata fixture did not qualify its recursive path"
+  let _ ← Simp.Engine.dsimpMainCoreReplay metadataExpression ctx config
+    metadataDSimpRecording.program
+  let lambdaExpression := mkLambda `x .default (mkConst ``Nat) <|
+    mkLambda `y .default (mkConst ``Nat) (mkBVar 1)
+  let (_, _, lambdaRecording) ←
+    Simp.Engine.dsimpMainCoreRecording lambdaExpression ctx (methods := methods)
+  unless programUsesPathStep lambdaRecording.program (.lambdaDomain 0) &&
+      programUsesPathStep lambdaRecording.program (.lambdaDomain 1) &&
+      !programUsesPathStep lambdaRecording.program (.forallDomain 0) do
+    throwError "dsimp lambda fixture recorded an incorrect binder-domain path"
+  let _ ← Simp.Engine.dsimpMainCoreReplay lambdaExpression ctx config lambdaRecording.program
+  let forallExpression := mkForall `x .default (mkConst ``Nat) <|
+    mkForall `y .default (mkConst ``Nat) (mkSort 1)
+  let (_, _, forallRecording) ←
+    Simp.Engine.dsimpMainCoreRecording forallExpression ctx (methods := methods)
+  unless programUsesPathStep forallRecording.program (.forallDomain 0) &&
+      programUsesPathStep forallRecording.program (.forallDomain 1) &&
+      !programUsesPathStep forallRecording.program (.lambdaDomain 0) do
+    throwError "dsimp forall fixture recorded an incorrect binder-domain path"
+  let _ ← Simp.Engine.dsimpMainCoreReplay forallExpression ctx config forallRecording.program
+  let branches := proofRecording.coveredBranches ++ mvarRecording.coveredBranches ++
+    metadataRecording.coveredBranches ++ metadataDSimpRecording.coveredBranches ++
+    lambdaRecording.coveredBranches ++ forallRecording.coveredBranches
   logInfo m!"SIMP_ENGINE_REPLAY branches={String.intercalate "," branches.toList}"
 
 opaque replayPairAdd : Nat → Nat → Nat
 axiom replayTwoPremises {a b : Nat} (ha : a = 0) (hb : b = 0) :
   replayPairAdd a b = 0
 
-@[congr] theorem ReplayHolds.congr {p q : Prop} (h : p = q) :
-    ReplayHolds p = ReplayHolds q := congrArg ReplayHolds h
+opaque replayVariantFirst : Nat → Nat
+opaque replayVariantSecond : Nat → Nat
+axiom replayConjoinedVariants (n : Nat) :
+  replayVariantFirst n = n ∧ replayVariantSecond n = n
+
+@[congr] theorem ReplayHolds.congr {p q : Prop} (h : p = q)
+    (_side : True) : ReplayHolds p = ReplayHolds q :=
+  congrArg ReplayHolds h
+
+elab "check_user_congruence_premise_replay" : tactic => withMainContext do
+  let registered := (← getSimpCongrTheorems).get ``ReplayHolds
+  unless registered.any (fun entry => entry.theoremName == ``ReplayHolds.congr) do
+    throwError "user congruence fixture theorem is not registered: {repr registered}"
+  let simpStx ← `(tactic| simp)
+  let recording ← ExplicitLean.SimpEngine.Recording.recordCertificate simpStx.raw
+  let mut found := false
+  let mut observations : Array String := #[]
+  for subject in recording.certificate.subjects do
+    for witness in subject.program.structural do
+      if let .congruence _ (.user theoremName _ _ _ _ premises) := witness.witness then
+        observations := observations.push s!"{theoremName}:{premises.size}"
+        if theoremName == ``ReplayHolds.congr && !premises.isEmpty then found := true
+  unless found do
+    throwError "user congruence fixture did not record its side-premise program: registered={repr registered}, observed={observations}"
+  ExplicitLean.SimpEngine.Replay.replayCertificate recording
+  logInfo m!"SIMP_ENGINE_REPLAY branches={String.intercalate "," recording.branches.toList}"
+
+elab "check_ground_equation_replay" : tactic => withMainContext do
+  let simpStx ← `(tactic| simp (config := { zeta := false }) +ground)
+  let recording ← ExplicitLean.SimpEngine.Recording.recordCertificate simpStx.raw
+  let found := recording.certificate.subjects.any fun subject =>
+    subject.program.events.any fun event =>
+      event.path.steps.contains .ground &&
+        match event.operation with
+        | .rewrite rule _ _ => match rule.origin with
+          | .equation declaration _ => declaration == ``replayGroundValue
+          | _ => false
+        | _ => false
+  unless found do
+    throwError "ground fixture did not record a stable source-declaration equation origin"
+  ExplicitLean.SimpEngine.Replay.replayCertificate recording
+  logInfo m!"SIMP_ENGINE_REPLAY branches={String.intercalate "," recording.branches.toList}"
 
 example (xs : List Nat) : xs ++ [] = xs := by
   simp_engine_replay only [List.append_nil]
@@ -85,8 +173,11 @@ example (p q : Prop) (h : p) (hpq : p → q) : q := by
 example (a b : Nat) (ha : a = 0) (hb : b = 0) : replayPairAdd a b = 0 := by
   simp_engine_replay only [replayTwoPremises, ha, hb]
 
+example (n : Nat) : replayVariantSecond n = n := by
+  simp_engine_replay only [replayConjoinedVariants]
+
 example : ReplayHolds (True ∧ True) := by
-  simp_engine_replay
+  check_user_congruence_premise_replay
   exact replayHoldsTrue
 
 example (h : ReplaySeeProp (∀ x : True ∧ True, ReplayDepends x)) :
@@ -117,3 +208,7 @@ example : (20 : Nat) < 30 := by
 
 example (x : Int) : x + x + 0 = 2 * x := by
   simp_engine_replay +arith
+
+example : ReplaySeeGroundBox replayGroundValue := by
+  check_ground_equation_replay
+  exact replaySeeGroundValue

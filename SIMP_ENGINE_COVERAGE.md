@@ -1,6 +1,6 @@
 # Pinned `simp` engine coverage and certificate architecture
 
-Status: implementation specification; E1 through E4 complete
+Status: implementation specification; E1 through E5 complete
 
 Pinned engine: Lean 4.32.2, commit
 `f3b06c705e6c85f5314019d5d3baab0fec5b580c`
@@ -80,6 +80,7 @@ The authoritative source surface is:
 - `Lean/Meta/Tactic/Simp/Rewrite.lean` for rules, builtins, and discharge;
 - `Lean/Meta/Tactic/Simp/Types.lean` for state, configuration, and congruence;
 - `Lean/Meta/Tactic/Simp/SimpTheorems.lean` for rule preprocessing;
+- `Lean/Meta/Tactic/Simp/Simproc.lean` for simproc candidate execution;
 - `Lean/Meta/Tactic/Simp/SimpCongrTheorems.lean` and
   `Lean/Meta/CongrTheorems.lean` for congruence selection;
 - `Lean/Meta/Transform.lean` for the definitional traversal; and
@@ -100,6 +101,21 @@ pre/post phase invocation also ends with a `phaseOutcome`, including unchanged
 `done`/`continue` results; absence of a changing event is not enough to recover
 control flow.
 
+Cache visibility follows Lean's staged `SExprMap`, `withFreshCache`,
+`withPreservedCache`, and linearly threaded dsimp-cache scopes exactly.
+Producer entries themselves use an append-only execution registry, and each
+hit records both the producer path and registry ordinal.
+The ordinal is necessary because isolated premise attempts can repeat the same
+qualified path and expression fingerprint; neither field alone identifies a
+cache value.
+
+The ground evaluator is a nested engine context, not merely another phase. It
+uses the pinned seval configuration, methods, theorem environment, and an
+isolated simp cache. Replay installs the same fixed configuration with empty
+ambient rule sets, consumes the nested program under `ground`, and restores the
+outer cache. Lazily generated equation theorems inside that context are
+reconstructed from their source declaration and equation index.
+
 Structural traversal recursively calls either `simp` or `dsimp`. `dsimp` is a
 different state machine based on `transformWithCache`: it has `dpre` and
 `dpost`, skips selected instance arguments, introduces locals for telescopes,
@@ -116,10 +132,11 @@ The `Required representation` column is normative for certificate schema 16.
 | --- | --- | --- | --- |
 | `simpImpl` call boundary | Recursive calls may share the same semantic child path, and proofs stop before `simpLoop` | `simpCall` identity and an explicit `proofSkip` terminal | absent |
 | `dsimpImpl` call boundary | Recursive definitional calls may share the same semantic child path | `dsimpCall` identity | absent |
-| `simpLoop` cache | Reuses a prior result and can suppress a second traversal | call-qualified structural `cacheHit` with the producing path | implicit |
+| `simpLoop` cache | Reuses a prior result and can suppress a second traversal | call-qualified structural `cacheHit` with the producing path and exact execution-registry ordinal | implicit |
 | `pre` step | `done`, `visit`, `continue none`, and `continue some` have different control flow even without a changing operation | exact `phaseOutcome` for every invocation | partial |
 | `post` step | May finish or restart the entire node | exact `phaseOutcome` plus the call-qualified restart edge | partial |
 | `simpStep`: unassigned mvar | Stops structurally when instantiation makes no progress | explicit `unassignedMVarStop` terminal | absent |
+| metadata traversal | Both simp and dsimp recurse through `.mdata` wrappers | explicit `metadataBody` child path | absent |
 | `reduceStep`: mvar head | Instantiates assigned metavariables | `instantiateMVars` reduction | absent |
 | `reduceStep`: beta | Head beta reduction | `beta` reduction | present |
 | `reduceStep`: native projection | Reduces `.proj` | exact structure/field projection | present only when `config.proj` exposes it in the pre interposer |
@@ -134,7 +151,7 @@ The `Required representation` column is normative for certificate schema 16.
 | `simpProj` | Reduces a projection even outside the `reduceStep` config branch, otherwise simplifies or dsimps its major | projection structural choice plus child mode | incomplete |
 | `simpApp` | Chooses user congruence, generated congruence, or generic congruence | exact `CongruenceChoice` and child modes | ambient congruence set |
 | failed congruence candidates | A failed user/generated attempt may already have recursively simplified children or changed replay-relevant caches | ordered `userAttemptFailed`/`generatedAttemptFailed` choice when the attempt has executable progress | absent |
-| user congruence | Selects a named `[congr]` theorem and simplifies designated hypotheses | theorem identity, priority/variant, and hypothesis subprograms | absent |
+| user congruence | Selects a named `[congr]` theorem, simplifies designated hypotheses, and synthesizes remaining side premises | theorem fingerprint, match envelope, priority/variant, hypothesis paths, and nested side-premise programs | absent |
 | generated congruence | Computes argument kinds, may synthesize subsingleton instances and remove dummy casts | generated theorem identity/shape, argument kinds, and synthesis fingerprints | implicit |
 | generic congruence | Simplifies independent args, dsimps dependent/fixed args, and may skip instances | per-argument `simp`, `dsimp`, or `fixed` path | implicit |
 | `simpMatch` direct reduction | Iota before ordinary `reduceStep` | `iota` reduction at `pre` | present |
@@ -149,7 +166,7 @@ The `Required representation` column is normative for certificate schema 16.
 | `dpre`/`dpost` | Applies rfl-only theorems and dsimprocs | `dpre` and `dpost` phases | absent |
 | `dsimpReduce` | Repeats all definitional reductions, then `reduceFVar` | the same exact reduction vocabulary in dsimp mode | absent |
 | dsimp transform | Uses a separate cache, telescope reconstruction, `usedLetOnly`, and instance skipping | `DSimpPath` structural witnesses and config | implicit |
-| theorem preprocessing | One source rule may produce several actual simp theorems | exact preprocessed variant index and lhs/rule fingerprint | all variants retried under one origin |
+| theorem preprocessing | One source rule may produce several actual simp theorems, and equation theorems may be generated lazily | source declaration/equation index when needed, lhs/rule fingerprints, and an ordinal among fingerprint-identical variants | all variants retried under one origin |
 | indexed rewrite | Discrimination lookup, priority, erased set, extra args | selected rule plus `index` mode and variant | mostly present |
 | theorem match | Unification, permutation orientation, binder hints, no-op rejection | match/instantiation envelope fingerprints | result-only validation |
 | failed theorem candidate | Premise simplification may execute before synthesis, no-op, or orientation failure | `rewriteAttemptFailed` with its exact rule, match envelope, and nested premise programs | absent |
@@ -210,8 +227,9 @@ inductive PathStep where
   | matchDiscriminant (index : Nat) (mode : Mode)
   | lambdaDomain (index : Nat)
   | lambdaBody
-  | forallDomain
+  | forallDomain (index : Nat)
   | forallBody
+  | metadataBody
   | implicationDomain
   | implicationBody
   | letType (index : Nat)
@@ -224,6 +242,13 @@ inductive PathStep where
 
 structure ExecutionPath where
   steps : Array PathStep
+
+inductive RuleOrigin where
+  | decl (name : Name)
+  | equation (declaration : Name) (index : Nat)
+  | syntax (source : String)
+  | local (subject : LocalRef)
+  | other (name : Name)
 
 structure RuleRef where
   source : String
@@ -257,31 +282,45 @@ inductive Builtin where
   | decideFalse
   | arith (handler : ArithHandler)
 
-inductive Structural where
-  | phaseOutcome (phase : Phase) (invocationOrdinal : Nat)
-      (disposition : StepDisposition) (outputFingerprint : String)
-      (proofPresent : Bool)
-  | proofSkip (invocationOrdinal : Nat) (typeFingerprint : String)
-  | unassignedMVarStop (simpStepOrdinal : Nat)
-  | cacheHit (sourcePath : ExecutionPath)
-  | congruence (invocationOrdinal : Nat) (choice : CongruenceChoice)
-  | projectionMajor (structureName : Name) (field : Nat) (mode : ChildMode)
-  | matchDiscriminants (count : Nat)
-  | matchDiscriminantsAttemptFailed (count : Nat)
-  | lambdaTelescope (count : Nat)
-  | forallBranch (choice : ForallBranch)
-  | contextualScope (locals : Array ScopedLocalRef)
-  | letToHave
-  | haveTelescope (fixed used : Array Bool)
-  | dropUnusedHave (index : Nat)
-  | dsimpCacheHit (sourcePath : ExecutionPath)
-  | dsimpTransform (usedLetOnly skipInstances : Bool)
-
 mutual
   structure PremiseProgram where
     propositionFingerprint : String
     program : Program
     terminal : PremiseTerminal
+
+  inductive CongruenceChoice where
+    | user (theoremName : Name) (priority : Nat)
+        (hypothesisPositions : Array Nat) (theoremFingerprint : String)
+        (matchEnvelope : MatchEnvelope) (premises : Array PremiseProgram)
+    | userAttemptFailed (theoremName : Name) (priority : Nat)
+        (hypothesisPositions : Array Nat) (theoremFingerprint : String)
+        (matchEnvelope : MatchEnvelope) (premises : Array PremiseProgram)
+    | generated (theoremTypeFingerprint proofFingerprint : String)
+        (argumentKinds : Array GeneratedCongruenceArgKind)
+        (arguments : Array ChildMode)
+        (synthesizedAssignments : Array String)
+    | generatedAttemptFailed
+    | generic ...
+
+  inductive Structural where
+    | phaseOutcome (phase : Phase) (invocationOrdinal : Nat)
+        (disposition : StepDisposition) (outputFingerprint : String)
+        (proofPresent : Bool)
+    | proofSkip (invocationOrdinal : Nat) (typeFingerprint : String)
+    | unassignedMVarStop (simpStepOrdinal : Nat)
+    | cacheHit (sourcePath : ExecutionPath) (sourceIndex : Nat)
+    | congruence (invocationOrdinal : Nat) (choice : CongruenceChoice)
+    | projectionMajor (structureName : Name) (field : Nat) (mode : ChildMode)
+    | matchDiscriminants (count : Nat)
+    | matchDiscriminantsAttemptFailed (count : Nat)
+    | lambdaTelescope (count : Nat)
+    | forallBranch (choice : ForallBranch)
+    | contextualScope (locals : Array ScopedLocalRef)
+    | letToHave
+    | haveTelescope (fixed used : Array Bool)
+    | dropUnusedHave (index : Nat)
+    | dsimpCacheHit (sourcePath : ExecutionPath) (sourceIndex : Nat)
+    | dsimpTransform (usedLetOnly skipInstances : Bool)
 
   inductive Operation where
     | rewrite (rule : RuleRef) (match : MatchEnvelope)
@@ -456,8 +495,10 @@ of individual private reductions inside `SimpEngine.lean`.
 ### 8.1 Rules
 
 The recorder stores the actual `SimpTheorem` variant that succeeded, not merely
-its `Origin`. Replay reconstructs exactly that variant and checks its rule and
-lhs fingerprints before matching. Candidate ordering is relevant only while
+its `Origin`. Rule and lhs fingerprints identify the preprocessing output, and
+an ordinal disambiguates fingerprint-identical duplicates. Lazily generated
+equation rules use the stable source declaration and equation index rather than
+the temporary theorem name. Candidate ordering is relevant only while
 recording; an explicit replay operation does not consult an ambient theorem
 tree.
 
@@ -471,13 +512,15 @@ Ambient `getSimpCongrTheorems` is prohibited during replay. Record mode emits
 one of:
 
 - the exact user congruence theorem and hypothesis positions;
-- the generated congruence theorem shape and argument kinds; or
+- the generated congruence theorem type, proof, exact argument kinds, child
+  modes, and synthesized assignments; or
 - generic congruence with each argument's `simp`, `dsimp`, or fixed mode.
 
 Replay executes that choice directly. A user congruence theorem is resolved and
 fingerprinted like an ordinary rule. Generated congruence may use the pinned
-generator, but its generated type, proof head, and argument kinds must match
-the witness before its child programs run.
+generator, but its generated type, proof term, exact argument kinds, child
+modes, and synthesized assignments must match the witness before its child
+programs run.
 
 Failed user/generated candidates are recorded when they performed recursive or
 cache-relevant work. Their failure is replayed before the next candidate. A
@@ -506,9 +549,11 @@ It does require exact detection, including:
 - simprocs invoked by ground/seval; and
 - simprocs inside recursive premise programs.
 
-The instrumented candidate loop records the selected declaration name, phase,
-input/output fingerprints, step disposition, and nesting path, then classifies
-the enclosing execution `deferred_simproc`. No result proof is materialized.
+The instrumented candidate loop records every committed simproc transition's
+selected declaration name, phase, input/output fingerprints, step disposition,
+and nesting path, then classifies the enclosing execution
+`deferred_simproc`. A candidate returning `continue none` has no transition
+under the simproc API and is omitted. No result proof is materialized.
 This makes the non-simproc completeness gate honest without prematurely
 choosing simproc semantics.
 
@@ -558,8 +603,8 @@ Gate: every branch-focused certificate replays; mutations of path, phase,
 operation, rule variant, congruence choice, config, premise order, or terminal
 fail at the mutated item.
 
-Status: complete. The focused suite replays 36 dynamic branch classes and
-rejects 15 targeted mutations. The batched bounded gate records each module
+Status: complete. The focused suite replays 39 dynamic branch classes and
+rejects 20 targeted mutations. The batched bounded gate records each module
 once, classifies every execution by occurrence ID, then replays 55 wholly
 non-deferred occurrences across 58 executions in one replay compile per module;
 two occurrences are explicitly simproc-deferred and none are unclassified.
@@ -578,12 +623,13 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused and two bounded production modules contain 62
-occurrences: 60 materialize across 64 dynamic executions, while two remain
+copies are compiled. The focused and two bounded production modules contain 63
+occurrences: 61 materialize across 65 dynamic executions, while two remain
 explicitly simproc-deferred. The focused gate covers private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
-locations, and configuration-driven builtins. A source-only engine-schema
-mutation is rejected before replay.
+locations, configuration-driven builtins, and stable lazy-equation origins in
+an isolated ground context. A source-only engine-schema mutation is rejected
+before replay.
 
 ### E5. Pre-cloud completeness review
 
@@ -595,6 +641,16 @@ mutation is rejected before replay.
 
 Gate: the implementation-to-IR matrix has no `partial`, `implicit`, or `absent`
 entry; all review checks are machine-enforced.
+
+Status: complete. A declaration-level lineage manifest binds 120 semantic fork
+declarations to the pinned `Main`, `Rewrite`, `Types`, `Simproc`, and
+`Transform` implementations. A separate digest covers 101 controlled
+declarations, and hashes lock the manually reviewed fork, IR, runtime,
+fingerprinting, record/replay, source, inventory, reference adapter, and
+coverage contract. The
+review fixed every discrepancy it found before rerunning the complete local
+gate; section 4 has 54 machine-bound rows and no partial, implicit, or absent
+schema-16 representation.
 
 ### E6. Full cloud closure
 
@@ -632,8 +688,8 @@ closure run, not a substitute for the completeness review.
 ## 12. Decisions
 
 - Schema 15 remains only in Git history and is not a simplifier IR dependency.
-- E1 through E4 are complete; the next implementation step is the pre-cloud
-  completeness review (E5).
+- E1 through E5 are complete; the next implementation step is full cloud
+  closure (E6).
 - The correctness boundary is a pinned source fork with record and replay
   modes.
 - Structural traversal and dsimp are first-class certificate semantics.

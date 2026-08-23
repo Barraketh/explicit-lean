@@ -18,6 +18,7 @@ SOURCE_HASHES = {
     "Lean/Meta/Tactic/Simp/Types.lean": "2c7b77822452e3194d4d820854068e2fb72f33a2041dd9ae3a09df153423c869",
     "Lean/Meta/Tactic/Simp/SimpTheorems.lean": "78b3a7f971d3bd2aeca9c60a7850ec3449b9e48f9730000569fa43fa0274957d",
     "Lean/Meta/Tactic/Simp/SimpCongrTheorems.lean": "46852cd6ba7a38bf58188ccce2dcec4dd6b21c072f05d45d3bd6425a5a863b1b",
+    "Lean/Meta/Tactic/Simp/Simproc.lean": "67742fdfa2334d588ecb9b8252c9ee26d3150f130945a0866420fecfc27e1e02",
     "Lean/Meta/CongrTheorems.lean": "2a24eae0954ff67bab815eab23dd595be020c0320086f070bae846947413d2db",
     "Lean/Meta/Transform.lean": "de997e740f295fd829a76362d714343bc8bca0d82ace7418b8d75b3a1d0e02ea",
     "Lean/Meta/HaveTelescope.lean": "551e4ae4b8c98ca5d841ae3449406a0835bfa3a398d59c4dca3e6aef95b60620",

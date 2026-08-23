@@ -93,6 +93,14 @@ def exprFingerprint (expression : Expr) : MetaM ExprFingerprint := do
 def exprFingerprintHash (expression : Expr) : MetaM String := do
   return (← exprFingerprint expression).fingerprint
 
+/-- Fingerprint an expression without erasing proof subterms. This is used only
+for certificate fields where the proof constructor itself is semantic. -/
+def exprStructuralFingerprintHash (expression : Expr) : MetaM String := do
+  let expression ← instantiateMVars expression
+  let lctx ← getLCtx
+  let (canonical, _) := (canonicalExpr lctx expression).run {}
+  return s!"expr-structural-v1:{hash canonical}"
+
 private def digest (kind payload : String) : String :=
   s!"{kind}-v1:{hash payload}"
 
