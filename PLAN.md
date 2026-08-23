@@ -617,11 +617,21 @@ been exercised across Mathlib.
 
 ### 4.1 Mathlib-wide `simp` coverage
 
-The implementation design for this phase is specified in
-[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md). This section remains the
-roadmap and completion criterion; the design document owns the certificate IR,
+The semantic design for this phase is specified in
+[SIMP_EXPLICIT_DESIGN.md](SIMP_EXPLICIT_DESIGN.md), and the pinned
+implementation-to-IR coverage specification is
+[SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md). This section remains the
+roadmap and completion criterion; those documents own the certificate IR,
 replay invariants, failure encodings, source-rewriting strategy, and staged
 acceptance gates.
+
+The implementation audit on 2026-08-23 superseded the empirical O6 bridge
+workstream. Schema 15 observes only pre/post callbacks and cannot completely
+represent dsimp, congruence selection, specialized structural traversal, or all
+fixed simplifier operations. Its O6e--O6j bridges remain diagnostic evidence,
+not the final recording boundary. Schema 16 is implemented from a pinned,
+instrumented simplifier engine with explicit structural paths and all four
+pre/post phases before the full corpus is run in parallel cloud shards.
 
 The governing goal was revised on 2026-08-21. Every committed successful
 non-simproc execution must be reconstructed from the operations that `simp`
@@ -647,7 +657,8 @@ module from compiling. Record per occurrence:
 - module, declaration, source location, and original syntax;
 - whether ordinary simplification succeeds and whether it closes the goal;
 - the complete ordered operational trace, including definitional reductions;
-- trace length, structural selectors, and transition-continuity checks;
+- trace length, exact structural paths/witnesses, and transition-continuity
+  checks;
 - the proposed fallback-free certificate and its source size;
 - whether the materialized replacement compiles in the complete body;
 - a terminal outcome when the occurrence is not reached, fails, or is observed

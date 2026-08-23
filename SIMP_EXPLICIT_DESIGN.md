@@ -4,6 +4,12 @@ Status: revised implementation design
 
 Scope: `simp` and `simp only` coverage in [PLAN.md](PLAN.md), section 4.1
 
+The implementation-level completeness specification is
+[SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md). It supersedes the O6
+continuity-bridge workstream as the acceptance architecture: schema-15 bridges
+remain diagnostics only, while schema 16 records and replays the pinned
+simplifier's complete structural execution model.
+
 ## 1. Purpose
 
 `simp_explicit?` must turn each committed successful `simp` or `simp only`
@@ -100,11 +106,14 @@ programs. It may not consult:
 - the ambient simp theorem set;
 - the registered simproc set;
 - an ambient discharger;
-- the original `simp` configuration as an execution mode; or
+- an unrecorded ambient `simp` or Meta configuration; or
 - automation hidden in generated `by` blocks.
 
-Configuration remains provenance. Its effects must be visible in the selected
-operations and traversal.
+Schema 16 carries an explicit, normalized replay configuration for the pinned
+engine's structural traversal, theorem matching, and operation eligibility.
+State-changing reductions and builtins remain command-gated: recording a
+configuration flag never authorizes an implicit transition. Configuration that
+is not represented in this closed metadata remains provenance only.
 
 ### 3.4 Exact consumption
 
@@ -179,7 +188,10 @@ events. Simproc transitions remain deferred.
 
 ## 4. Operational certificate model
 
-The following Lean-like types are schematic:
+The following Lean-like types describe the historical flat schema-15 model.
+Schema 16 replaces them with the structural `Program`, four phases, exact rule
+variants, congruence witnesses, and replay configuration specified in
+[SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md), section 5.
 
 ```lean
 inductive SubjectRef where
@@ -361,8 +373,9 @@ result proof into a rewrite command.
 
 ## 6. Replay model
 
-Replay uses an empty simp theorem collection, no registered simprocs, and no
-ambient discharger. It interprets the certificate as a closed program.
+Replay uses an empty simp theorem collection, no registered simprocs, no
+ambient congruence collection, and no ambient discharger. It interprets the
+certificate as a closed program.
 
 A `traversalLocalRule` is the exact one-based declaration-index offset from
 the simplifier context's recorded `lctxInitIndices`. It represents a theorem
@@ -391,17 +404,14 @@ For a reduction command it:
 4. executes exactly that reduction; and
 5. constructs and checks the local equality or iff proof.
 
-The replay traversal uses `Simp.neutralConfig`, so beta, zeta, delta, and other
-built-in reductions cannot run merely because the interpreter is implemented
-on top of `Simp.mainCore`. Pinned Lean 4.32.2 needs iota enabled to expose
-matcher applications to the pre-method hook, and its structural `simpProj`
-path reduces native projections independently of the `proj` flag. Replay
-therefore probes and rejects an iota or native-projection redex unless the
-current command consumes it first. The corresponding command primitive
-locally enables only the machinery required by its named kernel reduction.
-In particular, pinned `reduceRecMatcher?` needs beta enabled internally to
-reduce a matcher after an earlier pre-phase theorem exposes its constructor;
-this does not authorize a separate ambient beta transition.
+Schema 15 used `Simp.neutralConfig` plus selected guards. The implementation
+audit proved that insufficient: neutral configuration changes dsimp and
+structural behavior, while native projection and other branches can still
+change expressions outside the guarded pre hook. Schema 16 instead uses the
+pinned instrumented engine with an explicit replay configuration and
+command-gates every changing branch. A fixed reduction primitive may locally
+enable only the Meta machinery required by that recorded operation; doing so
+does not authorize a separate ambient transition.
 
 Target certificates may omit a final `eq_self` or `iff_self` diagnostic event:
 closing the final reflexive residual goal is fixed behavior of the
