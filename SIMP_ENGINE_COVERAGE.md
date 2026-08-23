@@ -689,7 +689,9 @@ pending. The first 32-shard execution was invalidated when hosted runners
 received external shutdown signals before their shard artifacts uploaded. The
 shutdowns occurred across both small and moderate next modules and after widely
 different amounts of progress, so that execution is neither a semantic failure
-set nor coverage evidence.
+set nor coverage evidence. A subsequent four-worker bounded trial evicted two
+workers while the other two remained healthy beyond the eviction point; the
+accepted topology therefore caps concurrency at two.
 
 The inventory fixes 8,264 module files, 6,319 modules containing 83,425
 occurrences, source hashes, and exact byte ranges at the tested commit. It
@@ -697,7 +699,7 @@ includes 91 nested occurrences, uses the exact frontend for five modules whose
 lightweight parse requires recovery, and collapses one byte-identical duplicate
 syntax record. Modules are assigned by `SHA256(module) mod shardCount`. The
 rerun uses 256 short deterministic batches, about 25 occurrence-bearing modules
-per batch, on at most four pinned Ubuntu 24.04 runners concurrently. Each batch
+per batch, on at most two pinned Ubuntu 24.04 runners concurrently. Each batch
 records a module once and, when it has accepted executions, compiles one copied
 module with all accepted occurrences materialized. A batch stops after its
 first semantic failure so its checkpoint, log, and failing source reach the
@@ -715,7 +717,7 @@ run before it reaches the default branch. It:
 - refuse a dirty or moving ref and check out the exact SHA;
 - restore Lean/Mathlib build caches keyed by toolchain, lake manifest, and SHA;
 - run a matrix of short independent deterministic batches;
-- limit the matrix to four simultaneous pinned Ubuntu 24.04 runners by
+- limit the matrix to two simultaneous pinned Ubuntu 24.04 runners by
   default;
 - use a shared inventory artifact and disjoint batch output directories;
 - upload reports even when a shard fails;

@@ -15,7 +15,7 @@ on:
       max_parallel:
         description: Maximum simultaneous shard jobs
         required: true
-        default: "4"
+        default: "2"
         type: string
       module_timeout:
         description: Per-module compile timeout in seconds
@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(inputs.max_parallel || '4') }}
+      max-parallel: ${{ fromJSON(inputs.max_parallel || '2') }}
       matrix:
         shard: ${{ fromJSON(needs.inventory.outputs.matrix) }}
     steps:
