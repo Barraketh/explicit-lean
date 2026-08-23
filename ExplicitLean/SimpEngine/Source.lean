@@ -52,10 +52,18 @@ private def writeCertificate (directory occurrenceId : String)
 
 private def recordSource (occurrenceId directory : String)
     (simpStx : Syntax) : TacticM Unit := do
-  let recording ← Recording.recordCertificate simpStx
+  let referenceFailed ← IO.mkRef false
+  let recording : Recording.TacticRecording ← try
+    Recording.recordCertificate simpStx (commitReference := true) (onReferenceFailure := do
+      referenceFailed.set true
+      IO.println s!"SIMP_ENGINE_SOURCE_UNSUCCESSFUL occurrence={occurrenceId}")
+  catch error =>
+    let failed ← referenceFailed.get
+    unless failed do
+      IO.println s!"SIMP_ENGINE_SOURCE_RECORDER_FAILURE occurrence={occurrenceId}"
+    throw error
   let path ← writeCertificate directory occurrenceId recording.certificate
   logInfo m!"SIMP_ENGINE_SOURCE_RECORD occurrence={occurrenceId} certificate={path} deferredSubjects={deferredSubjectCount recording.certificate} subjects={recording.certificate.subjects.size}"
-  evalTactic simpStx
 
 private def certificateSourceArrayType : Expr :=
   mkApp (mkConst ``Array [Level.zero]) (mkConst ``String)

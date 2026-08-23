@@ -59,13 +59,15 @@ def instrument(
     tactic: str,
     selected: set[str] | None,
 ) -> Path:
-    for entry in sorted(entries, key=lambda item: item["startByte"], reverse=True):
-        occurrence = str(entry["id"])
-        if selected is not None and occurrence not in selected:
-            continue
-        original = str(entry["source"])
-        replacement = f"{tactic} {json.dumps(occurrence)}" + original[len("simp") :]
-        source = coverage.replace_bytes(source, entry, replacement)
+    chosen = [
+        entry for entry in entries
+        if selected is None or str(entry["id"]) in selected
+    ]
+    source = coverage.rewrite_simp_heads(
+        source,
+        chosen,
+        lambda entry: f"{tactic} {json.dumps(str(entry['id']))}",
+    )
     imported = (
         "ExplicitLean.SimpEngine.Recording"
         if tactic == "simp_engine_recording_id"

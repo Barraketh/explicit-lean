@@ -18,8 +18,18 @@ def sourceGroundValue : SourceGroundBox :=
 
 axiom sourceSeeGroundValue : sourceSeeGroundBox .value
 
+opaque SourceUnchanged : Prop
+
+axiom sourceUnchanged : SourceUnchanged
+
+theorem sourceNestedRule (_ : True) (n : Nat) : n + 0 = n :=
+  Nat.add_zero n
+
 example (xs : List Nat) : xs ++ [] = xs := by
   simp only [List.append_nil]
+
+example (n : Nat) : n + 0 = n := by
+  simp only [sourceNestedRule (by simp)]
 
 example (a b : Nat) (ha : a = 0) (hb : b = 0) : sourcePairAdd a b = 0 := by
   simp only [sourceTwoPremises, ha, hb]
@@ -36,3 +46,8 @@ example : (20 : Nat) < 30 := by
 example : sourceSeeGroundBox sourceGroundValue := by
   simp (config := { zeta := false }) +ground
   exact sourceSeeGroundValue
+
+example : SourceUnchanged := by
+  first
+  | simp (config := { failIfUnchanged := true }) only
+  | exact sourceUnchanged

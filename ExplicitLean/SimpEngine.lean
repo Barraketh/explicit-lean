@@ -2330,6 +2330,32 @@ def dsimpMain (e : Expr) (ctx : Context) (stats : Stats := {}) (methods : Method
   let (r, s) ← dsimpMainCore e ctx { stats with } methods
   return (r, { s with })
 
+private def instrumentationSimpArgs? (stx : Syntax) : Option Syntax :=
+  match stx.getKind.toString with
+  | "Lean.Parser.Tactic.simpEngineReference"
+  | "Lean.Parser.Tactic.simpEngineRecording"
+  | "Lean.Parser.Tactic.simpEngineObserve"
+  | "Lean.Parser.Tactic.simpEngineReplay" => some stx[1]
+  | "Lean.Parser.Tactic.simpEngineRecordingId"
+  | "Lean.Parser.Tactic.simpEngineReplayId" => some stx[2]
+  | "Lean.Parser.Tactic.simpEngineSourceRecording"
+  | "Lean.Parser.Tactic.simpEngineApply" => some stx[3]
+  | _ => none
+
+/-- Instrumented nested tactics remain semantically ordinary `simp` calls.
+    Canonicalizing their parser wrappers makes explicit theorem origins stable
+    between recording and materialized source without re-running ambient simp. -/
+private def canonicalRuleSyntax (stx : Syntax) : Syntax :=
+  stx.rewriteBottomUp fun child =>
+    match instrumentationSimpArgs? child with
+    | none => child
+    | some args => mkNode ``Lean.Parser.Tactic.simp #[
+        mkAtom "simp", args[0], args[1], args[2], args[3], args[4]]
+
+private def canonicalRuleSyntaxSource (stx : Syntax) : String :=
+  let canonical := canonicalRuleSyntax stx
+  canonical.reprint.getD (toString canonical.prettyPrint)
+
 private def ruleOrigin (origin : Origin) (override? : Option RuleOrigin := none) :
     EngineM (RuleOrigin × String × Bool) := do
   if let some override := override? then
@@ -2346,7 +2372,7 @@ private def ruleOrigin (origin : Origin) (override? : Option RuleOrigin := none)
     let localDecl ← getFVarLocalDecl (.fvar fvarId)
     return (.local (← localRefOfDecl localDecl), s!"local:{localDecl.index}", false)
   | .stx _ ref =>
-    let source := ref.reprint.getD (toString ref.prettyPrint)
+    let source := canonicalRuleSyntaxSource ref
     return (.syntax source, source, false)
   | .other name => return (.other name, toString name, false)
 
@@ -2543,7 +2569,7 @@ private def originMatchesRule (expected : RuleOrigin) (actual : Origin) : Engine
       let actualDecl ← getFVarLocalDecl (.fvar fvarId)
       return expectedRef == (← localRefOfDecl actualDecl)
   | .syntax expectedSource, .stx _ stx =>
-      let actualSource := stx.reprint.getD (toString stx.prettyPrint)
+      let actualSource := canonicalRuleSyntaxSource stx
       return expectedSource == actualSource
   | .other expectedName, .other actualName => return expectedName == actualName
   | _, _ => return false

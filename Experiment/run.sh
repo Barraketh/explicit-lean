@@ -12,3 +12,4 @@ python3 Experiment/check_simp_engine_mutations.py
 python3 Experiment/check_simp_engine_production.py
 python3 Experiment/check_simp_engine_replay_production.py
 python3 Experiment/check_simp_engine_source.py
+python3 Experiment/check_simp_engine_cloud.py

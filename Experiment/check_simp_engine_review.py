@@ -29,7 +29,7 @@ REVIEWED_FILES = (
 # These values are changed only after a new source-level completeness review.
 REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine.lean":
-        "de5fc91a0c62f5da5e7a88a466278b62e048bf347aa8dfb915d9b1a139369722",
+        "82c0f93fa28e12d7c729f8784ef91ce291932265f973cad68a94972a0521f637",
     "ExplicitLean/SimpEngine/Fingerprint.lean":
         "7aed346f08125514e2675c84e199a5e380d885934c12ebcdc587e2ab94d5bd21",
     "ExplicitLean/SimpEngine/IR.lean":
@@ -37,25 +37,25 @@ REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine/Inventory.lean":
         "d08cefcb506f63b29c8c91f53fa089177d17b501473af554c4adf6c4002a44e8",
     "ExplicitLean/SimpEngine/Recording.lean":
-        "cddb53e7b67242d6115ea6fea0003954296d88212ebb8bb136c22d7c66aca786",
+        "b53b7aee50fbfb7b42e692816dc35abbed73dfa7b44125b9f7f0a367a5d8409b",
     "ExplicitLean/SimpEngine/Reference.lean":
         "e3f59c3a7c5f01dec5a700eda0dad5d08199df7adee4ff557e548f4b5fca6bb0",
     "ExplicitLean/SimpEngine/Replay.lean":
-        "58d568064691eb9b23d5ee9f6b9b55313cc89064e8af4fc931e472d292917800",
+        "6d32c261860778f5401e2128b127eaef2f0b86e052546d94634b7c1538ebe7ee",
     "ExplicitLean/SimpEngine/Runtime.lean":
         "533c27c3f2b3e95fe2a5490ee564c3bcf27457a88441d252caf52d59391ebbfb",
     "ExplicitLean/SimpEngine/Source.lean":
-        "9e51725597f7d9c881c400ed03a378754ce15d97fb380428961fd1cebaa8f0d1",
+        "351e26bf4736dd77dfdcb0ad9d3c3c3c6bfaf8467907323a451d5514320dce56",
     "SIMP_ENGINE_COVERAGE.md":
-        "60c701a4e7900cd08301ba34c70971d77963b6a661a520e458d492459b9caa8f",
+        "94ebd98c9a5c98d5ec06ea6409b2bbb4a73b8726ad16a7abe22adfc61ba57c90",
 }
 EXPECTED_LINEAGE_DIGEST = (
     "958e73db5698bd153dd304c02b7137966da2f4d5de2a05fbf48ab43e27de34ee"
 )
 EXPECTED_CONTROLLED_DIGEST = (
-    "56bf10a805e2fc32af569d9db0070b932c0a93f1a246f8f286b2d60f6c780b44"
+    "12499ce39fd575507665bf90c6b434f1d521f97ca821099bea6bfd348f292395"
 )
-EXPECTED_DECLARATION_COUNT = 221
+EXPECTED_DECLARATION_COUNT = 224
 
 MAIN = "Lean/Meta/Tactic/Simp/Main.lean"
 REWRITE = "Lean/Meta/Tactic/Simp/Rewrite.lean"

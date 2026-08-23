@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 import time
-from typing import Any
+from typing import Any, Callable
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -65,17 +65,50 @@ def syntax_inventory_file(path: Path, module: str, timeout: int) -> list[dict[st
     return result
 
 
-def replace_bytes(source: bytes, entry: dict[str, Any], replacement: str) -> bytes:
-    start, end = entry["startByte"], entry["endByte"]
-    actual = source[start:end].decode("utf-8")
+def validate_occurrence(source: bytes, entry: dict[str, Any]) -> None:
+    start, end = int(entry["startByte"]), int(entry["endByte"])
+    if not 0 <= start < end <= len(source):
+        raise RuntimeError(
+            f"invalid inventory range for {entry['module']}:{entry['line']}: "
+            f"{start}:{end} in {len(source)} bytes"
+        )
+    try:
+        actual = source[start:end].decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RuntimeError(
+            f"inventory range splits UTF-8 for {entry['module']}:{entry['line']}"
+        ) from error
     if actual != entry["source"]:
         raise RuntimeError(
             f"stale inventory for {entry['module']}:{entry['line']}: "
             f"expected {entry['source']!r}, found {actual!r}"
         )
-    indent = " " * entry["column"]
-    replacement = replacement.replace("\n", "\n" + indent)
-    return source[:start] + replacement.encode("utf-8") + source[end:]
+    if source[start : start + 4] != b"simp":
+        raise RuntimeError(
+            f"supported occurrence does not start with `simp`: "
+            f"{entry['module']}:{entry['line']}"
+        )
+
+
+def rewrite_simp_heads(
+    source: bytes,
+    entries: list[dict[str, Any]],
+    replacement: Callable[[dict[str, Any]], str],
+) -> bytes:
+    """Replace only each `simp` token so nested occurrences compose exactly."""
+    starts: set[int] = set()
+    for entry in entries:
+        validate_occurrence(source, entry)
+        start = int(entry["startByte"])
+        if start in starts:
+            raise RuntimeError(
+                f"duplicate instrumentation start for {entry['module']}:{entry['line']}"
+            )
+        starts.add(start)
+    for entry in sorted(entries, key=lambda item: int(item["startByte"]), reverse=True):
+        start = int(entry["startByte"])
+        source = source[:start] + replacement(entry).encode("utf-8") + source[start + 4 :]
+    return source
 
 
 def inject_import(source: bytes, imported: str) -> bytes:

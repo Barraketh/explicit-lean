@@ -149,6 +149,7 @@ def replayCertificate (recording : ExplicitLean.SimpEngine.Recording.TacticRecor
 
 private def recordAndReplay (simpStx : Syntax) (occurrenceId? : Option String := none) : TacticM Unit := do
   let recording ← ExplicitLean.SimpEngine.Recording.recordCertificate simpStx
+    (commitReference := false)
   replayCertificate recording
   let occurrence := occurrenceId?.map (fun id => s!" occurrence={id}") |>.getD ""
   logInfo m!"SIMP_ENGINE_REPLAY{occurrence} branches={String.intercalate "," recording.branches.toList}"

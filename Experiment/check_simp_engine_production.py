@@ -50,12 +50,9 @@ def instrument(module: str) -> tuple[Path, int]:
         for entry in coverage.syntax_inventory_file(source_path, module, 180)
         if entry["kind"] in coverage.SUPPORTED_KINDS
     ]
-    for entry in sorted(entries, key=lambda item: item["startByte"], reverse=True):
-        original = entry["source"]
-        if not original.startswith("simp"):
-            raise RuntimeError(f"unexpected supported simp syntax: {original!r}")
-        replacement = "simp_engine_reference" + original[len("simp") :]
-        source = coverage.replace_bytes(source, entry, replacement)
+    source = coverage.rewrite_simp_heads(
+        source, entries, lambda _entry: "simp_engine_reference"
+    )
     source = coverage.inject_import(source, "ExplicitLean.SimpEngine.Reference")
     destination = OUTPUT / module
     destination.parent.mkdir(parents=True, exist_ok=True)

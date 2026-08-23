@@ -389,6 +389,15 @@ current state. Equal duplicates are harmless; different certificates for the
 same state are rejected as ambiguous. No mutable execution counter participates
 in replay.
 
+Nested source occurrences compose by replacing only the leading `simp` token
+of each occurrence, never an enclosing byte range. Recording leaves its already
+verified upstream result in the proof state, so elaborating a nested tactic for
+an outer explicit rule does not execute it a second time. Explicit-rule origin
+identity canonicalizes the recording and materialization wrapper nodes back to
+their underlying `simp` syntax. This canonical string is used only to identify
+the theorem already elaborated in the source context; replay does not execute
+the canonicalized `simp` text.
+
 The retained original simp arguments reconstruct the authored theorem terms,
 configuration, and location subjects. They do not authorize ambient simp,
 congruence, simproc, or discharger selection; traversal and operation selection
@@ -501,6 +510,12 @@ equation rules use the stable source declaration and equation index rather than
 the temporary theorem name. Candidate ordering is relevant only while
 recording; an explicit replay operation does not consult an ambient theorem
 tree.
+
+For authored compound rule terms, replay searches only the explicit theorem set
+elaborated from the retained original arguments. Instrumentation wrappers in a
+nested tactic are normalized for origin comparison, then rule/lhs fingerprints
+and the variant ordinal select the recorded theorem. The normalized source is
+never elaborated as a fallback.
 
 The match envelope validates ordered binder and instance assignments. Replay
 may use Lean's unifier and typeclass synthesis to construct those assignments,
@@ -623,9 +638,10 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused and two bounded production modules contain 63
-occurrences: 61 materialize across 65 dynamic executions, while two remain
-explicitly simproc-deferred. The focused gate covers private qualified rule
+copies are compiled. The focused and two bounded production modules contain 66
+occurrences: 63 materialize across 67 successful executions, two remain
+explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
+The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
 locations, configuration-driven builtins, and stable lazy-equation origins in
 an isolated ground context. A source-only engine-schema mutation is rejected
@@ -665,21 +681,50 @@ successful non-simproc/non-custom-discharger execution materializes; there are
 no coverage, recorder, harness, declaration, aggregate, or unclassified
 failures.
 
+Status: validated inventory and cloud infrastructure complete; shard result
+pending. The inventory fixes 8,264 module files, 6,319 modules containing
+83,425 occurrences, source hashes, and exact byte ranges at the tested commit.
+It includes 91 nested occurrences, uses the exact frontend for five modules
+whose lightweight parse requires recovery, and collapses one byte-identical
+duplicate syntax record. Modules are assigned by
+`SHA256(module) mod shardCount`. Each shard records a module once and, when it
+has accepted executions, compiles one copied module with all accepted
+occurrences materialized. Diagnostic group bisection runs only after a
+materialization failure and never changes the gate. The reducer requires every
+shard, module, occurrence, and replay count before it can pass.
+
 ## 11. Cloud execution design
 
-The repository currently has no GitHub Actions workflow. Before E6, add a
-manual `workflow_dispatch` workflow with inputs for commit SHA, shard count,
-timeout, and optional module prefix. It must:
+The GitHub Actions workflow has a manual `workflow_dispatch` entry with inputs
+for commit SHA, shard count, timeout, and optional module prefix. A dedicated
+one-shot push ref permits the reviewed workflow to run before it reaches the
+default branch. It:
 
 - refuse a dirty or moving ref and check out the exact SHA;
 - restore Lean/Mathlib build caches keyed by toolchain, lake manifest, and SHA;
 - run a matrix of independent shards;
 - use a shared inventory artifact and disjoint shard output directories;
 - upload reports even when a shard fails;
+- reclaim generated certificates and copied sources after each checkpoint;
 - run one reducer that verifies inventory coverage and schema/engine identity;
   and
 - retain the merged JSON, Markdown summary, compiler logs, and failing source
   copies.
+
+The terminal taxonomy is deliberately closed:
+
+- `materialized`: at least one successful execution, with exactly the same
+  number of source replays;
+- `deferred_simproc`, `deferred_custom_discharger`, or their combination: every
+  successful execution at that occurrence crosses a separately designed
+  boundary;
+- `unsuccessful_execution`: the occurrence ran, upstream `simp` failed, and no
+  successful execution was recorded; and
+- `not_executed`: neither the success nor upstream-failure observer ran.
+
+`mixed_deferred_execution`, `recording_failure`, `materialization_failure`,
+`harness_failure`, and `unclassified` are reportable diagnostics but failing
+gate outcomes.
 
 The workflow is dispatched only from a clean committed implementation after E5.
 Local parallelism remains the fast focused gate; cloud parallelism is the final
@@ -688,8 +733,8 @@ closure run, not a substitute for the completeness review.
 ## 12. Decisions
 
 - Schema 15 remains only in Git history and is not a simplifier IR dependency.
-- E1 through E5 are complete; the next implementation step is full cloud
-  closure (E6).
+- E1 through E5 and the E6 cloud infrastructure are complete; the full E6
+  corpus result is pending.
 - The correctness boundary is a pinned source fork with record and replay
   modes.
 - Structural traversal and dsimp are first-class certificate semantics.

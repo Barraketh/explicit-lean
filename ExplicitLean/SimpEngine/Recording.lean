@@ -197,7 +197,11 @@ structure TacticRecording where
   fvarIds : Array FVarId
   simplifyTarget : Bool
 
-def recordCertificate (simpStx : Syntax) : TacticM TacticRecording := do
+/-- Record and validate one tactic execution. When `commitReference` is true,
+    leave the verified upstream result in the tactic state; otherwise restore
+    the post-context initial state so the returned certificate can be replayed. -/
+def recordCertificate (simpStx : Syntax) (commitReference : Bool := false)
+    (onReferenceFailure : TacticM Unit := pure ()) : TacticM TacticRecording := do
   let { ctx, simprocs, dischargeWrapper, .. } ←
     mkSimpContext simpStx (eraseLocal := false)
   let (fvarIds, simplifyTarget) ← locationSubjects (expandOptLocation simpStx[5])
@@ -206,13 +210,18 @@ def recordCertificate (simpStx : Syntax) : TacticM TacticRecording := do
   let mainGoal := initialGoals.head!
   let tail := initialGoals.tail
   let initialState ← Simp.Engine.proofStateFingerprint initialGoals
-  let (referenceFinal, certificate, branches) ← dischargeWrapper.with fun discharge? => do
-    let (referenceResult, _) ← Meta.simpGoal mainGoal ctx
-      (simprocs := simprocs) (discharge? := discharge?)
-      (simplifyTarget := simplifyTarget) (fvarIdsToSimp := fvarIds)
+  let (certificate, branches) ← dischargeWrapper.with fun discharge? => do
+    let (referenceResult, _) ← try
+      Meta.simpGoal mainGoal ctx
+        (simprocs := simprocs) (discharge? := discharge?)
+        (simplifyTarget := simplifyTarget) (fvarIdsToSimp := fvarIds)
+    catch error =>
+      onReferenceFailure
+      throw error
     let referenceGoals := goalsAfter tail referenceResult
     setGoals referenceGoals
     let referenceFinal ← Simp.Engine.proofStateFingerprint referenceGoals
+    let referenceMeta ← Meta.saveState
     initialMeta.restore
     setGoals initialGoals
     let methods := match discharge? with
@@ -229,15 +238,19 @@ def recordCertificate (simpStx : Syntax) : TacticM TacticRecording := do
       initialState
       finalState
     }
-    return (referenceFinal, certificate, recorded.branches)
-  unless referenceFinal == certificate.finalState do
-    throwError "record_mode_mismatch: final proof state"
-  initialMeta.restore
-  setGoals initialGoals
+    unless referenceFinal == certificate.finalState do
+      throwError "record_mode_mismatch: final proof state"
+    if commitReference then
+      referenceMeta.restore
+      setGoals referenceGoals
+    else
+      initialMeta.restore
+      setGoals initialGoals
+    return (certificate, recorded.branches)
   return { ctx, certificate, branches, fvarIds, simplifyTarget }
 
 private def recordTactic (simpStx : Syntax) (occurrenceId? : Option String := none) : TacticM Unit := do
-  let recording ← recordCertificate simpStx
+  let recording ← recordCertificate simpStx (commitReference := true)
   logCertificate recording.certificate recording.branches occurrenceId?
 
 private def recordObservation (simpStx : Syntax) (target : Expr) : TacticM Unit := do
@@ -283,12 +296,10 @@ elab_rules : tactic
       let inner := mkNode ``Lean.Parser.Tactic.simp #[
         mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
       recordTactic inner
-      evalTactic inner
   | `(tactic| simp_engine_recording_id $id:str $args:simpEngineRecordingArgs) => withMainContext do
       let inner := mkNode ``Lean.Parser.Tactic.simp #[
         mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
       recordTactic inner (some id.getString)
-      evalTactic inner
   | `(tactic| simp_engine_observe $args:simpEngineRecordingArgs) => withMainContext do
       let target ← instantiateMVars (← (← getMainGoal).getType)
       let inner := mkNode ``Lean.Parser.Tactic.simp #[

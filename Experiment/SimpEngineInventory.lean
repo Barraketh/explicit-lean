@@ -1,6 +1,7 @@
 import Mathlib
 import ExplicitLean.SimpEngine.Inventory
 import Lean.Elab.Frontend
+import Lean.Elab.Import
 import Lean.Parser.Module
 import Lean.Util.Path
 
@@ -11,6 +12,28 @@ private def affectsParserContext (stx : Syntax) : Bool :=
   stx.isOfKind ``Lean.Parser.Command.«section» ||
   stx.isOfKind ``Lean.Parser.Command.«end» ||
   stx.isOfKind ``Lean.Parser.Command.«open»
+
+private def definesNotation (stx : Syntax) : Bool :=
+  stx.isOfKind ``Lean.Parser.Command.«notation» ||
+  stx.isOfKind ``Lean.Parser.Command.«mixfix» ||
+  stx.isOfKind `Mathlib.Tactic.scopedNS
+
+private def elabNotationForParser (command : Syntax) : Lean.Elab.Frontend.FrontendM Unit := do
+  let before ← Lean.Elab.Frontend.getCommandState
+  let scope :: scopes := before.scopes
+    | throw <| IO.Error.userError "inventory frontend has no command scope"
+  let savedOptions := scope.opts
+  let options := Lean.Elab.Term.Quotation.quotPrecheck.set savedOptions false
+  Lean.Elab.Frontend.setCommandState {
+    before with scopes := { scope with opts := options } :: scopes
+  }
+  Lean.Elab.Frontend.elabCommandAtFrontend command
+  let after ← Lean.Elab.Frontend.getCommandState
+  let scope :: scopes := after.scopes
+    | throw <| IO.Error.userError "inventory notation removed its command scope"
+  Lean.Elab.Frontend.setCommandState {
+    after with scopes := { scope with opts := savedOptions } :: scopes
+  }
 
 private def processInventoryCommand : Lean.Elab.Frontend.FrontendM Bool := do
   Lean.Elab.Frontend.updateCmdPos
@@ -29,7 +52,9 @@ private def processInventoryCommand : Lean.Elab.Frontend.FrontendM Bool := do
   modify fun state => { state with commands := state.commands.push command }
   Lean.Elab.Frontend.setParserState nextParserState
   Lean.Elab.Frontend.setMessages messages
-  if affectsParserContext command then
+  if definesNotation command then
+    elabNotationForParser command
+  else if affectsParserContext command then
     Lean.Elab.Frontend.elabCommandAtFrontend command
   return Parser.isTerminalCommand command
 
@@ -38,7 +63,7 @@ private partial def processInventoryCommands : Lean.Elab.Frontend.FrontendM Unit
     processInventoryCommands
 
 private def parseModuleIncrementally (env : Environment) (path : System.FilePath)
-    (source : String) : IO (Syntax × Bool) := do
+    (source : String) : IO (Syntax × MessageLog) := do
   let inputCtx := Parser.mkInputContext source path.toString
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   let initialState : Lean.Elab.Frontend.State := {
@@ -48,15 +73,36 @@ private def parseModuleIncrementally (env : Environment) (path : System.FilePath
   }
   let (_, state) ← (processInventoryCommands.run { inputCtx }).run initialState
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
-  return (moduleSyntax, state.commandState.messages.hasErrors)
+  return (moduleSyntax, state.commandState.messages)
+
+private unsafe def parseModuleFully (path : System.FilePath)
+    (source : String) : IO (Syntax × MessageLog) := do
+  let inputCtx := Parser.mkInputContext source path.toString
+  let (header, parserState, messages) ← Parser.parseHeader inputCtx
+  Lean.enableInitializersExecution
+  let env ← Lean.importModules (Lean.Elab.HeaderSyntax.imports header) {}
+    (loadExts := true)
+  let env := env.setMainModule `ExplicitLean.SimpEngine.InventoryFallback
+  let state ← Lean.Elab.IO.processCommands inputCtx parserState
+    (Lean.Elab.Command.mkState env messages)
+  let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
+  return (moduleSyntax, state.commandState.messages)
 
 private unsafe def inventoryFile (env : Environment) (path : System.FilePath) : IO UInt32 := do
   let source ← IO.FS.readFile path
   let fileMap := FileMap.ofString source
   try
-    let (stx, hasErrors) ← parseModuleIncrementally env path source
-    if hasErrors then
+    let (fastSyntax, fastMessages) ← parseModuleIncrementally env path source
+    let (stx, messages) ← if fastMessages.hasErrors then
+      IO.println s!"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={path}"
+      parseModuleFully path source
+    else
+      pure (fastSyntax, fastMessages)
+    if messages.hasErrors then
       IO.eprintln s!"simp engine inventory could not parse {path} without recovery"
+      for message in messages.toArray do
+        if message.severity == .error then
+          IO.eprintln s!"{message.pos.line}:{message.pos.column}: {← message.data.toString}"
       return 1
     for entry in ExplicitLean.SimpEngine.Inventory.collect path.toString fileMap stx do
       IO.println (toJson entry).compress

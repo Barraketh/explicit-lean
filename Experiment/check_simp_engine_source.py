@@ -28,6 +28,8 @@ RECORD = re.compile(
     r"deferredSubjects=(\d+) subjects=(\d+)"
 )
 REPLAY = re.compile(r"SIMP_ENGINE_SOURCE_REPLAY occurrence=(\S+)")
+UNSUCCESSFUL = re.compile(r"SIMP_ENGINE_SOURCE_UNSUCCESSFUL occurrence=(\S+)")
+RECORDER_FAILURE = re.compile(r"SIMP_ENGINE_SOURCE_RECORDER_FAILURE occurrence=(\S+)")
 
 
 def dynamic_library() -> str:
@@ -61,14 +63,14 @@ def recording_copy(
     key: str, module: str, source: bytes, entries: list[dict[str, object]],
     certificate_directory: Path,
 ) -> Path:
-    for entry in sorted(entries, key=lambda item: item["startByte"], reverse=True):
+    def replacement(entry: dict[str, object]) -> str:
         occurrence = str(entry["id"])
-        original = str(entry["source"])
-        replacement = (
+        return (
             f"simp_engine_source_recording {json.dumps(occurrence)} "
-            f"{json.dumps(str(certificate_directory))}" + original[len("simp") :]
+            f"{json.dumps(str(certificate_directory))}"
         )
-        source = coverage.replace_bytes(source, entry, replacement)
+
+    source = coverage.rewrite_simp_heads(source, entries, replacement)
     source = coverage.inject_import(source, "ExplicitLean.SimpEngine.Source")
     destination = OUTPUT / "record" / key / module
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -80,20 +82,20 @@ def materialized_copy(
     key: str, module: str, source: bytes, entries: list[dict[str, object]],
     certificates: dict[str, list[Path]], selected: set[str],
 ) -> Path:
-    for entry in sorted(entries, key=lambda item: item["startByte"], reverse=True):
+    chosen = [entry for entry in entries if str(entry["id"]) in selected]
+
+    def replacement(entry: dict[str, object]) -> str:
         occurrence = str(entry["id"])
-        if occurrence not in selected:
-            continue
         terms = sorted({path.read_text(encoding="utf-8") for path in certificates[occurrence]})
         if not terms:
             raise RuntimeError(f"selected occurrence has no certificate source: {occurrence}")
         array_source = "#[\n" + ",\n".join(json.dumps(term) for term in terms) + "\n]"
-        original = str(entry["source"])
-        replacement = (
+        return (
             f"simp_engine_apply {json.dumps(occurrence)} "
-            f"(certificates := {array_source})" + original[len("simp") :]
+            f"(certificates := {array_source})"
         )
-        source = coverage.replace_bytes(source, entry, replacement)
+
+    source = coverage.rewrite_simp_heads(source, chosen, replacement)
     source = coverage.inject_import(source, "ExplicitLean.SimpEngine.Source")
     destination = OUTPUT / "materialized" / key / module
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -146,6 +148,7 @@ def main() -> None:
     occurrence_total = 0
     materialized_total = 0
     deferred_total = 0
+    unsuccessful_total = 0
     execution_total = 0
     for key, path, module, require_total in FIXTURES:
         source, entries = inventory(path, module)
@@ -168,6 +171,15 @@ def main() -> None:
                 raise RuntimeError(f"certificate source was not written: {certificate_path}")
             outcomes[occurrence].append(int(deferred))
             certificates[occurrence].append(certificate_path)
+        unsuccessful = Counter(match.group(1) for match in UNSUCCESSFUL.finditer(output))
+        unknown_unsuccessful = set(unsuccessful) - known
+        if unknown_unsuccessful:
+            raise RuntimeError(
+                f"unknown unsuccessful occurrence in source log: {unknown_unsuccessful}"
+            )
+        recorder_failures = set(RECORDER_FAILURE.findall(output))
+        if recorder_failures:
+            raise RuntimeError(f"source recorder failures: {recorder_failures}")
         selected = {
             occurrence for occurrence, executions in outcomes.items()
             if executions and all(deferred == 0 for deferred in executions)
@@ -176,11 +188,13 @@ def main() -> None:
             occurrence for occurrence, executions in outcomes.items()
             if any(subjects > 0 for subjects in executions)
         }
-        not_executed = known - outcomes.keys()
-        if require_total and (selected != known or deferred or not_executed):
+        not_executed = known - outcomes.keys() - unsuccessful.keys()
+        terminal = selected | deferred | set(unsuccessful)
+        if require_total and (terminal != known or deferred or not_executed):
             raise RuntimeError(
                 f"focused source fixture was not total: selected={selected}, "
-                f"deferred={deferred}, not_executed={not_executed}"
+                f"deferred={deferred}, unsuccessful={unsuccessful}, "
+                f"not_executed={not_executed}"
             )
         if key == "focused":
             check_engine_mismatch(module, source, entries, certificates, dynlib)
@@ -201,12 +215,14 @@ def main() -> None:
         occurrence_total += len(known)
         materialized_total += len(selected)
         deferred_total += len(deferred)
+        unsuccessful_total += sum(unsuccessful.values())
         execution_total += sum(expected.values())
     print(
         "schema-16 source materialization: "
         f"{len(FIXTURES)} modules, {occurrence_total} occurrences, "
         f"{materialized_total} materialized, {deferred_total} deferred, "
-        f"{execution_total} executions, engine mutation rejected: ok"
+        f"{unsuccessful_total} unsuccessful, {execution_total} executions, "
+        "engine mutation rejected: ok"
     )
 
 

@@ -1,6 +1,6 @@
 # Explicit Lean implementation plan
 
-Status: E1 through E5 complete; E6 is next.
+Status: E1 through E5 complete; E6 cloud execution is in progress.
 
 ## 1. Current goal
 
@@ -87,10 +87,13 @@ string arrays. Every payload is decoded and compared structurally with the
 recorded certificate before it is written; `Name` values use lossless
 string/numeric components rather than Lean's lossy default JSON codec. A source
 occurrence that executes more than once carries one certificate per distinct
-initial proof state and selects without a mutable execution counter. The source
-gate materializes 61 non-deferred occurrences across 65 executions in three
-complete module copies; the other two bounded occurrences are explicitly
-simproc-deferred. A mutated engine identity is rejected before replay.
+initial proof state and selects without a mutable execution counter. Nested
+occurrences are instrumented by replacing only their `simp` token; rule-origin
+identity canonicalizes the recording/materialization wrappers without executing
+ambient simp. The source gate covers 66 occurrences in three complete module
+copies: 63 materialize across 67 successful executions, two are explicitly
+simproc-deferred, and one executes unsuccessfully under `first`. A mutated
+engine identity is rejected before replay.
 
 ### E5. Pre-cloud completeness review
 
@@ -124,6 +127,16 @@ Gate: every occurrence has a terminal classification; every committed
 successful non-simproc/non-custom-discharger execution records, replays,
 materializes, and compiles without fallback.
 
+Status: validated inventory and infrastructure complete; cloud shard result
+pending. The committed runner inventories 8,264 files and validates 83,425
+occurrences in 6,319 modules byte-for-byte, including 91 nested occurrences.
+It assigns modules by a stable SHA-256 hash, records every module once, and
+compiles one materialized copy for all accepted occurrences in that module.
+Reports are checkpointed and work files reclaimed after every module. The
+reducer rejects missing shards/modules/occurrences, source or engine drift,
+mixed deferred/non-deferred executions, replay-count mismatches, and every
+recorder, harness, or materialization failure.
+
 ## 4. Current local gate
 
 `Experiment/run.sh` is intentionally small. It builds the new engine and runs
@@ -137,8 +150,9 @@ only tests that provide confidence in that engine:
 6. focused closed replay;
 7. single-field replay mutation rejection;
 8. bounded Mathlib reference equivalence;
-9. batched bounded recording/classification/replay; and
-10. schema-16 source round-trip and complete-module materialization.
+9. batched bounded recording/classification/replay;
+10. schema-16 source round-trip and complete-module materialization; and
+11. cloud shard assignment and strict reducer mutation rejection.
 
 Historical proof exporters, schema-15 bridges, fallback materializers, and
 their regression tests have been removed. Git history remains the record of
