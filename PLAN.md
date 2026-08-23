@@ -877,6 +877,21 @@ rules, and no operational or proof fallback. Focused gates reject a missing
 command, a command moved past the first named rule, and a different projection
 identity. Schema 15 is unchanged.
 
+O6h implementation status (2026-08-22): an ambient local `let` now has an
+exact operational reduction, printed as `reduce local_def s`. Elaboration
+requires an accessible local let declaration; replay accepts only its exact
+free-variable identity, local-context index, user name, and stored value, then
+returns that value without invoking weak-head reduction, simplification, or a
+local-context search. Bridge synthesis considers this command only when the
+already matched continuity-gap expression is itself that local fvar. Because
+expanding the value can change later historical theorem sites, the augmented
+trace runs the existing bounded selector discovery before full replay and
+final-state validation. Directed occurrence `26c72cb4c4292d08` now
+materializes with `reduce local_def s`, the already recorded `reduce zeta`,
+five named rules, and `match 3 => Subalgebra.coe_mk`; deletion, reordering, and
+wrong-local mutations fail closed. No recorder event, ambient simp rule, or
+proof fallback is fabricated. Schema 15 is unchanged.
+
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
 `Simp.Config` field as normalized JSON provenance; certificates compile the

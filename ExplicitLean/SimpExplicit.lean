@@ -240,8 +240,12 @@ inductive ReductionKind where
   | iota
   | projection (structureName : Name) (field : Nat)
   | projectionFunction (name : Name)
+  /-- Expand exactly one ambient local `let` declaration.  The declaration
+      identity and its stored value are kept in the replay operation rather
+      than rediscovered from the simplifier or the local context. -/
+  | localDef (fvarId : FVarId) (contextIndex : Nat) (name : Name) (value : Expr)
   | eta
-  deriving BEq, Repr
+  deriving Repr
 
 structure ReductionIdentity where
   kind : ReductionKind
@@ -1309,6 +1313,11 @@ private def reductionReport (reduction : ReductionIdentity) : ReductionReport :=
       name := some name.toString
       field := none
     }
+  | .localDef _ _ name _ => {
+      kind := "local_def"
+      name := some name.toString
+      field := none
+    }
   | .eta => { kind := "eta", name := none, field := none }
 
 private def reductionText (reduction : ReductionIdentity) : MetaM String := do
@@ -1324,6 +1333,10 @@ private def reductionText (reduction : ReductionIdentity) : MetaM String := do
   | .projectionFunction name =>
       let printedName ← declarationRuleName name
       return s!"reduce projection_fn {printedName}"
+  | .localDef _ _ name _ =>
+      if name.isInaccessibleUserName then
+        throwError "simp_explicit cannot print inaccessible local definition '{name}'"
+      return s!"reduce local_def {name}"
   | .eta => return "reduce eta"
 
 private def reductionSource (reduction : ReductionIdentity) (phase : Phase) : MetaM String := do
@@ -1555,7 +1568,30 @@ private def elaborateReduction (stx : Syntax) : TacticM (Phase × ReductionIdent
     if operation == `projection_fn then
       let name ← resolveReductionDeclaration stx[3]
       return (phase, { kind := .projectionFunction name })
-    throwErrorAt stx[2] "expected `delta` or `projection_fn` for a named reduction command"
+    if operation == `local_def then
+      let some localExpr ← Term.isLocalIdent? stx[3]
+        | throwErrorAt stx[3]
+            "expected an accessible local let identifier for `reduce local_def`"
+      let .fvar fvarId := localExpr
+        | throwErrorAt stx[3]
+            "expected an accessible local let identifier for `reduce local_def`"
+      let localDecl ← try
+        fvarId.getDecl
+      catch _ =>
+        throwErrorAt stx[3] "local definition is no longer available"
+      if localDecl.userName.isInaccessibleUserName then
+        throwErrorAt stx[3]
+          "`reduce local_def` requires an accessible local let identifier"
+      match localDecl with
+      | .ldecl contextIndex declarationFVarId name _ value _ _ =>
+          unless declarationFVarId == fvarId do
+            throwErrorAt stx[3] "local definition identity changed during elaboration"
+          return (phase, { kind := .localDef fvarId contextIndex name value })
+      | .cdecl .. =>
+          throwErrorAt stx[3]
+            "`reduce local_def` requires a local let declaration, not a variable"
+    throwErrorAt stx[2]
+      "expected `delta`, `projection_fn`, or `local_def` for a named reduction command"
   unless stx.getNumArgs == 3 do
     throwErrorAt stx "invalid simp_explicit reduction command"
   match operation with
@@ -1925,6 +1961,8 @@ private def replayCanonicalReduction : ReductionKind → String
   | .iota => "iota"
   | .projection structureName field => s!"projection:{structureName}:{field}"
   | .projectionFunction name => s!"projection_function:{name}"
+  | .localDef fvarId contextIndex name _ =>
+      s!"local_def:{repr fvarId}:{contextIndex}:{name}"
   | .eta => "eta"
 
 private def replayCanonicalEventKey (ambientFVars : Array FVarId)
@@ -2071,6 +2109,29 @@ private def replayEta? (input : Expr) : MetaM (Option Expr) := do
   let output := input.eta
   return if Expr.equal input output then none else some output
 
+/-! A local-definition reduction is intentionally narrower than zeta.  It
+    recognizes one exact ambient fvar/declaration and returns the value stored
+    in the certificate identity.  No simplifier reduction, whnf, or local-name
+    search is allowed here. -/
+private def replayLocalDef? (input : Expr) (fvarId : FVarId)
+    (contextIndex : Nat) (name : Name) (value : Expr) : Simp.SimpM (Option Expr) := do
+  let .fvar inputFVarId := input | return none
+  unless inputFVarId == fvarId do
+    return none
+  let localDecl ← try
+    liftM fvarId.getDecl
+  catch _ =>
+    return none
+  match localDecl with
+  | .ldecl actualIndex actualFVarId actualName _ actualValue _ _ =>
+      unless actualFVarId == fvarId && actualIndex == contextIndex && actualName == name do
+        return none
+      unless Expr.equal actualValue value do
+        return none
+      return some value
+  | .cdecl .. =>
+      return none
+
 private def applyRecordedReduction? (input : Expr) (reduction : ReductionIdentity) :
     Simp.SimpM (Option Simp.Result) := do
   let output? ← match reduction.kind with
@@ -2080,6 +2141,8 @@ private def applyRecordedReduction? (input : Expr) (reduction : ReductionIdentit
     | .iota => replayIota? input
     | .projection structureName field => replayProjection? input structureName field
     | .projectionFunction name => replayProjectionFunction? input name
+    | .localDef fvarId contextIndex name value =>
+        replayLocalDef? input fvarId contextIndex name value
     | .eta => liftM <| replayEta? input
   return output?.bind (prooflessReductionResult? input)
 
@@ -3554,6 +3617,23 @@ private def boundedProjectionFunctionCandidates (expression : Expr) : MetaM (Arr
       result := result.push name
   return result
 
+/- The local-definition bridge is deliberately not a search over the ambient
+   context.  It is available only when the already matched gap expression is
+   itself an ambient fvar whose declaration is a let with a value. -/
+private def localDefReduction? (expression : Expr) : MetaM (Option ReductionIdentity) := do
+  let .fvar fvarId := expression | return none
+  let localDecl ← try
+    fvarId.getDecl
+  catch _ =>
+    return none
+  match localDecl with
+  | .ldecl contextIndex declarationFVarId name _ value _ _ =>
+      if declarationFVarId == fvarId && !name.isInaccessibleUserName then
+        return some { kind := .localDef fvarId contextIndex name value }
+      return none
+  | .cdecl .. =>
+      return none
+
 private structure CertificateBridgePrefix where
   firstUnconsumed : Nat
   selectors : Array ReplaySelector
@@ -3585,7 +3665,11 @@ private def certificateBridgePrefix? (target : Expr) (recorded : Array RecordedE
     else
       tickSelectors
   let some event := recorded[bestCount]? | return none
-  unless event.reduction.isNone && event.origins.size == 1 do
+  -- A missing transition can precede either a named theorem (the O6e/O6g
+  -- projection bridges) or an already recorded reduction (local-let
+  -- expansion followed by zeta).  In both cases the next event itself must
+  -- still have a single explicit replay identity.
+  unless event.reduction.isSome || event.origins.size == 1 do
     return none
   let some prefixExpr ← continuityPrefixReplay? target recorded bestSelectors bestCount
     | return none
@@ -4032,9 +4116,40 @@ private def bridgeCertificatePlan? (target : Expr) (searchedResult : Simp.Result
     return none
   let rawWithNext := annotateSelectorInfo <| baseEncoded.map fun event =>
     { event with replay := { event.replay with selector := .next } }
-  let candidates ← boundedProjectionFunctionCandidates bridge.matched.expression
   let rawEncodingInfos := baseEncoded.map (·.info)
   let rawPremiseEncodingInfos := baseEncoded.map (·.premiseEncodings)
+  -- A local let is the shortest possible continuity bridge.  Its identity is
+  -- taken only from the already matched fvar; no ambient declaration search is
+  -- performed.  Validate the complete augmented program before returning it.
+  if let some reduction ← localDefReduction? bridge.matched.expression then
+    let localDef0 ← syntheticBridgeReductionEvent bridge.matched.expression reduction
+    let .localDef _ _ _ value := reduction.kind | return none
+    -- Discovery needs the real transition endpoints.  Unlike the older
+    -- projection bridge, this operation knows its exact output without
+    -- executing a simplifier reduction: it is the stored local-let value.
+    let localDef := {
+      localDef0 with
+        event := {
+          localDef0.event with
+            step := .visit { expr := value }
+            result := { expr := value }
+        }
+    }
+    let mut augmented := baseEncoded.take bridge.firstUnconsumed
+    augmented := augmented.push localDef
+    augmented := augmented ++ baseEncoded.drop bridge.firstUnconsumed
+    -- The newly exposed value can change which occurrence of a later theorem
+    -- is historical.  Re-run the already bounded selector discovery on the
+    -- complete augmented trace; do not guess by choosing the first site.
+    for mode in #[CertificateSelectorMode.discover, CertificateSelectorMode.next,
+        CertificateSelectorMode.ticks] do
+      let selected? ← withoutModifyingState do
+        selectCertificateEvents? target searchedResult augmented mode
+      if let some selected := selected? then
+        return some (← makeCertificatePlan searchedResult
+          (annotateSelectorInfo selected) bindings
+          rawEncodingInfos rawPremiseEncodingInfos)
+  let candidates ← boundedProjectionFunctionCandidates bridge.matched.expression
   for name in candidates do
     let zeta ← syntheticBridgeReductionEvent bridge.matched.expression {
       kind := .zeta

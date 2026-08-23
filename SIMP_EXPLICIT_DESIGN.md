@@ -848,6 +848,20 @@ Quasispectrum occurrence `226e61786984b7bc` materializes with two explicit
 zero fallback metrics. Deletion, reordering past the first theorem rule, and
 identity-substitution mutations fail closed. Schema 15 is unchanged.
 
+O6h implementation status (2026-08-22): `reduce local_def <local>` is the
+explicit operation for expanding one ambient local let declaration. Its replay
+identity retains the exact fvar, declaration index, accessible user name, and
+stored value; it applies only to that fvar and returns only that value. It does
+not run whnf, `reduceStep`, a simplifier, or name-based local lookup. The
+certificate-only bridge is eligible only when continuity has already matched
+the gap to that local fvar, including when the next recorded event is itself a
+reduction. After insertion, the existing bounded historical-selector discovery
+is rerun over the augmented trace, and exact full-result validation remains the
+acceptance check. Directed occurrence `26c72cb4c4292d08` materializes as local
+definition expansion, recorded zeta, and named theorem applications (including
+the discovered third `Subalgebra.coe_mk` site), with zero fallback metrics.
+Delete, reorder, and wrong-local mutations fail closed. Schema 15 is unchanged.
+
 ### S. Simproc design
 
 Simproc handling begins only after a separate design discussion and document.

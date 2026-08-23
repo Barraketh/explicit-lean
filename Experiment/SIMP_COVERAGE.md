@@ -79,3 +79,11 @@ materializes with two `reduce projection_fn Units.val` commands and six named
 rules, with no fallback metrics. The focused production gate checks the stable
 trace and rejects deletion, reordering, and wrong-identity mutations. Schema 15
 is unchanged.
+
+O6h implementation status (2026-08-22): exact ambient local-let expansion is
+available as `reduce local_def <local>`. The operation checks the local fvar,
+context index, accessible name, and stored value, and bridge synthesis proposes
+it only for a continuity gap already matched to that fvar. The Directed target
+`26c72cb4c4292d08` now materializes with local-def expansion followed by its
+recorded zeta and named events; the focused gate rejects deletion, reordering,
+and a wrong local and asserts zero fallback metrics. Schema 15 is unchanged.
