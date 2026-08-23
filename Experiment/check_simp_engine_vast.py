@@ -59,11 +59,16 @@ def main() -> None:
         {"completedShards": [3], "failedShards": [4]},
     ]) != (3, 1):
         raise RuntimeError("Vast progress accounting changed")
+    defaults = vast.parser().parse_args(["run", "--output-dir", "unused"])
+    fallbacks = vast.replacement_offers(
+        offers + [offer(5, 13, 0.15, 8, 3.0)], defaults, {10}
+    )
+    if [value["machine_id"] for value in fallbacks] != [11, 13, 12]:
+        raise RuntimeError("Vast fallback filtering changed")
     if vast.parse_ssh_url("ssh://root@example.test:12345") != ("example.test", 12345):
         raise RuntimeError("Vast SSH URL parsing changed")
     if vast.parse_jsonish("{'success': True}") != {"success": True}:
         raise RuntimeError("Vast legacy CLI response parsing changed")
-    defaults = vast.parser().parse_args(["run", "--output-dir", "unused"])
     if defaults.concurrency != 1 or defaults.minimum_ram_gb_per_process != 120:
         raise RuntimeError("Vast memory-isolation defaults changed")
     print(

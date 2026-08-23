@@ -143,8 +143,12 @@ single-process limit is empirical: the first cloud attempt ran four compiles on
 32--64 GB hosts, and a representative instrumented module was killed with exit
 137 even when reproduced alone on a 64 GB machine. Offers are selected from the
 live market under unique-machine, reliability, CPU, RAM, disk, network,
-hourly-price, and total-runtime guards. All hosts set up in parallel; each
-begins its assigned batches as soon as it is ready. A failed setup or transfer
+hourly-price, and total-runtime guards. Because each host runs one Lean process,
+the CPU floor is four effective cores rather than an unrelated whole-machine
+core count. The fallback pool is refreshed from the live market a bounded
+number of times when churn exhausts the initial snapshot. All hosts set up in
+parallel; each begins its assigned batches as soon as it is ready. A failed
+setup or transfer
 is destroyed and replaced in-place while other workers keep running. The
 inventory is compressed before transfer, checkpoints are copied home every 30
 seconds even while the remaining hosts provision, and the controller stops at

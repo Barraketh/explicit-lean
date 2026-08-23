@@ -22,9 +22,9 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_QUERY = (
-    "verified=true rentable=true cpu_arch=amd64 cpu_cores_effective>=12 "
-    "cpu_ram>=128 disk_space>=80 disk_bw>=500 direct_port_count>=1 "
-    "reliability>=0.995 inet_down>=200 inet_up>=100"
+    "verified=true rentable=true cpu_arch=amd64 cpu_cores_effective>=4 "
+    "cpu_ram>=128 disk_space>=80 disk_bw>=300 direct_port_count>=1 "
+    "reliability>=0.99 inet_down>=100 inet_up>=50"
 )
 
 
@@ -137,13 +137,41 @@ def select_offers(
     )
 
 
-def search_offers(args: argparse.Namespace, extra: int = 0) -> list[dict[str, Any]]:
+def market_offers(args: argparse.Namespace) -> list[dict[str, Any]]:
     raw = json_command([
         "vastai", "search", "offers", args.offer_query,
-        "--raw", "--limit", str(max(100, args.workers + extra)),
+        "--raw", "--limit", "200",
         "--storage", str(args.disk_gb), "-o", "dph_total",
     ], timeout=60)
-    offers = raw if isinstance(raw, list) else raw.get("offers", [])
+    return raw if isinstance(raw, list) else raw.get("offers", [])
+
+
+def replacement_offers(
+    offers: list[dict[str, Any]],
+    args: argparse.Namespace,
+    excluded_machines: set[int],
+) -> list[dict[str, Any]]:
+    minimum_ram_mb = args.minimum_ram_gb_per_process * args.concurrency * 1000
+    result: list[dict[str, Any]] = []
+    machines = set(excluded_machines)
+    for offer in sorted(
+        offers,
+        key=lambda value: (offer_score(value, args.concurrency), value["dph_total"]),
+    ):
+        machine = int(offer.get("machine_id", -1))
+        if machine < 0 or machine in machines:
+            continue
+        if float(offer.get("dph_total") or float("inf")) > args.max_offer_hourly:
+            continue
+        if offer_ram_mb(offer) < minimum_ram_mb:
+            continue
+        result.append(offer)
+        machines.add(machine)
+    return result
+
+
+def search_offers(args: argparse.Namespace, extra: int = 0) -> list[dict[str, Any]]:
+    offers = market_offers(args)
     planned = select_offers(
         offers,
         args.workers,
@@ -155,23 +183,7 @@ def search_offers(args: argparse.Namespace, extra: int = 0) -> list[dict[str, An
     if extra <= 0:
         return planned
     selected_machines = {int(offer["machine_id"]) for offer in planned}
-    extras: list[dict[str, Any]] = []
-    minimum_ram_mb = args.minimum_ram_gb_per_process * args.concurrency * 1000
-    for offer in sorted(
-        offers,
-        key=lambda value: (offer_score(value, args.concurrency), value["dph_total"]),
-    ):
-        machine = int(offer.get("machine_id", -1))
-        if machine < 0 or machine in selected_machines:
-            continue
-        if float(offer.get("dph_total") or float("inf")) > args.max_offer_hourly:
-            continue
-        if offer_ram_mb(offer) < minimum_ram_mb:
-            continue
-        extras.append(offer)
-        selected_machines.add(machine)
-        if len(extras) == extra:
-            break
+    extras = replacement_offers(offers, args, selected_machines)[:extra]
     return planned + extras
 
 
@@ -514,6 +526,8 @@ def run_closure(args: argparse.Namespace) -> int:
         raise RuntimeError("price and runtime guards must be positive")
     if args.minimum_ram_gb_per_process <= 0:
         raise RuntimeError("minimum RAM per concurrent Lean process must be positive")
+    if args.market_refreshes < 0:
+        raise RuntimeError("market refresh count cannot be negative")
     if not args.ssh_private_key.is_file() or not args.ssh_public_key.is_file():
         raise RuntimeError("Vast SSH private/public key pair is missing")
     assert_clean_commit(args.commit)
@@ -522,7 +536,7 @@ def run_closure(args: argparse.Namespace) -> int:
         raise RuntimeError(f"output directory is not empty: {output}")
     output.mkdir(parents=True, exist_ok=True)
     known_hosts = output / "known_hosts"
-    offers = search_offers(args, extra=max(8, args.workers))
+    offers = search_offers(args, extra=max(32, args.workers * 2))
     planned = offers[:args.workers]
     total_hourly = sum(float(offer["dph_total"]) for offer in planned)
     plan = {
@@ -565,21 +579,49 @@ def run_closure(args: argparse.Namespace) -> int:
     atomic_json(state_path, plan)
     deadline = time.monotonic() + args.max_runtime_hours * 3600
     try:
-        candidates = iter(offers)
+        candidate_queue = list(offers)
+        attempted_machines: set[int] = set()
+        market_refreshes = 0
         candidate_index = 0
+
+        def next_candidate_offer(active_cost: float) -> dict[str, Any]:
+            nonlocal market_refreshes
+            while True:
+                while candidate_queue:
+                    offer = candidate_queue.pop(0)
+                    machine = int(offer.get("machine_id", -1))
+                    if machine < 0 or machine in attempted_machines:
+                        continue
+                    attempted_machines.add(machine)
+                    if active_cost + float(offer["dph_total"]) > args.max_total_hourly:
+                        continue
+                    return offer
+                if market_refreshes >= args.market_refreshes:
+                    raise RuntimeError(
+                        "Vast offers were exhausted after bounded market refreshes"
+                    )
+                market_refreshes += 1
+                print(
+                    f"refreshing Vast fallback market "
+                    f"({market_refreshes}/{args.market_refreshes})",
+                    flush=True,
+                )
+                refreshed = replacement_offers(
+                    market_offers(args), args, attempted_machines
+                )
+                candidate_queue.extend(refreshed)
+                if not refreshed:
+                    time.sleep(10)
+
         while len(ready_instances) < args.workers:
             batch: list[dict[str, Any]] = []
             vacancy = args.workers - len(ready_instances)
             while len(batch) < vacancy:
-                offer = next(candidates, None)
-                if offer is None:
-                    raise RuntimeError("Vast offers were exhausted during SSH qualification")
                 active_cost = sum(
                     float(item["offer"]["dph_total"])
                     for item in ready_instances + batch
                 )
-                if active_cost + float(offer["dph_total"]) > args.max_total_hourly:
-                    continue
+                offer = next_candidate_offer(active_cost)
                 try:
                     instance = create_instance(offer, candidate_index, args)
                 except Exception as error:
@@ -618,18 +660,12 @@ def run_closure(args: argparse.Namespace) -> int:
         def launch_replacement(worker_index: int) -> dict[str, Any]:
             nonlocal candidate_index
             while True:
-                offer = next(candidates, None)
-                if offer is None:
-                    raise RuntimeError(
-                        f"Vast offers were exhausted replacing worker {worker_index}"
-                    )
                 active_cost = sum(
                     float(item["offer"]["dph_total"])
                     for item in slots.values()
                     if item.get("status") != "destroyed"
                 )
-                if active_cost + float(offer["dph_total"]) > args.max_total_hourly:
-                    continue
+                offer = next_candidate_offer(active_cost)
                 try:
                     replacement = create_instance(offer, candidate_index, args)
                 except Exception as error:
@@ -826,6 +862,7 @@ def parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--boot-timeout", type=int, default=180)
     run_parser.add_argument("--setup-timeout", type=int, default=1800)
     run_parser.add_argument("--poll-seconds", type=int, default=30)
+    run_parser.add_argument("--market-refreshes", type=int, default=3)
     run_parser.add_argument("--execute", action="store_true")
     run_parser.add_argument("--keep-instances", action="store_true")
     run_parser.set_defaults(function=run_closure)

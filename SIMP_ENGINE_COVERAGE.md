@@ -721,7 +721,9 @@ occurrence, and replay count before it can pass.
   key to every contract;
 - retains only candidates that pass the real SSH handshake, destroys rejects,
   and fills their slots from distinct fallback offers without exceeding the
-  aggregate hourly guard;
+  aggregate hourly guard; the one-process worker model requires four effective
+  cores, and the controller refreshes an exhausted fallback snapshot from the
+  live market a bounded number of times;
 - installs the pinned Lean toolchain on all hosts concurrently, checks out the
   exact commit, restores Mathlib artifacts, and builds the engine and shared
   library before starting work;
