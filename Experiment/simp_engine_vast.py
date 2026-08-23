@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -25,6 +26,15 @@ DEFAULT_QUERY = (
     "verified=true rentable=true cpu_arch=amd64 cpu_cores_effective>=16 "
     "cpu_ram>=96 disk_space>=80 disk_bw>=300 direct_port_count>=1 "
     "reliability>=0.99 inet_down>=100 inet_up>=50"
+)
+INVENTORY_INPUT_PATHS = (
+    "Experiment/SimpEngineInventory.lean",
+    "Experiment/simp_engine_cloud.py",
+    "Experiment/simp_engine_inventory.py",
+    "ExplicitLean/SimpEngine/Inventory.lean",
+    "lake-manifest.json",
+    "lakefile.toml",
+    "lean-toolchain",
 )
 
 
@@ -75,6 +85,10 @@ def atomic_json(path: Path, value: object) -> None:
 
 def current_commit() -> str:
     return run(["git", "rev-parse", "HEAD"]).strip()
+
+
+def current_mathlib_commit() -> str:
+    return run(["git", "-C", ".lake/packages/mathlib", "rev-parse", "HEAD"]).strip()
 
 
 def assert_clean_commit(commit: str) -> None:
@@ -515,6 +529,83 @@ def inventory(args: argparse.Namespace, output: Path) -> None:
     ], timeout=args.inventory_timeout)
 
 
+def validate_reusable_inventory(
+    value: object, expected_commit: str, expected_mathlib_commit: str
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RuntimeError("reusable inventory must be a JSON object")
+    if value.get("kind") != "simp_engine_inventory" or value.get("reportSchema") != 1:
+        raise RuntimeError("reusable inventory has an unsupported format")
+    if value.get("commit") != expected_commit:
+        raise RuntimeError(
+            f"reusable inventory commit mismatch: {value.get('commit')} != {expected_commit}"
+        )
+    if value.get("mathlibCommit") != expected_mathlib_commit:
+        raise RuntimeError(
+            "reusable inventory Mathlib commit mismatch: "
+            f"{value.get('mathlibCommit')} != {expected_mathlib_commit}"
+        )
+    engine = value.get("engine")
+    if not isinstance(engine, dict) or engine.get("certificateSchema") != 17:
+        raise RuntimeError("reusable inventory does not target certificate schema 17")
+    modules = value.get("modules")
+    if not isinstance(modules, list) or len(modules) != value.get("moduleFileCount"):
+        raise RuntimeError("reusable inventory module count is inconsistent")
+    occurrence_count = sum(
+        len(module.get("occurrences", []))
+        for module in modules
+        if isinstance(module, dict)
+    )
+    if occurrence_count != value.get("occurrenceCount"):
+        raise RuntimeError("reusable inventory occurrence count is inconsistent")
+    return value
+
+
+def inventory_inputs_unchanged(source_commit: str, target_commit: str) -> bool:
+    if source_commit == target_commit:
+        return True
+    result = subprocess.run(
+        ["git", "diff", "--quiet", source_commit, target_commit, "--", *INVENTORY_INPUT_PATHS],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    if result.returncode not in (0, 1):
+        raise RuntimeError(
+            f"cannot compare reusable inventory inputs ({result.returncode}): {result.stdout}"
+        )
+    return result.returncode == 0
+
+
+def reuse_inventory(args: argparse.Namespace, output: Path) -> None:
+    source = Path(args.reuse_inventory).expanduser().resolve()
+    if not source.is_file():
+        raise RuntimeError(f"reusable inventory does not exist: {source}")
+    try:
+        value = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"cannot read reusable inventory {source}: {error}") from error
+    if not isinstance(value, dict) or not isinstance(value.get("commit"), str):
+        raise RuntimeError("reusable inventory has no source commit")
+    source_commit = value["commit"]
+    validate_reusable_inventory(value, source_commit, current_mathlib_commit())
+    if not inventory_inputs_unchanged(source_commit, args.commit):
+        raise RuntimeError(
+            f"reusable inventory inputs changed between {source_commit} and {args.commit}"
+        )
+    if source_commit == args.commit:
+        shutil.copyfile(source, output / "inventory.json")
+        return
+    rebound = dict(value)
+    rebound["commit"] = args.commit
+    rebound["reusedFromCommit"] = source_commit
+    rebound["reusedAt"] = utc_now()
+    validate_reusable_inventory(rebound, args.commit, current_mathlib_commit())
+    atomic_json(output / "inventory.json", rebound)
+
+
 def reduce(output: Path, args: argparse.Namespace) -> int:
     result = subprocess.run([
         sys.executable, "Experiment/simp_engine_cloud.py", "reduce",
@@ -582,7 +673,11 @@ def run_closure(args: argparse.Namespace) -> int:
     if not args.execute:
         return 0
 
-    inventory(args, output)
+    if args.reuse_inventory:
+        reuse_inventory(args, output)
+        print(f"reused inventory: {args.reuse_inventory}", flush=True)
+    else:
+        inventory(args, output)
     archive = compressed_inventory(output)
     print(
         f"compressed inventory: {archive.stat().st_size / (1024 * 1024):.1f} MiB",
@@ -875,6 +970,7 @@ def parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--max-runtime-hours", type=float, default=3.0)
     run_parser.add_argument("--module-timeout", type=int, default=900)
     run_parser.add_argument("--inventory-timeout", type=int, default=3600)
+    run_parser.add_argument("--reuse-inventory", default="")
     run_parser.add_argument("--boot-timeout", type=int, default=180)
     run_parser.add_argument("--setup-timeout", type=int, default=1800)
     run_parser.add_argument("--poll-seconds", type=int, default=30)

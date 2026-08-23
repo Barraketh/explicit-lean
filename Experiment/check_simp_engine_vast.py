@@ -68,6 +68,29 @@ def main() -> None:
     ]) != (3, 1):
         raise RuntimeError("Vast progress accounting changed")
     defaults = vast.parser().parse_args(["run", "--output-dir", "unused"])
+    inventory_fixture = {
+        "kind": "simp_engine_inventory",
+        "reportSchema": 1,
+        "commit": "a" * 40,
+        "mathlibCommit": "b" * 40,
+        "engine": {"certificateSchema": 17},
+        "moduleFileCount": 1,
+        "occurrenceCount": 1,
+        "modules": [{"occurrences": [{}]}],
+    }
+    if vast.validate_reusable_inventory(inventory_fixture, "a" * 40, "b" * 40) is not inventory_fixture:
+        raise RuntimeError("valid reusable inventory was not accepted")
+    try:
+        vast.validate_reusable_inventory(inventory_fixture, "c" * 40, "b" * 40)
+    except RuntimeError as error:
+        if "commit mismatch" not in str(error):
+            raise
+    else:
+        raise RuntimeError("stale reusable inventory was accepted")
+    if "Experiment/SimpEngineInventory.lean" not in vast.INVENTORY_INPUT_PATHS:
+        raise RuntimeError("reusable inventory omits its Lean generator from provenance")
+    if "ExplicitLean/SimpEngine/Inventory.lean" not in vast.INVENTORY_INPUT_PATHS:
+        raise RuntimeError("reusable inventory omits its collector from provenance")
     fallback_fixture = vast.parser().parse_args([
         "run", "--output-dir", "unused", "--minimum-ram-gb-per-process", "120",
         "--concurrency", "1",
