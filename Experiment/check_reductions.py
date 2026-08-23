@@ -195,7 +195,7 @@ def main() -> None:
             "simp_explicit [reduce delta notReductionDelta]",
             1,
         ),
-        "ordered simp rule did not match",
+        "Unknown constant `notReductionDelta`",
     )
     expect_failure(
         "wrong-kind",

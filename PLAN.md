@@ -834,6 +834,19 @@ replacement site and receive `_root_.` only on an actual namespace/open-state
 collision; this also materializes LinearEquiv occurrence `ef04e0e8339535de`
 with `_root_.map_smul` and retires its former source-rewrite failure.
 
+O6e implementation status (2026-08-22): schema 15 adds the pinned
+`projection_function` reduction vocabulary, cloned from Lean 4.32.2's
+`reduceProjFn?` branch and replayed by exact kernel declaration identity. The
+NonUnitalSubalgebra target `add0ff7c330214e4` now materializes with the adjacent
+certificate commands `reduce zeta` and `reduce projection_fn
+NonUnitalSubring.toNonUnitalSubsemiring`. This pair is a bounded,
+certificate-only continuity reconstruction of omitted definitional
+intermediates: it is inserted only after the ordinary raw-event plan has a
+continuity gap, while raw recorder events and premise metadata remain aligned
+with the original trace. Deleting either command, swapping their order, or
+substituting a different known projection identity fails closed; no ambient
+simp or proof fallback is used.
+
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
 `Simp.Config` field as normalized JSON provenance; certificates compile the

@@ -108,7 +108,7 @@ register_option explicitLean.simpExplicit.bodyScopeFrame : Nat := {
 }
 
 def reportSchema : String := "explicitLean.simpRecording"
-def reportSchemaVersion : Nat := 14
+def reportSchemaVersion : Nat := 15
 
 structure ExprFingerprint where
   /-- A bounded diagnostic rendering for humans.  This is never used for replay. -/
@@ -239,6 +239,7 @@ inductive ReductionKind where
   | zeta
   | iota
   | projection (structureName : Name) (field : Nat)
+  | projectionFunction (name : Name)
   | eta
   deriving BEq, Repr
 
@@ -770,6 +771,45 @@ private def replayZeta? (input : Expr) : MetaM (Option Expr) := do
       return some (expandLet body #[value] (zetaHave := true))
   | _ => return none
 
+/-! This is a local clone of the pinned Lean 4.32.2 `reduceProjFn?` branch.
+    The upstream helper is private, so keeping the branch here makes the
+    observed and replayed operation explicit without invoking ambient simp or
+    exporting a proof fallback. -/
+private def unfoldProjectionFunctionAny? (input : Expr) : MetaM (Option Expr) := do
+  if let .const declarationName _ := input.getAppFn then
+    if (← isIrreducible declarationName) then
+      return none
+  unfoldDefinition? input (ignoreTransparency := true)
+
+private def reduceProjectionFunction? (input : Expr) : Simp.SimpM (Option Expr) := do
+  matchConst input.getAppFn (fun _ => pure none) fun constantInfo _ => do
+    let some projectionInfo ← getProjectionFnInfo? constantInfo.name | return none
+    let reduceProjectionContinuation? (input? : Option Expr) : Simp.SimpM (Option Expr) := do
+      match input? with
+      | none => pure none
+      | some input =>
+          match (← Simp.withSimpMetaConfig <| reduceProj? input.getAppFn) with
+          | some function => return some (mkAppN function input.getAppArgs)
+          | none => return none
+    if projectionInfo.fromClass then
+      if (← Simp.getContext).isDeclToUnfold constantInfo.name then
+        let input? ← withReducibleAndInstances <| unfoldDefinition? input
+        if input?.isSome then
+          Simp.recordSimpTheorem (.decl constantInfo.name)
+        return input?
+      else
+        unless input.getAppNumArgs > projectionInfo.numParams do
+          return none
+        let major := input.getArg! projectionInfo.numParams
+        unless (← isConstructorApp major) do
+          return none
+        if backward.whnf.reducibleClassField.get (← getOptions) then
+          unfoldProjectionFunctionAny? input
+        else
+          reduceProjectionContinuation? (← unfoldProjectionFunctionAny? input)
+    else
+      reduceProjectionContinuation? (← unfoldDefinition? input)
+
 /-! This public pre-method interposer implements the supported prefix branches
     in pinned `reduceStep` precedence. The upstream `Simp.mainCore` remains
     authoritative; a successful `.visit` makes it recurse on the observed
@@ -798,6 +838,16 @@ private def selectedReduction? (input : Expr) : Simp.SimpM (Option (ReductionIde
           | some output =>
               if !Expr.equal input output then
                 return some ({ kind := .projection structureName field }, output)
+              restore
+              return none
+          | none => pure ()
+      | _ => pure ()
+      match f with
+      | .const projectionFunctionName _ =>
+          match (← Simp.withSimpMetaConfig <| reduceProjectionFunction? input) with
+          | some output =>
+              if !Expr.equal input output then
+                return some ({ kind := .projectionFunction projectionFunctionName }, output)
               restore
               return none
           | none => pure ()
@@ -1220,20 +1270,31 @@ private def reductionReport (reduction : ReductionIdentity) : ReductionReport :=
       name := some structureName.toString
       field := some field
     }
+  | .projectionFunction name => {
+      kind := "projection_function"
+      name := some name.toString
+      field := none
+    }
   | .eta => { kind := "eta", name := none, field := none }
 
-private def reductionText (reduction : ReductionIdentity) : String :=
+private def reductionText (reduction : ReductionIdentity) : MetaM String := do
   match reduction.kind with
-  | .delta name => s!"reduce delta {name}"
-  | .beta => "reduce beta"
-  | .zeta => "reduce zeta"
-  | .iota => "reduce iota"
-  | .projection structureName field => s!"reduce projection {structureName} {field}"
-  | .eta => "reduce eta"
+  | .delta name =>
+      let printedName ← declarationRuleName name
+      return s!"reduce delta {printedName}"
+  | .beta => return "reduce beta"
+  | .zeta => return "reduce zeta"
+  | .iota => return "reduce iota"
+  | .projection structureName field =>
+      return s!"reduce projection {structureName} {field}"
+  | .projectionFunction name =>
+      let printedName ← declarationRuleName name
+      return s!"reduce projection_fn {printedName}"
+  | .eta => return "reduce eta"
 
-private def reductionSource (reduction : ReductionIdentity) (phase : Phase) : String := by
+private def reductionSource (reduction : ReductionIdentity) (phase : Phase) : MetaM String := do
   let phasePrefix := if phase == .pre then "" else "↑ "
-  exact phasePrefix ++ reductionText reduction
+  return phasePrefix ++ (← reductionText reduction)
 
 private def isReflexiveClosure : Origin → Bool
   | .decl name _ _ => name == ``eq_self || name == ``iff_self
@@ -1266,7 +1327,7 @@ private def certificateEventListText (events : Array RecordedEvent)
     let comma := if index + 1 < eventCount then "," else ""
     let selector := selectors[index]?.getD .next
     let command ← match event.reduction with
-      | some reduction => pure (reductionSource reduction event.phase)
+      | some reduction => reductionSource reduction event.phase
       | none => do
           unless event.localRuleSlot.isSome || event.origins.size == 1 do
             throwError "simp_explicit cannot encode semantic event {index}: observed {event.origins.size} diagnostic origin candidates"
@@ -1441,6 +1502,9 @@ private def parsePhase (stx : Syntax) : TacticM Phase :=
   else
     throwErrorAt stx "expected `↓` or `↑`"
 
+private def resolveReductionDeclaration (stx : Syntax) : TacticM Name := do
+  resolveGlobalConstNoOverload stx
+
 private def elaborateReduction (stx : Syntax) : TacticM (Phase × ReductionIdentity) := do
   let phase ← if stx[0].isNone then pure .pre else parsePhase stx[0][0]
   let operation := stx[2].getId
@@ -1451,9 +1515,13 @@ private def elaborateReduction (stx : Syntax) : TacticM (Phase × ReductionIdent
       | throwErrorAt stx[4] "expected a numeric projection field index"
     return (phase, { kind := .projection stx[3].getId field })
   if stx.getNumArgs == 4 then
-    unless operation == `delta do
-      throwErrorAt stx[2] "expected `delta` for a named reduction command"
-    return (phase, { kind := .delta stx[3].getId })
+    if operation == `delta then
+      let name ← resolveReductionDeclaration stx[3]
+      return (phase, { kind := .delta name })
+    if operation == `projection_fn then
+      let name ← resolveReductionDeclaration stx[3]
+      return (phase, { kind := .projectionFunction name })
+    throwErrorAt stx[2] "expected `delta` or `projection_fn` for a named reduction command"
   unless stx.getNumArgs == 3 do
     throwErrorAt stx "invalid simp_explicit reduction command"
   match operation with
@@ -1793,6 +1861,7 @@ private def replayCanonicalReduction : ReductionKind → String
   | .zeta => "zeta"
   | .iota => "iota"
   | .projection structureName field => s!"projection:{structureName}:{field}"
+  | .projectionFunction name => s!"projection_function:{name}"
   | .eta => "eta"
 
 private def replayCanonicalEventKey (ambientFVars : Array FVarId)
@@ -1917,6 +1986,22 @@ private def replayProjection? (input : Expr) (structureName : Name) (field : Nat
         return none
   | _ => return none
 
+private def replayProjectionFunction? (input : Expr) (name : Name) : Simp.SimpM (Option Expr) := do
+  let .const head _ := input.getAppFn | return none
+  unless head == name do
+    return none
+  let snapshot ← liftM Meta.saveState
+  try
+    let output? ← Simp.withSimpMetaConfig <| reduceProjectionFunction? input
+    match output? with
+    | some output => return some output
+    | none =>
+        liftM snapshot.restore
+        return none
+  catch _ =>
+    liftM snapshot.restore
+    return none
+
 private def replayEta? (input : Expr) : MetaM (Option Expr) := do
   let output := input.eta
   return if Expr.equal input output then none else some output
@@ -1929,6 +2014,7 @@ private def applyRecordedReduction? (input : Expr) (reduction : ReductionIdentit
     | .zeta => liftM <| replayZeta? input
     | .iota => replayIota? input
     | .projection structureName field => replayProjection? input structureName field
+    | .projectionFunction name => replayProjectionFunction? input name
     | .eta => liftM <| replayEta? input
   return output?.bind (prooflessReductionResult? input)
 
@@ -1938,9 +2024,17 @@ private def hasUncommandedReduction (input : Expr) : Simp.SimpM Bool := do
   liftM iotaSnapshot.restore
   if iota?.isSome then
     return true
-  let .proj structureName field _ := input | return false
+  match input with
+  | .proj structureName field _ =>
+      let snapshot ← liftM Meta.saveState
+      let output? ← replayProjection? input structureName field
+      liftM snapshot.restore
+      if output?.isSome then
+        return true
+  | _ => pure ()
+  let .const projectionFunctionName _ := input.getAppFn | return false
   let snapshot ← liftM Meta.saveState
-  let output? ← replayProjection? input structureName field
+  let output? ← replayProjectionFunction? input projectionFunctionName
   liftM snapshot.restore
   return output?.isSome
 
@@ -2110,7 +2204,7 @@ private def replayMethod (events : Array ReplayEvent) (hasLocalRules : Bool)
             ref.set probeState
             throw ex
   if phase == .pre && (← hasUncommandedReduction input) then
-    throwError "simp_explicit encountered a reducible iota or native projection without an explicit reduction command"
+    throwError "simp_explicit encountered a reducible iota, native projection, or projection function without an explicit reduction command"
   if phase == .pre && hasLocalRules then
     match input with
     | .forallE _ proposition consequence _ =>
@@ -2641,11 +2735,12 @@ private partial def buildEncodedEvents? (recorded : Array RecordedEvent)
         pure none
       if replay?.isSome then
         let rule ← match event.reduction with
-          | some reduction => pure (reductionSource reduction event.phase)
+          | some reduction => reductionSource reduction event.phase
           | none => do
               unless event.localRuleSlot.isSome || event.origins.size == 1 do
                 throwError "simp_explicit cannot encode semantic event {index}: observed {event.origins.size} diagnostic origin candidates"
-              recordedRuleText event
+              let rule ← recordedRuleText event
+              pure rule
         let mut premiseNames := #[]
         let mut premiseEncodings := #[]
         let mut premiseProofs := #[]
@@ -2928,49 +3023,6 @@ private def makeCertificatePlan (searchedResult : Simp.Result)
     }
     rawEncodingInfos
     rawPremiseEncodingInfos
-  }
-
-private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEvent)
-    (searchedResult : Simp.Result) (initialUsedNames : Array Name := #[]) :
-    TacticM (Option CertificatePlan) := do
-  let some (baseEncoded, bindings, _) ← buildEncodedEvents? recorded initialUsedNames
-    | return none
-  if let some projection ← projectCertificateEvents? target searchedResult baseEncoded then
-    let encoded := projection.selected
-    return some (← makeCertificatePlan searchedResult encoded bindings
-      projection.rawEncodingInfos projection.rawPremiseEncodingInfos
-      projection.nonmaterialInternalEvents)
-  for mode in #[CertificateSelectorMode.next, CertificateSelectorMode.discover,
-      CertificateSelectorMode.ticks] do
-    let some selected ← selectCertificateEvents? target searchedResult baseEncoded mode
-      | continue
-    let encoded := annotateSelectorInfo selected
-    return some (← makeCertificatePlan searchedResult encoded bindings)
-  return none
-
-/-- Encode one semantic simp result using the same event fallback and closed
-    replay validation used by `simp_explicit?`.  `origins` is diagnostic input
-    only; the resulting source never invokes ambient simp or simproc search. -/
-def encodeProofResult (input : Expr) (result : Simp.Result)
-    (origins : Array Origin) (phase : Phase) : TacticM ProofResultEncoding := do
-  let event : RecordedEvent := {
-    tick := 1
-    phase
-    input
-    step := .done result
-    result
-    origins
-    premises := #[]
-  }
-  let some plan ← buildCertificatePlan? input #[event] result
-    | throwError "proof-result encoder could not validate an event replay"
-  let some encoded := plan.events[0]?
-    | throwError "proof-result encoder produced no event encoding"
-  return {
-    source := plan.source
-    metrics := plan.metrics
-    encodingKind := encoded.info.kind
-    encodingReason := encoded.info.reason
   }
 
 private def replaySimp (eventSyntax : Array Syntax) (closeReflexive := true) : TacticM Unit := withMainContext do
@@ -3409,6 +3461,75 @@ private partial def firstDefEqSubexpression? (subject expected : Expr)
       return some found
   return none
 
+private def maxBridgeProjectionCandidates : Nat := 8
+
+private partial def projectionFunctionNameOccurrences (expression : Expr)
+    (fuel : Nat := 256) : MetaM (Array Name) := do
+  if fuel == 0 then
+    return #[]
+  let mut result := #[]
+  if let .const name _ := expression.getAppFn then
+    if expression.isApp && (← isProjectionFn name) then
+      result := result.push name
+  for (_, child) in expressionChildren expression do
+    result := result ++ (← projectionFunctionNameOccurrences child (fuel - 1))
+  return result
+
+private def boundedProjectionFunctionCandidates (expression : Expr) : MetaM (Array Name) := do
+  let occurrences ← projectionFunctionNameOccurrences expression
+  let mut result := #[]
+  for name in occurrences do
+    if result.size >= maxBridgeProjectionCandidates then
+      break
+    unless result.contains name do
+      result := result.push name
+  return result
+
+private structure CertificateBridgePrefix where
+  firstUnconsumed : Nat
+  selectors : Array ReplaySelector
+  prefixExpr : Expr
+  matched : DefEqSubexpression
+  event : RecordedEvent
+
+private def certificateBridgePrefix? (target : Expr) (recorded : Array RecordedEvent) :
+    TacticM (Option CertificateBridgePrefix) := do
+  let count := certificateEventCount recorded
+  if count == 0 then
+    return none
+  let nextSelectors : Array ReplaySelector := Array.replicate recorded.size (.next : ReplaySelector)
+  let matchSelectors : Array ReplaySelector := recorded.map
+    (fun event => .discover event.input event.result.expr)
+  let tickSelectors : Array ReplaySelector := recorded.map
+    (fun event => .tickPos event.tick)
+  let nextConsumedCount := (← continuityReplayCount? target recorded nextSelectors).getD 0
+  let matchConsumedCount := (← continuityReplayCount? target recorded matchSelectors).getD 0
+  let tickConsumedCount := (← continuityReplayCount? target recorded tickSelectors).getD 0
+  let bestCount := max nextConsumedCount (max matchConsumedCount tickConsumedCount)
+  if bestCount >= count then
+    return none
+  let bestSelectors :=
+    if nextConsumedCount >= matchConsumedCount && nextConsumedCount >= tickConsumedCount then
+      nextSelectors
+    else if matchConsumedCount >= tickConsumedCount then
+      matchSelectors
+    else
+      tickSelectors
+  let some event := recorded[bestCount]? | return none
+  unless event.reduction.isNone && event.origins.size == 1 do
+    return none
+  let some prefixExpr ← continuityPrefixReplay? target recorded bestSelectors bestCount
+    | return none
+  let some matched ← firstDefEqSubexpression? prefixExpr event.input
+    | return none
+  return some {
+    firstUnconsumed := bestCount
+    selectors := bestSelectors
+    prefixExpr
+    matched
+    event
+  }
+
 private def originName? : Origin → Option Name
   | .decl name _ _ => some name
   | _ => none
@@ -3795,6 +3916,133 @@ private def buildTransitionContinuity? (target : Expr) (recorded : Array Recorde
       buildTransitionContinuityCore? target recorded recordedFinal
   catch _ =>
     diagnosticFallbackContinuity target recorded recordedFinal
+
+private def syntheticBridgeReductionEvent (input : Expr)
+    (reduction : ReductionIdentity) : TacticM EncodedEvent := do
+  let event : RecordedEvent := {
+    tick := 0
+    phase := .pre
+    input
+    step := .visit { expr := input }
+    result := { expr := input }
+    origins := #[]
+    premises := #[]
+    reduction := some reduction
+  }
+  let replay : ReplayEvent := {
+    selector := .next
+    phase := .pre
+    rules := #[]
+    premises := #[]
+    reduction := some reduction
+    source := (mkIdent `reduce).raw
+  }
+  return {
+    event
+    replay
+    info := {
+      kind := "reduction"
+      reason := none
+      selectorKind := some "next"
+      selectorValue := none
+      deltaReduction := match reduction.kind with
+        | .delta _ => true
+        | _ => false
+    }
+    ruleText := ← reductionSource reduction .pre
+    binding? := none
+  }
+
+private def bridgeCertificatePlan? (target : Expr) (searchedResult : Simp.Result)
+    (baseEncoded : Array EncodedEvent) (bindings : Array GeneratedBinding)
+    (bridge : CertificateBridgePrefix) : TacticM (Option CertificatePlan) := do
+  unless bridge.firstUnconsumed <= baseEncoded.size do
+    return none
+  let rawWithNext := annotateSelectorInfo <| baseEncoded.map fun event =>
+    { event with replay := { event.replay with selector := .next } }
+  let candidates ← boundedProjectionFunctionCandidates bridge.matched.expression
+  let rawEncodingInfos := baseEncoded.map (·.info)
+  let rawPremiseEncodingInfos := baseEncoded.map (·.premiseEncodings)
+  for name in candidates do
+    let zeta ← syntheticBridgeReductionEvent bridge.matched.expression {
+      kind := .zeta
+    }
+    let projection ← syntheticBridgeReductionEvent bridge.matched.expression {
+      kind := .projectionFunction name
+    }
+    let mut augmented := rawWithNext.take bridge.firstUnconsumed
+    augmented := augmented.push zeta
+    augmented := augmented.push projection
+    augmented := augmented ++ rawWithNext.drop bridge.firstUnconsumed
+    let accepted ← try
+      withoutModifyingState do
+        let replayEvents := augmented.map (·.replay)
+        let (replayedResult, replayState) ← runReplay target replayEvents
+        unless replayState.next == replayEvents.size do
+          return false
+        unless ← replayResultWellFormed? replayedResult do
+          return false
+        reachesSearchedResult? searchedResult replayedResult
+    catch _ =>
+      pure false
+    if accepted then
+      return some (← makeCertificatePlan searchedResult augmented bindings
+        rawEncodingInfos rawPremiseEncodingInfos)
+  return none
+
+private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEvent)
+    (searchedResult : Simp.Result) (initialUsedNames : Array Name := #[]) :
+    TacticM (Option CertificatePlan) := do
+  let base? ← withoutModifyingState do
+    buildEncodedEvents? recorded initialUsedNames
+  let some (baseEncoded, bindings, _) := base?
+    | return none
+  let projection? ← withoutModifyingState do
+    projectCertificateEvents? target searchedResult baseEncoded
+  if let some projection := projection? then
+    let encoded := projection.selected
+    return some (← makeCertificatePlan searchedResult encoded bindings
+      projection.rawEncodingInfos projection.rawPremiseEncodingInfos
+      projection.nonmaterialInternalEvents)
+  for mode in #[CertificateSelectorMode.next, CertificateSelectorMode.discover,
+      CertificateSelectorMode.ticks] do
+    let selected? ← withoutModifyingState do
+      selectCertificateEvents? target searchedResult baseEncoded mode
+    if let some selected := selected? then
+      let encoded := annotateSelectorInfo selected
+      return some (← makeCertificatePlan searchedResult encoded bindings)
+  let bridge? ← try
+    certificateBridgePrefix? target recorded
+  catch _ =>
+    pure none
+  let some bridge := bridge?
+    | return none
+  bridgeCertificatePlan? target searchedResult baseEncoded bindings bridge
+
+/-! Encode one semantic simp result using the same event fallback and closed
+    replay validation used by `simp_explicit?`.  `origins` is diagnostic input
+    only; the resulting source never invokes ambient simp or simproc search. -/
+def encodeProofResult (input : Expr) (result : Simp.Result)
+    (origins : Array Origin) (phase : Phase) : TacticM ProofResultEncoding := do
+  let event : RecordedEvent := {
+    tick := 1
+    phase
+    input
+    step := .done result
+    result
+    origins
+    premises := #[]
+  }
+  let some plan ← buildCertificatePlan? input #[event] result
+    | throwError "proof-result encoder could not validate an event replay"
+  let some encoded := plan.events[0]?
+    | throwError "proof-result encoder produced no event encoding"
+  return {
+    source := plan.source
+    metrics := plan.metrics
+    encodingKind := encoded.info.kind
+    encodingReason := encoded.info.reason
+  }
 
 private def premiseTerminalReport : PremiseTerminal → MetaM PremiseTerminalReport
   | .isTrue _ => return { kind := "isTrue" }

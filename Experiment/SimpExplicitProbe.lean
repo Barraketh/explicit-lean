@@ -102,7 +102,8 @@ example {K : Type*} {g : GenContFract K} [DivisionRing K]
     g.nums 1 = gp.b * g.h + gp.a := by
   simp_explicit [
     GenContFract.num_eq_conts_a,
-    GenContFract.first_cont_eq zeroth_s_eq
+    GenContFract.first_cont_eq zeroth_s_eq,
+    reduce projection_fn GenContFract.Pair.a
   ]
 
 private theorem alternate_add_zero (n : Nat) : n + 0 = n := Nat.add_zero n

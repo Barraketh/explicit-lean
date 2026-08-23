@@ -807,6 +807,19 @@ would resolve to a different constant. Consequently the LinearEquiv occurrence
 `ef04e0e8339535de` now materializes with `_root_.map_smul` instead of reaching
 the retired body-proof rejection gate. Schema 14 is unchanged.
 
+O6e implementation status (2026-08-22): schema 15 adds the exact
+`projection_function` reduction command, using a local clone of Lean 4.32.2's
+`reduceProjFn?` branch for both recording and replay. The
+NonUnitalSubalgebra occurrence `add0ff7c330214e4` materializes through a
+bounded certificate-only continuity bridge that inserts the two adjacent
+pre-phase commands `reduce zeta` and `reduce projection_fn
+NonUnitalSubring.toNonUnitalSubsemiring` when the raw event trace omits those
+definitional intermediates. Candidate heads come only from the matched
+subexpression, the full augmented program is replay-validated, and the raw
+recorder trace and premise metadata remain unchanged; no ambient simp or
+proof fallback is introduced. The production gate rejects deletion, order
+swapping, and a different known projection identity.
+
 ### S. Simproc design
 
 Simproc handling begins only after a separate design discussion and document.
