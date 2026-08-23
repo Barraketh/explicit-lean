@@ -1,6 +1,5 @@
 import Mathlib
-import ExplicitLean.SimpInventory
-import Lean.Data.Json
+import ExplicitLean.SimpEngine.Inventory
 import Lean.Elab.Frontend
 import Lean.Parser.Module
 import Lean.Util.Path
@@ -56,33 +55,26 @@ private unsafe def inventoryFile (env : Environment) (path : System.FilePath) : 
   let fileMap := FileMap.ofString source
   try
     let (stx, hasErrors) ← parseModuleIncrementally env path source
-    for entry in ExplicitLean.SimpInventory.collect path.toString fileMap stx do
-      IO.println (toJson entry).compress
     if hasErrors then
-      let payload := Json.mkObj [("file", toJson path.toString),
-        ("error", toJson "incremental syntax parser recovered")]
-      IO.println s!"EXPLICIT_LEAN_INVENTORY_PARSE_FAILURE {payload.compress}"
+      IO.eprintln s!"simp engine inventory could not parse {path} without recovery"
+      return 1
+    for entry in ExplicitLean.SimpEngine.Inventory.collect path.toString fileMap stx do
+      IO.println (toJson entry).compress
     return 0
   catch error =>
-    let payload := Json.mkObj [("file", toJson path.toString), ("error", toJson (toString error))]
-    IO.println s!"EXPLICIT_LEAN_INVENTORY_PARSE_FAILURE {payload.compress}"
-    return 0
+    IO.eprintln s!"simp engine inventory failed for {path}: {error}"
+    return 1
 
 unsafe def main (args : List String) : IO UInt32 := do
-  let paths ← match args with
-    | ["--files-from", manifest] =>
-        pure ((← IO.FS.readFile manifest).splitOn "\n" |>.filter (!·.isEmpty))
-    | paths => pure paths
-  if paths.isEmpty then
-    IO.eprintln "usage: SimpInventory.lean [--files-from manifest | <Mathlib source file>...]"
+  if args.isEmpty then
+    IO.eprintln "usage: SimpEngineInventory.lean <Lean source file>..."
     return 2
   Lean.initSearchPath (← Lean.findSysroot)
   Lean.enableInitializersExecution
   let env ← Lean.importModules #[{ module := `Mathlib }] {} (loadExts := true)
   let mut status := 0
-  for pathString in paths do
-    let path := System.FilePath.mk pathString
-    let code ← inventoryFile env path
+  for pathString in args do
+    let code ← inventoryFile env (System.FilePath.mk pathString)
     if code != 0 then
       status := code
   return status

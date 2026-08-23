@@ -1,18 +1,18 @@
 # Pinned `simp` engine coverage and certificate architecture
 
-Status: implementation specification
+Status: implementation specification; E1 and E2 complete
 
 Pinned engine: Lean 4.32.2, commit
 `f3b06c705e6c85f5314019d5d3baab0fec5b580c`
 
 Scope: successful `simp` and `simp only` executions covered by
-[PLAN.md](PLAN.md) section 4.1. `simpa`, `simp_all`, `simp_rw`, and `rw` remain
+[PLAN.md](PLAN.md). `simpa`, `simp_all`, `simp_rw`, and `rw` remain
 separate phases. Simprocs are observed and classified here, but their replay
 semantics remain a separate design.
 
 ## 1. Verdict
 
-The current schema-15 event IR is not a complete model of Lean's simplifier.
+The superseded schema-15 event IR was not a complete model of Lean's simplifier.
 It observes the public `pre` and `post` method boundary and reconstructs some
 private reductions around that boundary. Lean's implementation has additional
 semantic boundaries:
@@ -24,11 +24,6 @@ semantic boundaries:
 - specialized lambda, forall, implication, let, and have-telescope traversal;
 - fixed `decide`, arithmetic, and ground-evaluator procedures; and
 - goal and hypothesis transport after expression simplification.
-
-The O6e--O6j continuity bridges infer omitted operations from replay gaps. They
-are useful diagnostics, but they cannot be part of the completeness argument.
-They must not be an accepted recording path after the architecture in this
-document lands.
 
 The replacement is a pinned instrumented copy of the simplifier's execution
 engine. It records at the points where the engine commits operations and
@@ -392,7 +387,7 @@ Three engine modes are required.
   uncommanded transition.
 
 The fork is the version boundary. We do not continue accumulating local clones
-of individual private reductions inside `SimpExplicit.lean`.
+of individual private reductions inside `SimpEngine.lean`.
 
 ## 8. Rules, congruence, and premises
 
@@ -464,8 +459,8 @@ Gate: zero equivalence mismatches; no certificate or corpus behavior changes.
 
 Status: complete. The fork is pinned by hashes of the complete authoritative
 source surface, the focused reference probe covers both `simp` and `dsimp`
-branches, 57 supported calls across two syntax-instrumented Mathlib modules
-agree exactly, and the complete pre-existing `Experiment/run.sh` suite passes.
+branches, and 57 supported calls across two syntax-instrumented Mathlib modules
+agree exactly.
 
 ### E2. Total structured recorder
 
@@ -477,6 +472,11 @@ agree exactly, and the complete pre-existing `Experiment/run.sh` suite passes.
 
 Gate: branch-focused tests cover every row of section 4. Deleting any observer
 call causes its focused test to fail with `unobserved_transition`.
+
+Status: complete. The recorder covers every matrix row, rolls back speculative
+candidate state transactionally, emits nested premise programs, observes all
+simproc/dsimproc phases without accepting them, and matches reference-mode
+results on the focused probe and 57 bounded production calls.
 
 ### E3. Closed structural replay
 
@@ -494,8 +494,8 @@ fail at the mutated item.
 - Print and parse the schema-16 source form.
 - Include engine id, rule fingerprints, and final-state validation.
 - Switch passive recording and context programs to the new engine.
-- Delete or quarantine schema-15 bridge and selector discovery from accepted
-  materialization paths.
+- Keep the source and materializer independent of removed historical bridge
+  and selector-discovery implementations.
 
 Gate: all existing non-simproc focused/production fixtures materialize through
 schema 16 with zero bridge, generated-proof, presentation, or whole-result
@@ -547,9 +547,8 @@ closure run, not a substitute for the completeness review.
 
 ## 12. Decisions
 
-- Schema 15 remains historical evidence but is not a complete simplifier IR.
-- E1 is complete; the next implementation step is E2, not another O6
-  continuity bridge.
+- Schema 15 remains only in Git history and is not a simplifier IR dependency.
+- E1 and E2 are complete; the next implementation step is closed replay (E3).
 - The correctness boundary is a pinned source fork with record and replay
   modes.
 - Structural traversal and dsimp are first-class certificate semantics.

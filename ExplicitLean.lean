@@ -1,4 +1,4 @@
 import ExplicitLean.SimpEngine
+import ExplicitLean.SimpEngine.Inventory
 import ExplicitLean.SimpEngine.Reference
-import ExplicitLean.SimpExplicit
-import ExplicitLean.Normalize
+import ExplicitLean.SimpEngine.Recording
