@@ -129,15 +129,24 @@ Gate: every occurrence has a terminal classification; every committed
 successful non-simproc/non-custom-discharger execution records, replays,
 materializes, and compiles without fallback.
 
-Status: validated inventory and infrastructure complete; cloud shard result
-pending. The committed runner inventories 8,264 files and validates 83,425
-occurrences in 6,319 modules byte-for-byte, including 91 nested occurrences.
-It assigns modules by a stable SHA-256 hash, records every module once, and
+Status: validated inventory and infrastructure complete; cloud corpus result
+pending. The first 32-shard run did not produce a corpus result: hosted runners
+received external shutdown signals before their shard artifacts could upload.
+The failures were not correlated with module size or occurrence count, so they
+are classified as invalid infrastructure executions, not engine failures or
+successful coverage.
+
+The bounded rerun inventories 8,264 files and validates 83,425 occurrences in
+6,319 modules byte-for-byte, including 91 nested occurrences. It uses 256
+deterministic batches (about 25 occurrence-bearing modules per batch), runs at
+most four Ubuntu 24.04 workers concurrently, and stops a batch after its first
+semantic failure so the checkpoint, log, and failing source can upload
+promptly. Every completed batch still records each assigned module once and
 compiles one materialized copy for all accepted occurrences in that module.
 Reports are checkpointed and work files reclaimed after every module. The
-reducer rejects missing shards/modules/occurrences, source or engine drift,
-mixed deferred/non-deferred executions, replay-count mismatches, and every
-recorder, harness, or materialization failure.
+reducer rejects incomplete or missing batches/modules/occurrences, source or
+engine drift, mixed deferred/non-deferred executions, replay-count mismatches,
+and every recorder, harness, or materialization failure.
 
 ## 4. Current local gate
 

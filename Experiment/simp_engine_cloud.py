@@ -455,6 +455,15 @@ def failed_module_result(
     }
 
 
+def module_has_failure(result: dict[str, Any]) -> bool:
+    if result.get("errors"):
+        return True
+    return any(
+        occurrence.get("terminal") not in ALLOWED_TERMINALS
+        for occurrence in result.get("occurrences", [])
+    )
+
+
 def preserve_failure_source(output: Path, stage: str, module: str, source: Path) -> None:
     destination = output / "failures" / stage / module
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -768,6 +777,7 @@ def run_shard(args: argparse.Namespace) -> None:
         "startedAt": utc_now(),
         "completedAt": None,
         "complete": False,
+        "stoppedAfterFailure": None,
         "assignedModuleCount": len(assigned),
         "modules": [],
         "harnessErrors": [],
@@ -808,6 +818,10 @@ def run_shard(args: argparse.Namespace) -> None:
                 f"{module['module']} {dict(terminals)}",
                 flush=True,
             )
+            if args.stop_after_failure and module_has_failure(result):
+                report["stoppedAfterFailure"] = module["module"]
+                json_write(report_path, report)
+                break
     report["complete"] = len(report["modules"]) == len(assigned)
     report["completedAt"] = utc_now()
     json_write(report_path, report)
@@ -817,6 +831,8 @@ def run_shard(args: argparse.Namespace) -> None:
         f"schema-16 cloud shard {args.shard_index}/{args.shard_count}: "
         f"{len(report['modules'])}/{len(assigned)} modules reported"
     )
+    if report["stoppedAfterFailure"] is not None:
+        raise SystemExit(1)
 
 
 def find_shard_reports(directory: Path) -> list[Path]:
@@ -1080,6 +1096,7 @@ def parser() -> argparse.ArgumentParser:
     shard.add_argument("--shard-count", type=int, required=True)
     shard.add_argument("--output-dir", required=True)
     shard.add_argument("--module-timeout", type=int, default=900)
+    shard.add_argument("--stop-after-failure", action="store_true")
     shard.add_argument("--allow-dirty", action="store_true")
     shard.set_defaults(function=run_shard)
 

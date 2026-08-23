@@ -10,7 +10,12 @@ on:
       shard_count:
         description: Number of deterministic module shards
         required: true
-        default: "32"
+        default: "256"
+        type: string
+      max_parallel:
+        description: Maximum simultaneous shard jobs
+        required: true
+        default: "4"
         type: string
       module_timeout:
         description: Per-module compile timeout in seconds
@@ -39,14 +44,14 @@ concurrency:
 
 env:
   TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.commit_sha || github.sha }}
-  SHARD_COUNT: ${{ inputs.shard_count || '32' }}
+  SHARD_COUNT: ${{ inputs.shard_count || '256' }}
   MODULE_TIMEOUT: ${{ inputs.module_timeout || '900' }}
   MODULE_PREFIX: ${{ inputs.module_prefix || 'Mathlib/' }}
 
 jobs:
   inventory:
     name: Pin, local gate, and inventory
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -93,11 +98,11 @@ jobs:
   shard:
     name: Shard ${{ matrix.shard }}
     needs: inventory
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: 16
+      max-parallel: ${{ fromJSON(inputs.max_parallel || '4') }}
       matrix:
         shard: ${{ fromJSON(needs.inventory.outputs.matrix) }}
     steps:
@@ -129,6 +134,7 @@ jobs:
             --shard-index "${{ matrix.shard }}" \
             --shard-count "$SHARD_COUNT" \
             --module-timeout "$MODULE_TIMEOUT" \
+            --stop-after-failure \
             --output-dir ".cloud/shard-${{ matrix.shard }}"
 
       - name: Upload checkpointed shard report and logs
@@ -150,7 +156,7 @@ jobs:
     needs:
       - inventory
       - shard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out exact commit

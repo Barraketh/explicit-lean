@@ -54,6 +54,12 @@ def main() -> None:
         "simproc", "custom_discharger"
     }:
         raise RuntimeError("combined deferred reasons were not preserved")
+    if cloud.module_has_failure({"errors": [], "occurrences": [{
+        "terminal": "materialized"
+    }]}):
+        raise RuntimeError("accepted terminal was classified as a module failure")
+    if not cloud.module_has_failure({"errors": ["recording_failure"]}):
+        raise RuntimeError("module error did not stop the diagnostic batch")
     nested_source = b"by\n  simp [show True from by simp]\n"
     outer_start = nested_source.index(b"simp")
     inner_start = nested_source.index(b"simp", outer_start + 4)
