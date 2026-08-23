@@ -70,3 +70,12 @@ visible so a corpus run cannot silently treat an unexplained failure as known.
 end-to-end regression.  It inventories two modules covering nested tactics and
 all five tactic families, materializes a known deterministic certificate, and
 compiles the corresponding aggregate module.
+
+O6g implementation status (2026-08-22): explicit projection-function replay
+locally enables Meta beta and `.yesWithDelta` projection reduction for the
+pinned projection operation while leaving the recorder clone and neutral
+traversal unchanged. Quasispectrum occurrence `226e61786984b7bc` now
+materializes with two `reduce projection_fn Units.val` commands and six named
+rules, with no fallback metrics. The focused production gate checks the stable
+trace and rejects deletion, reordering, and wrong-identity mutations. Schema 15
+is unchanged.

@@ -838,15 +838,15 @@ former source-rewrite failure.
 O6e implementation status (2026-08-22): schema 15 adds the pinned
 `projection_function` reduction vocabulary, cloned from Lean 4.32.2's
 `reduceProjFn?` branch and replayed by exact kernel declaration identity. The
-NonUnitalSubalgebra target `add0ff7c330214e4` now materializes with the adjacent
-certificate commands `reduce zeta` and `reduce projection_fn
-NonUnitalSubring.toNonUnitalSubsemiring`. This pair is a bounded,
-certificate-only continuity reconstruction of omitted definitional
-intermediates: it is inserted only after the ordinary raw-event plan has a
-continuity gap, while raw recorder events and premise metadata remain aligned
-with the original trace. Deleting either command, swapping their order, or
-substituting a different known projection identity fails closed; no ambient
-simp or proof fallback is used.
+NonUnitalSubalgebra target `add0ff7c330214e4` now materializes with the single
+certificate command `reduce projection_fn
+NonUnitalSubring.toNonUnitalSubsemiring`. Bridge synthesis tries that shortest
+program first and retains the former `reduce zeta` plus projection pair as a
+bounded compatibility candidate. A bridge is inserted only after the ordinary
+raw-event plan has a continuity gap, while raw recorder events and premise
+metadata remain aligned with the original trace. Deleting or reordering the
+projection command, or substituting a different known projection identity,
+fails closed; no ambient simp or proof fallback is used.
 
 O6f implementation status (2026-08-22): a bare global theorem identifier that
 is not a shadowing local now follows ordinary `simp`'s declaration path first,
@@ -861,6 +861,21 @@ type, and Spectrum occurrence `a2c03aa81fb3fb0b` materializes with seven named
 rules, zero reductions, and no operational fallback. Accepted source plans
 run historical discovery before the generic `.next` fast path. Schema 15 is
 unchanged.
+
+O6g implementation status (2026-08-22): named projection-function replay now
+uses a replay-only clone of the pinned Lean 4.32.2 branch under a local Meta
+configuration with `beta := true` and `proj := .yesWithDelta`. This is the
+configuration required by `reduceProj?` to weak-head normalize a projection's
+major argument after the projection declaration is unfolded. The recorder
+clone remains unchanged, and the surrounding traversal remains neutral, so the
+recorded projection transition is available only through an explicit
+certificate command. The uncommanded-reduction guard probes only operations
+available to that neutral traversal, rather than the stronger explicit command.
+Quasispectrum occurrence `226e61786984b7bc` now
+materializes with two `reduce projection_fn Units.val` commands, six named
+rules, and no operational or proof fallback. Focused gates reject a missing
+command, a command moved past the first named rule, and a different projection
+identity. Schema 15 is unchanged.
 
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in

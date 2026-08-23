@@ -810,6 +810,40 @@ private def reduceProjectionFunction? (input : Expr) : Simp.SimpM (Option Expr) 
     else
       reduceProjectionContinuation? (← unfoldDefinition? input)
 
+/-! Replay uses the same pinned projection-function branches, but must not let
+    the nested `reduceProj?` call restore `Simp.neutralConfig` through
+    `withSimpMetaConfig`. The caller supplies the replay-local beta/projection
+    Meta configuration; keeping this helper separate leaves the recorder's
+    ordinary-simp clone above unchanged. -/
+private def reduceProjectionFunctionReplay? (input : Expr) : Simp.SimpM (Option Expr) := do
+  matchConst input.getAppFn (fun _ => pure none) fun constantInfo _ => do
+    let some projectionInfo ← getProjectionFnInfo? constantInfo.name | return none
+    let reduceProjectionContinuation? (input? : Option Expr) : Simp.SimpM (Option Expr) := do
+      match input? with
+      | none => pure none
+      | some input =>
+          match (← reduceProj? input.getAppFn) with
+          | some function => return some (mkAppN function input.getAppArgs)
+          | none => return none
+    if projectionInfo.fromClass then
+      if (← Simp.getContext).isDeclToUnfold constantInfo.name then
+        let input? ← withReducibleAndInstances <| unfoldDefinition? input
+        if input?.isSome then
+          Simp.recordSimpTheorem (.decl constantInfo.name)
+        return input?
+      else
+        unless input.getAppNumArgs > projectionInfo.numParams do
+          return none
+        let major := input.getArg! projectionInfo.numParams
+        unless (← isConstructorApp major) do
+          return none
+        if backward.whnf.reducibleClassField.get (← getOptions) then
+          unfoldProjectionFunctionAny? input
+        else
+          reduceProjectionContinuation? (← unfoldProjectionFunctionAny? input)
+    else
+      reduceProjectionContinuation? (← unfoldDefinition? input)
+
 /-! This public pre-method interposer implements the supported prefix branches
     in pinned `reduceStep` precedence. The upstream `Simp.mainCore` remains
     authoritative; a successful `.visit` makes it recurse on the observed
@@ -2021,7 +2055,9 @@ private def replayProjectionFunction? (input : Expr) (name : Name) : Simp.SimpM 
     return none
   let snapshot ← liftM Meta.saveState
   try
-    let output? ← Simp.withSimpMetaConfig <| reduceProjectionFunction? input
+    let output? ← withConfig (fun config =>
+      { config with beta := true, proj := .yesWithDelta }) <|
+        reduceProjectionFunctionReplay? input
     match output? with
     | some output => return some output
     | none =>
@@ -2061,9 +2097,13 @@ private def hasUncommandedReduction (input : Expr) : Simp.SimpM Bool := do
       if output?.isSome then
         return true
   | _ => pure ()
-  let .const projectionFunctionName _ := input.getAppFn | return false
+  let .const _ _ := input.getAppFn | return false
   let snapshot ← liftM Meta.saveState
-  let output? ← replayProjectionFunction? input projectionFunctionName
+  -- Guard only reductions available to the neutral traversal. The explicit
+  -- projection-function command has a stronger, locally scoped beta/proj
+  -- configuration; using it here would reject expressions that the ambient
+  -- replay engine cannot itself reduce.
+  let output? ← Simp.withSimpMetaConfig <| reduceProjectionFunction? input
   liftM snapshot.restore
   return output?.isSome
 
@@ -4002,24 +4042,27 @@ private def bridgeCertificatePlan? (target : Expr) (searchedResult : Simp.Result
     let projection ← syntheticBridgeReductionEvent bridge.matched.expression {
       kind := .projectionFunction name
     }
-    let mut augmented := rawWithNext.take bridge.firstUnconsumed
-    augmented := augmented.push zeta
-    augmented := augmented.push projection
-    augmented := augmented ++ rawWithNext.drop bridge.firstUnconsumed
-    let accepted ← try
-      withoutModifyingState do
-        let replayEvents := augmented.map (·.replay)
-        let (replayedResult, replayState) ← runReplay target replayEvents
-        unless replayState.next == replayEvents.size do
-          return false
-        unless ← replayResultWellFormed? replayedResult do
-          return false
-        reachesSearchedResult? searchedResult replayedResult
-    catch _ =>
-      pure false
-    if accepted then
-      return some (← makeCertificatePlan searchedResult augmented bindings
-        rawEncodingInfos rawPremiseEncodingInfos)
+    -- The replay-specific projection operation can perform the beta-WHNF
+    -- needed by `reduceProj?`; prefer the shortest validated bridge. Keep the
+    -- older zeta/projection pair as a bounded compatibility candidate.
+    for inserted in #[#[projection], #[zeta, projection]] do
+      let mut augmented := rawWithNext.take bridge.firstUnconsumed
+      augmented := augmented ++ inserted
+      augmented := augmented ++ rawWithNext.drop bridge.firstUnconsumed
+      let accepted ← try
+        withoutModifyingState do
+          let replayEvents := augmented.map (·.replay)
+          let (replayedResult, replayState) ← runReplay target replayEvents
+          unless replayState.next == replayEvents.size do
+            return false
+          unless ← replayResultWellFormed? replayedResult do
+            return false
+          reachesSearchedResult? searchedResult replayedResult
+      catch _ =>
+        pure false
+      if accepted then
+        return some (← makeCertificatePlan searchedResult augmented bindings
+          rawEncodingInfos rawPremiseEncodingInfos)
   return none
 
 private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEvent)

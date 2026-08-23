@@ -18,9 +18,8 @@ FIXTURE = ROOT / "Experiment" / "O6eProjectionFunctionProbe.lean"
 OUTPUT = ROOT / ".lake" / "o6e-projection-function"
 PROJECTION = "NonUnitalSubring.toNonUnitalSubsemiring"
 WRONG_PROJECTION = "NonUnitalSubalgebra.toNonUnitalSubsemiring"
-ZETA_LINE = "  ↓ reduce zeta,\n"
 PROJECTION_LINE = f"  ↓ reduce projection_fn {PROJECTION},\n"
-BRIDGE = ZETA_LINE + PROJECTION_LINE
+FOLLOWING_RULE_LINE = "  NonUnitalSubalgebra.coe_toNonUnitalSubsemiring,\n"
 
 FORBIDDEN_METRICS = (
     "deferredSimprocEvents",
@@ -102,9 +101,9 @@ def check_report(report: dict) -> str:
         raise RuntimeError(f"target report has no accepted certificate: {report!r}")
     if report.get("certificate") != certificate:
         raise RuntimeError("target report did not expose the accepted certificate")
-    if certificate.count(BRIDGE) != 1:
-        raise RuntimeError(f"target certificate lost the adjacent zeta/projection bridge: {certificate!r}")
-    if certificate.count("reduce zeta") != 1 or certificate.count("reduce projection_fn ") != 1:
+    if certificate.count(PROJECTION_LINE) != 1:
+        raise RuntimeError(f"target certificate lost its projection bridge: {certificate!r}")
+    if "reduce zeta" in certificate or certificate.count("reduce projection_fn ") != 1:
         raise RuntimeError(f"target certificate has an unexpected reduction sequence: {certificate!r}")
     if PROJECTION not in certificate:
         raise RuntimeError(f"target certificate has the wrong projection identity: {certificate!r}")
@@ -129,11 +128,11 @@ def check_report(report: dict) -> str:
     expected = {
         "mode": "event",
         "namedRuleEvents": 7,
-        "reductionEvents": 2,
-        "nextSelectorCount": 9,
+        "reductionEvents": 1,
+        "nextSelectorCount": 8,
         "matchSelectorCount": 0,
         "tickSelectorCount": 0,
-        "totalCertificateBytes": 304,
+        "totalCertificateBytes": 285,
     }
     if any(encoding.get(key) != value for key, value in expected.items()):
         raise RuntimeError(f"target certificate encoding changed: {encoding!r}")
@@ -222,7 +221,6 @@ def check_production() -> None:
         raise RuntimeError("target candidate did not preserve the accepted certificate")
 
     source = (coverage.MATHLIB / MODULE).read_bytes()
-    check_mutation("delete-zeta", candidate, source, certificate.replace(ZETA_LINE, "", 1))
     check_mutation(
         "delete-projection",
         candidate,
@@ -233,7 +231,11 @@ def check_production() -> None:
         "swap-order",
         candidate,
         source,
-        certificate.replace(BRIDGE, PROJECTION_LINE + ZETA_LINE, 1),
+        certificate.replace(
+            PROJECTION_LINE + FOLLOWING_RULE_LINE,
+            FOLLOWING_RULE_LINE + PROJECTION_LINE,
+            1,
+        ),
     )
     check_mutation(
         "wrong-projection",

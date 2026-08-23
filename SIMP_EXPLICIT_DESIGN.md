@@ -811,14 +811,15 @@ O6e implementation status (2026-08-22): schema 15 adds the exact
 `projection_function` reduction command, using a local clone of Lean 4.32.2's
 `reduceProjFn?` branch for both recording and replay. The
 NonUnitalSubalgebra occurrence `add0ff7c330214e4` materializes through a
-bounded certificate-only continuity bridge that inserts the two adjacent
-pre-phase commands `reduce zeta` and `reduce projection_fn
-NonUnitalSubring.toNonUnitalSubsemiring` when the raw event trace omits those
-definitional intermediates. Candidate heads come only from the matched
-subexpression, the full augmented program is replay-validated, and the raw
-recorder trace and premise metadata remain unchanged; no ambient simp or
-proof fallback is introduced. The production gate rejects deletion, order
-swapping, and a different known projection identity.
+bounded certificate-only continuity bridge containing one pre-phase command,
+`reduce projection_fn NonUnitalSubring.toNonUnitalSubsemiring`. Bridge synthesis
+tries this shortest program first and retains the former `reduce zeta` plus
+projection pair only as a bounded compatibility candidate. Candidate heads
+come only from the matched subexpression, the full augmented program is
+replay-validated, and the raw recorder trace and premise metadata remain
+unchanged; no ambient simp or proof fallback is introduced. The production
+gate rejects deletion, order swapping, and a different known projection
+identity.
 
 O6f implementation status (2026-08-22): a bare global theorem identifier that
 is not a shadowing local now follows ordinary `simp`'s declaration path first,
@@ -833,6 +834,19 @@ type, and Spectrum occurrence `a2c03aa81fb3fb0b` materializes with seven named
 rules, zero reductions, and no operational fallback. Accepted source plans
 run historical discovery before the generic `.next` fast path. Schema 15 is
 unchanged.
+
+O6g implementation status (2026-08-22): projection-function recording keeps
+the exact pinned Lean 4.32.2 clone from O6e. Replay uses a separate copy of the
+same branch under a locally scoped Meta configuration with `beta := true` and
+`proj := .yesWithDelta`, and its nested `reduceProj?` does not reinstall the
+neutral simplifier configuration. This permits only the head normalization
+that is part of the named projection operation; `runReplay` remains neutral,
+and the pre-hook probes the pinned neutral reducer rather than this stronger
+explicit operation when rejecting uncommanded reductions. The
+Quasispectrum occurrence `226e61786984b7bc` materializes with two explicit
+`Units.val` projection-function reductions followed by six named rules, with
+zero fallback metrics. Deletion, reordering past the first theorem rule, and
+identity-substitution mutations fail closed. Schema 15 is unchanged.
 
 ### S. Simproc design
 
