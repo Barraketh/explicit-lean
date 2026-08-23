@@ -21,7 +21,7 @@ def nameFromJson (json : Json) : Except String Name := do
     match part with
     | .arr #[.str "str", .str value] => return .str name value
     | .arr #[.str "num", value] => return .num name (← fromJson? value)
-    | _ => throw s!"invalid schema-16 name component: {part.compress}"
+    | _ => throw s!"invalid schema-17 name component: {part.compress}"
 
 local instance schema16NameToJson : ToJson Name where
   toJson name := .arr (nameJsonParts name)
@@ -38,33 +38,33 @@ structure EngineId where
 def engineId : EngineId := {
   leanVersion := "4.32.2"
   leanCommit := "f3b06c705e6c85f5314019d5d3baab0fec5b580c"
-  certificateSchema := 16
+  certificateSchema := 17
 }
 
 inductive Mode where
   | simp
   | dsimp
-  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+  deriving Inhabited, Repr, BEq, Hashable, Lean.ToJson, Lean.FromJson
 
 inductive Phase where
   | pre
   | post
   | dpre
   | dpost
-  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+  deriving Inhabited, Repr, BEq, Hashable, Lean.ToJson, Lean.FromJson
 
 inductive ChildMode where
   | simp
   | dsimp
   | fixed
-  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+  deriving Inhabited, Repr, BEq, Hashable, Lean.ToJson, Lean.FromJson
 
 inductive StepDisposition where
   | done
   | visit
   | continueNone
   | continueSome
-  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+  deriving Inhabited, Repr, BEq, Hashable, Lean.ToJson, Lean.FromJson
 
 inductive ProjectionBranch where
   | requestedClass
@@ -174,11 +174,11 @@ inductive PathStep where
   | haveBody
   | premise (index : Nat)
   | ground
-  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+  deriving Inhabited, Repr, BEq, Hashable, Lean.ToJson, Lean.FromJson
 
 structure ExecutionPath where
   steps : Array PathStep := #[]
-  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+  deriving Inhabited, Repr, BEq, Hashable, Lean.ToJson, Lean.FromJson
 
 structure RuleRef where
   source : String
@@ -307,13 +307,51 @@ structure SimprocObservation where
   outputFingerprint : String
   stepDisposition : StepDisposition
   definitional : Bool
-  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+  deriving Inhabited, Repr, BEq, Hashable, Lean.ToJson, Lean.FromJson
+
+/-- A lossless ordered simproc trace. The source schema dictionaries repeated
+    observations while retaining one order index for every invocation. -/
+structure SimprocTrace where
+  observations : Array SimprocObservation := #[]
+  deriving Inhabited, Repr, BEq
+
+def SimprocTrace.size (trace : SimprocTrace) : Nat :=
+  trace.observations.size
+
+def SimprocTrace.isEmpty (trace : SimprocTrace) : Bool :=
+  trace.observations.isEmpty
+
+instance : Lean.ToJson SimprocTrace where
+  toJson trace :=
+    let (dictionary, _, order) := trace.observations.foldl
+      (init := (#[], ({} : Std.HashMap SimprocObservation Nat), #[]))
+      fun (dictionary, indices, order) observation =>
+        match indices.get? observation with
+        | some index => (dictionary, indices, order.push index)
+        | none =>
+            let index := dictionary.size
+            (dictionary.push observation, indices.insert observation index,
+              order.push index)
+    Json.mkObj [
+      ("dictionary", Lean.toJson dictionary),
+      ("order", Lean.toJson order)
+    ]
+
+instance : Lean.FromJson SimprocTrace where
+  fromJson? json := do
+    let dictionary ← json.getObjValAs? (Array SimprocObservation) "dictionary"
+    let order ← json.getObjValAs? (Array Nat) "order"
+    let observations ← order.mapM fun index => do
+      let some observation := dictionary[index]?
+        | throw s!"invalid schema-17 simproc dictionary index: {index}/{dictionary.size}"
+      return observation
+    return { observations }
 
 structure Recording where
   engine : EngineId := engineId
   program : Program
   deferred : Option DeferredReason := none
-  simprocs : Array SimprocObservation := #[]
+  simprocs : SimprocTrace := {}
   coveredBranches : Array String := #[]
   deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
 
@@ -347,7 +385,7 @@ structure SubjectProgram where
   program : Program
   terminal : SubjectTerminal
   deferred : Option DeferredReason := none
-  simprocs : Array SimprocObservation := #[]
+  simprocs : SimprocTrace := {}
   deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
 
 structure StateFingerprint where

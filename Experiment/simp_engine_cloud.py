@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory, shard, materialize, and reduce the full schema-16 Mathlib run."""
+"""Inventory, shard, materialize, and reduce the full schema-17 Mathlib run."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import simp_engine_inventory as coverage
 ROOT = Path(__file__).resolve().parents[1]
 MATHLIB = coverage.MATHLIB
 REPORT_SCHEMA = 1
-CERTIFICATE_SCHEMA = 16
+CERTIFICATE_SCHEMA = 17
 ENGINE_ID = {
     "leanVersion": pin.LEAN_VERSION,
     "leanCommit": pin.LEAN_COMMIT,
@@ -288,7 +288,7 @@ def build_inventory(args: argparse.Namespace) -> None:
     }
     json_write(Path(args.output), inventory)
     print(
-        "schema-16 cloud inventory: "
+        "schema-17 cloud inventory: "
         f"{inventory['moduleFileCount']} files, "
         f"{inventory['inventoriedModuleCount']} modules with occurrences, "
         f"{inventory['occurrenceCount']} occurrences, "
@@ -398,7 +398,8 @@ def compile_copy(
 def deferred_reasons(certificate: dict[str, Any]) -> set[str]:
     result: set[str] = set()
     for subject in certificate.get("subjects", []):
-        if subject.get("simprocs"):
+        simproc_trace = subject.get("simprocs", {})
+        if isinstance(simproc_trace, dict) and simproc_trace.get("order"):
             result.add("simproc")
         deferred = subject.get("deferred")
         if deferred is None:
@@ -847,7 +848,7 @@ def run_shard(args: argparse.Namespace) -> None:
     if (output / "work").exists():
         shutil.rmtree(output / "work")
     print(
-        f"schema-16 cloud shard {args.shard_index}/{args.shard_count}: "
+        f"schema-17 cloud shard {args.shard_index}/{args.shard_count}: "
         f"{len(report['modules'])}/{len(assigned)} modules reported"
     )
     if report["stoppedAfterFailure"] is not None:
@@ -1054,7 +1055,7 @@ def reduce_reports(args: argparse.Namespace) -> int:
     output.mkdir(parents=True, exist_ok=True)
     json_write(output / "simp-engine-closure.json", summary, pretty=True)
     markdown = [
-        "# Schema-16 full Mathlib closure",
+        "# Schema-17 full Mathlib closure",
         "",
         f"- Commit: `{summary['commit']}`",
         f"- Mathlib: `{summary['mathlibCommit']}`",
@@ -1078,7 +1079,7 @@ def reduce_reports(args: argparse.Namespace) -> int:
         "\n".join(markdown) + "\n", encoding="utf-8"
     )
     print(
-        "schema-16 full closure: "
+        "schema-17 full closure: "
         f"{len(actual_occurrences)}/{len(expected_occurrences)} occurrences, "
         f"terminals={dict(terminal_counts)}, failures={len(failures)}"
     )

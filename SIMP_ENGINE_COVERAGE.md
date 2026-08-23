@@ -126,7 +126,7 @@ execution model. It is only one projection of the execution.
 
 ## 4. Implementation-to-IR coverage matrix
 
-The `Required representation` column is normative for certificate schema 16.
+The `Required representation` column is normative for certificate schema 17.
 
 | Upstream site | Committed behavior | Required representation | Schema 15 |
 | --- | --- | --- | --- |
@@ -362,12 +362,12 @@ structure Certificate where
 
 ### 5.1 What is and is not source
 
-The schema-16 source payload is compact JSON embedded in a shallow Lean array
+The schema-17 source payload is compact JSON embedded in a shallow Lean array
 of string literals:
 
 ```lean
 simp_engine_apply "occurrence-id"
-  (certificates := #["{...schema-16 certificate...}", ...]) originalSimpArgs
+  (certificates := #["{...schema-17 certificate...}", ...]) originalSimpArgs
 ```
 
 The JSON contains the complete path-qualified operations and structural
@@ -376,6 +376,21 @@ are validation fields. Every emitted payload is parsed immediately and compared
 structurally with the in-memory certificate before it is accepted. At the
 replacement site it is parsed again, its engine identity is checked, and closed
 replay validates its initial and final states.
+
+Expression fingerprints hash Lean's shared expression DAG directly with
+memoization; they never expand it into a canonical tree. Proof erasure is part
+of that traversal, and every public fingerprint operation saves and restores
+the meta-state so observation cannot affect later simplifier choices. A
+per-engine cache reuses fingerprints for repeated simproc candidate inputs.
+Recursive premise recording starts with empty observation buffers and merges
+only the premise's new observations into the outer execution; copying the
+outer prefix into a nested trace would duplicate it exponentially.
+
+The ordered simproc trace is serialized losslessly as a dictionary of distinct
+observations plus an array of dictionary indices. The index array has one entry
+per invocation and therefore preserves exact multiplicity and order while
+avoiding repeated JSON objects. Source decoding reconstructs and structurally
+compares the original ordered trace.
 
 `Name` is encoded as an ordered array of tagged string and numeric components.
 This is lossless for generated private declarations; Lean's standard JSON name
@@ -601,7 +616,7 @@ proof-state mismatch.
 
 ### E2. Total structured recorder
 
-- Add schema-16 paths, structural witnesses, all four phases, total reduction
+- Add schema-17 paths, structural witnesses, all four phases, total reduction
   identities, exact congruence choices, rule variants, match envelopes, and
   full nested premise programs.
 - Add exact simproc/dsimproc observation and deferred classification.
@@ -626,21 +641,21 @@ Gate: every branch-focused certificate replays; mutations of path, phase,
 operation, rule variant, congruence choice, config, premise order, or terminal
 fail at the mutated item.
 
-Status: complete. The focused suite replays 36 dynamic branch classes and
+Status: complete. The focused suite replays 37 dynamic branch classes and
 rejects 20 targeted mutations. Complete-module classification and replay are
 tested once through the source materialization gate instead of a parallel
 record/replay harness.
 
 ### E4. Source and materializer migration
 
-- Print and parse the schema-16 source form.
+- Print and parse the schema-17 source form.
 - Include engine id, rule fingerprints, and final-state validation.
 - Switch passive recording and context programs to the new engine.
 - Keep the source and materializer independent of removed historical bridge
   and selector-discovery implementations.
 
 Gate: all existing non-simproc focused/production fixtures materialize through
-schema 16 with zero bridge, generated-proof, presentation, or whole-result
+schema 17 with zero bridge, generated-proof, presentation, or whole-result
 metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
@@ -669,13 +684,13 @@ entry; all review checks are machine-enforced.
 
 Status: complete. A declaration-level lineage manifest binds 120 semantic fork
 declarations to the pinned `Main`, `Rewrite`, `Types`, `Simproc`, and
-`Transform` implementations. A separate digest covers 101 controlled
+`Transform` implementations. A separate digest covers 105 controlled
 declarations, and hashes lock the manually reviewed fork, IR, runtime,
 fingerprinting, record/replay, source, inventory, reference adapter, and
 coverage contract. The
 review fixed every discrepancy it found before rerunning the complete local
 gate; section 4 has 54 machine-bound rows and no partial, implicit, or absent
-schema-16 representation.
+schema-17 representation.
 
 ### E6. Full cloud closure
 
@@ -700,18 +715,22 @@ The inventory fixes 8,264 module files, 6,319 modules containing 83,425
 occurrences, source hashes, and exact byte ranges at the tested commit. It
 includes 91 nested occurrences, uses the exact frontend for five modules whose
 lightweight parse requires recovery, and collapses one byte-identical duplicate
-syntax record. Modules are assigned by `SHA256(module) mod shardCount`. The run
-uses 256 short deterministic batches distributed across eight distinct verified
-Vast.ai machines. One shard process runs on each host with at least 250 GB of
-RAM reserved for it, giving eight memory-isolated concurrent module executions.
-The first live attempt established that four processes on 32--64 GB hosts was
-not valid parallelism: multiple shards were killed with exit 137, and the same
-instrumented `Mathlib/Algebra/Order/Ring/Unbundled/Rat.lean` recording compile
-was killed when reproduced alone on a 64 GB machine. A later isolated
-`TraceForm.lean` recording exhausted 128 GB, establishing the 250 GB floor.
-Exit `-9` or `137` is classified as worker-capacity failure and never triggers
-semantic materialization bisection. Each batch records a module
-once and, when it has accepted executions, compiles one copied module with all
+syntax record. Modules are assigned by `SHA256(module) mod shardCount`.
+
+The run uses 256 deterministic batches distributed across 16 distinct verified
+Vast.ai machines. Four shard processes run on each host, so 64 module
+executions can proceed concurrently. Every host provides at least 16 effective
+CPU cores and 96 GB RAM, or four effective cores and 24 GB RAM per active Lean
+process. Those bounds follow a root-cause correction, not an accommodation of
+the earlier capacity failures: the recorder had duplicated outer simproc traces
+inside recursive premises, expanded shared expression DAGs into trees while
+fingerprinting, and allowed observation to change meta-state. Once those bugs
+were fixed, the module that previously exceeded a 250 GB worker completed the
+normal shard harness at 1.61 GB RSS.
+
+Exit `-9` or `137` is still classified as worker-capacity failure and never
+triggers semantic materialization bisection. Each batch records a module once
+and, when it has accepted executions, compiles one copied module with all
 accepted occurrences materialized. A batch stops after its first semantic
 failure. Diagnostic group bisection runs only after a materialization failure
 and never changes the gate. The reducer requires every batch, module,
@@ -726,13 +745,13 @@ occurrence, and replay count before it can pass.
 - queries the live Vast.ai marketplace and selects distinct verified machines
   under reliability, effective-vCPU, RAM, disk, network, per-offer, aggregate
   hourly, and maximum-runtime guards;
-- launches eight Ubuntu 24.04 hosts and explicitly attaches the configured SSH
+- launches 16 Ubuntu 24.04 hosts and explicitly attaches the configured SSH
   key to every contract;
 - retains only candidates that pass the real SSH handshake, destroys rejects,
   and fills their slots from distinct fallback offers without exceeding the
-  aggregate hourly guard; the one-process worker model requires four effective
-  cores, and the controller refreshes an exhausted fallback snapshot from the
-  live market a bounded number of times;
+  aggregate hourly guard; every concurrent process requires four effective
+  cores and 24 GB RAM, and the controller refreshes an exhausted fallback
+  snapshot from the live market a bounded number of times;
 - installs the pinned Lean toolchain on all hosts concurrently, checks out the
   exact commit, raises and verifies a 65,536 file-descriptor limit, restores
   Mathlib artifacts, and builds the engine and shared library before starting
@@ -744,8 +763,8 @@ occurrence, and replay count before it can pass.
 - compresses the immutable inventory for transfer, retries bounded transfers,
   and replaces a setup-failed host in the same worker slot while other workers
   continue;
-- partitions all 256 batches exactly once across the hosts and runs one
-  memory-isolated shard process per host;
+- partitions all 256 batches exactly once across the hosts and runs four shard
+  processes per host;
 - copies atomic worker state, reports, logs, and failing sources back to the
   controller every 30 seconds, excluding transient per-module `work/` trees and
   including checkpoints while slower hosts are still setting up;
@@ -755,10 +774,11 @@ occurrence, and replay count before it can pass.
 - destroys all rented instances on every terminal path unless explicitly kept
   for diagnosis.
 
-At the launch defaults, eight module executions can be active concurrently on
-eight independent machines. Every offer must provide 250 GB per active Lean
-process. The controller refuses a plan above $4.00/hour or three hours; the
-actual plan and its compute exposure are recomputed before rental.
+At the launch defaults, 64 module executions can be active concurrently on 16
+independent machines. Every offer must provide 16 effective CPU cores and 96 GB
+RAM for its four active Lean processes. The controller refuses a plan above
+$4.00/hour or three hours; the actual plan and its compute exposure are
+recomputed before rental.
 
 The terminal taxonomy is deliberately closed:
 
@@ -784,6 +804,8 @@ completeness review.
 ## 12. Decisions
 
 - Schema 15 remains only in Git history and is not a simplifier IR dependency.
+- Schema 17 is the current certificate format; it adds bounded DAG
+  fingerprinting and lossless dictionary encoding for ordered simproc traces.
 - E1 through E5 and the E6 cloud infrastructure are complete; the full E6
   corpus result is pending.
 - The correctness boundary is a pinned source fork with record and replay

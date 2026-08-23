@@ -445,8 +445,8 @@ def observeSimproc (name : Name) (input output : Expr)
       path := state.path
       name
       phase := state.phase
-      inputFingerprint := ← liftM (exprFingerprintHash input)
-      outputFingerprint := ← liftM (exprFingerprintHash output)
+      inputFingerprint := ← liftM (runtime.cachedFingerprintHash input)
+      outputFingerprint := ← liftM (runtime.cachedFingerprintHash output)
       stepDisposition
       definitional
     }
@@ -1762,6 +1762,8 @@ private def beginPremiseProgram (type : Expr) (index : Nat)
     runtime.state.set {
       outer with
       program := { initialFingerprint := fingerprint, finalFingerprint := fingerprint }
+      simprocs := #[]
+      coveredBranches := #[]
       path.steps := outer.path.steps.push (.premise index)
       lastPremiseTerminal := none
       phaseInvocationOrdinal := 0
@@ -2324,13 +2326,14 @@ private def finishRecording (runtime : Runtime) (finalExpr : Expr) : MetaM Recor
   return {
     program := state.program
     deferred := state.deferred
-    simprocs := state.simprocs
+    simprocs := { observations := state.simprocs }
     coveredBranches := state.coveredBranches
   }
 
 def mainCoreRecording (e : Expr) (ctx : Context) (s : State := {})
     (methods : Methods := {}) : MetaM (Result × State × Recording) := do
-  let runtime ← Runtime.record (← exprFingerprintHash e)
+  let initialFingerprint ← exprFingerprintHash e
+  let runtime ← Runtime.record initialFingerprint
   let (result, state) ← EngineM.runWithRuntime runtime ctx s methods <|
     withCatchingRuntimeEx <| simp e
   recordSimpUses state
@@ -2411,13 +2414,17 @@ private def useImplicitDefEqProofRecorded (thm : SimpTheorem) : EngineM Bool := 
   return false
 
 private def ruleShape (thm : SimpTheorem) : EngineM (String × String) := do
-  let value ← thm.getValue
-  let ruleFingerprint ← liftM (exprFingerprintHash (← inferType value))
-  let type ← inferType value
-  let (_, _, type) ← forallMetaTelescopeReducing type
-  let type ← whnf (← instantiateMVars type)
-  let lhs := type.appFn!.appArg!
-  return (ruleFingerprint, ← liftM (exprFingerprintHash lhs))
+  let saved ← Meta.saveState
+  try
+    let value ← thm.getValue
+    let ruleFingerprint ← liftM (exprFingerprintHash (← inferType value))
+    let type ← inferType value
+    let (_, _, type) ← forallMetaTelescopeReducing type
+    let type ← whnf (← instantiateMVars type)
+    let lhs := type.appFn!.appArg!
+    return (ruleFingerprint, ← liftM (exprFingerprintHash lhs))
+  finally
+    saved.restore
 
 private def exactRuleVariant (preceding : Array SimpTheorem)
     (selected : SimpTheorem) : EngineM Nat := do
@@ -2430,12 +2437,10 @@ private def exactRuleVariant (preceding : Array SimpTheorem)
 
 private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
     (bis : Array BinderInfo) (value type e : Expr) (thm : SimpTheorem)
-    (numExtraArgs variant : Nat) (indexMode : Bool)
+    (numExtraArgs : Nat) (variant : EngineM Nat) (indexMode : Bool)
     (originOverride? : Option RuleOrigin := none) : EngineM (Option Result) := do
   let recorderSaved ← saveRecorderState
   recordTriedSimpTheorem thm.origin
-  let ruleFingerprint ← liftM (exprFingerprintHash (← inferType value))
-  let lhsFingerprint ← liftM (exprFingerprintHash lhs)
   let mut extraArgs := #[]
   let mut subject := e
   for _ in *...numExtraArgs do
@@ -2446,6 +2451,10 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
     restoreRecorderState recorderSaved
     return none
   let makeMetadata (proofPresent : Bool) : EngineM (RuleRef × MatchEnvelope) := do
+    -- Matching assigns the theorem telescope metavariables. Certificate
+    -- identity is the generic theorem shape used for candidate resolution,
+    -- not this particular successful instantiation.
+    let (ruleFingerprint, lhsFingerprint) ← ruleShape thm
     let (origin, source, inverse) ← ruleOrigin thm.origin originOverride?
     let state ← getRecorderState
     let binderAssignments ← expressionFingerprints xs
@@ -2457,7 +2466,7 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
       origin
       inverse
       phase := state.phase
-      variant
+      variant := ← variant
       ruleFingerprint
       lhsFingerprint
       indexMode
@@ -2492,8 +2501,9 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
   let rhs := (← instantiateMVars type).appArg!
   if (← instantiateMVars subject) == rhs then
     return ← failAttempt premises
-  if thm.perm && !(← acLt rhs subject .reduceSimpleOnly) then
-    return ← failAttempt premises
+  if thm.perm then
+    let ordered ← acLt rhs subject .reduceSimpleOnly
+    unless ordered do return ← failAttempt premises
   let rhs ← if type.hasBinderNameHint then rhs.resolveBinderNameHint else pure rhs
   let mut result : Result := { expr := rhs, proof? }
   if (← hasAssignableMVar result.expr) then
@@ -2506,7 +2516,7 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
   return some result
 
 private def tryTheoremWithExtraArgsRecorded? (e : Expr) (thm : SimpTheorem)
-    (numExtraArgs variant : Nat) (indexMode : Bool)
+    (numExtraArgs : Nat) (variant : EngineM Nat) (indexMode : Bool)
     (originOverride? : Option RuleOrigin := none) : EngineM (Option Result) :=
   withNewMCtxDepth do
     let value ← thm.getValue
@@ -2526,14 +2536,14 @@ private def tryTheoremRecorded? (e : Expr) (thm : SimpTheorem)
     let (xs, bis, type) ← forallMetaTelescopeReducing type
     let type ← whnf (← instantiateMVars type)
     let lhs := type.appFn!.appArg!
-    match ← tryTheoremCoreRecorded lhs xs bis value type e thm 0 variant indexMode
+    match ← tryTheoremCoreRecorded lhs xs bis value type e thm 0 (pure variant) indexMode
         originOverride? with
     | some result => return some result
     | none =>
       let lhsNumArgs := lhs.getAppNumArgs
       let eNumArgs := e.getAppNumArgs
       if eNumArgs > lhsNumArgs then
-        tryTheoremCoreRecorded lhs xs bis value type e thm (eNumArgs - lhsNumArgs) variant
+        tryTheoremCoreRecorded lhs xs bis value type e thm (eNumArgs - lhsNumArgs) (pure variant)
           indexMode originOverride?
       else
         return none
@@ -2555,7 +2565,7 @@ private def rewriteRecorded? (e : Expr) (theorems : SimpTheoremTree)
     let candidates := candidates.insertionSort fun lhs rhs => lhs.1.priority > rhs.1.priority
     for h : candidateIndex in *...candidates.size do
       let (thm, numExtraArgs) := candidates[candidateIndex]
-      let variant ← exactRuleVariant
+      let variant := exactRuleVariant
         ((candidates.extract 0 candidateIndex).map (·.1)) thm
       checkSystem "simp"
       if erased.contains thm.origin then continue
@@ -2567,7 +2577,7 @@ private def rewriteRecorded? (e : Expr) (theorems : SimpTheoremTree)
     let candidates := candidates.insertionSort fun lhs rhs => lhs.priority > rhs.priority
     for h : candidateIndex in *...candidates.size do
       let thm := candidates[candidateIndex]
-      let variant ← exactRuleVariant (candidates.extract 0 candidateIndex) thm
+      let variant := exactRuleVariant (candidates.extract 0 candidateIndex) thm
       checkSystem "simp"
       unless erased.contains thm.origin ||
           (rflOnly && !(thm.rfl || (useBackward && thm.backwardRfl))) do

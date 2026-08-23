@@ -41,17 +41,23 @@ def main() -> None:
         offer(3, 11, 0.12, 24, 3.2),
         offer(4, 12, 0.30, 32, 4.0),
     ]
-    selected = vast.select_offers(offers, 2, 0.20, 0.25, 120_000, 1)
+    selected = vast.select_offers(offers, 2, 0.20, 0.25, 120_000, 1, 4)
     if {value["machine_id"] for value in selected} != {10, 11}:
         raise RuntimeError("Vast offer selection did not enforce unique machines")
     if sum(value["dph_total"] for value in selected) > 0.25:
         raise RuntimeError("Vast offer selection exceeded the price guard")
     under_memory = offer(5, 13, 0.01, 64, 5.0, 64_000)
     selected = vast.select_offers(
-        offers + [under_memory], 2, 0.20, 0.25, 120_000, 1
+        offers + [under_memory], 2, 0.20, 0.25, 120_000, 1, 4
     )
     if under_memory in selected:
         raise RuntimeError("Vast offer selection admitted an under-memory host")
+    under_cpu = offer(8, 16, 0.01, 3, 5.0, 256_000)
+    selected = vast.select_offers(
+        offers + [under_cpu], 2, 0.20, 0.25, 120_000, 1, 4
+    )
+    if under_cpu in selected:
+        raise RuntimeError("Vast offer selection admitted an under-CPU host")
     large_score = vast.offer_score(offer(6, 14, 0.10, 64, 4.0), 1)
     right_sized_score = vast.offer_score(offer(7, 15, 0.10, 4, 4.0), 1)
     if large_score != right_sized_score:
@@ -64,6 +70,7 @@ def main() -> None:
     defaults = vast.parser().parse_args(["run", "--output-dir", "unused"])
     fallback_fixture = vast.parser().parse_args([
         "run", "--output-dir", "unused", "--minimum-ram-gb-per-process", "120",
+        "--concurrency", "1",
     ])
     fallbacks = vast.replacement_offers(
         offers + [offer(5, 13, 0.15, 8, 3.0)], fallback_fixture, {10}
@@ -75,19 +82,20 @@ def main() -> None:
     if vast.parse_jsonish("{'success': True}") != {"success": True}:
         raise RuntimeError("Vast legacy CLI response parsing changed")
     if (
-        defaults.workers != 8
-        or defaults.concurrency != 1
-        or defaults.minimum_ram_gb_per_process != 250
+        defaults.workers != 16
+        or defaults.concurrency != 4
+        or defaults.minimum_ram_gb_per_process != 24
+        or defaults.minimum_cpu_cores_per_process != 4
         or defaults.max_runtime_hours != 3
     ):
-        raise RuntimeError("Vast memory-isolation defaults changed")
+        raise RuntimeError("Vast parallel resource defaults changed")
     if "--exclude=work/" not in inspect.getsource(vast.rsync_from):
         raise RuntimeError("Vast checkpoints include transient worker trees")
     setup = vast.setup_script("0" * 40)
     if "ulimit -n 65536" not in setup or 'test "$(ulimit -n)" -ge 65536' not in setup:
         raise RuntimeError("Vast setup does not protect parallel cache extraction")
     print(
-        "schema-16 Vast scheduler: 256 shards covered once; "
+        "schema-17 Vast scheduler: 256 shards covered once; "
         "memory, host, progress, and price guards: ok"
     )
 

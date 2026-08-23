@@ -1,5 +1,7 @@
 import ExplicitLean.SimpEngine.Recording
 
+open Lean Meta Elab Tactic
+
 def requestedDelta (n : Nat) : Nat := n + 0
 
 opaque Holds : Prop → Prop
@@ -12,6 +14,16 @@ axiom holdsTrue : Holds True
 theorem guardedRule {p q : Prop} (h : p → q) : p → q := h
 
 theorem falseGuardedAdd {n : Nat} (_ : False) : n + 0 = n := Nat.add_zero n
+
+elab "check_premise_trace_delta" : tactic => withMainContext do
+  let simpStx ← `(tactic|
+    simp (config := { failIfUnchanged := false }) [falseGuardedAdd])
+  let recording ← ExplicitLean.SimpEngine.Recording.recordCertificate simpStx.raw
+  let count := recording.certificate.subjects.foldl (init := 0) fun total subject =>
+    total + subject.simprocs.size
+  unless count == 18 do
+    throwError "premise recording duplicated or dropped simproc observations: expected 18, got {count}"
+  logInfo m!"SIMP_ENGINE_PREMISE_TRACE simprocs={count}"
 
 opaque SeeProp : Prop → Prop
 opaque SeeNat : Nat → Prop
@@ -54,6 +66,7 @@ example (p q : Prop) (h : p) (hpq : p → q) : q := by
   simp_engine_recording (disch := assumption) [hpq]
 
 example (n : Nat) : n + 0 = n := by
+  check_premise_trace_delta
   simp_engine_recording (config := { failIfUnchanged := false })
     (disch := assumption) only [falseGuardedAdd]
   exact Nat.add_zero n

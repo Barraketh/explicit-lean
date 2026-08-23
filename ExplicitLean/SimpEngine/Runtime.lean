@@ -47,16 +47,45 @@ structure RecorderState where
 structure Runtime where
   mode : RuntimeMode
   state : IO.Ref RecorderState
+  /-- Ephemeral expression fingerprints shared by one engine execution. Simproc
+      candidate loops commonly present the same expression to many candidates;
+      recomputing its proof-insensitive DAG hash for every observation is both
+      redundant and unbounded in practice. -/
+  fingerprintCache : IO.Ref (ExprStructMap String)
   ruleContext : Option Simp.Context := none
 
 def Runtime.reference : MetaM Runtime := do
-  return { mode := .reference, state := ← IO.mkRef {} }
+  return {
+    mode := .reference
+    state := ← IO.mkRef {}
+    fingerprintCache := ← IO.mkRef {}
+  }
 
 def Runtime.record (initialFingerprint : String) : MetaM Runtime := do
   let state : RecorderState := { program.initialFingerprint := initialFingerprint }
-  return { mode := .record, state := ← IO.mkRef state }
+  return {
+    mode := .record
+    state := ← IO.mkRef state
+    fingerprintCache := ← IO.mkRef {}
+  }
 
 def Runtime.replay (program : Program) (ruleContext : Option Simp.Context := none) : MetaM Runtime := do
-  return { mode := .replay, state := ← IO.mkRef { program }, ruleContext }
+  return {
+    mode := .replay
+    state := ← IO.mkRef { program }
+    fingerprintCache := ← IO.mkRef {}
+    ruleContext
+  }
+
+/-- Fingerprint an instantiated expression once per engine execution. The
+    cache is deliberately outside `RecorderState`: speculative simplifier
+    state rollback does not invalidate a pure fingerprint. -/
+def Runtime.cachedFingerprintHash (runtime : Runtime) (expression : Expr) : MetaM String := do
+  let expression ← instantiateMVars expression
+  if let some fingerprint := (← runtime.fingerprintCache.get).get? { val := expression } then
+    return fingerprint
+  let fingerprint ← exprFingerprintHash expression
+  runtime.fingerprintCache.modify fun cache => cache.insert { val := expression } fingerprint
+  return fingerprint
 
 end Lean.Meta.Simp.Engine

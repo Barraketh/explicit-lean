@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run schema-16 full closure in parallel on verified Vast.ai CPU capacity."""
+"""Run schema-17 full closure in parallel on verified Vast.ai CPU capacity."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_QUERY = (
-    "verified=true rentable=true cpu_arch=amd64 cpu_cores_effective>=4 "
-    "cpu_ram>=250 disk_space>=80 disk_bw>=300 direct_port_count>=1 "
+    "verified=true rentable=true cpu_arch=amd64 cpu_cores_effective>=16 "
+    "cpu_ram>=96 disk_space>=80 disk_bw>=300 direct_port_count>=1 "
     "reliability>=0.99 inet_down>=100 inet_up>=50"
 )
 
@@ -103,6 +103,10 @@ def offer_ram_mb(offer: dict[str, Any]) -> float:
     return float(offer.get("cpu_ram") or 0)
 
 
+def offer_effective_cores(offer: dict[str, Any]) -> float:
+    return float(offer.get("cpu_cores_effective") or 0)
+
+
 def select_offers(
     offers: list[dict[str, Any]],
     count: int,
@@ -110,6 +114,7 @@ def select_offers(
     max_total_hourly: float,
     minimum_ram_mb: float = 0,
     concurrency: int = 1,
+    minimum_effective_cores: float = 0,
 ) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
     machines: set[int] = set()
@@ -124,6 +129,7 @@ def select_offers(
             or machine in machines
             or price > max_offer_hourly
             or offer_ram_mb(offer) < minimum_ram_mb
+            or offer_effective_cores(offer) < minimum_effective_cores
         ):
             continue
         if sum(float(item["dph_total"]) for item in selected) + price > max_total_hourly:
@@ -152,6 +158,7 @@ def replacement_offers(
     excluded_machines: set[int],
 ) -> list[dict[str, Any]]:
     minimum_ram_mb = args.minimum_ram_gb_per_process * args.concurrency * 1000
+    minimum_effective_cores = args.minimum_cpu_cores_per_process * args.concurrency
     result: list[dict[str, Any]] = []
     machines = set(excluded_machines)
     for offer in sorted(
@@ -164,6 +171,8 @@ def replacement_offers(
         if float(offer.get("dph_total") or float("inf")) > args.max_offer_hourly:
             continue
         if offer_ram_mb(offer) < minimum_ram_mb:
+            continue
+        if offer_effective_cores(offer) < minimum_effective_cores:
             continue
         result.append(offer)
         machines.add(machine)
@@ -179,6 +188,7 @@ def search_offers(args: argparse.Namespace, extra: int = 0) -> list[dict[str, An
         args.max_total_hourly,
         args.minimum_ram_gb_per_process * args.concurrency * 1000,
         args.concurrency,
+        args.minimum_cpu_cores_per_process * args.concurrency,
     )
     if extra <= 0:
         return planned
@@ -238,7 +248,7 @@ def scp_to(
 
 
 def create_instance(offer: dict[str, Any], index: int, args: argparse.Namespace) -> dict[str, Any]:
-    label = f"simp16-{args.commit[:8]}-candidate-{index:02d}"
+    label = f"simp17-{args.commit[:8]}-candidate-{index:02d}"
     result = json_command([
         "vastai", "create", "instance", str(offer["id"]),
         "--image", args.image, "--disk", str(args.disk_gb),
@@ -528,6 +538,8 @@ def run_closure(args: argparse.Namespace) -> int:
         raise RuntimeError("price and runtime guards must be positive")
     if args.minimum_ram_gb_per_process <= 0:
         raise RuntimeError("minimum RAM per concurrent Lean process must be positive")
+    if args.minimum_cpu_cores_per_process <= 0:
+        raise RuntimeError("minimum effective CPU cores per Lean process must be positive")
     if args.market_refreshes < 0:
         raise RuntimeError("market refresh count cannot be negative")
     if not args.ssh_private_key.is_file() or not args.ssh_public_key.is_file():
@@ -550,6 +562,7 @@ def run_closure(args: argparse.Namespace) -> int:
         "workerCount": args.workers,
         "concurrencyPerWorker": args.concurrency,
         "minimumRamGbPerProcess": args.minimum_ram_gb_per_process,
+        "minimumEffectiveCpuCoresPerProcess": args.minimum_cpu_cores_per_process,
         "shardCount": args.shard_count,
         "totalModuleConcurrency": args.workers * args.concurrency,
         "totalHourlyUsd": total_hourly,
@@ -656,7 +669,7 @@ def run_closure(args: argparse.Namespace) -> int:
         ready_instances = ready_instances[:args.workers]
         for index, instance in enumerate(ready_instances):
             instance["workerIndex"] = index
-            instance["label"] = f"simp16-{args.commit[:8]}-{index:02d}"
+            instance["label"] = f"simp17-{args.commit[:8]}-{index:02d}"
         slots = {int(instance["workerIndex"]): instance for instance in ready_instances}
 
         def launch_replacement(worker_index: int) -> dict[str, Any]:
@@ -675,7 +688,7 @@ def run_closure(args: argparse.Namespace) -> int:
                     continue
                 candidate_index += 1
                 replacement["workerIndex"] = worker_index
-                replacement["label"] = f"simp16-{args.commit[:8]}-{worker_index:02d}"
+                replacement["label"] = f"simp17-{args.commit[:8]}-{worker_index:02d}"
                 instances.append(replacement)
                 plan["instances"] = instances
                 atomic_json(state_path, plan)
@@ -847,9 +860,10 @@ def parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--commit", default="")
     run_parser.add_argument("--output-dir", required=True)
-    run_parser.add_argument("--workers", type=int, default=8)
-    run_parser.add_argument("--concurrency", type=int, default=1)
-    run_parser.add_argument("--minimum-ram-gb-per-process", type=float, default=250.0)
+    run_parser.add_argument("--workers", type=int, default=16)
+    run_parser.add_argument("--concurrency", type=int, default=4)
+    run_parser.add_argument("--minimum-ram-gb-per-process", type=float, default=24.0)
+    run_parser.add_argument("--minimum-cpu-cores-per-process", type=float, default=4.0)
     run_parser.add_argument("--shard-count", type=int, default=256)
     run_parser.add_argument("--disk-gb", type=int, default=40)
     run_parser.add_argument("--image", default="ubuntu:24.04")

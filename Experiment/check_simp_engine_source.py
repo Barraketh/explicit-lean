@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Round-trip schema-16 source and compile focused/bounded materialized modules."""
+"""Round-trip schema-17 source and compile focused/bounded materialized modules."""
 
 from __future__ import annotations
 
@@ -220,7 +220,7 @@ def main() -> None:
         unsuccessful_total += sum(unsuccessful.values())
         execution_total += sum(expected.values())
     print(
-        "schema-16 source materialization: "
+        "schema-17 source materialization: "
         f"{len(FIXTURES)} modules, {occurrence_total} occurrences, "
         f"{materialized_total} materialized, {deferred_total} deferred, "
         f"{unsuccessful_total} unsuccessful, {execution_total} executions, "

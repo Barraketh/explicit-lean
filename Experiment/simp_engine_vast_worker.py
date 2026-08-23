@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run schema-16 shards concurrently on one Vast.ai worker."""
+"""Run schema-17 shards concurrently on one Vast.ai worker."""
 
 from __future__ import annotations
 

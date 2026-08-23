@@ -31,6 +31,42 @@ private def programUsesPathStep (program : Simp.Engine.Program)
   program.events.any (fun event => event.path.steps.contains step) ||
     program.structural.any (fun witness => witness.path.steps.contains step)
 
+elab "check_shared_expression_fingerprint" : tactic => withMainContext do
+  let mut expression := mkConst ``True
+  for _ in [0:40] do
+    expression := mkApp2 (mkConst ``And) expression expression
+  let fingerprint ← Simp.Engine.exprFingerprint expression
+  let hashOnly ← Simp.Engine.exprFingerprintHash expression
+  unless fingerprint.fingerprint == hashOnly && hashOnly.startsWith "expr-v2:" do
+    throwError "shared expression fingerprint paths disagree: {fingerprint.fingerprint} != {hashOnly}"
+
+elab "check_simproc_trace_roundtrip" : tactic => withMainContext do
+  let observation : Simp.Engine.SimprocObservation := {
+    path := { steps := #[.appFunction] }
+    name := `traceFixture
+    phase := .post
+    inputFingerprint := "input"
+    outputFingerprint := "output"
+    stepDisposition := .visit
+    definitional := false
+  }
+  let trace : Simp.Engine.SimprocTrace := {
+    observations := #[observation, observation, { observation with phase := .pre }]
+  }
+  let encoded := Lean.toJson trace
+  let decoded : Simp.Engine.SimprocTrace ←
+    match Lean.fromJson? encoded with
+    | .ok decoded => pure decoded
+    | .error message => throwError "simproc trace failed to decode: {message}"
+  unless decoded == trace do
+    throwError "simproc trace dictionary encoding changed invocation order"
+  let dictionary ← match encoded.getObjValAs? (Array Simp.Engine.SimprocObservation)
+      "dictionary" with
+    | .ok dictionary => pure dictionary
+    | .error message => throwError "simproc trace omitted its dictionary: {message}"
+  unless dictionary.size == 2 do
+    throwError "simproc trace did not dictionary repeated observations: {dictionary.size}"
+
 elab "check_engine_terminals_replay" : tactic => withMainContext do
   let ctx ← Simp.mkContext (simpTheorems := {}) (congrTheorems := {})
   let methods := Simp.Engine.mkDefaultMethodsCore {}
@@ -162,6 +198,8 @@ example (p q : Prop) (h : p → q) : p → q := by
   trivial
 
 example : True := by
+  check_shared_expression_fingerprint
+  check_simproc_trace_roundtrip
   check_engine_terminals_replay
   trivial
 

@@ -61,7 +61,7 @@ def recordExpression (expression : Expr) (ctx : Simp.Context)
     MetaM (Simp.Result × Simp.Stats × Simp.Engine.Recording) := do
   let initialMeta ← Meta.saveState
   let (reference, referenceState) ←
-    Simp.Engine.mainCore expression ctx { stats with } (methods := methods)
+    Simp.mainCore expression ctx { stats with } (methods := methods.base)
   let referenceMeta ← Meta.saveState
   initialMeta.restore
   let (recorded, recordedState, recording) ←
@@ -77,7 +77,7 @@ structure RecordedGoal where
   deriving Inhabited
 
 /-- The goal/hypothesis transport layer of `Meta.simpGoal`, with each engine
-    execution replaced by a schema-16 recording execution. -/
+    execution replaced by a schema-17 recording execution. -/
 def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
     (methods : Simp.Engine.Methods) (simplifyTarget : Bool)
     (fvarIdsToSimp : Array FVarId) : MetaM RecordedGoal := mvarId.withContext do

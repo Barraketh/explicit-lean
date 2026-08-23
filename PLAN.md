@@ -22,7 +22,7 @@ in [SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md).
 The implementation is a pinned copy of Lean's simplifier with three modes:
 
 - reference mode, which must be observationally equivalent to upstream;
-- recording mode, which emits schema-16 operations and structural witnesses at
+- recording mode, which emits schema-17 operations and structural witnesses at
   the engine's commit points; and
 - replay mode, which consumes that program without ambient simp theorems,
   congruence rules, simprocs, or dischargers.
@@ -44,7 +44,7 @@ Each package is committed before work begins on the next.
 
 ### E2. Total structured recorder — complete
 
-- Schema 16 represents all structural paths in the pinned engine audit, exact
+- Schema 17 represents all structural paths in the pinned engine audit, exact
   rule variants and matches, nested premise programs, reductions, congruence
   choices, subject transport, and final state.
 - Every invoked simp and dsimp simproc candidate, including `continue none`, is
@@ -66,14 +66,14 @@ Each package is committed before work begins on the next.
 
 Gate: every focused non-deferred recording replays; every mutation is rejected.
 
-Status: complete. The focused suite replays 36 dynamic branch classes and 20
+Status: complete. The focused suite replays 37 dynamic branch classes and 20
 single-field mutations are rejected. Complete-module recording, replay, and
 classification are owned by the source gate below rather than a second replay
 harness.
 
 ### E4. Certificate source and materializer — complete
 
-- Define and parse a stable schema-16 source form.
+- Define and parse a stable schema-17 source form.
 - Print qualified rule identities, engine/configuration identity, nested premise
   programs, and final-state validation.
 - Instrument all supported calls in a module once, materialize replacements in
@@ -82,7 +82,7 @@ harness.
 Gate: every focused and bounded-production non-deferred execution materializes,
 and the complete copied modules compile.
 
-Status: complete. Schema 16 is serialized as compact JSON inside shallow Lean
+Status: complete. Schema 17 is serialized as compact JSON inside shallow Lean
 string arrays. Every payload is decoded and compared structurally with the
 recorded certificate before it is written; `Name` values use lossless
 string/numeric components rather than Lean's lossy default JSON codec. A source
@@ -108,13 +108,13 @@ required by Lean's offside rule.
 Gate: the implementation-to-IR matrix has no partial, implicit, or absent row.
 
 Status: complete. The source-level review maps 120 semantic fork declarations
-to their pinned upstream declarations, separately audits 101 controlled
+to their pinned upstream declarations, separately audits 105 controlled
 declarations, and locks every semantic module by hash. The review corrected
 staged simp/dsimp cache provenance, binder and metadata paths, exact
 theorem-variant selection, stable
 lazy-equation origins, generated- and user-congruence identity, match-attempt
 rollback, ground-context isolation, and reduction/builtin eligibility. The
-focused recorder covers 42 dynamic branch classes, focused replay covers 36,
+focused recorder covers 42 dynamic branch classes, focused replay covers 37,
 and 20 independent certificate mutations are rejected.
 
 ### E6. Full cloud closure
@@ -136,37 +136,30 @@ results; the superseded workflow has been removed.
 
 The accepted run inventories 8,264 files and validates 83,425 occurrences in
 6,319 modules byte-for-byte, including 91 nested occurrences. It uses 256
-deterministic batches across eight distinct verified Vast.ai hosts, with one Lean
-module process per host and at least 250 GB of RAM reserved per process: eight
-memory-isolated modules can therefore record or materialize concurrently. The
-single-process and memory limits are empirical: four compiles on 32--64 GB hosts
-were killed, and a later isolated recording of `TraceForm.lean` exhausted a
-128 GB worker. Process exits `-9` and `137` are capacity failures, never semantic
-certificate failures, and materialization bisection is skipped for them. Offers are selected from the
-live market under unique-machine, reliability, CPU, RAM, disk, network,
-hourly-price, and total-runtime guards. Because each host runs one Lean process,
-the CPU floor is four effective cores rather than an unrelated whole-machine
-core count. Setup raises and verifies a 65,536 file-descriptor limit before
-parallel Mathlib cache extraction; a lower provider default was observed to
-drop thousands of artifacts and is rejected rather than repaired by a source
-build. The fallback pool is refreshed from the live market a bounded
-number of times when churn exhausts the initial snapshot. All hosts set up in
-parallel; each begins its assigned batches as soon as it is ready. A failed
-setup or transfer
-is destroyed and replaced in-place while other workers keep running. The
-inventory is compressed before transfer, durable reports/logs/failing sources
-are copied home every 30 seconds while transient `work/` trees are excluded,
-and the controller stops at
-the first semantic failure set. Every batch still records each assigned module
-once and compiles one materialized copy for all accepted occurrences in that
-module. Copied sources use Mathlib's semantic package options
-(`autoImplicit=false` and `maxSynthPendingDepth=3`); omitting those settings was
-shown to make untouched `NormDet.lean` fail independently of instrumentation.
-The strict reducer rejects incomplete or missing batches/modules/
-occurrences, source or engine drift, mixed deferred/non-deferred executions,
-replay-count mismatches, and every recorder, harness, or materialization
-failure. Every rented instance is destroyed on success, failure, timeout, or
-interruption.
+deterministic batches across 16 distinct verified Vast.ai hosts, with four Lean
+module processes per host: up to 64 modules record or materialize concurrently.
+Every host must expose at least 16 effective CPU cores and 96 GB RAM, reserving
+24 GB per process. This replaces the earlier one-process/250 GB plan: reproducing
+the worst failure showed that recursive premise traces duplicated their outer
+prefix, expression fingerprints expanded shared DAGs as trees, and fingerprint
+observers leaked speculative meta-state. After correcting all three invariants,
+the module that had exceeded 250 GB completes the production harness in 7.5
+seconds at 1.61 GB RSS. Capacity exits remain failing outcomes rather than being
+reclassified as certificate behavior.
+
+Offers are selected from the live market under unique-machine, reliability,
+CPU, RAM, disk, network, hourly-price, and total-runtime guards. Setup raises
+and verifies a 65,536 file-descriptor limit before parallel Mathlib cache
+extraction. All hosts set up concurrently; failed setup or transfer hosts are
+destroyed and replaced while healthy workers continue. The compressed
+inventory is transferred once, and durable reports, logs, and failing sources
+are copied home every 30 seconds while transient `work/` trees are excluded.
+Every batch records each assigned module once and compiles one materialized
+copy for all accepted occurrences. The strict reducer rejects incomplete or
+missing batches, modules, occurrences, source or engine drift, mixed deferred
+executions, replay-count mismatches, and every recorder, harness, capacity, or
+materialization failure. Every rented instance is destroyed on success,
+failure, timeout, or interruption.
 
 ## 4. Current local gate
 
@@ -180,7 +173,7 @@ only tests that provide confidence in that engine:
 5. focused dynamic recording coverage;
 6. focused closed replay;
 7. single-field replay mutation rejection;
-8. schema-16 source round-trip and complete-module upstream comparison,
+8. schema-17 source round-trip and complete-module upstream comparison,
    classification, replay, and materialization; and
 9. cloud shard assignment and strict reducer mutation rejection; and
 10. total Vast worker assignment, unique-host selection, SSH parsing, and
