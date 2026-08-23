@@ -789,6 +789,24 @@ Bilinear occurrence `5795dc0135cc7db3` now materializes with `local_rule 3`
 and `local_rule 4`; the focused source gate rejects a wrong positive slot with
 the ordered-rule mismatch diagnostic. Schema 14 is unchanged.
 
+O6d implementation status (2026-08-22): named theorem replay now uses the
+same discrimination-index candidate selection as ordinary `simp`, rather than
+calling the theorem unifier directly. Recorded declaration rules are rebuilt
+through the exact source-level elaboration path used by printed certificates,
+and first-site selection is accepted only when its final expression and proof
+are well-formed in the ambient context and reach the recorded final state.
+Historical-site discovery is the bounded fallback for a rejected fast path;
+it compares expired traversal locals modulo binder renaming while preserving
+ambient fvar identities. The AddConstMap occurrence
+`5771ee0e1343e576` now materializes with
+`match 2 => AddConstMap.coe_mk`; deleting that selector fails with the ordered
+rule diagnostic instead of admitting a proof containing an escaped callback
+fvar. Declaration printing also checks resolution in the replacement site's
+namespace/open context and adds `_root_.` only when the ordinary dotted name
+would resolve to a different constant. Consequently the LinearEquiv occurrence
+`ef04e0e8339535de` now materializes with `_root_.map_smul` instead of reaching
+the retired body-proof rejection gate. Schema 14 is unchanged.
+
 ### S. Simproc design
 
 Simproc handling begins only after a separate design discussion and document.

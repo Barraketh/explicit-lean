@@ -821,6 +821,19 @@ simplification uses a fresh cache boundary. The schema-14 Bilinear gate
 focused source mutation rejects a wrong positive slot with the ordered-rule
 mismatch diagnostic.
 
+O6d implementation status (2026-08-22): theorem commands replay through a
+singleton simp discrimination index, and recorded declarations use the same
+rule elaborator as their printed source. Selector synthesis accepts the fast
+first-applicable-site program only when its result and proof are well-formed
+and reach the recorded state; otherwise it discovers the historical site by
+comparing expired callback locals modulo stable binder renaming. The
+AddConstMap occurrence `5771ee0e1343e576` materializes with the explicit
+second-site command `match 2 => AddConstMap.coe_mk`; a first-site mutation is a
+permanent negative regression. Declaration names are resolved at the
+replacement site and receive `_root_.` only on an actual namespace/open-state
+collision; this also materializes LinearEquiv occurrence `ef04e0e8339535de`
+with `_root_.map_smul` and retires its former source-rewrite failure.
+
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
 `Simp.Config` field as normalized JSON provenance; certificates compile the

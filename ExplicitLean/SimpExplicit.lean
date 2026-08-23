@@ -1134,16 +1134,29 @@ private def recordingMethods (ref : IO.Ref RecorderState)
     post
     discharge? := recordedDischarge? ref }
 
+private def declarationRuleName (name : Name) : MetaM Name := do
+  let direct := mkIdent name
+  let resolved? ← try
+    some <$> resolveGlobalConstNoOverload direct
+  catch _ =>
+    pure none
+  if resolved? == some name then
+    return name
+  -- `_root_` is syntax, not part of the declaration's kernel name.  Add it
+  -- only when the replacement site's namespace/open context would resolve
+  -- the ordinary fully dotted spelling to a different declaration.
+  return (Name.mkSimple "_root_").append name
+
 private def ruleText (origin : Origin) : MetaM String := do
   match origin with
   | .decl name _ inverse =>
       if (← Simp.isBuiltinSimproc name) || (← Simp.isSimproc name) then
         throwError "simp_explicit cannot yet encode simproc '{name}'"
-      -- Keep declaration names fully qualified. Besides making certificates
-      -- robust when pasted under a different namespace, this ensures that a
-      -- printed positional certificate elaborates to the same simp theorem
-      -- used while recording it.
-      return (if inverse then "← " else "") ++ name.toString
+      -- Keep the declaration's dotted kernel name and add `_root_.` when the
+      -- replacement namespace/open state would resolve that spelling to a
+      -- different theorem.
+      let printedName ← declarationRuleName name
+      return (if inverse then "← " else "") ++ printedName.toString
   | .fvar fvarId =>
       let localDecl ← fvarId.getDecl
       if localDecl.userName.isInaccessibleUserName then
@@ -1299,11 +1312,17 @@ private structure ReplayEvent where
   selector : ReplaySelector
   phase : Phase
   rules : Array SimpTheorem
+  /-- Singleton discrimination indexes, built once when the source or recorded
+      event is elaborated rather than once per traversal callback. -/
+  indexedRules : Array SimpTheorems := #[]
   premises : Array Expr := #[]
   reduction : Option ReductionIdentity := none
   /-- Deferred identity for a theorem local to the current simplifier traversal. -/
   localRuleSlot : Option Nat := none
   source : Syntax
+
+private def indexReplayRules (rules : Array SimpTheorem) : Array SimpTheorems :=
+  rules.map fun rule => ({} : SimpTheorems).addSimpTheorem rule
 
 private structure GeneratedBinding where
   name : Name
@@ -1464,6 +1483,20 @@ private def elaborateRule (phase : Phase) (rule : Syntax) : TacticM (Array SimpT
   mkSimpTheoremFromExpr origin levelParams proof
     (inv := inverse) (post := phase == .post)
 
+private def elaborateRecordedDeclRule (name : Name) (post inverse : Bool) : TacticM (Array SimpTheorem) := do
+  -- Validate the exact source-level operation: construct the same rule syntax
+  -- that the certificate prints and send it through `elaborateRule`.  The
+  -- lower-level constant theorem constructor can yield different
+  -- discrimination keys for coercion/structure lemmas, which would make
+  -- selector discovery validate a site the freshly compiled source does not.
+  let printedName ← declarationRuleName name
+  let term : TSyntax `term := ⟨mkIdent printedName⟩
+  let rule ← if inverse then
+      `(simpExplicitRule| ← $term:term)
+    else
+      `(simpExplicitRule| $term:term)
+  elaborateRule (if post then .post else .pre) rule
+
 private def premiseSyntaxes (rule : Syntax) : Array Syntax :=
   if rule[3].isNone || rule[3].getNumArgs == 0 then
     #[]
@@ -1533,7 +1566,7 @@ private def elaborateEvent (stx : Syntax) : TacticM ReplayEvent := do
     let phase ← if rule[0].isNone then pure .post else parsePhase rule[0][0]
     let rules ← elaborateRule phase rule
     let premises ← premiseSyntaxes rule |>.mapM elaboratePremise
-    return { selector, phase, rules, premises, source := stx }
+    return { selector, phase, rules, indexedRules := indexReplayRules rules, premises, source := stx }
 
 private def recordedReplayEvent (event : RecordedEvent)
     (selector : ReplaySelector := .next)
@@ -1565,7 +1598,7 @@ private def recordedReplayEvent (event : RecordedEvent)
     | .decl name _ inverse =>
         if (← Simp.isBuiltinSimproc name) || (← Simp.isSimproc name) then
           throwError "simp_explicit cannot yet encode simproc '{name}'"
-        pure (← mkSimpTheoremFromConst name (post := post) (inv := inverse), (mkIdent name).raw)
+        pure (← elaborateRecordedDeclRule name post inverse, (mkIdent name).raw)
     | .fvar fvarId =>
         let localDecl ← fvarId.getDecl
         let rules ← mkSimpTheoremFromExpr origin #[] (mkFVar fvarId) (post := post)
@@ -1578,6 +1611,7 @@ private def recordedReplayEvent (event : RecordedEvent)
     selector
     phase := event.phase
     rules
+    indexedRules := indexReplayRules rules
     premises := premiseProofs?.getD (event.premises.map (·.proof))
     reduction := none
     source
@@ -1607,16 +1641,24 @@ private def applyRecordedRules? (input : Expr) (event : ReplayEvent)
     (ref : IO.Ref ReplayState) : Simp.SimpM (Option Simp.Result) := do
   let initial ← ref.get
   let mut lastFailure? : Option String := initial.premiseFailure?
-  let rules ← match event.localRuleSlot with
-    | some slot => traversalLocalRules? slot event.phase
-    | none => pure event.rules
-  for rule in rules do
+  let indexedRules ← match event.localRuleSlot with
+    | some slot => pure <| indexReplayRules (← traversalLocalRules? slot event.phase)
+    | none => pure event.indexedRules
+  for singleton in indexedRules do
     let snapshot ← ref.get
     ref.set { snapshot with premiseNext := 0, premiseFailure? := none }
     let metaSnapshot ← liftM Meta.saveState
     let result? ← try
       Simp.withDischarger (premiseProvider event.premises ref) false <|
-        Simp.tryTheorem? input rule
+        -- Replay the rule through the same discrimination index used by
+        -- `simp`.  Calling `tryTheorem?` directly is observably broader: a
+        -- constructor theorem such as `AddConstMap.coe_mk` can unify with an
+        -- arbitrary structure fvar by eta-expanding it, even though the simp
+        -- index would never offer that theorem at that site.  Match ordinals
+        -- count actual simp-rule sites, so candidate selection is part of the
+        -- operation being replayed.
+        let tree := if event.phase == .post then singleton.post else singleton.pre
+        Simp.rewrite? input tree singleton.erased (tag := "simp_explicit") (rflOnly := false)
     catch ex =>
       liftM metaSnapshot.restore
       ref.set snapshot
@@ -1768,8 +1810,32 @@ private def replayCanonicalEventKey (ambientFVars : Array FVarId)
   let (result, _) := (replayCanonicalExpr event.result.expr).run state
   s!"{phase}|{operation}|input={input}|result={result}"
 
+private def replayAmbientFVars : Simp.SimpM (Array FVarId) := do
+  let context ← Simp.getContext
+  let localContext ← getLCtx
+  let mut result := #[]
+  for index in *...min context.lctxInitIndices localContext.numIndices do
+    if let some declaration := localContext.getAt? index then
+      if declaration.index == index then
+        result := result.push declaration.fvarId
+  return result
+
+private def replayCanonicalExprMatches? (actual expected : Expr) : Simp.SimpM Bool := do
+  let ambientFVars ← replayAmbientFVars
+  let initialState : ReplayCanonicalState := { ambientFVars }
+  let (actualKey, _) := (replayCanonicalExpr actual).run initialState
+  let (expectedKey, _) := (replayCanonicalExpr expected).run initialState
+  return actualKey == expectedKey
+
 private def replayExprMatches? (actual expected : Expr) : Simp.SimpM Bool := do
   if Expr.equal actual expected then
+    return true
+  -- Historical callback expressions can contain traversal-local fvar ids
+  -- whose declarations no longer exist.  Compare them modulo a stable
+  -- first-occurrence renaming while preserving every ambient fvar identity.
+  -- This is only a discovery anchor; replay still validates the selected
+  -- operation and the final subject independently.
+  if (← replayCanonicalExprMatches? actual expected) then
     return true
   -- Discovery is allowed a bounded reducible-definitional fallback, but the
   -- comparison itself must not leak assignments into either a skipped probe
@@ -2404,6 +2470,14 @@ private def reachesSearchedResult? (searchedResult replayedResult : Simp.Result)
   else
     isDefEq searchedResult.expr replayedResult.expr
 
+private def replayResultWellFormed? (result : Simp.Result) : MetaM Bool := do
+  let localContext ← getLCtx
+  unless ← MetavarContext.isWellFormed localContext result.expr do
+    return false
+  match result.proof? with
+  | none => return true
+  | some proof => return ← MetavarContext.isWellFormed localContext proof
+
 private def selectCertificateEvents? (target : Expr) (searchedResult : Simp.Result)
     (encoded : Array EncodedEvent) (mode : CertificateSelectorMode) :
     TacticM (Option (Array EncodedEvent)) := do
@@ -2437,6 +2511,8 @@ private def selectCertificateEvents? (target : Expr) (searchedResult : Simp.Resu
     let replayEvents := selected.map (·.replay)
     let (replayedResult, replayState) ← runReplay target replayEvents
     unless replayState.next == replayEvents.size do
+      return none
+    unless ← replayResultWellFormed? replayedResult do
       return none
     let reaches ← reachesSearchedResult? searchedResult replayedResult
     unless reaches do
@@ -2488,6 +2564,10 @@ private def projectSelectedEvents? (target : Expr) (searchedResult : Simp.Result
         { event with replay := { event.replay with selector := .matchSite multiplicity } }
       else
         event
+    -- Keep first-site replay as the fast path, but accept it only after the
+    -- well-formed-result and exact-final-state checks above.  If an over-broad
+    -- unification lets a traversal-local fvar escape, discovery supplies the
+    -- historical match ordinal instead.
     let selected? ← match (← selectCertificateEvents? target searchedResult deduplicated .next) with
       | some selected => pure (some selected)
       | none =>
@@ -3200,6 +3280,8 @@ private def canReplayWithSelectors (target : Expr) (recorded : Array RecordedEve
       let (replayedResult, replayState) ← runReplay target events
       unless replayState.next == events.size do
         return false
+      unless ← replayResultWellFormed? replayedResult do
+        return false
       return ← reachesSearchedResult? searchedResult replayedResult
   catch _ =>
     return false
@@ -3209,6 +3291,9 @@ private def replayEncoding? (target : Expr) (recorded : Array RecordedEvent)
   let next := nextSelectors recorded
   if ← canReplayWithSelectors target recorded searchedResult next then
     return some next
+  -- A first-applicable-site run can be definitionally final while carrying an
+  -- escaped callback local in its proof.  `canReplayWithSelectors` rejects
+  -- that result, and historical discovery then finds the exact match ordinal.
   if let some mixed ← discoverSelectors? target recorded then
     if ← canReplayWithSelectors target recorded searchedResult mixed then
       return some mixed

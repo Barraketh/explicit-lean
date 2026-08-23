@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded rejection regression for singleton operational source ownership."""
+"""Bounded source-qualification regression for singleton operational ownership."""
 
 from __future__ import annotations
 
@@ -35,10 +35,10 @@ def main() -> None:
         and entry["id"] == TARGET_ID
     ]
     if len(entries) != 1:
-        raise RuntimeError(f"expected exactly one production fallback entry: {entries!r}")
+        raise RuntimeError(f"expected exactly one production qualification entry: {entries!r}")
     entry = entries[0]
     if entry["module"] != MODULE:
-        raise RuntimeError(f"fallback ID moved modules: {entry!r}")
+        raise RuntimeError(f"qualification ID moved modules: {entry!r}")
 
     record = coverage.run_closure_module(
         MODULE,
@@ -49,37 +49,36 @@ def main() -> None:
     )
     aggregate = record.get("aggregate", {})
     if record.get("recording", {}).get("compile_count") != 1:
-        raise RuntimeError(f"fallback recording was not singular: {record!r}")
-    if aggregate.get("compile") is not False:
-        raise RuntimeError(f"fallback-dependent aggregate unexpectedly compiled: {record!r}")
-    if aggregate.get("closure_complete") is not False:
-        raise RuntimeError(f"fallback-dependent closure was marked complete: {record!r}")
-    if aggregate.get("optimistic_compile") is not False:
-        raise RuntimeError(f"fallback did not retain the optimistic failure: {record!r}")
+        raise RuntimeError(f"qualification recording was not singular: {record!r}")
+    if aggregate.get("compile") is not True or aggregate.get("closure_complete") is not True:
+        raise RuntimeError(f"qualified aggregate did not close: {record!r}")
+    if aggregate.get("optimistic_compile") is not True:
+        raise RuntimeError(f"qualified candidate did not compile optimistically: {record!r}")
 
     occurrences = record.get("occurrences", [])
     if len(occurrences) != 1 or occurrences[0].get("id") != TARGET_ID:
         raise RuntimeError(f"fallback occurrence identity changed: {record!r}")
     occurrence = occurrences[0]
-    if occurrence.get("terminal_outcome") != "coverage_failure":
-        raise RuntimeError(f"fallback occurrence bypassed the completion gate: {record!r}")
-    if occurrence.get("failure_reason") != "source_rewrite":
-        raise RuntimeError(f"fallback rejection reason changed: {record!r}")
+    if occurrence.get("terminal_outcome") != "materialized":
+        raise RuntimeError(f"qualified occurrence did not materialize: {record!r}")
+    if occurrence.get("failure_reason") is not None or occurrence.get("materialized_compile") is not True:
+        raise RuntimeError(f"qualified occurrence retained a failure: {record!r}")
     candidate = occurrence.get("candidate")
     if not isinstance(candidate, dict) or candidate.get("kind") != "occurrence":
-        raise RuntimeError(f"original operational candidate audit was lost: {record!r}")
+        raise RuntimeError(f"qualified operational candidate audit was lost: {record!r}")
+    replacement = candidate.get("replacement")
+    if not isinstance(replacement, str) or replacement.count("_root_.map_smul") != 1:
+        raise RuntimeError(f"root qualification was not preserved: {record!r}")
 
     fallback = aggregate.get("body_scope_proof_fallback")
     final_attempt = aggregate.get("body_scope_proof_aggregate")
     if fallback is not None or final_attempt is not None:
         raise RuntimeError(f"body-proof fallback was still selected: {record!r}")
-    if aggregate.get("body_scope_proof_failures") != {
-        TARGET_ID: "source_rewrite"
-    }:
-        raise RuntimeError(f"body-proof rejection audit changed: {record!r}")
+    if aggregate.get("body_scope_proof_failures") != {}:
+        raise RuntimeError(f"body-proof failure audit was not empty: {record!r}")
     labels = [attempt.get("label") for attempt in aggregate.get("attempts", [])]
-    if "body-scope-proof-fallback" in labels or "body-scope-proof-aggregate" in labels:
-        raise RuntimeError(f"body-proof compile attempt was not suppressed: {labels!r}")
+    if labels != ["optimistic"]:
+        raise RuntimeError(f"qualified candidate used unexpected compile attempts: {labels!r}")
     source = (coverage.MATHLIB / MODULE).read_bytes()
     actual_body = source[entry["bodyScopeStartByte"] : entry["bodyScopeEndByte"]].decode("utf-8")
     if actual_body != entry["bodyScopeSource"]:
@@ -89,7 +88,7 @@ def main() -> None:
     if any(marker in serialized for marker in FORBIDDEN):
         raise RuntimeError("body-proof closure record contains a raw internal identity")
     elapsed = time.monotonic() - started
-    print(f"singleton body-proof fallback rejected in {elapsed:.3f}s")
+    print(f"singleton root-qualified certificate materialized in {elapsed:.3f}s")
 
 
 if __name__ == "__main__":
