@@ -696,9 +696,13 @@ includes 91 nested occurrences, uses the exact frontend for five modules whose
 lightweight parse requires recovery, and collapses one byte-identical duplicate
 syntax record. Modules are assigned by `SHA256(module) mod shardCount`. The run
 uses 256 short deterministic batches distributed across 16 distinct verified
-Vast.ai machines. Four independent shard processes run on each host, giving a
-target concurrency of 64 module executions. Each batch records a module once
-and, when it has accepted executions, compiles one copied module with all
+Vast.ai machines. One shard process runs on each host with at least 120 GB of
+RAM reserved for it, giving 16 memory-isolated concurrent module executions.
+The first live attempt established that four processes on 32--64 GB hosts was
+not valid parallelism: multiple shards were killed with exit 137, and the same
+instrumented `Mathlib/Algebra/Order/Ring/Unbundled/Rat.lean` recording compile
+was killed when reproduced alone on a 64 GB machine. Each batch records a module
+once and, when it has accepted executions, compiles one copied module with all
 accepted occurrences materialized. A batch stops after its first semantic
 failure. Diagnostic group bisection runs only after a materialization failure
 and never changes the gate. The reducer requires every batch, module,
@@ -718,21 +722,27 @@ occurrence, and replay count before it can pass.
 - retains only candidates that pass the real SSH handshake, destroys rejects,
   and fills their slots from distinct fallback offers without exceeding the
   aggregate hourly guard;
-- installs the pinned Lean toolchain, checks out the exact commit, restores
-  Mathlib artifacts, and builds the engine;
-- partitions all 256 batches exactly once across the hosts and runs four shard
-  processes per host;
+- installs the pinned Lean toolchain on all hosts concurrently, checks out the
+  exact commit, restores Mathlib artifacts, and builds the engine and shared
+  library before starting work;
+- compresses the immutable inventory for transfer, retries bounded transfers,
+  and replaces a setup-failed host in the same worker slot while other workers
+  continue;
+- partitions all 256 batches exactly once across the hosts and runs one
+  memory-isolated shard process per host;
 - copies atomic worker state, reports, logs, and failing sources back to the
-  controller every 30 seconds;
-- stops the fleet after the first semantic failure set or the five-hour cost
+  controller every 30 seconds, including while slower hosts are still setting
+  up;
+- stops the fleet after the first semantic failure set or the two-hour cost
   bound;
 - runs the existing strict reducer only after collection; and
 - destroys all rented instances on every terminal path unless explicitly kept
   for diagnosis.
 
-At the launch defaults, 64 module executions can be active concurrently. The
-controller refuses a plan above $2.50/hour or five hours, so compute exposure is
-bounded at $12.50; actual offers are re-evaluated immediately before rental.
+At the launch defaults, 16 module executions can be active concurrently on 16
+independent machines. Every offer must provide 120 GB per active Lean process.
+The controller refuses a plan above $4.00/hour or two hours, so compute exposure
+is bounded at $8.00; actual offers are re-evaluated immediately before rental.
 
 The terminal taxonomy is deliberately closed:
 

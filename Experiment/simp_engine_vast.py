@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import argparse
 import ast
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from datetime import datetime, timezone
+import gzip
 import json
 import os
 from pathlib import Path
@@ -22,7 +23,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_QUERY = (
     "verified=true rentable=true cpu_arch=amd64 cpu_cores_effective>=12 "
-    "cpu_ram>=30 disk_space>=80 disk_bw>=500 direct_port_count>=1 "
+    "cpu_ram>=128 disk_space>=80 disk_bw>=500 direct_port_count>=1 "
     "reliability>=0.995 inet_down>=200 inet_up>=100"
 )
 
@@ -88,10 +89,18 @@ def assert_clean_commit(commit: str) -> None:
         raise RuntimeError("commit is not the tip of a remote ref")
 
 
-def offer_score(offer: dict[str, Any]) -> float:
+def offer_score(offer: dict[str, Any], concurrency: int = 1) -> float:
     effective = max(float(offer.get("cpu_cores_effective") or 0), 0.1)
     ghz = min(max(float(offer.get("cpu_ghz") or 0), 1.0), 5.0)
-    return float(offer["dph_total"]) / (effective * ghz)
+    # Lean module compilation cannot use an arbitrary number of cores.  Cap the
+    # useful CPU allocation per process so a large, expensive host does not win
+    # merely because it exposes idle cores.
+    useful_cores = min(effective, max(4, concurrency * 4))
+    return float(offer["dph_total"]) / (useful_cores * ghz)
+
+
+def offer_ram_mb(offer: dict[str, Any]) -> float:
+    return float(offer.get("cpu_ram") or 0)
 
 
 def select_offers(
@@ -99,13 +108,23 @@ def select_offers(
     count: int,
     max_offer_hourly: float,
     max_total_hourly: float,
+    minimum_ram_mb: float = 0,
+    concurrency: int = 1,
 ) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
     machines: set[int] = set()
-    for offer in sorted(offers, key=lambda value: (offer_score(value), value["dph_total"])):
+    for offer in sorted(
+        offers,
+        key=lambda value: (offer_score(value, concurrency), value["dph_total"]),
+    ):
         machine = int(offer.get("machine_id", -1))
         price = float(offer.get("dph_total") or float("inf"))
-        if machine < 0 or machine in machines or price > max_offer_hourly:
+        if (
+            machine < 0
+            or machine in machines
+            or price > max_offer_hourly
+            or offer_ram_mb(offer) < minimum_ram_mb
+        ):
             continue
         if sum(float(item["dph_total"]) for item in selected) + price > max_total_hourly:
             continue
@@ -130,16 +149,24 @@ def search_offers(args: argparse.Namespace, extra: int = 0) -> list[dict[str, An
         args.workers,
         args.max_offer_hourly,
         args.max_total_hourly,
+        args.minimum_ram_gb_per_process * args.concurrency * 1000,
+        args.concurrency,
     )
     if extra <= 0:
         return planned
     selected_machines = {int(offer["machine_id"]) for offer in planned}
     extras: list[dict[str, Any]] = []
-    for offer in sorted(offers, key=lambda value: (offer_score(value), value["dph_total"])):
+    minimum_ram_mb = args.minimum_ram_gb_per_process * args.concurrency * 1000
+    for offer in sorted(
+        offers,
+        key=lambda value: (offer_score(value, args.concurrency), value["dph_total"]),
+    ):
         machine = int(offer.get("machine_id", -1))
         if machine < 0 or machine in selected_machines:
             continue
         if float(offer.get("dph_total") or float("inf")) > args.max_offer_hourly:
+            continue
+        if offer_ram_mb(offer) < minimum_ram_mb:
             continue
         extras.append(offer)
         selected_machines.add(machine)
@@ -184,7 +211,8 @@ def ssh(instance: dict[str, Any], known_hosts: Path, script: str, timeout: int) 
 
 
 def scp_to(
-    instance: dict[str, Any], known_hosts: Path, source: Path, destination: str
+    instance: dict[str, Any], known_hosts: Path, source: Path, destination: str,
+    *, timeout: int = 180,
 ) -> None:
     command = [
         "scp", "-P", str(instance["sshPort"]),
@@ -194,7 +222,7 @@ def scp_to(
         "-o", f"UserKnownHostsFile={known_hosts}",
         str(source), f"root@{instance['sshHost']}:{destination}",
     ]
-    run(command, timeout=120)
+    run(command, timeout=timeout)
 
 
 def create_instance(offer: dict[str, Any], index: int, args: argparse.Namespace) -> dict[str, Any]:
@@ -298,9 +326,50 @@ cd /workspace/explicit-lean
 git fetch --depth=1 origin {commit}
 git checkout --detach {commit}
 lake exe cache get
-lake build ExplicitLean
+lake build ExplicitLean ExplicitLean:shared
 mkdir -p .cloud/vast-worker
 """
+
+
+def compressed_inventory(output: Path) -> Path:
+    source = output / "inventory.json"
+    destination = output / "inventory.json.gz"
+    with source.open("rb") as input_stream, gzip.open(
+        destination, "wb", compresslevel=6
+    ) as stream:
+        while block := input_stream.read(1024 * 1024):
+            stream.write(block)
+    return destination
+
+
+def transfer_inventory(
+    instance: dict[str, Any], output: Path, known_hosts: Path,
+) -> None:
+    archive = output / "inventory.json.gz"
+    error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            scp_to(
+                instance,
+                known_hosts,
+                archive,
+                "/workspace/explicit-lean/.cloud/inventory.json.gz",
+            )
+            ssh(
+                instance,
+                known_hosts,
+                "cd /workspace/explicit-lean && "
+                "gzip -dc .cloud/inventory.json.gz > .cloud/inventory.json.tmp && "
+                "mv .cloud/inventory.json.tmp .cloud/inventory.json",
+                120,
+            )
+            return
+        except Exception as current:
+            error = current
+            if attempt < 3:
+                time.sleep(2 * attempt)
+    assert error is not None
+    raise error
 
 
 def setup_instance(
@@ -311,10 +380,7 @@ def setup_instance(
     try:
         setup_output = ssh(instance, known_hosts, setup_script(args.commit), args.setup_timeout)
         log_path.write_text(setup_output, encoding="utf-8")
-        scp_to(
-            instance, known_hosts, output / "inventory.json",
-            "/workspace/explicit-lean/.cloud/inventory.json",
-        )
+        transfer_inventory(instance, output, known_hosts)
         command = f"""set -euo pipefail
 export PATH=/root/.elan/bin:$PATH
 cd /workspace/explicit-lean
@@ -325,7 +391,8 @@ echo $! > .cloud/vast-worker/worker.pid
         instance["status"] = "working"
     except Exception as error:
         instance["status"] = "setup_failure"
-        log_path.write_text(f"{type(error).__name__}: {error}\n", encoding="utf-8")
+        with log_path.open("a", encoding="utf-8") as stream:
+            stream.write(f"\nSETUP_FAILURE: {type(error).__name__}: {error}\n")
         raise
 
 
@@ -349,6 +416,60 @@ fi
         ssh(instance, known_hosts, script, 30)
     except Exception:
         pass
+
+
+def sync_worker_states(
+    instances: list[dict[str, Any]], known_hosts: Path, output: Path,
+) -> list[dict[str, Any]]:
+    if not instances:
+        return []
+    with ThreadPoolExecutor(max_workers=len(instances)) as executor:
+        futures = {
+            executor.submit(
+                rsync_from,
+                instance,
+                known_hosts,
+                output / "workers" / f"worker-{instance['workerIndex']:02d}",
+            ): instance
+            for instance in instances
+        }
+        for future in as_completed(futures):
+            instance = futures[future]
+            try:
+                future.result()
+            except Exception as error:
+                print(
+                    f"worker {instance['workerIndex']} sync warning: {error}",
+                    flush=True,
+                )
+    states: list[dict[str, Any]] = []
+    for instance in instances:
+        local = (
+            output / "workers" / f"worker-{instance['workerIndex']:02d}"
+            / "worker-state.json"
+        )
+        if local.exists():
+            states.append(json.loads(local.read_text(encoding="utf-8")))
+    return states
+
+
+def stop_workers(instances: list[dict[str, Any]], known_hosts: Path) -> None:
+    if not instances:
+        return
+    with ThreadPoolExecutor(max_workers=len(instances)) as executor:
+        futures = [
+            executor.submit(stop_worker, instance, known_hosts)
+            for instance in instances
+        ]
+        for future in as_completed(futures):
+            future.result()
+
+
+def state_progress(states: list[dict[str, Any]]) -> tuple[int, int]:
+    return (
+        sum(len(state.get("completedShards", [])) for state in states),
+        sum(len(state.get("failedShards", [])) for state in states),
+    )
 
 
 def destroy_instances(instances: list[dict[str, Any]]) -> None:
@@ -391,6 +512,8 @@ def run_closure(args: argparse.Namespace) -> int:
         raise RuntimeError("worker count cannot exceed shard count")
     if args.max_total_hourly <= 0 or args.max_runtime_hours <= 0:
         raise RuntimeError("price and runtime guards must be positive")
+    if args.minimum_ram_gb_per_process <= 0:
+        raise RuntimeError("minimum RAM per concurrent Lean process must be positive")
     if not args.ssh_private_key.is_file() or not args.ssh_public_key.is_file():
         raise RuntimeError("Vast SSH private/public key pair is missing")
     assert_clean_commit(args.commit)
@@ -410,6 +533,7 @@ def run_closure(args: argparse.Namespace) -> int:
         "status": "planned",
         "workerCount": args.workers,
         "concurrencyPerWorker": args.concurrency,
+        "minimumRamGbPerProcess": args.minimum_ram_gb_per_process,
         "shardCount": args.shard_count,
         "totalModuleConcurrency": args.workers * args.concurrency,
         "totalHourlyUsd": total_hourly,
@@ -430,6 +554,11 @@ def run_closure(args: argparse.Namespace) -> int:
         return 0
 
     inventory(args, output)
+    archive = compressed_inventory(output)
+    print(
+        f"compressed inventory: {archive.stat().st_size / (1024 * 1024):.1f} MiB",
+        flush=True,
+    )
     instances: list[dict[str, Any]] = []
     ready_instances: list[dict[str, Any]] = []
     plan["status"] = "launching"
@@ -484,46 +613,148 @@ def run_closure(args: argparse.Namespace) -> int:
         for index, instance in enumerate(ready_instances):
             instance["workerIndex"] = index
             instance["label"] = f"simp16-{args.commit[:8]}-{index:02d}"
+        slots = {int(instance["workerIndex"]): instance for instance in ready_instances}
+
+        def launch_replacement(worker_index: int) -> dict[str, Any]:
+            nonlocal candidate_index
+            while True:
+                offer = next(candidates, None)
+                if offer is None:
+                    raise RuntimeError(
+                        f"Vast offers were exhausted replacing worker {worker_index}"
+                    )
+                active_cost = sum(
+                    float(item["offer"]["dph_total"])
+                    for item in slots.values()
+                    if item.get("status") != "destroyed"
+                )
+                if active_cost + float(offer["dph_total"]) > args.max_total_hourly:
+                    continue
+                try:
+                    replacement = create_instance(offer, candidate_index, args)
+                except Exception as error:
+                    print(f"offer {offer['id']} unavailable: {error}", flush=True)
+                    continue
+                candidate_index += 1
+                replacement["workerIndex"] = worker_index
+                replacement["label"] = f"simp16-{args.commit[:8]}-{worker_index:02d}"
+                instances.append(replacement)
+                plan["instances"] = instances
+                atomic_json(state_path, plan)
+                qualified, rejected = wait_for_ssh(
+                    [replacement], args.boot_timeout, known_hosts
+                )
+                if rejected:
+                    print(
+                        f"replacement contract {replacement['contractId']} rejected SSH",
+                        flush=True,
+                    )
+                    destroy_instances(rejected)
+                    continue
+                print(
+                    f"replacement worker {worker_index}: contract "
+                    f"{replacement['contractId']} at ${offer['dph_total']:.3f}/hour",
+                    flush=True,
+                )
+                return qualified[0]
+
         plan["totalHourlyUsd"] = sum(
             float(instance["offer"]["dph_total"]) for instance in ready_instances
         )
         plan["maximumComputeUsd"] = plan["totalHourlyUsd"] * args.max_runtime_hours
         plan["status"] = "setting_up"
         atomic_json(state_path, plan)
-        with ThreadPoolExecutor(max_workers=min(args.workers, 8)) as executor:
-            futures = {
-                executor.submit(setup_instance, instance, args, output, known_hosts): instance
-                for instance in ready_instances
-            }
-            for future in as_completed(futures):
-                future.result()
-                print(f"worker {futures[future]['workerIndex']} started", flush=True)
+        setup_executor = ThreadPoolExecutor(max_workers=args.workers)
+        setup_futures = {
+            setup_executor.submit(
+                setup_instance, instance, args, output, known_hosts
+            ): instance
+            for instance in ready_instances
+        }
+        while setup_futures:
+            if time.monotonic() >= deadline:
+                plan["status"] = "timeout"
                 atomic_json(state_path, plan)
+                setup_executor.shutdown(wait=False, cancel_futures=True)
+                working = [
+                    instance for instance in slots.values()
+                    if instance.get("status") == "working"
+                ]
+                stop_workers(working, known_hosts)
+                sync_worker_states(working, known_hosts, output)
+                reduce(output, args)
+                return 1
+            done, _ = wait(
+                setup_futures,
+                timeout=args.poll_seconds,
+                return_when=FIRST_COMPLETED,
+            )
+            failed_setups: list[int] = []
+            for future in done:
+                instance = setup_futures.pop(future)
+                worker_index = int(instance["workerIndex"])
+                try:
+                    future.result()
+                except Exception as error:
+                    print(
+                        f"worker {worker_index} setup failed; replacing host: {error}",
+                        flush=True,
+                    )
+                    destroy_instances([instance])
+                    failed_setups.append(worker_index)
+                else:
+                    print(f"worker {worker_index} started", flush=True)
+
+            working = [
+                instance for instance in slots.values()
+                if instance.get("status") == "working"
+            ]
+            states = sync_worker_states(working, known_hosts, output)
+            completed, failed = state_progress(states)
+            if working:
+                print(
+                    f"Vast setup/progress: {len(working)}/{args.workers} workers active, "
+                    f"{completed}/{args.shard_count} shards complete, {failed} failed",
+                    flush=True,
+                )
+            if failed:
+                plan["status"] = "worker_failure"
+                atomic_json(state_path, plan)
+                setup_executor.shutdown(wait=False, cancel_futures=True)
+                stop_workers(working, known_hosts)
+                sync_worker_states(working, known_hosts, output)
+                reduce(output, args)
+                return 1
+            for worker_index in failed_setups:
+                replacement = launch_replacement(worker_index)
+                slots[worker_index] = replacement
+                setup_futures[
+                    setup_executor.submit(
+                        setup_instance,
+                        replacement,
+                        args,
+                        output,
+                        known_hosts,
+                    )
+                ] = replacement
+            plan["instances"] = instances
+            plan["totalHourlyUsd"] = sum(
+                float(item["offer"]["dph_total"])
+                for item in slots.values()
+                if item.get("status") != "destroyed"
+            )
+            plan["maximumComputeUsd"] = (
+                plan["totalHourlyUsd"] * args.max_runtime_hours
+            )
+            atomic_json(state_path, plan)
+        setup_executor.shutdown(wait=True)
+        ready_instances = [slots[index] for index in range(args.workers)]
         plan["status"] = "running"
         atomic_json(state_path, plan)
 
         while time.monotonic() < deadline:
-            states: list[dict[str, Any]] = []
-            with ThreadPoolExecutor(max_workers=min(args.workers, 8)) as executor:
-                futures = {
-                    executor.submit(
-                        rsync_from, instance, known_hosts,
-                        output / "workers" / f"worker-{instance['workerIndex']:02d}",
-                    ): instance
-                    for instance in ready_instances
-                }
-                for future in as_completed(futures):
-                    instance = futures[future]
-                    try:
-                        future.result()
-                    except Exception as error:
-                        print(f"worker {instance['workerIndex']} sync warning: {error}", flush=True)
-            for instance in ready_instances:
-                local = output / "workers" / f"worker-{instance['workerIndex']:02d}" / "worker-state.json"
-                if local.exists():
-                    states.append(json.loads(local.read_text(encoding="utf-8")))
-            completed = sum(len(state.get("completedShards", [])) for state in states)
-            failed = sum(len(state.get("failedShards", [])) for state in states)
+            states = sync_worker_states(ready_instances, known_hosts, output)
+            completed, failed = state_progress(states)
             print(
                 f"Vast progress: {completed}/{args.shard_count} shards complete, "
                 f"{failed} failed, {len(states)}/{args.workers} workers reporting",
@@ -532,8 +763,7 @@ def run_closure(args: argparse.Namespace) -> int:
             if failed:
                 plan["status"] = "worker_failure"
                 atomic_json(state_path, plan)
-                for instance in ready_instances:
-                    stop_worker(instance, known_hosts)
+                stop_workers(ready_instances, known_hosts)
                 break
             if len(states) == args.workers and all(state.get("status") == "success" for state in states):
                 plan["status"] = "reducing"
@@ -546,22 +776,9 @@ def run_closure(args: argparse.Namespace) -> int:
         else:
             plan["status"] = "timeout"
             atomic_json(state_path, plan)
-            for instance in ready_instances:
-                stop_worker(instance, known_hosts)
+            stop_workers(ready_instances, known_hosts)
 
-        with ThreadPoolExecutor(max_workers=min(args.workers, 8)) as executor:
-            futures = [
-                executor.submit(
-                    rsync_from, instance, known_hosts,
-                    output / "workers" / f"worker-{instance['workerIndex']:02d}",
-                )
-                for instance in ready_instances
-            ]
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as error:
-                    print(f"final sync warning: {error}", flush=True)
+        sync_worker_states(ready_instances, known_hosts, output)
         reduce(output, args)
         return 1
     except Exception as error:
@@ -593,16 +810,17 @@ def parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--commit", default="")
     run_parser.add_argument("--output-dir", required=True)
     run_parser.add_argument("--workers", type=int, default=16)
-    run_parser.add_argument("--concurrency", type=int, default=4)
+    run_parser.add_argument("--concurrency", type=int, default=1)
+    run_parser.add_argument("--minimum-ram-gb-per-process", type=float, default=120.0)
     run_parser.add_argument("--shard-count", type=int, default=256)
     run_parser.add_argument("--disk-gb", type=int, default=40)
     run_parser.add_argument("--image", default="ubuntu:24.04")
     run_parser.add_argument("--ssh-private-key", default="~/.ssh/id_rsa")
     run_parser.add_argument("--ssh-public-key", default="~/.ssh/id_rsa.pub")
     run_parser.add_argument("--offer-query", default=DEFAULT_QUERY)
-    run_parser.add_argument("--max-offer-hourly", type=float, default=0.20)
-    run_parser.add_argument("--max-total-hourly", type=float, default=2.50)
-    run_parser.add_argument("--max-runtime-hours", type=float, default=5.0)
+    run_parser.add_argument("--max-offer-hourly", type=float, default=0.50)
+    run_parser.add_argument("--max-total-hourly", type=float, default=4.00)
+    run_parser.add_argument("--max-runtime-hours", type=float, default=2.0)
     run_parser.add_argument("--module-timeout", type=int, default=900)
     run_parser.add_argument("--inventory-timeout", type=int, default=3600)
     run_parser.add_argument("--boot-timeout", type=int, default=180)

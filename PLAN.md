@@ -136,18 +136,25 @@ results; the superseded workflow has been removed.
 
 The accepted run inventories 8,264 files and validates 83,425 occurrences in
 6,319 modules byte-for-byte, including 91 nested occurrences. It uses 256
-deterministic batches across 16 distinct verified Vast.ai hosts, with four
-independent shard processes per host: approximately 64 modules can therefore
-record or materialize concurrently. Offers are selected from the live market
-under unique-machine, reliability, CPU, RAM, disk, network, hourly-price, and
-total-runtime guards. The controller copies checkpoints home every 30 seconds,
-stops the fleet after the first semantic failure set, runs the strict reducer
-only on total coverage, and destroys every rented instance on success, failure,
-timeout, or interruption. Every batch still records each assigned module once
-and compiles one materialized copy for all accepted occurrences in that module.
-The reducer rejects incomplete or missing batches/modules/occurrences, source
-or engine drift, mixed deferred/non-deferred executions, replay-count
-mismatches, and every recorder, harness, or materialization failure.
+deterministic batches across 16 distinct verified Vast.ai hosts, with one Lean
+module process per host and at least 120 GB of RAM reserved per process: 16
+memory-isolated modules can therefore record or materialize concurrently. The
+single-process limit is empirical: the first cloud attempt ran four compiles on
+32--64 GB hosts, and a representative instrumented module was killed with exit
+137 even when reproduced alone on a 64 GB machine. Offers are selected from the
+live market under unique-machine, reliability, CPU, RAM, disk, network,
+hourly-price, and total-runtime guards. All hosts set up in parallel; each
+begins its assigned batches as soon as it is ready. A failed setup or transfer
+is destroyed and replaced in-place while other workers keep running. The
+inventory is compressed before transfer, checkpoints are copied home every 30
+seconds even while the remaining hosts provision, and the controller stops at
+the first semantic failure set. Every batch still records each assigned module
+once and compiles one materialized copy for all accepted occurrences in that
+module. The strict reducer rejects incomplete or missing batches/modules/
+occurrences, source or engine drift, mixed deferred/non-deferred executions,
+replay-count mismatches, and every recorder, harness, or materialization
+failure. Every rented instance is destroyed on success, failure, timeout, or
+interruption.
 
 ## 4. Current local gate
 
