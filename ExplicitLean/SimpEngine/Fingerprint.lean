@@ -85,4 +85,53 @@ def exprFingerprint (expression : Expr) : MetaM ExprFingerprint := do
 def exprFingerprintHash (expression : Expr) : MetaM String := do
   return (← exprFingerprint expression).fingerprint
 
+private def digest (kind payload : String) : String :=
+  s!"{kind}-v1:{hash payload}"
+
+def optionsFingerprint (options : Options) : String :=
+  digest "options" (toString options)
+
+def metaConfigFingerprint (config : Meta.Config) : String :=
+  digest "meta-config" (toString (repr config))
+
+def localContextFingerprint : MetaM String := do
+  let mut entries := #[]
+  for localDecl in (← getLCtx) do
+    let typeFingerprint ← exprFingerprintHash localDecl.type
+    let valueFingerprint ← localDecl.value?.mapM exprFingerprintHash
+    entries := entries.push
+      s!"{localDecl.index}:{repr localDecl.binderInfo}:{typeFingerprint}:{valueFingerprint}"
+  return digest "local-context" (String.intercalate "|" entries.toList)
+
+private def goalFingerprint (goal : MVarId) : MetaM (String × String × String) :=
+  goal.withContext do
+    let decl ← goal.getDecl
+    let mut instances := #[]
+    for localInstance in decl.localInstances do
+      instances := instances.push
+        s!"{localInstance.className}:{← exprFingerprintHash localInstance.fvar}"
+    let mvarDescriptor := s!"{decl.depth}:{repr decl.kind}:{decl.numScopeArgs}:" ++
+      String.intercalate "|" instances.toList
+    return (← exprFingerprintHash decl.type, ← localContextFingerprint, mvarDescriptor)
+
+/-- A stable fingerprint of the proof state visible to a tactic execution. -/
+def proofStateFingerprint (goals : List MVarId) : MetaM StateFingerprint := do
+  let mut targets := #[]
+  let mut contexts := #[]
+  let mut metavariables := #[]
+  for goal in goals do
+    unless (← goal.isAssigned) do
+      let (target, context, metavariable) ← goalFingerprint goal
+      targets := targets.push target
+      contexts := contexts.push context
+      metavariables := metavariables.push metavariable
+  return {
+    targetFingerprint := digest "targets" (String.intercalate "|" targets.toList)
+    localContextFingerprint := digest "goal-contexts"
+      (String.intercalate "|" contexts.toList)
+    metavariableContextFingerprint := digest "metavariable-context"
+      (String.intercalate "|" metavariables.toList)
+    goalCount := targets.size
+  }
+
 end Lean.Meta.Simp.Engine

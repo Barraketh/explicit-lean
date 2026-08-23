@@ -63,15 +63,20 @@ def main() -> None:
     if run.returncode:
         raise RuntimeError(run.stdout)
     observed: set[str] = set()
+    subject_counts: list[int] = []
     for line in run.stdout.splitlines():
         marker = "SIMP_ENGINE_RECORDING branches="
         if marker not in line:
             continue
         payload = line.split(marker, 1)[1].split(" events=", 1)[0]
         observed.update(filter(None, payload.split(",")))
+        if " subjects=" in line:
+            subject_counts.append(int(line.rsplit(" subjects=", 1)[1]))
     missing = sorted(REQUIRED - observed)
     if missing:
         raise RuntimeError("unobserved_transition: " + ", ".join(missing) + "\n" + run.stdout)
+    if not subject_counts or max(subject_counts) < 2:
+        raise RuntimeError("subject_transport_unobserved\n" + run.stdout)
     print(f"schema-16 recording probe: {len(observed)} dynamic branches: ok")
 
 

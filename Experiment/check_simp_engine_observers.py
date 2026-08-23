@@ -12,7 +12,8 @@ MATRIX = ROOT / "SIMP_ENGINE_COVERAGE.md"
 ENGINE = (ROOT / "ExplicitLean/SimpEngine.lean").read_text(encoding="utf-8")
 IR = (ROOT / "ExplicitLean/SimpEngine/IR.lean").read_text(encoding="utf-8")
 RUNTIME = (ROOT / "ExplicitLean/SimpEngine/Runtime.lean").read_text(encoding="utf-8")
-SOURCE = ENGINE + "\n" + IR + "\n" + RUNTIME
+RECORDING = (ROOT / "ExplicitLean/SimpEngine/Recording.lean").read_text(encoding="utf-8")
+SOURCE = ENGINE + "\n" + IR + "\n" + RUNTIME + "\n" + RECORDING
 
 
 OBSERVERS: dict[str, tuple[str, ...]] = {
@@ -59,9 +60,9 @@ OBSERVERS: dict[str, tuple[str, ...]] = {
     "`simpGround`/`seval`": ("withPath .ground", "ground.delta", "mkSEvalMethods"),
     "pre/post simprocs": ("simprocCoreRecorded", "observeSimproc", "simproc.simp"),
     "dsimprocs": ("dsimprocCoreRecorded", "simproc.dsimp"),
-    "target result": ("SubjectTerminal", "targetTrue", "targetTransport"),
-    "local result": ("localFalse", "localDefEqReplace", "localAssertClear"),
-    "`simpGoal` batching": ("structure SubjectProgram", "subjects : Array SubjectProgram"),
+    "target result": ("result.expr.isTrue", "SubjectTerminal.targetTrue", ".targetTransport", "applySimpResultToTarget"),
+    "local result": ("SubjectTerminal.localFalse", ".localDefEqReplace", ".localAssertClear", "replaceLocalDeclDefEq"),
+    "`simpGoal` batching": ("private def recordGoal", "subjects := subjects.push", "proofStateFingerprint"),
     "`failIfUnchanged`": ("inductive ExecutionOutcome", "success (changed : Bool)", "tacticFailure"),
 }
 

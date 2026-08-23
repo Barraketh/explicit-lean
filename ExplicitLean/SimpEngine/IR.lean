@@ -273,6 +273,12 @@ inductive ProofPresence where
   | definitional
   deriving Inhabited, Repr, BEq
 
+inductive EtaStructPolicy where
+  | all
+  | notClasses
+  | none
+  deriving Inhabited, Repr, BEq
+
 inductive SubjectTerminal where
   | targetTrue (proofPresence : ProofPresence)
   | targetTransport (proofPresence : ProofPresence)
@@ -286,6 +292,8 @@ structure SubjectProgram where
   initialFingerprint : String
   program : Program
   terminal : SubjectTerminal
+  deferred : Option DeferredReason := none
+  simprocs : Array SimprocObservation := #[]
   deriving Inhabited, Repr, BEq
 
 structure StateFingerprint where
@@ -296,14 +304,18 @@ structure StateFingerprint where
   deriving Inhabited, Repr, BEq
 
 structure ReplayConfig where
+  maxSteps : Nat
+  maxDischargeDepth : Nat
   contextual : Bool
   memoize : Bool
   singlePass : Bool
+  zeta : Bool
   dsimp : Bool
   beta : Bool
+  eta : Bool
+  etaStruct : EtaStructPolicy
   proj : Bool
   iota : Bool
-  zeta : Bool
   zetaDelta : Bool
   zetaHave : Bool
   zetaUnused : Bool
@@ -315,15 +327,21 @@ structure ReplayConfig where
   ground : Bool
   index : Bool
   implicitDefEqProofs : Bool
-  etaStruct : Bool
+  failIfUnchanged : Bool
+  catchRuntime : Bool
+  congrConsts : Bool
+  bitVecOfNat : Bool
+  warnExponents : Bool
+  locals : Bool
   instances : Bool
-  congrConsts : Array Name := #[]
   dsimpProofs : Bool
   reducibleClassField : Bool
   smartUnfolding : Bool
   useBackwardDefEq : Bool
   dsimpUseDefEqAttr : Bool
   skipAssignedInstances : Bool
+  simprocsEnabled : Bool
+  userConfigFingerprint : String
   metaConfigFingerprint : String
   indexConfigFingerprint : String
   deriving Inhabited, Repr, BEq

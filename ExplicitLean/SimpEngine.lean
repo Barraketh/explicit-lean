@@ -17,6 +17,79 @@ namespace Simp.Engine
 
 open Simp
 
+private def etaStructPolicy : EtaStructMode → EtaStructPolicy
+  | .all => .all
+  | .notClasses => .notClasses
+  | .none => .none
+
+def replayConfigOfContext (ctx : Simp.Context) : MetaM ReplayConfig := do
+  let cfg := ctx.config
+  let base ← Meta.getConfig
+  let metaConfig : Meta.Config := { base with
+    beta := cfg.beta
+    iota := cfg.iota
+    zeta := cfg.zeta
+    zetaHave := cfg.zetaHave
+    zetaUnused := cfg.zetaUnused
+    zetaDelta := cfg.zetaDelta
+    etaStruct := cfg.etaStruct
+    proj := if cfg.proj then .yesWithDelta else .no
+    transparency := .reducible
+  }
+  let indexConfig : Meta.Config := { base with
+    beta := cfg.beta
+    iota := cfg.iota
+    zeta := cfg.zeta
+    zetaHave := cfg.zetaHave
+    zetaUnused := cfg.zetaUnused
+    zetaDelta := cfg.zetaDelta
+    etaStruct := cfg.etaStruct
+    proj := .no
+    transparency := .reducible
+  }
+  return {
+    maxSteps := cfg.maxSteps
+    maxDischargeDepth := cfg.maxDischargeDepth
+    contextual := cfg.contextual
+    memoize := cfg.memoize
+    singlePass := cfg.singlePass
+    zeta := cfg.zeta
+    dsimp := cfg.dsimp
+    beta := cfg.beta
+    eta := cfg.eta
+    etaStruct := etaStructPolicy cfg.etaStruct
+    proj := cfg.proj
+    iota := cfg.iota
+    zetaDelta := cfg.zetaDelta
+    zetaHave := cfg.zetaHave
+    zetaUnused := cfg.zetaUnused
+    autoUnfold := cfg.autoUnfold
+    unfoldPartialApp := cfg.unfoldPartialApp
+    letToHave := cfg.letToHave
+    decide := cfg.decide
+    arith := cfg.arith
+    ground := cfg.ground
+    index := cfg.index
+    implicitDefEqProofs := cfg.implicitDefEqProofs
+    failIfUnchanged := cfg.failIfUnchanged
+    catchRuntime := cfg.catchRuntime
+    congrConsts := cfg.congrConsts
+    bitVecOfNat := cfg.bitVecOfNat
+    warnExponents := cfg.warnExponents
+    locals := cfg.locals
+    instances := cfg.instances
+    dsimpProofs := backward.dsimp.proofs.get (← getOptions)
+    reducibleClassField := backward.whnf.reducibleClassField.get (← getOptions)
+    smartUnfolding := smartUnfolding.get (← getOptions)
+    useBackwardDefEq := backward.defeqAttrib.useBackward.get (← getOptions)
+    dsimpUseDefEqAttr := backward.dsimp.useDefEqAttr.get (← getOptions)
+    skipAssignedInstances := tactic.skipAssignedInstances.get (← getOptions)
+    simprocsEnabled := simprocs.get (← getOptions)
+    userConfigFingerprint := optionsFingerprint ctx.userConfig
+    metaConfigFingerprint := metaConfigFingerprint metaConfig
+    indexConfigFingerprint := metaConfigFingerprint indexConfig
+  }
+
 /- Nesting the fork under `Lean.Meta.Simp` preserves upstream unqualified-name
    resolution while giving every copied execution function a distinct name. -/
 

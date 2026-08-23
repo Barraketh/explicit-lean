@@ -93,6 +93,12 @@ example (x : Int) (h : SeeInt (x + x)) : SeeInt (x + x) := by
   simp_engine_observe (config := { arith := true })
   exact h
 
+example (x : Nat) (h : x + 0 = x) : True := by
+  simp_engine_recording at h ⊢
+
+example (h : False) : True := by
+  simp_engine_recording at h
+
 example (h : SeeUInt8 ((1 : UInt8) + 2)) : SeeUInt8 ((1 : UInt8) + 2) := by
   dsimp_engine_observe
   exact h
