@@ -154,7 +154,10 @@ inventory is compressed before transfer, checkpoints are copied home every 30
 seconds even while the remaining hosts provision, and the controller stops at
 the first semantic failure set. Every batch still records each assigned module
 once and compiles one materialized copy for all accepted occurrences in that
-module. The strict reducer rejects incomplete or missing batches/modules/
+module. Copied sources use Mathlib's semantic package options
+(`autoImplicit=false` and `maxSynthPendingDepth=3`); omitting those settings was
+shown to make untouched `NormDet.lean` fail independently of instrumentation.
+The strict reducer rejects incomplete or missing batches/modules/
 occurrences, source or engine drift, mixed deferred/non-deferred executions,
 replay-count mismatches, and every recorder, harness, or materialization
 failure. Every rented instance is destroyed on success, failure, timeout, or

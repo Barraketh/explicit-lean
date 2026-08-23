@@ -202,7 +202,7 @@ def recordCertificate (simpStx : Syntax) (commitReference : Bool := false)
   let { ctx, simprocs, dischargeWrapper, .. } ←
     mkSimpContext simpStx (eraseLocal := false)
   let (fvarIds, simplifyTarget) ← locationSubjects (expandOptLocation simpStx[5])
-  let initialMeta ← Meta.saveState
+  let initialElab ← Tactic.saveState
   let initialGoals ← getGoals
   let mainGoal := initialGoals.head!
   let tail := initialGoals.tail
@@ -218,9 +218,8 @@ def recordCertificate (simpStx : Syntax) (commitReference : Bool := false)
     let referenceGoals := goalsAfter tail referenceResult
     setGoals referenceGoals
     let referenceFinal ← Simp.Engine.proofStateFingerprint referenceGoals
-    let referenceMeta ← Meta.saveState
-    initialMeta.restore
-    setGoals initialGoals
+    let referenceElab ← Tactic.saveState
+    initialElab.restore
     let methods := match discharge? with
       | none => Simp.Engine.mkDefaultMethodsCore simprocs
       | some discharge => Simp.Engine.mkMethods simprocs discharge
@@ -238,11 +237,9 @@ def recordCertificate (simpStx : Syntax) (commitReference : Bool := false)
     unless referenceFinal == certificate.finalState do
       throwError "record_mode_mismatch: final proof state"
     if commitReference then
-      referenceMeta.restore
-      setGoals referenceGoals
+      referenceElab.restore
     else
-      initialMeta.restore
-      setGoals initialGoals
+      initialElab.restore
     return (certificate, recorded.branches)
   return { ctx, certificate, branches, fvarIds, simplifyTarget }
 

@@ -141,6 +141,10 @@ def lean_command(path: Path) -> list[str]:
         "lake",
         "env",
         "lean",
+        # These are semantic Mathlib package options, not linter preferences.
+        # Copied modules must elaborate under the same settings as `lake build`.
+        "-DautoImplicit=false",
+        "-DmaxSynthPendingDepth=3",
         "-Dlinter.unusedVariables=false",
         "-Dlinter.unusedSimpArgs=false",
         "-Dlinter.unreachableTactic=false",

@@ -398,6 +398,12 @@ their underlying `simp` syntax. This canonical string is used only to identify
 the theorem already elaborated in the source context; replay does not execute
 the canonicalized `simp` text.
 
+The reference/recording comparison is a full tactic-elaboration transaction.
+Its snapshots include the tactic goals, term-elaborator synthetic metavariables
+and pending constraints, and meta/core state. Restoring only `Meta.SavedState`
+is insufficient for a source tactic because it can leak term-elaboration work
+into the following declaration even when the resulting proof state matches.
+
 The retained original simp arguments reconstruct the authored theorem terms,
 configuration, and location subjects. They do not authorize ambient simp,
 congruence, simproc, or discharger selection; traversal and operation selection
@@ -727,6 +733,9 @@ occurrence, and replay count before it can pass.
 - installs the pinned Lean toolchain on all hosts concurrently, checks out the
   exact commit, restores Mathlib artifacts, and builds the engine and shared
   library before starting work;
+- compiles every copied module with Mathlib's semantic package options,
+  including `autoImplicit=false` and `maxSynthPendingDepth=3`, while disabling
+  only non-semantic linter noise;
 - compresses the immutable inventory for transfer, retries bounded transfers,
   and replaces a setup-failed host in the same worker slot while other workers
   continue;

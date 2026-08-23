@@ -37,7 +37,7 @@ REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine/Inventory.lean":
         "d08cefcb506f63b29c8c91f53fa089177d17b501473af554c4adf6c4002a44e8",
     "ExplicitLean/SimpEngine/Recording.lean":
-        "ec6b4819a847ce71039c198e123506f2d31d130522d7e1e357ae17412959ddea",
+        "ab5e1889cacf8fea4fa933c1cf08f2610c8a205d4f227b9d09baa0667af2bb1b",
     "ExplicitLean/SimpEngine/Reference.lean":
         "e3f59c3a7c5f01dec5a700eda0dad5d08199df7adee4ff557e548f4b5fca6bb0",
     "ExplicitLean/SimpEngine/Replay.lean":
@@ -47,7 +47,7 @@ REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine/Source.lean":
         "351e26bf4736dd77dfdcb0ad9d3c3c3c6bfaf8467907323a451d5514320dce56",
     "SIMP_ENGINE_COVERAGE.md":
-        "779446509b2de9a08e384e417be2272e4434adb7fffc506b632cde65ced25b34",
+        "73586bbf76f436c1e7ca6ddaa6b173eff37165a34d1fcbb9fc4c9a5f5bfdbf59",
 }
 EXPECTED_LINEAGE_DIGEST = (
     "00dd5ec6ad13fe5134f0a59cd1b6431743b8d1ea2736e684953c584b5b9d7390"

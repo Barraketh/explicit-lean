@@ -40,6 +40,12 @@ def reducer_args(root: Path) -> SimpleNamespace:
 
 
 def main() -> None:
+    compile_command = inventory_helpers.lean_command(
+        inventory_helpers.MATHLIB / MODULE
+    )
+    for option in ("-DautoImplicit=false", "-DmaxSynthPendingDepth=3"):
+        if option not in compile_command:
+            raise RuntimeError(f"copied Mathlib compile omitted package option: {option}")
     if cloud.module_shard(MODULE, 64) != 50:
         raise RuntimeError("stable shard assignment changed")
     combined_deferred = {
@@ -179,7 +185,7 @@ def main() -> None:
             if cloud.reduce_reports(reducer_args(root)) == 0:
                 raise RuntimeError("missing shard was accepted")
     print(
-        "schema-16 cloud harness: nested rewrite composed, "
+        "schema-16 cloud harness: package options and nested rewrite preserved, "
         "total report accepted, mutations rejected: ok"
     )
 
