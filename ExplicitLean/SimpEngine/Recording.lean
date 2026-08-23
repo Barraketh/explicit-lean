@@ -14,6 +14,9 @@ syntax simpEngineRecordingArgs := optConfig (discharger)? (&" only")?
 syntax (name := simpEngineRecording)
   "simp_engine_recording" simpEngineRecordingArgs : tactic
 
+syntax (name := simpEngineRecordingId)
+  "simp_engine_recording_id" str simpEngineRecordingArgs : tactic
+
 syntax (name := simpEngineObserve)
   "simp_engine_observe" simpEngineRecordingArgs : tactic
 
@@ -45,10 +48,10 @@ private def logRecording (recording : Simp.Engine.Recording) : TacticM Unit := d
   let branches := String.intercalate "," recording.coveredBranches.toList
   logInfo m!"SIMP_ENGINE_RECORDING branches={branches} events={recording.program.events.size} structural={recording.program.structural.size} simprocs={recording.simprocs.size} deferred={repr recording.deferred}"
 
-private def proofPresence (result : Simp.Result) : Simp.Engine.ProofPresence :=
+def proofPresence (result : Simp.Result) : Simp.Engine.ProofPresence :=
   if result.proof?.isSome then .explicit else .definitional
 
-private def localRef (localDecl : LocalDecl) : MetaM Simp.Engine.LocalRef := do
+def localRef (localDecl : LocalDecl) : MetaM Simp.Engine.LocalRef := do
   return {
     contextIndex := localDecl.index
     binderDepth := (← getLCtx).numIndices
@@ -56,7 +59,7 @@ private def localRef (localDecl : LocalDecl) : MetaM Simp.Engine.LocalRef := do
     valueFingerprint := ← localDecl.value?.mapM Simp.Engine.exprFingerprintHash
   }
 
-private def recordExpression (expression : Expr) (ctx : Simp.Context)
+def recordExpression (expression : Expr) (ctx : Simp.Context)
     (methods : Simp.Engine.Methods) (stats : Simp.Stats) :
     MetaM (Simp.Result × Simp.Stats × Simp.Engine.Recording) := do
   let initialMeta ← Meta.saveState
@@ -70,7 +73,7 @@ private def recordExpression (expression : Expr) (ctx : Simp.Context)
   referenceMeta.restore
   return (reference, { referenceState with }, recording)
 
-private structure RecordedGoal where
+structure RecordedGoal where
   result? : Option (Array FVarId × MVarId)
   subjects : Array Simp.Engine.SubjectProgram
   branches : Array String
@@ -78,7 +81,7 @@ private structure RecordedGoal where
 
 /-- The goal/hypothesis transport layer of `Meta.simpGoal`, with each engine
     execution replaced by a schema-16 recording execution. -/
-private def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
+def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
     (methods : Simp.Engine.Methods) (simplifyTarget : Bool)
     (fvarIdsToSimp : Array FVarId) : MetaM RecordedGoal := mvarId.withContext do
   mvarId.checkNotAssigned `simp_engine_recording
@@ -161,21 +164,21 @@ private def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
     throwError "`simp` made no progress"
   return { result? := some (fvarIdsNew, mvarIdNew), subjects, branches }
 
-private def locationSubjects (location : Location) : TacticM (Array FVarId × Bool) := do
+def locationSubjects (location : Location) : TacticM (Array FVarId × Bool) := do
   match location with
   | .targets hyps simplifyTarget =>
       return (← getFVarIds hyps, simplifyTarget)
   | .wildcard =>
       return (← (← getMainGoal).getNondepPropHyps, true)
 
-private def goalsAfter (tail : List MVarId)
+def goalsAfter (tail : List MVarId)
     (result? : Option (Array FVarId × MVarId)) : List MVarId :=
   match result? with
   | none => tail
   | some (_, goal) => goal :: tail
 
 private def logCertificate (certificate : Simp.Engine.Certificate)
-    (branches : Array String) : TacticM Unit := do
+    (branches : Array String) (occurrenceId? : Option String := none) : TacticM Unit := do
   let eventCount := certificate.subjects.foldl (init := (0 : Nat)) fun count subject =>
     count + subject.program.events.size
   let structuralCount := certificate.subjects.foldl (init := (0 : Nat)) fun count subject =>
@@ -184,9 +187,17 @@ private def logCertificate (certificate : Simp.Engine.Certificate)
     count + subject.simprocs.size
   let deferredCount := certificate.subjects.foldl (init := (0 : Nat)) fun count subject =>
     if subject.deferred.isSome then count + 1 else count
-  logInfo m!"SIMP_ENGINE_RECORDING branches={String.intercalate "," branches.toList} events={eventCount} structural={structuralCount} simprocs={simprocCount} deferredSubjects={deferredCount} subjects={certificate.subjects.size}"
+  let occurrence := occurrenceId?.map (fun id => s!" occurrence={id}") |>.getD ""
+  logInfo m!"SIMP_ENGINE_RECORDING{occurrence} branches={String.intercalate "," branches.toList} events={eventCount} structural={structuralCount} simprocs={simprocCount} deferredSubjects={deferredCount} subjects={certificate.subjects.size}"
 
-private def recordTactic (simpStx : Syntax) : TacticM Unit := do
+structure TacticRecording where
+  ctx : Simp.Context
+  certificate : Simp.Engine.Certificate
+  branches : Array String
+  fvarIds : Array FVarId
+  simplifyTarget : Bool
+
+def recordCertificate (simpStx : Syntax) : TacticM TacticRecording := do
   let { ctx, simprocs, dischargeWrapper, .. } ←
     mkSimpContext simpStx (eraseLocal := false)
   let (fvarIds, simplifyTarget) ← locationSubjects (expandOptLocation simpStx[5])
@@ -223,7 +234,11 @@ private def recordTactic (simpStx : Syntax) : TacticM Unit := do
     throwError "record_mode_mismatch: final proof state"
   initialMeta.restore
   setGoals initialGoals
-  logCertificate certificate branches
+  return { ctx, certificate, branches, fvarIds, simplifyTarget }
+
+private def recordTactic (simpStx : Syntax) (occurrenceId? : Option String := none) : TacticM Unit := do
+  let recording ← recordCertificate simpStx
+  logCertificate recording.certificate recording.branches occurrenceId?
 
 private def recordObservation (simpStx : Syntax) (target : Expr) : TacticM Unit := do
   let { ctx, simprocs, dischargeWrapper, .. } ←
@@ -268,6 +283,11 @@ elab_rules : tactic
       let inner := mkNode ``Lean.Parser.Tactic.simp #[
         mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
       recordTactic inner
+      evalTactic inner
+  | `(tactic| simp_engine_recording_id $id:str $args:simpEngineRecordingArgs) => withMainContext do
+      let inner := mkNode ``Lean.Parser.Tactic.simp #[
+        mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
+      recordTactic inner (some id.getString)
       evalTactic inner
   | `(tactic| simp_engine_observe $args:simpEngineRecordingArgs) => withMainContext do
       let target ← instantiateMVars (← (← getMainGoal).getType)

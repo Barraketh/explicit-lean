@@ -6,5 +6,7 @@ python3 Experiment/check_simp_engine_pin.py
 python3 Experiment/check_simp_engine_reference.py
 python3 Experiment/check_simp_engine_observers.py
 python3 Experiment/check_simp_engine_recording.py
+python3 Experiment/check_simp_engine_replay.py
+python3 Experiment/check_simp_engine_mutations.py
 python3 Experiment/check_simp_engine_production.py
-python3 Experiment/check_simp_engine_recording_production.py
+python3 Experiment/check_simp_engine_replay_production.py

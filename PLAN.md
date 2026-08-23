@@ -1,6 +1,6 @@
 # Explicit Lean implementation plan
 
-Status: E1 and E2 complete; E3 is next.
+Status: E1, E2, and E3 complete; E4 is next.
 
 ## 1. Current goal
 
@@ -24,7 +24,7 @@ The implementation is a pinned copy of Lean's simplifier with three modes:
 - reference mode, which must be observationally equivalent to upstream;
 - recording mode, which emits schema-16 operations and structural witnesses at
   the engine's commit points; and
-- replay mode, which will consume that program without ambient simp theorems,
+- replay mode, which consumes that program without ambient simp theorems,
   congruence rules, simprocs, or dischargers.
 
 Recording and replay share the same traversal. This makes completeness a finite
@@ -49,11 +49,12 @@ Each package is committed before work begins on the next.
   choices, subject transport, and final state.
 - All simp and dsimp simproc phases are observed and assigned a deferred
   classification rather than converted to proof fallbacks.
-- Failed speculative candidates roll back recorder state transactionally.
+- Failed candidates that execute recursive work are retained as explicit failed
+  attempts; candidates with no executable progress are omitted.
 - Focused static and dynamic branch gates plus the two production modules test
   the recorder.
 
-### E3. Closed structural replay — next
+### E3. Closed structural replay — complete
 
 - Add replay mode to the same pinned traversal.
 - Empty ambient simp, congruence, simproc, and discharger dependencies.
@@ -63,6 +64,12 @@ Each package is committed before work begins on the next.
   mutated item.
 
 Gate: every focused non-deferred recording replays; every mutation is rejected.
+
+Status: complete. The focused suite replays 36 dynamic branch classes, 15
+single-field mutations are rejected, and one batched recording plus one batched
+replay compile cover 55 non-deferred occurrences (58 executions) across the 57
+bounded production occurrences. The remaining two occurrences are explicitly
+simproc-deferred.
 
 ### E4. Certificate source and materializer
 
@@ -106,8 +113,10 @@ only tests that provide confidence in that engine:
 2. focused upstream/reference equivalence;
 3. implementation-to-IR observer audit;
 4. focused dynamic recording coverage;
-5. bounded Mathlib reference equivalence; and
-6. bounded Mathlib recording equivalence.
+5. focused closed replay;
+6. single-field replay mutation rejection;
+7. bounded Mathlib reference equivalence; and
+8. batched bounded recording/classification/replay.
 
 Historical proof exporters, schema-15 bridges, fallback materializers, and
 their regression tests have been removed. Git history remains the record of

@@ -1,6 +1,6 @@
 # Pinned `simp` engine coverage and certificate architecture
 
-Status: implementation specification; E1 and E2 complete
+Status: implementation specification; E1, E2, and E3 complete
 
 Pinned engine: Lean 4.32.2, commit
 `f3b06c705e6c85f5314019d5d3baab0fec5b580c`
@@ -53,7 +53,8 @@ An accepted certificate must establish all of the following.
    upstream implementation.
 2. **Trace totality.** Every committed expression-changing leaf operation and
    every structural choice needed to reach it has exactly one representation
-   in `P`. Speculative candidates are retained in diagnostics but not in `P`.
+   in `P`. A failed candidate is also in `P` when it performed recursive or
+   cache-relevant executable work.
 3. **Closed replay.** Replay consults only the recorded program, recorded rule
    terms, exact local identities, fixed kernel/meta primitives, and the local
    elaboration environment required to typecheck those terms.
@@ -93,6 +94,12 @@ At one expression node, `simpLoop` executes this state machine:
 5. execute `post` and honor its step result; and
 6. unless `singlePass` or unchanged, restart at step 1.
 
+Every `simp` and `dsimp` entry receives a call-frame identity. This is required
+because recursive helpers can revisit the same semantic child path. Every
+pre/post phase invocation also ends with a `phaseOutcome`, including unchanged
+`done`/`continue` results; absence of a changing event is not enough to recover
+control flow.
+
 Structural traversal recursively calls either `simp` or `dsimp`. `dsimp` is a
 different state machine based on `transformWithCache`: it has `dpre` and
 `dpost`, skips selected instance arguments, introduces locals for telescopes,
@@ -107,9 +114,12 @@ The `Required representation` column is normative for certificate schema 16.
 
 | Upstream site | Committed behavior | Required representation | Schema 15 |
 | --- | --- | --- | --- |
-| `simpLoop` cache | Reuses a prior result and can suppress a second traversal | engine configuration plus a structural `cacheHit` witness | implicit |
-| `pre` step | `done`, `visit`, and `continue some` have different control flow | phase and step disposition on the committed operation | partial |
-| `post` step | May finish or restart the entire node | phase and restart edge | partial |
+| `simpImpl` call boundary | Recursive calls may share the same semantic child path, and proofs stop before `simpLoop` | `simpCall` identity and an explicit `proofSkip` terminal | absent |
+| `dsimpImpl` call boundary | Recursive definitional calls may share the same semantic child path | `dsimpCall` identity | absent |
+| `simpLoop` cache | Reuses a prior result and can suppress a second traversal | call-qualified structural `cacheHit` with the producing path | implicit |
+| `pre` step | `done`, `visit`, `continue none`, and `continue some` have different control flow even without a changing operation | exact `phaseOutcome` for every invocation | partial |
+| `post` step | May finish or restart the entire node | exact `phaseOutcome` plus the call-qualified restart edge | partial |
+| `simpStep`: unassigned mvar | Stops structurally when instantiation makes no progress | explicit `unassignedMVarStop` terminal | absent |
 | `reduceStep`: mvar head | Instantiates assigned metavariables | `instantiateMVars` reduction | absent |
 | `reduceStep`: beta | Head beta reduction | `beta` reduction | present |
 | `reduceStep`: native projection | Reduces `.proj` | exact structure/field projection | present only when `config.proj` exposes it in the pre interposer |
@@ -123,11 +133,13 @@ The `Required representation` column is normative for certificate schema 16.
 | `reduceFVar` | Expands zeta-delta, requested, or implementation-detail local definitions | exact fvar/context index/value fingerprint plus reason | inferred only by O6 bridges |
 | `simpProj` | Reduces a projection even outside the `reduceStep` config branch, otherwise simplifies or dsimps its major | projection structural choice plus child mode | incomplete |
 | `simpApp` | Chooses user congruence, generated congruence, or generic congruence | exact `CongruenceChoice` and child modes | ambient congruence set |
+| failed congruence candidates | A failed user/generated attempt may already have recursively simplified children or changed replay-relevant caches | ordered `userAttemptFailed`/`generatedAttemptFailed` choice when the attempt has executable progress | absent |
 | user congruence | Selects a named `[congr]` theorem and simplifies designated hypotheses | theorem identity, priority/variant, and hypothesis subprograms | absent |
 | generated congruence | Computes argument kinds, may synthesize subsingleton instances and remove dummy casts | generated theorem identity/shape, argument kinds, and synthesis fingerprints | implicit |
 | generic congruence | Simplifies independent args, dsimps dependent/fixed args, and may skip instances | per-argument `simp`, `dsimp`, or `fixed` path | implicit |
 | `simpMatch` direct reduction | Iota before ordinary `reduceStep` | `iota` reduction at `pre` | present |
 | `simpMatchDiscrs?` | Recursively simplifies only matcher discriminants | `matchDiscriminants` structural choice and child programs | nested events suppressed |
+| failed match-discriminant candidate | Simplified discriminants may fail to produce a matcher reduction after changing replay-relevant state | `matchDiscriminantsAttemptFailed` structural terminal | absent |
 | `simpMatchCore` | Tries matcher equation theorems | exact equation theorem rule | only if aggregate origin inference succeeds |
 | lambda traversal | Dsimps binder domains, introduces locals, simplifies body | telescope structural path and scoped local identities | implicit |
 | implication traversal | Optionally installs antecedent as a contextual simp theorem and resets cache | contextual structural path and traversal-local rule identity | one hand-written implication special case |
@@ -140,10 +152,11 @@ The `Required representation` column is normative for certificate schema 16.
 | theorem preprocessing | One source rule may produce several actual simp theorems | exact preprocessed variant index and lhs/rule fingerprint | all variants retried under one origin |
 | indexed rewrite | Discrimination lookup, priority, erased set, extra args | selected rule plus `index` mode and variant | mostly present |
 | theorem match | Unification, permutation orientation, binder hints, no-op rejection | match/instantiation envelope fingerprints | result-only validation |
+| failed theorem candidate | Premise simplification may execute before synthesis, no-op, or orientation failure | `rewriteAttemptFailed` with its exact rule, match envelope, and nested premise programs | absent |
 | instance arguments | May synthesize typeclass arguments before premise discharge | ordered binder assignment fingerprints | implicit elaboration |
 | implicit defeq proof | Changes `proof?` and therefore local transport | recorded proof-presence mode and matching config | only indirectly inherited |
 | recursive premise simp | Runs the complete simplifier recursively | nested full `Program`, not only pre/post events | partial |
-| default discharge terminals | Assumption, equation solver, recursive simp, rfl, or `True` | exact terminal and nested program | present for current observed subset |
+| default discharge terminals | Assumption, equation solver, recursive simp, rfl, `True`, or failed discharge | exact terminal and nested program | present for current observed subset |
 | custom discharger | Arbitrary tactic code | `deferred_custom_discharger` until separately specified | deferred |
 | `simpUsingDecide` | Fixed decision procedure with true/false outcome | `decideTrue` or `decideFalse` builtin | unidentified special event |
 | `simpArith` | Nat/Int relation, equality, expression, or divisibility normalization | exact arithmetic handler variant | unidentified special event |
@@ -153,7 +166,7 @@ The `Required representation` column is normative for certificate schema 16.
 | target result | Closes `True` or transports/replaces target | subject terminal | present |
 | local result | Closes on `False`, defeq-replaces, or stages asserted hypotheses | subject terminal and proof-presence mode | mostly present |
 | `simpGoal` batching | Erases each local rule while simplifying itself, preserves authored location order, asserts then clears | ordered `SubjectProgram` list and exact transport | present |
-| `failIfUnchanged` | Tactic-level failure after all subjects | recorded execution outcome, not a replay operation | present as provenance only |
+| `failIfUnchanged` | Tactic-level failure after all subjects | replay configuration plus the identical final goal-identity check | present as provenance only |
 
 The matrix is complete only for the pinned source files named in section 3. A
 Lean upgrade requires regenerating this matrix against the new call graph and
@@ -163,7 +176,9 @@ changing the engine identifier.
 
 The executable authority is a structural program. Fingerprints shown below are
 alpha-stable hashes; raw `Expr`, `FVarId`, and position-bearing `Syntax` remain
-ephemeral recorder data.
+ephemeral recorder data. Expression fingerprints erase proof subterms before
+canonicalization; proof presence is represented separately wherever it changes
+control flow or transport.
 
 ```lean
 structure EngineId where
@@ -182,6 +197,8 @@ inductive Phase where
   | dpost
 
 inductive PathStep where
+  | simpCall (ordinal : Nat)
+  | dsimpCall (ordinal : Nat)
   | preVisit (iteration : Nat)
   | reductionVisit (iteration : Nat)
   | postRestart (iteration : Nat)
@@ -203,6 +220,7 @@ inductive PathStep where
   | haveValue (index : Nat) (mode : Mode)
   | haveBody
   | premise (index : Nat)
+  | ground
 
 structure ExecutionPath where
   steps : Array PathStep
@@ -240,14 +258,24 @@ inductive Builtin where
   | arith (handler : ArithHandler)
 
 inductive Structural where
+  | phaseOutcome (phase : Phase) (invocationOrdinal : Nat)
+      (disposition : StepDisposition) (outputFingerprint : String)
+      (proofPresent : Bool)
+  | proofSkip (invocationOrdinal : Nat) (typeFingerprint : String)
+  | unassignedMVarStop (simpStepOrdinal : Nat)
   | cacheHit (sourcePath : ExecutionPath)
-  | congruence (choice : CongruenceChoice)
+  | congruence (invocationOrdinal : Nat) (choice : CongruenceChoice)
+  | projectionMajor (structureName : Name) (field : Nat) (mode : ChildMode)
   | matchDiscriminants (count : Nat)
+  | matchDiscriminantsAttemptFailed (count : Nat)
+  | lambdaTelescope (count : Nat)
   | forallBranch (choice : ForallBranch)
   | contextualScope (locals : Array ScopedLocalRef)
   | letToHave
   | haveTelescope (fixed used : Array Bool)
   | dropUnusedHave (index : Nat)
+  | dsimpCacheHit (sourcePath : ExecutionPath)
+  | dsimpTransform (usedLetOnly skipInstances : Bool)
 
 mutual
   structure PremiseProgram where
@@ -258,12 +286,15 @@ mutual
   inductive Operation where
     | rewrite (rule : RuleRef) (match : MatchEnvelope)
         (premises : Array PremiseProgram)
+    | rewriteAttemptFailed (rule : RuleRef) (match : MatchEnvelope)
+        (premises : Array PremiseProgram)
     | reduce (reduction : Reduction)
     | builtin (builtin : Builtin)
 
   structure Event where
     path : ExecutionPath
     phase : Phase
+    invocationOrdinal : Nat
     operation : Operation
     inputFingerprint : String
     outputFingerprint : String
@@ -368,6 +399,8 @@ execution functions are copied with only these controlled changes:
 
 - recursive calls go through the fork;
 - each committed leaf operation emits an `Event`;
+- every phase invocation emits an exact outcome, even when no leaf changes;
+- every recursive simp/dsimp call extends the execution path with a call frame;
 - each structural branch emits or consumes a structural witness;
 - exact user-congruence selection is recorded at the successful candidate;
 - `Meta.simpHaveTelescope` runs through a small wrapper monad whose
@@ -381,7 +414,8 @@ Three engine modes are required.
 - **Reference mode:** no observer decisions; used to compare the fork with
   upstream `Simp.mainCore`.
 - **Record mode:** uses the original context, records successful choices, and
-  retains failed/speculative attempts only in diagnostics.
+  promotes failed/speculative attempts with executable progress into the
+  program.
 - **Replay mode:** receives choices from the certificate, has empty ambient
   simp/congruence/simproc sets and no ambient discharger, and fails on any
   uncommanded transition.
@@ -417,15 +451,22 @@ fingerprinted like an ordinary rule. Generated congruence may use the pinned
 generator, but its generated type, proof head, and argument kinds must match
 the witness before its child programs run.
 
+Failed user/generated candidates are recorded when they performed recursive or
+cache-relevant work. Their failure is replayed before the next candidate. A
+candidate with no executable progress is omitted; call frames, phase outcomes,
+and certificate-driven cache hits ensure that omitted meta allocation identity
+cannot become replay semantics.
+
 ### 8.3 Premises
 
 A recursive premise is a complete nested `Program`, including dsimp and
 structural witnesses. Default terminal selection remains explicit:
-`localAssumption`, `equationHypothesis`, `dischargeRfl`, or `isTrue`.
+`localAssumption`, `equationHypothesis`, `dischargeRfl`, `isTrue`, or `failed`.
 
-Failed theorem candidates restore Meta state, simplifier state, recorder state,
-program cursors, and nested premise cursors together. A custom source
-discharger remains `deferred_custom_discharger`.
+Failed theorem candidates that contain recursive premise work are explicit
+`rewriteAttemptFailed` operations with nested premise programs and a `failed`
+terminal. A candidate that produced no executable program item is omitted. A
+custom source discharger remains `deferred_custom_discharger`.
 
 ## 9. Simproc boundary
 
@@ -473,8 +514,8 @@ agree exactly.
 Gate: branch-focused tests cover every row of section 4. Deleting any observer
 call causes its focused test to fail with `unobserved_transition`.
 
-Status: complete. The recorder covers every matrix row, rolls back speculative
-candidate state transactionally, emits nested premise programs, observes all
+Status: complete. The recorder covers every matrix row, retains stateful failed
+candidate attempts, emits nested premise programs, observes all
 simproc/dsimproc phases without accepting them, and matches reference-mode
 results on the focused probe and 57 bounded production calls.
 
@@ -488,6 +529,12 @@ results on the focused probe and 57 bounded production calls.
 Gate: every branch-focused certificate replays; mutations of path, phase,
 operation, rule variant, congruence choice, config, premise order, or terminal
 fail at the mutated item.
+
+Status: complete. The focused suite replays 36 dynamic branch classes and
+rejects 15 targeted mutations. The batched bounded gate records each module
+once, classifies every execution by occurrence ID, then replays 55 wholly
+non-deferred occurrences across 58 executions in one replay compile per module;
+two occurrences are explicitly simproc-deferred and none are unclassified.
 
 ### E4. Source and materializer migration
 
@@ -548,7 +595,8 @@ closure run, not a substitute for the completeness review.
 ## 12. Decisions
 
 - Schema 15 remains only in Git history and is not a simplifier IR dependency.
-- E1 and E2 are complete; the next implementation step is closed replay (E3).
+- E1, E2, and E3 are complete; the next implementation step is source and
+  materializer migration (E4).
 - The correctness boundary is a pinned source fork with record and replay
   modes.
 - Structural traversal and dsimp are first-class certificate semantics.

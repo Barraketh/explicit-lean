@@ -17,9 +17,12 @@ SOURCE = ENGINE + "\n" + IR + "\n" + RUNTIME + "\n" + RECORDING
 
 
 OBSERVERS: dict[str, tuple[str, ...]] = {
+    "`simpImpl` call boundary": (".simpCall invocationOrdinal", ".proofSkip invocationOrdinal"),
+    "`dsimpImpl` call boundary": (".dsimpCall invocationOrdinal", "dsimpInvocationOrdinal"),
     "`simpLoop` cache": ("recordBranch \"struct.cacheHit\"", ".cacheHit sourcePath"),
-    "`pre` step": ("withPhase .pre", "stepDisposition : StepDisposition"),
-    "`post` step": ("withPhase .post", ".postRestart"),
+    "`pre` step": ("withPhase .pre", "recordPhaseStep", ".phaseOutcome"),
+    "`post` step": ("withPhase .post", ".postRestart", "consumeReplayPhaseOutcome"),
+    "`simpStep`: unassigned mvar": ("struct.unassignedMVarStop", ".unassignedMVarStop simpStepOrdinal"),
     "`reduceStep`: mvar head": ("reduce.instantiateMVars", ".instantiateMVars"),
     "`reduceStep`: beta": ("reduce.beta", ".beta"),
     "`reduceStep`: native projection": ("reduce.projection\"", ".projection structureName field"),
@@ -33,11 +36,13 @@ OBSERVERS: dict[str, tuple[str, ...]] = {
     "`reduceFVar`": ("reduce.localDef", "localRefOfDecl", "LocalDefReason.zetaDelta"),
     "`simpProj`": ("struct.projectionMajor.simp", "struct.projectionMajor.dsimp"),
     "`simpApp`": ("CongruenceChoice", "struct.congruence.user", "struct.congruence.generated", "struct.congruence.generic"),
+    "failed congruence candidates": (".userAttemptFailed", ".generatedAttemptFailed", "recorderStateProgressed"),
     "user congruence": (".user c.theoremName c.priority c.hypothesesPos", ".userCongrHypothesis"),
     "generated congruence": ("shapeFingerprint", "synthesizedAssignments", ".autoCongrArgument"),
     "generic congruence": (".generic modes", ".appArgument i .simp", ".appArgument i .dsimp"),
     "`simpMatch` direct reduction": ("reduce.matchIota", ".iota .visit"),
     "`simpMatchDiscrs?`": ("struct.matchDiscriminants", ".matchDiscriminant i"),
+    "failed match-discriminant candidate": ("struct.matchDiscriminantsAttemptFailed", ".matchDiscriminantsAttemptFailed"),
     "`simpMatchCore`": ("tryTheoremRecorded?", "origin := .decl matchEq"),
     "lambda traversal": ("struct.lambdaTelescope", ".lambdaDomain", ".lambdaBody"),
     "implication traversal": ("implicationContextual", "implicationPlain", ".contextualScope"),
@@ -50,10 +55,11 @@ OBSERVERS: dict[str, tuple[str, ...]] = {
     "theorem preprocessing": ("variant", "ruleFingerprint", "lhsFingerprint"),
     "indexed rewrite": ("getMatchWithExtra", "getMatchLiberal", "indexMode"),
     "theorem match": ("MatchEnvelope", "binderAssignments", "thm.perm", "resolveBinderNameHint"),
+    "failed theorem candidate": ("rewrite.attemptFailed", ".rewriteAttemptFailed rule envelope premises"),
     "instance arguments": ("instanceAssignments", "synthesizeInstance", "skipAssignedInstances"),
     "implicit defeq proof": ("useImplicitDefEqProofRecorded", "proofPresent"),
     "recursive premise simp": ("beginPremiseProgram", "finishPremiseProgram", "program := inner.program"),
-    "default discharge terminals": (".localAssumption", ".equationHypothesis", ".dischargeRfl", ".isTrue"),
+    "default discharge terminals": (".localAssumption", ".equationHypothesis", ".dischargeRfl", ".isTrue", ".failed"),
     "custom discharger": ("customDischarger", "deferRecording .customDischarger"),
     "`simpUsingDecide`": ("builtin.decideTrue", "builtin.decideFalse"),
     "`simpArith`": ("natConstraintHandler", "divisibilityHandler", "builtin.arith.intExpression"),
@@ -62,8 +68,8 @@ OBSERVERS: dict[str, tuple[str, ...]] = {
     "dsimprocs": ("dsimprocCoreRecorded", "simproc.dsimp"),
     "target result": ("result.expr.isTrue", "SubjectTerminal.targetTrue", ".targetTransport", "applySimpResultToTarget"),
     "local result": ("SubjectTerminal.localFalse", ".localDefEqReplace", ".localAssertClear", "replaceLocalDeclDefEq"),
-    "`simpGoal` batching": ("private def recordGoal", "subjects := subjects.push", "proofStateFingerprint"),
-    "`failIfUnchanged`": ("inductive ExecutionOutcome", "success (changed : Bool)", "tacticFailure"),
+    "`simpGoal` batching": ("def recordGoal", "subjects := subjects.push", "proofStateFingerprint"),
+    "`failIfUnchanged`": ("ctx.config.failIfUnchanged", "`simp` made no progress"),
 }
 
 

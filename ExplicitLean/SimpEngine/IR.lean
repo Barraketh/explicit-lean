@@ -89,6 +89,7 @@ inductive PremiseTerminal where
   | equationHypothesis
   | dischargeRfl
   | isTrue
+  | failed
   deriving Inhabited, Repr, BEq
 
 structure ExprFingerprint where
@@ -116,6 +117,8 @@ inductive RuleOrigin where
   deriving Inhabited, Repr, BEq
 
 inductive PathStep where
+  | simpCall (ordinal : Nat)
+  | dsimpCall (ordinal : Nat)
   | preVisit (iteration : Nat)
   | reductionVisit (iteration : Nat)
   | postRestart (iteration : Nat)
@@ -182,16 +185,24 @@ inductive Builtin where
 
 inductive CongruenceChoice where
   | user (theoremName : Name) (priority : Nat) (hypothesisPositions : Array Nat)
+  | userAttemptFailed (theoremName : Name) (priority : Nat)
+      (hypothesisPositions : Array Nat)
   | generated (shapeFingerprint : String) (arguments : Array ChildMode)
       (synthesizedAssignments : Array String)
+  | generatedAttemptFailed
   | generic (arguments : Array ChildMode)
   deriving Inhabited, Repr, BEq
 
 inductive Structural where
+  | phaseOutcome (phase : Phase) (invocationOrdinal : Nat)
+      (disposition : StepDisposition) (outputFingerprint : String) (proofPresent : Bool)
+  | proofSkip (invocationOrdinal : Nat) (typeFingerprint : String)
+  | unassignedMVarStop (simpStepOrdinal : Nat)
   | cacheHit (sourcePath : ExecutionPath)
-  | congruence (choice : CongruenceChoice)
+  | congruence (invocationOrdinal : Nat) (choice : CongruenceChoice)
   | projectionMajor (structureName : Name) (field : Nat) (mode : ChildMode)
   | matchDiscriminants (count : Nat)
+  | matchDiscriminantsAttemptFailed (count : Nat)
   | lambdaTelescope (count : Nat)
   | forallBranch (choice : ForallBranch)
   | contextualScope (locals : Array ScopedLocalRef)
@@ -212,6 +223,8 @@ mutual
   inductive Operation where
     | rewrite (rule : RuleRef) (matchEnvelope : MatchEnvelope)
         (premises : Array PremiseProgram)
+    | rewriteAttemptFailed (rule : RuleRef) (matchEnvelope : MatchEnvelope)
+        (premises : Array PremiseProgram)
     | reduce (reduction : Reduction)
     | builtin (builtin : Builtin)
     deriving Repr, BEq
@@ -219,6 +232,7 @@ mutual
   structure Event where
     path : ExecutionPath
     phase : Phase
+    invocationOrdinal : Nat
     operation : Operation
     inputFingerprint : String
     outputFingerprint : String
@@ -352,17 +366,6 @@ structure Certificate where
   subjects : Array SubjectProgram := #[]
   initialState : StateFingerprint
   finalState : StateFingerprint
-  deriving Inhabited, Repr, BEq
-
-inductive RecordingFailure where
-  | unobservedTransition (site : String)
-  | discontinuity (path : ExecutionPath) (expected actual : String)
-  | invalidFingerprint (path : ExecutionPath)
-  deriving Inhabited, Repr, BEq
-
-inductive ExecutionOutcome where
-  | success (changed : Bool)
-  | tacticFailure (kind : String)
   deriving Inhabited, Repr, BEq
 
 end Lean.Meta.Simp.Engine

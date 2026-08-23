@@ -65,8 +65,16 @@ private partial def canonicalExpr (lctx : LocalContext) : Expr → CanonicalM St
   | .proj name index expression =>
       return s!"(proj {name} {index} {← canonicalExpr lctx expression})"
 
+private def eraseProofTerms (expression : Expr) : MetaM Expr :=
+  Meta.transform (skipConstInApp := true) expression
+    (pre := fun subexpression => do
+      if ← Meta.isProof subexpression then
+        return .continue (← mkSorry (← inferType subexpression) true)
+      return .continue)
+
 def exprFingerprint (expression : Expr) : MetaM ExprFingerprint := do
   let expression ← instantiateMVars expression
+  let expression ← eraseProofTerms expression
   let lctx ← getLCtx
   let (canonical, _) := (canonicalExpr lctx expression).run {}
   let printable ← try
