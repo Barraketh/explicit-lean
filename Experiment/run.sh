@@ -1,7 +1,10 @@
 #!/bin/sh
 set -eu
 
-lake build ExplicitLean
+lake build \
+  ExplicitLean \
+  ExplicitLean.SimpEngine.Inventory \
+  ExplicitLean.SimpEngine.Reference
 python3 Experiment/check_simp_engine_pin.py
 python3 Experiment/check_simp_engine_reference.py
 python3 Experiment/check_simp_engine_observers.py
