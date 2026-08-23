@@ -47,7 +47,7 @@ REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine/Source.lean":
         "351e26bf4736dd77dfdcb0ad9d3c3c3c6bfaf8467907323a451d5514320dce56",
     "SIMP_ENGINE_COVERAGE.md":
-        "73586bbf76f436c1e7ca6ddaa6b173eff37165a34d1fcbb9fc4c9a5f5bfdbf59",
+        "c40ed65939b560f1437889a09dce53c0e47a63f091b93bf5f347f983d25ed0ff",
 }
 EXPECTED_LINEAGE_DIGEST = (
     "6ab7697b32c0191f4e33b1fced066bb0a81c2694fd3a3cc255fa996cfca704fa"

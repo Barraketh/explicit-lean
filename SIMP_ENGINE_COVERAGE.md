@@ -701,13 +701,16 @@ occurrences, source hashes, and exact byte ranges at the tested commit. It
 includes 91 nested occurrences, uses the exact frontend for five modules whose
 lightweight parse requires recovery, and collapses one byte-identical duplicate
 syntax record. Modules are assigned by `SHA256(module) mod shardCount`. The run
-uses 256 short deterministic batches distributed across 16 distinct verified
-Vast.ai machines. One shard process runs on each host with at least 120 GB of
-RAM reserved for it, giving 16 memory-isolated concurrent module executions.
+uses 256 short deterministic batches distributed across eight distinct verified
+Vast.ai machines. One shard process runs on each host with at least 250 GB of
+RAM reserved for it, giving eight memory-isolated concurrent module executions.
 The first live attempt established that four processes on 32--64 GB hosts was
 not valid parallelism: multiple shards were killed with exit 137, and the same
 instrumented `Mathlib/Algebra/Order/Ring/Unbundled/Rat.lean` recording compile
-was killed when reproduced alone on a 64 GB machine. Each batch records a module
+was killed when reproduced alone on a 64 GB machine. A later isolated
+`TraceForm.lean` recording exhausted 128 GB, establishing the 250 GB floor.
+Exit `-9` or `137` is classified as worker-capacity failure and never triggers
+semantic materialization bisection. Each batch records a module
 once and, when it has accepted executions, compiles one copied module with all
 accepted occurrences materialized. A batch stops after its first semantic
 failure. Diagnostic group bisection runs only after a materialization failure
@@ -723,7 +726,7 @@ occurrence, and replay count before it can pass.
 - queries the live Vast.ai marketplace and selects distinct verified machines
   under reliability, effective-vCPU, RAM, disk, network, per-offer, aggregate
   hourly, and maximum-runtime guards;
-- launches 16 Ubuntu 24.04 hosts and explicitly attaches the configured SSH
+- launches eight Ubuntu 24.04 hosts and explicitly attaches the configured SSH
   key to every contract;
 - retains only candidates that pass the real SSH handshake, destroys rejects,
   and fills their slots from distinct fallback offers without exceeding the
@@ -742,18 +745,18 @@ occurrence, and replay count before it can pass.
 - partitions all 256 batches exactly once across the hosts and runs one
   memory-isolated shard process per host;
 - copies atomic worker state, reports, logs, and failing sources back to the
-  controller every 30 seconds, including while slower hosts are still setting
-  up;
-- stops the fleet after the first semantic failure set or the two-hour cost
+  controller every 30 seconds, excluding transient per-module `work/` trees and
+  including checkpoints while slower hosts are still setting up;
+- stops the fleet after the first semantic failure set or the three-hour cost
   bound;
 - runs the existing strict reducer only after collection; and
 - destroys all rented instances on every terminal path unless explicitly kept
   for diagnosis.
 
-At the launch defaults, 16 module executions can be active concurrently on 16
-independent machines. Every offer must provide 120 GB per active Lean process.
-The controller refuses a plan above $4.00/hour or two hours, so compute exposure
-is bounded at $8.00; actual offers are re-evaluated immediately before rental.
+At the launch defaults, eight module executions can be active concurrently on
+eight independent machines. Every offer must provide 250 GB per active Lean
+process. The controller refuses a plan above $4.00/hour or three hours; the
+actual plan and its compute exposure are recomputed before rental.
 
 The terminal taxonomy is deliberately closed:
 
@@ -766,9 +769,10 @@ The terminal taxonomy is deliberately closed:
   successful execution was recorded; and
 - `not_executed`: neither the success nor upstream-failure observer ran.
 
-`mixed_deferred_execution`, `recording_failure`, `materialization_failure`,
-`harness_failure`, and `unclassified` are reportable diagnostics but failing
-gate outcomes.
+`capacity_failure`, `mixed_deferred_execution`, `recording_failure`,
+`materialization_failure`, `harness_failure`, and `unclassified` are reportable
+diagnostics but failing gate outcomes. A capacity failure means the batch must
+be rerun on a larger worker; it says nothing about certificate semantics.
 
 The fleet is launched only from a clean committed implementation after E5.
 Atomic remote reports become durable locally at every collection interval.

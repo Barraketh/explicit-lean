@@ -66,6 +66,10 @@ def main() -> None:
         raise RuntimeError("accepted terminal was classified as a module failure")
     if not cloud.module_has_failure({"errors": ["recording_failure"]}):
         raise RuntimeError("module error did not stop the diagnostic batch")
+    if not cloud.compile_exhausted_capacity(137) or not cloud.compile_exhausted_capacity(-9):
+        raise RuntimeError("worker memory exhaustion was not classified as capacity")
+    if cloud.compile_exhausted_capacity(1):
+        raise RuntimeError("semantic compile failure was misclassified as capacity")
     nested_source = b"by\n  simp [show True from by simp]\n"
     outer_start = nested_source.index(b"simp")
     inner_start = nested_source.index(b"simp", outer_start + 4)

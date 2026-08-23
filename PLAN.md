@@ -136,12 +136,13 @@ results; the superseded workflow has been removed.
 
 The accepted run inventories 8,264 files and validates 83,425 occurrences in
 6,319 modules byte-for-byte, including 91 nested occurrences. It uses 256
-deterministic batches across 16 distinct verified Vast.ai hosts, with one Lean
-module process per host and at least 120 GB of RAM reserved per process: 16
+deterministic batches across eight distinct verified Vast.ai hosts, with one Lean
+module process per host and at least 250 GB of RAM reserved per process: eight
 memory-isolated modules can therefore record or materialize concurrently. The
-single-process limit is empirical: the first cloud attempt ran four compiles on
-32--64 GB hosts, and a representative instrumented module was killed with exit
-137 even when reproduced alone on a 64 GB machine. Offers are selected from the
+single-process and memory limits are empirical: four compiles on 32--64 GB hosts
+were killed, and a later isolated recording of `TraceForm.lean` exhausted a
+128 GB worker. Process exits `-9` and `137` are capacity failures, never semantic
+certificate failures, and materialization bisection is skipped for them. Offers are selected from the
 live market under unique-machine, reliability, CPU, RAM, disk, network,
 hourly-price, and total-runtime guards. Because each host runs one Lean process,
 the CPU floor is four effective cores rather than an unrelated whole-machine
@@ -150,8 +151,9 @@ number of times when churn exhausts the initial snapshot. All hosts set up in
 parallel; each begins its assigned batches as soon as it is ready. A failed
 setup or transfer
 is destroyed and replaced in-place while other workers keep running. The
-inventory is compressed before transfer, checkpoints are copied home every 30
-seconds even while the remaining hosts provision, and the controller stops at
+inventory is compressed before transfer, durable reports/logs/failing sources
+are copied home every 30 seconds while transient `work/` trees are excluded,
+and the controller stops at
 the first semantic failure set. Every batch still records each assigned module
 once and compiles one materialized copy for all accepted occurrences in that
 module. Copied sources use Mathlib's semantic package options

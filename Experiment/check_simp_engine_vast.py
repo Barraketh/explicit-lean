@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import simp_engine_vast as vast
 import simp_engine_vast_worker as worker
 
@@ -60,8 +62,11 @@ def main() -> None:
     ]) != (3, 1):
         raise RuntimeError("Vast progress accounting changed")
     defaults = vast.parser().parse_args(["run", "--output-dir", "unused"])
+    fallback_fixture = vast.parser().parse_args([
+        "run", "--output-dir", "unused", "--minimum-ram-gb-per-process", "120",
+    ])
     fallbacks = vast.replacement_offers(
-        offers + [offer(5, 13, 0.15, 8, 3.0)], defaults, {10}
+        offers + [offer(5, 13, 0.15, 8, 3.0)], fallback_fixture, {10}
     )
     if [value["machine_id"] for value in fallbacks] != [11, 13, 12]:
         raise RuntimeError("Vast fallback filtering changed")
@@ -69,8 +74,15 @@ def main() -> None:
         raise RuntimeError("Vast SSH URL parsing changed")
     if vast.parse_jsonish("{'success': True}") != {"success": True}:
         raise RuntimeError("Vast legacy CLI response parsing changed")
-    if defaults.concurrency != 1 or defaults.minimum_ram_gb_per_process != 120:
+    if (
+        defaults.workers != 8
+        or defaults.concurrency != 1
+        or defaults.minimum_ram_gb_per_process != 250
+        or defaults.max_runtime_hours != 3
+    ):
         raise RuntimeError("Vast memory-isolation defaults changed")
+    if "--exclude=work/" not in inspect.getsource(vast.rsync_from):
+        raise RuntimeError("Vast checkpoints include transient worker trees")
     print(
         "schema-16 Vast scheduler: 256 shards covered once; "
         "memory, host, progress, and price guards: ok"

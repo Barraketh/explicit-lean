@@ -464,6 +464,11 @@ def module_has_failure(result: dict[str, Any]) -> bool:
     )
 
 
+def compile_exhausted_capacity(exit_code: int) -> bool:
+    """Recognize process death caused by the worker's memory/capacity limit."""
+    return exit_code in {-9, 137}
+
+
 def preserve_failure_source(output: Path, stage: str, module: str, source: Path) -> None:
     destination = output / "failures" / stage / module
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -588,11 +593,17 @@ def process_module(
     unknown_recorder = set(recorder_failures) - known
     if record_code or recorder_failures or unknown_recorder:
         preserve_failure_source(output, "record", module, recorded)
+        capacity_failure = compile_exhausted_capacity(record_code)
         message = (
-            f"recording_compile_exit={record_code}; "
+            f"recording_{'capacity_failure' if capacity_failure else 'compile_failure'}="
+            f"exit={record_code}; "
             f"recorder_failures={dict(recorder_failures)}; unknown={sorted(unknown_recorder)}"
         )
-        result = failed_module_result(module_entry, "recording_failure", message)
+        result = failed_module_result(
+            module_entry,
+            "capacity_failure" if capacity_failure else "recording_failure",
+            message,
+        )
         result["recording"] = {
             "exitCode": record_code,
             "seconds": record_duration,
@@ -712,22 +723,30 @@ def process_module(
                 occurrence_results[occurrence_id]["replayedExecutions"] = actual[occurrence_id]
         else:
             preserve_failure_source(output, "materialized", module, materialized)
+            capacity_failure = compile_exhausted_capacity(materialize_code)
+            failure_kind = (
+                "materialization_capacity_failure"
+                if capacity_failure else "materialization_failed"
+            )
             errors.append(
-                f"materialization_failed:exit={materialize_code}:expected={dict(expected)}:"
+                f"{failure_kind}:exit={materialize_code}:expected={dict(expected)}:"
                 f"actual={dict(actual)}:unknown={sorted(unknown_replay)}"
             )
-            materialization["failingGroups"] = bisect_materialization_failure(
-                output,
-                module,
-                source,
-                occurrences,
-                certificate_sources,
-                selected,
-                dynlib,
-                timeout,
-            )
+            if not capacity_failure:
+                materialization["failingGroups"] = bisect_materialization_failure(
+                    output,
+                    module,
+                    source,
+                    occurrences,
+                    certificate_sources,
+                    selected,
+                    dynlib,
+                    timeout,
+                )
             for occurrence_id in selected:
-                occurrence_results[occurrence_id]["terminal"] = "materialization_failure"
+                occurrence_results[occurrence_id]["terminal"] = (
+                    "capacity_failure" if capacity_failure else "materialization_failure"
+                )
 
     return {
         "module": module,

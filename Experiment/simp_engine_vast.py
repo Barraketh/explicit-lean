@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_QUERY = (
     "verified=true rentable=true cpu_arch=amd64 cpu_cores_effective>=4 "
-    "cpu_ram>=128 disk_space>=80 disk_bw>=300 direct_port_count>=1 "
+    "cpu_ram>=250 disk_space>=80 disk_bw>=300 direct_port_count>=1 "
     "reliability>=0.99 inet_down>=100 inet_up>=50"
 )
 
@@ -412,7 +412,7 @@ def rsync_from(instance: dict[str, Any], known_hosts: Path, destination: Path) -
     destination.mkdir(parents=True, exist_ok=True)
     ssh_transport = shlex.join(ssh_base(instance, known_hosts)[:-1])
     run([
-        "rsync", "-az", "--partial", "--timeout=45", "-e", ssh_transport,
+        "rsync", "-az", "--partial", "--timeout=45", "--exclude=work/", "-e", ssh_transport,
         f"root@{instance['sshHost']}:/workspace/explicit-lean/.cloud/vast-worker/",
         str(destination) + "/",
     ], timeout=120)
@@ -845,9 +845,9 @@ def parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--commit", default="")
     run_parser.add_argument("--output-dir", required=True)
-    run_parser.add_argument("--workers", type=int, default=16)
+    run_parser.add_argument("--workers", type=int, default=8)
     run_parser.add_argument("--concurrency", type=int, default=1)
-    run_parser.add_argument("--minimum-ram-gb-per-process", type=float, default=120.0)
+    run_parser.add_argument("--minimum-ram-gb-per-process", type=float, default=250.0)
     run_parser.add_argument("--shard-count", type=int, default=256)
     run_parser.add_argument("--disk-gb", type=int, default=40)
     run_parser.add_argument("--image", default="ubuntu:24.04")
@@ -856,7 +856,7 @@ def parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--offer-query", default=DEFAULT_QUERY)
     run_parser.add_argument("--max-offer-hourly", type=float, default=0.50)
     run_parser.add_argument("--max-total-hourly", type=float, default=4.00)
-    run_parser.add_argument("--max-runtime-hours", type=float, default=2.0)
+    run_parser.add_argument("--max-runtime-hours", type=float, default=3.0)
     run_parser.add_argument("--module-timeout", type=int, default=900)
     run_parser.add_argument("--inventory-timeout", type=int, default=3600)
     run_parser.add_argument("--boot-timeout", type=int, default=180)
