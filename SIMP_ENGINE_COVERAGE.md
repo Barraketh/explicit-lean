@@ -734,8 +734,10 @@ occurrence, and replay count before it can pass.
   cores, and the controller refreshes an exhausted fallback snapshot from the
   live market a bounded number of times;
 - installs the pinned Lean toolchain on all hosts concurrently, checks out the
-  exact commit, restores Mathlib artifacts, and builds the engine and shared
-  library before starting work;
+  exact commit, raises and verifies a 65,536 file-descriptor limit, restores
+  Mathlib artifacts, and builds the engine and shared library before starting
+  work; cache extraction failure rejects the host instead of silently compiling
+  a partial dependency graph;
 - compiles every copied module with Mathlib's semantic package options,
   including `autoImplicit=false` and `maxSynthPendingDepth=3`, while disabling
   only non-semantic linter noise;

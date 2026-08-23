@@ -326,6 +326,8 @@ def setup_script(commit: str) -> str:
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y ca-certificates curl git rsync zstd
+ulimit -n 65536
+test "$(ulimit -n)" -ge 65536
 if [ ! -x /root/.elan/bin/elan ]; then
   curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o /tmp/elan-init.sh
   sh /tmp/elan-init.sh -y --default-toolchain none

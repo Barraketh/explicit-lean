@@ -146,7 +146,10 @@ certificate failures, and materialization bisection is skipped for them. Offers 
 live market under unique-machine, reliability, CPU, RAM, disk, network,
 hourly-price, and total-runtime guards. Because each host runs one Lean process,
 the CPU floor is four effective cores rather than an unrelated whole-machine
-core count. The fallback pool is refreshed from the live market a bounded
+core count. Setup raises and verifies a 65,536 file-descriptor limit before
+parallel Mathlib cache extraction; a lower provider default was observed to
+drop thousands of artifacts and is rejected rather than repaired by a source
+build. The fallback pool is refreshed from the live market a bounded
 number of times when churn exhausts the initial snapshot. All hosts set up in
 parallel; each begins its assigned batches as soon as it is ready. A failed
 setup or transfer

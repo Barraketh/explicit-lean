@@ -83,6 +83,9 @@ def main() -> None:
         raise RuntimeError("Vast memory-isolation defaults changed")
     if "--exclude=work/" not in inspect.getsource(vast.rsync_from):
         raise RuntimeError("Vast checkpoints include transient worker trees")
+    setup = vast.setup_script("0" * 40)
+    if "ulimit -n 65536" not in setup or 'test "$(ulimit -n)" -ge 65536' not in setup:
+        raise RuntimeError("Vast setup does not protect parallel cache extraction")
     print(
         "schema-16 Vast scheduler: 256 shards covered once; "
         "memory, host, progress, and price guards: ok"
