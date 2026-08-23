@@ -145,9 +145,11 @@ def lean_command(path: Path) -> list[str]:
         # Copied modules must elaborate under the same settings as `lake build`.
         "-DautoImplicit=false",
         "-DmaxSynthPendingDepth=3",
-        "-Dlinter.unusedVariables=false",
-        "-Dlinter.unusedSimpArgs=false",
-        "-Dlinter.unreachableTactic=false",
+        # Not every Mathlib import graph registers every linter option. Weak
+        # settings apply when present without rejecting earlier modules.
+        "-Dweak.linter.unusedVariables=false",
+        "-Dweak.linter.unusedSimpArgs=false",
+        "-Dweak.linter.unreachableTactic=false",
         "-DmaxHeartbeats=0",
     ]
     try:

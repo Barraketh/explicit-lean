@@ -46,6 +46,13 @@ def main() -> None:
     for option in ("-DautoImplicit=false", "-DmaxSynthPendingDepth=3"):
         if option not in compile_command:
             raise RuntimeError(f"copied Mathlib compile omitted package option: {option}")
+    for option in (
+        "-Dweak.linter.unusedVariables=false",
+        "-Dweak.linter.unusedSimpArgs=false",
+        "-Dweak.linter.unreachableTactic=false",
+    ):
+        if option not in compile_command:
+            raise RuntimeError(f"copied Mathlib compile used a strict linter option: {option}")
     if cloud.module_shard(MODULE, 64) != 50:
         raise RuntimeError("stable shard assignment changed")
     combined_deferred = {
