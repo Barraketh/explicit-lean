@@ -862,6 +862,22 @@ definition expansion, recorded zeta, and named theorem applications (including
 the discovered third `Subalgebra.coe_mk` site), with zero fallback metrics.
 Delete, reorder, and wrong-local mutations fail closed. Schema 15 is unchanged.
 
+The same O6h bridge eligibility applies when the next recorded event is a
+reduction rather than a theorem; consequently Lattice occurrence
+`6f575c90cdb8a389` also materializes without adding another reduction kind.
+
+O6i implementation status (2026-08-22): the exact name in `reduce
+projection_fn <name>` authorizes the pinned class-projection unfolding branch.
+This replaces only ordinary `simp`'s transient `isDeclToUnfold` test, which was
+set by source such as `simp only [..., default]` but is absent from closed
+replay. The operation still requires the current application head to be that
+exact declaration, uses `withReducibleAndInstances` for the same single
+unfolding, installs no simp theorem, and remains subject to historical
+transition and final-state validation. Lattice occurrence
+`02a5cd6ee869c03d` now materializes with explicit `Inhabited.default` reduction
+and four named rules; deletion, reordering, and identity substitution fail
+closed. Schema 15 is unchanged.
+
 ### S. Simproc design
 
 Simproc handling begins only after a separate design discussion and document.

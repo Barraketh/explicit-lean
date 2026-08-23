@@ -87,3 +87,11 @@ it only for a continuity gap already matched to that fvar. The Directed target
 `26c72cb4c4292d08` now materializes with local-def expansion followed by its
 recorded zeta and named events; the focused gate rejects deletion, reordering,
 and a wrong local and asserts zero fallback metrics. Schema 15 is unchanged.
+
+O6i implementation status (2026-08-22): an explicit named class-projection
+command authorizes the same pinned unfolding that ordinary `simp only` obtains
+from its temporary `isDeclToUnfold` set; replay does not install that set or any
+ambient theorem. Lattice target `02a5cd6ee869c03d` materializes with `reduce
+projection_fn Inhabited.default` and four named rules. The focused gate rejects
+deletion, reordering, and a different projection identity and asserts zero
+fallback metrics. Schema 15 is unchanged.

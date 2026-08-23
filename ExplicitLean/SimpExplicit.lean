@@ -830,21 +830,23 @@ private def reduceProjectionFunctionReplay? (input : Expr) : Simp.SimpM (Option 
           | some function => return some (mkAppN function input.getAppArgs)
           | none => return none
     if projectionInfo.fromClass then
-      if (← Simp.getContext).isDeclToUnfold constantInfo.name then
-        let input? ← withReducibleAndInstances <| unfoldDefinition? input
-        if input?.isSome then
-          Simp.recordSimpTheorem (.decl constantInfo.name)
+      -- The certificate has already named this exact class projection.  That
+      -- explicit identity replaces ordinary `simp`'s `isDeclToUnfold` bit;
+      -- consulting the replay context here would incorrectly reject commands
+      -- recorded from `simp only [..., default]`.  Keep the pinned unfolding
+      -- operation itself unchanged and do not install any ambient simp rule.
+      let input? ← withReducibleAndInstances <| unfoldDefinition? input
+      if input?.isSome then
         return input?
+      unless input.getAppNumArgs > projectionInfo.numParams do
+        return none
+      let major := input.getArg! projectionInfo.numParams
+      unless (← isConstructorApp major) do
+        return none
+      if backward.whnf.reducibleClassField.get (← getOptions) then
+        unfoldProjectionFunctionAny? input
       else
-        unless input.getAppNumArgs > projectionInfo.numParams do
-          return none
-        let major := input.getArg! projectionInfo.numParams
-        unless (← isConstructorApp major) do
-          return none
-        if backward.whnf.reducibleClassField.get (← getOptions) then
-          unfoldProjectionFunctionAny? input
-        else
-          reduceProjectionContinuation? (← unfoldProjectionFunctionAny? input)
+        reduceProjectionContinuation? (← unfoldProjectionFunctionAny? input)
     else
       reduceProjectionContinuation? (← unfoldDefinition? input)
 

@@ -890,7 +890,21 @@ final-state validation. Directed occurrence `26c72cb4c4292d08` now
 materializes with `reduce local_def s`, the already recorded `reduce zeta`,
 five named rules, and `match 3 => Subalgebra.coe_mk`; deletion, reordering, and
 wrong-local mutations fail closed. No recorder event, ambient simp rule, or
-proof fallback is fabricated. Schema 15 is unchanged.
+proof fallback is fabricated. Permitting the same bounded bridge immediately
+before an already recorded reduction also closes Lattice occurrence
+`6f575c90cdb8a389` without another operation. Schema 15 is unchanged.
+
+O6i implementation status (2026-08-22): a named `projection_fn` command is now
+the unfolding authorization for that exact class projection. Ordinary `simp`
+records `Inhabited.default` after `simp only [..., default]` marks the
+declaration for unfolding, but replay has intentionally empty simp theorems;
+consulting `isDeclToUnfold` there rejected the explicit command. Replay now
+runs the same pinned `withReducibleAndInstances` projection unfolding directly,
+without installing an ambient rule, and retains constructor-field reduction as
+the bounded secondary branch. Lattice occurrence `02a5cd6ee869c03d`
+materializes with one `reduce projection_fn Inhabited.default` command and four
+named rules. Delete, reorder, and wrong-projection mutations fail closed, with
+zero fallback metrics. Schema 15 is unchanged.
 
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
