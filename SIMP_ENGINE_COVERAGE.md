@@ -386,6 +386,13 @@ Recursive premise recording starts with empty observation buffers and merges
 only the premise's new observations into the outer execution; copying the
 outer prefix into a nested trace would duplicate it exponentially.
 
+Cache producer registries contain only the recorded producer path and its
+append-only ordinal. The live expression cache and its lockstep provenance map
+remain authoritative for key equality and value lookup. An alpha-stable
+expression fingerprint is relative to the current local context, so the same
+cached expression can legitimately acquire a different fingerprint after a
+binder scope closes; such a fingerprint is not a valid cache-key witness.
+
 The ordered simproc trace is serialized losslessly as a dictionary of distinct
 observations plus an array of dictionary indices. The index array has one entry
 per invocation and therefore preserves exact multiplicity and order while
@@ -660,15 +667,17 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and two complete Mathlib modules contain 67
-occurrences: 13 materialize across 14 successful executions, 53 are explicitly
+copies are compiled. The focused fixture and three complete Mathlib modules contain 73
+occurrences: 17 materialize across 18 successful executions, 55 are explicitly
 simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
 locations, configuration-driven builtins, and stable lazy-equation origins in
 an isolated ground context. A source-only engine-schema mutation is rejected
 before replay. A trailing `+contextual` fixture requires multiline certificate
-payloads to preserve the tactic's offside-rule column.
+payloads to preserve the tactic's offside-rule column. `EventuallyConst.lean`
+retains a cache-hit regression in which the producer's binder is no longer in
+the local context at the later hit.
 
 ### E5. Pre-cloud completeness review
 

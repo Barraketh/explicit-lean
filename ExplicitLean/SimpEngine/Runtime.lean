@@ -32,9 +32,11 @@ structure RecorderState where
   dsimpStateCacheSources : ExprStructMap (ExecutionPath × Nat) := {}
   /-- Provenance for the cache threaded locally through the active dsimp traversal. -/
   dsimpCacheSources : ExprStructMap (ExecutionPath × Nat) := {}
-  /-- Append-only registries used to resolve exact producer ordinals during replay. -/
-  simpReplayCache : Array (ExecutionPath × String × Simp.Result) := #[]
-  dsimpReplayCache : Array (ExecutionPath × String × Expr) := #[]
+  /-- Append-only producer paths give cache entries stable execution ordinals.
+      The cache key itself remains authoritative: expression fingerprints are
+      local-context-relative and may change after a binder scope closes. -/
+  simpReplayCache : Array ExecutionPath := #[]
+  dsimpReplayCache : Array ExecutionPath := #[]
   congruenceInvocationOrdinal : Nat := 0
   simpInvocationOrdinal : Nat := 0
   dsimpInvocationOrdinal : Nat := 0

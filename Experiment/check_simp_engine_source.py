@@ -22,6 +22,8 @@ FIXTURES = (
      "Mathlib/Data/List/DropRight.lean", False),
     ("eq-to-hom", coverage.MATHLIB / "Mathlib/CategoryTheory/EqToHom.lean",
      "Mathlib/CategoryTheory/EqToHom.lean", False),
+    ("eventually-const", coverage.MATHLIB / "Mathlib/Order/Filter/EventuallyConst.lean",
+     "Mathlib/Order/Filter/EventuallyConst.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "

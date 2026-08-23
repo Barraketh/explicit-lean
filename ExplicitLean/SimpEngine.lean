@@ -1578,18 +1578,16 @@ where
         if ← isCurrentReplayStructural expected then
           if let .dsimpCacheHit sourcePath sourceIndex := expected.witness then
             let state ← getRecorderState
-            let fingerprint ← liftM (exprFingerprintHash e)
-            let some (actualPath, sourceFingerprint, sourceResult) :=
-                state.dsimpReplayCache[sourceIndex]?
+            let some actualPath := state.dsimpReplayCache[sourceIndex]?
               | throwError "replay_expected_dsimp_cache_hit: source={repr sourcePath}, path={repr state.path}, cached={state.dsimpReplayCache.size}"
-            unless actualPath == sourcePath && sourceFingerprint == fingerprint do
+            unless actualPath == sourcePath do
               throwError "replay_dsimp_cache_source_mismatch: source={repr sourcePath}, index={sourceIndex}"
-            unless (cache.get? { val := e }).isSome do
-              throwError "replay_dsimp_cache_miss: source={repr sourcePath}, index={sourceIndex}"
+            let some cachedResult := cache.get? { val := e }
+              | throwError "replay_dsimp_cache_miss: source={repr sourcePath}, index={sourceIndex}"
             unless state.dsimpCacheSources.get? { val := e } == some (sourcePath, sourceIndex) do
               throwError "replay_dsimp_cache_provenance_mismatch: source={repr sourcePath}, index={sourceIndex}"
             emitStructural (.dsimpCacheHit sourcePath sourceIndex)
-            return (sourceResult, cache)
+            return (cachedResult, cache)
     else if let some result := cache.get? { val := e } then
       if runtime.mode == .record then
         let state ← getRecorderState
@@ -1607,12 +1605,11 @@ where
       let (result, cache) ← visitUncached e cache
       let cache := cache.insert { val := e } result
       if runtime.mode != .reference then
-        let fingerprint ← liftM (exprFingerprintHash e)
         modifyRecorderState fun state => {
           state with
             dsimpCacheSources := state.dsimpCacheSources.insert { val := e }
               (state.path, state.dsimpReplayCache.size)
-            dsimpReplayCache := state.dsimpReplayCache.push (state.path, fingerprint, result)
+            dsimpReplayCache := state.dsimpReplayCache.push state.path
         }
       return (result, cache)
 
@@ -2173,12 +2170,11 @@ def cacheResult (e : Expr) (cfg : Config) (r : Result) : EngineM Result := do
   if cfg.memoize && r.cache then
     modify fun s => { s with cache := s.cache.insert e r }
     if (← getRuntime).mode != .reference then
-      let fingerprint ← liftM (exprFingerprintHash e)
       modifyRecorderState fun state => {
         state with
           simpCacheSources := state.simpCacheSources.insert e
             (state.path, state.simpReplayCache.size)
-          simpReplayCache := state.simpReplayCache.push (state.path, fingerprint, r)
+          simpReplayCache := state.simpReplayCache.push state.path
       }
   return r
 
@@ -2192,18 +2188,16 @@ partial def simpLoop (e : Expr) : EngineM Result := withIncRecDepth do
         if ← isCurrentReplayStructural expected then
           if let .cacheHit sourcePath sourceIndex := expected.witness then
             let state ← getRecorderState
-            let fingerprint ← liftM (exprFingerprintHash e)
-            let some (actualPath, sourceFingerprint, sourceResult) :=
-                state.simpReplayCache[sourceIndex]?
+            let some actualPath := state.simpReplayCache[sourceIndex]?
               | throwError "replay_expected_simp_cache_hit: source={repr sourcePath}, path={repr state.path}, cached={state.simpReplayCache.size}"
-            unless actualPath == sourcePath && sourceFingerprint == fingerprint do
-              throwError "replay_simp_cache_source_mismatch: source={repr sourcePath}, index={sourceIndex}"
-            unless (cache.find? e).isSome do
-              throwError "replay_simp_cache_miss: source={repr sourcePath}, index={sourceIndex}"
+            unless actualPath == sourcePath do
+              throwError "replay_simp_cache_source_mismatch: expectedPath={repr sourcePath}, actualPath={repr actualPath}, index={sourceIndex}"
+            let some cachedResult := cache.find? e
+              | throwError "replay_simp_cache_miss: source={repr sourcePath}, index={sourceIndex}"
             unless state.simpCacheSources.find? e == some (sourcePath, sourceIndex) do
               throwError "replay_simp_cache_provenance_mismatch: source={repr sourcePath}, index={sourceIndex}"
             emitStructural (.cacheHit sourcePath sourceIndex)
-            return sourceResult
+            return cachedResult
     else if let some result := cache.find? e then
       if runtime.mode == .record then
         let state ← getRecorderState
