@@ -25,6 +25,8 @@ REQUIRED = {
     "struct.lambdaTelescope",
     "struct.ground",
     "simproc.dsimp",
+    "simproc.simp.continueNone",
+    "boundary.customDischarger",
     "builtin.decideTrue",
     "builtin.arith.intEquality",
 }

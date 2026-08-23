@@ -423,9 +423,18 @@ private def assertReplayProgramConsumed (state : RecorderState) : MetaM Unit := 
     recordBranch branch
     emitEvent input output (.reduce reduction) stepDisposition
 
+private def mergeDeferredReason (current : Option DeferredReason)
+    (next : DeferredReason) : Option DeferredReason :=
+  match current, next with
+  | none, next => some next
+  | some (.simproc name phase), .customDischarger
+  | some .customDischarger, .simproc name phase =>
+      some (.simprocAndCustomDischarger name phase)
+  | some current, _ => some current
+
 def deferRecording (reason : DeferredReason) : EngineM Unit := do
   modifyRecorderState fun state =>
-    if state.deferred.isSome then state else { state with deferred := some reason }
+    { state with deferred := mergeDeferredReason state.deferred reason }
 
 def observeSimproc (name : Name) (input output : Expr)
     (stepDisposition : StepDisposition) (definitional : Bool) : EngineM Unit := do
@@ -443,10 +452,15 @@ def observeSimproc (name : Name) (input output : Expr)
     }
     runtime.state.set {
       state with
-      deferred := state.deferred.orElse fun _ => some (.simproc name state.phase)
+      deferred := mergeDeferredReason state.deferred (.simproc name state.phase)
       simprocs := state.simprocs.push observation
-      coveredBranches := state.coveredBranches.push
-        (if definitional then "simproc.dsimp" else "simproc.simp")
+      coveredBranches :=
+        let branch := if definitional then "simproc.dsimp" else "simproc.simp"
+        let branches := state.coveredBranches.push branch
+        if stepDisposition == .continueNone then
+          branches.push s!"{branch}.continueNone"
+        else
+          branches
     }
 
 @[inline] def setPremiseTerminal (terminal : PremiseTerminal) : EngineM Unit :=
@@ -1575,10 +1589,14 @@ where
     else if let some result := cache.get? { val := e } then
       if runtime.mode == .record then
         let state ← getRecorderState
-        let some (sourcePath, sourceIndex) := state.dsimpCacheSources.get? { val := e }
-          | throwError "record_dsimp_cache_source_missing: path={repr state.path}"
-        emitStructural (.dsimpCacheHit sourcePath sourceIndex)
-        recordBranch "struct.dsimpCacheHit"
+        match state.dsimpCacheSources.get? { val := e } with
+        | some (sourcePath, sourceIndex) =>
+            emitStructural (.dsimpCacheHit sourcePath sourceIndex)
+            recordBranch "struct.dsimpCacheHit"
+        | none =>
+            unless !state.simprocs.isEmpty do
+              throwError "record_dsimp_cache_source_missing: path={repr state.path}, input={e}"
+            recordBranch "boundary.simprocOpaqueDSimpCache"
       return (result, cache)
     withIncRecDepth do
       checkSystem "transform"
@@ -1853,6 +1871,9 @@ private def dischargeRecorded? (_thmId : Origin) (x type : Expr)
     restoreRecorderState outer
     return none
   let methods ← getMethods
+  if methods.customDischarger then
+    deferRecording .customDischarger
+    recordBranch "boundary.customDischarger"
   let proof? ← withIncDischargeDepth <| withPreservedCache <| methods.discharge? type
   let some proof := proof? | do
     modify fun state => { state with usedTheorems }
@@ -1862,8 +1883,6 @@ private def dischargeRecorded? (_thmId : Origin) (x type : Expr)
     modify fun state => { state with usedTheorems }
     setPremiseTerminal .failed
     return some (← finishPremiseProgram outer type, false)
-  if methods.customDischarger then
-    deferRecording .customDischarger
   recordBranch "rewrite.premise"
   return some (← finishPremiseProgram outer type, true)
 
@@ -2182,10 +2201,14 @@ partial def simpLoop (e : Expr) : EngineM Result := withIncRecDepth do
     else if let some result := cache.find? e then
       if runtime.mode == .record then
         let state ← getRecorderState
-        let some (sourcePath, sourceIndex) := state.simpCacheSources.find? e
-          | throwError "record_simp_cache_source_missing: path={repr state.path}"
-        recordBranch "struct.cacheHit"
-        emitStructural (.cacheHit sourcePath sourceIndex)
+        match state.simpCacheSources.find? e with
+        | some (sourcePath, sourceIndex) =>
+            recordBranch "struct.cacheHit"
+            emitStructural (.cacheHit sourcePath sourceIndex)
+        | none =>
+            unless !state.simprocs.isEmpty do
+              throwError "record_simp_cache_source_missing: path={repr state.path}, input={e}, cacheEntries={cache.toList.length}, sourceEntries={state.simpCacheSources.toList.length}"
+            recordBranch "boundary.simprocOpaqueCache"
       return result
   if (← get).numSteps > cfg.maxSteps then
     throwError "`simp` failed: maximum number of steps exceeded"
@@ -2336,8 +2359,6 @@ private def instrumentationSimpArgs? (stx : Syntax) : Option Syntax :=
   | "Lean.Parser.Tactic.simpEngineRecording"
   | "Lean.Parser.Tactic.simpEngineObserve"
   | "Lean.Parser.Tactic.simpEngineReplay" => some stx[1]
-  | "Lean.Parser.Tactic.simpEngineRecordingId"
-  | "Lean.Parser.Tactic.simpEngineReplayId" => some stx[2]
   | "Lean.Parser.Tactic.simpEngineSourceRecording"
   | "Lean.Parser.Tactic.simpEngineApply" => some stx[3]
   | _ => none
@@ -2347,10 +2368,14 @@ private def instrumentationSimpArgs? (stx : Syntax) : Option Syntax :=
     between recording and materialized source without re-running ambient simp. -/
 private def canonicalRuleSyntax (stx : Syntax) : Syntax :=
   stx.rewriteBottomUp fun child =>
-    match instrumentationSimpArgs? child with
-    | none => child
-    | some args => mkNode ``Lean.Parser.Tactic.simp #[
-        mkAtom "simp", args[0], args[1], args[2], args[3], args[4]]
+    if child.getKind == ``Lean.Parser.Tactic.simp then
+      mkNode ``Lean.Parser.Tactic.simp #[
+        mkAtom "simp", child[1], child[2], child[3], child[4], child[5]]
+    else
+      match instrumentationSimpArgs? child with
+      | none => child
+      | some args => mkNode ``Lean.Parser.Tactic.simp #[
+          mkAtom "simp", args[0], args[1], args[2], args[3], args[4]]
 
 private def canonicalRuleSyntaxSource (stx : Syntax) : String :=
   let canonical := canonicalRuleSyntax stx
@@ -2702,7 +2727,8 @@ private def simprocCoreRecorded (postPhase : Bool) (tree : SimprocTree)
         proof? ← mkEqTrans? proof? result.proof?
         cache := cache && result.cache
         found := true
-      | .continue none => pure ()
+      | .continue none =>
+        observeSimproc entry.declName expression expression .continueNone false
   if found then return .continue (some { expr := expression, proof?, cache })
   return .continue
 
@@ -2728,7 +2754,8 @@ private def dsimprocCoreRecorded (postPhase : Bool) (tree : SimprocTree)
         observeSimproc entry.declName expression output .continueSome true
         expression := output
         found := true
-      | .continue none => pure ()
+      | .continue none =>
+        observeSimproc entry.declName expression expression .continueNone true
   if found then return .continue (some expression)
   return .continue
 

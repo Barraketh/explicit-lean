@@ -47,8 +47,9 @@ Each package is committed before work begins on the next.
 - Schema 16 represents all structural paths in the pinned engine audit, exact
   rule variants and matches, nested premise programs, reductions, congruence
   choices, subject transport, and final state.
-- All simp and dsimp simproc phases are observed and assigned a deferred
-  classification rather than converted to proof fallbacks.
+- Every invoked simp and dsimp simproc candidate, including `continue none`, is
+  observed and assigned a deferred classification rather than converted to a
+  proof fallback. Every invoked custom discharger is likewise deferred.
 - Failed candidates that execute recursive work are retained as explicit failed
   attempts; candidates with no executable progress are omitted.
 - Focused static and dynamic branch gates test the recorder; the source gate
@@ -90,7 +91,7 @@ initial proof state and selects without a mutable execution counter. Nested
 occurrences are instrumented by replacing only their `simp` token; rule-origin
 identity canonicalizes the recording/materialization wrappers without executing
 ambient simp. The source gate covers 67 occurrences in three complete module
-copies: 64 materialize across 68 successful executions, two are explicitly
+copies: 13 materialize across 14 successful executions, 53 are explicitly
 simproc-deferred, and one executes unsuccessfully under `first`. A mutated
 engine identity is rejected before replay. Multiline certificate source keeps
 trailing tactic configuration to the right of the original tactic column, as
@@ -113,7 +114,7 @@ staged simp/dsimp cache provenance, binder and metadata paths, exact
 theorem-variant selection, stable
 lazy-equation origins, generated- and user-congruence identity, match-attempt
 rollback, ground-context isolation, and reduction/builtin eligibility. The
-focused recorder covers 39 dynamic branch classes, focused replay covers 36,
+focused recorder covers 42 dynamic branch classes, focused replay covers 36,
 and 20 independent certificate mutations are rejected.
 
 ### E6. Full cloud closure

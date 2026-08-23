@@ -42,6 +42,18 @@ def reducer_args(root: Path) -> SimpleNamespace:
 def main() -> None:
     if cloud.module_shard(MODULE, 64) != 50:
         raise RuntimeError("stable shard assignment changed")
+    combined_deferred = {
+        "subjects": [{
+            "deferred": {"simprocAndCustomDischarger": {
+                "name": [["str", "test"]], "phase": "post"
+            }},
+            "simprocs": [{}],
+        }]
+    }
+    if cloud.deferred_reasons(combined_deferred) != {
+        "simproc", "custom_discharger"
+    }:
+        raise RuntimeError("combined deferred reasons were not preserved")
     nested_source = b"by\n  simp [show True from by simp]\n"
     outer_start = nested_source.index(b"simp")
     inner_start = nested_source.index(b"simp", outer_start + 4)

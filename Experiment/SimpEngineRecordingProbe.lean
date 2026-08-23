@@ -11,6 +11,8 @@ axiom holdsTrue : Holds True
 
 theorem guardedRule {p q : Prop} (h : p → q) : p → q := h
 
+theorem falseGuardedAdd {n : Nat} (_ : False) : n + 0 = n := Nat.add_zero n
+
 opaque SeeProp : Prop → Prop
 opaque SeeNat : Nat → Prop
 opaque SeeInt : Int → Prop
@@ -50,6 +52,11 @@ example (p q : Prop) (h : p → q) : p → q := by
 
 example (p q : Prop) (h : p) (hpq : p → q) : q := by
   simp_engine_recording (disch := assumption) [hpq]
+
+example (n : Nat) : n + 0 = n := by
+  simp_engine_recording (config := { failIfUnchanged := false })
+    (disch := assumption) only [falseGuardedAdd]
+  exact Nat.add_zero n
 
 example : Holds (True ∧ True) := by
   simp_engine_recording

@@ -398,16 +398,26 @@ def compile_copy(
 def deferred_reasons(certificate: dict[str, Any]) -> set[str]:
     result: set[str] = set()
     for subject in certificate.get("subjects", []):
+        if subject.get("simprocs"):
+            result.add("simproc")
         deferred = subject.get("deferred")
         if deferred is None:
             continue
-        if deferred == "customDischarger" or (
-            isinstance(deferred, dict) and "customDischarger" in deferred
-        ):
+        recognized = False
+        if deferred == "customDischarger":
             result.add("custom_discharger")
-        elif isinstance(deferred, dict) and "simproc" in deferred:
-            result.add("simproc")
-        else:
+            recognized = True
+        elif isinstance(deferred, dict):
+            if (
+                "customDischarger" in deferred
+                or "simprocAndCustomDischarger" in deferred
+            ):
+                result.add("custom_discharger")
+                recognized = True
+            if "simproc" in deferred or "simprocAndCustomDischarger" in deferred:
+                result.add("simproc")
+                recognized = True
+        if not recognized:
             result.add("unknown")
     return result
 

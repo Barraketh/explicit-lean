@@ -1,5 +1,7 @@
 import ExplicitLean.SimpEngine.Replay
 
+set_option simprocs false
+
 open Lean Meta Elab Tactic
 
 def replayDelta (n : Nat) : Nat := n + 0

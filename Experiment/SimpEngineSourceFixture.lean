@@ -40,6 +40,7 @@ example (x y : Nat) : x + 0 = x ∧ y + 0 = y := by
 example (x : Nat) (h : x + 0 = x) : True := by
   simp only [Nat.add_zero] at h ⊢
 
+set_option simprocs false in
 example (p : Prop) : p → p := by
   simp +contextual
 

@@ -192,7 +192,7 @@ def main() -> None:
         }
         not_executed = known - outcomes.keys() - unsuccessful.keys()
         terminal = selected | deferred | set(unsuccessful)
-        if require_total and (terminal != known or deferred or not_executed):
+        if require_total and (terminal != known or not_executed):
             raise RuntimeError(
                 f"focused source fixture was not total: selected={selected}, "
                 f"deferred={deferred}, unsuccessful={unsuccessful}, "

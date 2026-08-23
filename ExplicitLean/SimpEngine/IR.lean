@@ -296,6 +296,7 @@ instance : Inhabited Structural := ⟨.matchDiscriminants 0⟩
 inductive DeferredReason where
   | simproc (name : Name) (phase : Phase)
   | customDischarger
+  | simprocAndCustomDischarger (name : Name) (phase : Phase)
   deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
 
 structure SimprocObservation where

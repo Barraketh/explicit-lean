@@ -481,8 +481,8 @@ execution functions are copied with only these controlled changes:
 - exact user-congruence selection is recorded at the successful candidate;
 - `Meta.simpHaveTelescope` runs through a small wrapper monad whose
   `MonadSimp` instance calls the fork;
-- simproc candidate loops report the exact selected simproc before returning a
-  deferred boundary; and
+- simproc candidate loops report every invoked opaque candidate, including
+  `continue none`, before returning a deferred boundary; and
 - record and replay drivers share the same execution code.
 
 Three engine modes are required.
@@ -552,7 +552,8 @@ structural witnesses. Default terminal selection remains explicit:
 Failed theorem candidates that contain recursive premise work are explicit
 `rewriteAttemptFailed` operations with nested premise programs and a `failed`
 terminal. A candidate that produced no executable program item is omitted. A
-custom source discharger remains `deferred_custom_discharger`.
+custom source discharger remains `deferred_custom_discharger` whenever it is
+invoked, regardless of whether it proves the premise.
 
 ## 9. Simproc boundary
 
@@ -564,13 +565,14 @@ It does require exact detection, including:
 - simprocs invoked by ground/seval; and
 - simprocs inside recursive premise programs.
 
-The instrumented candidate loop records every committed simproc transition's
-selected declaration name, phase, input/output fingerprints, step disposition,
-and nesting path, then classifies the enclosing execution
-`deferred_simproc`. A candidate returning `continue none` has no transition
-under the simproc API and is omitted. No result proof is materialized.
-This makes the non-simproc completeness gate honest without prematurely
-choosing simproc semantics.
+The instrumented candidate loop records every invoked simproc candidate's
+declaration name, phase, input/output fingerprints, step disposition, and
+nesting path, then classifies the enclosing execution `deferred_simproc`.
+This includes `continue none`: opaque simproc code may recursively simplify and
+mutate `Simp.State` caches before returning no result. Such cache entries are
+allowed only inside an already simproc-deferred recording and are never
+replayed. No result proof is materialized. This makes the non-simproc
+completeness gate honest without prematurely choosing simproc semantics.
 
 ## 10. Implementation obligations and gates
 
@@ -638,8 +640,8 @@ metrics. `Experiment/run.sh` passes.
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
 copies are compiled. The focused fixture and two complete Mathlib modules contain 67
-occurrences: 64 materialize across 68 successful executions, two remain
-explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
+occurrences: 13 materialize across 14 successful executions, 53 are explicitly
+simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
 locations, configuration-driven builtins, and stable lazy-equation origins in
