@@ -129,27 +129,25 @@ Gate: every occurrence has a terminal classification; every committed
 successful non-simproc/non-custom-discharger execution records, replays,
 materializes, and compiles without fallback.
 
-Status: validated inventory and infrastructure complete; cloud corpus result
-pending. The first 32-shard run did not produce a corpus result: hosted runners
-received external shutdown signals before their shard artifacts could upload.
-The failures were not correlated with module size or occurrence count, so they
-are classified as invalid infrastructure executions, not engine failures or
-successful coverage. A subsequent four-worker bounded trial evicted two
-concurrent runners while the other two remained healthy; a two-worker trial
-then evicted one while the other remained healthy. The accepted topology
-therefore runs one shard worker at a time.
+Status: validated inventory and parallel Vast.ai infrastructure complete;
+cloud corpus result pending. GitHub-hosted runners were rejected because their
+observed eviction behavior prevented parallel execution from producing durable
+results; the superseded workflow has been removed.
 
-The bounded rerun inventories 8,264 files and validates 83,425 occurrences in
+The accepted run inventories 8,264 files and validates 83,425 occurrences in
 6,319 modules byte-for-byte, including 91 nested occurrences. It uses 256
-deterministic batches (about 25 occurrence-bearing modules per batch), runs at
-most one Ubuntu 24.04 worker at a time, and stops a batch after its first
-semantic failure so the checkpoint, log, and failing source can upload
-promptly. Every completed batch still records each assigned module once and
-compiles one materialized copy for all accepted occurrences in that module.
-Reports are checkpointed and work files reclaimed after every module. The
-reducer rejects incomplete or missing batches/modules/occurrences, source or
-engine drift, mixed deferred/non-deferred executions, replay-count mismatches,
-and every recorder, harness, or materialization failure.
+deterministic batches across 16 distinct verified Vast.ai hosts, with four
+independent shard processes per host: approximately 64 modules can therefore
+record or materialize concurrently. Offers are selected from the live market
+under unique-machine, reliability, CPU, RAM, disk, network, hourly-price, and
+total-runtime guards. The controller copies checkpoints home every 30 seconds,
+stops the fleet after the first semantic failure set, runs the strict reducer
+only on total coverage, and destroys every rented instance on success, failure,
+timeout, or interruption. Every batch still records each assigned module once
+and compiles one materialized copy for all accepted occurrences in that module.
+The reducer rejects incomplete or missing batches/modules/occurrences, source
+or engine drift, mixed deferred/non-deferred executions, replay-count
+mismatches, and every recorder, harness, or materialization failure.
 
 ## 4. Current local gate
 
@@ -165,7 +163,9 @@ only tests that provide confidence in that engine:
 7. single-field replay mutation rejection;
 8. schema-16 source round-trip and complete-module upstream comparison,
    classification, replay, and materialization; and
-9. cloud shard assignment and strict reducer mutation rejection.
+9. cloud shard assignment and strict reducer mutation rejection; and
+10. total Vast worker assignment, unique-host selection, SSH parsing, and
+    hourly-price guards.
 
 Historical proof exporters, schema-15 bridges, fallback materializers, and
 their regression tests have been removed. Standalone bounded reference/replay

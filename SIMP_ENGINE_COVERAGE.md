@@ -684,51 +684,52 @@ successful non-simproc/non-custom-discharger execution materializes; there are
 no coverage, recorder, harness, declaration, aggregate, or unclassified
 failures.
 
-Status: validated inventory and cloud infrastructure complete; corpus result
-pending. The first 32-shard execution was invalidated when hosted runners
-received external shutdown signals before their shard artifacts uploaded. The
-shutdowns occurred across both small and moderate next modules and after widely
-different amounts of progress, so that execution is neither a semantic failure
-set nor coverage evidence. A subsequent four-worker bounded trial evicted two
-workers while the other two remained healthy beyond the eviction point; a
-two-worker trial then evicted one while the other remained healthy. The
-accepted topology therefore runs one shard worker at a time.
+Status: validated inventory and parallel Vast.ai infrastructure complete;
+corpus result pending. GitHub-hosted execution was rejected after repeated
+external runner evictions made useful parallelism and durable results mutually
+exclusive; the superseded workflow has been removed rather than retained as a
+test path.
 
 The inventory fixes 8,264 module files, 6,319 modules containing 83,425
 occurrences, source hashes, and exact byte ranges at the tested commit. It
 includes 91 nested occurrences, uses the exact frontend for five modules whose
 lightweight parse requires recovery, and collapses one byte-identical duplicate
-syntax record. Modules are assigned by `SHA256(module) mod shardCount`. The
-rerun uses 256 short deterministic batches, about 25 occurrence-bearing modules
-per batch, on one pinned Ubuntu 24.04 runner at a time. Each batch
-records a module once and, when it has accepted executions, compiles one copied
-module with all accepted occurrences materialized. A batch stops after its
-first semantic failure so its checkpoint, log, and failing source reach the
-artifact upload promptly. Diagnostic group bisection runs only after a
-materialization failure and never changes the gate. The reducer requires every
-batch, module, occurrence, and replay count before it can pass.
+syntax record. Modules are assigned by `SHA256(module) mod shardCount`. The run
+uses 256 short deterministic batches distributed across 16 distinct verified
+Vast.ai machines. Four independent shard processes run on each host, giving a
+target concurrency of 64 module executions. Each batch records a module once
+and, when it has accepted executions, compiles one copied module with all
+accepted occurrences materialized. A batch stops after its first semantic
+failure. Diagnostic group bisection runs only after a materialization failure
+and never changes the gate. The reducer requires every batch, module,
+occurrence, and replay count before it can pass.
 
 ## 11. Cloud execution design
 
-The GitHub Actions workflow has a manual `workflow_dispatch` entry with inputs
-for commit SHA, batch count, maximum parallel workers, timeout, and optional
-module prefix. A dedicated one-shot push ref permits the reviewed workflow to
-run before it reaches the default branch. It:
+`Experiment/simp_engine_vast.py` is the local controller. It:
 
-- refuse a dirty or moving ref and check out the exact SHA;
-- restore Lean/Mathlib build caches keyed by toolchain, lake manifest, and SHA;
-- run a matrix of short independent deterministic batches;
-- limit the matrix to one pinned Ubuntu 24.04 runner at a time by
-  default;
-- use a shared inventory artifact and disjoint batch output directories;
-- upload reports even when a shard fails;
-- stop a batch after the first semantic failure so its diagnostic artifact is
-  not held behind unrelated later modules;
-- reclaim generated certificates and copied sources after each checkpoint;
-- run one reducer that verifies inventory coverage and schema/engine identity;
-  and
-- retain the merged JSON, Markdown summary, compiler logs, and failing source
-  copies.
+- requires a clean exact commit that is the tip of a remote ref;
+- builds the immutable syntax inventory once locally;
+- queries the live Vast.ai marketplace and selects distinct verified machines
+  under reliability, effective-vCPU, RAM, disk, network, per-offer, aggregate
+  hourly, and maximum-runtime guards;
+- launches 16 Ubuntu 24.04 hosts and explicitly attaches the configured SSH
+  key to every contract;
+- checks the real SSH handshake, installs the pinned Lean toolchain, checks out
+  the exact commit, restores Mathlib artifacts, and builds the engine;
+- partitions all 256 batches exactly once across the hosts and runs four shard
+  processes per host;
+- copies atomic worker state, reports, logs, and failing sources back to the
+  controller every 30 seconds;
+- stops the fleet after the first semantic failure set or the five-hour cost
+  bound;
+- runs the existing strict reducer only after collection; and
+- destroys all rented instances on every terminal path unless explicitly kept
+  for diagnosis.
+
+At the launch defaults, 64 module executions can be active concurrently. The
+controller refuses a plan above $2.50/hour or five hours, so compute exposure is
+bounded at $12.50; actual offers are re-evaluated immediately before rental.
 
 The terminal taxonomy is deliberately closed:
 
@@ -745,11 +746,10 @@ The terminal taxonomy is deliberately closed:
 `harness_failure`, and `unclassified` are reportable diagnostics but failing
 gate outcomes.
 
-The workflow is dispatched only from a clean committed implementation after E5.
-A report is durable only after its job reaches artifact upload; the short-batch
-topology bounds how much execution is exposed to a hosted-runner shutdown.
-Local parallelism remains the fast focused gate; cloud parallelism is the final
-closure run, not a substitute for the completeness review.
+The fleet is launched only from a clean committed implementation after E5.
+Atomic remote reports become durable locally at every collection interval.
+Cloud parallelism is the final closure run, not a substitute for the finite
+completeness review.
 
 ## 12. Decisions
 
