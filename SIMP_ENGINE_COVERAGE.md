@@ -637,14 +637,15 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and two complete Mathlib modules contain 66
-occurrences: 63 materialize across 67 successful executions, two remain
+copies are compiled. The focused fixture and two complete Mathlib modules contain 67
+occurrences: 64 materialize across 68 successful executions, two remain
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
 locations, configuration-driven builtins, and stable lazy-equation origins in
 an isolated ground context. A source-only engine-schema mutation is rejected
-before replay.
+before replay. A trailing `+contextual` fixture requires multiline certificate
+payloads to preserve the tactic's offside-rule column.
 
 ### E5. Pre-cloud completeness review
 

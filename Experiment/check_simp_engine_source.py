@@ -89,7 +89,9 @@ def materialized_copy(
         terms = sorted({path.read_text(encoding="utf-8") for path in certificates[occurrence]})
         if not terms:
             raise RuntimeError(f"selected occurrence has no certificate source: {occurrence}")
-        array_source = "#[\n" + ",\n".join(json.dumps(term) for term in terms) + "\n]"
+        array_source = coverage.lean_string_array_source(
+            terms, int(entry["column"])
+        )
         return (
             f"simp_engine_apply {json.dumps(occurrence)} "
             f"(certificates := {array_source})"

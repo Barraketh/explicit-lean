@@ -40,6 +40,9 @@ example (x y : Nat) : x + 0 = x ∧ y + 0 = y := by
 example (x : Nat) (h : x + 0 = x) : True := by
   simp only [Nat.add_zero] at h ⊢
 
+example (p : Prop) : p → p := by
+  simp +contextual
+
 example : (20 : Nat) < 30 := by
   simp +decide
 

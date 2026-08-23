@@ -111,6 +111,22 @@ def rewrite_simp_heads(
     return source
 
 
+def lean_string_array_source(values: list[str], parent_column: int) -> str:
+    """Print a string array without escaping Lean's offside-rule context.
+
+    Tactic configuration items such as `+contextual` use `checkColGt`. Every
+    continuation line introduced before the original tactic suffix must
+    therefore remain to the right of the replaced `simp` token.
+    """
+    if not values:
+        raise ValueError("Lean string array must be nonempty")
+    if parent_column < 0:
+        raise ValueError("parent column must be nonnegative")
+    indent = " " * (parent_column + 1)
+    encoded = (json.dumps(value) for value in values)
+    return "#[\n" + indent + (",\n" + indent).join(encoded) + "\n" + indent + "]"
+
+
 def inject_import(source: bytes, imported: str) -> bytes:
     marker = b"module\n"
     position = source.find(marker)
