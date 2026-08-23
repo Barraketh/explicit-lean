@@ -1,6 +1,6 @@
 # Pinned `simp` engine coverage and certificate architecture
 
-Status: implementation specification; E1, E2, and E3 complete
+Status: implementation specification; E1 through E4 complete
 
 Pinned engine: Lean 4.32.2, commit
 `f3b06c705e6c85f5314019d5d3baab0fec5b580c`
@@ -323,9 +323,37 @@ structure Certificate where
 
 ### 5.1 What is and is not source
 
-The first schema-16 printer favors completeness over compression. It prints
-path-qualified operations and structural witnesses. It never prints
-intermediate expressions; input and output hashes are validation fields.
+The schema-16 source payload is compact JSON embedded in a shallow Lean array
+of string literals:
+
+```lean
+simp_engine_apply "occurrence-id"
+  (certificates := #["{...schema-16 certificate...}", ...]) originalSimpArgs
+```
+
+The JSON contains the complete path-qualified operations and structural
+witnesses. It never contains intermediate expressions; input and output hashes
+are validation fields. Every emitted payload is parsed immediately and compared
+structurally with the in-memory certificate before it is accepted. At the
+replacement site it is parsed again, its engine identity is checked, and closed
+replay validates its initial and final states.
+
+`Name` is encoded as an ordered array of tagged string and numeric components.
+This is lossless for generated private declarations; Lean's standard JSON name
+codec and name-quotation syntax are not. It also makes rule identity independent
+of the replacement site's namespace and `open` declarations.
+
+One syntax occurrence can execute more than once under tactic combinators. Its
+replacement therefore carries an array of dynamic certificates and selects the
+unique certificate whose recorded initial proof-state fingerprint matches the
+current state. Equal duplicates are harmless; different certificates for the
+same state are rejected as ambiguous. No mutable execution counter participates
+in replay.
+
+The retained original simp arguments reconstruct the authored theorem terms,
+configuration, and location subjects. They do not authorize ambient simp,
+congruence, simproc, or discharger selection; traversal and operation selection
+remain certificate-driven.
 
 The existing `next` and `match n` syntax may later be retained as a compressed
 encoding only when elaboration expands it into the same structural `Program`
@@ -548,6 +576,15 @@ Gate: all existing non-simproc focused/production fixtures materialize through
 schema 16 with zero bridge, generated-proof, presentation, or whole-result
 metrics. `Experiment/run.sh` passes.
 
+Status: complete. Each module is instrumented once for all occurrences, every
+serialized execution is structurally round-tripped, and complete materialized
+copies are compiled. The focused and two bounded production modules contain 62
+occurrences: 60 materialize across 64 dynamic executions, while two remain
+explicitly simproc-deferred. The focused gate covers private qualified rule
+names, recursive premises, multiple executions of one occurrence, authored
+locations, and configuration-driven builtins. A source-only engine-schema
+mutation is rejected before replay.
+
 ### E5. Pre-cloud completeness review
 
 - Mechanically check that every changing return in the pinned fork is paired
@@ -595,8 +632,8 @@ closure run, not a substitute for the completeness review.
 ## 12. Decisions
 
 - Schema 15 remains only in Git history and is not a simplifier IR dependency.
-- E1, E2, and E3 are complete; the next implementation step is source and
-  materializer migration (E4).
+- E1 through E4 are complete; the next implementation step is the pre-cloud
+  completeness review (E5).
 - The correctness boundary is a pinned source fork with record and replay
   modes.
 - Structural traversal and dsimp are first-class certificate semantics.

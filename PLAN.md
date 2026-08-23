@@ -1,6 +1,6 @@
 # Explicit Lean implementation plan
 
-Status: E1, E2, and E3 complete; E4 is next.
+Status: E1 through E4 complete; E5 is next.
 
 ## 1. Current goal
 
@@ -71,7 +71,7 @@ replay compile cover 55 non-deferred occurrences (58 executions) across the 57
 bounded production occurrences. The remaining two occurrences are explicitly
 simproc-deferred.
 
-### E4. Certificate source and materializer
+### E4. Certificate source and materializer — complete
 
 - Define and parse a stable schema-16 source form.
 - Print qualified rule identities, engine/configuration identity, nested premise
@@ -81,6 +81,16 @@ simproc-deferred.
 
 Gate: every focused and bounded-production non-deferred execution materializes,
 and the complete copied modules compile.
+
+Status: complete. Schema 16 is serialized as compact JSON inside shallow Lean
+string arrays. Every payload is decoded and compared structurally with the
+recorded certificate before it is written; `Name` values use lossless
+string/numeric components rather than Lean's lossy default JSON codec. A source
+occurrence that executes more than once carries one certificate per distinct
+initial proof state and selects without a mutable execution counter. The source
+gate materializes 60 non-deferred occurrences across 64 executions in three
+complete module copies; the other two bounded occurrences are explicitly
+simproc-deferred. A mutated engine identity is rejected before replay.
 
 ### E5. Pre-cloud completeness review
 
@@ -115,8 +125,9 @@ only tests that provide confidence in that engine:
 4. focused dynamic recording coverage;
 5. focused closed replay;
 6. single-field replay mutation rejection;
-7. bounded Mathlib reference equivalence; and
-8. batched bounded recording/classification/replay.
+7. bounded Mathlib reference equivalence;
+8. batched bounded recording/classification/replay; and
+9. schema-16 source round-trip and complete-module materialization.
 
 Historical proof exporters, schema-15 bridges, fallback materializers, and
 their regression tests have been removed. Git history remains the record of
