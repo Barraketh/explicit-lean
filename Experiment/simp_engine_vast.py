@@ -198,7 +198,7 @@ def scp_to(
 
 
 def create_instance(offer: dict[str, Any], index: int, args: argparse.Namespace) -> dict[str, Any]:
-    label = f"simp16-{args.commit[:8]}-{index:02d}"
+    label = f"simp16-{args.commit[:8]}-candidate-{index:02d}"
     result = json_command([
         "vastai", "create", "instance", str(offer["id"]),
         "--image", args.image, "--disk", str(args.disk_gb),
@@ -218,7 +218,8 @@ def create_instance(offer: dict[str, Any], index: int, args: argparse.Namespace)
         )
         raise
     return {
-        "workerIndex": index,
+        "candidateIndex": index,
+        "workerIndex": None,
         "contractId": int(contract),
         "offer": public_offer(offer),
         "label": label,
@@ -237,13 +238,14 @@ def show_instances() -> dict[int, dict[str, Any]]:
 
 def wait_for_ssh(
     instances: list[dict[str, Any]], timeout: int, known_hosts: Path,
-) -> None:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     deadline = time.monotonic() + timeout
-    pending = {instance["contractId"] for instance in instances}
+    ready: dict[int, dict[str, Any]] = {}
+    pending = {instance["contractId"]: instance for instance in instances}
     while pending and time.monotonic() < deadline:
         current = show_instances()
-        for instance in instances:
-            contract = instance["contractId"]
+        probe: list[dict[str, Any]] = []
+        for contract, instance in pending.items():
             value = current.get(contract, {})
             if value.get("cur_state") == "running":
                 try:
@@ -254,17 +256,29 @@ def wait_for_ssh(
                     continue
                 instance["sshHost"] = host
                 instance["sshPort"] = port
+                probe.append(instance)
+        with ThreadPoolExecutor(max_workers=min(len(probe), 16) or 1) as executor:
+            futures = {
+                executor.submit(ssh, instance, known_hosts, "true", 30): instance
+                for instance in probe
+            }
+            for future in as_completed(futures):
+                instance = futures[future]
                 try:
-                    ssh(instance, known_hosts, "true", 30)
-                except RuntimeError:
+                    future.result()
+                except Exception:
                     continue
                 else:
                     instance["status"] = "running"
-                    pending.discard(contract)
+                    contract = instance["contractId"]
+                    ready[contract] = instance
+                    pending.pop(contract, None)
         if pending:
-            time.sleep(10)
-    if pending:
-        raise RuntimeError(f"Vast instances did not become SSH-ready: {sorted(pending)}")
+            time.sleep(5)
+    rejected = list(pending.values())
+    for instance in rejected:
+        instance["status"] = "ssh_rejected"
+    return list(ready.values()), rejected
 
 
 def setup_script(commit: str) -> str:
@@ -385,7 +399,7 @@ def run_closure(args: argparse.Namespace) -> int:
         raise RuntimeError(f"output directory is not empty: {output}")
     output.mkdir(parents=True, exist_ok=True)
     known_hosts = output / "known_hosts"
-    offers = search_offers(args, extra=min(8, args.workers))
+    offers = search_offers(args, extra=max(8, args.workers))
     planned = offers[:args.workers]
     total_hourly = sum(float(offer["dph_total"]) for offer in planned)
     plan = {
@@ -417,42 +431,69 @@ def run_closure(args: argparse.Namespace) -> int:
 
     inventory(args, output)
     instances: list[dict[str, Any]] = []
+    ready_instances: list[dict[str, Any]] = []
     plan["status"] = "launching"
     atomic_json(state_path, plan)
     deadline = time.monotonic() + args.max_runtime_hours * 3600
     try:
         candidates = iter(offers)
-        while len(instances) < args.workers:
-            offer = next(candidates, None)
-            if offer is None:
-                raise RuntimeError("Vast offers were exhausted during launch")
-            if sum(float(item["offer"]["dph_total"]) for item in instances) + \
-                    float(offer["dph_total"]) > args.max_total_hourly:
-                continue
-            try:
-                instance = create_instance(offer, len(instances), args)
-            except Exception as error:
-                print(f"offer {offer['id']} unavailable: {error}", flush=True)
-                continue
-            instances.append(instance)
-            plan["instances"] = instances
-            atomic_json(state_path, plan)
+        candidate_index = 0
+        while len(ready_instances) < args.workers:
+            batch: list[dict[str, Any]] = []
+            vacancy = args.workers - len(ready_instances)
+            while len(batch) < vacancy:
+                offer = next(candidates, None)
+                if offer is None:
+                    raise RuntimeError("Vast offers were exhausted during SSH qualification")
+                active_cost = sum(
+                    float(item["offer"]["dph_total"])
+                    for item in ready_instances + batch
+                )
+                if active_cost + float(offer["dph_total"]) > args.max_total_hourly:
+                    continue
+                try:
+                    instance = create_instance(offer, candidate_index, args)
+                except Exception as error:
+                    print(f"offer {offer['id']} unavailable: {error}", flush=True)
+                    continue
+                candidate_index += 1
+                instances.append(instance)
+                batch.append(instance)
+                plan["instances"] = instances
+                atomic_json(state_path, plan)
+                print(
+                    f"launched candidate {instance['candidateIndex']}: contract "
+                    f"{instance['contractId']} at ${offer['dph_total']:.3f}/hour",
+                    flush=True,
+                )
+            qualified, rejected = wait_for_ssh(batch, args.boot_timeout, known_hosts)
+            ready_instances.extend(qualified)
+            if rejected:
+                print(
+                    "replacing SSH-rejected contracts: "
+                    + ",".join(str(instance["contractId"]) for instance in rejected),
+                    flush=True,
+                )
+                destroy_instances(rejected)
             print(
-                f"launched worker {instance['workerIndex']}: contract "
-                f"{instance['contractId']} at ${offer['dph_total']:.3f}/hour",
+                f"Vast SSH qualification: {len(ready_instances)}/{args.workers} ready",
                 flush=True,
             )
+            atomic_json(state_path, plan)
+        ready_instances = ready_instances[:args.workers]
+        for index, instance in enumerate(ready_instances):
+            instance["workerIndex"] = index
+            instance["label"] = f"simp16-{args.commit[:8]}-{index:02d}"
         plan["totalHourlyUsd"] = sum(
-            float(instance["offer"]["dph_total"]) for instance in instances
+            float(instance["offer"]["dph_total"]) for instance in ready_instances
         )
         plan["maximumComputeUsd"] = plan["totalHourlyUsd"] * args.max_runtime_hours
-        wait_for_ssh(instances, args.boot_timeout, known_hosts)
         plan["status"] = "setting_up"
         atomic_json(state_path, plan)
         with ThreadPoolExecutor(max_workers=min(args.workers, 8)) as executor:
             futures = {
                 executor.submit(setup_instance, instance, args, output, known_hosts): instance
-                for instance in instances
+                for instance in ready_instances
             }
             for future in as_completed(futures):
                 future.result()
@@ -469,7 +510,7 @@ def run_closure(args: argparse.Namespace) -> int:
                         rsync_from, instance, known_hosts,
                         output / "workers" / f"worker-{instance['workerIndex']:02d}",
                     ): instance
-                    for instance in instances
+                    for instance in ready_instances
                 }
                 for future in as_completed(futures):
                     instance = futures[future]
@@ -477,7 +518,7 @@ def run_closure(args: argparse.Namespace) -> int:
                         future.result()
                     except Exception as error:
                         print(f"worker {instance['workerIndex']} sync warning: {error}", flush=True)
-            for instance in instances:
+            for instance in ready_instances:
                 local = output / "workers" / f"worker-{instance['workerIndex']:02d}" / "worker-state.json"
                 if local.exists():
                     states.append(json.loads(local.read_text(encoding="utf-8")))
@@ -491,7 +532,7 @@ def run_closure(args: argparse.Namespace) -> int:
             if failed:
                 plan["status"] = "worker_failure"
                 atomic_json(state_path, plan)
-                for instance in instances:
+                for instance in ready_instances:
                     stop_worker(instance, known_hosts)
                 break
             if len(states) == args.workers and all(state.get("status") == "success" for state in states):
@@ -505,7 +546,7 @@ def run_closure(args: argparse.Namespace) -> int:
         else:
             plan["status"] = "timeout"
             atomic_json(state_path, plan)
-            for instance in instances:
+            for instance in ready_instances:
                 stop_worker(instance, known_hosts)
 
         with ThreadPoolExecutor(max_workers=min(args.workers, 8)) as executor:
@@ -514,7 +555,7 @@ def run_closure(args: argparse.Namespace) -> int:
                     rsync_from, instance, known_hosts,
                     output / "workers" / f"worker-{instance['workerIndex']:02d}",
                 )
-                for instance in instances
+                for instance in ready_instances
             ]
             for future in as_completed(futures):
                 try:
@@ -564,7 +605,7 @@ def parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--max-runtime-hours", type=float, default=5.0)
     run_parser.add_argument("--module-timeout", type=int, default=900)
     run_parser.add_argument("--inventory-timeout", type=int, default=3600)
-    run_parser.add_argument("--boot-timeout", type=int, default=900)
+    run_parser.add_argument("--boot-timeout", type=int, default=180)
     run_parser.add_argument("--setup-timeout", type=int, default=1800)
     run_parser.add_argument("--poll-seconds", type=int, default=30)
     run_parser.add_argument("--execute", action="store_true")

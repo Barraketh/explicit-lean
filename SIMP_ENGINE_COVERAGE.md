@@ -715,8 +715,11 @@ occurrence, and replay count before it can pass.
   hourly, and maximum-runtime guards;
 - launches 16 Ubuntu 24.04 hosts and explicitly attaches the configured SSH
   key to every contract;
-- checks the real SSH handshake, installs the pinned Lean toolchain, checks out
-  the exact commit, restores Mathlib artifacts, and builds the engine;
+- retains only candidates that pass the real SSH handshake, destroys rejects,
+  and fills their slots from distinct fallback offers without exceeding the
+  aggregate hourly guard;
+- installs the pinned Lean toolchain, checks out the exact commit, restores
+  Mathlib artifacts, and builds the engine;
 - partitions all 256 batches exactly once across the hosts and runs four shard
   processes per host;
 - copies atomic worker state, reports, logs, and failing sources back to the
