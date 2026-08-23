@@ -8,6 +8,7 @@ lake env lean Experiment/PremiseReplayProbe.lean
 lake env lean Experiment/GuardedPremiseProbe.lean
 lake env lean Experiment/TermPremiseProbe.lean
 lake env lean Experiment/O4TerminalProbe.lean
+lake env lean Experiment/O4ShadowedLocalProbe.lean
 lake env lean Experiment/CustomDischargerProbe.lean
 lake env lean Experiment/RecursivePremiseProbe.lean
 lake env lean Experiment/SelectorProbe.lean

@@ -19,6 +19,8 @@ RECURSIVE_PROBE = ROOT / "Experiment" / "RecursivePremiseProbe.lean"
 RECURSIVE_MATERIALIZED = OUTPUT / "RecursivePremiseMaterialized.lean"
 NESTED_SELECTOR_PROBE = ROOT / "Experiment" / "NestedPremiseSelectorProbe.lean"
 NESTED_SELECTOR_MATERIALIZED = OUTPUT / "NestedPremiseSelectorMaterialized.lean"
+SHADOWED_LOCAL_PROBE = ROOT / "Experiment" / "O4ShadowedLocalProbe.lean"
+SHADOWED_LOCAL_MATERIALIZED = OUTPUT / "O4ShadowedLocalMaterialized.lean"
 
 
 def trace_events(report: dict) -> list[dict]:
@@ -269,7 +271,51 @@ def main() -> None:
             "nested selector ordinal mutation was accepted or panicked:\n" + mutation_output
         )
 
-    print("O4 premise terminals and recursive selector metadata passed")
+    code, output, _ = coverage.run(
+        ["lake", "env", "lean", str(SHADOWED_LOCAL_PROBE)], timeout=180
+    )
+    shadowed_reports = coverage.parse_recording_reports(output)
+    if code != 0 or len(shadowed_reports) != 1:
+        raise RuntimeError(
+            f"shadowed-local probe failed: exit={code}, reports={len(shadowed_reports)}\n{output}"
+        )
+    shadowed = shadowed_reports[0]
+    accepted_report(shadowed)
+    certificate = shadowed["certificate"]
+    if "simp_explicit_premise localAssumption 1" not in certificate or "exact h" in certificate:
+        raise RuntimeError(f"shadowed local assumption lost exact-index identity: {shadowed!r}")
+    events = trace_events(shadowed)
+    premise = next(
+        (
+            premise
+            for event in events
+            for premise in event.get("premises", [])
+            if (premise.get("terminal") or {}).get("kind") == "localAssumption"
+        ),
+        None,
+    )
+    if (premise or {}).get("terminal", {}).get("localContextIndex") != 1:
+        raise RuntimeError(f"shadowed local terminal index changed: {shadowed!r}")
+    shadowed_source = SHADOWED_LOCAL_PROBE.read_text(encoding="utf-8")
+    shadowed_needle = "simp_explicit? only [shadowedLocalRule, eq_self]"
+    shadowed_source = replace_certificate(shadowed_source, shadowed_needle, certificate)
+    compile_materialized(SHADOWED_LOCAL_MATERIALIZED, shadowed_source)
+    mutated_source = shadowed_source.replace(
+        "simp_explicit_premise localAssumption 1",
+        "simp_explicit_premise localAssumption 2",
+        1,
+    )
+    mutated_path = OUTPUT / "O4ShadowedLocalMutated.lean"
+    mutated_path.write_text(mutated_source, encoding="utf-8")
+    mutation_code, mutation_output, _ = coverage.run(
+        ["lake", "env", "lean", str(mutated_path)], timeout=180
+    )
+    if mutation_code == 0 or "PANIC" in mutation_output or "backtrace" in mutation_output.lower():
+        raise RuntimeError(
+            "shadowed local-context index mutation was accepted or panicked:\n" + mutation_output
+        )
+
+    print("O4 premise terminals, exact local identity, and recursive selectors passed")
 
 
 if __name__ == "__main__":

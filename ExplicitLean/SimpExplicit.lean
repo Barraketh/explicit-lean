@@ -55,7 +55,7 @@ syntax (name := simpExplicitLeaveOpen) "simp_explicit" " leave_open" " ["
 /-- Replay independent closed certificates against selected local declarations and
 the target, using the same batch staging semantics as `simp at ...`. -/
 syntax (name := simpExplicitContext) "simp_explicit_context" " [" simpExplicitContextGroup,* "]" : tactic
-syntax (name := simpExplicitPremiseTerminal) "simp_explicit_premise" ident : tactic
+syntax (name := simpExplicitPremiseTerminal) "simp_explicit_premise" ident (num)? : tactic
 declare_syntax_cat simpExplicitLocalRename
 syntax num " => " ident : simpExplicitLocalRename
 /-- Give recorded local-context entries stable printable names. Unlike
@@ -2608,6 +2608,26 @@ private def rebuildEquationHypothesis? (proposition : Expr) :
     snapshot.restore
     return none
 
+/- A recorded local-assumption terminal identifies the exact declaration that
+   the pinned reverse context scan selected. Source names are insufficient:
+   Lean permits shadowing, so the same spelling can resolve to a newer local
+   with an unrelated type when the certificate is materialized. -/
+private def rebuildLocalAssumptionAt? (proposition : Expr) (contextIndex : Nat) :
+    TacticM (Option Expr) := do
+  let snapshot ← Meta.saveState
+  try
+    let some localDecl := (← getLCtx).getAt? contextIndex
+      | snapshot.restore
+        return none
+    if localDecl.isImplementationDetail ||
+        !(← isDefEq localDecl.type proposition) then
+      snapshot.restore
+      return none
+    return some localDecl.toExpr
+  catch _ =>
+    snapshot.restore
+    return none
+
 private def rebuildPremiseProof? (premise : RecordedPremise)
     (nestedResult : Simp.Result) : TacticM (Option Expr) := do
   let proposition ← instantiateMVars premise.proposition
@@ -2920,12 +2940,9 @@ private partial def buildEncodedEvents? (recorded : Array RecordedEvent)
             | .dischargeRfl _ =>
                 pure ("premise_dischargeRfl",
                   s!"by\n  {indentSource "  " nestedSource}\n  simp_explicit_premise dischargeRfl")
-            | .localAssumption fvarId _ storedName =>
-                let localName ← try
-                  pure (← fvarId.getDecl).userName
-                catch _ =>
-                  pure storedName
-                pure ("premise_local_assumption", s!"by\n  exact {localName}")
+            | .localAssumption _ contextIndex _ =>
+                pure ("premise_local_assumption",
+                  s!"by\n  simp_explicit_premise localAssumption {contextIndex}")
             | .equationHypothesis =>
                 pure ("premise_equation_hypothesis",
                   "by\n  simp_explicit_premise equationHypothesis")
@@ -6063,12 +6080,24 @@ end SimpExplicit
 open SimpExplicit
 
 elab_rules : tactic
-  | `(tactic| simp_explicit_premise $kind:ident) => withMainContext do
+  | `(tactic| simp_explicit_premise $kind:ident $[$index:num]?) => withMainContext do
       let mvarId ← getMainGoal
       let target ← instantiateMVars (← mvarId.getType)
       let proof? ← match kind.getId with
-        | `dischargeRfl => rebuildRecordedDischargeRfl? target
-        | `equationHypothesis => rebuildEquationHypothesis? target
+        | `dischargeRfl =>
+            if index.isSome then
+              throwErrorAt kind "dischargeRfl terminal does not take a local-context index"
+            rebuildRecordedDischargeRfl? target
+        | `equationHypothesis =>
+            if index.isSome then
+              throwErrorAt kind "equationHypothesis terminal does not take a local-context index"
+            rebuildEquationHypothesis? target
+        | `localAssumption =>
+            let some index := index
+              | throwErrorAt kind "localAssumption terminal requires a local-context index"
+            let some contextIndex := index.raw.isNatLit?
+              | throwErrorAt index "local-context index must be a natural-number literal"
+            rebuildLocalAssumptionAt? target contextIndex
         | _ => throwErrorAt kind "unknown simp_explicit premise terminal"
       let some proof := proof?
         | throwErrorAt kind "recorded simp_explicit premise terminal did not apply"

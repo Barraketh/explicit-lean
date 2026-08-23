@@ -701,18 +701,20 @@ enclosing event is classified `inadmissible_premise_program`. Its recursive
 trace remains available for coverage work, but neither an event proof nor a
 whole-result proof may replace the missing child command.
 
-Implementation status (2026-08-22): schema 14 records premise programs as a
+Implementation status (2026-08-23): schema 14 records premise programs as a
 recursive event hierarchy with explicit `isTrue`, `dischargeRfl`,
 `localAssumption`, and `equationHypothesis` terminals.  Built-in discharge
 follows the pinned branch order with complete recorder, Meta, and Simp
 rollback at premise and candidate boundaries; source custom dischargers are
 classified as `deferred_custom_discharger` without certificate or proof-term
 serialization.  Accepted premise bindings rebuild their proofs from the
-recorded terminal and nested commands, and proposition types use an unshared
-export path so the printer cannot introduce an unrecorded zeta transition.
-The focused O4 fixtures cover all four terminals, recursive premise nesting,
-closed materialization, terminal-selector mutation, and passive custom
-discharger classification. Premise-program gaps fail closed as
+recorded terminal and nested commands. `localAssumption` source addresses the
+recorded declaration by exact local-context index, so a newer shadowing name
+cannot capture the premise; proposition types use an unshared export path so
+the printer cannot introduce an unrecorded zeta transition. The focused O4
+fixtures cover all four terminals, recursive premise nesting, closed
+materialization, terminal-selector and local-index mutation, shadowed local
+identity, and passive custom-discharger classification. Premise-program gaps fail closed as
 `inadmissible_premise_program` without invoking either proof exporter. Full
 corpus closure and remaining simproc and context packages remain outside O4.
 
