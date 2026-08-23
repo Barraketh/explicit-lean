@@ -462,6 +462,11 @@ Each stage is committed before the next begins.
 
 Gate: zero equivalence mismatches; no certificate or corpus behavior changes.
 
+Status: complete. The fork is pinned by hashes of the complete authoritative
+source surface, the focused reference probe covers both `simp` and `dsimp`
+branches, 57 supported calls across two syntax-instrumented Mathlib modules
+agree exactly, and the complete pre-existing `Experiment/run.sh` suite passes.
+
 ### E2. Total structured recorder
 
 - Add schema-16 paths, structural witnesses, all four phases, total reduction
@@ -543,7 +548,8 @@ closure run, not a substitute for the completeness review.
 ## 12. Decisions
 
 - Schema 15 remains historical evidence but is not a complete simplifier IR.
-- The next implementation step is E1, not another O6 continuity bridge.
+- E1 is complete; the next implementation step is E2, not another O6
+  continuity bridge.
 - The correctness boundary is a pinned source fork with record and replay
   modes.
 - Structural traversal and dsimp are first-class certificate semantics.

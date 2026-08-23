@@ -2,6 +2,9 @@
 set -eu
 
 lake build ExplicitLean.SimpExplicit
+python3 Experiment/check_simp_engine_pin.py
+python3 Experiment/check_simp_engine_reference.py
+python3 Experiment/check_simp_engine_production.py
 lake env lean Experiment/PassiveSimpProbe.lean
 lake env lean Experiment/ProofExportProbe.lean
 lake env lean Experiment/PremiseReplayProbe.lean

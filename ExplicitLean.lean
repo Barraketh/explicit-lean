@@ -1,2 +1,4 @@
+import ExplicitLean.SimpEngine
+import ExplicitLean.SimpEngine.Reference
 import ExplicitLean.SimpExplicit
 import ExplicitLean.Normalize
