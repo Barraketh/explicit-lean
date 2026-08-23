@@ -134,14 +134,15 @@ pending. The first 32-shard run did not produce a corpus result: hosted runners
 received external shutdown signals before their shard artifacts could upload.
 The failures were not correlated with module size or occurrence count, so they
 are classified as invalid infrastructure executions, not engine failures or
-successful coverage. A subsequent four-worker bounded trial still evicted two
-concurrent runners while the other two remained healthy, so the accepted
-topology caps concurrency at two.
+successful coverage. A subsequent four-worker bounded trial evicted two
+concurrent runners while the other two remained healthy; a two-worker trial
+then evicted one while the other remained healthy. The accepted topology
+therefore runs one shard worker at a time.
 
 The bounded rerun inventories 8,264 files and validates 83,425 occurrences in
 6,319 modules byte-for-byte, including 91 nested occurrences. It uses 256
 deterministic batches (about 25 occurrence-bearing modules per batch), runs at
-most two Ubuntu 24.04 workers concurrently, and stops a batch after its first
+most one Ubuntu 24.04 worker at a time, and stops a batch after its first
 semantic failure so the checkpoint, log, and failing source can upload
 promptly. Every completed batch still records each assigned module once and
 compiles one materialized copy for all accepted occurrences in that module.
