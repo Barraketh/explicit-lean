@@ -30,6 +30,7 @@ python3 Experiment/check_o6_reporting_integrity.py
 python3 Experiment/check_o6c_contextual_local_rule.py
 python3 Experiment/check_o6d_indexed_match.py
 python3 Experiment/check_o6e_projection_function.py
+python3 Experiment/check_o6f_declaration_elaboration.py
 python3 Experiment/check_selectors.py
 python3 Experiment/check_reductions.py
 python3 Experiment/check_local_renames.py

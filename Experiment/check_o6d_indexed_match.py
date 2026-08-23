@@ -31,15 +31,18 @@ def check_focused_source() -> None:
     if code != 0:
         raise RuntimeError(f"focused indexed-match source failed:\n{output}")
 
+    # The context-specialized candidate remains necessary for this historical
+    # site: the bare generic rule fails closed instead of admitting an earlier
+    # callback transition that happens to reach the same final state.
     mutated_source = source.replace(ANCHOR, "AddConstMap.coe_mk", 1)
-    mutated = OUTPUT / "focused" / "O6dIndexedMatchProbe_next.lean"
+    mutated = OUTPUT / "focused" / "O6dIndexedMatchProbe_bare_rule.lean"
     mutated.parent.mkdir(parents=True, exist_ok=True)
     mutated.write_text(mutated_source, encoding="utf-8")
     code, output = run_source(mutated)
     if code == 0:
-        raise RuntimeError("first-site mutation unexpectedly compiled")
+        raise RuntimeError("bare-rule mutation unexpectedly compiled")
     if "ordered simp rule did not match anywhere in the remaining traversal" not in output:
-        raise RuntimeError(f"first-site mutation lost its ordered-rule diagnostic:\n{output}")
+        raise RuntimeError(f"bare-rule mutation lost its ordered-rule diagnostic:\n{output}")
 
 
 def check_production() -> None:

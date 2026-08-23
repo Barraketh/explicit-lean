@@ -5,10 +5,8 @@ namespace AddConstMap
 
 variable {G H : Type*} [AddCommGroup G] [AddCommGroup H]
 
-/- The theorem `coe_mk` is definitionally applicable one callback too early:
-   directly applying it to an arbitrary AddConstMap eta-expands that fvar.
-   Indexed replay plus the explicit second-match selector reproduces the site
-   chosen by ordinary simp without leaking the traversal-local binder. -/
+/- The context-specialized candidate preserves the historical second match;
+   the bare generic declaration is rejected by ordered replay. -/
 example (f : G →+c[0, 0] H) (x : G) :
     ((fun g : G →+c[0, 0] H =>
         (⟨fun y => -g (-y), fun _ => by simp⟩ : G →+c[0, 0] H))

@@ -798,14 +798,14 @@ are well-formed in the ambient context and reach the recorded final state.
 Historical-site discovery is the bounded fallback for a rejected fast path;
 it compares expired traversal locals modulo binder renaming while preserving
 ambient fvar identities. The AddConstMap occurrence
-`5771ee0e1343e576` now materializes with
-`match 2 => AddConstMap.coe_mk`; deleting that selector fails with the ordered
-rule diagnostic instead of admitting a proof containing an escaped callback
-fvar. Declaration printing also checks resolution in the replacement site's
-namespace/open context and adds `_root_.` only when the ordinary dotted name
-would resolve to a different constant. Consequently the LinearEquiv occurrence
-`ef04e0e8339535de` now materializes with `_root_.map_smul` instead of reaching
-the retired body-proof rejection gate. Schema 14 is unchanged.
+`5771ee0e1343e576` now materializes with the explicit second-site command
+`match 2 => AddConstMap.coe_mk`; the bare generic-rule mutation fails with the
+ordered-rule diagnostic under the dual candidate path. Declaration printing
+also checks resolution in the replacement site's namespace/open context and
+adds `_root_.` only when the ordinary dotted name would resolve to a different
+constant. Consequently the LinearEquiv occurrence `ef04e0e8339535de` now
+materializes with `_root_.map_smul` instead of reaching the retired body-proof
+rejection gate. Schema 14 is unchanged.
 
 O6e implementation status (2026-08-22): schema 15 adds the exact
 `projection_function` reduction command, using a local clone of Lean 4.32.2's
@@ -819,6 +819,20 @@ subexpression, the full augmented program is replay-validated, and the raw
 recorder trace and premise metadata remain unchanged; no ambient simp or
 proof fallback is introduced. The production gate rejects deletion, order
 swapping, and a different known projection identity.
+
+O6f implementation status (2026-08-22): a bare global theorem identifier that
+is not a shadowing local now follows ordinary `simp`'s declaration path first,
+preserving polymorphic universe and typeclass parameters. The same authored
+theorem also gets a deterministic context-specialized term-elaboration
+candidate when that term is not a plain constant; plain constants are
+deduplicated to the generic candidate. Compound terms and local hypotheses
+retain term elaboration, generated declaration rules validate the printed name
+and use the same dual candidate path, and no ambient search or proof fallback is
+introduced. The `Set.mem_neg` regression remains generic on a custom negated
+type, and Spectrum occurrence `a2c03aa81fb3fb0b` materializes with seven named
+rules, zero reductions, and no operational fallback. Accepted source plans
+run historical discovery before the generic `.next` fast path. Schema 15 is
+unchanged.
 
 ### S. Simproc design
 

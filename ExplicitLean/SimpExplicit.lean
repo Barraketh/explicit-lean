@@ -1534,6 +1534,19 @@ private def elaborateReduction (stx : Syntax) : TacticM (Phase × ReductionIdent
 private def elaborateRule (phase : Phase) (rule : Syntax) : TacticM (Array SimpTheorem) := do
   let inverse := !rule[1].isNone
   let term := rule[2]
+  -- Match `simp`'s declaration-argument path.  Elaborating a bare polymorphic
+  -- theorem as an unconstrained term can default its type and instance
+  -- metavariables (for example, specializing `Set.mem_neg` to `Set Int`).
+  -- `simp` resolves such an identifier as a declaration and constructs the
+  -- theorem from the constant, preserving its universe and type parameters.
+  let localIdent? ← if term.isIdent then Term.isLocalIdent? term else pure none
+  let declaration? ← if term.isIdent && localIdent?.isNone then
+    try
+      some <$> resolveGlobalConstNoOverload term
+    catch _ =>
+      pure none
+  else
+    pure none
   let proof? ← Term.withoutModifyingElabMetaStateWithInfo <| withRef term do
     let proof ← Term.elabTerm term .none
     Term.synthesizeSyntheticMVars (postpone := .no) (ignoreStuckTC := true)
@@ -1546,19 +1559,35 @@ private def elaborateRule (phase : Phase) (rule : Syntax) : TacticM (Array SimpT
       return some (abstracted.paramNames, abstracted.expr)
     return some (#[], proof)
   let some (levelParams, proof) := proof?
-    | throwErrorAt term "could not elaborate explicit simp rule"
+    | match declaration? with
+      | some declaration =>
+          return ← mkSimpTheoremFromConst declaration
+            (inv := inverse) (post := phase == .post)
+      | none => throwErrorAt term "could not elaborate explicit simp rule"
   let origin := Origin.stx (← mkFreshId) rule
-  mkSimpTheoremFromExpr origin levelParams proof
+  let contextualRules ← mkSimpTheoremFromExpr origin levelParams proof
     (inv := inverse) (post := phase == .post)
+  match declaration? with
+  | none => return contextualRules
+  | some declaration =>
+      -- Build the generic rules after contextual elaboration so no temporary
+      -- metavariable assignments from the latter can specialize their keys.
+      let genericRules ← mkSimpTheoremFromConst declaration
+        (inv := inverse) (post := phase == .post)
+      -- A plain constant reconstructs the same declaration rules.  An applied
+      -- term carries deterministic context specialization and may have the
+      -- discrimination keys used by a registered coercion theorem.
+      return if proof.isConst then genericRules else genericRules ++ contextualRules
 
 private def elaborateRecordedDeclRule (name : Name) (post inverse : Bool) : TacticM (Array SimpTheorem) := do
-  -- Validate the exact source-level operation: construct the same rule syntax
-  -- that the certificate prints and send it through `elaborateRule`.  The
-  -- lower-level constant theorem constructor can yield different
-  -- discrimination keys for coercion/structure lemmas, which would make
-  -- selector discovery validate a site the freshly compiled source does not.
+  -- Validate the exact printed name in the replacement namespace/open state,
+  -- then use the same dual declaration/contextual path as a freshly compiled
+  -- certificate.
   let printedName ← declarationRuleName name
   let term : TSyntax `term := ⟨mkIdent printedName⟩
+  let resolved ← resolveGlobalConstNoOverload term
+  unless resolved == name do
+    throwErrorAt term "printed simp rule resolved to '{resolved}' instead of '{name}'"
   let rule ← if inverse then
       `(simpExplicitRule| ← $term:term)
     else
@@ -2658,14 +2687,14 @@ private def projectSelectedEvents? (target : Expr) (searchedResult : Simp.Result
         { event with replay := { event.replay with selector := .matchSite multiplicity } }
       else
         event
-    -- Keep first-site replay as the fast path, but accept it only after the
-    -- well-formed-result and exact-final-state checks above.  If an over-broad
-    -- unification lets a traversal-local fvar escape, discovery supplies the
-    -- historical match ordinal instead.
-    let selected? ← match (← selectCertificateEvents? target searchedResult deduplicated .next) with
+    -- Historical transition identity is authoritative for source selection:
+    -- discover each recorded input/result before considering generic first-site
+    -- replay. A generic declaration can otherwise rewrite an earlier site and
+    -- coincidentally reach the same final state.
+    let selected? ← match (← selectCertificateEvents? target searchedResult deduplicated .discover) with
       | some selected => pure (some selected)
       | none =>
-          match (← selectCertificateEvents? target searchedResult deduplicated .discover) with
+          match (← selectCertificateEvents? target searchedResult deduplicated .next) with
           | some selected => pure (some selected)
           | none => selectCertificateEvents? target searchedResult deduplicated .ticks
     let some selected := selected? | return none
@@ -3340,15 +3369,12 @@ private def canReplayWithSelectors (target : Expr) (recorded : Array RecordedEve
 
 private def replayEncoding? (target : Expr) (recorded : Array RecordedEvent)
     (searchedResult : Simp.Result) : TacticM (Option (Array ReplaySelector)) := do
+  if let some discovered ← discoverSelectors? target recorded then
+    if ← canReplayWithSelectors target recorded searchedResult discovered then
+      return some discovered
   let next := nextSelectors recorded
   if ← canReplayWithSelectors target recorded searchedResult next then
     return some next
-  -- A first-applicable-site run can be definitionally final while carrying an
-  -- escaped callback local in its proof.  `canReplayWithSelectors` rejects
-  -- that result, and historical discovery then finds the exact match ordinal.
-  if let some mixed ← discoverSelectors? target recorded then
-    if ← canReplayWithSelectors target recorded searchedResult mixed then
-      return some mixed
   let ticks := tickSelectors recorded
   if ← canReplayWithSelectors target recorded searchedResult ticks then
     return some ticks
@@ -3382,6 +3408,9 @@ private def contextCanReplayWithSelectors (target : Expr) (recorded : Array Reco
 
 private def contextReplayEncoding? (target : Expr) (recorded : Array RecordedEvent)
     (searchedResult : Simp.Result) : TacticM (Option (Array ReplaySelector)) := do
+  if let some discovered ← discoverSelectors? target recorded then
+    if ← contextCanReplayWithSelectors target recorded searchedResult discovered then
+      return some discovered
   let next := Array.replicate recorded.size (.next : ReplaySelector)
   if ← contextCanReplayWithSelectors target recorded searchedResult next then
     return some next
@@ -3564,6 +3593,9 @@ certificate. The result is the complete target after that prefix and the
 selectors that validated it. -/
 private def replayRecorded? (target : Expr)
     (recorded : Array RecordedEvent) : TacticM (Option (Simp.Result × Array ReplaySelector)) := do
+  -- Continuity-gap diagnosis starts with the first-applicable operational
+  -- prefix.  This helper locates omitted reductions; it does not select the
+  -- final source selectors, whose accepted paths prefer historical discovery.
   let mut candidates := #[nextSelectors recorded]
   if let some mixed ← discoverSelectors? target recorded then
     candidates := candidates.push mixed
@@ -4004,7 +4036,7 @@ private def buildCertificatePlan? (target : Expr) (recorded : Array RecordedEven
     return some (← makeCertificatePlan searchedResult encoded bindings
       projection.rawEncodingInfos projection.rawPremiseEncodingInfos
       projection.nonmaterialInternalEvents)
-  for mode in #[CertificateSelectorMode.next, CertificateSelectorMode.discover,
+  for mode in #[CertificateSelectorMode.discover, CertificateSelectorMode.next,
       CertificateSelectorMode.ticks] do
     let selected? ← withoutModifyingState do
       selectCertificateEvents? target searchedResult baseEncoded mode

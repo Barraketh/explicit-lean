@@ -828,11 +828,12 @@ first-applicable-site program only when its result and proof are well-formed
 and reach the recorded state; otherwise it discovers the historical site by
 comparing expired callback locals modulo stable binder renaming. The
 AddConstMap occurrence `5771ee0e1343e576` materializes with the explicit
-second-site command `match 2 => AddConstMap.coe_mk`; a first-site mutation is a
-permanent negative regression. Declaration names are resolved at the
-replacement site and receive `_root_.` only on an actual namespace/open-state
-collision; this also materializes LinearEquiv occurrence `ef04e0e8339535de`
-with `_root_.map_smul` and retires its former source-rewrite failure.
+second-site command `match 2 => AddConstMap.coe_mk`; the bare generic-rule
+mutation fails with the ordered-rule diagnostic under the dual candidate path.
+Declaration names are resolved at the replacement site and receive `_root_.`
+only on an actual namespace/open-state collision; this also materializes
+LinearEquiv occurrence `ef04e0e8339535de` with `_root_.map_smul` and retires its
+former source-rewrite failure.
 
 O6e implementation status (2026-08-22): schema 15 adds the pinned
 `projection_function` reduction vocabulary, cloned from Lean 4.32.2's
@@ -846,6 +847,20 @@ continuity gap, while raw recorder events and premise metadata remain aligned
 with the original trace. Deleting either command, swapping their order, or
 substituting a different known projection identity fails closed; no ambient
 simp or proof fallback is used.
+
+O6f implementation status (2026-08-22): a bare global theorem identifier that
+is not a shadowing local now follows ordinary `simp`'s declaration path first,
+preserving polymorphic universe and typeclass parameters. The same authored
+theorem also gets a deterministic context-specialized term-elaboration
+candidate when that term is not a plain constant; plain constants are
+deduplicated to the generic candidate. Compound terms and local hypotheses
+retain term elaboration, generated declaration rules validate the printed name
+and use the same dual candidate path, and no ambient search or proof fallback is
+introduced. The `Set.mem_neg` regression remains generic on a custom negated
+type, and Spectrum occurrence `a2c03aa81fb3fb0b` materializes with seven named
+rules, zero reductions, and no operational fallback. Accepted source plans
+run historical discovery before the generic `.next` fast path. Schema 15 is
+unchanged.
 
 The nondefault-configuration step is now implemented. Recording reports use
 schema version 9 and retain the original `optConfig` syntax plus every built-in
