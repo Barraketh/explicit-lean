@@ -632,21 +632,6 @@ private def localRefOfDecl (localDecl : LocalDecl) : EngineM LocalRef := do
     valueFingerprint
   }
 
-private def reduceFVar (cfg : Config) (thms : SimpTheoremsArray) (e : Expr) : EngineM Expr := do
-  let localDecl ← getFVarLocalDecl e
-  if cfg.zetaDelta || thms.isLetDeclToUnfold e.fvarId! || localDecl.isImplementationDetail then
-    if !cfg.zetaDelta && thms.isLetDeclToUnfold e.fvarId! then
-      recordSimpTheorem (.fvar localDecl.fvarId)
-    let some v := localDecl.value? | return e
-    let reason :=
-      if cfg.zetaDelta then LocalDefReason.zetaDelta
-      else if thms.isLetDeclToUnfold e.fvarId! then .requested
-      else .implementationDetail
-    commitReduction "reduce.localDef" e v (.localDef (← localRefOfDecl localDecl) reason)
-    return v
-  else
-    return e
-
 /--
   Return true if `declName` is the name of a definition of the form
   ```
@@ -872,6 +857,25 @@ private def replayReductionStep? (e : Expr) : EngineM (Option Expr) := do
     throwError "replay_reduction_unchanged: {repr reduction}"
   emitEvent e output (.reduce reduction) expected.stepDisposition
   return some output
+
+private def reduceFVar (cfg : Config) (thms : SimpTheoremsArray) (e : Expr) : EngineM Expr := do
+  if let some output ← replayReductionStep? e then
+    return output
+  if (← getRuntime).mode == .replay then
+    return e
+  let localDecl ← getFVarLocalDecl e
+  if cfg.zetaDelta || thms.isLetDeclToUnfold e.fvarId! || localDecl.isImplementationDetail then
+    if !cfg.zetaDelta && thms.isLetDeclToUnfold e.fvarId! then
+      recordSimpTheorem (.fvar localDecl.fvarId)
+    let some v := localDecl.value? | return e
+    let reason :=
+      if cfg.zetaDelta then LocalDefReason.zetaDelta
+      else if thms.isLetDeclToUnfold e.fvarId! then .requested
+      else .implementationDetail
+    commitReduction "reduce.localDef" e v (.localDef (← localRefOfDecl localDecl) reason)
+    return v
+  else
+    return e
 
 private def reduceStep (e : Expr) : EngineM Expr := do
   if let some output ← replayReductionStep? e then
@@ -3322,7 +3326,7 @@ private def consumeReplayPhaseOutcome (input : Expr)
     | none => do
         let inputFingerprint ← liftM (exprFingerprintHash input)
         unless outputFingerprint == inputFingerprint && !proofPresent do
-          throwError "replay_phase_outcome_requires_operation: {repr expected.witness}"
+          throwError "replay_phase_outcome_requires_operation: {repr expected.witness}; input={inputFingerprint}"
         pure <| match disposition with
           | .done => .done { expr := input }
           | .visit => .visit { expr := input }

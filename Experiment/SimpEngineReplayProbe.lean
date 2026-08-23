@@ -138,6 +138,12 @@ example (x : Nat) : (fun y => y) x = x := by
 example (x : Nat) : replayDelta x = x := by
   simp_engine_replay only [replayDelta, Nat.add_zero]
 
+example (x : Nat) : x = x := by
+  let requestedLocal := x
+  have unfolded : requestedLocal = x := by
+    simp_engine_replay only [requestedLocal]
+  exact unfolded
+
 example (x : Nat) : (x + 0, x + 0) = (x, x) := by
   simp_engine_replay only [Nat.add_zero]
 

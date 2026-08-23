@@ -29,7 +29,7 @@ REVIEWED_FILES = (
 # These values are changed only after a new source-level completeness review.
 REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine.lean":
-        "b58ace2eb7cf035b36b029970e3bbf363d980382305aecaec667138e60ed7051",
+        "07248d8e1fbf4a0fe1ac49725cbc57a6de2f6224748f13e34e271dc3ced17fd9",
     "ExplicitLean/SimpEngine/Fingerprint.lean":
         "7aed346f08125514e2675c84e199a5e380d885934c12ebcdc587e2ab94d5bd21",
     "ExplicitLean/SimpEngine/IR.lean":
@@ -50,10 +50,10 @@ REVIEWED_HASHES: dict[str, str] = {
         "73586bbf76f436c1e7ca6ddaa6b173eff37165a34d1fcbb9fc4c9a5f5bfdbf59",
 }
 EXPECTED_LINEAGE_DIGEST = (
-    "00dd5ec6ad13fe5134f0a59cd1b6431743b8d1ea2736e684953c584b5b9d7390"
+    "6ab7697b32c0191f4e33b1fced066bb0a81c2694fd3a3cc255fa996cfca704fa"
 )
 EXPECTED_CONTROLLED_DIGEST = (
-    "25809083c3630ad2bc82bc6ecbaa59e9f1efbda46376349e89b7482a63ef25b1"
+    "1bffd732a4aa771810af90d3f76b8e76a8c64bb09f2687db7b0069c9c5b2b317"
 )
 EXPECTED_DECLARATION_COUNT = 225
 
