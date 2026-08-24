@@ -133,7 +133,7 @@ execution model. It is only one projection of the execution.
 
 ## 4. Implementation-to-IR coverage matrix
 
-The `Required representation` column is normative for certificate schema 18.
+The `Required representation` column is normative for certificate schema 19.
 
 | Upstream site | Committed behavior | Required representation | Schema 15 |
 | --- | --- | --- | --- |
@@ -292,7 +292,7 @@ inductive Builtin where
 
 mutual
   structure PremiseProgram where
-    propositionFingerprint : String
+    resolvedPropositionFingerprint : String
     program : Program
     terminal : PremiseTerminal
 
@@ -368,6 +368,14 @@ structure Certificate where
   finalState : StateFingerprint
 ```
 
+For a nested premise, `program.initialFingerprint` identifies the incoming
+telescope proposition before discharge, and `program.finalFingerprint`
+identifies the expression produced by the nested simplifier. The separate
+`resolvedPropositionFingerprint` identifies that original telescope
+proposition after discharge has assigned its metavariables. Replay validates
+these at entry, nested-program completion, and return respectively; they are
+not interchangeable when premise simplification resolves metavariables.
+
 The `iteration` values in `preVisit`, `reductionVisit`, and `postRestart` are
 trace-local ordinals. They are allocated from recorder state and roll back with
 a failed speculative candidate; they are deliberately not `Simp.State.numSteps`,
@@ -378,12 +386,12 @@ failed-attempt witness is retained so replay executes the same cache producer.
 
 ### 5.1 What is and is not source
 
-The schema-18 source payload is compact JSON embedded in a shallow Lean array
+The schema-19 source payload is compact JSON embedded in a shallow Lean array
 of string literals:
 
 ```lean
 simp_engine_apply "occurrence-id"
-  (certificates := #["{...schema-18 certificate...}", ...]) originalSimpArgs
+  (certificates := #["{...schema-19 certificate...}", ...]) originalSimpArgs
 ```
 
 The JSON contains the complete path-qualified operations and structural
@@ -654,7 +662,7 @@ proof-state mismatch.
 
 ### E2. Total structured recorder
 
-- Add schema-18 paths, structural witnesses, all four phases, total reduction
+- Add schema-19 paths, structural witnesses, all four phases, total reduction
   identities, exact congruence choices, rule variants, match envelopes, and
   full nested premise programs.
 - Add exact simproc/dsimproc observation and deferred classification.
@@ -680,26 +688,26 @@ operation, rule variant, congruence choice, config, premise order, or terminal
 fail at the mutated item.
 
 Status: complete. The focused suite replays 37 dynamic branch classes and
-rejects 21 targeted mutations. Complete-module classification and replay are
+rejects 23 targeted mutations. Complete-module classification and replay are
 tested once through the source materialization gate instead of a parallel
 record/replay harness.
 
 ### E4. Source and materializer migration
 
-- Print and parse the schema-18 source form.
+- Print and parse the schema-19 source form.
 - Include engine id, rule fingerprints, and final-state validation.
 - Switch passive recording and context programs to the new engine.
 - Keep the source and materializer independent of removed historical bridge
   and selector-discovery implementations.
 
 Gate: all existing non-simproc focused/production fixtures materialize through
-schema 18 with zero bridge, generated-proof, presentation, or whole-result
+schema 19 with zero bridge, generated-proof, presentation, or whole-result
 metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and thirteen complete Mathlib modules
-contain 410 occurrences: 178 materialize across 202 successful executions, 231 are
+copies are compiled. The focused fixture and fourteen complete Mathlib modules
+contain 443 occurrences: 198 materialize across 222 successful executions, 244 are
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
@@ -730,6 +738,10 @@ leak temporary metavariables into the live declaration.
 generated natural-isomorphism declaration, ensuring elaboration and synthesis
 of the closed certificate array are observational before strict initial-state
 selection and replay.
+`Topology/Constructions.lean` retains a recursive premise whose simplification
+assigns telescope metavariables. Its incoming proposition, simplified output,
+and resolved telescope proposition have distinct certificate roles and are
+validated at their respective replay boundaries.
 
 ### E5. Pre-cloud completeness review
 
@@ -751,7 +763,7 @@ fingerprinting, record/replay, source, inventory, reference adapter, and
 coverage contract. The
 review fixed every discrepancy it found before rerunning the complete local
 gate; section 4 has 54 machine-bound rows and no partial, implicit, or absent
-schema-18 representation.
+schema-19 representation.
 
 ### E6. Full cloud closure
 
@@ -866,9 +878,10 @@ completeness review.
 ## 12. Decisions
 
 - Schema 15 remains only in Git history and is not a simplifier IR dependency.
-- Schema 18 is the current certificate format; in addition to schema 17's
-  bounded DAG fingerprinting and lossless simproc dictionary encoding, it
-  records the exact extra-argument count selected by theorem indexing.
+- Schema 19 is the current certificate format. Schema 18 added the exact
+  extra-argument count selected by theorem indexing; schema 19 names the
+  post-discharge telescope fingerprint explicitly and validates premise entry
+  against the nested program's distinct initial fingerprint.
 - E1 through E5 and the E6 cloud infrastructure are complete; the full E6
   corpus result is pending.
 - The correctness boundary is a pinned source fork with record and replay

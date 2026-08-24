@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mechanically bind every coverage-matrix row to schema-18 implementation text."""
+"""Mechanically bind every coverage-matrix row to schema-19 implementation text."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ def main() -> None:
             failures.append(f"{row}: {missing}")
     if failures:
         raise RuntimeError("unobserved_transition:\n" + "\n".join(failures))
-    print(f"schema-18 observer audit: {len(rows)} matrix rows: ok")
+    print(f"schema-19 observer audit: {len(rows)} matrix rows: ok")
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ def nameFromJson (json : Json) : Except String Name := do
     match part with
     | .arr #[.str "str", .str value] => return .str name value
     | .arr #[.str "num", value] => return .num name (← fromJson? value)
-    | _ => throw s!"invalid schema-18 name component: {part.compress}"
+    | _ => throw s!"invalid schema-19 name component: {part.compress}"
 
 local instance schema16NameToJson : ToJson Name where
   toJson name := .arr (nameJsonParts name)
@@ -38,7 +38,7 @@ structure EngineId where
 def engineId : EngineId := {
   leanVersion := "4.32.2"
   leanCommit := "f3b06c705e6c85f5314019d5d3baab0fec5b580c"
-  certificateSchema := 18
+  certificateSchema := 19
 }
 
 inductive Mode where
@@ -219,7 +219,7 @@ inductive Builtin where
 
 mutual
   structure PremiseProgram where
-    propositionFingerprint : String
+    resolvedPropositionFingerprint : String
     program : Program
     terminal : PremiseTerminal
     deriving Repr, BEq, Lean.ToJson, Lean.FromJson
@@ -344,7 +344,7 @@ instance : Lean.FromJson SimprocTrace where
     let order ← json.getObjValAs? (Array Nat) "order"
     let observations ← order.mapM fun index => do
       let some observation := dictionary[index]?
-        | throw s!"invalid schema-18 simproc dictionary index: {index}/{dictionary.size}"
+        | throw s!"invalid schema-19 simproc dictionary index: {index}/{dictionary.size}"
       return observation
     return { observations }
 

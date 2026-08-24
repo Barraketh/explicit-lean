@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run schema-18 full closure in parallel on verified Vast.ai CPU capacity."""
+"""Run schema-19 full closure in parallel on verified Vast.ai CPU capacity."""
 
 from __future__ import annotations
 

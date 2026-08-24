@@ -77,7 +77,7 @@ structure RecordedGoal where
   deriving Inhabited
 
 /-- The goal/hypothesis transport layer of `Meta.simpGoal`, with each engine
-    execution replaced by a schema-18 recording execution. -/
+    execution replaced by a schema-19 recording execution. -/
 def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
     (methods : Simp.Engine.Methods) (simplifyTarget : Bool)
     (fvarIdsToSimp : Array FVarId) : MetaM RecordedGoal := mvarId.withContext do

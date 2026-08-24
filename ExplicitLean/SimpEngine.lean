@@ -1820,8 +1820,8 @@ private def beginPremiseProgram (type : Expr) (index : Nat)
     let some premise := premises[index]?
       | throwError "replay_missing_premise_program: {index}"
     let actualFingerprint ← liftM (exprFingerprintHash type)
-    unless actualFingerprint == premise.propositionFingerprint do
-      throwError "replay_premise_fingerprint_mismatch: expected {premise.propositionFingerprint}, got {actualFingerprint}"
+    unless actualFingerprint == premise.program.initialFingerprint do
+      throwError "replay_premise_initial_fingerprint_mismatch: expected {premise.program.initialFingerprint}, got {actualFingerprint}"
     runtime.state.set {
       outer with
       program := premise.program
@@ -1846,7 +1846,7 @@ private def finishPremiseProgram (outer : RecorderState) (type : Expr) : EngineM
     let inner ← runtime.state.get
     runtime.state.set outer
     return {
-      propositionFingerprint := ← liftM (exprFingerprintHash type)
+      resolvedPropositionFingerprint := ← liftM (exprFingerprintHash type)
       program := inner.program
       terminal := inner.lastPremiseTerminal.getD .isTrue
     }
@@ -1863,13 +1863,13 @@ private def finishPremiseProgram (outer : RecorderState) (type : Expr) : EngineM
         throwError "replay_premise_final_fingerprint_mismatch: expected {inner.program.finalFingerprint}, got {actualFingerprint}"
     runtime.state.set outer
     return {
-      propositionFingerprint := actualFingerprint
+      resolvedPropositionFingerprint := actualFingerprint
       program := inner.program
       terminal
     }
   else
     return {
-      propositionFingerprint := ""
+      resolvedPropositionFingerprint := ""
       program := {}
       terminal := .isTrue
     }

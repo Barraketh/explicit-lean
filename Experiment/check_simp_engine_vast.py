@@ -125,7 +125,7 @@ def main() -> None:
     if "ulimit -n 65536" not in setup or 'test "$(ulimit -n)" -ge 65536' not in setup:
         raise RuntimeError("Vast setup does not protect parallel cache extraction")
     print(
-        "schema-18 Vast scheduler: 256 shards covered once; "
+        "schema-19 Vast scheduler: 256 shards covered once; "
         "memory, host, progress, and price guards: ok"
     )
 

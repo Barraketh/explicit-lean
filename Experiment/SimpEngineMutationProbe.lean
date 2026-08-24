@@ -97,6 +97,14 @@ elab "check_replay_mutations" ha:ident hb:ident : tactic => withMainContext do
     | throwError "mutation fixture has no first premise"
   let some secondPremise := premises[1]?
     | throwError "mutation fixture has no second premise"
+  expectReplayReject "premise initial fingerprint" <| replaceEvent recording eventIndex {
+    event with operation := .rewrite rule envelope <|
+      premises.set! 0 {
+        firstPremise with program.initialFingerprint := "mutated" } }
+  expectReplayReject "premise resolved fingerprint" <| replaceEvent recording eventIndex {
+    event with operation := .rewrite rule envelope <|
+      premises.set! 0 {
+        firstPremise with resolvedPropositionFingerprint := "mutated" } }
   expectReplayReject "premise order" <| replaceEvent recording eventIndex {
     event with operation := .rewrite rule envelope #[secondPremise, firstPremise] }
   expectReplayReject "terminal" <| replaceFirstSubject recording {
@@ -104,7 +112,7 @@ elab "check_replay_mutations" ha:ident hb:ident : tactic => withMainContext do
   expectReplayReject "final fingerprint" <| replaceFirstSubject recording {
     subject with program.finalFingerprint := "mutated" }
 
-  logInfo "SIMP_ENGINE_MUTATIONS core=10"
+  logInfo "SIMP_ENGINE_MUTATIONS core=12"
 
 elab "check_replay_structural_mutations" : tactic => withMainContext do
   let simpStx ← `(tactic| simp only [Nat.add_zero])

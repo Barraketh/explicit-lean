@@ -21,7 +21,7 @@ end Lean.Parser.Tactic
 
 namespace ExplicitLean.SimpEngine.Source
 
-/-- Schema 18's stable source payload. The engine identifier inside the
+/-- Schema 19's stable source payload. The engine identifier inside the
     certificate is part of the serialized data and is validated before replay. -/
 def certificateSource (certificate : Simp.Engine.Certificate) : String :=
   (toJson certificate).compress
