@@ -128,7 +128,11 @@ def lean_string_array_source(values: list[str], parent_column: int) -> str:
     # quotes, backslashes, and control characters for the surrounding Lean
     # string.
     encoded = (json.dumps(value, ensure_ascii=False) for value in values)
-    return "#[\n" + indent + (",\n" + indent).join(encoded) + "\n" + indent + "]"
+    # `#[...]` expands through list notation. A source module may locally
+    # rebind `[]` or `::` (Vector3 does), causing the certificate term to
+    # elaborate as the wrong collection type. Build the Array directly.
+    pushes = "\n".join(f"{indent}|>.push {value}" for value in encoded)
+    return f"(Array.empty\n{pushes}\n{indent})"
 
 
 def inject_import(source: bytes, imported: str) -> bytes:

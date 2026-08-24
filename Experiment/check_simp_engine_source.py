@@ -39,6 +39,8 @@ FIXTURES = (
      "Mathlib/AlgebraicGeometry/Morphisms/SurjectiveOnStalks.lean", False),
     ("multiset-functor", coverage.MATHLIB / "Mathlib/Data/Multiset/Functor.lean",
      "Mathlib/Data/Multiset/Functor.lean", False),
+    ("vector3", coverage.MATHLIB / "Mathlib/Data/Vector3.lean",
+     "Mathlib/Data/Vector3.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "

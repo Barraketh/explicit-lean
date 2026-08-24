@@ -120,6 +120,8 @@ def main() -> None:
     )
     if "𝕜" not in non_bmp or "\\ud835" in non_bmp.lower():
         raise RuntimeError(f"Lean string source used a UTF-16 surrogate escape: {non_bmp!r}")
+    if "#[" in non_bmp or "Array.empty" not in non_bmp or "|>.push" not in non_bmp:
+        raise RuntimeError(f"Lean string source depends on local list notation: {non_bmp!r}")
     commit = cloud.current_commit()
     mathlib_commit = cloud.mathlib_commit()
     inventory = {

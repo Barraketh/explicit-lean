@@ -698,8 +698,8 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and ten complete Mathlib modules
-contain 334 occurrences: 156 materialize across 180 successful executions, 177 are
+copies are compiled. The focused fixture and eleven complete Mathlib modules
+contain 341 occurrences: 158 materialize across 182 successful executions, 182 are
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
@@ -720,6 +720,9 @@ zeta-delta reduction of an explicitly supplied local let declaration.
 `Data/Multiset/Functor.lean` retains eta-expanded authored rewrite rules whose
 discrimination-index result supplies an extra-argument count that cannot be
 reconstructed from the rule lhs application arity.
+`Data/Vector3.lean` retains a source context that locally rebinds list notation;
+certificate arrays therefore print through `Array.empty` and `Array.push`
+rather than the list-backed `#[...]` macro.
 
 ### E5. Pre-cloud completeness review
 
