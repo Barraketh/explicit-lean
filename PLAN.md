@@ -90,8 +90,8 @@ occurrence that executes more than once carries one certificate per distinct
 initial proof state and selects without a mutable execution counter. Nested
 occurrences are instrumented by replacing only their `simp` token; rule-origin
 identity canonicalizes the recording/materialization wrappers without executing
-ambient simp. The source gate covers 341 occurrences in twelve complete module
-copies: 158 materialize across 182 successful executions, 182 are explicitly
+ambient simp. The source gate covers 410 occurrences in fourteen complete module
+copies: 178 materialize across 202 successful executions, 231 are explicitly
 simproc-deferred, and one executes unsuccessfully under `first`. A mutated
 engine identity is rejected before replay. Multiline certificate source keeps
 trailing tactic configuration to the right of the original tactic column, as
@@ -101,6 +101,9 @@ generated matcher whose private name changes during source materialization.
 It also covers a successful user-congruence traversal whose auto-congruence
 child explicitly unfolds numeric literals inside `dsimp`, plus an authored
 local rule whose lhs retains a let-bound set after the subject unfolds it.
+It further requires user-congruence preprocessing and closed certificate-term
+elaboration to be observational: neither may solve, allocate, or leak
+metavariables in the surrounding declaration before replay begins.
 
 ### E5. Pre-cloud completeness review
 
@@ -113,7 +116,7 @@ local rule whose lhs retains a let-bound set after the subject unfolds it.
 Gate: the implementation-to-IR matrix has no partial, implicit, or absent row.
 
 Status: complete. The source-level review maps 120 semantic fork declarations
-to their pinned upstream declarations, separately audits 105 controlled
+to their pinned upstream declarations, separately audits 108 controlled
 declarations, and locks every semantic module by hash. The review corrected
 staged simp/dsimp cache provenance, binder and metadata paths, exact
 theorem-variant selection, stable
@@ -141,9 +144,9 @@ results; the superseded workflow has been removed.
 
 The accepted run inventories 8,264 files and validates 83,425 occurrences in
 6,319 modules byte-for-byte, including 91 nested occurrences. It uses 256
-deterministic batches across 16 distinct verified Vast.ai hosts, with four Lean
-module processes per host: up to 64 modules record or materialize concurrently.
-Every host must expose at least 16 effective CPU cores and 96 GB RAM, reserving
+deterministic batches across eight distinct verified Vast.ai hosts, with eight
+Lean module processes per host: 64 modules record or materialize concurrently.
+Every host must expose at least 32 effective CPU cores and 192 GB RAM, reserving
 24 GB per process. This replaces the earlier one-process/250 GB plan: reproducing
 the worst failure showed that recursive premise traces duplicated their outer
 prefix, expression fingerprints expanded shared DAGs as trees, and fingerprint

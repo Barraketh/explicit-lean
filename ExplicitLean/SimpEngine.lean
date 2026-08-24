@@ -2092,13 +2092,26 @@ private def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr)
   else
     return none
 
+private def replaySimpCongrTheorem (theoremName : Name)
+    (priority : Nat) : EngineM SimpCongrTheorem := do
+  -- Upstream preprocesses congruence declarations while populating the
+  -- environment extension, outside the tactic's live metavariable context.
+  -- Replay reconstructs the compact descriptor on demand, but the descriptor
+  -- retains only names and indices. Do not leak preprocessing metavariables
+  -- into the proof state that the recorded congruence execution must mutate.
+  let saved ← Meta.saveState
+  try
+    mkSimpCongrTheorem theoremName priority
+  finally
+    saved.restore
+
 private partial def replayCongruence (e : Expr) (invocationOrdinal : Nat) : EngineM Result := do
     let some choice ← findReplayCongruenceChoice? invocationOrdinal
       | let state ← getRecorderState
         throwError "replay_missing_congruence_choice: invocation={invocationOrdinal}, path={repr state.path}, structuralCursor={state.structuralCursor}"
     match choice with
     | .user theoremName priority hypotheses theoremFingerprint envelope premises =>
-        let candidate ← mkSimpCongrTheorem theoremName priority
+        let candidate ← replaySimpCongrTheorem theoremName priority
         unless candidate.hypothesesPos == hypotheses do
           throwError "replay_user_congruence_shape_mismatch: {theoremName}"
         let some attempt ← trySimpCongrTheorem? candidate e (some premises) true
@@ -2112,7 +2125,7 @@ private partial def replayCongruence (e : Expr) (invocationOrdinal : Nat) : Engi
           attempt.theoremFingerprint attempt.matchEnvelope attempt.premises))
         return result
     | .userAttemptFailed theoremName priority hypotheses theoremFingerprint envelope premises =>
-        let candidate ← mkSimpCongrTheorem theoremName priority
+        let candidate ← replaySimpCongrTheorem theoremName priority
         unless candidate.hypothesesPos == hypotheses do
           throwError "replay_user_congruence_shape_mismatch: {theoremName}"
         let some attempt ← trySimpCongrTheorem? candidate e (some premises)

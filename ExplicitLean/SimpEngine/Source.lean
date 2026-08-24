@@ -70,20 +70,28 @@ private def certificateSourceArrayType : Expr :=
 
 private unsafe def elaborateCertificates
     (source : Syntax) : TacticM (Array Simp.Engine.Certificate) := do
-  let expression ← Term.elabTermEnsuringType source certificateSourceArrayType
-  Term.synthesizeSyntheticMVarsNoPostponing
-  let sources ← Meta.evalExpr (Array String) certificateSourceArrayType expression
-  sources.mapM fun encoded =>
-    match parseCertificateSource encoded with
-    | .ok certificate => return certificate
-    | .error message => throwError "source_certificate_parse_failure: {message}"
+  -- Certificate source is closed data. Elaborating it must not solve
+  -- postponed metavariables belonging to the declaration around this tactic.
+  -- In particular, the global synthesis checkpoint below is required to
+  -- evaluate the array but is not part of `simp`'s observable execution.
+  let saved ← Tactic.saveState
+  try
+    let expression ← Term.elabTermEnsuringType source certificateSourceArrayType
+    Term.synthesizeSyntheticMVarsNoPostponing
+    let sources ← Meta.evalExpr (Array String) certificateSourceArrayType expression
+    sources.mapM fun encoded =>
+      match parseCertificateSource encoded with
+      | .ok certificate => return certificate
+      | .error message => throwError "source_certificate_parse_failure: {message}"
+  finally
+    saved.restore
 
 private def selectCertificate (certificates : Array Simp.Engine.Certificate) : TacticM
     Simp.Engine.Certificate := do
   let initialState ← Simp.Engine.proofStateFingerprint (← getGoals)
   let candidates := certificates.filter (·.initialState == initialState)
   let some selected := candidates[0]?
-    | throwError "source_certificate_missing_for_initial_state"
+    | throwError "source_certificate_missing_for_initial_state: actual={repr initialState}; available={repr (certificates.map (·.initialState))}"
   unless candidates.all (· == selected) do
     throwError "source_certificate_ambiguous_for_initial_state"
   unless selected.engine == Simp.Engine.engineId do

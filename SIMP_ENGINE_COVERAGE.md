@@ -698,8 +698,8 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and eleven complete Mathlib modules
-contain 341 occurrences: 158 materialize across 182 successful executions, 182 are
+copies are compiled. The focused fixture and thirteen complete Mathlib modules
+contain 410 occurrences: 178 materialize across 202 successful executions, 231 are
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
@@ -723,6 +723,13 @@ reconstructed from the rule lhs application arity.
 `Data/Vector3.lean` retains a source context that locally rebinds list notation;
 certificate arrays therefore print through `Array.empty` and `Array.push`
 rather than the list-backed `#[...]` macro.
+`NumberTheory/Height/MvPolynomial.lean` retains a user-congruence replay before
+a later named tactic hole, ensuring on-demand congruence preprocessing cannot
+leak temporary metavariables into the live declaration.
+`RepresentationTheory/FiniteIndex.lean` retains postponed metavariables in a
+generated natural-isomorphism declaration, ensuring elaboration and synthesis
+of the closed certificate array are observational before strict initial-state
+selection and replay.
 
 ### E5. Pre-cloud completeness review
 
@@ -738,7 +745,7 @@ entry; all review checks are machine-enforced.
 
 Status: complete. A declaration-level lineage manifest binds 120 semantic fork
 declarations to the pinned `Main`, `Rewrite`, `Types`, `Simproc`, and
-`Transform` implementations. A separate digest covers 105 controlled
+`Transform` implementations. A separate digest covers 108 controlled
 declarations, and hashes lock the manually reviewed fork, IR, runtime,
 fingerprinting, record/replay, source, inventory, reference adapter, and
 coverage contract. The

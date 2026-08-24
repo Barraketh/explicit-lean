@@ -41,6 +41,12 @@ FIXTURES = (
      "Mathlib/Data/Multiset/Functor.lean", False),
     ("vector3", coverage.MATHLIB / "Mathlib/Data/Vector3.lean",
      "Mathlib/Data/Vector3.lean", False),
+    ("mv-polynomial-height",
+     coverage.MATHLIB / "Mathlib/NumberTheory/Height/MvPolynomial.lean",
+     "Mathlib/NumberTheory/Height/MvPolynomial.lean", False),
+    ("finite-index-representations",
+     coverage.MATHLIB / "Mathlib/RepresentationTheory/FiniteIndex.lean",
+     "Mathlib/RepresentationTheory/FiniteIndex.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "
