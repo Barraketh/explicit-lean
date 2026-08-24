@@ -31,9 +31,9 @@ structural choices. Replay uses the same pinned engine with an explicit program
 driver, no ambient simp or congruence sets, no simprocs, and no ambient
 discharger.
 
-No full-corpus run is warranted until the implementation obligations in
-section 10 pass. A corpus run before then would only discover the next missing
-observer branch.
+The full-corpus run was deliberately withheld until the implementation
+obligations in section 10 passed. Running it earlier would only have discovered
+the next missing observer branch rather than testing a reviewed implementation.
 
 ## 2. Correctness contract
 
@@ -788,8 +788,12 @@ successful non-simproc/non-custom-discharger execution materializes; there are
 no coverage, recorder, harness, declaration, aggregate, or unclassified
 failures.
 
-Status: validated inventory and parallel Vast.ai infrastructure complete;
-corpus result pending. GitHub-hosted execution was rejected after repeated
+Status: complete. The strict reducer passed the full corpus at implementation
+commit `c21898e82590ddf06431eeaeb77c76211092b1bd` and pinned Mathlib commit
+`905b95818eb32af7874a58b427f50c1711a5e96c`. It received all 256 shard reports,
+all 6,319 inventoried modules, and all 83,425 occurrences, with no coverage,
+recorder, harness, declaration, aggregate, capacity, materialization, or
+unclassified failure. GitHub-hosted execution was rejected after repeated
 external runner evictions made useful parallelism and durable results mutually
 exclusive; the superseded workflow has been removed rather than retained as a
 test path.
@@ -800,11 +804,29 @@ includes 91 nested occurrences, uses the exact frontend for five modules whose
 lightweight parse requires recovery, and collapses one byte-identical duplicate
 syntax record. Modules are assigned by `SHA256(module) mod shardCount`.
 
-The run uses 256 deterministic batches distributed across 16 distinct verified
-Vast.ai machines. Four shard processes run on each host, so 64 module
-executions can proceed concurrently. Every host provides at least 16 effective
-CPU cores and 96 GB RAM, or four effective cores and 24 GB RAM per active Lean
-process. Those bounds follow a root-cause correction, not an accommodation of
+The accepted run used 256 deterministic batches distributed across six
+distinct verified Vast.ai machines. Eight shard processes ran on each host, so
+48 module executions proceeded concurrently. Every host provided at least 32
+effective CPU cores and 192 GB RAM, or four effective cores and 24 GB RAM per
+active Lean process. Two candidates that failed the real SSH handshake were
+destroyed and replaced before work began. The accepted plan cost $1.6773/hour;
+controller creation through strict reduction took about 43 minutes. All rented
+instances, including the rejected candidates, were destroyed, and the final
+provider instance query was empty.
+
+The reducer classified 27,149 occurrences as `materialized`, 56,197 as
+`deferred_simproc`, 12 as `deferred_custom_discharger`, 22 as
+`deferred_simproc_and_custom_discharger`, and 45 as `not_executed`. These totals
+cover all 83,425 occurrences. The recorder observed 89,990 successful source
+executions and replayed all 28,273 accepted non-deferred executions. It also
+observed 42 upstream-unsuccessful executions; none became an
+`unsuccessful_execution` terminal occurrence because the same occurrences had
+successful executions on other proof states. The quoted `simp%$...` forms in
+`Mathlib/Tactic/SimpRw.lean`, which exposed the final frontend bug in the prior
+run, compiled successfully and all three occurrences were correctly classified
+`not_executed`.
+
+The resource bounds follow a root-cause correction, not an accommodation of
 the earlier capacity failures: the recorder had duplicated outer simproc traces
 inside recursive premises, expanded shared expression DAGs into trees while
 fingerprinting, and allowed observation to change meta-state. Once those bugs
@@ -828,8 +850,8 @@ occurrence, and replay count before it can pass.
 - queries the live Vast.ai marketplace and selects distinct verified machines
   under reliability, effective-vCPU, RAM, disk, network, per-offer, aggregate
   hourly, and maximum-runtime guards;
-- launches 16 Ubuntu 24.04 hosts and explicitly attaches the configured SSH
-  key to every contract;
+- launches the requested number of Ubuntu 24.04 hosts and explicitly attaches
+  the configured SSH key to every contract;
 - retains only candidates that pass the real SSH handshake, destroys rejects,
   and fills their slots from distinct fallback offers without exceeding the
   aggregate hourly guard; every concurrent process requires four effective
@@ -846,8 +868,8 @@ occurrence, and replay count before it can pass.
 - compresses the immutable inventory for transfer, retries bounded transfers,
   and replaces a setup-failed host in the same worker slot while other workers
   continue;
-- partitions all 256 batches exactly once across the hosts and runs four shard
-  processes per host;
+- partitions all 256 batches exactly once across the hosts and runs the
+  requested number of shard processes per host;
 - copies atomic worker state, reports, logs, and failing sources back to the
   controller every 30 seconds, excluding transient per-module `work/` trees and
   including checkpoints while slower hosts are still setting up;
@@ -857,11 +879,13 @@ occurrence, and replay count before it can pass.
 - destroys all rented instances on every terminal path unless explicitly kept
   for diagnosis.
 
-At the launch defaults, 64 module executions can be active concurrently on 16
-independent machines. Every offer must provide 16 effective CPU cores and 96 GB
-RAM for its four active Lean processes. The controller refuses a plan above
-$4.00/hour or three hours; the actual plan and its compute exposure are
-recomputed before rental.
+The accepted closure launch used six independent machines and eight active Lean
+processes per host, for 48 concurrent module executions. Its offer floor was 32
+effective CPU cores and 192 GB RAM per host. Worker count and per-worker
+concurrency remain explicit controller parameters; every launch preserves the
+four-effective-core and 24-GB-RAM minimum per active process. The controller
+refuses a plan above its configured hourly or maximum-runtime guards and
+recomputes actual compute exposure before rental.
 
 The terminal taxonomy is deliberately closed:
 
@@ -892,8 +916,8 @@ completeness review.
   extra-argument count selected by theorem indexing; schema 19 names the
   post-discharge telescope fingerprint explicitly and validates premise entry
   against the nested program's distinct initial fingerprint.
-- E1 through E5 and the E6 cloud infrastructure are complete; the full E6
-  corpus result is pending.
+- E1 through E6 are complete; the full E6 corpus passed with 83,425/83,425
+  terminally classified occurrences and zero failures.
 - The correctness boundary is a pinned source fork with record and replay
   modes.
 - Structural traversal and dsimp are first-class certificate semantics.

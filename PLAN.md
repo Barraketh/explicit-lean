@@ -1,6 +1,6 @@
 # Explicit Lean implementation plan
 
-Status: E1 through E5 complete; E6 cloud execution is in progress.
+Status: E1 through E6 complete.
 
 ## 1. Current goal
 
@@ -140,17 +140,34 @@ Gate: every occurrence has a terminal classification; every committed
 successful non-simproc/non-custom-discharger execution records, replays,
 materializes, and compiles without fallback.
 
-Status: validated inventory and parallel Vast.ai infrastructure complete;
-cloud corpus result pending. GitHub-hosted runners were rejected because their
-observed eviction behavior prevented parallel execution from producing durable
-results; the superseded workflow has been removed.
+Status: complete. The strict reducer passed the full corpus at implementation
+commit `c21898e82590ddf06431eeaeb77c76211092b1bd` and pinned Mathlib commit
+`905b95818eb32af7874a58b427f50c1711a5e96c`: all 83,425 occurrences were
+reported, every one received a terminal classification, and the failure count
+was zero. The terminal totals were 27,149 `materialized`, 56,197
+`deferred_simproc`, 12 `deferred_custom_discharger`, 22
+`deferred_simproc_and_custom_discharger`, and 45 `not_executed`. The run
+recorded 89,990 successful source executions and replayed all 28,273 accepted
+non-deferred executions. Its 42 observed upstream-unsuccessful executions did
+not produce an `unsuccessful_execution` occurrence because those source
+occurrences also executed successfully on other proof states.
+
+GitHub-hosted runners were rejected because their observed eviction behavior
+prevented parallel execution from producing durable results; the superseded
+workflow has been removed.
 
 The accepted run inventories 8,264 files and validates 83,425 occurrences in
-6,319 modules byte-for-byte, including 91 nested occurrences. It uses 256
-deterministic batches across eight distinct verified Vast.ai hosts, with eight
-Lean module processes per host: 64 modules record or materialize concurrently.
-Every host must expose at least 32 effective CPU cores and 192 GB RAM, reserving
-24 GB per process. This replaces the earlier one-process/250 GB plan: reproducing
+6,319 modules byte-for-byte, including 91 nested occurrences. It used 256
+deterministic batches across six distinct verified Vast.ai hosts, with eight
+Lean module processes per host: 48 modules recorded or materialized
+concurrently. Every accepted host exposed at least 32 effective CPU cores and
+192 GB RAM, reserving 24 GB per process. Two candidates that failed the real
+SSH qualification were destroyed and replaced before work began. The six-host
+plan cost $1.6773/hour and completed from controller creation through reduction
+in about 43 minutes. All rented instances, including rejected candidates, were
+then destroyed and the provider returned an empty instance list.
+
+This replaces the earlier one-process/250 GB plan: reproducing
 the worst failure showed that recursive premise traces duplicated their outer
 prefix, expression fingerprints expanded shared DAGs as trees, and fingerprint
 observers leaked speculative meta-state. After correcting all three invariants,
