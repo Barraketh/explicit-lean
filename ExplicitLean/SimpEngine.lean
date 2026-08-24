@@ -3596,6 +3596,12 @@ private def replayDPhaseStep (e : Expr) : EngineM DStep :=
 private def replayDischarge? (e : Expr) : EngineM (Option Expr) := do
   let some terminal := (← getRecorderState).expectedPremiseTerminal
     | throwError "replay_missing_expected_premise_terminal"
+  -- `dischargeDefault?` removes annotations before every terminal branch,
+  -- including its recursive `simp` call. The premise program's initial
+  -- fingerprint still denotes the incoming proposition at the discharger
+  -- boundary; replay must apply the same deterministic preprocessing before
+  -- consuming the nested program.
+  let e := e.cleanupAnnotations
   match terminal with
   | .localAssumption contextIndex =>
       for localDecl in (← getLCtx) do

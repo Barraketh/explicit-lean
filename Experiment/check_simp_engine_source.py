@@ -50,6 +50,9 @@ FIXTURES = (
     ("topology-constructions",
      coverage.MATHLIB / "Mathlib/Topology/Constructions.lean",
      "Mathlib/Topology/Constructions.lean", False),
+    ("l2-space",
+     coverage.MATHLIB / "Mathlib/MeasureTheory/Function/L2Space.lean",
+     "Mathlib/MeasureTheory/Function/L2Space.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "

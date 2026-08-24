@@ -179,7 +179,7 @@ The `Required representation` column is normative for certificate schema 19.
 | failed theorem candidate | Premise simplification may execute before synthesis, no-op, or orientation failure | `rewriteAttemptFailed` with its exact rule, match envelope, and nested premise programs | absent |
 | instance arguments | May synthesize typeclass arguments before premise discharge | ordered binder assignment fingerprints | implicit elaboration |
 | implicit defeq proof | Changes `proof?` and therefore local transport | recorded proof-presence mode and matching config | only indirectly inherited |
-| recursive premise simp | Runs the complete simplifier recursively | nested full `Program`, not only pre/post events | partial |
+| recursive premise simp | The default discharger removes annotations, then runs the complete simplifier recursively | incoming proposition fingerprint, deterministic `cleanupAnnotations` during replay, and nested full `Program`, not only pre/post events | partial |
 | default discharge terminals | Assumption, equation solver, recursive simp, rfl, `True`, or failed discharge | exact terminal and nested program | present for current observed subset |
 | custom discharger | Arbitrary tactic code | `deferred_custom_discharger` until separately specified | deferred |
 | `simpUsingDecide` | Fixed decision procedure with true/false outcome | `decideTrue` or `decideFalse` builtin | unidentified special event |
@@ -374,7 +374,10 @@ identifies the expression produced by the nested simplifier. The separate
 `resolvedPropositionFingerprint` identifies that original telescope
 proposition after discharge has assigned its metavariables. Replay validates
 these at entry, nested-program completion, and return respectively; they are
-not interchangeable when premise simplification resolves metavariables.
+not interchangeable when premise simplification resolves metavariables. After
+entry validation, replay applies the default discharger's deterministic
+`cleanupAnnotations` before consuming the nested simplifier program, so its
+first phase sees the same expression as recording.
 
 The `iteration` values in `preVisit`, `reductionVisit`, and `postRestart` are
 trace-local ordinals. They are allocated from recorder state and roll back with

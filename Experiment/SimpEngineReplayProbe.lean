@@ -9,6 +9,9 @@ def replayDelta (n : Nat) : Nat := n + 0
 opaque ReplayHolds : Prop → Prop
 axiom replayHoldsTrue : ReplayHolds True
 
+opaque replayMetadataIdentity : Prop → Prop
+axiom replayMetadataRule {p : Prop} (_ : p) : replayMetadataIdentity p = True
+
 opaque ReplaySeeProp : Prop → Prop
 opaque ReplaySeeFin {n : Nat} : Fin n → Prop
 opaque ReplayDepends {p : Prop} : p → Prop
@@ -149,6 +152,37 @@ elab "check_user_congruence_premise_replay" : tactic => withMainContext do
   ExplicitLean.SimpEngine.Replay.replayCertificate recording
   logInfo m!"SIMP_ENGINE_REPLAY branches={String.intercalate "," recording.branches.toList}"
 
+elab "check_metadata_discharge_replay" : tactic => withMainContext do
+  let metadataTrue := mkMData MData.empty (mkConst ``True)
+  let target := mkApp (mkConst ``replayMetadataIdentity) metadataTrue
+  let simpStx ← `(tactic| simp only [replayMetadataRule])
+  let { ctx, simprocs, dischargeWrapper, .. } ←
+    mkSimpContext simpStx (eraseLocal := false)
+  let (recording, replayed) ← dischargeWrapper.with fun discharge? => do
+    let methods := match discharge? with
+      | none => Simp.Engine.mkDefaultMethodsCore simprocs
+      | some discharge => Simp.Engine.mkMethods simprocs discharge
+          (wellBehavedDischarge := false)
+    let (_, _, recording) ←
+      Simp.Engine.mainCoreRecording target ctx (methods := methods)
+    let config ← Simp.Engine.replayConfigOfContext ctx
+    let (replayed, _) ← Simp.Engine.mainCoreReplay target ctx config recording.program
+    pure (recording, replayed)
+  let mut foundPremise := false
+  for event in recording.program.events do
+    match event.operation with
+    | .rewrite rule _ premises =>
+        if rule.origin == .decl ``replayMetadataRule then
+          for premise in premises do
+            if premise.terminal == .isTrue then
+              foundPremise := true
+    | _ => pure ()
+  unless foundPremise do
+    throwError "metadata fixture did not record a default-discharge premise"
+  unless replayed.expr.isTrue do
+    throwError "metadata fixture closed replay did not reach True: {replayed.expr}"
+  logInfo m!"SIMP_ENGINE_REPLAY metadataDischarge=closed"
+
 elab "check_ground_equation_replay" : tactic => withMainContext do
   let simpStx ← `(tactic| simp (config := { zeta := false }) +ground)
   let recording ← ExplicitLean.SimpEngine.Recording.recordCertificate simpStx.raw
@@ -225,6 +259,10 @@ example (n : Nat) : replayVariantSecond n = n := by
 example : ReplayHolds (True ∧ True) := by
   check_user_congruence_premise_replay
   exact replayHoldsTrue
+
+example : True := by
+  check_metadata_discharge_replay
+  trivial
 
 example (h : ReplaySeeProp (∀ x : True ∧ True, ReplayDepends x)) :
     ReplaySeeProp (∀ x : True ∧ True, ReplayDepends x) := by
