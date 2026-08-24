@@ -123,6 +123,10 @@ Structural traversal recursively calls either `simp` or `dsimp`. `dsimp` is a
 different state machine based on `transformWithCache`: it has `dpre` and
 `dpost`, skips selected instance arguments, introduces locals for telescopes,
 and runs repeated definitional reduction after `dpost`.
+Each recorded dsimp phase outcome covers the complete upstream phase pipeline:
+`dpre` includes the fixed literal/proof guards, and `dpost` includes
+definitional reduction. Replay executes the recorded phase program directly;
+it does not append those fixed stages a second time.
 
 This means that a flat list of successful `pre`/`post` callbacks is not an
 execution model. It is only one projection of the execution.
@@ -583,6 +587,11 @@ cache-relevant work. Their failure is replayed before the next candidate. A
 candidate with no executable progress is omitted; call frames, phase outcomes,
 and certificate-driven cache hits ensure that omitted meta allocation identity
 cannot become replay semantics.
+Upstream catches hypothesis-processing exceptions while it speculatively tries
+user congruence candidates. Replay retains that behavior only for a recorded
+failed attempt. Once the certificate selects a successful candidate, nested
+replay-validation failures propagate instead of being misclassified as a new
+candidate failure and hidden behind a match-envelope mismatch.
 
 ### 8.3 Premises
 
@@ -680,8 +689,8 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and six complete Mathlib modules contain
-106 occurrences: 31 materialize across 32 successful executions, 74 are
+copies are compiled. The focused fixture and seven complete Mathlib modules
+contain 187 occurrences: 81 materialize across 105 successful executions, 105 are
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
@@ -691,7 +700,9 @@ during source materialization. A source-only engine-schema mutation is rejected
 before replay. A trailing `+contextual` fixture requires multiline certificate
 payloads to preserve the tactic's offside-rule column. `EventuallyConst.lean`
 retains a cache-hit regression in which the producer's binder is no longer in
-the local context at the later hit.
+the local context at the later hit. `Ordinal/Notation.lean` retains the
+successful `ite_congr`/auto-congruence case where a nested dsimp phase must
+explicitly unfold numeric literals exactly once.
 
 ### E5. Pre-cloud completeness review
 

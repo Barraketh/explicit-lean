@@ -1737,8 +1737,13 @@ private partial def dsimpImpl (e : Expr) : EngineM Expr := do
     unless cfg.dsimp do
       return e
     let m ← getMethods
-    let pre := m.dpre >> doNotVisitOfNat >> doNotVisitOfScientific >> doNotVisitCharLit >> doNotVisitProofs
-    let post := m.dpost >> dsimpReduce
+    -- Recording observes the complete upstream phase pipelines below, so a
+    -- replay `dpre`/`dpost` already denotes their final recorded outcome.
+    -- Appending the fixed stages again would execute literal guards and
+    -- definitional reduction twice after every replayed phase.
+    let pre := if runtime.mode == .replay then m.dpre else
+      m.dpre >> doNotVisitOfNat >> doNotVisitOfScientific >> doNotVisitCharLit >> doNotVisitProofs
+    let post := if runtime.mode == .replay then m.dpost else m.dpost >> dsimpReduce
     withInDSimpWithCache fun cache => do
       dsimpTransformWithCache e cache pre post
         (usedLetOnly := cfg.zeta || cfg.zetaUnused)
@@ -1998,7 +2003,8 @@ private structure UserCongruenceAttempt where
 
 /-- Try to rewrite `e` children using the given congruence theorem. -/
 private def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr)
-    (expectedPremises? : Option (Array PremiseProgram) := none) :
+    (expectedPremises? : Option (Array PremiseProgram) := none)
+    (replayExpectsSuccess : Bool := false) :
     EngineM (Option UserCongruenceAttempt) := withNewMCtxDepth do withParent e do
   recordCongrTheorem c.theoremName
   trace[Debug.Meta.Tactic.simp.congr] "{c.theoremName}, {e}"
@@ -2045,7 +2051,13 @@ private def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr)
         if (← withPath (.userCongrHypothesis c.theoremName i) <|
             processCongrHypothesis h hType) then
           modified := true
-      catch _ =>
+      catch ex =>
+        -- Upstream treats any ordinary hypothesis-processing exception as a
+        -- failed congruence candidate.  A certificate-selected successful
+        -- candidate is no longer speculative, however: swallowing a nested
+        -- replay validation error would disguise the real divergence as a
+        -- later match-envelope mismatch.
+        if replayExpectsSuccess then throw ex
         trace[Meta.Tactic.simp.congr] "processCongrHypothesis {c.theoremName} failed {hType}"
         -- Remark: we don't need to check ex.isMaxRecDepth anymore since `try .. catch ..`
         -- does not catch runtime exceptions by default.
@@ -2081,11 +2093,11 @@ private partial def replayCongruence (e : Expr) (invocationOrdinal : Nat) : Engi
         let candidate ← mkSimpCongrTheorem theoremName priority
         unless candidate.hypothesesPos == hypotheses do
           throwError "replay_user_congruence_shape_mismatch: {theoremName}"
-        let some attempt ← trySimpCongrTheorem? candidate e (some premises)
+        let some attempt ← trySimpCongrTheorem? candidate e (some premises) true
           | throwError "replay_user_congruence_failed: {theoremName}"
         unless attempt.theoremFingerprint == theoremFingerprint &&
             attempt.matchEnvelope == envelope do
-          throwError "replay_user_congruence_match_mismatch: {theoremName}"
+          throwError "replay_user_congruence_match_mismatch: {theoremName}; expectedTheorem={theoremFingerprint}; actualTheorem={attempt.theoremFingerprint}; expectedEnvelope={repr envelope}; actualEnvelope={repr attempt.matchEnvelope}"
         let some result := attempt.result?
           | throwError "replay_user_congruence_failed: {theoremName}"
         emitStructural (.congruence invocationOrdinal (.user theoremName priority hypotheses
@@ -2099,7 +2111,7 @@ private partial def replayCongruence (e : Expr) (invocationOrdinal : Nat) : Engi
           | throwError "replay_expected_user_congruence_attempt: {theoremName}"
         unless attempt.theoremFingerprint == theoremFingerprint &&
             attempt.matchEnvelope == envelope do
-          throwError "replay_user_congruence_match_mismatch: {theoremName}"
+          throwError "replay_user_congruence_match_mismatch: {theoremName}; expectedTheorem={theoremFingerprint}; actualTheorem={attempt.theoremFingerprint}; expectedEnvelope={repr envelope}; actualEnvelope={repr attempt.matchEnvelope}"
         if attempt.result?.isSome then
           throwError "replay_expected_user_congruence_failure: {theoremName}"
         emitStructural (.congruence invocationOrdinal

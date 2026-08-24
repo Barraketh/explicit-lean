@@ -30,6 +30,8 @@ FIXTURES = (
      "Mathlib/Algebra/Ring/InjSurj.lean", False),
     ("pfunctor-m", coverage.MATHLIB / "Mathlib/Data/PFunctor/Multivariate/M.lean",
      "Mathlib/Data/PFunctor/Multivariate/M.lean", False),
+    ("ordinal-notation", coverage.MATHLIB / "Mathlib/SetTheory/Ordinal/Notation.lean",
+     "Mathlib/SetTheory/Ordinal/Notation.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "
