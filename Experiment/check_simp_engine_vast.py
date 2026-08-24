@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import inspect
 
+import simp_engine_cloud as cloud
 import simp_engine_vast as vast
 import simp_engine_vast_worker as worker
 
@@ -73,13 +74,19 @@ def main() -> None:
         "reportSchema": 1,
         "commit": "a" * 40,
         "mathlibCommit": "b" * 40,
-        "engine": {"certificateSchema": 17},
+        "engine": dict(cloud.ENGINE_ID),
         "moduleFileCount": 1,
         "occurrenceCount": 1,
         "modules": [{"occurrences": [{}]}],
     }
     if vast.validate_reusable_inventory(inventory_fixture, "a" * 40, "b" * 40) is not inventory_fixture:
         raise RuntimeError("valid reusable inventory was not accepted")
+    prior_schema = {
+        **inventory_fixture,
+        "engine": {**cloud.ENGINE_ID, "certificateSchema": 17},
+    }
+    if vast.validate_reusable_inventory(prior_schema, "a" * 40, "b" * 40) is not prior_schema:
+        raise RuntimeError("schema-independent syntax census was not reusable")
     try:
         vast.validate_reusable_inventory(inventory_fixture, "c" * 40, "b" * 40)
     except RuntimeError as error:
@@ -118,7 +125,7 @@ def main() -> None:
     if "ulimit -n 65536" not in setup or 'test "$(ulimit -n)" -ge 65536' not in setup:
         raise RuntimeError("Vast setup does not protect parallel cache extraction")
     print(
-        "schema-17 Vast scheduler: 256 shards covered once; "
+        "schema-18 Vast scheduler: 256 shards covered once; "
         "memory, host, progress, and price guards: ok"
     )
 

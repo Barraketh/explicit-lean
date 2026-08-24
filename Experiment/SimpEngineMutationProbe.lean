@@ -85,6 +85,9 @@ elab "check_replay_mutations" ha:ident hb:ident : tactic => withMainContext do
     event with phase := .dpost }
   expectReplayReject "rule variant" <| replaceEvent recording eventIndex {
     event with operation := .rewrite { rule with variant := rule.variant + 1 } envelope premises }
+  expectReplayReject "rule extra arguments" <| replaceEvent recording eventIndex {
+    event with operation := .rewrite {
+      rule with numExtraArgs := rule.numExtraArgs + 1 } envelope premises }
   expectReplayReject "operation" <| replaceEvent recording eventIndex {
     event with operation := .reduce .beta }
   expectReplayReject "match envelope" <| replaceEvent recording eventIndex {
@@ -101,7 +104,7 @@ elab "check_replay_mutations" ha:ident hb:ident : tactic => withMainContext do
   expectReplayReject "final fingerprint" <| replaceFirstSubject recording {
     subject with program.finalFingerprint := "mutated" }
 
-  logInfo "SIMP_ENGINE_MUTATIONS core=9"
+  logInfo "SIMP_ENGINE_MUTATIONS core=10"
 
 elab "check_replay_structural_mutations" : tactic => withMainContext do
   let simpStx ← `(tactic| simp only [Nat.add_zero])

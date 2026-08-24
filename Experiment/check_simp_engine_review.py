@@ -29,15 +29,15 @@ REVIEWED_FILES = (
 # These values are changed only after a new source-level completeness review.
 REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine.lean":
-        "70c98d057b9b3da087c10ed197ca836fdad9dab348b7843bcf5da7ad1379cd9e",
+        "28b4e26af59eb50601759d21d3100f7430adb391862b89480d79df9883d5ad64",
     "ExplicitLean/SimpEngine/Fingerprint.lean":
         "e2c1e4547133fee8e4a18bcd07de4fde3036e5b5fde9b8240e0a5fe01b4863ff",
     "ExplicitLean/SimpEngine/IR.lean":
-        "85e3b9004bf227e6b7bb777471543161aa776cd0ed7db8296e84ee5eca0d3dac",
+        "9d6e711ae4968f6e7715a9c290c7f11f6e5739655f1232b3bdbcaa6f1ed43e1d",
     "ExplicitLean/SimpEngine/Inventory.lean":
         "d08cefcb506f63b29c8c91f53fa089177d17b501473af554c4adf6c4002a44e8",
     "ExplicitLean/SimpEngine/Recording.lean":
-        "1d5b3ab8ed2cc64d4ed8733b54d891d69d51edf8fa0c382e94efe7edf863e926",
+        "8269088fad40ced5eaf841af36ef6d1ec96ad30106c223e7d1c66b7ced9678e1",
     "ExplicitLean/SimpEngine/Reference.lean":
         "e3f59c3a7c5f01dec5a700eda0dad5d08199df7adee4ff557e548f4b5fca6bb0",
     "ExplicitLean/SimpEngine/Replay.lean":
@@ -45,15 +45,15 @@ REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine/Runtime.lean":
         "5935c0f152933590a8a3d8fa6c6a67cb1b8cfcdb1f6c9dc588e712a78593627a",
     "ExplicitLean/SimpEngine/Source.lean":
-        "7177faa4193c50ccbfab06fa9bba114748c8d0953714fdb4b62711d16fc4ea18",
+        "31d9f86a57c72140a356e49272b8b55469f142483bc89821e3f53ff0140b53ce",
     "SIMP_ENGINE_COVERAGE.md":
-        "d995059eafa30d9bb489e60709af8d7311194a84dcf77e885774dcf44b1b0dbb",
+        "a99f2471f42f44f00164f84604a48e2c51ffc83c14dce8683c430b4c06f541e7",
 }
 EXPECTED_LINEAGE_DIGEST = (
-    "789b8ce55475bffdf2a6088c13d0d5d3af8a43ed7d8c5fc50c3c6393c003fee9"
+    "763d8c84bb393d353579ccfa322ed445df45930c6f301e56ca69b3fe507d9080"
 )
 EXPECTED_CONTROLLED_DIGEST = (
-    "4468214d507659884927cc3d61d0a4b5592905a01208831d21842b38985155bd"
+    "ed1270378c394f6a91a33235c4e9566fcef65f93fcba73199fa1321b1a08be45"
 )
 EXPECTED_DECLARATION_COUNT = 227
 
@@ -279,7 +279,7 @@ def main() -> None:
     if found:
         raise RuntimeError(f"unidentified or ambient operations returned: {found}")
     print(
-        "schema-17 source review: "
+        "schema-18 source review: "
         f"{current['lineageCount']} upstream-lineage declarations, "
         f"{current['controlledCount']} controlled declarations: ok"
     )

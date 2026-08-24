@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory, shard, materialize, and reduce the full schema-17 Mathlib run."""
+"""Inventory, shard, materialize, and reduce the full schema-18 Mathlib run."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import simp_engine_inventory as coverage
 ROOT = Path(__file__).resolve().parents[1]
 MATHLIB = coverage.MATHLIB
 REPORT_SCHEMA = 1
-CERTIFICATE_SCHEMA = 17
+CERTIFICATE_SCHEMA = 18
 ENGINE_ID = {
     "leanVersion": pin.LEAN_VERSION,
     "leanCommit": pin.LEAN_COMMIT,
@@ -288,7 +288,7 @@ def build_inventory(args: argparse.Namespace) -> None:
     }
     json_write(Path(args.output), inventory)
     print(
-        "schema-17 cloud inventory: "
+        "schema-18 cloud inventory: "
         f"{inventory['moduleFileCount']} files, "
         f"{inventory['inventoriedModuleCount']} modules with occurrences, "
         f"{inventory['occurrenceCount']} occurrences, "
@@ -860,7 +860,7 @@ def run_shard(args: argparse.Namespace) -> None:
     if (output / "work").exists():
         shutil.rmtree(output / "work")
     print(
-        f"schema-17 cloud shard {args.shard_index}/{args.shard_count}: "
+        f"schema-18 cloud shard {args.shard_index}/{args.shard_count}: "
         f"{len(report['modules'])}/{len(assigned)} modules reported"
     )
     if report["stoppedAfterFailure"] is not None:
@@ -1091,7 +1091,7 @@ def reduce_reports(args: argparse.Namespace) -> int:
         "\n".join(markdown) + "\n", encoding="utf-8"
     )
     print(
-        "schema-17 full closure: "
+        "schema-18 full closure: "
         f"{len(actual_occurrences)}/{len(expected_occurrences)} occurrences, "
         f"terminals={dict(terminal_counts)}, failures={len(failures)}"
     )

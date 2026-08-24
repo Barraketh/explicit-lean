@@ -133,7 +133,7 @@ execution model. It is only one projection of the execution.
 
 ## 4. Implementation-to-IR coverage matrix
 
-The `Required representation` column is normative for certificate schema 17.
+The `Required representation` column is normative for certificate schema 18.
 
 | Upstream site | Committed behavior | Required representation | Schema 15 |
 | --- | --- | --- | --- |
@@ -174,7 +174,7 @@ The `Required representation` column is normative for certificate schema 17.
 | `dsimpReduce` | Repeats all definitional reductions, then `reduceFVar` | the same exact reduction vocabulary in dsimp mode | absent |
 | dsimp transform | Uses a separate cache, telescope reconstruction, `usedLetOnly`, and instance skipping | `DSimpPath` structural witnesses and config | implicit |
 | theorem preprocessing | One source rule may produce several actual simp theorems, and equation theorems may be generated lazily | source declaration/equation index when needed, lhs/rule fingerprints, and an ordinal among fingerprint-identical variants | all variants retried under one origin |
-| indexed rewrite | Discrimination lookup, priority, erased set, extra args | selected rule plus `index` mode and variant | mostly present |
+| indexed rewrite | Discrimination lookup, priority, erased set, extra args | selected rule plus `index` mode, variant, and exact `numExtraArgs` | mostly present |
 | theorem match | Unification, permutation orientation, binder hints, no-op rejection | match/instantiation envelope fingerprints | result-only validation |
 | failed theorem candidate | Premise simplification may execute before synthesis, no-op, or orientation failure | `rewriteAttemptFailed` with its exact rule, match envelope, and nested premise programs | absent |
 | instance arguments | May synthesize typeclass arguments before premise discharge | ordered binder assignment fingerprints | implicit elaboration |
@@ -266,6 +266,7 @@ structure RuleRef where
   ruleFingerprint : String
   lhsFingerprint : String
   indexMode : Bool
+  numExtraArgs : Nat
 
 structure MatchEnvelope where
   binderAssignments : Array String
@@ -377,12 +378,12 @@ failed-attempt witness is retained so replay executes the same cache producer.
 
 ### 5.1 What is and is not source
 
-The schema-17 source payload is compact JSON embedded in a shallow Lean array
+The schema-18 source payload is compact JSON embedded in a shallow Lean array
 of string literals:
 
 ```lean
 simp_engine_apply "occurrence-id"
-  (certificates := #["{...schema-17 certificate...}", ...]) originalSimpArgs
+  (certificates := #["{...schema-18 certificate...}", ...]) originalSimpArgs
 ```
 
 The JSON contains the complete path-qualified operations and structural
@@ -653,7 +654,7 @@ proof-state mismatch.
 
 ### E2. Total structured recorder
 
-- Add schema-17 paths, structural witnesses, all four phases, total reduction
+- Add schema-18 paths, structural witnesses, all four phases, total reduction
   identities, exact congruence choices, rule variants, match envelopes, and
   full nested premise programs.
 - Add exact simproc/dsimproc observation and deferred classification.
@@ -679,26 +680,26 @@ operation, rule variant, congruence choice, config, premise order, or terminal
 fail at the mutated item.
 
 Status: complete. The focused suite replays 37 dynamic branch classes and
-rejects 20 targeted mutations. Complete-module classification and replay are
+rejects 21 targeted mutations. Complete-module classification and replay are
 tested once through the source materialization gate instead of a parallel
 record/replay harness.
 
 ### E4. Source and materializer migration
 
-- Print and parse the schema-17 source form.
+- Print and parse the schema-18 source form.
 - Include engine id, rule fingerprints, and final-state validation.
 - Switch passive recording and context programs to the new engine.
 - Keep the source and materializer independent of removed historical bridge
   and selector-discovery implementations.
 
 Gate: all existing non-simproc focused/production fixtures materialize through
-schema 17 with zero bridge, generated-proof, presentation, or whole-result
+schema 18 with zero bridge, generated-proof, presentation, or whole-result
 metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and nine complete Mathlib modules
-contain 320 occurrences: 147 materialize across 171 successful executions, 172 are
+copies are compiled. The focused fixture and ten complete Mathlib modules
+contain 334 occurrences: 156 materialize across 180 successful executions, 177 are
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
@@ -716,6 +717,9 @@ mentions a let-bound set after the recorded subject explicitly unfolds it.
 `AlgebraicGeometry/Morphisms/SurjectiveOnStalks.lean` retains structure
 projection reductions whose major expression exposes a constructor only after
 zeta-delta reduction of an explicitly supplied local let declaration.
+`Data/Multiset/Functor.lean` retains eta-expanded authored rewrite rules whose
+discrimination-index result supplies an extra-argument count that cannot be
+reconstructed from the rule lhs application arity.
 
 ### E5. Pre-cloud completeness review
 
@@ -737,7 +741,7 @@ fingerprinting, record/replay, source, inventory, reference adapter, and
 coverage contract. The
 review fixed every discrepancy it found before rerunning the complete local
 gate; section 4 has 54 machine-bound rows and no partial, implicit, or absent
-schema-17 representation.
+schema-18 representation.
 
 ### E6. Full cloud closure
 
@@ -852,8 +856,9 @@ completeness review.
 ## 12. Decisions
 
 - Schema 15 remains only in Git history and is not a simplifier IR dependency.
-- Schema 17 is the current certificate format; it adds bounded DAG
-  fingerprinting and lossless dictionary encoding for ordered simproc traces.
+- Schema 18 is the current certificate format; in addition to schema 17's
+  bounded DAG fingerprinting and lossless simproc dictionary encoding, it
+  records the exact extra-argument count selected by theorem indexing.
 - E1 through E5 and the E6 cloud infrastructure are complete; the full E6
   corpus result is pending.
 - The correctness boundary is a pinned source fork with record and replay

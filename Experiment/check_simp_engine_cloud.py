@@ -211,7 +211,7 @@ def main() -> None:
             if cloud.reduce_reports(reducer_args(root)) == 0:
                 raise RuntimeError("missing shard was accepted")
     print(
-        "schema-17 cloud harness: package options and nested rewrite preserved, "
+        "schema-18 cloud harness: package options and nested rewrite preserved, "
         "total report accepted, mutations rejected: ok"
     )
 

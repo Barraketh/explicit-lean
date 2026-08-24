@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile the schema-17 recorder probe and require key dynamic observers."""
+"""Compile the schema-18 recorder probe and require key dynamic observers."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def main() -> None:
         raise RuntimeError("unobserved_transition: " + ", ".join(missing) + "\n" + run.stdout)
     if not subject_counts or max(subject_counts) < 2:
         raise RuntimeError("subject_transport_unobserved\n" + run.stdout)
-    print(f"schema-17 recording probe: {len(observed)} dynamic branches: ok")
+    print(f"schema-18 recording probe: {len(observed)} dynamic branches: ok")
 
 
 if __name__ == "__main__":

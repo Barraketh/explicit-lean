@@ -22,7 +22,7 @@ in [SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md).
 The implementation is a pinned copy of Lean's simplifier with three modes:
 
 - reference mode, which must be observationally equivalent to upstream;
-- recording mode, which emits schema-17 operations and structural witnesses at
+- recording mode, which emits schema-18 operations and structural witnesses at
   the engine's commit points; and
 - replay mode, which consumes that program without ambient simp theorems,
   congruence rules, simprocs, or dischargers.
@@ -44,7 +44,7 @@ Each package is committed before work begins on the next.
 
 ### E2. Total structured recorder — complete
 
-- Schema 17 represents all structural paths in the pinned engine audit, exact
+- Schema 18 represents all structural paths in the pinned engine audit, exact
   rule variants and matches, nested premise programs, reductions, congruence
   choices, subject transport, and final state.
 - Every invoked simp and dsimp simproc candidate, including `continue none`, is
@@ -66,14 +66,14 @@ Each package is committed before work begins on the next.
 
 Gate: every focused non-deferred recording replays; every mutation is rejected.
 
-Status: complete. The focused suite replays 37 dynamic branch classes and 20
+Status: complete. The focused suite replays 37 dynamic branch classes and 21
 single-field mutations are rejected. Complete-module recording, replay, and
 classification are owned by the source gate below rather than a second replay
 harness.
 
 ### E4. Certificate source and materializer — complete
 
-- Define and parse a stable schema-17 source form.
+- Define and parse a stable schema-18 source form.
 - Print qualified rule identities, engine/configuration identity, nested premise
   programs, and final-state validation.
 - Instrument all supported calls in a module once, materialize replacements in
@@ -82,7 +82,7 @@ harness.
 Gate: every focused and bounded-production non-deferred execution materializes,
 and the complete copied modules compile.
 
-Status: complete. Schema 17 is serialized as compact JSON inside shallow Lean
+Status: complete. Schema 18 is serialized as compact JSON inside shallow Lean
 string arrays. Every payload is decoded and compared structurally with the
 recorded certificate before it is written; `Name` values use lossless
 string/numeric components rather than Lean's lossy default JSON codec. A source
@@ -90,8 +90,8 @@ occurrence that executes more than once carries one certificate per distinct
 initial proof state and selects without a mutable execution counter. Nested
 occurrences are instrumented by replacing only their `simp` token; rule-origin
 identity canonicalizes the recording/materialization wrappers without executing
-ambient simp. The source gate covers 320 occurrences in ten complete module
-copies: 147 materialize across 171 successful executions, 172 are explicitly
+ambient simp. The source gate covers 334 occurrences in eleven complete module
+copies: 156 materialize across 180 successful executions, 177 are explicitly
 simproc-deferred, and one executes unsuccessfully under `first`. A mutated
 engine identity is rejected before replay. Multiline certificate source keeps
 trailing tactic configuration to the right of the original tactic column, as
@@ -120,7 +120,7 @@ theorem-variant selection, stable
 lazy-equation origins, generated- and user-congruence identity, match-attempt
 rollback, ground-context isolation, and reduction/builtin eligibility. The
 focused recorder covers 42 dynamic branch classes, focused replay covers 37,
-and 20 independent certificate mutations are rejected.
+and 21 independent certificate mutations are rejected.
 
 ### E6. Full cloud closure
 
@@ -179,7 +179,7 @@ only tests that provide confidence in that engine:
 5. focused dynamic recording coverage;
 6. focused closed replay;
 7. single-field replay mutation rejection;
-8. schema-17 source round-trip and complete-module upstream comparison,
+8. schema-18 source round-trip and complete-module upstream comparison,
    classification, replay, and materialization; and
 9. cloud shard assignment and strict reducer mutation rejection; and
 10. total Vast worker assignment, unique-host selection, SSH parsing, and

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run schema-17 full closure in parallel on verified Vast.ai CPU capacity."""
+"""Run schema-18 full closure in parallel on verified Vast.ai CPU capacity."""
 
 from __future__ import annotations
 
@@ -13,12 +13,13 @@ import os
 from pathlib import Path
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import time
 from typing import Any
 from urllib.parse import urlparse
+
+import simp_engine_cloud as cloud
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -547,8 +548,11 @@ def validate_reusable_inventory(
             f"{value.get('mathlibCommit')} != {expected_mathlib_commit}"
         )
     engine = value.get("engine")
-    if not isinstance(engine, dict) or engine.get("certificateSchema") != 17:
-        raise RuntimeError("reusable inventory does not target certificate schema 17")
+    if not isinstance(engine, dict) or any(
+        engine.get(field) != cloud.ENGINE_ID[field]
+        for field in ("leanVersion", "leanCommit")
+    ):
+        raise RuntimeError("reusable inventory does not target the pinned Lean engine")
     modules = value.get("modules")
     if not isinstance(modules, list) or len(modules) != value.get("moduleFileCount"):
         raise RuntimeError("reusable inventory module count is inconsistent")
@@ -596,11 +600,12 @@ def reuse_inventory(args: argparse.Namespace, output: Path) -> None:
         raise RuntimeError(
             f"reusable inventory inputs changed between {source_commit} and {args.commit}"
         )
-    if source_commit == args.commit:
-        shutil.copyfile(source, output / "inventory.json")
-        return
     rebound = dict(value)
     rebound["commit"] = args.commit
+    # The syntax census is independent of certificate serialization.  Once its
+    # declared inputs are unchanged, bind the reused census to the current
+    # engine identity rather than carrying the source run's schema forward.
+    rebound["engine"] = dict(cloud.ENGINE_ID)
     rebound["reusedFromCommit"] = source_commit
     rebound["reusedAt"] = utc_now()
     validate_reusable_inventory(rebound, args.commit, current_mathlib_commit())

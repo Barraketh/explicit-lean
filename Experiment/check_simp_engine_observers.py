@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mechanically bind every coverage-matrix row to schema-17 implementation text."""
+"""Mechanically bind every coverage-matrix row to schema-18 implementation text."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ OBSERVERS: dict[str, tuple[str, ...]] = {
     "`dsimpReduce`": ("private def dsimpReduce", "reduceFVar"),
     "dsimp transform": ("struct.dsimpTransform", "struct.dsimpCacheHit", "dsimpStateSources", "replay_dsimp_cache_provenance_mismatch"),
     "theorem preprocessing": ("exactRuleVariant", "ruleFingerprint", "lhsFingerprint", ".equation declName equationIndex"),
-    "indexed rewrite": ("getMatchWithExtra", "getMatchLiberal", "indexMode"),
+    "indexed rewrite": ("getMatchWithExtra", "getMatchLiberal", "indexMode", "numExtraArgs"),
     "theorem match": ("MatchEnvelope", "binderAssignments", "thm.perm", "resolveBinderNameHint"),
     "failed theorem candidate": ("rewrite.attemptFailed", ".rewriteAttemptFailed rule envelope premises"),
     "instance arguments": ("instanceAssignments", "synthesizeInstance", "skipAssignedInstances"),
@@ -103,7 +103,7 @@ def main() -> None:
             failures.append(f"{row}: {missing}")
     if failures:
         raise RuntimeError("unobserved_transition:\n" + "\n".join(failures))
-    print(f"schema-17 observer audit: {len(rows)} matrix rows: ok")
+    print(f"schema-18 observer audit: {len(rows)} matrix rows: ok")
 
 
 if __name__ == "__main__":

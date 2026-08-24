@@ -2477,8 +2477,14 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
     extraArgs := extraArgs.push subject.appArg!
     subject := subject.appFn!
   extraArgs := extraArgs.reverse
+  let matchState ← if replaySelected then some <$> Meta.saveState else pure none
   let lhsMatches ← withSimpMetaConfig <| isDefEq lhs subject
   let lhsMatches ← if lhsMatches || !replaySelected then pure lhsMatches else
+    -- A failed `isDefEq` attempt may leave partial metavariable assignments.
+    -- The zeta-delta retry is a distinct matching strategy, so it must start
+    -- from the exact state preceding the ordinary match.
+    let some matchState := matchState | unreachable!
+    matchState.restore
     withSimpMetaConfig <| withConfig (fun config => { config with zetaDelta := true }) <|
       isDefEq lhs subject
   unless lhsMatches do
@@ -2504,6 +2510,7 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
       ruleFingerprint
       lhsFingerprint
       indexMode
+      numExtraArgs
     }, {
       binderAssignments
       instanceAssignments
@@ -2717,7 +2724,8 @@ private def applyRecordedRule (e : Expr) (rule : RuleRef) : EngineM Result := do
         matchingOrdinal := matchingOrdinal + 1
         continue
       let override? := if rule.origin matches .equation .. then some rule.origin else none
-      let some result ← tryTheoremRecorded? e thm rule.variant rule.indexMode override? true
+      let some result ← tryTheoremWithExtraArgsRecorded? e thm rule.numExtraArgs
+          (pure rule.variant) rule.indexMode override? true
         | throwError "replay_recorded_rule_did_not_apply: {rule.source}"
       return result
   throwError "replay_recorded_rule_not_resolved: {rule.source}"
@@ -2732,7 +2740,8 @@ private def applyRecordedRuleAttempt (e : Expr) (rule : RuleRef) : EngineM Unit 
         continue
       let cursor := (← getRecorderState).eventCursor
       let override? := if rule.origin matches .equation .. then some rule.origin else none
-      if (← tryTheoremRecorded? e thm rule.variant rule.indexMode override? true).isSome then
+      if (← tryTheoremWithExtraArgsRecorded? e thm rule.numExtraArgs
+          (pure rule.variant) rule.indexMode override? true).isSome then
         throwError "replay_expected_failed_rule_attempt: {rule.source}"
       unless (← getRecorderState).eventCursor > cursor do
         throwError "replay_failed_rule_attempt_not_consumed: {rule.source}"

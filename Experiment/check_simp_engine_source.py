@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Round-trip schema-17 source and compile focused/bounded materialized modules."""
+"""Round-trip schema-18 source and compile focused/bounded materialized modules."""
 
 from __future__ import annotations
 
@@ -37,6 +37,8 @@ FIXTURES = (
     ("surjective-on-stalks",
      coverage.MATHLIB / "Mathlib/AlgebraicGeometry/Morphisms/SurjectiveOnStalks.lean",
      "Mathlib/AlgebraicGeometry/Morphisms/SurjectiveOnStalks.lean", False),
+    ("multiset-functor", coverage.MATHLIB / "Mathlib/Data/Multiset/Functor.lean",
+     "Mathlib/Data/Multiset/Functor.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "
@@ -235,7 +237,7 @@ def main() -> None:
         unsuccessful_total += sum(unsuccessful.values())
         execution_total += sum(expected.values())
     print(
-        "schema-17 source materialization: "
+        "schema-18 source materialization: "
         f"{len(FIXTURES)} modules, {occurrence_total} occurrences, "
         f"{materialized_total} materialized, {deferred_total} deferred, "
         f"{unsuccessful_total} unsuccessful, {execution_total} executions, "
