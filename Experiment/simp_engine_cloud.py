@@ -499,6 +499,22 @@ def classify_deferred(reasons: set[str]) -> str:
     return "recording_failure"
 
 
+def classify_occurrence_executions(
+    executions: list[dict[str, Any]], unsuccessful_executions: int
+) -> str | None:
+    """Return a terminal outcome, or `None` when every execution can materialize."""
+    if executions:
+        reasons = {
+            reason
+            for execution in executions
+            for reason in execution["deferredReasons"]
+        }
+        return classify_deferred(reasons) if reasons else None
+    if unsuccessful_executions:
+        return "unsuccessful_execution"
+    return "not_executed"
+
+
 def compile_diagnostic_group(
     output: Path,
     module: str,
@@ -677,17 +693,13 @@ def process_module(
             for reason in execution["deferredReasons"]
         }
         occurrence_result["deferredReasons"] = sorted(all_reasons)
-        deferred_executions = sum(bool(item["deferredReasons"]) for item in execution_records)
-        if execution_records and deferred_executions == 0:
+        terminal = classify_occurrence_executions(
+            execution_records, unsuccessful[occurrence_id]
+        )
+        if terminal is None:
             selected.add(occurrence_id)
-        elif execution_records and deferred_executions != len(execution_records):
-            occurrence_result["terminal"] = "mixed_deferred_execution"
-        elif execution_records:
-            occurrence_result["terminal"] = classify_deferred(all_reasons)
-        elif unsuccessful[occurrence_id]:
-            occurrence_result["terminal"] = "unsuccessful_execution"
         else:
-            occurrence_result["terminal"] = "not_executed"
+            occurrence_result["terminal"] = terminal
 
     materialization: dict[str, Any] | None = None
     if selected:

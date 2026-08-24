@@ -161,9 +161,10 @@ inventory is transferred once, and durable reports, logs, and failing sources
 are copied home every 30 seconds while transient `work/` trees are excluded.
 Every batch records each assigned module once and compiles one materialized
 copy for all accepted occurrences. The strict reducer rejects incomplete or
-missing batches, modules, occurrences, source or engine drift, mixed deferred
-executions, replay-count mismatches, and every recorder, harness, capacity, or
-materialization failure. Every rented instance is destroyed on success,
+missing batches, modules, occurrences, source or engine drift, mismatched
+deferred certificate/reason unions, replay-count mismatches, and every recorder,
+harness, capacity, or materialization failure. Every rented instance is
+destroyed on success,
 failure, timeout, or interruption.
 
 ## 4. Current local gate

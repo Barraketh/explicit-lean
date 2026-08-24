@@ -67,6 +67,16 @@ def main() -> None:
         "simproc", "custom_discharger"
     }:
         raise RuntimeError("combined deferred reasons were not preserved")
+    mixed_executions = [
+        {"deferredReasons": []},
+        {"deferredReasons": ["simproc"]},
+    ]
+    if cloud.classify_occurrence_executions(mixed_executions, 0) != "deferred_simproc":
+        raise RuntimeError("mixed replayable/simproc executions were not deferred as one occurrence")
+    if cloud.classify_occurrence_executions(
+        [{"deferredReasons": []}, {"deferredReasons": []}], 0
+    ) is not None:
+        raise RuntimeError("fully replayable executions were not selected for materialization")
     if cloud.module_has_failure({"errors": [], "occurrences": [{
         "terminal": "materialized"
     }]}):

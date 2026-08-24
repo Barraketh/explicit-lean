@@ -831,15 +831,16 @@ The terminal taxonomy is deliberately closed:
 
 - `materialized`: at least one successful execution, with exactly the same
   number of source replays;
-- `deferred_simproc`, `deferred_custom_discharger`, or their combination: every
-  successful execution at that occurrence crosses a separately designed
-  boundary;
+- `deferred_simproc`, `deferred_custom_discharger`, or their combination: at
+  least one successful execution at that source occurrence crosses a
+  separately designed boundary, so the occurrence as a whole remains
+  unmaterialized;
 - `unsuccessful_execution`: the occurrence ran, upstream `simp` failed, and no
   successful execution was recorded; and
 - `not_executed`: neither the success nor upstream-failure observer ran.
 
-`capacity_failure`, `mixed_deferred_execution`, `recording_failure`,
-`materialization_failure`, `harness_failure`, and `unclassified` are reportable
+`capacity_failure`, `recording_failure`, `materialization_failure`,
+`harness_failure`, and `unclassified` are reportable
 diagnostics but failing gate outcomes. A capacity failure means the batch must
 be rerun on a larger worker; it says nothing about certificate semantics.
 
