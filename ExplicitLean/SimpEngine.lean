@@ -2623,7 +2623,12 @@ private def originMatchesRule (expected : RuleOrigin) (actual : Origin) : Engine
   | _, _ => return false
 
 private def ruleMatches (expected : RuleRef) (thm : SimpTheorem) : EngineM Bool := do
-  unless ← originMatchesRule expected.origin thm.origin do return false
+  -- Equation candidates are selected by matcher and equation index in
+  -- `candidatesForRule`. Generated matcher names may change when the tactic
+  -- head is materialized, so their theorem origin is validated structurally
+  -- below instead of against the recording-time private name.
+  unless expected.origin matches .equation .. do
+    unless ← originMatchesRule expected.origin thm.origin do return false
   let (ruleFingerprint, lhsFingerprint) ← ruleShape thm
   return ruleFingerprint == expected.ruleFingerprint &&
     lhsFingerprint == expected.lhsFingerprint
@@ -2651,8 +2656,15 @@ private def candidatesForRule (e : Expr) (rule : RuleRef) : EngineM (Array SimpT
   | .decl name =>
       mkSimpTheoremFromConst name (post := phaseIsPost rule.phase) (inv := rule.inverse)
   | .equation declaration index =>
-      let some equations ← getEqnsFor? declaration
-        | throwError "replay_equation_source_missing: {declaration}"
+      let equations? ← match e.getAppFn with
+        | .const currentMatcher _ =>
+            if ← isMatcher currentMatcher then
+              pure (some (← Match.getEquationsFor currentMatcher).eqnNames)
+            else
+              getEqnsFor? declaration
+        | _ => getEqnsFor? declaration
+      let some equations := equations?
+        | throwError "replay_equation_source_missing: {declaration}; currentHead={e.getAppFn}"
       let some equation := equations[index]?
         | throwError "replay_equation_index_missing: {declaration}:{index}"
       mkSimpTheoremFromConst equation (post := phaseIsPost rule.phase)
@@ -3423,6 +3435,22 @@ private def finishAccumulatedPhaseOutcome (origin : Expr)
 
 private partial def replayPhaseStepCore (origin current : Expr)
     (accumulated? : Option Result) : EngineM Step := do
+  -- `simpMatch` emits its discriminant marker before it tries the generated
+  -- equation theorem.  Events and structural witnesses have separate
+  -- cursors, so prefer this enclosing structural operation when both streams
+  -- are poised at the same phase path; `simpMatch` will consume the equation
+  -- event itself if one succeeds.
+  if let some expected ← peekReplayStructural? then
+    if ← isCurrentReplayStructural expected then
+      match expected.witness with
+      | .matchDiscriminants _ | .matchDiscriminantsAttemptFailed _ =>
+          let step ← composePhaseStep accumulated? (← simpMatch current)
+          match step with
+          | .continue none => return ← replayPhaseStepCore origin current accumulated?
+          | .continue (some accumulated) =>
+              return ← replayPhaseStepCore origin accumulated.expr (some accumulated)
+          | step => return ← consumeReplayPhaseOutcome origin (some step)
+      | _ => pure ()
   if let some expected ← peekReplayEvent? then
     if ← isCurrentReplayEvent expected then
       assertReplayEventInput current expected
@@ -3465,13 +3493,6 @@ private partial def replayPhaseStepCore (origin current : Expr)
   if let some expected ← peekReplayStructural? then
     if ← isCurrentReplayStructural expected then
       match expected.witness with
-      | .matchDiscriminants _ | .matchDiscriminantsAttemptFailed _ =>
-          let step ← composePhaseStep accumulated? (← simpMatch current)
-          match step with
-          | .continue none => return ← replayPhaseStepCore origin current accumulated?
-          | .continue (some accumulated) =>
-              return ← replayPhaseStepCore origin accumulated.expr (some accumulated)
-          | step => return ← consumeReplayPhaseOutcome origin (some step)
       | .phaseOutcome .. =>
           return ← finishAccumulatedPhaseOutcome origin accumulated?
       | _ => pure ()

@@ -28,6 +28,8 @@ FIXTURES = (
      "Mathlib/Algebra/Polynomial/Reverse.lean", False),
     ("ring-inj-surj", coverage.MATHLIB / "Mathlib/Algebra/Ring/InjSurj.lean",
      "Mathlib/Algebra/Ring/InjSurj.lean", False),
+    ("pfunctor-m", coverage.MATHLIB / "Mathlib/Data/PFunctor/Multivariate/M.lean",
+     "Mathlib/Data/PFunctor/Multivariate/M.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "

@@ -114,7 +114,10 @@ uses the pinned seval configuration, methods, theorem environment, and an
 isolated simp cache. Replay installs the same fixed configuration with empty
 ambient rule sets, consumes the nested program under `ground`, and restores the
 outer cache. Lazily generated equation theorems inside that context are
-reconstructed from their source declaration and equation index.
+reconstructed from the matcher at the current replay expression and the
+recorded equation index, then checked against the recorded rule and lhs
+fingerprints. The recording-time matcher name is diagnostic provenance only:
+private matcher names can change when a source tactic is materialized.
 
 Structural traversal recursively calls either `simp` or `dsimp`. `dsimp` is a
 different state machine based on `transformWithCache`: it has `dpre` and
@@ -542,10 +545,12 @@ of individual private reductions inside `SimpEngine.lean`.
 The recorder stores the actual `SimpTheorem` variant that succeeded, not merely
 its `Origin`. Rule and lhs fingerprints identify the preprocessing output, and
 an ordinal disambiguates fingerprint-identical duplicates. Lazily generated
-equation rules use the stable source declaration and equation index rather than
-the temporary theorem name. Candidate ordering is relevant only while
-recording; an explicit replay operation does not consult an ambient theorem
-tree.
+equation rules retain the recording matcher for provenance and use the equation
+index as their semantic selector. Replay obtains the current matcher from the
+expression, reconstructs that indexed equation, and validates its rule and lhs
+fingerprints; it does not require generated private names to survive source
+materialization. Candidate ordering is relevant only while recording; an
+explicit replay operation does not consult an ambient theorem tree.
 
 For authored compound rule terms, replay searches only the explicit theorem set
 elaborated from the retained original arguments. Instrumentation wrappers in a
@@ -675,13 +680,14 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and three complete Mathlib modules contain 73
-occurrences: 17 materialize across 18 successful executions, 55 are explicitly
-simproc-deferred, and one executes unsuccessfully inside `first`.
+copies are compiled. The focused fixture and six complete Mathlib modules contain
+106 occurrences: 31 materialize across 32 successful executions, 74 are
+explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
-locations, configuration-driven builtins, and stable lazy-equation origins in
-an isolated ground context. A source-only engine-schema mutation is rejected
+locations, configuration-driven builtins, and lazy-equation origins in both an
+isolated ground context and a generated matcher whose private name changes
+during source materialization. A source-only engine-schema mutation is rejected
 before replay. A trailing `+contextual` fixture requires multiline certificate
 payloads to preserve the tactic's offside-rule column. `EventuallyConst.lean`
 retains a cache-hit regression in which the producer's binder is no longer in
