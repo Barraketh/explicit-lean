@@ -2459,7 +2459,8 @@ private def exactRuleVariant (preceding : Array SimpTheorem)
 private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
     (bis : Array BinderInfo) (value type e : Expr) (thm : SimpTheorem)
     (numExtraArgs : Nat) (variant : EngineM Nat) (indexMode : Bool)
-    (originOverride? : Option RuleOrigin := none) : EngineM (Option Result) := do
+    (originOverride? : Option RuleOrigin := none) (replaySelected : Bool := false) :
+    EngineM (Option Result) := do
   let recorderSaved ← saveRecorderState
   recordTriedSimpTheorem thm.origin
   let mut extraArgs := #[]
@@ -2468,7 +2469,11 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
     extraArgs := extraArgs.push subject.appArg!
     subject := subject.appFn!
   extraArgs := extraArgs.reverse
-  unless (← withSimpMetaConfig <| isDefEq lhs subject) do
+  let lhsMatches ← withSimpMetaConfig <| isDefEq lhs subject
+  let lhsMatches ← if lhsMatches || !replaySelected then pure lhsMatches else
+    withSimpMetaConfig <| withConfig (fun config => { config with zetaDelta := true }) <|
+      isDefEq lhs subject
+  unless lhsMatches do
     restoreRecorderState recorderSaved
     return none
   let makeMetadata (proofPresent : Bool) : EngineM (RuleRef × MatchEnvelope) := do
@@ -2538,7 +2543,8 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
 
 private def tryTheoremWithExtraArgsRecorded? (e : Expr) (thm : SimpTheorem)
     (numExtraArgs : Nat) (variant : EngineM Nat) (indexMode : Bool)
-    (originOverride? : Option RuleOrigin := none) : EngineM (Option Result) :=
+    (originOverride? : Option RuleOrigin := none) (replaySelected : Bool := false) :
+    EngineM (Option Result) :=
   withNewMCtxDepth do
     let value ← thm.getValue
     let type ← inferType value
@@ -2546,11 +2552,12 @@ private def tryTheoremWithExtraArgsRecorded? (e : Expr) (thm : SimpTheorem)
     let type ← whnf (← instantiateMVars type)
     let lhs := type.appFn!.appArg!
     tryTheoremCoreRecorded lhs xs bis value type e thm numExtraArgs variant indexMode
-      originOverride?
+      originOverride? replaySelected
 
 private def tryTheoremRecorded? (e : Expr) (thm : SimpTheorem)
     (variant := 0) (indexMode := true)
-    (originOverride? : Option RuleOrigin := none) : EngineM (Option Result) := do
+    (originOverride? : Option RuleOrigin := none) (replaySelected : Bool := false) :
+    EngineM (Option Result) := do
   withNewMCtxDepth do
     let value ← thm.getValue
     let type ← inferType value
@@ -2558,14 +2565,14 @@ private def tryTheoremRecorded? (e : Expr) (thm : SimpTheorem)
     let type ← whnf (← instantiateMVars type)
     let lhs := type.appFn!.appArg!
     match ← tryTheoremCoreRecorded lhs xs bis value type e thm 0 (pure variant) indexMode
-        originOverride? with
+        originOverride? replaySelected with
     | some result => return some result
     | none =>
       let lhsNumArgs := lhs.getAppNumArgs
       let eNumArgs := e.getAppNumArgs
       if eNumArgs > lhsNumArgs then
         tryTheoremCoreRecorded lhs xs bis value type e thm (eNumArgs - lhsNumArgs) (pure variant)
-          indexMode originOverride?
+          indexMode originOverride? replaySelected
       else
         return none
 
@@ -2702,7 +2709,7 @@ private def applyRecordedRule (e : Expr) (rule : RuleRef) : EngineM Result := do
         matchingOrdinal := matchingOrdinal + 1
         continue
       let override? := if rule.origin matches .equation .. then some rule.origin else none
-      let some result ← tryTheoremRecorded? e thm rule.variant rule.indexMode override?
+      let some result ← tryTheoremRecorded? e thm rule.variant rule.indexMode override? true
         | throwError "replay_recorded_rule_did_not_apply: {rule.source}"
       return result
   throwError "replay_recorded_rule_not_resolved: {rule.source}"
@@ -2717,7 +2724,7 @@ private def applyRecordedRuleAttempt (e : Expr) (rule : RuleRef) : EngineM Unit 
         continue
       let cursor := (← getRecorderState).eventCursor
       let override? := if rule.origin matches .equation .. then some rule.origin else none
-      if (← tryTheoremRecorded? e thm rule.variant rule.indexMode override?).isSome then
+      if (← tryTheoremRecorded? e thm rule.variant rule.indexMode override? true).isSome then
         throwError "replay_expected_failed_rule_attempt: {rule.source}"
       unless (← getRecorderState).eventCursor > cursor do
         throwError "replay_failed_rule_attempt_not_consumed: {rule.source}"

@@ -32,6 +32,8 @@ FIXTURES = (
      "Mathlib/Data/PFunctor/Multivariate/M.lean", False),
     ("ordinal-notation", coverage.MATHLIB / "Mathlib/SetTheory/Ordinal/Notation.lean",
      "Mathlib/SetTheory/Ordinal/Notation.lean", False),
+    ("process-stopping", coverage.MATHLIB / "Mathlib/Probability/Process/Stopping.lean",
+     "Mathlib/Probability/Process/Stopping.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "

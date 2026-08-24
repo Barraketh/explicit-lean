@@ -556,6 +556,14 @@ fingerprints; it does not require generated private names to survive source
 materialization. Candidate ordering is relevant only while recording; an
 explicit replay operation does not consult an ambient theorem tree.
 
+Certificate-selected rule application first uses upstream's ordinary matching
+configuration. If that fails, replay retries lhs unification with local-let
+unfolding enabled. This covers representation drift where the recorded subject
+has unfolded a let explicitly named in the simp arguments while the authored
+rule still mentions the local let. The retry cannot select another rule: rule
+and lhs fingerprints, variant, match envelope, output fingerprint, and phase
+outcome remain mandatory.
+
 For authored compound rule terms, replay searches only the explicit theorem set
 elaborated from the retained original arguments. Instrumentation wrappers in a
 nested tactic are normalized for origin comparison, then rule/lhs fingerprints
@@ -689,8 +697,8 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and seven complete Mathlib modules
-contain 187 occurrences: 81 materialize across 105 successful executions, 105 are
+copies are compiled. The focused fixture and eight complete Mathlib modules
+contain 309 occurrences: 142 materialize across 166 successful executions, 166 are
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
@@ -703,6 +711,8 @@ retains a cache-hit regression in which the producer's binder is no longer in
 the local context at the later hit. `Ordinal/Notation.lean` retains the
 successful `ite_congr`/auto-congruence case where a nested dsimp phase must
 explicitly unfold numeric literals exactly once.
+`Probability/Process/Stopping.lean` retains an authored local rewrite whose lhs
+mentions a let-bound set after the recorded subject explicitly unfolds it.
 
 ### E5. Pre-cloud completeness review
 

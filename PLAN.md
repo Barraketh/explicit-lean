@@ -90,8 +90,8 @@ occurrence that executes more than once carries one certificate per distinct
 initial proof state and selects without a mutable execution counter. Nested
 occurrences are instrumented by replacing only their `simp` token; rule-origin
 identity canonicalizes the recording/materialization wrappers without executing
-ambient simp. The source gate covers 187 occurrences in eight complete module
-copies: 81 materialize across 105 successful executions, 105 are explicitly
+ambient simp. The source gate covers 309 occurrences in nine complete module
+copies: 142 materialize across 166 successful executions, 166 are explicitly
 simproc-deferred, and one executes unsuccessfully under `first`. A mutated
 engine identity is rejected before replay. Multiline certificate source keeps
 trailing tactic configuration to the right of the original tactic column, as
@@ -99,7 +99,8 @@ required by Lean's offside rule. The production fixture also covers a cache hit
 after the cached expression's binder has left the current local context and a
 generated matcher whose private name changes during source materialization.
 It also covers a successful user-congruence traversal whose auto-congruence
-child explicitly unfolds numeric literals inside `dsimp`.
+child explicitly unfolds numeric literals inside `dsimp`, plus an authored
+local rule whose lhs retains a let-bound set after the subject unfolds it.
 
 ### E5. Pre-cloud completeness review
 
