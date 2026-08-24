@@ -115,6 +115,29 @@ def main() -> None:
     )
     if rewritten != b"by\n  record-outer [show True from by record-inner]\n":
         raise RuntimeError(f"nested occurrence rewrite did not compose: {rewritten!r}")
+    quoted_source = b"`(tactic| simp%$s only [example])"
+    quoted_start = quoted_source.index(b"simp")
+    quoted_entry = {
+        "id": "quoted",
+        "module": "Quoted.lean",
+        "line": 1,
+        "startByte": quoted_start,
+        "endByte": len(quoted_source) - 1,
+        "source": quoted_source[quoted_start:-1].decode(),
+    }
+    quoted_rewritten = inventory_helpers.rewrite_simp_heads(
+        quoted_source,
+        [quoted_entry],
+        lambda _entry: 'simp_engine_source_recording "id" "directory"',
+    )
+    expected_quoted = (
+        b'`(tactic| simp_engine_source_recording%$s "id" "directory" only [example])'
+    )
+    if quoted_rewritten != expected_quoted:
+        raise RuntimeError(
+            "quoted tactic-head antiquotation was not preserved: "
+            f"{quoted_rewritten!r}"
+        )
     non_bmp = inventory_helpers.lean_string_array_source(
         ['{"scalar":"𝕜"}'], parent_column=2
     )
@@ -213,7 +236,7 @@ def main() -> None:
             if cloud.reduce_reports(reducer_args(root)) == 0:
                 raise RuntimeError("missing shard was accepted")
     print(
-        "schema-19 cloud harness: package options and nested rewrite preserved, "
+        "schema-19 cloud harness: package options and nested/quoted rewrites preserved, "
         "total report accepted, mutations rejected: ok"
     )
 

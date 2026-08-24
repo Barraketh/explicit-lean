@@ -448,6 +448,12 @@ their underlying `simp` syntax. This canonical string is used only to identify
 the theorem already elaborated in the source context; replay does not execute
 the canonicalized `simp` text.
 
+When a syntax quotation attaches a source-position antiquotation directly to
+the tactic head, as in `simp%$s`, token-local instrumentation moves that suffix
+onto the wrapper head. Leaving it after the wrapper's injected arguments is not
+valid Lean quotation syntax. The occurrence range and all remaining authored
+arguments stay untouched.
+
 The reference/recording comparison is a full tactic-elaboration transaction.
 Its snapshots include the tactic goals, term-elaborator synthetic metavariables
 and pending constraints, and meta/core state. Restoring only `Meta.SavedState`

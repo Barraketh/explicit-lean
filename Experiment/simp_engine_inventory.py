@@ -95,7 +95,13 @@ def rewrite_simp_heads(
     entries: list[dict[str, Any]],
     replacement: Callable[[dict[str, Any]], str],
 ) -> bytes:
-    """Replace only each `simp` token so nested occurrences compose exactly."""
+    """Replace only each `simp` head so nested occurrences compose exactly.
+
+    Inside a syntax quotation, Lean may attach a source-position antiquotation
+    directly to the tactic token, as in ``simp%$s``.  The annotation belongs to
+    the head token. Move it onto the replacement head instead of leaving it
+    after the replacement's injected arguments.
+    """
     starts: set[int] = set()
     for entry in entries:
         validate_occurrence(source, entry)
@@ -107,7 +113,32 @@ def rewrite_simp_heads(
         starts.add(start)
     for entry in sorted(entries, key=lambda item: int(item["startByte"]), reverse=True):
         start = int(entry["startByte"])
-        source = source[:start] + replacement(entry).encode("utf-8") + source[start + 4 :]
+        suffix_start = start + 4
+        head_antiquotation = b""
+        if source[suffix_start : suffix_start + 2] == b"%$":
+            cursor = suffix_start + 2
+            occurrence_end = int(entry["endByte"])
+            delimiters = b" \t\r\n[](){},;"
+            while cursor < occurrence_end and source[cursor] not in delimiters:
+                cursor += 1
+            if cursor == suffix_start + 2:
+                raise RuntimeError(
+                    "empty tactic-head antiquotation for "
+                    f"{entry['module']}:{entry['line']}"
+                )
+            head_antiquotation = source[suffix_start:cursor]
+            suffix_start = cursor
+        rewritten_head = replacement(entry).encode("utf-8")
+        insertion = next(
+            (index for index, byte in enumerate(rewritten_head) if byte in b" \t\r\n"),
+            len(rewritten_head),
+        )
+        rewritten_head = (
+            rewritten_head[:insertion]
+            + head_antiquotation
+            + rewritten_head[insertion:]
+        )
+        source = source[:start] + rewritten_head + source[suffix_start:]
     return source
 
 

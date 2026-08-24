@@ -90,7 +90,8 @@ occurrence emits one passive, non-deduplicated completion record per dynamic
 execution. Selection keys on `(initial proof-state fingerprint, ReplayConfig)`:
 equal duplicates under that full key are allowed, while unequal duplicates under
 the same full key are rejected. Nested occurrences are instrumented by replacing
-only their `simp` token; rule-origin
+only their `simp` head; an attached quotation source antiquotation such as `%$s`
+moves with that head instead of being stranded after injected arguments. Rule-origin
 identity canonicalizes the recording/materialization wrappers without executing
 ambient simp. The source gate covers 510 occurrences in seventeen complete module
 copies: 213 materialize across 242 dynamic executions, 296 are explicitly
