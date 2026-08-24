@@ -86,12 +86,14 @@ Status: complete. Schema 19 is serialized as compact JSON inside shallow Lean
 string arrays. Every payload is decoded and compared structurally with the
 recorded certificate before it is written; `Name` values use lossless
 string/numeric components rather than Lean's lossy default JSON codec. A source
-occurrence that executes more than once carries one certificate per distinct
-initial proof state and selects without a mutable execution counter. Nested
-occurrences are instrumented by replacing only their `simp` token; rule-origin
+occurrence emits one passive, non-deduplicated completion record per dynamic
+execution. Selection keys on `(initial proof-state fingerprint, ReplayConfig)`:
+equal duplicates under that full key are allowed, while unequal duplicates under
+the same full key are rejected. Nested occurrences are instrumented by replacing
+only their `simp` token; rule-origin
 identity canonicalizes the recording/materialization wrappers without executing
-ambient simp. The source gate covers 443 occurrences in fifteen complete module
-copies: 198 materialize across 222 successful executions, 244 are explicitly
+ambient simp. The source gate covers 510 occurrences in seventeen complete module
+copies: 213 materialize across 242 dynamic executions, 296 are explicitly
 simproc-deferred, and one executes unsuccessfully under `first`. A mutated
 engine identity is rejected before replay. Multiline certificate source keeps
 trailing tactic configuration to the right of the original tactic column, as

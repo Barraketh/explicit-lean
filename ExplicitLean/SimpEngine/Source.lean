@@ -63,7 +63,7 @@ private def recordSource (occurrenceId directory : String)
       IO.println s!"SIMP_ENGINE_SOURCE_RECORDER_FAILURE occurrence={occurrenceId}"
     throw error
   let path ← writeCertificate directory occurrenceId recording.certificate
-  logInfo m!"SIMP_ENGINE_SOURCE_RECORD occurrence={occurrenceId} certificate={path} deferredSubjects={deferredSubjectCount recording.certificate} subjects={recording.certificate.subjects.size}"
+  IO.println s!"SIMP_ENGINE_SOURCE_RECORD occurrence={occurrenceId} certificate={path} deferredSubjects={deferredSubjectCount recording.certificate} subjects={recording.certificate.subjects.size}"
 
 private def certificateSourceArrayType : Expr :=
   mkApp (mkConst ``Array [Level.zero]) (mkConst ``String)
@@ -86,14 +86,20 @@ private unsafe def elaborateCertificates
   finally
     saved.restore
 
-private def selectCertificate (certificates : Array Simp.Engine.Certificate) : TacticM
-    Simp.Engine.Certificate := do
+private def selectCertificate (certificates : Array Simp.Engine.Certificate)
+    (actualConfig : Simp.Engine.ReplayConfig) : TacticM Simp.Engine.Certificate := do
   let initialState ← Simp.Engine.proofStateFingerprint (← getGoals)
-  let candidates := certificates.filter (·.initialState == initialState)
+  -- A section-variable tactic can be re-elaborated under different scoped
+  -- options while presenting the same goal. The replay configuration is
+  -- therefore part of dynamic execution identity, not merely a later check.
+  let candidates := certificates.filter fun certificate =>
+    certificate.initialState == initialState && certificate.config == actualConfig
+  let available := certificates.map fun certificate =>
+    (certificate.initialState, certificate.config)
   let some selected := candidates[0]?
-    | throwError "source_certificate_missing_for_initial_state: actual={repr initialState}; available={repr (certificates.map (·.initialState))}"
+    | throwError "source_certificate_missing_for_initial_state_and_config: actualState={repr initialState}; actualConfig={repr actualConfig}; available={repr available}"
   unless candidates.all (· == selected) do
-    throwError "source_certificate_ambiguous_for_initial_state"
+    throwError "source_certificate_ambiguous_for_initial_state_and_config"
   unless selected.engine == Simp.Engine.engineId do
     throwError "source_certificate_engine_mismatch: expected {repr Simp.Engine.engineId}, got {repr selected.engine}"
   return selected
@@ -101,8 +107,8 @@ private def selectCertificate (certificates : Array Simp.Engine.Certificate) : T
 private def replaySource (occurrenceId : String) (certificatesSource : Syntax)
     (simpStx : Syntax) : TacticM Unit := do
   let certificates ← unsafe elaborateCertificates certificatesSource
-  let certificate ← selectCertificate certificates
   let { ctx, .. } ← mkSimpContext simpStx (eraseLocal := false)
+  let certificate ← selectCertificate certificates (← Simp.Engine.replayConfigOfContext ctx)
   let (fvarIds, simplifyTarget) ←
     Recording.locationSubjects (expandOptLocation simpStx[5])
   let recording : Recording.TacticRecording := {
@@ -113,7 +119,7 @@ private def replaySource (occurrenceId : String) (certificatesSource : Syntax)
     simplifyTarget
   }
   Replay.replayCertificate recording
-  logInfo m!"SIMP_ENGINE_SOURCE_REPLAY occurrence={occurrenceId}"
+  IO.println s!"SIMP_ENGINE_SOURCE_REPLAY occurrence={occurrenceId}"
 
 elab_rules : tactic
   | `(tactic| simp_engine_source_recording $occurrenceId:str $directory:str

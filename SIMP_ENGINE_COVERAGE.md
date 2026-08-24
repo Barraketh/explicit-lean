@@ -431,12 +431,13 @@ This is lossless for generated private declarations; Lean's standard JSON name
 codec and name-quotation syntax are not. It also makes rule identity independent
 of the replacement site's namespace and `open` declarations.
 
-One syntax occurrence can execute more than once under tactic combinators. Its
-replacement therefore carries an array of dynamic certificates and selects the
-unique certificate whose recorded initial proof-state fingerprint matches the
-current state. Equal duplicates are harmless; different certificates for the
-same state are rejected as ambiguous. No mutable execution counter participates
-in replay.
+One syntax occurrence can execute more than once under tactic combinators. Source
+recording emits a passive, non-deduplicating completion record for every dynamic
+execution. Its replacement therefore carries an array of dynamic certificates
+and selects by the pair `(initial proof-state fingerprint, ReplayConfig)`.
+Equal duplicate certificates under that full key are allowed; unequal
+certificates under the same full key are rejected as ambiguous. No mutable
+execution counter participates in replay.
 
 Nested source occurrences compose by replacing only the leading `simp` token
 of each occurrence, never an enclosing byte range. Recording leaves its already
@@ -709,8 +710,8 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and fourteen complete Mathlib modules
-contain 443 occurrences: 198 materialize across 222 successful executions, 244 are
+copies are compiled. The focused fixture and sixteen complete Mathlib modules
+contain 510 occurrences: 213 materialize across 242 dynamic executions, 296 are
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored

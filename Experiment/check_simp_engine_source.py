@@ -22,6 +22,8 @@ FIXTURES = (
      "Mathlib/Data/List/DropRight.lean", False),
     ("eq-to-hom", coverage.MATHLIB / "Mathlib/CategoryTheory/EqToHom.lean",
      "Mathlib/CategoryTheory/EqToHom.lean", False),
+    ("grothendieck", coverage.MATHLIB / "Mathlib/CategoryTheory/Grothendieck.lean",
+     "Mathlib/CategoryTheory/Grothendieck.lean", True),
     ("eventually-const", coverage.MATHLIB / "Mathlib/Order/Filter/EventuallyConst.lean",
      "Mathlib/Order/Filter/EventuallyConst.lean", False),
     ("polynomial-reverse", coverage.MATHLIB / "Mathlib/Algebra/Polynomial/Reverse.lean",
@@ -176,6 +178,120 @@ def check_engine_mismatch(
         )
 
 
+def check_selector_ambiguity(
+    module: str, source: bytes, entries: list[dict[str, object]],
+    certificates: dict[str, list[Path]], dynlib: str,
+) -> None:
+    occurrence = next(
+        str(entry["id"]) for entry in entries
+        if len(certificates.get(str(entry["id"]), [])) == 1
+    )
+    original = certificates[occurrence][0]
+    payload = json.loads(original.read_text(encoding="utf-8"))
+    payload["finalState"]["goalCount"] += 1
+    mutation = OUTPUT / "mutations" / f"{occurrence}-ambiguous.json"
+    mutation.parent.mkdir(parents=True, exist_ok=True)
+    mutation.write_text(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True), encoding="utf-8"
+    )
+    materialized = materialized_copy(
+        "selector-ambiguity", module, source, entries,
+        {occurrence: [original, mutation]}, {occurrence},
+    )
+    code, output = compile_copy(materialized, dynlib, timeout=600)
+    if (
+        code == 0
+        or "source_certificate_ambiguous_for_initial_state_and_config" not in output
+    ):
+        raise RuntimeError(
+            "unequal source certificates under one selector key were not rejected; "
+            f"see {materialized.with_suffix('.log')}"
+        )
+
+
+def check_grothendieck_selector_regression(
+    module: str,
+    outcomes: dict[str, list[int]],
+    certificates: dict[str, list[Path]],
+    actual: Counter[str],
+) -> None:
+    """Check dynamic source reporting and full-key certificate selection."""
+    if module != "Mathlib/CategoryTheory/Grothendieck.lean":
+        return
+    if len(outcomes) != 52:
+        raise RuntimeError(
+            f"Grothendieck supported-occurrence count changed: {len(outcomes)}"
+        )
+    recorded_total = sum(len(executions) for executions in outcomes.values())
+    if recorded_total != 62:
+        raise RuntimeError(
+            "Grothendieck completion records were deduplicated or changed: "
+            f"expected 62, got {recorded_total}"
+        )
+
+    repeated = {
+        occurrence: paths for occurrence, paths in certificates.items()
+        if len(paths) > 1
+    }
+    equal_duplicate_occurrences: list[str] = []
+    config_sensitive: list[tuple[str, list[dict[str, object]]]] = []
+    for occurrence, paths in repeated.items():
+        payloads = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+        by_full_key: defaultdict[tuple[str, str], list[str]] = defaultdict(list)
+        for payload in payloads:
+            full_key = (
+                json.dumps(payload["initialState"], sort_keys=True, separators=(",", ":")),
+                json.dumps(payload["config"], sort_keys=True, separators=(",", ":")),
+            )
+            by_full_key[full_key].append(
+                json.dumps(payload, sort_keys=True, separators=(",", ":"))
+            )
+        if any(len(set(values)) > 1 for values in by_full_key.values()):
+            raise RuntimeError(
+                "Grothendieck has unequal certificates under one "
+                f"(initial-state, ReplayConfig) key: {occurrence}"
+            )
+        if any(len(values) > 1 for values in by_full_key.values()):
+            equal_duplicate_occurrences.append(occurrence)
+
+        states = {
+            key[0] for key in by_full_key
+        }
+        configs = {
+            key[1] for key in by_full_key
+        }
+        if len(states) == 1 and len(configs) > 1:
+            config_sensitive.append((occurrence, payloads))
+
+    if not equal_duplicate_occurrences:
+        raise RuntimeError(
+            "Grothendieck did not retain an equal duplicate completion record"
+        )
+    if sorted(len(payloads) for _, payloads in config_sensitive) != [3, 4]:
+        raise RuntimeError(
+            "Grothendieck config-sensitive executions changed: "
+            f"{sorted(len(payloads) for _, payloads in config_sensitive)}"
+        )
+    for occurrence, payloads in config_sensitive:
+        backward_defeq = {
+            payload["config"]["useBackwardDefEq"] for payload in payloads
+        }
+        if backward_defeq != {False, True}:
+            raise RuntimeError(
+                "Grothendieck config-sensitive occurrence did not vary "
+                f"backward defeq: {occurrence}"
+            )
+        if any(outcomes[occurrence]):
+            raise RuntimeError(
+                f"Grothendieck config-sensitive occurrence was deferred: {occurrence}"
+            )
+        if actual[occurrence] != len(payloads):
+            raise RuntimeError(
+                "Grothendieck config-sensitive selection replay count mismatch: "
+                f"{occurrence}: expected {len(payloads)}, got {actual[occurrence]}"
+            )
+
+
 def main() -> None:
     dynlib = dynamic_library()
     occurrence_total = 0
@@ -231,6 +347,7 @@ def main() -> None:
             )
         if key == "focused":
             check_engine_mismatch(module, source, entries, certificates, dynlib)
+            check_selector_ambiguity(module, source, entries, certificates, dynlib)
         materialized = materialized_copy(
             key, module, source, entries, certificates, selected
         )
@@ -245,6 +362,7 @@ def main() -> None:
             raise RuntimeError(
                 f"materialized execution mismatch in {module}: expected {expected}, got {actual}"
             )
+        check_grothendieck_selector_regression(module, outcomes, certificates, actual)
         occurrence_total += len(known)
         materialized_total += len(selected)
         deferred_total += len(deferred)
@@ -255,7 +373,7 @@ def main() -> None:
         f"{len(FIXTURES)} modules, {occurrence_total} occurrences, "
         f"{materialized_total} materialized, {deferred_total} deferred, "
         f"{unsuccessful_total} unsuccessful, {execution_total} executions, "
-        "engine mutation rejected: ok"
+        "engine mutation and selector ambiguity rejected: ok"
     )
 
 
