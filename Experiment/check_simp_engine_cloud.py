@@ -105,6 +105,11 @@ def main() -> None:
     )
     if rewritten != b"by\n  record-outer [show True from by record-inner]\n":
         raise RuntimeError(f"nested occurrence rewrite did not compose: {rewritten!r}")
+    non_bmp = inventory_helpers.lean_string_array_source(
+        ['{"scalar":"𝕜"}'], parent_column=2
+    )
+    if "𝕜" not in non_bmp or "\\ud835" in non_bmp.lower():
+        raise RuntimeError(f"Lean string source used a UTF-16 surrogate escape: {non_bmp!r}")
     commit = cloud.current_commit()
     mathlib_commit = cloud.mathlib_commit()
     inventory = {

@@ -123,7 +123,11 @@ def lean_string_array_source(values: list[str], parent_column: int) -> str:
     if parent_column < 0:
         raise ValueError("parent column must be nonnegative")
     indent = " " * (parent_column + 1)
-    encoded = (json.dumps(value) for value in values)
+    # Lean does not accept JSON's UTF-16 surrogate-pair escapes in string
+    # literals.  Emit Unicode scalar values directly; json.dumps still escapes
+    # quotes, backslashes, and control characters for the surrounding Lean
+    # string.
+    encoded = (json.dumps(value, ensure_ascii=False) for value in values)
     return "#[\n" + indent + (",\n" + indent).join(encoded) + "\n" + indent + "]"
 
 

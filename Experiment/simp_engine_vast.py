@@ -27,10 +27,11 @@ DEFAULT_QUERY = (
     "cpu_ram>=96 disk_space>=80 disk_bw>=300 direct_port_count>=1 "
     "reliability>=0.99 inet_down>=100 inet_up>=50"
 )
+# The report schema versions Python-side inventory assembly.  Byte discovery
+# itself depends on these Lean sources and dependency pins; materializer and
+# scheduler fixes must not invalidate an otherwise identical 83k-site census.
 INVENTORY_INPUT_PATHS = (
     "Experiment/SimpEngineInventory.lean",
-    "Experiment/simp_engine_cloud.py",
-    "Experiment/simp_engine_inventory.py",
     "ExplicitLean/SimpEngine/Inventory.lean",
     "lake-manifest.json",
     "lakefile.toml",
