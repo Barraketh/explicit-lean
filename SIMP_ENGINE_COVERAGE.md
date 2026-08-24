@@ -360,6 +360,14 @@ structure Certificate where
   finalState : StateFingerprint
 ```
 
+The `iteration` values in `preVisit`, `reductionVisit`, and `postRestart` are
+trace-local ordinals. They are allocated from recorder state and roll back with
+a failed speculative candidate; they are deliberately not `Simp.State.numSteps`,
+which Lean may advance during work that leaves no certificate event. Cache
+provenance and passive simproc observations are operational state outside that
+rollback boundary. If a speculative candidate produces a cache entry, its
+failed-attempt witness is retained so replay executes the same cache producer.
+
 ### 5.1 What is and is not source
 
 The schema-17 source payload is compact JSON embedded in a shallow Lean array

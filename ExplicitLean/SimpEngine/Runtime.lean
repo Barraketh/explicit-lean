@@ -27,7 +27,16 @@ structure RecorderState where
   congruenceInvocationOrdinal : Nat := 0
   simpInvocationOrdinal : Nat := 0
   dsimpInvocationOrdinal : Nat := 0
+  /-- Identity for trace path anchors.  This is intentionally independent of
+      `Simp.State.numSteps`: speculative work may advance the operational step
+      counter and then roll back without leaving a certificate event. -/
+  pathInvocationOrdinal : Nat := 0
   simpStepOrdinal : Nat := 0
+  /-- Cache producer counts captured by `saveRecorderState`.  They make
+      speculative cache mutations count as observable progress without
+      placing the operational cache maps back inside rollback-able state. -/
+  savedSimpCacheProducerCount : Nat := 0
+  savedDSimpCacheProducerCount : Nat := 0
   pendingMonadSimpPaths : Array PathStep := #[]
   expectedPremiseTerminal : Option PremiseTerminal := none
   deriving Inhabited

@@ -26,6 +26,8 @@ FIXTURES = (
      "Mathlib/Order/Filter/EventuallyConst.lean", False),
     ("polynomial-reverse", coverage.MATHLIB / "Mathlib/Algebra/Polynomial/Reverse.lean",
      "Mathlib/Algebra/Polynomial/Reverse.lean", False),
+    ("ring-inj-surj", coverage.MATHLIB / "Mathlib/Algebra/Ring/InjSurj.lean",
+     "Mathlib/Algebra/Ring/InjSurj.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "

@@ -401,6 +401,14 @@ private def nextCongruenceInvocationOrdinal : EngineM Nat := do
     state with congruenceInvocationOrdinal := state.congruenceInvocationOrdinal + 1 }
   return state.congruenceInvocationOrdinal
 
+private def nextPathInvocationOrdinal : EngineM Nat := do
+  let runtime ← getRuntime
+  if runtime.mode == .reference then return 0
+  let state ← runtime.state.get
+  runtime.state.set {
+    state with pathInvocationOrdinal := state.pathInvocationOrdinal + 1 }
+  return state.pathInvocationOrdinal
+
 @[inline] def isCurrentReplayEvent (event : Event) : EngineM Bool := do
   let state ← getRecorderState
   return event.path == state.path && event.phase == state.phase &&
@@ -470,7 +478,14 @@ def observeSimproc (name : Name) (input output : Expr)
 @[inline] def setPremiseTerminal (terminal : PremiseTerminal) : EngineM Unit :=
   modifyRecorderState fun state => { state with lastPremiseTerminal := some terminal }
 
-@[inline] def saveRecorderState : EngineM RecorderState := getRecorderState
+@[inline] def saveRecorderState : EngineM RecorderState := do
+  let state ← getRecorderState
+  let provenance ← (← getRuntime).cacheProvenance.get
+  return {
+    state with
+    savedSimpCacheProducerCount := provenance.simpOrder.size
+    savedDSimpCacheProducerCount := provenance.dsimpOrder.size
+  }
 
 @[inline] def restoreRecorderState (state : RecorderState) : EngineM Unit :=
   setRecorderState state
@@ -1743,14 +1758,17 @@ def visitFn (e : Expr) : EngineM Result := do
       proof ← Meta.mkCongrFun proof arg
     return { expr := eNew, proof? := proof }
 
-private def recorderStateProgressed (before after : RecorderState) : Bool :=
-  before.program.events.size != after.program.events.size ||
-  before.program.structural.size != after.program.structural.size ||
-  before.phaseInvocationOrdinal != after.phaseInvocationOrdinal ||
-  before.congruenceInvocationOrdinal != after.congruenceInvocationOrdinal ||
-  before.simpInvocationOrdinal != after.simpInvocationOrdinal ||
-  before.dsimpInvocationOrdinal != after.dsimpInvocationOrdinal ||
-  before.simpStepOrdinal != after.simpStepOrdinal
+private def recorderStateProgressed (before after : RecorderState) : EngineM Bool := do
+  let provenance ← (← getRuntime).cacheProvenance.get
+  return before.program.events.size != after.program.events.size ||
+    before.program.structural.size != after.program.structural.size ||
+    before.phaseInvocationOrdinal != after.phaseInvocationOrdinal ||
+    before.congruenceInvocationOrdinal != after.congruenceInvocationOrdinal ||
+    before.simpInvocationOrdinal != after.simpInvocationOrdinal ||
+    before.dsimpInvocationOrdinal != after.dsimpInvocationOrdinal ||
+    before.simpStepOrdinal != after.simpStepOrdinal ||
+    before.savedSimpCacheProducerCount != provenance.simpOrder.size ||
+    before.savedDSimpCacheProducerCount != provenance.dsimpOrder.size
 
 private def expressionFingerprints (expressions : Array Expr) : EngineM (Array String) :=
   expressions.mapM fun expression => do
@@ -1772,6 +1790,7 @@ private def beginPremiseProgram (type : Expr) (index : Nat)
       congruenceInvocationOrdinal := 0
       simpInvocationOrdinal := 0
       dsimpInvocationOrdinal := 0
+      pathInvocationOrdinal := 0
       simpStepOrdinal := 0
     }
   else if runtime.mode == .replay then
@@ -1803,6 +1822,7 @@ private def beginPremiseProgram (type : Expr) (index : Nat)
       congruenceInvocationOrdinal := 0
       simpInvocationOrdinal := 0
       dsimpInvocationOrdinal := 0
+      pathInvocationOrdinal := 0
       simpStepOrdinal := 0
     }
   return outer
@@ -1929,7 +1949,7 @@ partial def congrDefault (e : Expr) (invocationOrdinal : Nat) : EngineM Result :
     result.mkEqTrans (← visitFn result.expr)
   else do
     let after ← getRecorderState
-    if recorderStateProgressed recorderSaved after then
+    if ← recorderStateProgressed recorderSaved after then
       emitStructural (.congruence invocationOrdinal .generatedAttemptFailed)
       recordBranch "struct.congruence.generatedAttemptFailed"
     else
@@ -2104,7 +2124,7 @@ def congr (e : Expr) : EngineM Result := do
       | some attempt => match attempt.result? with
         | none =>
             let after ← getRecorderState
-            if recorderStateProgressed recorderSaved after then
+            if ← recorderStateProgressed recorderSaved after then
               emitStructural (.congruence invocationOrdinal
                 (.userAttemptFailed c.theoremName c.priority c.hypothesesPos
                   attempt.theoremFingerprint attempt.matchEnvelope attempt.premises))
@@ -2207,8 +2227,8 @@ partial def simpLoop (e : Expr) : EngineM Result := withIncRecDepth do
   else
     checkSystem "simp"
     modify fun s => { s with numSteps := s.numSteps + 1 }
-    let iteration := (← get).numSteps
-    match (← withPath (.preVisit iteration) <| withPhase .pre <|
+    let pathOrdinal ← nextPathInvocationOrdinal
+    match (← withPath (.preVisit pathOrdinal) <| withPhase .pre <|
         recordPhaseStep e <| pre e) with
     | .done r  => cacheResult e cfg r
     | .visit r => cacheResult e cfg (← r.mkEqTrans (← simpLoop r.expr))
@@ -2216,7 +2236,8 @@ partial def simpLoop (e : Expr) : EngineM Result := withIncRecDepth do
     | .continue (some r) => visitPreContinue cfg r
 where
   visitPreContinue (cfg : Config) (r : Result) : EngineM Result := do
-    let eNew ← withPath (.reductionVisit (← get).numSteps) <| reduceStep r.expr
+    let pathOrdinal ← nextPathInvocationOrdinal
+    let eNew ← withPath (.reductionVisit pathOrdinal) <| reduceStep r.expr
     if eNew != r.expr then
       trace[Debug.Meta.Tactic.simp] "reduceStep (pre) {e} => {eNew}"
       let r := { r with expr := eNew }
@@ -2243,7 +2264,8 @@ where
   visitPostContinue (cfg : Config) (r : Result) : EngineM Result := do
     let mut r := r
     unless cfg.singlePass || e == r.expr do
-      r ← r.mkEqTrans (← withPath (.postRestart (← get).numSteps) <| simpLoop r.expr)
+      let pathOrdinal ← nextPathInvocationOrdinal
+      r ← r.mkEqTrans (← withPath (.postRestart pathOrdinal) <| simpLoop r.expr)
     cacheResult e cfg r
 
 set_option compiler.ignoreBorrowAnnotation true in
@@ -2464,7 +2486,7 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
     })
   let failAttempt (premises : Array PremiseProgram) : EngineM (Option Result) := do
     let after ← getRecorderState
-    if recorderStateProgressed recorderSaved after then
+    if ← recorderStateProgressed recorderSaved after then
       let (rule, envelope) ← makeMetadata false
       recordBranch "rewrite.attemptFailed"
       emitEvent e e (.rewriteAttemptFailed rule envelope premises) .continueNone
@@ -2925,7 +2947,7 @@ def simpMatchDiscrs? (info : MatcherInfo) (e : Expr) : EngineM (Option Result) :
       r ← mkCongrFun r argNew
   unless modified do
     let after ← getRecorderState
-    if recorderStateProgressed attemptBaseline after then
+    if ← recorderStateProgressed attemptBaseline after then
       emitStructural (.matchDiscriminantsAttemptFailed info.numDiscrs)
       recordBranch "struct.matchDiscriminantsAttemptFailed"
     else
@@ -3457,7 +3479,8 @@ private partial def replayPhaseStepCore (origin current : Expr)
     let result ← replayGround current
     let step ← composePhaseStep accumulated? (.done result)
     return ← consumeReplayPhaseOutcome origin (some step)
-  throwError "replay_missing_phase_operation_or_outcome: phase={repr (← getRecorderState).phase}, path={repr (← getRecorderState).path}"
+  let state ← getRecorderState
+  throwError "replay_missing_phase_operation_or_outcome: phase={repr state.phase}, path={repr state.path}, eventCursor={state.eventCursor}/{state.program.events.size}, nextEvent={repr state.program.events[state.eventCursor]?}, structuralCursor={state.structuralCursor}/{state.program.structural.size}, nextStructural={repr state.program.structural[state.structuralCursor]?}"
 
 private partial def replayDPhaseStepCore (origin current : Expr)
     (hasAccumulated : Bool) : EngineM DStep := do
