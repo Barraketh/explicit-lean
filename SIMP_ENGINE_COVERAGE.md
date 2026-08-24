@@ -697,8 +697,8 @@ metrics. `Experiment/run.sh` passes.
 
 Status: complete. Each module is instrumented once for all occurrences, every
 serialized execution is structurally round-tripped, and complete materialized
-copies are compiled. The focused fixture and eight complete Mathlib modules
-contain 309 occurrences: 142 materialize across 166 successful executions, 166 are
+copies are compiled. The focused fixture and nine complete Mathlib modules
+contain 320 occurrences: 147 materialize across 171 successful executions, 172 are
 explicitly simproc-deferred, and one executes unsuccessfully inside `first`.
 The focused gate covers nested source calls, private qualified rule
 names, recursive premises, multiple executions of one occurrence, authored
@@ -713,6 +713,9 @@ successful `ite_congr`/auto-congruence case where a nested dsimp phase must
 explicitly unfold numeric literals exactly once.
 `Probability/Process/Stopping.lean` retains an authored local rewrite whose lhs
 mentions a let-bound set after the recorded subject explicitly unfolds it.
+`AlgebraicGeometry/Morphisms/SurjectiveOnStalks.lean` retains structure
+projection reductions whose major expression exposes a constructor only after
+zeta-delta reduction of an explicitly supplied local let declaration.
 
 ### E5. Pre-cloud completeness review
 

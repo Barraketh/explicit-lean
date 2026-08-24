@@ -34,6 +34,9 @@ FIXTURES = (
      "Mathlib/SetTheory/Ordinal/Notation.lean", False),
     ("process-stopping", coverage.MATHLIB / "Mathlib/Probability/Process/Stopping.lean",
      "Mathlib/Probability/Process/Stopping.lean", False),
+    ("surjective-on-stalks",
+     coverage.MATHLIB / "Mathlib/AlgebraicGeometry/Morphisms/SurjectiveOnStalks.lean",
+     "Mathlib/AlgebraicGeometry/Morphisms/SurjectiveOnStalks.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "

@@ -828,7 +828,12 @@ private def executeRecordedReduction (e : Expr) (reduction : Reduction) : Engine
       withSimpMetaConfig <| reduceProj? e
   | .projectionFunction name branch =>
       unless cfg.proj do return none
-      exactProjectionFunction e name branch
+      -- Upstream executes projection-function unfolding inside the
+      -- `withSimpMetaConfig` scope in `reduceStep`.  In particular, the
+      -- transparency settings in that scope affect `unfoldDefinition?` before
+      -- the resulting projection node is reduced.  Recreate the same ambient
+      -- configuration when executing the already-selected operation.
+      withSimpMetaConfig <| exactProjectionFunction e name branch
   | .iota =>
       unless cfg.iota do return none
       withSimpMetaConfig <| reduceRecMatcher? e
@@ -843,7 +848,10 @@ private def executeRecordedReduction (e : Expr) (reduction : Reduction) : Engine
       if cfg.zeta && (!nondep || cfg.zetaHave) then return none
       unless !body.hasLooseBVars do return none
       return some (consumeUnusedLet body)
-  | .delta name strategy => exactDelta e name strategy
+  | .delta name strategy =>
+      -- Delta reduction is selected in the same upstream scope as projection
+      -- functions, so its exact replay must use the same meta configuration.
+      withSimpMetaConfig <| exactDelta e name strategy
   | .foldRawNatLit =>
       let sourceContext ← getOperationSourceContext
       if sourceContext.isDeclToUnfold ``OfNat.ofNat then return none
@@ -3612,9 +3620,17 @@ private def replayMethods : Methods := {
   base := {}
 }
 
-private def closedReplayContext (ctx : Context) : MetaM Context :=
-  mkContext (config := ctx.config) (simpTheorems := {})
+private def closedReplayContext (ctx : Context) : MetaM Context := do
+  let closed ← mkContext (config := ctx.config) (simpTheorems := {})
     (congrTheorems := {}) (userConfig := ctx.userConfig)
+  /-
+  `zetaDeltaSet` is distinct from the simp-theorem index.  It is the explicit
+  whitelist of local let declarations supplied by arguments such as `[L]`, and
+  Meta reduction consults it while reducing projections and other selected
+  operations.  Preserve that operational context without reopening either
+  theorem or congruence search.
+  -/
+  return closed.setZetaDeltaSet ctx.zetaDeltaSet ctx.initUsedZetaDelta
 
 private def finishReplay (runtime : Runtime) (result : Expr) : MetaM Unit := do
   let state ← runtime.state.get

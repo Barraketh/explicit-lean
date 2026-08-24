@@ -90,8 +90,8 @@ occurrence that executes more than once carries one certificate per distinct
 initial proof state and selects without a mutable execution counter. Nested
 occurrences are instrumented by replacing only their `simp` token; rule-origin
 identity canonicalizes the recording/materialization wrappers without executing
-ambient simp. The source gate covers 309 occurrences in nine complete module
-copies: 142 materialize across 166 successful executions, 166 are explicitly
+ambient simp. The source gate covers 320 occurrences in ten complete module
+copies: 147 materialize across 171 successful executions, 172 are explicitly
 simproc-deferred, and one executes unsuccessfully under `first`. A mutated
 engine identity is rejected before replay. Multiline certificate source keeps
 trailing tactic configuration to the right of the original tactic column, as
