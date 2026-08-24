@@ -24,6 +24,8 @@ FIXTURES = (
      "Mathlib/CategoryTheory/EqToHom.lean", False),
     ("eventually-const", coverage.MATHLIB / "Mathlib/Order/Filter/EventuallyConst.lean",
      "Mathlib/Order/Filter/EventuallyConst.lean", False),
+    ("polynomial-reverse", coverage.MATHLIB / "Mathlib/Algebra/Polynomial/Reverse.lean",
+     "Mathlib/Algebra/Polynomial/Reverse.lean", False),
 )
 RECORD = re.compile(
     r"SIMP_ENGINE_SOURCE_RECORD occurrence=(\S+) certificate=(\S+) "

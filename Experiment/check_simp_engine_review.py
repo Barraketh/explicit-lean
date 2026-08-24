@@ -29,7 +29,7 @@ REVIEWED_FILES = (
 # These values are changed only after a new source-level completeness review.
 REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine.lean":
-        "4cdc418c5c27a8a7bd9c1bb52bfe49a8ac8c6106f876eb0d4e41846c66cb1d8b",
+        "ca8b144059bf0634431b9fc38f2abecd8268ba60e6f273e218a9c36f8a84b2c7",
     "ExplicitLean/SimpEngine/Fingerprint.lean":
         "e2c1e4547133fee8e4a18bcd07de4fde3036e5b5fde9b8240e0a5fe01b4863ff",
     "ExplicitLean/SimpEngine/IR.lean":
@@ -43,19 +43,19 @@ REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLean/SimpEngine/Replay.lean":
         "ea34fe5b55040403cae4c38812afcc0fe36233bf87cd09e5f9a2253c725a5477",
     "ExplicitLean/SimpEngine/Runtime.lean":
-        "0b9c8686dbc99739b0dc441715514f813ff0df8abd49a711d2eeb401351d0a1c",
+        "a8ec0dc86129d80c0bfbd5a818768835c78697c363e5ad451513fa95b6a446a7",
     "ExplicitLean/SimpEngine/Source.lean":
         "7177faa4193c50ccbfab06fa9bba114748c8d0953714fdb4b62711d16fc4ea18",
     "SIMP_ENGINE_COVERAGE.md":
         "b06a58fd6cba43000a82bae31f35c3632a3c0d317c38c2ed3610afb0ed0d99c5",
 }
 EXPECTED_LINEAGE_DIGEST = (
-    "5592731de862cd32aa0ad520f2812172f37e3208c7a0dca9724b1628539c3f29"
+    "f020cce5bfef1dd33b5295916edd4bda8f0b058a6ec92a3ba3ab98a317d671f8"
 )
 EXPECTED_CONTROLLED_DIGEST = (
-    "ee0aae785492dd24ab8e01ab45267a7c93ec1402c874618ce269f2258fb74bac"
+    "de1b198e8f2e7e370c13b831b534d0b4c65f19816c65facc56a835befc844141"
 )
-EXPECTED_DECLARATION_COUNT = 225
+EXPECTED_DECLARATION_COUNT = 226
 
 MAIN = "Lean/Meta/Tactic/Simp/Main.lean"
 REWRITE = "Lean/Meta/Tactic/Simp/Rewrite.lean"

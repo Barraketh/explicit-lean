@@ -181,26 +181,24 @@ opaque MethodsRef.toMethods (methods : MethodsRef) : Methods
   if runtime.mode == .reference then
     mapSimpM Simp.withFreshCache x
   else
-    let saved ← runtime.state.get
-    runtime.state.set { saved with simpCacheSources := {} }
+    let saved := (← runtime.cacheProvenance.get).simpSources
+    runtime.cacheProvenance.modify fun current => { current with simpSources := {} }
     try mapSimpM Simp.withFreshCache x finally
-      runtime.state.modify fun current => {
-        current with simpCacheSources := saved.simpCacheSources
-      }
+      runtime.cacheProvenance.modify fun current => { current with simpSources := saved }
 
 @[inline] def withPreservedCache (x : EngineM α) : EngineM α := do
   let runtime : Runtime ← readThe Runtime
   if runtime.mode == .reference then
     mapSimpM Simp.withPreservedCache x
   else
-    let saved := (← runtime.state.get).simpCacheSources
-    runtime.state.modify fun current => {
-      current with simpCacheSources := current.simpCacheSources.switch
+    let saved := (← runtime.cacheProvenance.get).simpSources
+    runtime.cacheProvenance.modify fun current => {
+      current with simpSources := current.simpSources.switch
     }
     try mapSimpM Simp.withPreservedCache x finally
-      runtime.state.modify fun current => {
-        current with simpCacheSources := {
-          current.simpCacheSources with map₂ := saved.map₂, stage₁ := saved.stage₁
+      runtime.cacheProvenance.modify fun current => {
+        current with simpSources := {
+          current.simpSources with map₂ := saved.map₂, stage₁ := saved.stage₁
         }
       }
 
@@ -210,17 +208,17 @@ opaque MethodsRef.toMethods (methods : MethodsRef) : Methods
     if runtime.mode == .reference then
       k cache methods runtime
     else
-      let saved ← runtime.state.get
-      runtime.state.set {
-        saved with
-        dsimpCacheSources := saved.dsimpStateCacheSources
-        dsimpStateCacheSources := {}
+      let saved ← runtime.cacheProvenance.get
+      runtime.cacheProvenance.modify fun current => {
+        current with
+        dsimpSources := saved.dsimpStateSources
+        dsimpStateSources := {}
       }
       let (result, cache) ← k cache methods runtime
-      runtime.state.modify fun current => {
+      runtime.cacheProvenance.modify fun current => {
         current with
-        dsimpStateCacheSources := current.dsimpCacheSources
-        dsimpCacheSources := saved.dsimpCacheSources
+        dsimpStateSources := current.dsimpSources
+        dsimpSources := saved.dsimpSources
       }
       return (result, cache)
 
@@ -257,8 +255,8 @@ private def getOperationSourceContext : EngineM Context := do
 @[inline] def recordBranch (branch : String) : EngineM Unit := do
   let runtime ← getRuntime
   if runtime.mode == .record then
-    runtime.state.modify fun state =>
-      { state with coveredBranches := state.coveredBranches.push branch }
+    runtime.observations.modify fun observations =>
+      { observations with coveredBranches := observations.coveredBranches.push branch }
 
 @[inline] def withPath (step : PathStep) (x : EngineM α) : EngineM α := do
   let runtime ← getRuntime
@@ -432,9 +430,15 @@ private def mergeDeferredReason (current : Option DeferredReason)
       some (.simprocAndCustomDischarger name phase)
   | some current, _ => some current
 
+private def deferredBySimproc : Option DeferredReason → Bool
+  | some (.simproc ..) | some (.simprocAndCustomDischarger ..) => true
+  | _ => false
+
 def deferRecording (reason : DeferredReason) : EngineM Unit := do
-  modifyRecorderState fun state =>
-    { state with deferred := mergeDeferredReason state.deferred reason }
+  let runtime ← getRuntime
+  if runtime.mode == .record then
+    runtime.observations.modify fun observations =>
+      { observations with deferred := mergeDeferredReason observations.deferred reason }
 
 def observeSimproc (name : Name) (input output : Expr)
     (stepDisposition : StepDisposition) (definitional : Bool) : EngineM Unit := do
@@ -450,13 +454,13 @@ def observeSimproc (name : Name) (input output : Expr)
       stepDisposition
       definitional
     }
-    runtime.state.set {
-      state with
-      deferred := mergeDeferredReason state.deferred (.simproc name state.phase)
-      simprocs := state.simprocs.push observation
+    runtime.observations.modify fun observations => {
+      observations with
+      deferred := mergeDeferredReason observations.deferred (.simproc name state.phase)
+      simprocs := observations.simprocs.push observation
       coveredBranches :=
         let branch := if definitional then "simproc.dsimp" else "simproc.simp"
-        let branches := state.coveredBranches.push branch
+        let branches := observations.coveredBranches.push branch
         if stepDisposition == .continueNone then
           branches.push s!"{branch}.continueNone"
         else
@@ -1578,25 +1582,28 @@ where
         if ← isCurrentReplayStructural expected then
           if let .dsimpCacheHit sourcePath sourceIndex := expected.witness then
             let state ← getRecorderState
-            let some actualPath := state.dsimpReplayCache[sourceIndex]?
-              | throwError "replay_expected_dsimp_cache_hit: source={repr sourcePath}, path={repr state.path}, cached={state.dsimpReplayCache.size}"
+            let provenance ← runtime.cacheProvenance.get
+            let some actualPath := provenance.dsimpOrder[sourceIndex]?
+              | throwError "replay_expected_dsimp_cache_hit: source={repr sourcePath}, path={repr state.path}, cached={provenance.dsimpOrder.size}"
             unless actualPath == sourcePath do
               throwError "replay_dsimp_cache_source_mismatch: source={repr sourcePath}, index={sourceIndex}"
             let some cachedResult := cache.get? { val := e }
               | throwError "replay_dsimp_cache_miss: source={repr sourcePath}, index={sourceIndex}"
-            unless state.dsimpCacheSources.get? { val := e } == some (sourcePath, sourceIndex) do
+            unless provenance.dsimpSources.get? { val := e } == some (sourcePath, sourceIndex) do
               throwError "replay_dsimp_cache_provenance_mismatch: source={repr sourcePath}, index={sourceIndex}"
             emitStructural (.dsimpCacheHit sourcePath sourceIndex)
             return (cachedResult, cache)
     else if let some result := cache.get? { val := e } then
       if runtime.mode == .record then
         let state ← getRecorderState
-        match state.dsimpCacheSources.get? { val := e } with
+        let provenance ← runtime.cacheProvenance.get
+        match provenance.dsimpSources.get? { val := e } with
         | some (sourcePath, sourceIndex) =>
             emitStructural (.dsimpCacheHit sourcePath sourceIndex)
             recordBranch "struct.dsimpCacheHit"
         | none =>
-            unless !state.simprocs.isEmpty do
+            let observations ← runtime.observations.get
+            unless deferredBySimproc observations.deferred do
               throwError "record_dsimp_cache_source_missing: path={repr state.path}, input={e}"
             recordBranch "boundary.simprocOpaqueDSimpCache"
       return (result, cache)
@@ -1605,11 +1612,12 @@ where
       let (result, cache) ← visitUncached e cache
       let cache := cache.insert { val := e } result
       if runtime.mode != .reference then
-        modifyRecorderState fun state => {
-          state with
-            dsimpCacheSources := state.dsimpCacheSources.insert { val := e }
-              (state.path, state.dsimpReplayCache.size)
-            dsimpReplayCache := state.dsimpReplayCache.push state.path
+        let path := (← getRecorderState).path
+        runtime.cacheProvenance.modify fun provenance => {
+          provenance with
+            dsimpSources := provenance.dsimpSources.insert { val := e }
+              (path, provenance.dsimpOrder.size)
+            dsimpOrder := provenance.dsimpOrder.push path
         }
       return (result, cache)
 
@@ -1738,8 +1746,6 @@ def visitFn (e : Expr) : EngineM Result := do
 private def recorderStateProgressed (before after : RecorderState) : Bool :=
   before.program.events.size != after.program.events.size ||
   before.program.structural.size != after.program.structural.size ||
-  before.simpReplayCache.size != after.simpReplayCache.size ||
-  before.dsimpReplayCache.size != after.dsimpReplayCache.size ||
   before.phaseInvocationOrdinal != after.phaseInvocationOrdinal ||
   before.congruenceInvocationOrdinal != after.congruenceInvocationOrdinal ||
   before.simpInvocationOrdinal != after.simpInvocationOrdinal ||
@@ -1759,8 +1765,6 @@ private def beginPremiseProgram (type : Expr) (index : Nat)
     runtime.state.set {
       outer with
       program := { initialFingerprint := fingerprint, finalFingerprint := fingerprint }
-      simprocs := #[]
-      coveredBranches := #[]
       path.steps := outer.path.steps.push (.premise index)
       lastPremiseTerminal := none
       phaseInvocationOrdinal := 0
@@ -1807,17 +1811,7 @@ private def finishPremiseProgram (outer : RecorderState) (type : Expr) : EngineM
   let runtime ← getRuntime
   if runtime.mode == .record then
     let inner ← runtime.state.get
-    runtime.state.set {
-      outer with
-      deferred := inner.deferred.orElse fun _ => outer.deferred
-      simprocs := outer.simprocs ++ inner.simprocs
-      coveredBranches := outer.coveredBranches ++ inner.coveredBranches
-      simpCacheSources := inner.simpCacheSources
-      dsimpStateCacheSources := inner.dsimpStateCacheSources
-      dsimpCacheSources := inner.dsimpCacheSources
-      simpReplayCache := inner.simpReplayCache
-      dsimpReplayCache := inner.dsimpReplayCache
-    }
+    runtime.state.set outer
     return {
       propositionFingerprint := ← liftM (exprFingerprintHash type)
       program := inner.program
@@ -1834,14 +1828,7 @@ private def finishPremiseProgram (outer : RecorderState) (type : Expr) : EngineM
     if terminal matches .localAssumption _ | .equationHypothesis then
       unless inner.program.finalFingerprint == actualFingerprint do
         throwError "replay_premise_final_fingerprint_mismatch: expected {inner.program.finalFingerprint}, got {actualFingerprint}"
-    runtime.state.set {
-      outer with
-      simpCacheSources := inner.simpCacheSources
-      dsimpStateCacheSources := inner.dsimpStateCacheSources
-      dsimpCacheSources := inner.dsimpCacheSources
-      simpReplayCache := inner.simpReplayCache
-      dsimpReplayCache := inner.dsimpReplayCache
-    }
+    runtime.state.set outer
     return {
       propositionFingerprint := actualFingerprint
       program := inner.program
@@ -2168,46 +2155,51 @@ def simpStep (e : Expr) (simpStepOrdinal : Nat) : EngineM Result := do
 
 def cacheResult (e : Expr) (cfg : Config) (r : Result) : EngineM Result := do
   if cfg.memoize && r.cache then
+    let runtime ← getRuntime
     modify fun s => { s with cache := s.cache.insert e r }
-    if (← getRuntime).mode != .reference then
-      modifyRecorderState fun state => {
-        state with
-          simpCacheSources := state.simpCacheSources.insert e
-            (state.path, state.simpReplayCache.size)
-          simpReplayCache := state.simpReplayCache.push state.path
+    if runtime.mode != .reference then
+      let path := (← getRecorderState).path
+      runtime.cacheProvenance.modify fun provenance => {
+        provenance with
+          simpSources := provenance.simpSources.insert e
+            (path, provenance.simpOrder.size)
+          simpOrder := provenance.simpOrder.push path
       }
   return r
 
 partial def simpLoop (e : Expr) : EngineM Result := withIncRecDepth do
   let cfg ← getConfig
+  let runtime ← getRuntime
   if cfg.memoize then
     let cache := (← get).cache
-    let runtime ← getRuntime
     if runtime.mode == .replay then
       if let some expected ← peekReplayStructural? then
         if ← isCurrentReplayStructural expected then
           if let .cacheHit sourcePath sourceIndex := expected.witness then
             let state ← getRecorderState
-            let some actualPath := state.simpReplayCache[sourceIndex]?
-              | throwError "replay_expected_simp_cache_hit: source={repr sourcePath}, path={repr state.path}, cached={state.simpReplayCache.size}"
+            let provenance ← runtime.cacheProvenance.get
+            let some actualPath := provenance.simpOrder[sourceIndex]?
+              | throwError "replay_expected_simp_cache_hit: source={repr sourcePath}, path={repr state.path}, cached={provenance.simpOrder.size}"
             unless actualPath == sourcePath do
               throwError "replay_simp_cache_source_mismatch: expectedPath={repr sourcePath}, actualPath={repr actualPath}, index={sourceIndex}"
             let some cachedResult := cache.find? e
               | throwError "replay_simp_cache_miss: source={repr sourcePath}, index={sourceIndex}"
-            unless state.simpCacheSources.find? e == some (sourcePath, sourceIndex) do
+            unless provenance.simpSources.find? e == some (sourcePath, sourceIndex) do
               throwError "replay_simp_cache_provenance_mismatch: source={repr sourcePath}, index={sourceIndex}"
             emitStructural (.cacheHit sourcePath sourceIndex)
             return cachedResult
     else if let some result := cache.find? e then
       if runtime.mode == .record then
         let state ← getRecorderState
-        match state.simpCacheSources.find? e with
+        let provenance ← runtime.cacheProvenance.get
+        match provenance.simpSources.find? e with
         | some (sourcePath, sourceIndex) =>
             recordBranch "struct.cacheHit"
             emitStructural (.cacheHit sourcePath sourceIndex)
         | none =>
-            unless !state.simprocs.isEmpty do
-              throwError "record_simp_cache_source_missing: path={repr state.path}, input={e}, cacheEntries={cache.toList.length}, sourceEntries={state.simpCacheSources.toList.length}"
+            let observations ← runtime.observations.get
+            unless deferredBySimproc observations.deferred do
+              throwError "record_simp_cache_source_missing: path={repr state.path}, input={e}, cacheEntries={cache.toList.length}, sourceEntries={provenance.simpSources.toList.length}"
             recordBranch "boundary.simprocOpaqueCache"
       return result
   if (← get).numSteps > cfg.maxSteps then
@@ -2317,11 +2309,12 @@ private def finishRecording (runtime : Runtime) (finalExpr : Expr) : MetaM Recor
     state with program.finalFingerprint := finalFingerprint
   }
   let state ← runtime.state.get
+  let observations ← runtime.observations.get
   return {
     program := state.program
-    deferred := state.deferred
-    simprocs := { observations := state.simprocs }
-    coveredBranches := state.coveredBranches
+    deferred := observations.deferred
+    simprocs := { observations := observations.simprocs }
+    coveredBranches := observations.coveredBranches
   }
 
 def mainCoreRecording (e : Expr) (ctx : Context) (s : State := {})

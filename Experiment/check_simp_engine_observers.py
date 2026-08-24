@@ -19,7 +19,7 @@ SOURCE = ENGINE + "\n" + IR + "\n" + RUNTIME + "\n" + RECORDING
 OBSERVERS: dict[str, tuple[str, ...]] = {
     "`simpImpl` call boundary": (".simpCall invocationOrdinal", ".proofSkip invocationOrdinal"),
     "`dsimpImpl` call boundary": (".dsimpCall invocationOrdinal", "dsimpInvocationOrdinal"),
-    "`simpLoop` cache": ("simpCacheSources.switch", "replay_simp_cache_provenance_mismatch", ".cacheHit sourcePath sourceIndex"),
+    "`simpLoop` cache": ("simpSources := current.simpSources.switch", "replay_simp_cache_provenance_mismatch", ".cacheHit sourcePath sourceIndex"),
     "`pre` step": ("withPhase .pre", "recordPhaseStep", ".phaseOutcome"),
     "`post` step": ("withPhase .post", ".postRestart", "consumeReplayPhaseOutcome"),
     "`simpStep`: unassigned mvar": ("struct.unassignedMVarStop", ".unassignedMVarStop simpStepOrdinal"),
@@ -52,7 +52,7 @@ OBSERVERS: dict[str, tuple[str, ...]] = {
     "have telescope": ("struct.haveTelescope", "struct.dropUnusedHave", ".haveValue", ".haveBody"),
     "`dpre`/`dpost`": ("withPhase .dpre", "withPhase .dpost", "dpreDefaultRecorded", "dpostDefaultRecorded"),
     "`dsimpReduce`": ("private def dsimpReduce", "reduceFVar"),
-    "dsimp transform": ("struct.dsimpTransform", "struct.dsimpCacheHit", "dsimpStateCacheSources", "replay_dsimp_cache_provenance_mismatch"),
+    "dsimp transform": ("struct.dsimpTransform", "struct.dsimpCacheHit", "dsimpStateSources", "replay_dsimp_cache_provenance_mismatch"),
     "theorem preprocessing": ("exactRuleVariant", "ruleFingerprint", "lhsFingerprint", ".equation declName equationIndex"),
     "indexed rewrite": ("getMatchWithExtra", "getMatchLiberal", "indexMode"),
     "theorem match": ("MatchEnvelope", "binderAssignments", "thm.perm", "resolveBinderNameHint"),
