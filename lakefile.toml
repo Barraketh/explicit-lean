@@ -8,3 +8,6 @@ rev = "v4.32.2"
 
 [[lean_lib]]
 name = "ExplicitLean"
+
+[[lean_lib]]
+name = "ExplicitLeanMathlibAudit"

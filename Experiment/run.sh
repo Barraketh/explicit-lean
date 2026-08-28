@@ -3,10 +3,25 @@ set -eu
 
 lake build \
   ExplicitLean \
+  ExplicitLeanMathlibAudit \
   ExplicitLean.SimpEngine.Inventory \
   ExplicitLean.SimpEngine.Reference
 python3 Experiment/check_simp_engine_pin.py
 python3 Experiment/check_simp_engine_reference.py
+python3 Experiment/check_simp_engine_simproc.py
+python3 Experiment/check_simp_engine_nat_binary.py
+python3 Experiment/check_simp_engine_nat_binary_fold.py
+python3 Experiment/check_simp_engine_ite.py
+python3 Experiment/check_simp_engine_dite.py
+python3 Experiment/check_simp_engine_int_neg_guard_fold.py
+python3 Experiment/check_simp_engine_fin_literal_fold.py
+python3 Experiment/check_simp_engine_fin_mk.py
+python3 Experiment/check_simp_engine_matrix_cons_val.py
+python3 Experiment/check_simp_engine_exists_and_eq.py
+python3 Experiment/check_simp_engine_field_eq_audit.py
+python3 Experiment/check_simp_engine_ctor_eq.py
+python3 Experiment/check_simp_engine_ctor_source.py
+python3 Experiment/check_simp_engine_exists_source.py
 python3 Experiment/check_simp_engine_observers.py
 python3 Experiment/check_simp_engine_review.py
 python3 Experiment/check_simp_engine_recording.py

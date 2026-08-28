@@ -23,13 +23,130 @@ private def checkPresence (expected : Simp.Engine.ProofPresence)
   unless ExplicitLean.SimpEngine.Recording.proofPresence result == expected do
     throwError "replay_proof_presence_mismatch"
 
+private def isNoEffectObservation (observation : Simp.Engine.SimprocObservation) : Bool :=
+  observation.stepDisposition == .continueNone &&
+    !observation.outputChanged &&
+    observation.inputFingerprint == observation.outputFingerprint &&
+    !observation.proofPresent && observation.cache.isNone &&
+    observation.outputSize.isNone
+
+private def isUnexecutedObservation (observation : Simp.Engine.SimprocObservation) : Bool :=
+  !observation.executed && isNoEffectObservation observation
+
+private def isPinnedNoResult (observation : Simp.Engine.SimprocObservation) : Bool :=
+  observation.executed && isNoEffectObservation observation &&
+    ((observation.procedureKind == .dsimp &&
+        Simp.Engine.isIgnorableWfContinueNone observation.name) ||
+      (observation.procedureKind == .simp &&
+        observation.name == `ExistsAndEq.existsAndEq))
+
+private def candidateCoversObservation (event : Simp.Engine.Event)
+    (fold : Simp.Engine.SimprocFold)
+    (candidate : Simp.Engine.SimprocCandidateEvent)
+    (observation : Simp.Engine.SimprocObservation) : Bool :=
+  let definitionalPhase := observation.phase == .dpre || observation.phase == .dpost
+  event.path == observation.path && event.invocationOrdinal == observation.phaseInvocationOrdinal &&
+    fold.phase == observation.phase && observation.executed &&
+    observation.definitional == definitionalPhase &&
+    observation.outputSize.isSome &&
+    candidate.declaration == observation.name &&
+    candidate.procedureKind == observation.procedureKind &&
+    candidate.setIndex == observation.setIndex &&
+    candidate.inputFingerprint == observation.inputFingerprint &&
+    candidate.outputFingerprint == observation.outputFingerprint &&
+    candidate.numExtraArgs == observation.numExtraArgs &&
+    candidate.disposition == observation.stepDisposition &&
+    candidate.proofPresent == observation.proofPresent &&
+    candidate.cache == observation.cache &&
+    observation.outputChanged ==
+      (candidate.inputFingerprint != candidate.outputFingerprint)
+
+private def programCoversObservation (program : Simp.Engine.Program)
+    (observation : Simp.Engine.SimprocObservation) : Bool :=
+  program.events.any fun event =>
+    event.path == observation.path && event.phase == observation.phase &&
+      match event.operation with
+      | .semanticSimproc fold =>
+          fold.candidates.any fun candidate =>
+            candidateCoversObservation event fold candidate observation
+      | _ => false
+
+private def validateFoldObservationMultiplicity
+    (trace : Simp.Engine.SimprocTrace) (event : Simp.Engine.Event)
+    (fold : Simp.Engine.SimprocFold) : MetaM Unit := do
+  let mut cursor := 0
+  let mut consumed : Nat := 0
+  for candidate in fold.candidates do
+    let mut found? : Option Nat := none
+    for index in cursor...trace.observations.size do
+      if found?.isNone && candidateCoversObservation event fold candidate
+          trace.observations[index]! then
+        found? := some index
+    let some index := found?
+      | throwError "replay_semantic_simproc_candidate_unobserved: {candidate.declaration} {repr fold.phase}"
+    cursor := index + 1
+    consumed := consumed + 1
+  let matching : Nat := trace.observations.foldl (init := 0) fun count observation =>
+    if observation.executed && observation.outputSize.isSome &&
+        event.path == observation.path &&
+        event.invocationOrdinal == observation.phaseInvocationOrdinal &&
+        fold.phase == observation.phase &&
+        fold.candidates.any (fun candidate =>
+          candidateCoversObservation event fold candidate observation) then
+      count + 1
+    else
+      count
+  unless consumed == matching do
+    throwError "replay_semantic_simproc_observation_multiplicity_mismatch: candidates={consumed}, observations={matching}"
+
+private def validateSimprocObservationOrder
+    (program : Simp.Engine.Program) (trace : Simp.Engine.SimprocTrace) : MetaM Unit := do
+  let mut cursor := 0
+  for event in program.events do
+    if let .semanticSimproc fold := event.operation then
+      for candidate in fold.candidates do
+        let mut found? : Option Nat := none
+        for index in cursor...trace.observations.size do
+          if found?.isNone && candidateCoversObservation event fold candidate
+              trace.observations[index]! then
+            found? := some index
+        let some index := found?
+          | throwError "replay_semantic_simproc_observation_order_mismatch: {candidate.declaration} {repr fold.phase}"
+        cursor := index + 1
+
+/-- Validate the link between the rollback-aware committed simproc trace and
+  executable semantic folds.  Calls made by failed speculative candidates are
+  retained only in runtime diagnostics and never enter this trace.  Every
+  committed result must therefore be represented by a semantic fold, and every
+  executable candidate must have an exact committed observation.  Observations
+  never authorize replay. -/
+partial def validateSimprocObservations (program : Simp.Engine.Program)
+    (trace : Simp.Engine.SimprocTrace) : MetaM Unit := do
+  for observation in trace.observations do
+    unless isUnexecutedObservation observation ||
+        isPinnedNoResult observation ||
+        programCoversObservation program observation do
+      throwError "replay_uncovered_simproc_observation: {observation.name} {repr observation.phase}"
+  validateSimprocObservationOrder program trace
+  for event in program.events do
+    if let .semanticSimproc fold := event.operation then
+      validateFoldObservationMultiplicity trace event fold
+      for candidate in fold.candidates do
+        match candidate.semantics with
+        | .iteSelect selection =>
+            validateSimprocObservations selection.conditionProgram.program
+              selection.conditionProgram.simprocs
+        | .diteSelect selection =>
+            validateSimprocObservations selection.conditionProgram.program
+              selection.conditionProgram.simprocs
+        | _ => pure ()
+
 private def replayExpression (expression : Expr) (ctx : Simp.Context)
     (certificate : Simp.Engine.Certificate) (subject : Simp.Engine.SubjectProgram)
     (stats : Simp.Stats) : MetaM (Simp.Result × Simp.Stats) := do
   if let some reason := subject.deferred then
     throwError "replay_deferred: {repr reason}"
-  unless subject.simprocs.isEmpty do
-    throwError "replay_deferred_simproc_observations"
+  validateSimprocObservations subject.program subject.simprocs
   let (result, state) ← Simp.Engine.mainCoreReplay expression ctx
     certificate.config subject.program { stats with }
   return (result, { state with })

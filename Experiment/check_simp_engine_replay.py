@@ -67,7 +67,7 @@ def main() -> None:
     missing = sorted(REQUIRED - observed)
     if missing:
         raise RuntimeError("unreplayed_transition: " + ", ".join(missing) + "\n" + run.stdout)
-    print(f"schema-19 focused closed replay: {len(observed)} dynamic branches: ok")
+    print(f"schema-27 focused closed replay: {len(observed)} dynamic branches: ok")
 
 
 if __name__ == "__main__":

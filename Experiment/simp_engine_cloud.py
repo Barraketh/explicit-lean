@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory, shard, materialize, and reduce the full schema-19 Mathlib run."""
+"""Inventory, shard, materialize, and reduce the full schema-27 Mathlib run."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ import simp_engine_inventory as coverage
 
 ROOT = Path(__file__).resolve().parents[1]
 MATHLIB = coverage.MATHLIB
-REPORT_SCHEMA = 1
-CERTIFICATE_SCHEMA = 19
+REPORT_SCHEMA = 3
+CERTIFICATE_SCHEMA = 27
 ENGINE_ID = {
     "leanVersion": pin.LEAN_VERSION,
     "leanCommit": pin.LEAN_COMMIT,
@@ -111,6 +111,18 @@ def assert_repository(expected_commit: str | None, allow_dirty: bool) -> str:
             completed = subprocess.run(command, cwd=ROOT, check=False)
             if completed.returncode:
                 raise RuntimeError("dirty_tracked_worktree")
+        untracked = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        if untracked.returncode:
+            raise RuntimeError("cannot_inspect_worktree")
+        if untracked.stdout.strip():
+            raise RuntimeError("dirty_worktree")
     return commit
 
 
@@ -288,7 +300,7 @@ def build_inventory(args: argparse.Namespace) -> None:
     }
     json_write(Path(args.output), inventory)
     print(
-        "schema-19 cloud inventory: "
+        f"schema-{CERTIFICATE_SCHEMA} cloud inventory: "
         f"{inventory['moduleFileCount']} files, "
         f"{inventory['inventoriedModuleCount']} modules with occurrences, "
         f"{inventory['occurrenceCount']} occurrences, "
@@ -398,9 +410,6 @@ def compile_copy(
 def deferred_reasons(certificate: dict[str, Any]) -> set[str]:
     result: set[str] = set()
     for subject in certificate.get("subjects", []):
-        simproc_trace = subject.get("simprocs", {})
-        if isinstance(simproc_trace, dict) and simproc_trace.get("order"):
-            result.add("simproc")
         deferred = subject.get("deferred")
         if deferred is None:
             continue
@@ -423,6 +432,296 @@ def deferred_reasons(certificate: dict[str, Any]) -> set[str]:
     return result
 
 
+def simproc_name_key(name: Any) -> str:
+    if not isinstance(name, list):
+        raise ValueError("simproc name is not a component array")
+    for component in name:
+        if not isinstance(component, list) or len(component) != 2 \
+                or component[0] not in {"str", "num"}:
+            raise ValueError(f"invalid simproc name component: {component!r}")
+        if component[0] == "str" and not isinstance(component[1], str):
+            raise ValueError(f"invalid simproc string component: {component!r}")
+        if component[0] == "num" and (not isinstance(component[1], int) \
+                or isinstance(component[1], bool) or component[1] < 0):
+            raise ValueError(f"invalid simproc numeric component: {component!r}")
+    return json.dumps(name, separators=(",", ":"), ensure_ascii=False)
+
+
+def simproc_display_name(name: list[list[Any]]) -> str:
+    components = [
+        str(value) if kind == "str" else f"#{value}"
+        for kind, value in name
+    ]
+    return ".".join(components) or "_anonymous"
+
+
+def empty_simproc_aggregate(name: list[list[Any]]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "displayName": simproc_display_name(name),
+        "usedInvocations": 0,
+        "executionCount": 0,
+        "changingInvocations": 0,
+        "proofPresentInvocations": 0,
+        "cacheFalseInvocations": 0,
+        "treeSizeCappedInvocations": 0,
+        "phaseCounts": Counter(),
+        "dispositionCounts": Counter(),
+        "procedureKindCounts": Counter(),
+        "extraArgumentCounts": Counter(),
+        "resultTreeSizeCounts": Counter(),
+        "resultDAGSizeCounts": Counter(),
+    }
+
+
+def merge_count_map(target: Counter[Any], source: Any, field: str) -> None:
+    if not isinstance(source, dict):
+        raise ValueError(f"{field} is not an object")
+    for key, value in source.items():
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"invalid {field} count: {key!r}={value!r}")
+        target[str(key)] += value
+
+
+def merge_simproc_summary_entry(
+    aggregates: dict[str, dict[str, Any]], entry: dict[str, Any]
+) -> str:
+    if not isinstance(entry, dict):
+        raise ValueError("simproc summary entry is not an object")
+    name = entry.get("name")
+    key = simproc_name_key(name)
+    display_name = simproc_display_name(name)
+    if entry.get("displayName") != display_name:
+        raise ValueError(f"simproc display name mismatch: {entry.get('displayName')!r}")
+    aggregate = aggregates.setdefault(key, empty_simproc_aggregate(name))
+    scalar_fields = (
+        "usedInvocations",
+        "executionCount",
+        "changingInvocations",
+        "proofPresentInvocations",
+        "cacheFalseInvocations",
+        "treeSizeCappedInvocations",
+    )
+    for field in scalar_fields:
+        value = entry.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"invalid simproc {field}: {value!r}")
+        aggregate[field] += value
+    for field in (
+        "phaseCounts",
+        "dispositionCounts",
+        "procedureKindCounts",
+        "extraArgumentCounts",
+        "resultTreeSizeCounts",
+        "resultDAGSizeCounts",
+    ):
+        merge_count_map(aggregate[field], entry.get(field), field)
+    return key
+
+
+def finalized_simproc_summaries(
+    aggregates: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    result = []
+    for aggregate in aggregates.values():
+        item = {
+            field: aggregate[field]
+            for field in (
+                "name",
+                "displayName",
+                "usedInvocations",
+                "executionCount",
+                "changingInvocations",
+                "proofPresentInvocations",
+                "cacheFalseInvocations",
+                "treeSizeCappedInvocations",
+            )
+        }
+        for field in (
+            "phaseCounts",
+            "dispositionCounts",
+            "procedureKindCounts",
+            "extraArgumentCounts",
+            "resultTreeSizeCounts",
+            "resultDAGSizeCounts",
+        ):
+            item[field] = dict(sorted(aggregate[field].items()))
+        if sum(item["phaseCounts"].values()) != item["usedInvocations"] \
+                or sum(item["dispositionCounts"].values()) != item["usedInvocations"] \
+                or sum(item["procedureKindCounts"].values()) != item["usedInvocations"] \
+                or sum(item["extraArgumentCounts"].values()) != item["usedInvocations"]:
+            raise ValueError(f"simproc used-invocation subtotal mismatch: {item['displayName']}")
+        if sum(item["resultTreeSizeCounts"].values()) != item["usedInvocations"] \
+                or sum(item["resultDAGSizeCounts"].values()) != item["usedInvocations"]:
+            raise ValueError(f"simproc output-size subtotal mismatch: {item['displayName']}")
+        if item["usedInvocations"] == 0 or item["executionCount"] == 0 \
+                or item["executionCount"] > item["usedInvocations"] \
+                or "continueNone" in item["dispositionCounts"] \
+                or item["changingInvocations"] > item["usedInvocations"] \
+                or item["proofPresentInvocations"] > item["usedInvocations"] \
+                or item["cacheFalseInvocations"] > item["usedInvocations"] \
+                or item["treeSizeCappedInvocations"] > item["usedInvocations"]:
+            raise ValueError(f"invalid simproc count ordering: {item['displayName']}")
+        result.append(item)
+    return sorted(result, key=lambda item: item["displayName"])
+
+
+def certificate_simproc_summary(certificate: dict[str, Any]) -> list[dict[str, Any]]:
+    aggregates: dict[str, dict[str, Any]] = {}
+    execution_names: set[str] = set()
+    for subject in certificate.get("subjects", []):
+        trace = subject.get("simprocs", {})
+        if not isinstance(trace, dict):
+            raise ValueError("simproc trace is not an object")
+        dictionary = trace.get("dictionary", [])
+        order = trace.get("order", [])
+        if not isinstance(dictionary, list) or not isinstance(order, list):
+            raise ValueError("simproc trace dictionary/order is not an array")
+        for index in order:
+            if not isinstance(index, int) or isinstance(index, bool) \
+                    or not 0 <= index < len(dictionary):
+                raise ValueError(f"invalid simproc dictionary index: {index!r}")
+            observation = dictionary[index]
+            if not isinstance(observation, dict):
+                raise ValueError("simproc observation is not an object")
+            name = observation.get("name")
+            key = simproc_name_key(name)
+            phase = observation.get("phase")
+            disposition = observation.get("stepDisposition")
+            procedure_kind = observation.get("procedureKind")
+            definitional = observation.get("definitional")
+            num_extra_args = observation.get("numExtraArgs")
+            executed = observation.get("executed")
+            proof_present = observation.get("proofPresent")
+            output_changed = observation.get("outputChanged")
+            cache = observation.get("cache")
+            output_size = observation.get("outputSize")
+            if phase not in {"pre", "post", "dpre", "dpost"}:
+                raise ValueError(f"invalid simproc phase: {phase!r}")
+            if disposition not in {"done", "visit", "continueNone", "continueSome"}:
+                raise ValueError(f"invalid simproc disposition: {disposition!r}")
+            if procedure_kind not in {"simp", "dsimp"}:
+                raise ValueError(f"invalid simproc procedure kind: {procedure_kind!r}")
+            if not isinstance(definitional, bool) \
+                    or definitional != (phase in {"dpre", "dpost"}):
+                raise ValueError(f"invalid simproc definitional flag: {definitional!r}")
+            if not isinstance(num_extra_args, int) or isinstance(num_extra_args, bool) \
+                    or num_extra_args < 0:
+                raise ValueError(f"invalid simproc extra-argument count: {num_extra_args!r}")
+            if not isinstance(executed, bool) or not isinstance(proof_present, bool) \
+                    or not isinstance(output_changed, bool):
+                raise ValueError("invalid simproc execution/proof flag")
+            expected_executed = not (definitional and procedure_kind == "simp")
+            if executed != expected_executed:
+                raise ValueError("simproc executed flag disagrees with tryD semantics")
+            if cache is not None and not isinstance(cache, bool):
+                raise ValueError(f"invalid simproc cache flag: {cache!r}")
+            has_result = disposition != "continueNone"
+            if has_result != (output_size is not None):
+                raise ValueError("simproc result disposition/size mismatch")
+            if not has_result and (output_changed or proof_present or cache is not None):
+                raise ValueError("continue-none simproc reported result metadata")
+            if has_result and definitional and (proof_present or cache is not None):
+                raise ValueError("dsimp-phase result reported proof/cache metadata")
+            if has_result and not definitional and not isinstance(cache, bool):
+                raise ValueError("simp-phase result omitted its cache flag")
+            if not has_result:
+                continue
+            if not isinstance(output_size, dict):
+                raise ValueError("simproc output size is not an object")
+            tree_nodes = output_size.get("treeNodes")
+            dag_nodes = output_size.get("dagNodes")
+            tree_capped = output_size.get("treeNodesCapped")
+            if any(not isinstance(value, int) or isinstance(value, bool) or value <= 0
+                   for value in (tree_nodes, dag_nodes)) or not isinstance(tree_capped, bool):
+                raise ValueError(f"invalid simproc output size: {output_size!r}")
+            aggregate = aggregates.setdefault(key, empty_simproc_aggregate(name))
+            execution_names.add(key)
+            aggregate["usedInvocations"] += 1
+            aggregate["changingInvocations"] += int(output_changed)
+            aggregate["proofPresentInvocations"] += int(proof_present)
+            aggregate["cacheFalseInvocations"] += int(cache is False)
+            aggregate["treeSizeCappedInvocations"] += int(tree_capped)
+            aggregate["phaseCounts"][phase] += 1
+            aggregate["dispositionCounts"][disposition] += 1
+            aggregate["procedureKindCounts"][procedure_kind] += 1
+            aggregate["extraArgumentCounts"][str(num_extra_args)] += 1
+            aggregate["resultTreeSizeCounts"][str(tree_nodes)] += 1
+            aggregate["resultDAGSizeCounts"][str(dag_nodes)] += 1
+    for key in execution_names:
+        aggregates[key]["executionCount"] += 1
+    return finalized_simproc_summaries(aggregates)
+
+
+def size_statistics(counts: dict[str, int], capped_count: int = 0) -> dict[str, Any]:
+    values = sorted((int(size), count) for size, count in counts.items() if count)
+    count = sum(item_count for _, item_count in values)
+    if count == 0:
+        return {"count": 0}
+    total = sum(size * item_count for size, item_count in values)
+
+    def percentile(numerator: int, denominator: int) -> int:
+        rank = max(1, (count * numerator + denominator - 1) // denominator)
+        cumulative = 0
+        for size, item_count in values:
+            cumulative += item_count
+            if cumulative >= rank:
+                return size
+        return values[-1][0]
+
+    result = {
+        "count": count,
+        "total": total,
+        "mean": total / count,
+        "min": values[0][0],
+        "p50": percentile(50, 100),
+        "p90": percentile(90, 100),
+        "p99": percentile(99, 100),
+        "max": values[-1][0],
+    }
+    if capped_count:
+        result["cappedCount"] = capped_count
+        result["meanIsLowerBound"] = True
+    return result
+
+
+def simproc_histogram_for_modules(modules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    aggregates: dict[str, dict[str, Any]] = {}
+    occurrences: dict[str, set[str]] = defaultdict(set)
+    module_names: dict[str, set[str]] = defaultdict(set)
+    for module in modules:
+        module_name = str(module.get("module"))
+        for occurrence in module.get("occurrences", []):
+            occurrence_id = str(occurrence.get("id"))
+            summary = occurrence.get("simprocs", [])
+            if not isinstance(summary, list):
+                raise ValueError(f"invalid simproc summary array: {occurrence_id}")
+            seen: set[str] = set()
+            for entry in summary:
+                key = simproc_name_key(entry.get("name") if isinstance(entry, dict) else None)
+                if key in seen:
+                    raise ValueError(f"duplicate simproc summary: {occurrence_id}:{key}")
+                seen.add(key)
+                merge_simproc_summary_entry(aggregates, entry)
+                occurrences[key].add(occurrence_id)
+                module_names[key].add(module_name)
+    histogram = finalized_simproc_summaries(aggregates)
+    for item in histogram:
+        key = simproc_name_key(item["name"])
+        item["sourceOccurrenceCount"] = len(occurrences[key])
+        item["moduleCount"] = len(module_names[key])
+        item["resultTreeSize"] = size_statistics(
+            item["resultTreeSizeCounts"], item["treeSizeCappedInvocations"]
+        )
+        item["resultDAGSize"] = size_statistics(item["resultDAGSizeCounts"])
+    histogram.sort(key=lambda item: (
+        -item["usedInvocations"],
+        -item["sourceOccurrenceCount"],
+        item["displayName"],
+    ))
+    return histogram
+
+
 def occurrence_shell(occurrence: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": occurrence["id"],
@@ -434,6 +733,7 @@ def occurrence_shell(occurrence: dict[str, Any]) -> dict[str, Any]:
         "replayedExecutions": 0,
         "deferredReasons": [],
         "certificates": [],
+        "simprocs": [],
         "terminal": "unclassified",
     }
 
@@ -456,11 +756,14 @@ def failed_module_result(
     }
 
 
-def module_has_failure(result: dict[str, Any]) -> bool:
+def module_has_failure(
+    result: dict[str, Any], *, record_only: bool = False
+) -> bool:
     if result.get("errors"):
         return True
+    allowed = ALLOWED_TERMINALS | {"recorded"} if record_only else ALLOWED_TERMINALS
     return any(
-        occurrence.get("terminal") not in ALLOWED_TERMINALS
+        occurrence.get("terminal") not in allowed
         for occurrence in result.get("occurrences", [])
     )
 
@@ -593,6 +896,8 @@ def process_module(
     module_entry: dict[str, Any],
     dynlib: str,
     timeout: int,
+    *,
+    record_only: bool = False,
 ) -> dict[str, Any]:
     module = str(module_entry["module"])
     occurrences = list(module_entry["occurrences"])
@@ -632,6 +937,7 @@ def process_module(
     unknown_unsuccessful = set(unsuccessful) - known
     successes: dict[str, list[dict[str, Any]]] = defaultdict(list)
     certificate_sources: dict[str, list[str]] = defaultdict(list)
+    occurrence_simprocs: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
     errors: list[str] = []
     for match in SOURCE_RECORD.finditer(record_output):
         occurrence_id, certificate_name, deferred_count, subject_count = match.groups()
@@ -657,6 +963,12 @@ def process_module(
             errors.append(f"deferred_count_mismatch:{occurrence_id}")
         if int(subject_count) != len(certificate.get("subjects", [])):
             errors.append(f"subject_count_mismatch:{occurrence_id}")
+        try:
+            simproc_summary = certificate_simproc_summary(certificate)
+            for entry in simproc_summary:
+                merge_simproc_summary_entry(occurrence_simprocs[occurrence_id], entry)
+        except ValueError as error:
+            errors.append(f"invalid_simproc_trace:{occurrence_id}:{error}")
         certificate_sources[occurrence_id].append(encoded)
         successes[occurrence_id].append(
             {
@@ -687,6 +999,9 @@ def process_module(
         occurrence_result["successfulExecutions"] = len(execution_records)
         occurrence_result["unsuccessfulExecutions"] = unsuccessful[occurrence_id]
         occurrence_result["certificates"] = execution_records
+        occurrence_result["simprocs"] = finalized_simproc_summaries(
+            occurrence_simprocs[occurrence_id]
+        )
         all_reasons = {
             reason
             for execution in execution_records
@@ -702,7 +1017,16 @@ def process_module(
             occurrence_result["terminal"] = terminal
 
     materialization: dict[str, Any] | None = None
-    if selected:
+    if record_only:
+        # A record-only run is intentionally a committed invocation census,
+        # not a replayability check.  The recording certificate and its
+        # validated simproc summaries are retained; otherwise-selectable
+        # occurrences receive a distinct terminal so the reducer can require
+        # this mode explicitly.  Deferred, unsuccessful, and non-executed
+        # occurrences keep their ordinary terminals above.
+        for occurrence_id in selected:
+            occurrence_results[occurrence_id]["terminal"] = "recorded"
+    elif selected:
         materialized = materialized_copy(
             output,
             "materialized",
@@ -800,7 +1124,10 @@ def run_shard(args: argparse.Namespace) -> None:
     ]
     report = {
         "reportSchema": REPORT_SCHEMA,
-        "kind": "simp_engine_shard",
+        "kind": (
+            "simp_engine_histogram_shard"
+            if args.record_only else "simp_engine_shard"
+        ),
         "commit": inventory["commit"],
         "mathlibCommit": inventory["mathlibCommit"],
         "engine": ENGINE_ID,
@@ -812,6 +1139,7 @@ def run_shard(args: argparse.Namespace) -> None:
         "stoppedAfterFailure": None,
         "assignedModuleCount": len(assigned),
         "modules": [],
+        "simprocHistogram": [],
         "harnessErrors": [],
     }
     report_path = shard_report_path(output, args.shard_index)
@@ -827,7 +1155,13 @@ def run_shard(args: argparse.Namespace) -> None:
     else:
         for ordinal, module in enumerate(assigned, start=1):
             try:
-                result = process_module(output, module, dynlib, args.module_timeout)
+                result = process_module(
+                    output,
+                    module,
+                    dynlib,
+                    args.module_timeout,
+                    record_only=args.record_only,
+                )
             except Exception as error:
                 failure_log = log_path(output, "harness", module["module"])
                 failure_log.write_text(traceback.format_exc(), encoding="utf-8")
@@ -841,6 +1175,7 @@ def run_shard(args: argparse.Namespace) -> None:
                     f"work_cleanup_failure:{type(error).__name__}:{error}"
                 )
             report["modules"].append(result)
+            report["simprocHistogram"] = simproc_histogram_for_modules(report["modules"])
             json_write(report_path, report)
             terminals = Counter(
                 occurrence["terminal"] for occurrence in result["occurrences"]
@@ -850,17 +1185,20 @@ def run_shard(args: argparse.Namespace) -> None:
                 f"{module['module']} {dict(terminals)}",
                 flush=True,
             )
-            if args.stop_after_failure and module_has_failure(result):
+            if args.stop_after_failure and module_has_failure(
+                result, record_only=args.record_only
+            ):
                 report["stoppedAfterFailure"] = module["module"]
                 json_write(report_path, report)
                 break
     report["complete"] = len(report["modules"]) == len(assigned)
     report["completedAt"] = utc_now()
+    report["simprocHistogram"] = simproc_histogram_for_modules(report["modules"])
     json_write(report_path, report)
     if (output / "work").exists():
         shutil.rmtree(output / "work")
     print(
-        f"schema-19 cloud shard {args.shard_index}/{args.shard_count}: "
+        f"schema-{CERTIFICATE_SCHEMA} cloud shard {args.shard_index}/{args.shard_count}: "
         f"{len(report['modules'])}/{len(assigned)} modules reported"
     )
     if report["stoppedAfterFailure"] is not None:
@@ -874,6 +1212,11 @@ def find_shard_reports(directory: Path) -> list[Path]:
 def reduce_reports(args: argparse.Namespace) -> int:
     inventory = json.loads(Path(args.inventory).read_text(encoding="utf-8"))
     assert_repository(inventory["commit"], args.allow_dirty)
+    histogram_only = bool(getattr(args, "histogram_only", False))
+    expected_report_kind = (
+        "simp_engine_histogram_shard"
+        if histogram_only else "simp_engine_shard"
+    )
     report_paths = find_shard_reports(Path(args.reports_dir))
     shard_reports = [json.loads(path.read_text(encoding="utf-8")) for path in report_paths]
     failures: list[str] = []
@@ -897,11 +1240,17 @@ def reduce_reports(args: argparse.Namespace) -> int:
             expected = inventory[field]
             if report.get(field) != expected:
                 failures.append(f"shard_{index}_{field}_mismatch")
-        if report.get("kind") != "simp_engine_shard":
+        if report.get("kind") != expected_report_kind:
             failures.append(f"shard_{index}_kind_mismatch")
         if not report.get("complete"):
             failures.append(f"incomplete_shard:{index}")
         failures.extend(f"shard_{index}_harness:{error}" for error in report.get("harnessErrors", []))
+        try:
+            expected_histogram = simproc_histogram_for_modules(report.get("modules", []))
+            if report.get("simprocHistogram") != expected_histogram:
+                failures.append(f"shard_{index}_simproc_histogram_mismatch")
+        except ValueError as error:
+            failures.append(f"shard_{index}_invalid_simproc_histogram:{error}")
     expected_indices = set(range(shard_count))
     if set(reports_by_index) != expected_indices:
         failures.append(
@@ -952,6 +1301,9 @@ def reduce_reports(args: argparse.Namespace) -> int:
     successful_executions = 0
     unsuccessful_executions = 0
     replayed_executions = 0
+    closure_simprocs: dict[str, dict[str, Any]] = {}
+    simproc_occurrences: dict[str, set[str]] = defaultdict(set)
+    simproc_modules: dict[str, set[str]] = defaultdict(set)
     for module_name, module in actual_modules.items():
         expected_module = expected_modules.get(module_name)
         if expected_module and module.get("sourceHash") != expected_module["sourceHash"]:
@@ -1001,6 +1353,31 @@ def reduce_reports(args: argparse.Namespace) -> int:
             reasons = set(map(str, occurrence.get("deferredReasons", [])))
             if reasons != certificate_reasons:
                 failures.append(f"deferred_reason_union_mismatch:{occurrence_id}")
+            occurrence_summary = occurrence.get("simprocs", [])
+            occurrence_aggregates: dict[str, dict[str, Any]] = {}
+            occurrence_names: set[str] = set()
+            if not isinstance(occurrence_summary, list):
+                failures.append(f"invalid_simproc_summary:{occurrence_id}")
+                occurrence_summary = []
+            try:
+                for entry in occurrence_summary:
+                    key = simproc_name_key(entry.get("name") if isinstance(entry, dict) else None)
+                    if key in occurrence_names:
+                        raise ValueError(f"duplicate simproc summary: {key}")
+                    occurrence_names.add(key)
+                    merge_simproc_summary_entry(occurrence_aggregates, entry)
+                validated_summary = finalized_simproc_summaries(occurrence_aggregates)
+                for entry in validated_summary:
+                    key = merge_simproc_summary_entry(closure_simprocs, entry)
+                    simproc_occurrences[key].add(str(occurrence_id))
+                    simproc_modules[key].add(module_name)
+                    if entry["executionCount"] > successful:
+                        raise ValueError(
+                            f"execution count exceeds occurrence executions: {entry['displayName']}"
+                        )
+            except ValueError as error:
+                failures.append(f"invalid_simproc_summary:{occurrence_id}:{error}")
+                validated_summary = []
             successful_executions += successful
             unsuccessful_executions += unsuccessful
             replayed_executions += replayed
@@ -1011,6 +1388,16 @@ def reduce_reports(args: argparse.Namespace) -> int:
                 module_materialized += successful
                 if successful == 0 or replayed != successful or reasons:
                     failures.append(f"materialized_execution_mismatch:{occurrence_id}")
+            elif terminal == "recorded":
+                if not histogram_only:
+                    failures.append(f"failure_terminal:{occurrence_id}:{terminal}")
+                # One source occurrence may be elaborated more than once.  A
+                # failed attempt does not invalidate its successful committed
+                # recordings; this is the same selection rule used before
+                # normal materialization.  Record-only mode differs only by
+                # intentionally skipping replay/materialization.
+                elif successful == 0 or replayed != 0 or reasons:
+                    failures.append(f"recorded_execution_mismatch:{occurrence_id}")
             elif terminal == "unsuccessful_execution" and (successful != 0 or unsuccessful == 0):
                 failures.append(f"unsuccessful_execution_mismatch:{occurrence_id}")
             elif terminal == "not_executed" and (successful != 0 or unsuccessful != 0):
@@ -1029,6 +1416,8 @@ def reduce_reports(args: argparse.Namespace) -> int:
                 recording.get("unsuccessfulExecutions") != module_unsuccessful:
             failures.append(f"recording_count_mismatch:{module_name}")
         materialization = module.get("materialization")
+        if histogram_only and materialization is not None:
+            failures.append(f"unexpected_materialization_summary:{module_name}")
         if module_materialized:
             if not isinstance(materialization, dict) or materialization.get("exitCode") != 0:
                 failures.append(f"materialization_summary_mismatch:{module_name}")
@@ -1043,9 +1432,37 @@ def reduce_reports(args: argparse.Namespace) -> int:
             f"extra={len(set(actual_occurrences) - set(expected_occurrences))}"
         )
 
+    try:
+        simproc_histogram = finalized_simproc_summaries(closure_simprocs)
+    except ValueError as error:
+        failures.append(f"invalid_closure_simproc_histogram:{error}")
+        simproc_histogram = []
+    for item in simproc_histogram:
+        key = simproc_name_key(item["name"])
+        item["sourceOccurrenceCount"] = len(simproc_occurrences[key])
+        item["moduleCount"] = len(simproc_modules[key])
+        item["resultTreeSize"] = size_statistics(
+            item["resultTreeSizeCounts"], item["treeSizeCappedInvocations"]
+        )
+        item["resultDAGSize"] = size_statistics(item["resultDAGSizeCounts"])
+    simproc_histogram.sort(key=lambda item: (
+        -item["usedInvocations"],
+        -item["sourceOccurrenceCount"],
+        item["displayName"],
+    ))
+    try:
+        recomputed_histogram = simproc_histogram_for_modules(list(actual_modules.values()))
+        if simproc_histogram != recomputed_histogram:
+            failures.append("closure_simproc_histogram_mismatch")
+    except ValueError as error:
+        failures.append(f"invalid_recomputed_simproc_histogram:{error}")
+
     summary = {
         "reportSchema": REPORT_SCHEMA,
-        "kind": "simp_engine_closure",
+        "kind": (
+            "simp_engine_histogram_closure"
+            if histogram_only else "simp_engine_closure"
+        ),
         "commit": inventory["commit"],
         "mathlibCommit": inventory["mathlibCommit"],
         "engine": inventory["engine"],
@@ -1060,14 +1477,27 @@ def reduce_reports(args: argparse.Namespace) -> int:
         "successfulExecutions": successful_executions,
         "unsuccessfulExecutions": unsuccessful_executions,
         "replayedExecutions": replayed_executions,
+        "simprocHistogram": simproc_histogram,
         "failureCount": len(failures),
         "failures": failures,
     }
+    if histogram_only:
+        summary["histogramOnly"] = True
+    if isinstance(inventory.get("sample"), dict):
+        summary["sample"] = inventory["sample"]
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     json_write(output / "simp-engine-closure.json", summary, pretty=True)
+    sample = summary.get("sample")
+    if histogram_only:
+        report_scope = (
+            "representative committed simproc histogram"
+            if sample else "full Mathlib committed simproc histogram"
+        )
+    else:
+        report_scope = "representative Mathlib sample" if sample else "full Mathlib closure"
     markdown = [
-        "# Schema-17 full Mathlib closure",
+        f"# Schema-{CERTIFICATE_SCHEMA} {report_scope}",
         "",
         f"- Commit: `{summary['commit']}`",
         f"- Mathlib: `{summary['mathlibCommit']}`",
@@ -1077,11 +1507,74 @@ def reduce_reports(args: argparse.Namespace) -> int:
         f"- Successful executions: {successful_executions}",
         f"- Replayed executions: {replayed_executions}",
         f"- Unsuccessful executions: {unsuccessful_executions}",
-        "",
-        "## Terminal outcomes",
-        "",
     ]
+    if sample:
+        markdown.extend([
+            f"- Sampling: {sample.get('method', 'unspecified')}",
+            f"- Sample seed: `{sample.get('seed', 'unspecified')}`",
+            f"- Population: {sample.get('populationModuleCount', 'unknown')} simp-using modules, "
+            f"{sample.get('populationOccurrenceCount', 'unknown')} occurrences",
+        ])
+    markdown.extend(["", "## Terminal outcomes", ""])
     markdown.extend(f"- `{key}`: {value}" for key, value in sorted(terminal_counts.items()))
+    if simproc_histogram:
+        markdown.extend([
+            "",
+            "## Committed simproc invocation histogram",
+            "",
+            "Only committed result-bearing dispositions (`done`, `visit`, and `continue some`) are included.",
+            "The JSON report contains the complete histogram and exact output-size distributions.",
+            "Tree size estimates an unshared serialized term; DAG size counts shared expression nodes.",
+            "",
+            "| simproc | source occurrences | executions | committed invocations | changed | mean tree | p90 tree | mean DAG |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ])
+        for item in simproc_histogram[:100]:
+            tree = item["resultTreeSize"]
+            dag = item["resultDAGSize"]
+            tree_prefix = "≥" if tree.get("meanIsLowerBound") else ""
+            markdown.append(
+                f"| `{item['displayName']}` | {item['sourceOccurrenceCount']} | "
+                f"{item['executionCount']} | {item['usedInvocations']} | "
+                f"{item['changingInvocations']} | "
+                f"{tree_prefix}{tree.get('mean', 0):.1f} | {tree.get('p90', 0)} | "
+                f"{dag.get('mean', 0):.1f} |"
+            )
+        if len(simproc_histogram) > 100:
+            markdown.append(
+                f"\nTop 100 of {len(simproc_histogram)} simprocs shown; see JSON for all entries."
+            )
+        rewrite_candidates = sorted(
+            (item for item in simproc_histogram if item["changingInvocations"]),
+            key=lambda item: (
+                item["sourceOccurrenceCount"],
+                item["moduleCount"],
+                item["changingInvocations"],
+                item["displayName"],
+            ),
+        )
+        if rewrite_candidates:
+            markdown.extend([
+                "",
+                "## Low-frequency changing simprocs",
+                "",
+                "These are the first candidates to inspect for replacing source invocations instead of modeling the simproc.",
+                "",
+                "| simproc | source occurrences | modules | changing invocations | mean tree | p90 tree |",
+                "|---|---:|---:|---:|---:|---:|",
+            ])
+            for item in rewrite_candidates[:100]:
+                tree = item["resultTreeSize"]
+                tree_prefix = "≥" if tree.get("meanIsLowerBound") else ""
+                markdown.append(
+                    f"| `{item['displayName']}` | {item['sourceOccurrenceCount']} | "
+                    f"{item['moduleCount']} | {item['changingInvocations']} | "
+                    f"{tree_prefix}{tree.get('mean', 0):.1f} | {tree.get('p90', 0)} |"
+                )
+            if len(rewrite_candidates) > 100:
+                markdown.append(
+                    f"\nFirst 100 of {len(rewrite_candidates)} changing simprocs shown; see JSON for all entries."
+                )
     if failures:
         markdown.extend(["", "## Failures", ""])
         markdown.extend(f"- `{failure}`" for failure in failures[:500])
@@ -1090,8 +1583,9 @@ def reduce_reports(args: argparse.Namespace) -> int:
     (output / "simp-engine-closure.md").write_text(
         "\n".join(markdown) + "\n", encoding="utf-8"
     )
+    marker_scope = "committed histogram" if histogram_only else "full closure"
     print(
-        "schema-19 full closure: "
+        f"schema-{CERTIFICATE_SCHEMA} {marker_scope}: "
         f"{len(actual_occurrences)}/{len(expected_occurrences)} occurrences, "
         f"terminals={dict(terminal_counts)}, failures={len(failures)}"
     )
@@ -1129,6 +1623,7 @@ def parser() -> argparse.ArgumentParser:
     shard.add_argument("--output-dir", required=True)
     shard.add_argument("--module-timeout", type=int, default=900)
     shard.add_argument("--stop-after-failure", action="store_true")
+    shard.add_argument("--record-only", action="store_true")
     shard.add_argument("--allow-dirty", action="store_true")
     shard.set_defaults(function=run_shard)
 
@@ -1137,6 +1632,7 @@ def parser() -> argparse.ArgumentParser:
     reduce_parser.add_argument("--reports-dir", required=True)
     reduce_parser.add_argument("--output-dir", required=True)
     reduce_parser.add_argument("--shard-count", type=int)
+    reduce_parser.add_argument("--histogram-only", action="store_true")
     reduce_parser.add_argument("--allow-dirty", action="store_true")
     reduce_parser.set_defaults(function=lambda args: sys.exit(reduce_reports(args)))
     return result

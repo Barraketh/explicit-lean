@@ -71,7 +71,7 @@ def main() -> None:
     defaults = vast.parser().parse_args(["run", "--output-dir", "unused"])
     inventory_fixture = {
         "kind": "simp_engine_inventory",
-        "reportSchema": 1,
+        "reportSchema": cloud.REPORT_SCHEMA,
         "commit": "a" * 40,
         "mathlibCommit": "b" * 40,
         "engine": dict(cloud.ENGINE_ID),
@@ -83,7 +83,10 @@ def main() -> None:
         raise RuntimeError("valid reusable inventory was not accepted")
     prior_schema = {
         **inventory_fixture,
-        "engine": {**cloud.ENGINE_ID, "certificateSchema": 17},
+        "engine": {
+            **cloud.ENGINE_ID,
+            "certificateSchema": cloud.CERTIFICATE_SCHEMA - 1,
+        },
     }
     if vast.validate_reusable_inventory(prior_schema, "a" * 40, "b" * 40) is not prior_schema:
         raise RuntimeError("schema-independent syntax census was not reusable")
@@ -117,15 +120,21 @@ def main() -> None:
         or defaults.minimum_ram_gb_per_process != 24
         or defaults.minimum_cpu_cores_per_process != 4
         or defaults.max_runtime_hours != 3
+        or defaults.record_only
     ):
         raise RuntimeError("Vast parallel resource defaults changed")
+    record_only = vast.parser().parse_args(
+        ["run", "--output-dir", "unused", "--record-only"]
+    )
+    if not record_only.record_only:
+        raise RuntimeError("Vast record-only mode was not exposed by the controller")
     if "--exclude=work/" not in inspect.getsource(vast.rsync_from):
         raise RuntimeError("Vast checkpoints include transient worker trees")
     setup = vast.setup_script("0" * 40)
     if "ulimit -n 65536" not in setup or 'test "$(ulimit -n)" -ge 65536' not in setup:
         raise RuntimeError("Vast setup does not protect parallel cache extraction")
     print(
-        "schema-19 Vast scheduler: 256 shards covered once; "
+        "schema-27 Vast scheduler: 256 shards covered once; "
         "memory, host, progress, and price guards: ok"
     )
 

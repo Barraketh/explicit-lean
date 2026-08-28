@@ -14,6 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FORK = ROOT / "ExplicitLean" / "SimpEngine.lean"
 REVIEWED_FILES = (
+    "lakefile.toml",
+    "PLAN.md",
     "ExplicitLean/SimpEngine.lean",
     "ExplicitLean/SimpEngine/Fingerprint.lean",
     "ExplicitLean/SimpEngine/IR.lean",
@@ -22,40 +24,110 @@ REVIEWED_FILES = (
     "ExplicitLean/SimpEngine/Runtime.lean",
     "ExplicitLean/SimpEngine/Recording.lean",
     "ExplicitLean/SimpEngine/Replay.lean",
+    "ExplicitLean/SimpEngine/SemanticSimproc.lean",
     "ExplicitLean/SimpEngine/Source.lean",
+    "ExplicitLeanMathlibAudit.lean",
+    "ExplicitLeanMathlibAudit/FieldEq.lean",
     "SIMP_ENGINE_COVERAGE.md",
+    "simprocs.md",
 )
+
+# Upstream implementations whose state-free negative branches and supported
+# semantic simproc derivations are covered by the source-level review.
+REVIEWED_UPSTREAM_HASHES: dict[str, str] = {
+    "Init/Data/Fin/Basic.lean":
+        "fcf6cfb3553deaf9eb88e62c51e7ab6c54c1d873953f65f2216b154034b7fc31",
+    "Init/Prelude.lean":
+        "44f86ebbb9ab743a05c6ebe2c674aadbf2c822bee874f1b16d7e6c8d56318dc9",
+    "Init/SimpLemmas.lean":
+        "43b85a7d431ed8966855f68bf7db7f36000f002cb2b191a9c87003e6a9506cea",
+    "Lean/Elab/PreDefinition/WF/Preprocess.lean":
+        "1288a4d870a94e30fad9f3d67a4488c29cb49dae947edcde2251ab51db69ddfa",
+    "Lean/Expr.lean":
+        "7d4418bf9fef6f72eac422db70613848f849f074573392e79fb86fe745e79f7e",
+    "Lean/Meta/AppBuilder.lean":
+        "2d11a3e6bf24e3572c340c58ae5250a9502720d8e2996b641b4c053b1696644c",
+    "Lean/Meta/CtorRecognizer.lean":
+        "1702e73c93bb81c978001a8206f6b22ec35186ed5f9e8313c70799a9b4b453cb",
+    "Lean/Meta/LitValues.lean":
+        "609f53f536b06d2b05d71c219cf0007064244084a82d9e88956f57e15eb72720",
+    "Lean/Meta/Offset.lean":
+        "b1322d582b1a8028325d8322968f40ade286526ecf0a142bcbbdba50510cee88",
+    "Lean/Meta/Match/MatcherApp/Basic.lean":
+        "d664d30764d31bb4cb6a0b58ab35e038b9e98e1b8b62233b60ce9c75c1229a1b",
+    "Lean/Meta/Match/MatcherInfo.lean":
+        "7a9067b5d788c656202c2e4cc74868f1f8531dfc73f3d8c94604c56f796d8d34",
+    "Lean/Meta/Tactic/Simp/BuiltinSimprocs/Fin.lean":
+        "5c8a2e3fd7c723c42abb0fdd16a77ebb05146e3aeca8f556a559831b7c3c9cba",
+    "Lean/Meta/Tactic/Simp/BuiltinSimprocs/Core.lean":
+        "c576304b94ae0969c058e084805ba359e2f5bd6158ef19c493c900e1405af4f4",
+    "Lean/Meta/Tactic/Simp/BuiltinSimprocs/Int.lean":
+        "5510cf5360d54ea45c957fb0411b87a497d6bb60b802d2ac2f7d523e9a1c8ff2",
+    "Lean/Meta/Tactic/Simp/BuiltinSimprocs/Nat.lean":
+        "6384d4df788555086a56e37c06731563d0d892d1c28ff15e3d61ca3a6169acea",
+    "Lean/ToExpr.lean":
+        "97ce56c718e5eeb86f308d10007485cac0803f92216d434a2aee3db6cfee7cd0",
+    "Lean/Util/SafeExponentiation.lean":
+        "8b8915c3a5892b125bc800023b5bd4f7eb5cdd4d08b9fcd84667e7196602b6eb",
+    "Lean/AuxRecursor.lean":
+        "c004ddcbd0d6475550e701e30b8035e146132f8f7c8d3d5c8486c1f465a6ff9f",
+}
+
+# Mathlib-owned implementations used by semantic interpreters are pinned
+# independently from the Lean toolchain source root.
+REVIEWED_MATHLIB_HASHES: dict[str, str] = {
+    "Mathlib/Data/Fin/VecNotation.lean":
+        "dffd4a79591dc0ca61e18c6babcecdcf2e3fc623e4b80981e84c60a60cefcbb0",
+    "Mathlib/Tactic/Simproc/ExistsAndEq.lean":
+        "8a96de10d08a39413ad7fa06d92a7e2312dbf922f1d30a22b523bc6835961b44",
+    "Mathlib/Tactic/FieldSimp.lean":
+        "7c4960c3c633aa093d2adf6b455449bd39f33342b52e48878cb058aa55ac00c2",
+    "Mathlib/Tactic/FieldSimp/Discharger.lean":
+        "87c89068d9bfda38de822505f93fc6b6f1b27d83e2085f27f950379416ad5c59",
+}
 
 # These values are changed only after a new source-level completeness review.
 REVIEWED_HASHES: dict[str, str] = {
+    "lakefile.toml":
+        "a37efc6e358aaedadc967b5ddcfb639269ebf8613be8d235d529384d7cc5725e",
+    "PLAN.md":
+        "c685941227f2ec500c06dd36cf979efcba93d7109ff47abaf189b44dfc24b44b",
     "ExplicitLean/SimpEngine.lean":
-        "58cab6c28cc22e6dbbe30ecad9ae35870b33dea973523f996062c7c2526a43ed",
+        "8fe62915752b06e3f5eaf76146db67de3eda11d36e47df76c006629debcd7148",
     "ExplicitLean/SimpEngine/Fingerprint.lean":
-        "e2c1e4547133fee8e4a18bcd07de4fde3036e5b5fde9b8240e0a5fe01b4863ff",
+        "6cbfb1377aa645224c8feb84e785274a3f2d3e04e77181d6dfc0ff1e06d82d77",
     "ExplicitLean/SimpEngine/IR.lean":
-        "70cb8064c7486b0d164faef22c565a86ad9ada0f334d0e2c7f81d5ef82ba1a4b",
+        "f790c9a13955a250fda5e6c1c1f92694f4d5000bef4f378fc11ee813eabdcfe6",
     "ExplicitLean/SimpEngine/Inventory.lean":
         "d08cefcb506f63b29c8c91f53fa089177d17b501473af554c4adf6c4002a44e8",
     "ExplicitLean/SimpEngine/Recording.lean":
-        "251f79cac7ed335593dcff918cdd580f31dc4b1c41a6b238b0687f44c05ba087",
+        "098cb198a326e0efa6b3c74492f0001141d09a1a221363905b4d9f8770422a39",
     "ExplicitLean/SimpEngine/Reference.lean":
         "e3f59c3a7c5f01dec5a700eda0dad5d08199df7adee4ff557e548f4b5fca6bb0",
     "ExplicitLean/SimpEngine/Replay.lean":
-        "ea34fe5b55040403cae4c38812afcc0fe36233bf87cd09e5f9a2253c725a5477",
+        "ca06988d05c982db4ddccb48bd733c1c105ac02877f484002a552211537524a0",
+    "ExplicitLean/SimpEngine/SemanticSimproc.lean":
+        "62c8127196d33283a3d8c2b0191faec535047792358f49a1b476f9ecbcfed5e5",
     "ExplicitLean/SimpEngine/Runtime.lean":
-        "5935c0f152933590a8a3d8fa6c6a67cb1b8cfcdb1f6c9dc588e712a78593627a",
+        "03e71f3005a58dafdb12ad262634aa9a16e9cb689728aa604e547cd12192e5cd",
     "ExplicitLean/SimpEngine/Source.lean":
-        "74a84e31a3d938a18be14bfcb6c121a32f5d03d3d4085d5cba9507094aa9d4f2",
+        "1808c85ae29a5508bde8b98bd6c886ca88ec8d074de8b95857b2a6133a09f5d3",
+    "ExplicitLeanMathlibAudit.lean":
+        "83d05f986e7bcab4c3a7a0b4c8af171cf5959ecf439550cda4468bf99e444a02",
+    "ExplicitLeanMathlibAudit/FieldEq.lean":
+        "c5c0ec09f153a7e73e804ec2093e85708c0bd3c38b2f8161a6355012d0019112",
     "SIMP_ENGINE_COVERAGE.md":
-        "5a5757a72f1ddb72f3505d65731821270fc532d4acfe8a8b42204bc33e3eb692",
+        "811313f4098240c6984651ca966298381edd5a782d469020438de3d12d87de61",
+    "simprocs.md":
+        "fa57800e6231eafead9095765fad891c989cc95594015459545a41fb42236d65",
 }
 EXPECTED_LINEAGE_DIGEST = (
-    "763d8c84bb393d353579ccfa322ed445df45930c6f301e56ca69b3fe507d9080"
+    "60511e7930514efa28c4ce54b954ed7662baca737de447469781ffdbc035aab7"
 )
 EXPECTED_CONTROLLED_DIGEST = (
-    "33023b30a59d01b7f029b7a8c78db20bc78c1d8fabdffa2c0c6775956949f8ff"
+    "ff10456b202a198d347c917b70f058a4567298594af2f965f1463c1d7f70e6d3"
 )
-EXPECTED_DECLARATION_COUNT = 228
+EXPECTED_DECLARATION_COUNT = 256
 
 MAIN = "Lean/Meta/Tactic/Simp/Main.lean"
 REWRITE = "Lean/Meta/Tactic/Simp/Rewrite.lean"
@@ -219,6 +291,7 @@ def source_root() -> Path:
 
 def current_values() -> dict[str, object]:
     upstream_root = source_root()
+    mathlib_root = ROOT / ".lake" / "packages" / "mathlib"
     fork_decls = declarations(FORK)
     lineage_targets: set[str] = set()
     lineage_rows: list[str] = []
@@ -249,6 +322,14 @@ def current_values() -> dict[str, object]:
         "reviewedHashes": {
             relative: sha((ROOT / relative).read_bytes()) for relative in REVIEWED_FILES
         },
+        "reviewedUpstreamHashes": {
+            relative: sha((upstream_root / relative).read_bytes())
+            for relative in REVIEWED_UPSTREAM_HASHES
+        },
+        "reviewedMathlibHashes": {
+            relative: sha((mathlib_root / relative).read_bytes())
+            for relative in REVIEWED_MATHLIB_HASHES
+        },
         "lineageDigest": sha("\n".join(sorted(lineage_rows)).encode()),
         "controlledDigest": sha("\n".join(controlled_rows).encode()),
         "declarationCount": declaration_count,
@@ -264,6 +345,8 @@ def main() -> None:
         return
     expected = {
         "reviewedHashes": REVIEWED_HASHES,
+        "reviewedUpstreamHashes": REVIEWED_UPSTREAM_HASHES,
+        "reviewedMathlibHashes": REVIEWED_MATHLIB_HASHES,
         "lineageDigest": EXPECTED_LINEAGE_DIGEST,
         "controlledDigest": EXPECTED_CONTROLLED_DIGEST,
         "declarationCount": EXPECTED_DECLARATION_COUNT,
@@ -279,7 +362,7 @@ def main() -> None:
     if found:
         raise RuntimeError(f"unidentified or ambient operations returned: {found}")
     print(
-        "schema-19 source review: "
+        "schema-27 source review: "
         f"{current['lineageCount']} upstream-lineage declarations, "
         f"{current['controlledCount']} controlled declarations: ok"
     )

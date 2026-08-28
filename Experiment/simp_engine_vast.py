@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run schema-19 full closure in parallel on verified Vast.ai CPU capacity."""
+"""Run schema-27 full closure in parallel on verified Vast.ai CPU capacity."""
 
 from __future__ import annotations
 
@@ -264,7 +264,7 @@ def scp_to(
 
 
 def create_instance(offer: dict[str, Any], index: int, args: argparse.Namespace) -> dict[str, Any]:
-    label = f"simp17-{args.commit[:8]}-candidate-{index:02d}"
+    label = f"simp-engine-{args.commit[:8]}-candidate-{index:02d}"
     result = json_command([
         "vastai", "create", "instance", str(offer["id"]),
         "--image", args.image, "--disk", str(args.disk_gb),
@@ -421,10 +421,11 @@ def setup_instance(
         setup_output = ssh(instance, known_hosts, setup_script(args.commit), args.setup_timeout)
         log_path.write_text(setup_output, encoding="utf-8")
         transfer_inventory(instance, output, known_hosts)
+        record_only = " --record-only" if args.record_only else ""
         command = f"""set -euo pipefail
 export PATH=/root/.elan/bin:$PATH
 cd /workspace/explicit-lean
-setsid sh -c 'exec python3 Experiment/simp_engine_vast_worker.py --inventory .cloud/inventory.json --worker-index {instance['workerIndex']} --worker-count {args.workers} --shard-count {args.shard_count} --concurrency {args.concurrency} --module-timeout {args.module_timeout} --output-dir .cloud/vast-worker > .cloud/vast-worker/worker.log 2>&1' </dev/null >/dev/null 2>&1 &
+setsid sh -c 'exec python3 Experiment/simp_engine_vast_worker.py --inventory .cloud/inventory.json --worker-index {instance['workerIndex']} --worker-count {args.workers} --shard-count {args.shard_count} --concurrency {args.concurrency} --module-timeout {args.module_timeout} --output-dir .cloud/vast-worker{record_only} > .cloud/vast-worker/worker.log 2>&1' </dev/null >/dev/null 2>&1 &
 echo $! > .cloud/vast-worker/worker.pid
 """
         ssh(instance, known_hosts, command, 60)
@@ -536,7 +537,8 @@ def validate_reusable_inventory(
 ) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RuntimeError("reusable inventory must be a JSON object")
-    if value.get("kind") != "simp_engine_inventory" or value.get("reportSchema") != 1:
+    if value.get("kind") != "simp_engine_inventory" \
+            or value.get("reportSchema") != cloud.REPORT_SCHEMA:
         raise RuntimeError("reusable inventory has an unsupported format")
     if value.get("commit") != expected_commit:
         raise RuntimeError(
@@ -613,13 +615,16 @@ def reuse_inventory(args: argparse.Namespace, output: Path) -> None:
 
 
 def reduce(output: Path, args: argparse.Namespace) -> int:
-    result = subprocess.run([
+    command = [
         sys.executable, "Experiment/simp_engine_cloud.py", "reduce",
         "--inventory", str(output / "inventory.json"),
         "--reports-dir", str(output / "workers"),
         "--shard-count", str(args.shard_count),
         "--output-dir", str(output / "final"),
-    ], cwd=ROOT, check=False)
+    ]
+    if args.record_only:
+        command.append("--histogram-only")
+    result = subprocess.run(command, cwd=ROOT, check=False)
     return result.returncode
 
 
@@ -661,6 +666,7 @@ def run_closure(args: argparse.Namespace) -> int:
         "minimumRamGbPerProcess": args.minimum_ram_gb_per_process,
         "minimumEffectiveCpuCoresPerProcess": args.minimum_cpu_cores_per_process,
         "shardCount": args.shard_count,
+        "recordOnly": args.record_only,
         "totalModuleConcurrency": args.workers * args.concurrency,
         "totalHourlyUsd": total_hourly,
         "maximumRuntimeHours": args.max_runtime_hours,
@@ -770,7 +776,7 @@ def run_closure(args: argparse.Namespace) -> int:
         ready_instances = ready_instances[:args.workers]
         for index, instance in enumerate(ready_instances):
             instance["workerIndex"] = index
-            instance["label"] = f"simp17-{args.commit[:8]}-{index:02d}"
+            instance["label"] = f"simp-engine-{args.commit[:8]}-{index:02d}"
         slots = {int(instance["workerIndex"]): instance for instance in ready_instances}
 
         def launch_replacement(worker_index: int) -> dict[str, Any]:
@@ -789,7 +795,7 @@ def run_closure(args: argparse.Namespace) -> int:
                     continue
                 candidate_index += 1
                 replacement["workerIndex"] = worker_index
-                replacement["label"] = f"simp17-{args.commit[:8]}-{worker_index:02d}"
+                replacement["label"] = f"simp-engine-{args.commit[:8]}-{worker_index:02d}"
                 instances.append(replacement)
                 plan["instances"] = instances
                 atomic_json(state_path, plan)
@@ -981,6 +987,7 @@ def parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--setup-timeout", type=int, default=1800)
     run_parser.add_argument("--poll-seconds", type=int, default=30)
     run_parser.add_argument("--market-refreshes", type=int, default=3)
+    run_parser.add_argument("--record-only", action="store_true")
     run_parser.add_argument("--execute", action="store_true")
     run_parser.add_argument("--keep-instances", action="store_true")
     run_parser.set_defaults(function=run_closure)

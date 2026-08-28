@@ -1,214 +1,139 @@
-# Explicit Lean implementation plan
+# Explicit Lean roadmap
 
-Status: E1 through E6 complete.
+## Goal
 
-## 1. Current goal
+Explicit Lean turns successful `simp` and `simp only` executions into stable
+Lean source whose meaning is explicit. A certificate records the operations and
+control-flow choices that the pinned simplifier committed; replay consumes that
+program without ambient simp theorems, congruence rules, simproc registries, or
+dischargers.
 
-For every committed successful `simp` and `simp only` execution, produce
-deterministic Lean source that replays the operations the pinned simplifier
-performed. A certificate may use recorded theorem applications, fixed
-reductions and builtins, explicit structural traversal, and recursively explicit
-premise programs. It may not replace an unidentified operation with a generated
-event proof, whole-result proof, aggregate `change`, or enclosing-body proof.
+The current scope is `simp` and `simp only`. `simpa`, `simp_all`, `simp_rw`, and
+`rw` are later projects. The normative engine contract is in
+[SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md), and the corpus evidence and
+per-simproc decisions are in [simprocs.md](simprocs.md).
 
-Simprocs and arbitrary custom dischargers are observed exactly but deferred for
-separate designs. `simpa`, `simp_all`, `simp_rw`, and `rw` are later phases.
+## Current design
 
-The normative engine model, certificate IR, invariants, and acceptance gates are
-in [SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md).
+The implementation is a pinned fork of Lean 4.32.2's simplifier at commit
+`f3b06c705e6c85f5314019d5d3baab0fec5b580c`. It has three modes:
 
-## 2. Architecture
+- reference mode follows upstream behavior;
+- recording mode emits schema-27 programs, structural witnesses, subject
+  transport, and rollback-aware committed simproc traces; and
+- replay mode consumes those programs in the same traversal.
 
-The implementation is a pinned copy of Lean's simplifier with three modes:
+Recording is checked against a separate upstream execution before its result is
+accepted. The comparison covers the result expression, proof presence and
+proposition, cache flag, and the complete operational `Simp.State`: step count,
+simp/congruence/dsimp caches, used theorem origins, and diagnostics. Proof terms
+inside state are compared modulo proof irrelevance because independent custom
+discharger runs may generate extension-local private proof names. Fresh local,
+expression-metavariable, and universe-metavariable identities are canonicalized.
 
-- reference mode, which must be observationally equivalent to upstream;
-- recording mode, which emits schema-19 operations and structural witnesses at
-  the engine's commit points; and
-- replay mode, which consumes that program without ambient simp theorems,
-  congruence rules, simprocs, or dischargers.
+The certificate never treats a result proof as a substitute for an unidentified
+operation. Unsupported result-bearing simprocs and arbitrary custom dischargers
+make the containing subject explicitly deferred.
 
-Recording and replay share the same traversal. This makes completeness a finite
-implementation audit instead of an open-ended cycle of inferring missing steps
-from corpus failures.
+### Simproc boundary
 
-## 3. Implementation sequence
+Every invoked candidate is observed with its declaration, phase, registry set,
+procedure kind, disposition, execution flag, extra-argument count, proof/cache
+facts, fingerprints, and bounded result tree/DAG size. The certificate trace is
+part of rollback-able recorder state, so calls made only by failed speculative
+candidates do not appear in histograms or replay validation. Append-only runtime
+observations remain conservative diagnostics and may still force deferral when
+an unmodelled candidate ran before rollback.
 
-Each package is committed before work begins on the next.
+A supported result is represented as a `semanticSimproc` fold. The fold records
+ordered candidates and their actual procedure protocol, but the declaration
+name is provenance rather than replay authority. Replay reconstructs the result
+from a closed semantic descriptor, verifies all fingerprints and protocol
+fields, composes proofs/cache flags exactly, and requires a matching committed
+observation. Observations validate authority; they never create it.
 
-### E1. Pinned reference engine — complete
+The supported protocol is intentionally closed:
 
-- The authoritative Lean source surface is version- and hash-pinned.
-- Focused `simp` and `dsimp` probes compare the fork with upstream.
-- The source gate verifies upstream/fork final-state equivalence while compiling
-  complete instrumented Mathlib modules; there is no separate bounded adapter.
+| declaration | procedure protocol | semantic operation |
+| --- | --- | --- |
+| `Fin.isValue` | dsimproc, post registry, `done` | range guard or canonical modulo literal |
+| `reduceIte` | simproc, pre registry, `visit` | nested condition program and selected input branch |
+| `Nat.reduceAdd`, `Nat.reduceDiv` | dsimproc, post registry, `done` | canonical Nat binary value |
+| `reduceDIte` | simproc, pre registry, `visit` | nested condition program, selected dependent branch, head beta |
+| `Int.reduceNeg` | dsimproc, post registry, `done` | syntax guard or canonical negative literal |
+| `reduceCtorEq` | simproc, post registry, `done` | constructor disjointness and no-confusion proof |
+| `Matrix.cons_val` | dsimproc, post registry, `continue some` | checked vector spine/index lookup |
+| `Fin.reduceFinMk` | dsimproc, post registry, `done` | canonical `Fin.mk` via a checked Nat evaluation trace |
+| `ExistsAndEq.existsAndEq` | simproc, pre registry, `visit` | checked route and explicit equivalence proof |
 
-### E2. Total structured recorder — complete
+The `fieldEq` simproc is not replay authority yet. A separate Mathlib-dependent
+audit library runs a source-faithful shadow from the saved pre-state, records the
+four discharger strategies and recursive calls, and requires exact authoritative
+versus shadow result, `Simp.State`, and tracked metavariable/message effects. The
+hook restores the complete authoritative Core/Meta post-state; its payload is
+diagnostic only.
 
-- Schema 19 represents all structural paths in the pinned engine audit, exact
-  rule variants and matches, nested premise programs, reductions, congruence
-  choices, subject transport, and final state.
-- Every invoked simp and dsimp simproc candidate, including `continue none`, is
-  observed and assigned a deferred classification rather than converted to a
-  proof fallback. Every invoked custom discharger is likewise deferred.
-- Failed candidates that execute recursive work are retained as explicit failed
-  attempts; candidates with no executable progress are omitted.
-- Focused static and dynamic branch gates test the recorder; the source gate
-  exercises the same recorder in complete modules.
+## Completed work
 
-### E3. Closed structural replay — complete
+1. The upstream source surface and semantic helper implementations are pinned
+   by hashes.
+2. The structural recorder covers simplifier recursion, reductions, rewrite
+   selection and failed attempts, congruence, caches, nested discharge/ground
+   programs, dsimp traversal, and goal/hypothesis transport.
+3. Closed replay validates paths, fingerprints, provenance, assignments,
+   dispositions, final state, and exact program consumption.
+4. Certificate source round-trips as compact schema-27 JSON embedded in Lean
+   strings and materializes at original tactic sites.
+5. Syntax-aware local and cloud harnesses inventory complete Mathlib modules,
+   classify every occurrence, and support deterministic sharding and strict
+   reduction.
+6. A full pre-schema-27 closure run at the pinned Mathlib commit classified all
+   83,425 inventoried occurrences in 6,319 modules with zero harness failures.
+   This is a historical baseline, not evidence that the current schema-27 tree
+   has completed a fresh full-corpus closure.
+7. A full rollback-aware record-only census measured 12,731 committed
+   result-bearing simproc calls. The top ten account for 12,049 (94.6%).
+8. Focused semantic gates cover the nine replay-supported declarations/families
+   above, exact fold/observation linkage, source round trips for constructor and
+   existential equality slices, and single-field mutation rejection.
 
-- Add replay mode to the same pinned traversal.
-- Empty ambient simp, congruence, simproc, and discharger dependencies.
-- Gate every changing branch by the next recorded command and validate paths,
-  identities, assignments, phases, fingerprints, and exact consumption.
-- Add mutation tests that change one field at a time and require failure at the
-  mutated item.
+## Acceptance gates
 
-Gate: every focused non-deferred recording replays; every mutation is rejected.
+`Experiment/run.sh` is the commit gate. It builds the generic and Mathlib-audit
+libraries and runs:
 
-Status: complete. The focused suite replays 37 dynamic branch classes and 23
-single-field mutations are rejected. Complete-module recording, replay, and
-classification are owned by the source gate below rather than a second replay
-harness.
+- source pinning and upstream/fork reference equivalence;
+- focused simproc-entry and semantic interpreter/fold differentials;
+- passive `fieldEq` shadow parity;
+- constructor and existential source round trips;
+- the 54-row implementation-to-IR observer audit and reviewed-source hash lock;
+- exact recording parity, closed replay, and mutation rejection;
+- the representative complete-module source materializer; and
+- cloud reducer and Vast scheduler/harness mutation tests.
 
-### E4. Certificate source and materializer — complete
+Cloud production commands refuse a dirty worktree unless `--allow-dirty` is
+explicitly supplied. Record-only runs reuse the syntax inventory across
+certificate schema changes but validate report schema, repository commit,
+Mathlib commit, and all harness inputs.
 
-- Define and parse a stable schema-19 source form.
-- Print qualified rule identities, engine/configuration identity, nested premise
-  programs, and final-state validation.
-- Instrument all supported calls in a module once, materialize replacements in
-  batches, and bisect only compilation failures.
+## Remaining work
 
-Gate: every focused and bounded-production non-deferred execution materializes,
-and the complete copied modules compile.
+1. Run a fresh full-Mathlib schema-27 closure and compare its terminal
+   classifications with the historical baseline.
+2. Build a memory-safe, resumable full-corpus `fieldEq` audit. The discarded
+   whole-module prototype could exceed 12 GB for a module and was not suitable
+   as a production census. Use occurrence isolation or bounded shards before
+   choosing its semantic IR.
+3. Extend semantic support only from measured committed calls. For each new
+   declaration, pin its actual kind/registry/disposition protocol, model any
+   state or meta effects, add a closed interpreter, prove observation/fold
+   correspondence, and reject mutations.
+4. Reassess the four `ExistsAndEq` deferrals. Three require explicit
+   certificate effects for procedure-created metavariable assignments. The
+   fourth uses the post registry; supporting both registries would require
+   binding that provenance into observation validation.
+5. After simproc closure is current, begin the separate tactic families
+   (`simpa`, `simp_all`, `simp_rw`, and `rw`).
 
-Status: complete. Schema 19 is serialized as compact JSON inside shallow Lean
-string arrays. Every payload is decoded and compared structurally with the
-recorded certificate before it is written; `Name` values use lossless
-string/numeric components rather than Lean's lossy default JSON codec. A source
-occurrence emits one passive, non-deduplicated completion record per dynamic
-execution. Selection keys on `(initial proof-state fingerprint, ReplayConfig)`:
-equal duplicates under that full key are allowed, while unequal duplicates under
-the same full key are rejected. Nested occurrences are instrumented by replacing
-only their `simp` head; an attached quotation source antiquotation such as `%$s`
-moves with that head instead of being stranded after injected arguments. Rule-origin
-identity canonicalizes the recording/materialization wrappers without executing
-ambient simp. The source gate covers 510 occurrences in seventeen complete module
-copies: 213 materialize across 242 dynamic executions, 296 are explicitly
-simproc-deferred, and one executes unsuccessfully under `first`. A mutated
-engine identity is rejected before replay. Multiline certificate source keeps
-trailing tactic configuration to the right of the original tactic column, as
-required by Lean's offside rule. The production fixture also covers a cache hit
-after the cached expression's binder has left the current local context and a
-generated matcher whose private name changes during source materialization.
-It also covers a successful user-congruence traversal whose auto-congruence
-child explicitly unfolds numeric literals inside `dsimp`, plus an authored
-local rule whose lhs retains a let-bound set after the subject unfolds it.
-It further requires user-congruence preprocessing and closed certificate-term
-elaboration to be observational: neither may solve, allocate, or leak
-metavariables in the surrounding declaration before replay begins.
-
-### E5. Pre-cloud completeness review
-
-- Mechanically diff the fork against pinned upstream, allowing only namespace,
-  recursion, observer, and replay-driver changes.
-- Require every changing return and structural decision to map to the IR.
-- Run reference, recording, replay, mutation, and complete-module source gates
-  from a clean commit.
-
-Gate: the implementation-to-IR matrix has no partial, implicit, or absent row.
-
-Status: complete. The source-level review maps 120 semantic fork declarations
-to their pinned upstream declarations, separately audits 108 controlled
-declarations, and locks every semantic module by hash. The review corrected
-staged simp/dsimp cache provenance, binder and metadata paths, exact
-theorem-variant selection, stable
-lazy-equation origins, generated- and user-congruence identity, match-attempt
-rollback, ground-context isolation, and reduction/builtin eligibility. The
-focused recorder covers 42 dynamic branch classes, focused replay covers 37,
-and 23 independent certificate mutations are rejected.
-
-### E6. Full cloud closure
-
-- Inventory the pinned Mathlib checkout once at the tested commit.
-- Compile each instrumented module once per mode and shard modules by stable
-  hash.
-- Upload per-module results and merge them into a terminal outcome for every
-  inventoried occurrence.
-
-Gate: every occurrence has a terminal classification; every committed
-successful non-simproc/non-custom-discharger execution records, replays,
-materializes, and compiles without fallback.
-
-Status: complete. The strict reducer passed the full corpus at implementation
-commit `c21898e82590ddf06431eeaeb77c76211092b1bd` and pinned Mathlib commit
-`905b95818eb32af7874a58b427f50c1711a5e96c`: all 83,425 occurrences were
-reported, every one received a terminal classification, and the failure count
-was zero. The terminal totals were 27,149 `materialized`, 56,197
-`deferred_simproc`, 12 `deferred_custom_discharger`, 22
-`deferred_simproc_and_custom_discharger`, and 45 `not_executed`. The run
-recorded 89,990 successful source executions and replayed all 28,273 accepted
-non-deferred executions. Its 42 observed upstream-unsuccessful executions did
-not produce an `unsuccessful_execution` occurrence because those source
-occurrences also executed successfully on other proof states.
-
-GitHub-hosted runners were rejected because their observed eviction behavior
-prevented parallel execution from producing durable results; the superseded
-workflow has been removed.
-
-The accepted run inventories 8,264 files and validates 83,425 occurrences in
-6,319 modules byte-for-byte, including 91 nested occurrences. It used 256
-deterministic batches across six distinct verified Vast.ai hosts, with eight
-Lean module processes per host: 48 modules recorded or materialized
-concurrently. Every accepted host exposed at least 32 effective CPU cores and
-192 GB RAM, reserving 24 GB per process. Two candidates that failed the real
-SSH qualification were destroyed and replaced before work began. The six-host
-plan cost $1.6773/hour and completed from controller creation through reduction
-in about 43 minutes. All rented instances, including rejected candidates, were
-then destroyed and the provider returned an empty instance list.
-
-This replaces the earlier one-process/250 GB plan: reproducing
-the worst failure showed that recursive premise traces duplicated their outer
-prefix, expression fingerprints expanded shared DAGs as trees, and fingerprint
-observers leaked speculative meta-state. After correcting all three invariants,
-the module that had exceeded 250 GB completes the production harness in 7.5
-seconds at 1.61 GB RSS. Capacity exits remain failing outcomes rather than being
-reclassified as certificate behavior.
-
-Offers are selected from the live market under unique-machine, reliability,
-CPU, RAM, disk, network, hourly-price, and total-runtime guards. Setup raises
-and verifies a 65,536 file-descriptor limit before parallel Mathlib cache
-extraction. All hosts set up concurrently; failed setup or transfer hosts are
-destroyed and replaced while healthy workers continue. The compressed
-inventory is transferred once, and durable reports, logs, and failing sources
-are copied home every 30 seconds while transient `work/` trees are excluded.
-Every batch records each assigned module once and compiles one materialized
-copy for all accepted occurrences. The strict reducer rejects incomplete or
-missing batches, modules, occurrences, source or engine drift, mismatched
-deferred certificate/reason unions, replay-count mismatches, and every recorder,
-harness, capacity, or materialization failure. Every rented instance is
-destroyed on success,
-failure, timeout, or interruption.
-
-## 4. Current local gate
-
-`Experiment/run.sh` is intentionally small. It builds the new engine and runs
-only tests that provide confidence in that engine:
-
-1. upstream source pinning;
-2. focused upstream/reference equivalence;
-3. implementation-to-IR observer audit;
-4. locked fork-to-upstream source review;
-5. focused dynamic recording coverage;
-6. focused closed replay;
-7. single-field replay mutation rejection;
-8. schema-19 source round-trip and complete-module upstream comparison,
-   classification, replay, and materialization; and
-9. cloud shard assignment and strict reducer mutation rejection; and
-10. total Vast worker assignment, unique-host selection, SSH parsing, and
-    hourly-price guards.
-
-Historical proof exporters, schema-15 bridges, fallback materializers, and
-their regression tests have been removed. Standalone bounded reference/replay
-harnesses were also removed once the complete-module source gate subsumed them.
-Git history remains the record of those experiments.
+Git history is the record of superseded schemas and experiments; this document
+describes only the current design, evidence, and next decisions.

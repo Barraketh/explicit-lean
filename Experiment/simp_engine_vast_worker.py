@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run schema-19 shards concurrently on one Vast.ai worker."""
+"""Run schema-27 shards concurrently on one Vast.ai worker."""
 
 from __future__ import annotations
 
@@ -90,6 +90,10 @@ def run_worker(args: argparse.Namespace) -> int:
             "--stop-after-failure",
             "--output-dir", str(shard_output),
         ]
+        if args.record_only:
+            command.append("--record-only")
+        if args.allow_dirty:
+            command.append("--allow-dirty")
         with log_path.open("w", encoding="utf-8") as log:
             result = subprocess.run(
                 command,
@@ -127,6 +131,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--shard-count", type=int, default=256)
     result.add_argument("--concurrency", type=int, default=4)
     result.add_argument("--module-timeout", type=int, default=900)
+    result.add_argument("--record-only", action="store_true")
+    result.add_argument("--allow-dirty", action="store_true")
     result.add_argument("--output-dir", required=True)
     return result
 

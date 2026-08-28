@@ -42,6 +42,10 @@ elab "check_shared_expression_fingerprint" : tactic => withMainContext do
   let hashOnly ← Simp.Engine.exprFingerprintHash expression
   unless fingerprint.fingerprint == hashOnly && hashOnly.startsWith "expr-v2:" do
     throwError "shared expression fingerprint paths disagree: {fingerprint.fingerprint} != {hashOnly}"
+  let size ← Simp.Engine.exprSize expression
+  unless size.treeNodesCapped && size.treeNodes == Simp.Engine.exprTreeSizeLimit &&
+      size.dagNodes == 82 do
+    throwError "shared expression size was not DAG-bounded: {repr size}"
 
 elab "check_simproc_trace_roundtrip" : tactic => withMainContext do
   let observation : Simp.Engine.SimprocObservation := {
@@ -50,8 +54,15 @@ elab "check_simproc_trace_roundtrip" : tactic => withMainContext do
     phase := .post
     inputFingerprint := "input"
     outputFingerprint := "output"
+    outputChanged := true
     stepDisposition := .visit
     definitional := false
+    procedureKind := .simp
+    numExtraArgs := 2
+    executed := true
+    proofPresent := true
+    cache := some false
+    outputSize := some { treeNodes := 7, treeNodesCapped := false, dagNodes := 5 }
   }
   let trace : Simp.Engine.SimprocTrace := {
     observations := #[observation, observation, { observation with phase := .pre }]
@@ -69,6 +80,104 @@ elab "check_simproc_trace_roundtrip" : tactic => withMainContext do
     | .error message => throwError "simproc trace omitted its dictionary: {message}"
   unless dictionary.size == 2 do
     throwError "simproc trace did not dictionary repeated observations: {dictionary.size}"
+
+elab "check_semantic_fold_roundtrip" : tactic => withMainContext do
+  let inputRef : Simp.Engine.InputSubtermRef := {
+    path := #[.appFunction, .metadataBody]
+    fingerprint := "input-subterm"
+  }
+  let localRef : Simp.Engine.LocalRef := {
+    contextIndex := 3
+    binderDepth := 1
+    typeFingerprint := "Nat"
+    valueFingerprint := some "local-value"
+  }
+  let witness : Simp.Engine.InstanceWitness := {
+    term := .application `Nat.add #[] #[
+      .input inputRef,
+      .local localRef,
+      .literal (.nat 7)]
+    typeFingerprint := "Nat → Nat → Nat"
+  }
+  let derivation : Simp.Engine.NatBinaryDerivation := {
+    operator := .add
+    lhs := 3
+    rhs := 4
+    result := 7
+    lhsView := .raw inputRef 3 1
+    rhsView := .ofNat inputRef 4 2 witness
+    operatorInstance := witness
+  }
+  let candidate : Simp.Engine.SimprocCandidateEvent := {
+    declaration := `Nat.reduceAdd
+    procedureKind := .dsimp
+    semantics := .canonicalValue (.natBinary derivation)
+    setIndex := 2
+    registryPost := true
+    inputFingerprint := "raw-input"
+    peeledInputFingerprint := "peeled-input"
+    extraArgumentFingerprints := #["extra-0", "extra-1"]
+    procedureOutputFingerprint := "procedure-output"
+    outputFingerprint := "candidate-output"
+    numExtraArgs := 2
+    disposition := .done
+    proofPresent := false
+    cache := none
+  }
+  let fold : Simp.Engine.SimprocFold := {
+    phase := .dpost
+    candidates := #[candidate]
+    finalOutputFingerprint := "final-output"
+    finalDisposition := .done
+    finalProofPresent := false
+    finalCache := none
+  }
+  let operation : Simp.Engine.Operation := .semanticSimproc fold
+  let program : Simp.Engine.Program := {
+    initialFingerprint := "program-input"
+    finalFingerprint := "program-output"
+    events := #[{
+      path := { steps := #[.simprocInternal 0 0 0] }
+      phase := .dpost
+      invocationOrdinal := 0
+      operation
+      inputFingerprint := "program-input"
+      outputFingerprint := "program-output"
+      stepDisposition := .done
+    }]
+  }
+  let nested : Simp.Engine.NestedProgram := {
+    program := {
+      initialFingerprint := "nested-input"
+      finalFingerprint := "nested-output"
+    }
+    simprocs := {}
+    statePolicy := .isolatedStats
+    configPolicy := .defaultSimp
+    dischargeDepthIncrement := 1
+  }
+  let decodedFold : Simp.Engine.SimprocFold ←
+    match Lean.fromJson? (Lean.toJson fold) with
+    | .ok decoded => pure decoded
+    | .error message => throwError "semantic fold failed to decode: {message}"
+  unless decodedFold == fold do
+    throwError "semantic fold JSON roundtrip mismatch"
+  let decodedProgram : Simp.Engine.Program ←
+    match Lean.fromJson? (Lean.toJson program) with
+    | .ok decoded => pure decoded
+    | .error message => throwError "semantic program failed to decode: {message}"
+  unless decodedProgram == program do
+    throwError "semantic program JSON roundtrip mismatch"
+  let decodedNested : Simp.Engine.NestedProgram ←
+    match Lean.fromJson? (Lean.toJson nested) with
+    | .ok decoded => pure decoded
+    | .error message => throwError "nested semantic program failed to decode: {message}"
+  unless decodedNested == nested do
+    throwError "nested semantic policy JSON roundtrip mismatch"
+  match (Lean.fromJson? (Json.str "not-a-nested-program") :
+      Except String Simp.Engine.NestedProgram) with
+  | .ok _ => throwError "malformed nested semantic program JSON was accepted"
+  | .error _ => pure ()
 
 elab "check_engine_terminals_replay" : tactic => withMainContext do
   let ctx ← Simp.mkContext (simpTheorems := {}) (congrTheorems := {})
@@ -234,6 +343,7 @@ example (p q : Prop) (h : p → q) : p → q := by
 example : True := by
   check_shared_expression_fingerprint
   check_simproc_trace_roundtrip
+  check_semantic_fold_roundtrip
   check_engine_terminals_replay
   trivial
 

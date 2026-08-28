@@ -29,12 +29,13 @@ def write(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def reducer_args(root: Path) -> SimpleNamespace:
+def reducer_args(root: Path, *, histogram_only: bool = False) -> SimpleNamespace:
     return SimpleNamespace(
         inventory=str(root / "inventory.json"),
         reports_dir=str(root / "reports"),
         output_dir=str(root / "final"),
         shard_count=2,
+        histogram_only=histogram_only,
         allow_dirty=True,
     )
 
@@ -67,6 +68,55 @@ def main() -> None:
         "simproc", "custom_discharger"
     }:
         raise RuntimeError("combined deferred reasons were not preserved")
+    simproc_certificate = {
+        "subjects": [{
+            "simprocs": {
+                "dictionary": [{
+                    "name": [["str", "Nat"], ["str", "reduceAdd"]],
+                    "phase": "post",
+                    "stepDisposition": "continueSome",
+                    "definitional": False,
+                    "procedureKind": "dsimp",
+                    "numExtraArgs": 1,
+                    "executed": True,
+                    "proofPresent": False,
+                    "cache": True,
+                    "inputFingerprint": "input",
+                    "outputFingerprint": "output",
+                    "outputChanged": True,
+                    "outputSize": {
+                        "treeNodes": 9,
+                        "treeNodesCapped": False,
+                        "dagNodes": 6,
+                    },
+                }, {
+                    "name": [["str", "unusedSimproc"]],
+                    "phase": "post",
+                    "stepDisposition": "continueNone",
+                    "definitional": False,
+                    "procedureKind": "simp",
+                    "numExtraArgs": 0,
+                    "executed": True,
+                    "proofPresent": False,
+                    "cache": None,
+                    "inputFingerprint": "unused-input",
+                    "outputFingerprint": "unused-input",
+                    "outputChanged": False,
+                    "outputSize": None,
+                }],
+                "order": [0, 0, 1],
+            },
+        }],
+    }
+    simproc_summary = cloud.certificate_simproc_summary(simproc_certificate)
+    if len(simproc_summary) != 1 or simproc_summary[0]["usedInvocations"] != 2 \
+            or simproc_summary[0]["executionCount"] != 1 \
+            or simproc_summary[0]["resultTreeSizeCounts"] != {"9": 2}:
+        raise RuntimeError(f"simproc trace histogram changed: {simproc_summary!r}")
+    size_summary = cloud.size_statistics({"3": 1, "9": 2})
+    if size_summary["mean"] != 7 or size_summary["p50"] != 9 \
+            or size_summary["p90"] != 9:
+        raise RuntimeError(f"simproc result-size statistics changed: {size_summary!r}")
     mixed_executions = [
         {"deferredReasons": []},
         {"deferredReasons": ["simproc"]},
@@ -190,6 +240,7 @@ def main() -> None:
             "complete": True,
             "assignedModuleCount": 1 if index == assigned else 0,
             "harnessErrors": [],
+            "simprocHistogram": [],
             "modules": [] if index != assigned else [{
                 "module": MODULE,
                 "sourceHash": "source-hash",
@@ -216,6 +267,85 @@ def main() -> None:
             if cloud.reduce_reports(reducer_args(root)) != 0:
                 raise RuntimeError("total synthetic cloud report was rejected")
 
+        committed_simproc = copy.deepcopy(reports[assigned])
+        committed_simproc["modules"][0]["occurrences"][0]["simprocs"] = simproc_summary
+        committed_simproc["simprocHistogram"] = cloud.simproc_histogram_for_modules(
+            committed_simproc["modules"]
+        )
+        write(root / "reports" / f"shard-{assigned:04d}.json", committed_simproc)
+        with redirect_stdout(io.StringIO()):
+            if cloud.reduce_reports(reducer_args(root)) != 0:
+                raise RuntimeError("committed simproc histogram without deferral was rejected")
+        summary = json.loads(
+            (root / "final" / "simp-engine-closure.json").read_text(encoding="utf-8")
+        )
+        if summary["failureCount"] != 0 \
+                or summary["simprocHistogram"][0]["usedInvocations"] != 2:
+            raise RuntimeError("committed simproc histogram was not preserved")
+
+        histogram_reports = copy.deepcopy(reports)
+        for report in histogram_reports:
+            report["kind"] = "simp_engine_histogram_shard"
+        histogram_module = histogram_reports[assigned]["modules"][0]
+        histogram_module["materialization"] = None
+        histogram_occurrence = histogram_module["occurrences"][0]
+        histogram_occurrence["terminal"] = "recorded"
+        histogram_occurrence["replayedExecutions"] = 0
+        histogram_occurrence["simprocs"] = simproc_summary
+        histogram_reports[assigned]["simprocHistogram"] = cloud.simproc_histogram_for_modules(
+            histogram_reports[assigned]["modules"]
+        )
+        for report in histogram_reports:
+            write(root / "reports" / f"shard-{report['shardIndex']:04d}.json", report)
+        with redirect_stdout(io.StringIO()):
+            if cloud.reduce_reports(
+                reducer_args(root, histogram_only=True)
+            ) != 0:
+                raise RuntimeError("record-only histogram report was rejected")
+        summary = json.loads(
+            (root / "final" / "simp-engine-closure.json").read_text(encoding="utf-8")
+        )
+        if summary["failureCount"] != 0 \
+                or summary["kind"] != "simp_engine_histogram_closure" \
+                or not summary.get("histogramOnly") \
+                or summary["terminalCounts"] != {"recorded": 1} \
+                or summary["simprocHistogram"][0]["usedInvocations"] != 2:
+            raise RuntimeError("record-only histogram closure was not preserved")
+
+        mixed_histogram_reports = copy.deepcopy(histogram_reports)
+        mixed_module = mixed_histogram_reports[assigned]["modules"][0]
+        mixed_occurrence = mixed_module["occurrences"][0]
+        mixed_occurrence["unsuccessfulExecutions"] = 2
+        mixed_module["recording"]["unsuccessfulExecutions"] = 2
+        write(
+            root / "reports" / f"shard-{assigned:04d}.json",
+            mixed_histogram_reports[assigned],
+        )
+        with redirect_stdout(io.StringIO()):
+            if cloud.reduce_reports(
+                reducer_args(root, histogram_only=True)
+            ) != 0:
+                raise RuntimeError(
+                    "record-only histogram rejected a successfully recorded occurrence "
+                    "with additional unsuccessful attempts"
+                )
+        summary = json.loads(
+            (root / "final" / "simp-engine-closure.json").read_text(encoding="utf-8")
+        )
+        if summary["failureCount"] != 0 \
+                or summary["successfulExecutions"] != 1 \
+                or summary["unsuccessfulExecutions"] != 2:
+            raise RuntimeError("mixed-attempt histogram counts were not preserved")
+        write(
+            root / "reports" / f"shard-{assigned:04d}.json",
+            histogram_reports[assigned],
+        )
+        with redirect_stdout(io.StringIO()):
+            if cloud.reduce_reports(reducer_args(root)) == 0:
+                raise RuntimeError("normal reducer accepted record-only reports")
+
+        for report in reports:
+            write(root / "reports" / f"shard-{report['shardIndex']:04d}.json", report)
         mutated = copy.deepcopy(reports[assigned])
         mutated["modules"][0]["occurrences"][0]["replayedExecutions"] = 0
         write(root / "reports" / f"shard-{assigned:04d}.json", mutated)
@@ -236,7 +366,8 @@ def main() -> None:
             if cloud.reduce_reports(reducer_args(root)) == 0:
                 raise RuntimeError("missing shard was accepted")
     print(
-        "schema-19 cloud harness: package options and nested/quoted rewrites preserved, "
+        "schema-27 cloud harness: package options, simproc histograms, and "
+        "nested/quoted rewrites preserved, "
         "total report accepted, mutations rejected: ok"
     )
 

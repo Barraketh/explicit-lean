@@ -9,6 +9,7 @@ Upstream: Lean 4.32.2, f3b06c705e6c85f5314019d5d3baab0fec5b580c.
 module
 prelude
 public import ExplicitLean.SimpEngine.Runtime
+public import ExplicitLean.SimpEngine.SemanticSimproc
 public import Lean.Elab.Tactic.Simp
 import Lean.Meta.HaveTelescope
 public section
@@ -107,6 +108,12 @@ abbrev DSimproc := Expr → EngineM DStep
 
 abbrev Discharge := Expr → EngineM (Option Expr)
 
+/-! Optional Mathlib-specific instrumentation.  The core engine knows only the
+common schema-27 payload and the hook shape; the FieldSimp shadow lives in a
+separate module and can be attached by callers that import Mathlib. -/
+abbrev FieldEqAuditHook :=
+  Expr → Simp.Simproc → SimpM (Simp.Step × FieldEqAudit)
+
 structure Methods where
   pre : Simproc := fun _ => return .continue
   post : Simproc := fun e => return .done { expr := e }
@@ -115,6 +122,7 @@ structure Methods where
   discharge? : Discharge := fun _ => return none
   wellBehavedDischarge : Bool := true
   customDischarger : Bool := false
+  fieldEqAudit? : Option FieldEqAuditHook := none
   base : Simp.Methods := {}
   deriving Inhabited
 
@@ -449,22 +457,48 @@ def deferRecording (reason : DeferredReason) : EngineM Unit := do
       { observations with deferred := mergeDeferredReason observations.deferred reason }
 
 def observeSimproc (name : Name) (input output : Expr)
-    (stepDisposition : StepDisposition) (definitional : Bool) : EngineM Unit := do
+    (stepDisposition : StepDisposition) (definitional : Bool)
+    (procedureKind : SimprocKind) (numExtraArgs : Nat) (executed : Bool)
+    (proofPresent : Bool := false) (cache : Option Bool := none)
+    (hasResult : Bool := false) (semanticSupported : Bool := false)
+    (setIndex : Nat := 0) (fieldEqAudit? : Option FieldEqAudit := none) : EngineM Unit := do
   let runtime ← getRuntime
   if runtime.mode == .record then
     let state ← runtime.state.get
+    let outputSize : Option ExprSize ←
+      if hasResult then
+        (do
+          let size ← liftM (runtime.cachedExprSize output)
+          pure (some size))
+      else
+        pure none
     let observation : SimprocObservation := {
       path := state.path
       name
       phase := state.phase
+      phaseInvocationOrdinal := state.currentPhaseInvocationOrdinal
+      setIndex
       inputFingerprint := ← liftM (runtime.cachedFingerprintHash input)
       outputFingerprint := ← liftM (runtime.cachedFingerprintHash output)
+      outputChanged := input != output
       stepDisposition
       definitional
+      procedureKind
+      numExtraArgs
+      executed
+      proofPresent
+      cache
+      outputSize
+      fieldEqAudit := fieldEqAudit?
+    }
+    runtime.state.modify fun state => {
+      state with committedSimprocs := state.committedSimprocs.push observation
     }
     runtime.observations.modify fun observations => {
       observations with
-      deferred := mergeDeferredReason observations.deferred (.simproc name state.phase)
+      deferred :=
+        if !executed || semanticSupported then observations.deferred
+        else mergeDeferredReason observations.deferred (.simproc name state.phase)
       simprocs := observations.simprocs.push observation
       coveredBranches :=
         let branch := if definitional then "simproc.dsimp" else "simproc.simp"
@@ -1949,6 +1983,15 @@ partial def congrDefault (e : Expr) (invocationOrdinal : Nat) : EngineM Result :
           | throwError "replay_generated_congruence_failed"
         return ← result.mkEqTrans (← visitFn result.expr)
     | .generic .. =>
+        /-
+        The recording path probes the automatically generated congruence
+        theorem before falling back to generic congruence.  A probe that
+        returns `none` still populates `Simp.State.congrCache`; reproduce
+        that cache-producing lookup while replaying the recorded generic
+        choice, without consulting any simproc registry or re-running the
+        discarded child traversal.
+        -/
+        let _ ← liftSimpM <| Simp.mkCongrSimp? e.getAppFn
         return ← withParent e <| simpAppUsingCongr e invocationOrdinal
     | .generatedAttemptFailed =>
         if (← tryAutoCongrTheorem? e invocationOrdinal).isSome then
@@ -2099,11 +2142,7 @@ private def replaySimpCongrTheorem (theoremName : Name)
   -- Replay reconstructs the compact descriptor on demand, but the descriptor
   -- retains only names and indices. Do not leak preprocessing metavariables
   -- into the proof state that the recorded congruence execution must mutate.
-  let saved ← Meta.saveState
-  try
-    mkSimpCongrTheorem theoremName priority
-  finally
-    saved.restore
+  liftM <| withRestoredFullMetaState <| mkSimpCongrTheorem theoremName priority
 
 private partial def replayCongruence (e : Expr) (invocationOrdinal : Nat) : EngineM Result := do
     let some choice ← findReplayCongruenceChoice? invocationOrdinal
@@ -2368,7 +2407,7 @@ private def finishRecording (runtime : Runtime) (finalExpr : Expr) : MetaM Recor
   return {
     program := state.program
     deferred := observations.deferred
-    simprocs := { observations := observations.simprocs }
+    simprocs := { observations := state.committedSimprocs }
     coveredBranches := observations.coveredBranches
   }
 
@@ -2456,17 +2495,14 @@ private def useImplicitDefEqProofRecorded (thm : SimpTheorem) : EngineM Bool := 
   return false
 
 private def ruleShape (thm : SimpTheorem) : EngineM (String × String) := do
-  let saved ← Meta.saveState
-  try
+  liftM <| withRestoredFullMetaState do
     let value ← thm.getValue
-    let ruleFingerprint ← liftM (exprFingerprintHash (← inferType value))
+    let ruleFingerprint ← exprFingerprintHash (← inferType value)
     let type ← inferType value
     let (_, _, type) ← forallMetaTelescopeReducing type
     let type ← whnf (← instantiateMVars type)
     let lhs := type.appFn!.appArg!
-    return (ruleFingerprint, ← liftM (exprFingerprintHash lhs))
-  finally
-    saved.restore
+    return (ruleFingerprint, ← exprFingerprintHash lhs)
 
 private def exactRuleVariant (preceding : Array SimpTheorem)
     (selected : SimpTheorem) : EngineM Nat := do
@@ -2559,11 +2595,15 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
     let ordered ← acLt rhs subject .reduceSimpleOnly
     unless ordered do return ← failAttempt premises
   let rhs ← if type.hasBinderNameHint then rhs.resolveBinderNameHint else pure rhs
+  -- Upstream records the theorem at the successful inner rewrite boundary,
+  -- before the outer extra-argument result is checked for assignable
+  -- metavariables. A late rejection therefore still contributes this state
+  -- effect even though it produces no simplifier result.
+  recordSimpTheorem thm.origin
   let mut result : Result := { expr := rhs, proof? }
   if (← hasAssignableMVar result.expr) then
     return ← failAttempt premises
   result ← result.addExtraArgs extraArgs
-  recordSimpTheorem thm.origin
   let (rule, envelope) ← makeMetadata result.proof?.isSome
   recordBranch "rewrite.commit"
   emitEvent e result.expr (.rewrite rule envelope premises) .visit
@@ -2785,103 +2825,739 @@ private def drewritePostRecorded : DSimproc := fun e => do
       return .visit result.expr
   return .continue
 
-private def simprocCoreRecorded (postPhase : Bool) (tree : SimprocTree)
-    (erased : PHashSet Name) (input : Expr) : EngineM Step := do
+structure SimprocEntryTryResult where
+  peeledInput : Expr
+  extraArguments : Array Expr
+  /-- Whether the procedure received an input whose metavariables were not all
+      assigned before the opaque procedure ran.  A semantic adapter must not
+      take credit for assignments made by the procedure unless it models them. -/
+  procedureInputHadUnassignedMVars : Bool := false
+  procedureStep : Step
+  finalStep : Step
+  nestedProgram? : Option NestedProgram := none
+  /-- Ephemeral condition result retained by the record-only conditional
+      adapters.  It carries the exact equality proof needed to reconstruct a
+      dependent branch application, but never enters certificate IR. -/
+  conditionResult? : Option Result := none
+  /-- Passive schema-27 diagnostics for an ordinary `fieldEq` invocation. -/
+  fieldEqAudit? : Option FieldEqAudit := none
+
+def peelSimprocExtraArgs (numExtraArgs : Nat) (input : Expr) : Expr × Array Expr :=
+  Id.run do
+    let mut extraArguments := #[]
+    let mut peeledInput := input
+    for _ in *...numExtraArgs do
+      extraArguments := extraArguments.push peeledInput.appArg!
+      peeledInput := peeledInput.appFn!
+    return (peeledInput, extraArguments.reverse)
+
+def trySimprocEntry (entry : SimprocEntry) (numExtraArgs : Nat) (input : Expr)
+    (fieldEqAudit? : Option FieldEqAuditHook := none) : SimpM SimprocEntryTryResult := do
+  let (peeledInput, extraArguments) := peelSimprocExtraArgs numExtraArgs input
+  let procedureInputHadUnassignedMVars ←
+    if entry.declName == `ExistsAndEq.existsAndEq then
+      pure (← instantiateMVars peeledInput).hasMVar
+    else
+      pure false
+  match entry.proc with
+  | .inl proc =>
+    let (procedureStep, audit?) ← match fieldEqAudit? with
+      | some audit =>
+          let (step, audit) ← audit peeledInput proc
+          pure (step, some audit)
+      | none => pure (← proc peeledInput, none)
+    let finalStep ← procedureStep.addExtraArgs extraArguments
+    return {
+      peeledInput
+      extraArguments
+      procedureInputHadUnassignedMVars
+      procedureStep
+      finalStep
+      fieldEqAudit? := audit?
+    }
+  | .inr proc =>
+    let rawStep ← proc peeledInput
+    let procedureStep := rawStep.toStep
+    let finalStep ← procedureStep.addExtraArgs extraArguments
+    return {
+      peeledInput
+      extraArguments
+      procedureInputHadUnassignedMVars
+      procedureStep
+      finalStep
+    }
+
+private def beginConditionalNestedRecorderState (outer : RecorderState)
+    (program : Program) : RecorderState := {
+  outer with
+  program
+  eventCursor := 0
+  structuralCursor := 0
+  path.steps := outer.path.steps.push
+    (.simprocInternal outer.currentPhaseInvocationOrdinal 0 0)
+  phase := .pre
+  phaseInvocationOrdinal := 0
+  currentPhaseInvocationOrdinal := 0
+  lastPremiseTerminal := none
+  expectedPremiseTerminal := none
+  congruenceInvocationOrdinal := 0
+  simpInvocationOrdinal := 0
+  dsimpInvocationOrdinal := 0
+  pathInvocationOrdinal := 0
+  simpStepOrdinal := 0
+  pendingMonadSimpPaths := #[]
+  committedSimprocs := #[]
+}
+
+private def tryReduceIteRecorded (numExtraArgs : Nat) (input : Expr) :
+    EngineM SimprocEntryTryResult := do
+  let (peeledInput, extraArguments) := peelSimprocExtraArgs numExtraArgs input
+  let_expr f@ite α c i tb eb ← peeledInput
+    | let procedureStep : Step := .continue
+      let finalStep ← liftM (procedureStep.addExtraArgs extraArguments)
+      return { peeledInput, extraArguments, procedureStep, finalStep }
+  let outer ← getRecorderState
+  let runtime ← getRuntime
+  let conditionFingerprint ← liftM (exprFingerprintHash c)
+  runtime.state.set <| beginConditionalNestedRecorderState outer
+    { initialFingerprint := conditionFingerprint, finalFingerprint := conditionFingerprint }
+  try
+    let conditionResult ← simp c
+    setProgramFinal conditionResult.expr
+    unless conditionResult.expr.isTrue || conditionResult.expr.isFalse do
+      restoreRecorderState outer
+      let procedureStep : Step := .continue
+      let finalStep ← liftM (procedureStep.addExtraArgs extraArguments)
+      return { peeledInput, extraArguments, procedureStep, finalStep }
+    let inner ← getRecorderState
+    let nested : NestedProgram := {
+      program := inner.program
+      simprocs := { observations := inner.committedSimprocs }
+      statePolicy := .sharedSimpState
+      configPolicy := .inherited
+      dischargeDepthIncrement := 0
+    }
+    let proof := mkApp (mkApp5
+      (mkConst (if conditionResult.expr.isTrue then ``ite_cond_eq_true else ``ite_cond_eq_false)
+        f.constLevels!) α c i tb eb) (← conditionResult.getProof)
+    let procedureStep : Step :=
+      .visit { expr := if conditionResult.expr.isTrue then tb else eb, proof? := proof }
+    let finalStep ← liftM (procedureStep.addExtraArgs extraArguments)
+    restoreRecorderState outer
+    return {
+      peeledInput
+      extraArguments
+      procedureStep
+      finalStep
+      nestedProgram? := some nested
+    }
+  catch ex =>
+    restoreRecorderState outer
+    throw ex
+
+private def tryReduceDIteRecorded (numExtraArgs : Nat) (input : Expr) :
+    EngineM SimprocEntryTryResult := do
+  let (peeledInput, extraArguments) := peelSimprocExtraArgs numExtraArgs input
+  let_expr f@dite α c i tb eb ← peeledInput
+    | let procedureStep : Step := .continue
+      let finalStep ← liftM (procedureStep.addExtraArgs extraArguments)
+      return { peeledInput, extraArguments, procedureStep, finalStep }
+  let outer ← getRecorderState
+  let runtime ← getRuntime
+  let conditionFingerprint ← liftM (exprFingerprintHash c)
+  runtime.state.set <| beginConditionalNestedRecorderState outer
+    { initialFingerprint := conditionFingerprint, finalFingerprint := conditionFingerprint }
+  try
+    let conditionResult ← simp c
+    setProgramFinal conditionResult.expr
+    unless conditionResult.expr.isTrue || conditionResult.expr.isFalse do
+      restoreRecorderState outer
+      let procedureStep : Step := .continue
+      let finalStep ← liftM (procedureStep.addExtraArgs extraArguments)
+      return { peeledInput, extraArguments, procedureStep, finalStep }
+    let inner ← getRecorderState
+    let nested : NestedProgram := {
+      program := inner.program
+      simprocs := { observations := inner.committedSimprocs }
+      statePolicy := .sharedSimpState
+      configPolicy := .inherited
+      dischargeDepthIncrement := 0
+    }
+    let conditionProof ← conditionResult.getProof
+    let h := if conditionResult.expr.isTrue then
+      mkApp2 (mkConst ``of_eq_true) c conditionProof
+    else
+      mkApp2 (mkConst ``of_eq_false) c conditionProof
+    let selectedBranch := if conditionResult.expr.isTrue then tb else eb
+    let eNew := (mkApp selectedBranch h).headBeta
+    let prNew := mkApp (mkApp5
+      (mkConst (if conditionResult.expr.isTrue then ``dite_cond_eq_true else ``dite_cond_eq_false)
+        f.constLevels!) α c i tb eb) conditionProof
+    let procedureStep : Step := .visit { expr := eNew, proof? := prNew }
+    let finalStep ← liftM (procedureStep.addExtraArgs extraArguments)
+    restoreRecorderState outer
+    return {
+      peeledInput
+      extraArguments
+      procedureStep
+      finalStep
+      nestedProgram? := some nested
+      conditionResult? := some conditionResult
+    }
+  catch ex =>
+    restoreRecorderState outer
+    throw ex
+
+structure DSimprocEntryTryResult where
+  peeledInput : Expr
+  extraArguments : Array Expr
+  procedureStep : DStep
+  finalStep : DStep
+  executed : Bool
+
+private structure SimprocCoreRecordedResult where
+  step : Step
+  candidateEvents : Array SimprocCandidateEvent := #[]
+  semanticallyComplete : Bool := true
+
+private structure DSimprocCoreRecordedResult where
+  step : DStep
+  candidateEvents : Array SimprocCandidateEvent := #[]
+  semanticallyComplete : Bool := true
+
+private def deriveNatBinaryShadow? (declaration : Name) (peeledInput procedureOutput : Expr) :
+    EngineM (Option NatBinaryDerivation) := do
+  liftM <| withRestoredFullMetaState <|
+    deriveNatBinary? declaration peeledInput procedureOutput
+
+private def deriveIntNegShadow? (declaration : Name)
+    (peeledInput procedureOutput : Expr) : EngineM (Option SemanticSimproc) := do
+  liftM <| withRestoredFullMetaState <|
+    deriveIntNeg? declaration peeledInput procedureOutput
+
+private def deriveFinLiteralShadow? (declaration : Name)
+    (peeledInput procedureOutput : Expr) : EngineM (Option SemanticSimproc) := do
+  liftM <| withRestoredFullMetaState <|
+    deriveFinLiteral? declaration peeledInput procedureOutput
+
+private def deriveFinMkCanonicalShadow? (declaration : Name)
+    (peeledInput procedureOutput : Expr) : EngineM (Option SemanticSimproc) := do
+  liftM <| withRestoredFullMetaState do
+    let derivation? ← deriveFinMkCanonical? declaration peeledInput procedureOutput
+    pure <| derivation?.map fun derivation =>
+      SemanticSimproc.canonicalValue (.finMkCanonical derivation)
+
+private def deriveConstructorDisjointShadow? (declaration : Name)
+    (peeledInput procedureOutput : Expr) : EngineM (Option SemanticSimproc) := do
+  liftM <| withRestoredFullMetaState do
+    let witness? ← deriveConstructorDisjoint? declaration peeledInput procedureOutput
+    pure <| witness?.map SemanticSimproc.constructorDisjoint
+
+private def deriveVectorLookupShadow? (declaration : Name)
+    (peeledInput procedureOutput : Expr) :
+    EngineM (Option SemanticSimproc) := do
+  liftM <| withRestoredFullMetaState do
+    let derivation? ← deriveVectorLookup declaration peeledInput procedureOutput
+    pure <| derivation?.map fun derivation =>
+      SemanticSimproc.vectorLookup derivation
+
+private structure SemanticSimprocProtocol where
+  procedureKind : SimprocKind
+  disposition : StepDisposition
+  registryPost : Bool
+
+/-- The source protocol for every declaration whose opaque result currently has
+    a semantic representation. A declaration used through another registry or
+    procedure kind remains observable, but is conservatively deferred. -/
+private def semanticSimprocProtocol? (declaration : Name) :
+    Option SemanticSimprocProtocol :=
+  if declaration == `reduceIte || declaration == `reduceDIte ||
+      declaration == `ExistsAndEq.existsAndEq then
+    some { procedureKind := .simp, disposition := .visit, registryPost := false }
+  else if declaration == `reduceCtorEq then
+    some { procedureKind := .simp, disposition := .done, registryPost := true }
+  else if declaration == `Matrix.cons_val then
+    some { procedureKind := .dsimp, disposition := .continueSome, registryPost := true }
+  else if declaration == `Nat.reduceAdd || declaration == `Nat.reduceDiv ||
+      declaration == `Int.reduceNeg || declaration == `Fin.isValue ||
+      declaration == `Fin.reduceFinMk then
+    some { procedureKind := .dsimp, disposition := .done, registryPost := true }
+  else
+    none
+
+private def mkSemanticSimprocCandidate? (entry : SimprocEntry) (setIndex : Nat)
+    (input peeledInput procedureOutput output : Expr) (extraArguments : Array Expr)
+    (procedureKind : SimprocKind) (disposition : StepDisposition)
+    (postPhase proofPresent : Bool) (cache : Option Bool)
+    (nestedProgram? : Option NestedProgram := none)
+    (conditionResult? : Option Simp.Result := none)
+    (procedureProof? : Option Expr := none)
+    (procedureInputHadUnassignedMVars : Bool := false) :
+    EngineM (Option SimprocCandidateEvent) := do
+  let some protocol := semanticSimprocProtocol? entry.declName
+    | return none
+  unless protocol.procedureKind == procedureKind &&
+      protocol.disposition == disposition && protocol.registryPost == postPhase do
+    return none
+  let semantics? ←
+    if entry.declName == `reduceIte then
+      let some nestedProgram := nestedProgram?
+        | return none
+      let selection? ← liftM <| deriveIteSelection? entry.declName peeledInput
+        procedureOutput nestedProgram
+      pure <| selection?.map SemanticSimproc.iteSelect
+    else if entry.declName == `reduceDIte then
+      let some nestedProgram := nestedProgram?
+        | return none
+      let some conditionResult := conditionResult?
+        | return none
+      let selection? ← liftM <| deriveDIteSelection? entry.declName peeledInput
+        procedureOutput nestedProgram conditionResult
+      pure <| selection?.map SemanticSimproc.diteSelect
+    else if entry.declName == `reduceCtorEq then
+      deriveConstructorDisjointShadow? entry.declName peeledInput procedureOutput
+    else if entry.declName == `Nat.reduceAdd || entry.declName == `Nat.reduceDiv then
+      let derivation? ← deriveNatBinaryShadow? entry.declName peeledInput procedureOutput
+      pure <| derivation?.map fun derivation =>
+        SemanticSimproc.canonicalValue (.natBinary derivation)
+    else if entry.declName == `Int.reduceNeg then
+      deriveIntNegShadow? entry.declName peeledInput procedureOutput
+    else if entry.declName == `Fin.isValue then
+      deriveFinLiteralShadow? entry.declName peeledInput procedureOutput
+    else if entry.declName == `Fin.reduceFinMk then
+      deriveFinMkCanonicalShadow? entry.declName peeledInput procedureOutput
+    else if entry.declName == `Matrix.cons_val then
+      deriveVectorLookupShadow? entry.declName peeledInput procedureOutput
+    else if entry.declName == `ExistsAndEq.existsAndEq then
+      unless extraArguments.isEmpty do
+        return none
+      -- The source procedure may solve input metavariables as an incidental
+      -- Meta effect.  Until such assignments have explicit certificate IR,
+      -- accept only inputs that were already closed before it ran.
+      if procedureInputHadUnassignedMVars then
+        return none
+      let derivation? ← liftM <| deriveExistsAndEq? entry.declName peeledInput procedureOutput
+      let some derivation := derivation? | pure none
+      let some sourceProof := procedureProof? | pure none
+      let sourceProof ← liftMetaM <| instantiateMVars sourceProof
+      let instantiatedInput ← liftMetaM <| instantiateMVars peeledInput
+      let reconstructed ← liftM <| interpretExistsAndEq instantiatedInput derivation
+      let some reconstructedProof := reconstructed.proof? | pure none
+      let reconstructedProof ← liftMetaM <| instantiateMVars reconstructedProof
+      unless exprEqualIgnoringBinderNames sourceProof reconstructedProof do
+        return none
+      pure <| some (SemanticSimproc.existentialEqualityElim derivation)
+    else
+      pure none
+  let some semantics := semantics?
+    | return none
+  let runtime ← getRuntime
+  let inputFingerprint ← liftM (runtime.cachedFingerprintHash input)
+  let peeledInputFingerprint ← liftM (runtime.cachedFingerprintHash peeledInput)
+  let extraArgumentFingerprints ← extraArguments.mapM fun extraArgument =>
+    liftM (runtime.cachedFingerprintHash extraArgument)
+  let procedureOutputFingerprint ← liftM (runtime.cachedFingerprintHash procedureOutput)
+  let outputFingerprint ← liftM (runtime.cachedFingerprintHash output)
+  return some {
+    declaration := entry.declName
+    procedureKind
+    semantics
+    setIndex
+    registryPost := postPhase
+    inputFingerprint
+    peeledInputFingerprint
+    extraArgumentFingerprints
+    procedureOutputFingerprint
+    outputFingerprint
+    numExtraArgs := extraArguments.size
+    disposition
+    proofPresent
+    cache
+  }
+
+/-- Every `.continue none` branch of these three pinned WF preprocessing
+  dsimprocs performs only syntax and environment reads.  Their term-building
+  branches return a result instead.  A no-result call therefore has no state
+  or provenance effect and is not an executable member of a semantic fold. -/
+def isIgnorableWfContinueNone (declaration : Name) : Bool :=
+  declaration == `Lean.Elab.WF.paramProj ||
+    declaration == `Lean.Elab.WF.paramMatcher ||
+    declaration == `Lean.Elab.WF.paramLet
+
+/-- These ordinary simprocs may be invoked again after a successful visit while
+  traversing the resulting proposition.  Their no-result path is a pure
+  syntactic search and has no committed semantic effect, so an executed
+  `continue none` is an ignorable boundary for recording. -/
+def isIgnorableSimprocContinueNone (declaration : Name) : Bool :=
+  isIgnorableWfContinueNone declaration || declaration == `ExistsAndEq.existsAndEq
+
+def tryDSimprocEntry (entry : SimprocEntry) (numExtraArgs : Nat) (input : Expr) : SimpM
+    DSimprocEntryTryResult := do
+  let (peeledInput, extraArguments) := peelSimprocExtraArgs numExtraArgs input
+  match entry.proc with
+  | .inl _ =>
+    let procedureStep : DStep := .continue
+    return { peeledInput, extraArguments, procedureStep, finalStep := procedureStep, executed := false }
+  | .inr proc =>
+    let procedureStep ← proc peeledInput
+    let finalStep := procedureStep.addExtraArgs extraArguments
+    return { peeledInput, extraArguments, procedureStep, finalStep, executed := true }
+
+private def simprocCoreRecorded (semanticEnabled postPhase : Bool) (tree : SimprocTree)
+    (erased : PHashSet Name) (setIndex : Nat) (input : Expr) :
+    EngineM SimprocCoreRecordedResult := do
   let candidates ← withSimpIndexConfig <| tree.getMatchWithExtra input
   let mut expression := input
   let mut proof? : Option Expr := none
   let mut found := false
   let mut cache := true
+  let mut candidateEvents : Array SimprocCandidateEvent := #[]
+  let mut semanticallyComplete := true
   for (entry, numExtraArgs) in candidates do
     unless erased.contains entry.declName do
-      let step ← liftSimpM (entry.try numExtraArgs expression)
+      let procedureKind := match entry.proc with
+        | .inl _ => SimprocKind.simp
+        | .inr _ => SimprocKind.dsimp
+      let fieldEqAudit? ← if (← getRuntime).mode == .record &&
+          entry.declName == `fieldEq && procedureKind == .simp then
+        pure (← getMethods).fieldEqAudit?
+      else
+        pure none
+      let invocation ← if (← getRuntime).mode == .record &&
+          (entry.declName == `reduceIte || entry.declName == `reduceDIte) &&
+          procedureKind == .simp then
+        if entry.declName == `reduceIte then
+          tryReduceIteRecorded numExtraArgs expression
+        else
+          tryReduceDIteRecorded numExtraArgs expression
+      else
+        liftSimpM (trySimprocEntry entry numExtraArgs expression fieldEqAudit?)
+      let step := invocation.finalStep
       match step with
       | .visit result =>
+        let candidate? ← if semanticEnabled then match invocation.procedureStep, step with
+          | .visit procedureResult, .visit finalResult =>
+              mkSemanticSimprocCandidate? entry setIndex expression invocation.peeledInput
+                procedureResult.expr finalResult.expr invocation.extraArguments
+                procedureKind .visit postPhase finalResult.proof?.isSome
+                (some finalResult.cache)
+                invocation.nestedProgram? invocation.conditionResult?
+                (procedureProof? := procedureResult.proof?)
+                (procedureInputHadUnassignedMVars :=
+                  invocation.procedureInputHadUnassignedMVars)
+          | _, _ => pure none
+          else pure none
         recordSimpTheorem (.decl entry.declName postPhase)
-        observeSimproc entry.declName expression result.expr .visit false
-        return .visit (← mkEqTransOptProofResult proof? cache result)
+        observeSimproc entry.declName expression result.expr .visit false procedureKind
+          numExtraArgs true result.proof?.isSome (some result.cache) true
+          (semanticSupported := candidate?.isSome) (setIndex := setIndex)
+          (fieldEqAudit? := invocation.fieldEqAudit?)
+        return {
+          step := .visit (← mkEqTransOptProofResult proof? cache result)
+          candidateEvents := candidateEvents ++ candidate?.toArray
+          semanticallyComplete := semanticallyComplete && candidate?.isSome
+        }
       | .done result =>
+        let candidate? ← if semanticEnabled then match invocation.procedureStep, step with
+          | .done procedureResult, .done finalResult =>
+              mkSemanticSimprocCandidate? entry setIndex expression invocation.peeledInput
+                procedureResult.expr finalResult.expr invocation.extraArguments
+                procedureKind .done postPhase finalResult.proof?.isSome
+                (some finalResult.cache)
+                invocation.nestedProgram? invocation.conditionResult?
+                (procedureProof? := procedureResult.proof?)
+                (procedureInputHadUnassignedMVars :=
+                  invocation.procedureInputHadUnassignedMVars)
+          | _, _ => pure none
+          else pure none
         recordSimpTheorem (.decl entry.declName postPhase)
-        observeSimproc entry.declName expression result.expr .done false
-        return .done (← mkEqTransOptProofResult proof? cache result)
+        observeSimproc entry.declName expression result.expr .done false procedureKind
+          numExtraArgs true result.proof?.isSome (some result.cache) true
+          (semanticSupported := candidate?.isSome) (setIndex := setIndex)
+          (fieldEqAudit? := invocation.fieldEqAudit?)
+        return {
+          step := .done (← mkEqTransOptProofResult proof? cache result)
+          candidateEvents := candidateEvents ++ candidate?.toArray
+          semanticallyComplete := semanticallyComplete && candidate?.isSome
+        }
       | .continue (some result) =>
+        let candidate? ← if semanticEnabled then match invocation.procedureStep, step with
+          | .continue (some procedureResult), .continue (some finalResult) =>
+              mkSemanticSimprocCandidate? entry setIndex expression invocation.peeledInput
+                procedureResult.expr finalResult.expr invocation.extraArguments
+                procedureKind .continueSome postPhase finalResult.proof?.isSome
+                (some finalResult.cache)
+                invocation.nestedProgram? invocation.conditionResult?
+                (procedureProof? := procedureResult.proof?)
+                (procedureInputHadUnassignedMVars :=
+                  invocation.procedureInputHadUnassignedMVars)
+          | _, _ => pure none
+          else pure none
         recordSimpTheorem (.decl entry.declName postPhase)
-        observeSimproc entry.declName expression result.expr .continueSome false
+        observeSimproc entry.declName expression result.expr .continueSome false procedureKind
+          numExtraArgs true result.proof?.isSome (some result.cache) true
+          (semanticSupported := candidate?.isSome) (setIndex := setIndex)
+          (fieldEqAudit? := invocation.fieldEqAudit?)
         expression := result.expr
         proof? ← mkEqTrans? proof? result.proof?
         cache := cache && result.cache
         found := true
+        candidateEvents := candidateEvents ++ candidate?.toArray
+        semanticallyComplete := semanticallyComplete && candidate?.isSome
       | .continue none =>
-        observeSimproc entry.declName expression expression .continueNone false
-  if found then return .continue (some { expr := expression, proof?, cache })
-  return .continue
+        let ignorable := isIgnorableSimprocContinueNone entry.declName
+        observeSimproc entry.declName expression expression .continueNone false procedureKind
+          numExtraArgs true (semanticSupported := ignorable) (setIndex := setIndex)
+          (fieldEqAudit? := invocation.fieldEqAudit?)
+        unless ignorable do
+          semanticallyComplete := false
+  if found then
+    return {
+      step := .continue (some { expr := expression, proof?, cache })
+      candidateEvents
+      semanticallyComplete
+    }
+  return { step := .continue, candidateEvents, semanticallyComplete }
 
-private def dsimprocCoreRecorded (postPhase : Bool) (tree : SimprocTree)
-    (erased : PHashSet Name) (input : Expr) : EngineM DStep := do
+private def dsimprocCoreRecorded (semanticEnabled postPhase : Bool) (tree : SimprocTree)
+    (erased : PHashSet Name) (setIndex : Nat) (input : Expr) :
+    EngineM DSimprocCoreRecordedResult := do
   let candidates ← withSimpIndexConfig <| tree.getMatchWithExtra input
   let mut expression := input
   let mut found := false
+  let mut candidateEvents : Array SimprocCandidateEvent := #[]
+  let mut semanticallyComplete := true
   for (entry, numExtraArgs) in candidates do
     unless erased.contains entry.declName do
-      let step ← liftSimpM (entry.tryD numExtraArgs expression)
+      let procedureKind := match entry.proc with
+        | .inl _ => SimprocKind.simp
+        | .inr _ => SimprocKind.dsimp
+      let invocation ← liftSimpM (tryDSimprocEntry entry numExtraArgs expression)
+      let step := invocation.finalStep
       match step with
       | .visit output =>
+        let candidate? ← if semanticEnabled then match invocation.procedureStep, step with
+          | .visit procedureOutput, .visit finalOutput =>
+              mkSemanticSimprocCandidate? entry setIndex expression invocation.peeledInput
+                procedureOutput finalOutput invocation.extraArguments procedureKind .visit
+                postPhase false none
+          | _, _ => pure none
+          else pure none
         recordSimpTheorem (.decl entry.declName postPhase)
-        observeSimproc entry.declName expression output .visit true
-        return .visit output
+        observeSimproc entry.declName expression output .visit true procedureKind
+          numExtraArgs invocation.executed (hasResult := true)
+          (semanticSupported := candidate?.isSome) (setIndex := setIndex)
+        return {
+          step := .visit output
+          candidateEvents := candidateEvents ++ candidate?.toArray
+          semanticallyComplete := semanticallyComplete && candidate?.isSome
+        }
       | .done output =>
+        let candidate? ← if semanticEnabled then match invocation.procedureStep, step with
+          | .done procedureOutput, .done finalOutput =>
+              mkSemanticSimprocCandidate? entry setIndex expression invocation.peeledInput
+                procedureOutput finalOutput invocation.extraArguments procedureKind .done
+                postPhase false none
+          | _, _ => pure none
+          else pure none
         recordSimpTheorem (.decl entry.declName postPhase)
-        observeSimproc entry.declName expression output .done true
-        return .done output
+        observeSimproc entry.declName expression output .done true procedureKind
+          numExtraArgs invocation.executed (hasResult := true)
+          (semanticSupported := candidate?.isSome) (setIndex := setIndex)
+        return {
+          step := .done output
+          candidateEvents := candidateEvents ++ candidate?.toArray
+          semanticallyComplete := semanticallyComplete && candidate?.isSome
+        }
       | .continue (some output) =>
+        let candidate? ← if semanticEnabled then match invocation.procedureStep, step with
+          | .continue (some procedureOutput), .continue (some finalOutput) =>
+              mkSemanticSimprocCandidate? entry setIndex expression invocation.peeledInput
+                procedureOutput finalOutput invocation.extraArguments procedureKind .continueSome
+                postPhase false none
+          | _, _ => pure none
+          else pure none
         recordSimpTheorem (.decl entry.declName postPhase)
-        observeSimproc entry.declName expression output .continueSome true
+        observeSimproc entry.declName expression output .continueSome true procedureKind
+          numExtraArgs invocation.executed (hasResult := true)
+          (semanticSupported := candidate?.isSome) (setIndex := setIndex)
         expression := output
         found := true
+        candidateEvents := candidateEvents ++ candidate?.toArray
+        if invocation.executed then
+          semanticallyComplete := semanticallyComplete && candidate?.isSome
       | .continue none =>
-        observeSimproc entry.declName expression expression .continueNone true
-  if found then return .continue (some expression)
-  return .continue
+        let ignorable := invocation.executed && isIgnorableWfContinueNone entry.declName
+        observeSimproc entry.declName expression expression .continueNone true procedureKind
+          numExtraArgs invocation.executed (semanticSupported := ignorable) (setIndex := setIndex)
+        if invocation.executed && !ignorable then
+          semanticallyComplete := false
+  if found then
+    return {
+      step := .continue (some expression)
+      candidateEvents
+      semanticallyComplete
+    }
+  return { step := .continue, candidateEvents, semanticallyComplete }
+
+structure SimprocArrayAccumulator where
+  expression : Expr
+  proof? : Option Expr := none
+  cache : Bool := true
+  found : Bool := false
+
+def SimprocArrayAccumulator.push (accumulator : SimprocArrayAccumulator)
+    (result : Result) : MetaM SimprocArrayAccumulator := do
+  return {
+    expression := result.expr
+    proof? := ← mkEqTrans? accumulator.proof? result.proof?
+    cache := accumulator.cache && result.cache
+    found := true
+  }
+
+def SimprocArrayAccumulator.finish (accumulator : SimprocArrayAccumulator) : Step :=
+  if accumulator.found then
+    -- Match upstream `simprocArrayCore`: the cache flag is threaded into an
+    -- early `.visit`/`.done`, but full-array exhaustion reconstructs a result
+    -- with the default `cache := true`.
+    .continue (some {
+      expr := accumulator.expression
+      proof? := accumulator.proof?
+    })
+  else
+    .continue
 
 private def simprocArrayRecorded (postPhase : Bool) (sets : SimprocsArray)
     (input : Expr) : EngineM Step := do
-  let mut found := false
-  let mut expression := input
-  let mut proof? : Option Expr := none
-  let mut cache := true
+  let mut accumulator : SimprocArrayAccumulator := { expression := input }
+  let mut candidateEvents : Array SimprocCandidateEvent := #[]
+  let mut semanticallyComplete := true
+  let phase := (← getRecorderState).phase
+  -- A simproc registry can run as internal work of the other protocol (for
+  -- example, the dsimproc registry during ordinary pre-processing).  Such a
+  -- nested invocation is not a top-level fold at the recorder's actual phase.
+  -- Execute and observe it, but defer it until nested programs are represented.
+  let semanticEnabled := phase == .pre || phase == .post
+  let mut setIndex := 0
   for set in sets do
-    match ← simprocCoreRecorded postPhase (if postPhase then set.post else set.pre)
-        set.erased expression with
-    | .visit result => return .visit (← mkEqTransOptProofResult proof? cache result)
-    | .done result => return .done (← mkEqTransOptProofResult proof? cache result)
+    let core ← simprocCoreRecorded semanticEnabled postPhase
+        (if postPhase then set.post else set.pre)
+        set.erased setIndex accumulator.expression
+    candidateEvents := candidateEvents ++ core.candidateEvents
+    semanticallyComplete := semanticallyComplete && core.semanticallyComplete
+    match core.step with
+    | .visit result =>
+      let finalResult ← mkEqTransOptProofResult accumulator.proof? accumulator.cache result
+      if semanticallyComplete && !candidateEvents.isEmpty then
+        let fold : SimprocFold := {
+          phase
+          candidates := candidateEvents
+          finalOutputFingerprint := ← liftM (exprFingerprintHash finalResult.expr)
+          finalDisposition := .visit
+          finalProofPresent := finalResult.proof?.isSome
+          finalCache := some finalResult.cache
+        }
+        emitEvent input finalResult.expr (.semanticSimproc fold) .visit
+      return .visit finalResult
+    | .done result =>
+      let finalResult ← mkEqTransOptProofResult accumulator.proof? accumulator.cache result
+      if semanticallyComplete && !candidateEvents.isEmpty then
+        let fold : SimprocFold := {
+          phase
+          candidates := candidateEvents
+          finalOutputFingerprint := ← liftM (exprFingerprintHash finalResult.expr)
+          finalDisposition := .done
+          finalProofPresent := finalResult.proof?.isSome
+          finalCache := some finalResult.cache
+        }
+        emitEvent input finalResult.expr (.semanticSimproc fold) .done
+      return .done finalResult
     | .continue none => pure ()
     | .continue (some result) =>
-      expression := result.expr
-      proof? ← mkEqTrans? proof? result.proof?
-      cache := cache && result.cache
-      found := true
-  if found then return .continue (some { expr := expression, proof?, cache })
-  return .continue
+      accumulator ← accumulator.push result
+    setIndex := setIndex + 1
+  let finalStep := accumulator.finish
+  match finalStep with
+  | .continue (some result) =>
+      if semanticallyComplete && !candidateEvents.isEmpty then
+        let fold : SimprocFold := {
+          phase
+          candidates := candidateEvents
+          finalOutputFingerprint := ← liftM (exprFingerprintHash result.expr)
+          finalDisposition := .continueSome
+          finalProofPresent := result.proof?.isSome
+          finalCache := some result.cache
+        }
+        emitEvent input result.expr (.semanticSimproc fold) .continueSome
+      return finalStep
+  | _ => return finalStep
 
 private def dsimprocArrayRecorded (postPhase : Bool) (sets : SimprocsArray)
     (input : Expr) : EngineM DStep := do
   let mut found := false
   let mut expression := input
+  let mut candidateEvents : Array SimprocCandidateEvent := #[]
+  let mut semanticallyComplete := true
+  let phase := (← getRecorderState).phase
+  let semanticEnabled := phase == .dpre || phase == .dpost
+  let mut setIndex := 0
   for set in sets do
-    match ← dsimprocCoreRecorded postPhase (if postPhase then set.post else set.pre)
-        set.erased expression with
-    | .visit output => return .visit output
-    | .done output => return .done output
+    let core ← dsimprocCoreRecorded semanticEnabled postPhase
+        (if postPhase then set.post else set.pre)
+        set.erased setIndex expression
+    candidateEvents := candidateEvents ++ core.candidateEvents
+    semanticallyComplete := semanticallyComplete && core.semanticallyComplete
+    match core.step with
+    | .visit output =>
+      if semanticallyComplete && !candidateEvents.isEmpty then
+        let fold : SimprocFold := {
+          phase
+          candidates := candidateEvents
+          finalOutputFingerprint := ← liftM (exprFingerprintHash output)
+          finalDisposition := .visit
+          finalProofPresent := false
+          finalCache := none
+        }
+        emitEvent input output (.semanticSimproc fold) .visit
+      return .visit output
+    | .done output =>
+      if semanticallyComplete && !candidateEvents.isEmpty then
+        let fold : SimprocFold := {
+          phase
+          candidates := candidateEvents
+          finalOutputFingerprint := ← liftM (exprFingerprintHash output)
+          finalDisposition := .done
+          finalProofPresent := false
+          finalCache := none
+        }
+        emitEvent input output (.semanticSimproc fold) .done
+      return .done output
     | .continue none => pure ()
     | .continue (some output) => expression := output; found := true
-  if found then return .continue (some expression)
+    setIndex := setIndex + 1
+  if found then
+    if semanticallyComplete && !candidateEvents.isEmpty then
+      let fold : SimprocFold := {
+        phase
+        candidates := candidateEvents
+        finalOutputFingerprint := ← liftM (exprFingerprintHash expression)
+        finalDisposition := .continueSome
+        finalProofPresent := false
+        finalCache := none
+      }
+      emitEvent input expression (.semanticSimproc fold) .continueSome
+    return .continue (some expression)
   return .continue
 
-private def userPreSimprocsRecorded (sets : SimprocsArray) : Simproc := fun e => do
+/-- Recorder-aware counterpart of `Simp.userPreSimprocs`. -/
+def userPreSimprocsRecorded (sets : SimprocsArray) : Simproc := fun e => do
   unless simprocs.get (← getOptions) do return .continue
   simprocArrayRecorded false sets e
 
-private def userPostSimprocsRecorded (sets : SimprocsArray) : Simproc := fun e => do
+/-- Recorder-aware counterpart of `Simp.userPostSimprocs`.  Keeping this
+    combinator available permits custom `Methods` to run a post registry at a
+    deliberately chosen protocol phase without bypassing semantic recording. -/
+def userPostSimprocsRecorded (sets : SimprocsArray) : Simproc := fun e => do
   unless simprocs.get (← getOptions) do return .continue
   simprocArrayRecorded true sets e
 
@@ -3364,6 +4040,234 @@ private def validateBuiltinDisposition (builtin : Builtin)
   unless valid do
     throwError "replay_builtin_disposition_mismatch: {repr builtin}, {repr disposition}"
 
+private def replayConditionalCondition (condition : Expr) (nested : NestedProgram) :
+    EngineM Result := do
+  unless nested.statePolicy == .sharedSimpState do
+    throwError "replay_conditional_nested_state_policy_mismatch"
+  unless nested.configPolicy == .inherited do
+    throwError "replay_conditional_nested_config_policy_mismatch"
+  unless nested.dischargeDepthIncrement == 0 do
+    throwError "replay_conditional_nested_discharge_depth_mismatch"
+  let outer ← getRecorderState
+  let actualInitial ← liftM (exprFingerprintHash condition)
+  unless nested.program.initialFingerprint == actualInitial do
+    throwError "replay_conditional_nested_initial_fingerprint_mismatch: expected {nested.program.initialFingerprint}, got {actualInitial}"
+  let runtime ← getRuntime
+  unless runtime.mode == .replay do
+    throwError "replay_conditional_nested_requires_replay_mode"
+  runtime.state.set <| beginConditionalNestedRecorderState outer nested.program
+  try
+    let result ← simp condition
+    let actualFinal ← liftM (exprFingerprintHash result.expr)
+    unless nested.program.finalFingerprint == actualFinal do
+      throwError "replay_conditional_nested_final_fingerprint_mismatch: expected {nested.program.finalFingerprint}, got {actualFinal}"
+    let inner ← getRecorderState
+    liftM <| assertReplayProgramConsumed inner
+    restoreRecorderState outer
+    return result
+  catch ex =>
+    restoreRecorderState outer
+    throw ex
+
+private def replaySemanticSimprocCandidate (input : Expr) (fold : SimprocFold)
+    (ordinary : Bool) (candidateIndex : Nat) (finalCandidate : Bool) :
+    EngineM Result := do
+  let state ← getRecorderState
+  let expectedPhase := if ordinary then
+    state.phase == .pre || state.phase == .post
+  else
+    state.phase == .dpre || state.phase == .dpost
+  unless expectedPhase && fold.phase == state.phase do
+    throwError "replay_semantic_simproc_phase_mismatch: fold={repr fold.phase}, state={repr state.phase}"
+  let candidate ← match fold.candidates[candidateIndex]? with
+    | some candidate => pure candidate
+    | none => throwError
+        "replay_semantic_simproc_candidate_index_mismatch: {candidateIndex}/{fold.candidates.size}"
+  let conditionalSemantics := match candidate.semantics with
+    | .iteSelect _ | .diteSelect _ => true
+    | _ => false
+  let vectorSemantics := match candidate.semantics with
+    | .vectorLookup _ => true
+    | _ => false
+  let existsSemantics := match candidate.semantics with
+    | .existentialEqualityElim _ => true
+    | _ => false
+  let some protocol := semanticSimprocProtocol? candidate.declaration
+    | throwError "replay_semantic_simproc_unsupported_declaration"
+  unless candidate.registryPost == protocol.registryPost do
+    throwError "replay_semantic_simproc_registry_provenance_mismatch"
+  unless candidate.procedureKind == protocol.procedureKind do
+    throwError "replay_semantic_simproc_procedure_kind_mismatch"
+  unless candidate.disposition == protocol.disposition do
+    throwError "replay_semantic_simproc_candidate_disposition_mismatch"
+  unless finalCandidate || candidate.disposition == .continueSome do
+    throwError "replay_semantic_simproc_nonfinal_candidate_disposition_mismatch"
+  let constructorSemantics := match candidate.semantics with
+    | .constructorDisjoint _ => true
+    | _ => false
+  let expectedCache : Option Bool := if constructorSemantics then some true
+    else if ordinary then some true else none
+  if conditionalSemantics then
+    unless finalCandidate && ordinary && candidate.procedureKind == .simp && candidate.proofPresent &&
+        candidate.cache == some true do
+      throwError "replay_semantic_simproc_conditional_protocol_mismatch"
+  else if constructorSemantics then
+    unless finalCandidate && ordinary && candidate.procedureKind == .simp && candidate.proofPresent &&
+        candidate.cache == some true do
+      throwError "replay_semantic_simproc_constructor_protocol_mismatch"
+  else if existsSemantics then
+    unless finalCandidate && ordinary && candidate.procedureKind == .simp && candidate.proofPresent &&
+        candidate.cache == some true do
+      throwError "replay_semantic_simproc_exists_and_eq_protocol_mismatch"
+  else if vectorSemantics then
+    let expectedCache : Option Bool := if ordinary then some true else none
+    unless candidate.procedureKind == .dsimp do
+      throwError "replay_semantic_simproc_vector_procedure_kind_mismatch"
+    unless !candidate.proofPresent && candidate.cache == expectedCache do
+      throwError "replay_semantic_simproc_vector_protocol_mismatch"
+  else
+    unless candidate.procedureKind == .dsimp do
+      throwError "replay_semantic_simproc_procedure_kind_mismatch"
+    unless !candidate.proofPresent do
+      throwError "replay_semantic_simproc_candidate_proof_mismatch"
+    unless candidate.cache == expectedCache do
+      throwError "replay_semantic_simproc_candidate_cache_mismatch"
+    unless finalCandidate do
+      throwError "replay_semantic_simproc_nonfinal_terminal_candidate"
+  let inputFingerprint ← liftM (exprFingerprintHash input)
+  unless candidate.inputFingerprint == inputFingerprint do
+    throwError "replay_semantic_simproc_input_fingerprint_mismatch: expected {candidate.inputFingerprint}, got {inputFingerprint}"
+  unless input.getAppNumArgs >= candidate.numExtraArgs do
+    throwError "replay_semantic_simproc_extra_argument_count_exceeds_input"
+  let (peeledInput, extraArguments) :=
+    peelSimprocExtraArgs candidate.numExtraArgs input
+  unless extraArguments.size == candidate.numExtraArgs &&
+      candidate.extraArgumentFingerprints.size == candidate.numExtraArgs do
+    throwError "replay_semantic_simproc_extra_argument_count_mismatch"
+  let peeledInputFingerprint ← liftM (exprFingerprintHash peeledInput)
+  unless candidate.peeledInputFingerprint == peeledInputFingerprint do
+    throwError "replay_semantic_simproc_peeled_input_fingerprint_mismatch: expected {candidate.peeledInputFingerprint}, got {peeledInputFingerprint}"
+  for index in *...extraArguments.size do
+    let actual ← liftM (exprFingerprintHash extraArguments[index]!)
+    unless candidate.extraArgumentFingerprints[index]! == actual do
+      throwError "replay_semantic_simproc_extra_argument_fingerprint_mismatch: index={index}"
+  let conditionalConditionResult? ← match candidate.semantics with
+    | .iteSelect selection =>
+        let condition ← liftM (resolveInputSubterm peeledInput selection.conditionRef)
+        pure <| some (← replayConditionalCondition condition selection.conditionProgram)
+    | .diteSelect selection =>
+        let condition ← liftM (resolveInputSubterm peeledInput selection.conditionRef)
+        pure <| some (← replayConditionalCondition condition selection.conditionProgram)
+    | _ => pure none
+  let procedureResult ← liftM <| withRestoredFullMetaState do
+      match candidate.semantics with
+      | .iteSelect selection =>
+          unless candidate.declaration == `reduceIte do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected reduceIte, got {candidate.declaration}"
+          let some conditionResult := conditionalConditionResult?
+            | throwError "replay_ite_condition_result_missing"
+          interpretIteSelection peeledInput selection conditionResult
+      | .diteSelect selection =>
+          unless candidate.declaration == `reduceDIte do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected reduceDIte, got {candidate.declaration}"
+          let some conditionResult := conditionalConditionResult?
+            | throwError "replay_dite_condition_result_missing"
+          interpretDIteSelection peeledInput selection conditionResult
+      | .canonicalValue (.natBinary derivation) =>
+          let expectedDeclaration := match derivation.operator with
+            | .add => `Nat.reduceAdd
+            | .div => `Nat.reduceDiv
+          unless candidate.declaration == expectedDeclaration do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected {expectedDeclaration}, got {candidate.declaration}"
+          let output ← interpretNatBinary peeledInput derivation
+          pure ({ expr := output } : Result)
+      | .valueGuard (.intNegOfNatSyntax argument) =>
+          unless candidate.declaration == `Int.reduceNeg do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected Int.reduceNeg, got {candidate.declaration}"
+          let output ← interpretIntNegOfNatSyntax peeledInput argument
+          pure ({ expr := output } : Result)
+      | .canonicalValue (.intNegateLiteral derivation) =>
+          unless candidate.declaration == `Int.reduceNeg do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected Int.reduceNeg, got {candidate.declaration}"
+          let output ← interpretIntNegateLiteral peeledInput derivation
+          pure ({ expr := output } : Result)
+      | .valueGuard (.finLiteralInRange derivation) =>
+          unless candidate.declaration == `Fin.isValue do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected Fin.isValue, got {candidate.declaration}"
+          let output ← interpretFinLiteralInRange peeledInput derivation
+          pure ({ expr := output } : Result)
+      | .canonicalValue (.finLiteralModulo derivation) =>
+          unless candidate.declaration == `Fin.isValue do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected Fin.isValue, got {candidate.declaration}"
+          let output ← interpretFinLiteralModulo peeledInput derivation
+          pure ({ expr := output } : Result)
+      | .canonicalValue (.finMkCanonical derivation) =>
+          unless candidate.declaration == `Fin.reduceFinMk do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected Fin.reduceFinMk, got {candidate.declaration}"
+          let output ← interpretFinMkCanonical peeledInput derivation
+          pure ({ expr := output } : Result)
+      | .constructorDisjoint witness =>
+          unless candidate.declaration == `reduceCtorEq do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected reduceCtorEq, got {candidate.declaration}"
+          interpretConstructorDisjoint peeledInput witness
+      | .vectorLookup derivation =>
+          unless candidate.declaration == `Matrix.cons_val do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected Matrix.cons_val, got {candidate.declaration}"
+          let output ← interpretVectorLookup peeledInput derivation
+          pure ({ expr := output } : Result)
+      | .existentialEqualityElim derivation =>
+          unless candidate.declaration == `ExistsAndEq.existsAndEq do
+            throwError "replay_semantic_simproc_declaration_mismatch: expected ExistsAndEq.existsAndEq, got {candidate.declaration}"
+          interpretExistsAndEq peeledInput derivation
+  let procedureOutput := procedureResult.expr
+  let procedureOutputFingerprint ← liftM (exprFingerprintHash procedureOutput)
+  unless candidate.procedureOutputFingerprint == procedureOutputFingerprint do
+    throwError "replay_semantic_simproc_procedure_output_fingerprint_mismatch: expected {candidate.procedureOutputFingerprint}, got {procedureOutputFingerprint}"
+  let outputResult ← liftM <| procedureResult.addExtraArgs extraArguments
+  let output := outputResult.expr
+  let outputFingerprint ← liftM (exprFingerprintHash output)
+  unless candidate.outputFingerprint == outputFingerprint do
+    throwError "replay_semantic_simproc_output_fingerprint_mismatch: expected {candidate.outputFingerprint}, got {outputFingerprint}"
+  unless outputResult.proof?.isSome == candidate.proofPresent do
+    throwError "replay_semantic_simproc_output_proof_mismatch"
+  unless outputResult.cache == (candidate.cache.getD true) do
+    throwError "replay_semantic_simproc_output_cache_mismatch"
+  return outputResult
+
+private def replaySemanticSimprocOutput (input : Expr) (fold : SimprocFold)
+    (ordinary : Bool) : EngineM Result := do
+  unless !fold.candidates.isEmpty do
+    throwError "replay_semantic_simproc_candidate_count_mismatch: 0"
+  let mut expression := input
+  let mut proof? : Option Expr := none
+  let mut cache := true
+  for candidateIndex in *...fold.candidates.size do
+    let finalCandidate := candidateIndex + 1 == fold.candidates.size
+    let result ← replaySemanticSimprocCandidate expression fold ordinary candidateIndex
+      finalCandidate
+    let combined ← mkEqTransOptProofResult proof? cache result
+    expression := combined.expr
+    proof? := combined.proof?
+    cache := combined.cache
+  let result : Result := { expr := expression, proof?, cache }
+  let outputFingerprint ← liftM (exprFingerprintHash result.expr)
+  unless fold.finalOutputFingerprint == outputFingerprint do
+    throwError "replay_semantic_simproc_fold_output_fingerprint_mismatch: expected {fold.finalOutputFingerprint}, got {outputFingerprint}"
+  let lastCandidate ← match fold.candidates[fold.candidates.size - 1]? with
+    | some candidate => pure candidate
+    | none => throwError "replay_semantic_simproc_candidate_count_mismatch: 0"
+  unless fold.finalDisposition == lastCandidate.disposition do
+    throwError "replay_semantic_simproc_fold_disposition_mismatch"
+  unless result.proof?.isSome == fold.finalProofPresent do
+    throwError "replay_semantic_simproc_fold_proof_mismatch"
+  if ordinary then
+    unless fold.finalCache == some result.cache do
+      throwError "replay_semantic_simproc_fold_cache_mismatch"
+  else
+    unless fold.finalCache.isNone do
+      throwError "replay_semantic_simproc_fold_dphase_cache_mismatch"
+  return result
+
 private def pathHasChild (path parent : ExecutionPath) (child : PathStep) : Bool :=
   path.steps.size > parent.steps.size &&
     path.steps.extract 0 parent.steps.size == parent.steps &&
@@ -3539,6 +4443,26 @@ private partial def replayPhaseStepCore (origin current : Expr)
           | .continue (some accumulated) =>
               return ← replayPhaseStepCore origin accumulated.expr (some accumulated)
           | step => return ← consumeReplayPhaseOutcome origin (some step)
+      | .semanticSimproc fold =>
+          unless accumulated?.isNone do
+            throwError "replay_semantic_simproc_has_prior_candidate"
+          unless expected.stepDisposition == fold.finalDisposition do
+            throwError "replay_semantic_simproc_outer_disposition_mismatch"
+          let outputResult ← replaySemanticSimprocOutput current fold true
+          let output := outputResult.expr
+          let outputFingerprint ← liftM (exprFingerprintHash output)
+          unless expected.outputFingerprint == outputFingerprint do
+            throwError "replay_semantic_simproc_outer_output_fingerprint_mismatch"
+          for candidate in fold.candidates do
+            recordSimpTheorem (.decl candidate.declaration candidate.registryPost)
+          emitEvent current output (.semanticSimproc fold) fold.finalDisposition
+          let step ← resultStep outputResult fold.finalDisposition
+          match step with
+          | .continue none =>
+              return ← replayPhaseStepCore origin current accumulated?
+          | .continue (some accumulated) =>
+              return ← replayPhaseStepCore origin accumulated.expr (some accumulated)
+          | step => return ← consumeReplayPhaseOutcome origin (some step)
   if let some expected ← peekReplayStructural? then
     if ← isCurrentReplayStructural expected then
       match expected.witness with
@@ -3580,6 +4504,26 @@ private partial def replayDPhaseStepCore (origin current : Expr)
           | step => return ← consumeReplayDPhaseOutcome origin (some step)
       | .builtin builtin =>
           throwError "replay_builtin_in_dsimp_phase: {repr builtin}"
+      | .semanticSimproc fold =>
+          unless !hasAccumulated do
+            throwError "replay_semantic_simproc_has_prior_candidate"
+          unless expected.stepDisposition == fold.finalDisposition do
+            throwError "replay_semantic_simproc_outer_disposition_mismatch"
+          let outputResult ← replaySemanticSimprocOutput current fold false
+          let output := outputResult.expr
+          let outputFingerprint ← liftM (exprFingerprintHash output)
+          unless expected.outputFingerprint == outputFingerprint do
+            throwError "replay_semantic_simproc_outer_output_fingerprint_mismatch"
+          for candidate in fold.candidates do
+            recordSimpTheorem (.decl candidate.declaration candidate.registryPost)
+          emitEvent current output (.semanticSimproc fold) fold.finalDisposition
+          let step ← expressionStep output fold.finalDisposition
+          match step with
+          | .continue none =>
+              return ← replayDPhaseStepCore origin current hasAccumulated
+          | .continue (some output) =>
+              return ← replayDPhaseStepCore origin output true
+          | step => return ← consumeReplayDPhaseOutcome origin (some step)
   if hasAccumulated then
     let some expected ← peekReplayStructural?
       | throwError "replay_missing_accumulated_dphase_outcome"

@@ -39,6 +39,11 @@ structure RecorderState where
   savedDSimpCacheProducerCount : Nat := 0
   pendingMonadSimpPaths : Array PathStep := #[]
   expectedPremiseTerminal : Option PremiseTerminal := none
+  /-- Result and no-result simproc calls in logical execution order.  Unlike
+      `PassiveObservations.simprocs`, this trace is part of rollback-able
+      recorder state, so calls made by failed speculative candidates do not
+      appear in the certificate's committed invocation trace. -/
+  committedSimprocs : Array SimprocObservation := #[]
   deriving Inhabited
 
 /-- Observations of work that actually ran.  Unlike the logical recorder
@@ -78,6 +83,9 @@ structure Runtime where
       recomputing its proof-insensitive DAG hash for every observation is both
       redundant and unbounded in practice. -/
   fingerprintCache : IO.Ref (ExprStructMap String)
+  /-- Result-size observations share the same per-execution lifetime as
+      fingerprints. They are diagnostics, not logical recorder state. -/
+  sizeCache : IO.Ref (ExprStructMap ExprSize)
   ruleContext : Option Simp.Context := none
 
 def Runtime.reference : MetaM Runtime := do
@@ -87,6 +95,7 @@ def Runtime.reference : MetaM Runtime := do
     observations := ← IO.mkRef {}
     cacheProvenance := ← IO.mkRef {}
     fingerprintCache := ← IO.mkRef {}
+    sizeCache := ← IO.mkRef {}
   }
 
 def Runtime.record (initialFingerprint : String) : MetaM Runtime := do
@@ -97,6 +106,7 @@ def Runtime.record (initialFingerprint : String) : MetaM Runtime := do
     observations := ← IO.mkRef {}
     cacheProvenance := ← IO.mkRef {}
     fingerprintCache := ← IO.mkRef {}
+    sizeCache := ← IO.mkRef {}
   }
 
 def Runtime.replay (program : Program) (ruleContext : Option Simp.Context := none) : MetaM Runtime := do
@@ -106,6 +116,7 @@ def Runtime.replay (program : Program) (ruleContext : Option Simp.Context := non
     observations := ← IO.mkRef {}
     cacheProvenance := ← IO.mkRef {}
     fingerprintCache := ← IO.mkRef {}
+    sizeCache := ← IO.mkRef {}
     ruleContext
   }
 
@@ -119,5 +130,13 @@ def Runtime.cachedFingerprintHash (runtime : Runtime) (expression : Expr) : Meta
   let fingerprint ← exprFingerprintHash expression
   runtime.fingerprintCache.modify fun cache => cache.insert { val := expression } fingerprint
   return fingerprint
+
+def Runtime.cachedExprSize (runtime : Runtime) (expression : Expr) : MetaM ExprSize := do
+  let expression ← instantiateMVars expression
+  if let some size := (← runtime.sizeCache.get).get? { val := expression } then
+    return size
+  let size ← exprSize expression
+  runtime.sizeCache.modify fun cache => cache.insert { val := expression } size
+  return size
 
 end Lean.Meta.Simp.Engine

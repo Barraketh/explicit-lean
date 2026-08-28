@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Round-trip schema-19 source and compile focused/bounded materialized modules."""
+"""Round-trip schema-27 source and compile focused/bounded materialized modules."""
 
 from __future__ import annotations
 
@@ -293,6 +293,8 @@ def check_grothendieck_selector_regression(
 
 
 def main() -> None:
+    if OUTPUT.exists():
+        shutil.rmtree(OUTPUT)
     dynlib = dynamic_library()
     occurrence_total = 0
     materialized_total = 0
@@ -369,7 +371,7 @@ def main() -> None:
         unsuccessful_total += sum(unsuccessful.values())
         execution_total += sum(expected.values())
     print(
-        "schema-19 source materialization: "
+        "schema-27 source materialization: "
         f"{len(FIXTURES)} modules, {occurrence_total} occurrences, "
         f"{materialized_total} materialized, {deferred_total} deferred, "
         f"{unsuccessful_total} unsuccessful, {execution_total} executions, "

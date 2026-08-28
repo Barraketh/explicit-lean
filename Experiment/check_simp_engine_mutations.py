@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require schema-19 replay to reject focused single-field mutations."""
+"""Require schema-27 replay to reject focused single-field mutations."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def main() -> None:
             "SIMP_ENGINE_MUTATIONS equation=1" not in run.stdout or \
             "SIMP_ENGINE_MUTATIONS arithmetic=2" not in run.stdout:
         raise RuntimeError("mutation probe did not run all cases\n" + run.stdout)
-    print("schema-19 replay mutations: 23 rejected: ok")
+    print("schema-27 replay mutations: 23 rejected: ok")
 
 
 if __name__ == "__main__":

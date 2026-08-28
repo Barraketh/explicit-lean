@@ -27,19 +27,34 @@ end Lean.Parser.Tactic
 
 namespace ExplicitLean.SimpEngine.Recording
 
-private def assertRecordedEquivalent (reference recorded : Simp.Result)
-    (referenceState recordedState : Simp.State) : MetaM Unit := do
-  unless Expr.equal reference.expr recorded.expr do
-    throwError "record_mode_mismatch: expression"
-  unless reference.proof?.isSome == recorded.proof?.isSome do
-    throwError "record_mode_mismatch: proof presence"
-  unless reference.cache == recorded.cache do
-    throwError "record_mode_mismatch: result cache flag"
-  unless referenceState.numSteps == recordedState.numSteps &&
-      referenceState.cache.toList.length == recordedState.cache.toList.length &&
-      referenceState.congrCache.size == recordedState.congrCache.size &&
-      referenceState.dsimpCache.size == recordedState.dsimpCache.size do
-    throwError "record_mode_mismatch: simplifier state"
+private structure DifferentialSummary where
+  expression : String
+  proof : Option String
+  cache : Bool
+  state : Simp.Engine.SimpStateFingerprint
+  deriving BEq, Repr
+
+private structure ReferenceRun where
+  result : Simp.Result
+  state : Simp.State
+  summary : DifferentialSummary
+  finalMetaState : Simp.Engine.FullMetaState
+
+private def differentialSummary (result : Simp.Result)
+    (state : Simp.State) : MetaM DifferentialSummary := do
+  return {
+    expression := ← Simp.Engine.exprStructuralFingerprintHash result.expr
+    -- Hash a proof through the proof-erasing fingerprint.  This validates its
+    -- proposition while treating extension-local private proof declarations
+    -- from independently repeated custom dischargers as proof-irrelevant.
+    proof := ← result.proof?.mapM Simp.Engine.exprFingerprintHash
+    cache := result.cache
+    state := Simp.Engine.simpStateFingerprint state
+  }
+
+private def assertRecordedEquivalent (reference recorded : DifferentialSummary) : MetaM Unit := do
+  unless reference == recorded do
+    throwError "record_mode_mismatch: upstream={repr reference}, recorded={repr recorded}"
 
 private def logRecording (recording : Simp.Engine.Recording) : TacticM Unit := do
   let branches := String.intercalate "," recording.coveredBranches.toList
@@ -59,16 +74,36 @@ def localRef (localDecl : LocalDecl) : MetaM Simp.Engine.LocalRef := do
 def recordExpression (expression : Expr) (ctx : Simp.Context)
     (methods : Simp.Engine.Methods) (stats : Simp.Stats) :
     MetaM (Simp.Result × Simp.Stats × Simp.Engine.Recording) := do
-  let initialMeta ← Meta.saveState
-  let (reference, referenceState) ←
-    Simp.mainCore expression ctx { stats with } (methods := methods.base)
-  let referenceMeta ← Meta.saveState
+  let initialMeta ← Simp.Engine.saveFullMetaState
+  let referenceAction : MetaM ReferenceRun := do
+    let (reference, referenceState) ←
+      Simp.mainCore expression ctx { stats with } (methods := methods.base)
+    let referenceSummary ← differentialSummary reference referenceState
+    let referenceMeta ← Simp.Engine.saveFullMetaState
+    return {
+      result := reference
+      state := referenceState
+      summary := referenceSummary
+      finalMetaState := referenceMeta
+    }
+  let referenceRun ← try
+    referenceAction
+  catch error =>
+    initialMeta.restore
+    throw error
   initialMeta.restore
-  let (recorded, recordedState, recording) ←
-    Simp.Engine.mainCoreRecording expression ctx { stats with } (methods := methods)
-  assertRecordedEquivalent reference recorded referenceState recordedState
-  referenceMeta.restore
-  return (reference, { referenceState with }, recording)
+  let recordingAction : MetaM Simp.Engine.Recording := do
+    let (recorded, recordedState, recording) ←
+      Simp.Engine.mainCoreRecording expression ctx { stats with }
+        (methods := methods)
+    let recordedSummary ← differentialSummary recorded recordedState
+    assertRecordedEquivalent referenceRun.summary recordedSummary
+    return recording
+  let recording ← try
+    recordingAction
+  finally
+    referenceRun.finalMetaState.restore
+  return (referenceRun.result, { referenceRun.state with }, recording)
 
 structure RecordedGoal where
   result? : Option (Array FVarId × MVarId)
@@ -77,7 +112,7 @@ structure RecordedGoal where
   deriving Inhabited
 
 /-- The goal/hypothesis transport layer of `Meta.simpGoal`, with each engine
-    execution replaced by a schema-19 recording execution. -/
+    execution replaced by a schema-27 recording execution. -/
 def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
     (methods : Simp.Engine.Methods) (simplifyTarget : Bool)
     (fvarIdsToSimp : Array FVarId) : MetaM RecordedGoal := mvarId.withContext do
@@ -207,40 +242,44 @@ def recordCertificate (simpStx : Syntax) (commitReference : Bool := false)
   let mainGoal := initialGoals.head!
   let tail := initialGoals.tail
   let initialState ← Simp.Engine.proofStateFingerprint initialGoals
-  let (certificate, branches) ← dischargeWrapper.with fun discharge? => do
-    let (referenceResult, _) ← try
-      Meta.simpGoal mainGoal ctx
-        (simprocs := simprocs) (discharge? := discharge?)
-        (simplifyTarget := simplifyTarget) (fvarIdsToSimp := fvarIds)
-    catch error =>
-      onReferenceFailure
-      throw error
-    let referenceGoals := goalsAfter tail referenceResult
-    setGoals referenceGoals
-    let referenceFinal ← Simp.Engine.proofStateFingerprint referenceGoals
-    let referenceElab ← Tactic.saveState
-    initialElab.restore
-    let methods := match discharge? with
-      | none => Simp.Engine.mkDefaultMethodsCore simprocs
-      | some discharge => Simp.Engine.mkMethods simprocs discharge
-          (wellBehavedDischarge := false)
-    let recorded ← recordGoal mainGoal ctx methods simplifyTarget fvarIds
-    let recordedGoals := goalsAfter tail recorded.result?
-    setGoals recordedGoals
-    let finalState ← Simp.Engine.proofStateFingerprint recordedGoals
-    let certificate : Simp.Engine.Certificate := {
-      config := ← Simp.Engine.replayConfigOfContext ctx
-      subjects := recorded.subjects
-      initialState
-      finalState
-    }
-    unless referenceFinal == certificate.finalState do
-      throwError "record_mode_mismatch: final proof state"
-    if commitReference then
-      referenceElab.restore
-    else
+  let (certificate, branches) ← try
+    dischargeWrapper.with fun discharge? => do
+      let (referenceResult, _) ← try
+        Meta.simpGoal mainGoal ctx
+          (simprocs := simprocs) (discharge? := discharge?)
+          (simplifyTarget := simplifyTarget) (fvarIdsToSimp := fvarIds)
+      catch error =>
+        onReferenceFailure
+        throw error
+      let referenceGoals := goalsAfter tail referenceResult
+      setGoals referenceGoals
+      let referenceFinal ← Simp.Engine.proofStateFingerprint referenceGoals
+      let referenceElab ← Tactic.saveState
       initialElab.restore
-    return (certificate, recorded.branches)
+      let methods := match discharge? with
+        | none => Simp.Engine.mkDefaultMethodsCore simprocs
+        | some discharge => Simp.Engine.mkMethods simprocs discharge
+            (wellBehavedDischarge := false)
+      let recorded ← recordGoal mainGoal ctx methods simplifyTarget fvarIds
+      let recordedGoals := goalsAfter tail recorded.result?
+      setGoals recordedGoals
+      let finalState ← Simp.Engine.proofStateFingerprint recordedGoals
+      let certificate : Simp.Engine.Certificate := {
+        config := ← Simp.Engine.replayConfigOfContext ctx
+        subjects := recorded.subjects
+        initialState
+        finalState
+      }
+      unless referenceFinal == certificate.finalState do
+        throwError "record_mode_mismatch: final proof state"
+      if commitReference then
+        referenceElab.restore
+      else
+        initialElab.restore
+      return (certificate, recorded.branches)
+  catch error =>
+    initialElab.restore
+    throw error
   return { ctx, certificate, branches, fvarIds, simplifyTarget }
 
 private def recordTactic (simpStx : Syntax) (occurrenceId? : Option String := none) : TacticM Unit := do
@@ -250,39 +289,45 @@ private def recordTactic (simpStx : Syntax) (occurrenceId? : Option String := no
 private def recordObservation (simpStx : Syntax) (target : Expr) : TacticM Unit := do
   let { ctx, simprocs, dischargeWrapper, .. } ←
     mkSimpContext simpStx (eraseLocal := false)
-  let initialMeta ← Meta.saveState
+  let initialMeta ← Simp.Engine.saveFullMetaState
   let initialGoals ← getGoals
-  let recording ← dischargeWrapper.with fun discharge? => do
-    let methods := match discharge? with
-      | none => Simp.Engine.mkDefaultMethodsCore simprocs
-      | some discharge => Simp.Engine.mkMethods simprocs discharge
-          (wellBehavedDischarge := false)
-    let (_, _, recording) ← recordExpression target ctx methods {}
-    return recording
-  initialMeta.restore
-  setGoals initialGoals
+  let recording ← try
+    dischargeWrapper.with fun discharge? => do
+      let methods := match discharge? with
+        | none => Simp.Engine.mkDefaultMethodsCore simprocs
+        | some discharge => Simp.Engine.mkMethods simprocs discharge
+            (wellBehavedDischarge := false)
+      let (_, _, recording) ← recordExpression target ctx methods {}
+      return recording
+  finally
+    initialMeta.restore
+    setGoals initialGoals
   logRecording recording
 
 private def recordDSimpTarget (dsimpStx : Syntax) (target : Expr) : TacticM Unit := do
   let { ctx, simprocs, dischargeWrapper, .. } ←
     mkSimpContext dsimpStx (eraseLocal := false)
-  let initialMeta ← Meta.saveState
+  let initialMeta ← Simp.Engine.saveFullMetaState
   let initialGoals ← getGoals
-  let recording ← dischargeWrapper.with fun discharge? => do
-    let methods := match discharge? with
-      | none => Simp.Engine.mkDefaultMethodsCore simprocs
-      | some discharge => Simp.Engine.mkMethods simprocs discharge
-          (wellBehavedDischarge := false)
-    let (reference, referenceState) ← Simp.Engine.dsimpMainCore target ctx (methods := methods)
+  let recording ← try
+    dischargeWrapper.with fun discharge? => do
+      let methods := match discharge? with
+        | none => Simp.Engine.mkDefaultMethodsCore simprocs
+        | some discharge => Simp.Engine.mkMethods simprocs discharge
+            (wellBehavedDischarge := false)
+      let (reference, referenceState) ←
+        Simp.Engine.dsimpMainCore target ctx (methods := methods)
+      let referenceSummary ← differentialSummary { expr := reference } referenceState
+      initialMeta.restore
+      setGoals initialGoals
+      let (recorded, recordedState, recording) ←
+        Simp.Engine.dsimpMainCoreRecording target ctx (methods := methods)
+      let recordedSummary ← differentialSummary { expr := recorded } recordedState
+      assertRecordedEquivalent referenceSummary recordedSummary
+      return recording
+  finally
     initialMeta.restore
     setGoals initialGoals
-    let (recorded, recordedState, recording) ←
-      Simp.Engine.dsimpMainCoreRecording target ctx (methods := methods)
-    assertRecordedEquivalent { expr := reference } { expr := recorded }
-      referenceState recordedState
-    return recording
-  initialMeta.restore
-  setGoals initialGoals
   logRecording recording
 
 elab_rules : tactic

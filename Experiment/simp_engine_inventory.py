@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small syntax-aware instrumentation helpers for the schema-19 engine tests."""
+"""Small syntax-aware instrumentation helpers for the schema-27 engine tests."""
 
 from __future__ import annotations
 
