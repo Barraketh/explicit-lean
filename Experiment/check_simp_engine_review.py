@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lock the manually reviewed fork-to-upstream declaration map and semantic core."""
+"""Lock the frozen schema-27 fork, upstream map, and legacy contract."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 FORK = ROOT / "ExplicitLean" / "SimpEngine.lean"
 REVIEWED_FILES = (
     "lakefile.toml",
-    "PLAN.md",
     "ExplicitLean/SimpEngine.lean",
     "ExplicitLean/SimpEngine/Fingerprint.lean",
     "ExplicitLean/SimpEngine/IR.lean",
@@ -29,7 +28,6 @@ REVIEWED_FILES = (
     "ExplicitLeanMathlibAudit.lean",
     "ExplicitLeanMathlibAudit/FieldEq.lean",
     "SIMP_ENGINE_COVERAGE.md",
-    "simprocs.md",
 )
 
 # Upstream implementations whose state-free negative branches and supported
@@ -90,8 +88,6 @@ REVIEWED_MATHLIB_HASHES: dict[str, str] = {
 REVIEWED_HASHES: dict[str, str] = {
     "lakefile.toml":
         "a37efc6e358aaedadc967b5ddcfb639269ebf8613be8d235d529384d7cc5725e",
-    "PLAN.md":
-        "c685941227f2ec500c06dd36cf979efcba93d7109ff47abaf189b44dfc24b44b",
     "ExplicitLean/SimpEngine.lean":
         "8fe62915752b06e3f5eaf76146db67de3eda11d36e47df76c006629debcd7148",
     "ExplicitLean/SimpEngine/Fingerprint.lean":
@@ -117,9 +113,7 @@ REVIEWED_HASHES: dict[str, str] = {
     "ExplicitLeanMathlibAudit/FieldEq.lean":
         "c5c0ec09f153a7e73e804ec2093e85708c0bd3c38b2f8161a6355012d0019112",
     "SIMP_ENGINE_COVERAGE.md":
-        "811313f4098240c6984651ca966298381edd5a782d469020438de3d12d87de61",
-    "simprocs.md":
-        "fa57800e6231eafead9095765fad891c989cc95594015459545a41fb42236d65",
+        "207bea3e5a7ac673d6616593a109d81d788d03db127662fd1de52bbe55c10d56",
 }
 EXPECTED_LINEAGE_DIGEST = (
     "60511e7930514efa28c4ce54b954ed7662baca737de447469781ffdbc035aab7"
@@ -362,7 +356,7 @@ def main() -> None:
     if found:
         raise RuntimeError(f"unidentified or ambient operations returned: {found}")
     print(
-        "schema-27 source review: "
+        "legacy schema-27 source review: "
         f"{current['lineageCount']} upstream-lineage declarations, "
         f"{current['controlledCount']} controlled declarations: ok"
     )

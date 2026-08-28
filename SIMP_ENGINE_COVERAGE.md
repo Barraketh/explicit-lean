@@ -1,6 +1,11 @@
-# Pinned `simp` engine contract
+# Legacy schema-27 `simp` engine contract
 
-Status: schema 27, implementation specification
+> **Status: superseded product design; frozen legacy implementation contract.**
+> This document specifies the operational recorder/replayer currently present
+> in the repository. It is retained for regression review and engineering
+> evidence. It is not the correctness contract or roadmap for the active
+> boundary-state translator. [PLAN.md](PLAN.md) is authoritative, and
+> [README.md](README.md) explains the distinction for new implementers.
 
 Pinned engine: Lean 4.32.2, commit
 `f3b06c705e6c85f5314019d5d3baab0fec5b580c`
@@ -99,9 +104,11 @@ operation.
 
 ## 4. Implementation-to-IR coverage matrix
 
-This matrix is normative. `Experiment/check_simp_engine_observers.py` binds
-every row to implementation text, while the reviewed-source lock detects edits
-that require a fresh semantic review.
+This matrix is normative only for the frozen schema-27 legacy implementation.
+It does not specify the boundary-state translator.
+`Experiment/check_simp_engine_observers.py` binds every row to legacy
+implementation text, while the reviewed-source lock detects edits that require
+a fresh legacy semantic review.
 
 | Upstream site | Committed behavior | Schema-27 representation |
 | --- | --- | --- |
@@ -246,12 +253,14 @@ The last full closure predates schema 27 and is retained only as a baseline:
 harness failures. The rollback-aware record-only simproc census is current
 evidence for call frequency, not a substitute for a fresh schema-27 closure.
 
-## 8. Review and change policy
+## 8. Legacy review and change policy
 
-The review lock hashes every semantic source file, the normative documents,
-the fork-to-upstream declaration lineage, controlled fork declarations, and
-the upstream Lean/Mathlib implementations on which negative-path or semantic
-reasoning depends. A Lean or Mathlib upgrade must:
+The schema-27 review lock hashes every legacy semantic source file, this legacy
+contract, the fork-to-upstream declaration lineage, controlled fork
+declarations, and the upstream Lean/Mathlib implementations on which its
+negative-path or semantic reasoning depends. Active planning, simproc guidance,
+and report-storage documents are deliberately outside that legacy hash lock. A
+Lean or Mathlib upgrade of the retained implementation must:
 
 1. regenerate the lineage and implementation hashes;
 2. re-audit every coverage-matrix row and semantic protocol;
