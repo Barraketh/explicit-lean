@@ -130,6 +130,79 @@ def validate_execution_join() -> None:
             raise RuntimeError(f"{label} execution join mutation was accepted")
 
 
+def validate_declaration_oracle_protocol() -> None:
+    base: dict[str, object] = {
+        "kind": materialize.DECLARATION_ORACLE_KIND,
+        "schema": materialize.DECLARATION_ORACLE_SCHEMA,
+        "module": "Test.Module",
+        "status": "success",
+        "failureCategory": None,
+        "failureDetail": None,
+        "stockDeclarationCount": 5,
+        "appliedDeclarationCount": 4,
+        "commonPublicDeclarationCount": 3,
+        "stockOnlyPrivateProofCount": 1,
+        "appliedOnlyPrivateProofCount": 0,
+        "stockExtensionCount": 2,
+        "appliedExtensionCount": 2,
+        "checkedDeclarationCount": 4,
+    }
+
+    def parse(report: dict[str, object]) -> dict[str, object]:
+        marker = materialize.DECLARATION_ORACLE_MARKER + json.dumps(report)
+        return materialize._parse_declaration_oracle(marker, "Test.Module")
+
+    if parse(base) != base:
+        raise RuntimeError("valid declaration-oracle protocol report changed")
+
+    mutations = (
+        ("boolean schema", "unexpected schema", {"schema": True}),
+        (
+            "inconsistent stock counts",
+            "inconsistent stock counts",
+            {"stockDeclarationCount": 6},
+        ),
+        (
+            "inconsistent applied counts",
+            "inconsistent applied counts",
+            {"appliedDeclarationCount": 5},
+        ),
+        (
+            "inconsistent public count",
+            "inconsistent public count",
+            {"commonPublicDeclarationCount": 5},
+        ),
+    )
+    for label, expected, changes in mutations:
+        forged = dict(base)
+        forged.update(changes)
+        try:
+            parse(forged)
+        except RuntimeError as error:
+            if expected not in str(error):
+                raise
+        else:
+            raise RuntimeError(f"materializer accepted {label}")
+
+    failure = dict(base)
+    failure.update(
+        status="failure",
+        failureCategory="test_failure",
+        failureDetail="test detail",
+    )
+    for field in materialize.DECLARATION_ORACLE_COUNT_FIELDS:
+        failure[field] = 0
+    parse(failure)
+    failure["checkedDeclarationCount"] = 1
+    try:
+        parse(failure)
+    except RuntimeError as error:
+        if "nonzero counts" not in str(error):
+            raise
+    else:
+        raise RuntimeError("materializer accepted nonzero failure counts")
+
+
 def validate_manifest(manifest: dict[str, object]) -> None:
     if manifest.get("reportSchema") != 2 or manifest.get("kind") != (
         "simp_engine_boundary_manifest"
@@ -172,7 +245,9 @@ def validate_manifest(manifest: dict[str, object]) -> None:
         "ExplicitLean/SimpEngine/Boundary/ScopeProbe.lean",
         "Experiment/SimpEngineInventory.lean",
         "Experiment/SimpEngineBoundaryScope.lean",
+        "Experiment/SimpEngineDeclarationOracle.lean",
         "Experiment/check_simp_engine_boundary_scope.py",
+        "Experiment/check_simp_engine_declaration_oracle.py",
         "Experiment/simp_engine_boundary_corpus.py",
     }
     missing_hashes = required_hashes - set(implementation_hashes)
@@ -226,6 +301,7 @@ def validate_manifest(manifest: dict[str, object]) -> None:
 
 def main() -> None:
     validate_execution_join()
+    validate_declaration_oracle_protocol()
     paths = [corpus.MATHLIB / module for module in MODULES]
     temporary_parent = ROOT / ".lake"
     temporary_parent.mkdir(exist_ok=True)

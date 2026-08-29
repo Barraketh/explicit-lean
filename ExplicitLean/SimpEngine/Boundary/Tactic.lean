@@ -38,10 +38,20 @@ declare_syntax_cat boundaryEncodedLocationEvidence
 syntax boundaryEncodedLocalEvidence+ (boundaryEncodedTargetEvidence)? :
   boundaryEncodedLocationEvidence
 
+declare_syntax_cat boundaryEncodedEnvironmentAction
+syntax "realize_reserved_name" str : boundaryEncodedEnvironmentAction
+
+declare_syntax_cat boundaryEncodedActions
+syntax "[" boundaryEncodedEnvironmentAction,* "]" : boundaryEncodedActions
+
 declare_syntax_cat boundaryVariantOutcome
 syntax "failure" : boundaryVariantOutcome
 syntax "apply_encoded" boundaryEncodedEvidence : boundaryVariantOutcome
 syntax "apply_encoded" boundaryEncodedLocationEvidence : boundaryVariantOutcome
+syntax "apply_encoded_with_actions" boundaryEncodedActions boundaryEncodedEvidence :
+  boundaryVariantOutcome
+syntax "apply_encoded_with_actions" boundaryEncodedActions boundaryEncodedLocationEvidence :
+  boundaryVariantOutcome
 
 declare_syntax_cat boundaryVariant
 syntax "| " str str str num str str " => " boundaryVariantOutcome : boundaryVariant
@@ -191,17 +201,36 @@ private def runExplicitLocationApply (localSyntax : Array Syntax)
 private def findLocalByIndex (lctx : LocalContext) (index : Nat) : Option LocalDecl :=
   lctx.decls.findSome? fun decl? => decl?.filter (·.index == index)
 
-private def runExplicitEncodedApply (evidence : Syntax) : TacticM Unit :=
+private def parseEncodedEnvironmentActions
+    (actions : Array Syntax) : TacticM (Array EnvironmentAction) := do
+  let mut result : Array EnvironmentAction := #[]
+  for action in actions do
+    match action with
+    | `(boundaryEncodedEnvironmentAction| realize_reserved_name $name:str) =>
+        let name := name.getString.toName
+        if name.isAnonymous then
+          throwError "invalid encoded reserved-name action"
+        result := result.push (EnvironmentAction.realizeReservedName name)
+    | _ => throwError "invalid encoded environment action"
+  return result
+
+private def runExplicitEncodedApply (actions : Array Syntax) (evidence : Syntax) : TacticM Unit :=
   withMainContext do
     withBoundaryEncodedSourceContext do
+      let environmentActions ← parseEncodedEnvironmentActions actions
       let artifact ← elaborateEncodedEvidence evidence
       let goals ← getGoals
-      let (next, _) ← applyTargetArtifact goals.head! goals.tail artifact
+      let (next, _) ← applyGoalArtifact goals.head! goals.tail {
+        target? := some artifact
+        environmentActions
+      }
       setGoals next
 
-private def runExplicitEncodedLocationApply (localSyntax : Array Syntax)
-    (targetSyntax? : Option Syntax) : TacticM Unit := withMainContext do
+private def runExplicitEncodedLocationApply (actions : Array Syntax)
+    (localSyntax : Array Syntax) (targetSyntax? : Option Syntax) : TacticM Unit :=
+  withMainContext do
   withBoundaryEncodedSourceContext do
+    let environmentActions ← parseEncodedEnvironmentActions actions
     let lctx ← getLCtx
     let mut locals := #[]
     for entrySyntax in localSyntax do
@@ -222,7 +251,11 @@ private def runExplicitEncodedLocationApply (localSyntax : Array Syntax)
           elaborateEncodedEvidence evidence
       | _ => throwError "invalid encoded target boundary evidence"
     let goals ← getGoals
-    let (next, _) ← applyGoalArtifact goals.head! goals.tail { locals, target? }
+    let (next, _) ← applyGoalArtifact goals.head! goals.tail {
+      locals
+      target?
+      environmentActions
+    }
     setGoals next
 
 private def runBoundaryGuard (targetFingerprint localContextFingerprint
@@ -280,12 +313,22 @@ private def runBoundaryVariantOutcome (outcome : Syntax) : TacticM Unit := do
   | `(boundaryVariantOutcome| failure) =>
       throwError "boundary_recorded_tactic_failure"
   | `(boundaryVariantOutcome| apply_encoded $evidence:boundaryEncodedEvidence) =>
-      runExplicitEncodedApply evidence
+      runExplicitEncodedApply #[] evidence
   | `(boundaryVariantOutcome| apply_encoded
       $location:boundaryEncodedLocationEvidence) =>
       let locals := location.raw[0].getArgs
       let targetSyntax? := if location.raw[1].isNone then none else some location.raw[1][0]
-      runExplicitEncodedLocationApply locals targetSyntax?
+      runExplicitEncodedLocationApply #[] locals targetSyntax?
+  | `(boundaryVariantOutcome| apply_encoded_with_actions
+      [$actions:boundaryEncodedEnvironmentAction,*]
+      $evidence:boundaryEncodedEvidence) =>
+      runExplicitEncodedApply actions evidence
+  | `(boundaryVariantOutcome| apply_encoded_with_actions
+      [$actions:boundaryEncodedEnvironmentAction,*]
+      $location:boundaryEncodedLocationEvidence) =>
+      let locals := location.raw[0].getArgs
+      let targetSyntax? := if location.raw[1].isNone then none else some location.raw[1][0]
+      runExplicitEncodedLocationApply actions locals targetSyntax?
   | _ => throwError "invalid boundary variant outcome"
 
 private def runBoundarySelect (variants : Array Syntax) : TacticM Unit := do

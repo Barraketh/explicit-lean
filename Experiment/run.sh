@@ -32,6 +32,7 @@ python3 Experiment/check_simp_engine_cloud.py
 python3 Experiment/check_simp_engine_vast.py
 python3 Experiment/check_simp_engine_boundary.py
 python3 Experiment/check_simp_engine_boundary_source.py
+python3 Experiment/check_simp_engine_declaration_oracle.py
 python3 Experiment/check_simp_engine_boundary_scope.py
 python3 Experiment/check_simp_engine_boundary_corpus.py
 python3 Experiment/check_simp_engine_boundary_mathlib.py

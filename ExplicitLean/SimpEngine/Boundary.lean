@@ -382,6 +382,16 @@ private def boundarySnapshot (basis : PreBoundaryBasis) : TacticM BoundarySnapsh
 private def boundaryComparisonMismatch {α : Type} (label : String) : TacticM α :=
   throwError s!"boundary_comparison_mismatch:{label}"
 
+private def boundaryEnvironmentActionName : EnvironmentAction → Name
+  | EnvironmentAction.realizeReservedName name => name
+
+private def boundaryEnvironmentActionJson (action : EnvironmentAction) : Json :=
+  match action with
+  | EnvironmentAction.realizeReservedName name => Json.mkObj [
+      ("kind", Json.str "realize_reserved_name"),
+      ("name", Json.str name.toString)
+    ]
+
 private def boundaryMetavarKindEq : MetavarKind → MetavarKind → Bool
   | .natural, .natural => true
   | .synthetic, .synthetic => true
@@ -451,9 +461,35 @@ private def pairLMVarIds (basis : PreBoundaryBasis) (mapping : BoundaryIdMap)
   | none, none =>
       let appliedPre := basis.levelMVars.any (fun entry => entry.id == applied)
       let stockPre := basis.levelMVars.any (fun entry => entry.id == stock)
-      unless appliedPre && stockPre && applied == stock do
-        throwError s!"boundary_comparison_unpaired_fresh_universe_mvar:{label}"
+      unless (!appliedPre && !stockPre) || (appliedPre && stockPre && applied == stock) do
+        boundaryComparisonMismatch s!"{label}.universe.pre"
       return { mapping with lmvars := mapping.lmvars.push (applied, stock) }
+
+private def pairBoundaryLevelAssignments (basis : PreBoundaryBasis)
+    (mapping : BoundaryIdMap) (stock applied : BoundarySnapshot) : TacticM BoundaryIdMap := do
+  let mut mapping := mapping
+  let mut ordinal := 0
+  while h : ordinal < mapping.lmvars.size do
+    let pair := mapping.lmvars[ordinal]
+    ordinal := ordinal + 1
+    let some stockEntry := findLevelMVarSnapshot? stock pair.2
+      | throwError "boundary_comparison_unpaired_mapped_universe_mvar"
+    let some appliedEntry := findLevelMVarSnapshot? applied pair.1
+      | throwError "boundary_comparison_unpaired_mapped_universe_mvar"
+    match stockEntry.status.valueOpt, appliedEntry.status.valueOpt with
+    | some stockLevel, some appliedLevel =>
+        let stockLevels := (collectLevelMVars {} (.sort stockLevel)).result
+        let appliedLevels := (collectLevelMVars {} (.sort appliedLevel)).result
+        unless stockLevels.size == appliedLevels.size do
+          throwError s!"boundary_comparison_unpaired_fresh_universe_mvar:assignment[{ordinal - 1}]"
+        for h : levelOrdinal in *...stockLevels.size do
+          let some appliedLevelMVar := appliedLevels[levelOrdinal]?
+            | throwError "boundary_comparison_unpaired_fresh_universe_mvar"
+          mapping ← pairLMVarIds basis mapping appliedLevelMVar stockLevels[levelOrdinal]
+            s!"levelMVars.assignment[{ordinal - 1}][{levelOrdinal}]"
+    | none, none => pure ()
+    | _, _ => pure ()
+  return mapping
 
 private def initialBoundaryIdMap (basis : PreBoundaryBasis) : BoundaryIdMap :=
   {
@@ -492,6 +528,31 @@ private def pairBoundaryExprMVars (basis : PreBoundaryBasis) (mapping : Boundary
       stockMVars[ordinal] s!"{label}[{ordinal}]"
     queue := queue.push { applied := appliedMVar, stock := stockMVars[ordinal] }
   mapping ← pairBoundaryLevels basis mapping stock applied label
+  return (mapping, queue)
+
+private def pairBoundaryProofRoots (basis : PreBoundaryBasis)
+    (mapping : BoundaryIdMap) (queue : Array BoundaryMVarPair)
+    (stock applied : Expr) (label : String) :
+    TacticM (BoundaryIdMap × Array BoundaryMVarPair) := do
+  let stockMVars := (stock.collectMVars {}).result
+  let appliedMVars := (applied.collectMVars {}).result
+  let mut mapping := mapping
+  let mut queue := queue
+  if stockMVars.size == appliedMVars.size then
+    for h : ordinal in *...stockMVars.size do
+      let some appliedMVar := appliedMVars[ordinal]?
+        | return (mapping, queue)
+      mapping ← pairMVarIds basis mapping appliedMVar stockMVars[ordinal]
+        s!"{label}.mvar[{ordinal}]"
+      queue := queue.push { applied := appliedMVar, stock := stockMVars[ordinal] }
+    let stockLevels := (collectLevelMVars {} stock).result
+    let appliedLevels := (collectLevelMVars {} applied).result
+    if stockLevels.size == appliedLevels.size then
+      for h : ordinal in *...stockLevels.size do
+        let some appliedLevel := appliedLevels[ordinal]?
+          | return (mapping, queue)
+        mapping ← pairLMVarIds basis mapping appliedLevel stockLevels[ordinal]
+          s!"{label}.universe[{ordinal}]"
   return (mapping, queue)
 
 private def compareBoundaryLocalDeclShape (label : String)
@@ -697,15 +758,18 @@ private def buildBoundaryIdMap (basis : PreBoundaryBasis)
       if stockEntry.status.tag == boundaryExprAssigned then
         unless stockEntry.status.isProof == appliedEntry.status.isProof do
           boundaryComparisonMismatch "exprMVars.assignment.proofStatus"
-        unless stockEntry.status.isProof do
-          let some stockValue := stockEntry.status.valueOpt
-            | boundaryComparisonMismatch "exprMVars.assignment.stockValue"
-          let some appliedValue := appliedEntry.status.valueOpt
-            | boundaryComparisonMismatch "exprMVars.assignment.appliedValue"
-          let (mapping', queue') ← pairBoundaryExprMVars basis mapping queue
-            stockValue appliedValue "exprMVars.assignment"
-          mapping := mapping'
-          queue := queue'
+        let some stockValue := stockEntry.status.valueOpt
+          | boundaryComparisonMismatch "exprMVars.assignment.stockValue"
+        let some appliedValue := appliedEntry.status.valueOpt
+          | boundaryComparisonMismatch "exprMVars.assignment.appliedValue"
+        let (mapping', queue') ← if stockEntry.status.isProof then
+          pairBoundaryProofRoots basis mapping queue stockValue appliedValue
+            "exprMVars.assignment"
+        else
+          pairBoundaryExprMVars basis mapping queue stockValue appliedValue
+            "exprMVars.assignment"
+        mapping := mapping'
+        queue := queue'
       else if stockEntry.status.tag == boundaryExprDelayed then
         let some stockPending := stockEntry.status.pendingOpt
           | boundaryComparisonMismatch "exprMVars.delayed.stockPending"
@@ -723,13 +787,7 @@ private def buildBoundaryIdMap (basis : PreBoundaryBasis)
             throwError "boundary_comparison_unpaired_fresh_delayed_fvar"
           mapping ← pairFVarIds basis mapping appliedFVar.fvarId!
             stockFVar.fvarId! s!"exprMVars.delayed.fvar[{ordinal}]"
-  for entry in stock.levelMVars do
-    unless basis.levelMVars.any (fun pre => pre.id == entry.id) do
-      throwError "boundary_comparison_unpaired_fresh_universe_mvar"
-  for entry in applied.levelMVars do
-    unless basis.levelMVars.any (fun pre => pre.id == entry.id) do
-      throwError "boundary_comparison_unpaired_fresh_universe_mvar"
-  return mapping
+  pairBoundaryLevelAssignments basis mapping stock applied
 
 private def mapBoundaryLevel (mapping : BoundaryIdMap) : Level → MetaM Level
   | .zero => pure .zero
@@ -1117,6 +1175,25 @@ private def compareBoundaryLetRecs
   unless stock.isEmpty && applied.isEmpty do
     throwError "boundary_comparison_unpaired_fresh_letrec"
 
+private def compareBoundaryLevelMVarStates (mapping : BoundaryIdMap)
+    (stock applied : BoundarySnapshot) : TacticM Unit := do
+  for (appliedId, stockId) in mapping.lmvars do
+    let some stockEntry := findLevelMVarSnapshot? stock stockId
+      | throwError "boundary_comparison_unpaired_mapped_universe_mvar"
+    let some appliedEntry := findLevelMVarSnapshot? applied appliedId
+      | throwError "boundary_comparison_unpaired_mapped_universe_mvar"
+    unless stockEntry.decl.depth == appliedEntry.decl.depth do
+      boundaryComparisonMismatch s!"levelMVars[{stockId.name}].depth"
+    unless stockEntry.status.tag == appliedEntry.status.tag do
+      boundaryComparisonMismatch s!"levelMVars[{stockId.name}].status"
+    if stockEntry.status.tag == boundaryLevelAssigned then
+      let some stockLevel := stockEntry.status.valueOpt
+        | boundaryComparisonMismatch s!"levelMVars[{stockId.name}].stockValue"
+      let some appliedLevel := appliedEntry.status.valueOpt
+        | boundaryComparisonMismatch s!"levelMVars[{stockId.name}].appliedValue"
+      compareBoundaryLevel mapping s!"levelMVars[{stockId.name}].value"
+        stockLevel appliedLevel
+
 private def compareBoundarySnapshot (basis : PreBoundaryBasis)
     (mapping : BoundaryIdMap) (stock applied : BoundarySnapshot) : TacticM Unit := do
   unless stock.options == applied.options do boundaryComparisonMismatch "options"
@@ -1156,7 +1233,7 @@ private def compareBoundarySnapshot (basis : PreBoundaryBasis)
     for h : ordinal in *...stockDeps.size do
       let appliedLevel := appliedDeps[ordinal]!
       let some mapped := findPairByApplied? mapping.lmvars appliedLevel
-        | throwError "boundary_comparison_unpaired_fresh_universe_mvar"
+          | throwError "boundary_comparison_unpaired_fresh_universe_mvar"
       unless mapped == stockDeps[ordinal] do
         boundaryComparisonMismatch s!"levelMVarErrorInfos[{entryOrdinal}][{ordinal}]"
   unless stock.goals.size == applied.goals.size do boundaryComparisonMismatch "goals.count"
@@ -1186,22 +1263,7 @@ private def compareBoundarySnapshot (basis : PreBoundaryBasis)
       | throwError "boundary_comparison_unpaired_mapped_mvar"
     compareBoundaryMVarNode mapping stock applied stockEntry appliedEntry
       s!"exprMVars.mapped[{ordinal}]"
-  for pre in basis.levelMVars do
-    let some stockEntry := findLevelMVarSnapshot? stock pre.id
-      | boundaryComparisonMismatch s!"levelMVars[{pre.decl.index}].missingStock"
-    let some appliedEntry := findLevelMVarSnapshot? applied pre.id
-      | boundaryComparisonMismatch s!"levelMVars[{pre.decl.index}].missingApplied"
-    unless stockEntry.decl.depth == appliedEntry.decl.depth do
-      boundaryComparisonMismatch s!"levelMVars[{pre.decl.index}].depth"
-    unless stockEntry.status.tag == appliedEntry.status.tag do
-      boundaryComparisonMismatch s!"levelMVars[{pre.decl.index}].status"
-    if stockEntry.status.tag == boundaryLevelAssigned then
-      let some stockLevel := stockEntry.status.valueOpt
-        | boundaryComparisonMismatch s!"levelMVars[{pre.decl.index}].stockValue"
-      let some appliedLevel := appliedEntry.status.valueOpt
-        | boundaryComparisonMismatch s!"levelMVars[{pre.decl.index}].appliedValue"
-      compareBoundaryLevel mapping s!"levelMVars[{pre.decl.index}].value"
-        stockLevel appliedLevel
+  compareBoundaryLevelMVarStates mapping stock applied
   compareBoundarySyntheticState basis mapping stock applied
   unless stock.postponed.size == applied.postponed.size do
     boundaryComparisonMismatch "postponed.count"
@@ -1263,6 +1325,161 @@ private def runBoundaryComparatorSelfTest : TacticM Unit := do
     unless (← getGoals) == [positiveGoal] do
       throwError "boundary_comparator_self_test_positive_restore_failed"
     testBaseState.restore
+    let stockFreshLevel ← mkFreshLevelMVar
+    let stockFreshGoal ← mkTestGoal (.sort stockFreshLevel)
+    setGoals [stockFreshGoal]
+    let freshStock ← boundarySnapshot basis
+    let freshStockState ← Tactic.saveState
+    testBaseState.restore
+    let _unusedFreshLevel ← mkFreshLevelMVar
+    let appliedFreshLevel ← mkFreshLevelMVar
+    let appliedFreshGoal ← mkTestGoal (.sort appliedFreshLevel)
+    setGoals [appliedFreshGoal]
+    let freshApplied ← boundarySnapshot basis
+    let freshAppliedState ← Tactic.saveState
+    unless stockFreshLevel != appliedFreshLevel do
+      throwError "boundary_comparator_self_test_fresh_universe_not_alpha_renamed"
+    compareBoundaryStates basis freshStockState freshAppliedState freshStock freshApplied
+    unless (← getGoals) == [appliedFreshGoal] do
+      throwError "boundary_comparator_self_test_fresh_universe_restore_failed"
+    testBaseState.restore
+    let statusStockLevel ← mkFreshLevelMVar
+    let statusStockGoal ← mkTestGoal (.sort statusStockLevel)
+    setGoals [statusStockGoal]
+    let statusStock ← boundarySnapshot basis
+    let statusStockState ← Tactic.saveState
+    testBaseState.restore
+    let _unusedStatusLevel ← mkFreshLevelMVar
+    let statusAppliedLevel ← mkFreshLevelMVar
+    assignLevelMVar statusAppliedLevel.mvarId! .zero
+    let statusAppliedGoal ← mkTestGoal (.sort statusAppliedLevel)
+    setGoals [statusAppliedGoal]
+    let statusApplied ← boundarySnapshot basis
+    let statusAppliedState ← Tactic.saveState
+    let statusRejected ← try
+      compareBoundaryStates basis statusStockState statusAppliedState statusStock statusApplied
+      pure false
+    catch error =>
+      let message ← error.toMessageData.toString
+      unless message.contains "boundary_comparison_mismatch:levelMVars" &&
+          message.contains ".status" do
+        throw error
+      unless (← getGoals) == [statusAppliedGoal] do
+        throwError "boundary_comparator_self_test_fresh_status_restore_failed"
+      pure true
+    unless statusRejected do
+      throwError "boundary_comparator_self_test_fresh_status_accepted"
+    testBaseState.restore
+    let depthStockLevel ← mkFreshLevelMVar
+    let depthStockGoal ← mkTestGoal (.sort depthStockLevel)
+    setGoals [depthStockGoal]
+    let depthStock ← boundarySnapshot basis
+    let depthStockState ← Tactic.saveState
+    testBaseState.restore
+    let _unusedDepthLevel ← mkFreshLevelMVar
+    let depthAppliedLevel ← mkFreshLevelMVar
+    let depthAppliedId := depthAppliedLevel.mvarId!
+    let depthDecl := (← getMCtx).getLevelDecl depthAppliedId
+    let depthChangedDecl := { depthDecl with depth := depthDecl.depth + 1 }
+    modifyMCtx fun mctx =>
+      { mctx with lDecls := mctx.lDecls.insert depthAppliedId depthChangedDecl }
+    let depthAppliedGoal ← mkTestGoal (.sort depthAppliedLevel)
+    setGoals [depthAppliedGoal]
+    let depthApplied ← boundarySnapshot basis
+    let depthAppliedState ← Tactic.saveState
+    let depthRejected ← try
+      compareBoundaryStates basis depthStockState depthAppliedState depthStock depthApplied
+      pure false
+    catch error =>
+      let message ← error.toMessageData.toString
+      unless message.contains "boundary_comparison_mismatch:levelMVars" &&
+          message.contains ".depth" do
+        throw error
+      unless (← getGoals) == [depthAppliedGoal] do
+        throwError "boundary_comparator_self_test_fresh_depth_restore_failed"
+      pure true
+    unless depthRejected do
+      throwError "boundary_comparator_self_test_fresh_depth_accepted"
+    testBaseState.restore
+    let shareStockLevel1 ← mkFreshLevelMVar
+    let shareStockLevel2 ← mkFreshLevelMVar
+    let shareStockGoal1 ← mkTestGoal (.sort shareStockLevel1)
+    let shareStockGoal2 ← mkTestGoal (.sort shareStockLevel2)
+    setGoals [shareStockGoal1, shareStockGoal2]
+    let shareStock ← boundarySnapshot basis
+    let shareStockState ← Tactic.saveState
+    testBaseState.restore
+    let _unusedShareLevel ← mkFreshLevelMVar
+    let shareAppliedLevel ← mkFreshLevelMVar
+    let shareAppliedGoal1 ← mkTestGoal (.sort shareAppliedLevel)
+    let shareAppliedGoal2 ← mkTestGoal (.sort shareAppliedLevel)
+    setGoals [shareAppliedGoal1, shareAppliedGoal2]
+    let shareApplied ← boundarySnapshot basis
+    let shareAppliedState ← Tactic.saveState
+    let shareRejected ← try
+      compareBoundaryStates basis shareStockState shareAppliedState shareStock shareApplied
+      pure false
+    catch error =>
+      let message ← error.toMessageData.toString
+      unless message.contains "boundary_comparison_mismatch:" &&
+          message.contains ".universe" do
+        throw error
+      unless (← getGoals) == [shareAppliedGoal1, shareAppliedGoal2] do
+        throwError "boundary_comparator_self_test_fresh_sharing_restore_failed"
+      pure true
+    unless shareRejected do
+      throwError "boundary_comparator_self_test_fresh_sharing_accepted"
+    testBaseState.restore
+    let chainStockChild ← mkFreshLevelMVar
+    let chainStockRoot ← mkFreshLevelMVar
+    assignLevelMVar chainStockRoot.mvarId! (.succ chainStockChild)
+    let chainStockGoal ← mkTestGoal (.sort chainStockRoot)
+    setGoals [chainStockGoal]
+    let chainStock ← boundarySnapshot basis
+    let chainStockState ← Tactic.saveState
+    testBaseState.restore
+    let _unusedChainChild ← mkFreshLevelMVar
+    let chainAppliedChild ← mkFreshLevelMVar
+    let chainAppliedRoot ← mkFreshLevelMVar
+    assignLevelMVar chainAppliedRoot.mvarId! (.succ chainAppliedChild)
+    let chainAppliedGoal ← mkTestGoal (.sort chainAppliedRoot)
+    setGoals [chainAppliedGoal]
+    let chainApplied ← boundarySnapshot basis
+    let chainAppliedState ← Tactic.saveState
+    compareBoundaryStates basis chainStockState chainAppliedState chainStock chainApplied
+    unless (← getGoals) == [chainAppliedGoal] do
+      throwError "boundary_comparator_self_test_fresh_assignment_chain_restore_failed"
+    testBaseState.restore
+    let valueStockChild ← mkFreshLevelMVar
+    let valueStockRoot ← mkFreshLevelMVar
+    assignLevelMVar valueStockRoot.mvarId! (.succ valueStockChild)
+    let valueStockGoal ← mkTestGoal (.sort valueStockRoot)
+    setGoals [valueStockGoal]
+    let valueStock ← boundarySnapshot basis
+    let valueStockState ← Tactic.saveState
+    testBaseState.restore
+    let _unusedValueChild ← mkFreshLevelMVar
+    let valueAppliedChild ← mkFreshLevelMVar
+    let valueAppliedRoot ← mkFreshLevelMVar
+    assignLevelMVar valueAppliedRoot.mvarId! (.succ (.succ valueAppliedChild))
+    let valueAppliedGoal ← mkTestGoal (.sort valueAppliedRoot)
+    setGoals [valueAppliedGoal]
+    let valueApplied ← boundarySnapshot basis
+    let valueAppliedState ← Tactic.saveState
+    let valueRejected ← try
+      compareBoundaryStates basis valueStockState valueAppliedState valueStock valueApplied
+      pure false
+    catch error =>
+      let message ← error.toMessageData.toString
+      unless message.contains "boundary_comparison_mismatch:levelMVars" &&
+          message.contains ".value" do
+        throw error
+      unless (← getGoals) == [valueAppliedGoal] do
+        throwError "boundary_comparator_self_test_fresh_assignment_value_restore_failed"
+      pure true
+    unless valueRejected do
+      throwError "boundary_comparator_self_test_fresh_assignment_value_accepted"
+    testBaseState.restore
     let negativeGoal ← mkTestGoal (mkConst ``False)
     setGoals [negativeGoal]
     let negative ← boundarySnapshot basis
@@ -1321,6 +1538,16 @@ private def runBoundaryComparatorSelfTest : TacticM Unit := do
       pure true
     unless openProofRejected do
       throwError "boundary_comparator_self_test_open_proof_accepted"
+    testBaseState.restore
+    let reservedName := `Nat.add.congr_simp
+    let environment ← getEnv
+    unless !environment.contains reservedName do
+      throwError "boundary_environment_action_self_test_name_already_present"
+    unless isReservedName environment reservedName do
+      throwError "boundary_environment_action_self_test_name_not_reserved"
+    executeEnvironmentActions #[EnvironmentAction.realizeReservedName reservedName]
+    unless (← getEnv).containsOnBranch reservedName do
+      throwError "boundary_environment_action_self_test_replay_failed"
     IO.println "SIMP_ENGINE_BOUNDARY_COMPARATOR_SELF_TEST ok"
   finally
     outerState.restore
@@ -1366,6 +1593,165 @@ private def validateArtifactExpr (basis : PreBoundaryBasis) (label : String)
     unless basis.levelMVars.any (fun entry => entry.id == id) do
       throwError "boundary_artifact_fresh_universe_mvar:{label}:{id.name}"
 
+private def boundaryEnvironmentDeclarations (environment : Environment) :
+    Array ConstantInfo :=
+  environment.constants.foldStage2 (fun declarations _ info => declarations.push info) #[]
+
+private def boundaryEnvironmentDelta (basis : PreBoundaryBasis)
+    (environment : Environment) : Array ConstantInfo :=
+  (boundaryEnvironmentDeclarations environment).filter fun info =>
+    !basis.environment.contains info.name
+
+private def boundaryEnvironmentPrivateName (basis : PreBoundaryBasis) (name : Name) : Bool :=
+  isPrivateName name || (name.isInternalDetail && !isReservedName basis.environment name)
+
+private def boundaryPrivateProofDeclaration (basis : PreBoundaryBasis)
+    (environment : Environment) (info : ConstantInfo) : TacticM Bool := do
+  if !boundaryEnvironmentPrivateName basis info.name then
+    return false
+  match info with
+  | .thmInfo _ => pure true
+  | .defnInfo _ | .opaqueInfo _ =>
+      withEnv environment <| withLCtx {} #[] <|
+        withRestoredBoundaryFullMetaState <| isProp info.type
+  | _ => pure false
+
+private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
+    (stockEnvironment : Environment) : TacticM (Array EnvironmentAction) := do
+  let declarations := (boundaryEnvironmentDelta basis stockEnvironment).qsort
+    (fun lhs rhs => lhs.name.toString < rhs.name.toString)
+  let mut actions : Array EnvironmentAction := #[]
+  for info in declarations do
+    if boundaryEnvironmentPrivateName basis info.name then
+      unless ← boundaryPrivateProofDeclaration basis stockEnvironment info do
+        throwError s!"boundary_comparison_unsupported_environment_delta:{info.name}"
+    else
+      unless isReservedName basis.environment info.name do
+        throwError s!"boundary_comparison_unsupported_environment_delta:{info.name}"
+      actions := actions.push (EnvironmentAction.realizeReservedName info.name)
+  return actions
+
+private def boundaryConstantMetadataEq
+    (stock applied : ConstantInfo) : Bool :=
+  match stock, applied with
+  | .axiomInfo stock, .axiomInfo applied =>
+      stock.name == applied.name && stock.levelParams == applied.levelParams &&
+        stock.isUnsafe == applied.isUnsafe
+  | .defnInfo stock, .defnInfo applied =>
+      stock.name == applied.name && stock.levelParams == applied.levelParams &&
+        stock.hints == applied.hints && stock.safety == applied.safety &&
+        stock.all == applied.all
+  | .thmInfo stock, .thmInfo applied =>
+      stock.name == applied.name && stock.levelParams == applied.levelParams &&
+        stock.all == applied.all
+  | .opaqueInfo stock, .opaqueInfo applied =>
+      stock.name == applied.name && stock.levelParams == applied.levelParams &&
+        stock.isUnsafe == applied.isUnsafe && stock.all == applied.all
+  | .quotInfo stock, .quotInfo applied =>
+      stock.name == applied.name && stock.levelParams == applied.levelParams &&
+        match stock.kind, applied.kind with
+        | .type, .type => true
+        | .ctor, .ctor => true
+        | .lift, .lift => true
+        | .ind, .ind => true
+        | _, _ => false
+  | .inductInfo stock, .inductInfo applied =>
+      stock.name == applied.name && stock.levelParams == applied.levelParams &&
+        stock.numParams == applied.numParams && stock.numIndices == applied.numIndices &&
+        stock.all == applied.all && stock.ctors == applied.ctors &&
+        stock.numNested == applied.numNested && stock.isRec == applied.isRec &&
+        stock.isUnsafe == applied.isUnsafe && stock.isReflexive == applied.isReflexive
+  | .ctorInfo stock, .ctorInfo applied =>
+      stock.name == applied.name && stock.levelParams == applied.levelParams &&
+        stock.induct == applied.induct && stock.cidx == applied.cidx &&
+        stock.numParams == applied.numParams && stock.numFields == applied.numFields &&
+        stock.isUnsafe == applied.isUnsafe
+  | .recInfo stock, .recInfo applied =>
+      stock.name == applied.name && stock.levelParams == applied.levelParams &&
+        stock.all == applied.all && stock.numParams == applied.numParams &&
+        stock.numIndices == applied.numIndices && stock.numMotives == applied.numMotives &&
+        stock.numMinors == applied.numMinors && stock.k == applied.k &&
+        stock.isUnsafe == applied.isUnsafe && stock.rules.length == applied.rules.length &&
+        (List.zipWith (fun stockRule appliedRule =>
+          stockRule.ctor == appliedRule.ctor && stockRule.nfields == appliedRule.nfields)
+          stock.rules applied.rules).all (fun value => value)
+  | _, _ => false
+
+private def boundaryDeclarationIsProp (environment : Environment)
+    (info : ConstantInfo) : TacticM Bool :=
+  withEnv environment <| withLCtx {} #[] <|
+    withRestoredBoundaryFullMetaState <| isProp info.type
+
+private def compareBoundaryRecursorRules (stockEnvironment : Environment)
+    (stock applied : ConstantInfo) : TacticM Unit := do
+  match stock, applied with
+  | .recInfo stock, .recInfo applied =>
+      for (stockRule, appliedRule) in List.zip stock.rules applied.rules do
+        let equal ← withEnv stockEnvironment do
+          withLCtx {} #[] do
+            withRestoredBoundaryFullMetaState <|
+              withNewMCtxDepth <| isDefEqGuarded stockRule.rhs appliedRule.rhs
+        unless equal do
+          boundaryComparisonMismatch s!"environment.declaration.recursorRule:{stock.name}"
+  | _, _ => pure ()
+
+private def compareBoundaryDeclaration (stockEnvironment : Environment)
+    (stock applied : ConstantInfo) : TacticM Unit := do
+  unless boundaryConstantMetadataEq stock applied do
+    boundaryComparisonMismatch s!"environment.declaration.metadata:{stock.name}"
+  let typeEqual ← withEnv stockEnvironment do
+    withLCtx {} #[] do
+      withRestoredBoundaryFullMetaState <| withNewMCtxDepth <| isDefEqGuarded stock.type applied.type
+  unless typeEqual do
+    boundaryComparisonMismatch s!"environment.declaration.type:{stock.name}"
+  compareBoundaryRecursorRules stockEnvironment stock applied
+  unless ← boundaryDeclarationIsProp stockEnvironment stock do
+    match stock.value? (allowOpaque := true), applied.value? (allowOpaque := true) with
+    | some stockValue, some appliedValue =>
+        let valueEqual ← withEnv stockEnvironment do
+          withLCtx {} #[] do
+            withRestoredBoundaryFullMetaState <|
+              withNewMCtxDepth <| isDefEqGuarded stockValue appliedValue
+        unless valueEqual do
+          boundaryComparisonMismatch s!"environment.declaration.value:{stock.name}"
+    | none, none => pure ()
+    | _, _ => boundaryComparisonMismatch s!"environment.declaration.value:{stock.name}"
+
+private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
+    (stockEnvironment appliedEnvironment : Environment)
+    (actions : Array EnvironmentAction) : TacticM Unit := do
+  let stockDelta := boundaryEnvironmentDelta basis stockEnvironment
+  let appliedDelta := boundaryEnvironmentDelta basis appliedEnvironment
+  let stockPublic :=
+    (stockDelta.filter (!boundaryEnvironmentPrivateName basis ·.name)).qsort
+      (fun lhs rhs => lhs.name.toString < rhs.name.toString)
+  let appliedPublic :=
+    (appliedDelta.filter (!boundaryEnvironmentPrivateName basis ·.name)).qsort
+      (fun lhs rhs => lhs.name.toString < rhs.name.toString)
+  let stockPublicNames := stockPublic.map (·.name)
+  let appliedPublicNames := appliedPublic.map (·.name)
+  unless stockPublicNames == appliedPublicNames do
+    throwError "boundary_comparison_unsupported_environment_delta"
+  let actionNames := actions.map boundaryEnvironmentActionName
+  unless actionNames == stockPublicNames do
+    throwError "boundary_comparison_unsupported_environment_delta"
+  for stockInfo in stockPublic do
+    let some appliedInfo := appliedDelta.find? (fun info => info.name == stockInfo.name)
+      | throwError "boundary_comparison_unsupported_environment_delta"
+    compareBoundaryDeclaration stockEnvironment stockInfo appliedInfo
+  for stockInfo in stockDelta do
+    if boundaryEnvironmentPrivateName basis stockInfo.name then
+      match appliedDelta.find? (fun info => info.name == stockInfo.name) with
+      | some appliedInfo =>
+          compareBoundaryDeclaration stockEnvironment stockInfo appliedInfo
+      | none =>
+          unless ← boundaryPrivateProofDeclaration basis stockEnvironment stockInfo do
+            throwError s!"boundary_comparison_unsupported_environment_delta:{stockInfo.name}"
+  for appliedInfo in appliedDelta do
+    if boundaryEnvironmentPrivateName basis appliedInfo.name &&
+        (stockDelta.find? (fun info => info.name == appliedInfo.name)).isNone then
+      unless ← boundaryPrivateProofDeclaration basis appliedEnvironment appliedInfo do
+        throwError s!"boundary_comparison_unsupported_environment_delta:{appliedInfo.name}"
 private def captureTransformation (basis : PreBoundaryBasis) (label : String)
     (input : Expr) (ctx : Simp.Context) (simprocs : Simp.SimprocsArray)
     (discharge? : Option Simp.Discharge) (stats : Simp.Stats) :
@@ -1487,6 +1873,8 @@ private def artifactReportJson (occurrence : String) (selector : Json)
     ("occurrence", Json.str occurrence),
     ("selector", selector),
     ("status", Json.str "success"),
+    ("environmentActions", Json.arr (artifact.environmentActions.map
+      boundaryEnvironmentActionJson)),
     ("locals", Json.arr localReports),
     ("target", targetJson.getD Json.null),
     ("input", inputJson),
@@ -1526,6 +1914,8 @@ private def runBoundaryProbe (simpStx : Syntax)
       emitFailureReport occurrence selector
     throw error
   let stock ← boundarySnapshot basis
+  let stockEnvironment ← getEnv
+  let environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
   let stockState ← Tactic.saveState
   pre.restore
   let artifact ← try
@@ -1533,6 +1923,7 @@ private def runBoundaryProbe (simpStx : Syntax)
   catch error =>
     pre.restore
     throw error
+  let artifact := { artifact with environmentActions }
   -- Rendering must happen in the original local context. Proof-bearing local
   -- transformations clear their old declarations during apply, after which a
   -- pretty printer can no longer recover valid source names for the artifact.
@@ -1545,7 +1936,12 @@ private def runBoundaryProbe (simpStx : Syntax)
   setGoals applyGoals
   let applied ← boundarySnapshot basis
   let appliedState ← Tactic.saveState
-  compareBoundaryStates basis stockState appliedState stock applied
+  try
+    compareBoundaryStates basis stockState appliedState stock applied
+    compareBoundaryEnvironment basis stockEnvironment (← getEnv) environmentActions
+  catch error =>
+    pre.restore
+    throw error
   let applyClosed := applyTerminal != .open
   unless stockClosed == applyClosed do
     throwError "boundary_terminal_mismatch: stockClosed={stockClosed}; apply={repr applyTerminal}"

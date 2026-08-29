@@ -36,8 +36,11 @@ MATHLIB = corpus.MATHLIB
 MANIFEST_KIND = "simp_engine_boundary_manifest"
 MANIFEST_SCHEMA = 2
 REPORT_KIND = "simp_engine_boundary_materialization_shard"
-REPORT_SCHEMA = 2
+REPORT_SCHEMA = 3
 ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
+DECLARATION_ORACLE_MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
+DECLARATION_ORACLE_KIND = "simp_engine_declaration_oracle"
+DECLARATION_ORACLE_SCHEMA = 1
 BOUNDARY_DEBUG_ROOT = ROOT / ".lake" / "boundary-materialization"
 
 # These are generated terms and source, not authored input.  In particular,
@@ -713,6 +716,160 @@ def _compile_copy(path: Path, dylib: str, timeout: int) -> tuple[int, str, float
     return _run_command(command, timeout)
 
 
+DECLARATION_ORACLE_COUNT_FIELDS = {
+    "stockDeclarationCount",
+    "appliedDeclarationCount",
+    "commonPublicDeclarationCount",
+    "stockOnlyPrivateProofCount",
+    "appliedOnlyPrivateProofCount",
+    "stockExtensionCount",
+    "appliedExtensionCount",
+    "checkedDeclarationCount",
+}
+DECLARATION_ORACLE_FIELDS = DECLARATION_ORACLE_COUNT_FIELDS | {
+    "kind",
+    "schema",
+    "module",
+    "status",
+    "failureCategory",
+    "failureDetail",
+}
+
+
+def _parse_declaration_oracle(
+    output: str, expected_module: str
+) -> dict[str, Any]:
+    markers = [
+        line.split(DECLARATION_ORACLE_MARKER, 1)[1].strip()
+        for line in output.splitlines()
+        if line.startswith(DECLARATION_ORACLE_MARKER)
+    ]
+    if len(markers) != 1:
+        raise RuntimeError(
+            "declaration oracle must emit exactly one canonical marker; "
+            f"found {len(markers)}"
+        )
+    try:
+        report = json.loads(markers[0])
+    except json.JSONDecodeError as error:
+        raise RuntimeError("declaration oracle marker is not valid JSON") from error
+    if not isinstance(report, dict):
+        raise RuntimeError("declaration oracle marker payload must be an object")
+    if set(report) != DECLARATION_ORACLE_FIELDS:
+        raise RuntimeError(
+            "declaration oracle marker has unexpected fields: "
+            f"{sorted(report)}"
+        )
+    if report.get("kind") != DECLARATION_ORACLE_KIND:
+        raise RuntimeError(
+            f"declaration oracle marker has unexpected kind: {report.get('kind')!r}"
+        )
+    schema = report.get("schema")
+    if (
+        isinstance(schema, bool)
+        or not isinstance(schema, int)
+        or schema != DECLARATION_ORACLE_SCHEMA
+    ):
+        raise RuntimeError(
+            f"declaration oracle marker has unexpected schema: {schema!r}"
+        )
+    if report.get("module") != expected_module:
+        raise RuntimeError(
+            "declaration oracle marker has unexpected module: "
+            f"{report.get('module')!r}"
+        )
+    for field in DECLARATION_ORACLE_COUNT_FIELDS:
+        value = report[field]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise RuntimeError(
+                f"declaration oracle marker has invalid {field}: {value!r}"
+            )
+    if report.get("status") not in {"success", "failure"}:
+        raise RuntimeError(
+            f"declaration oracle marker has unexpected status: {report.get('status')!r}"
+        )
+    category = report.get("failureCategory")
+    detail = report.get("failureDetail")
+    if report["status"] == "success":
+        if category is not None or detail is not None:
+            raise RuntimeError("successful declaration oracle report has failure details")
+        checked = report["checkedDeclarationCount"]
+        if checked + report["stockOnlyPrivateProofCount"] != report[
+            "stockDeclarationCount"
+        ]:
+            raise RuntimeError(
+                "successful declaration oracle report has inconsistent stock counts"
+            )
+        if checked + report["appliedOnlyPrivateProofCount"] != report[
+            "appliedDeclarationCount"
+        ]:
+            raise RuntimeError(
+                "successful declaration oracle report has inconsistent applied counts"
+            )
+        if report["commonPublicDeclarationCount"] > checked:
+            raise RuntimeError(
+                "successful declaration oracle report has inconsistent public count"
+            )
+    else:
+        if not isinstance(category, str) or not category:
+            raise RuntimeError("failed declaration oracle report has no failure category")
+        if not isinstance(detail, str) or not detail:
+            raise RuntimeError("failed declaration oracle report has no failure detail")
+        if any(report[field] != 0 for field in DECLARATION_ORACLE_COUNT_FIELDS):
+            raise RuntimeError("failed declaration oracle report has nonzero counts")
+    return report
+
+
+def _run_declaration_oracle(
+    selected: SelectedModule,
+    original_path: Path,
+    materialized_path: Path,
+    module_root: Path,
+    dylib: str,
+    timeout: int,
+) -> dict[str, Any]:
+    command = [
+        "lake",
+        "env",
+        "lean",
+        f"--load-dynlib={dylib}",
+        "--run",
+        "Experiment/SimpEngineDeclarationOracle.lean",
+        selected.compiled_module,
+        str(original_path),
+        str(materialized_path),
+    ]
+    code, output, elapsed = _run_command(command, timeout)
+    log_path = module_root / "declaration-oracle.log"
+    report_path = module_root / "declaration-oracle-report.json"
+    _write_text(log_path, output)
+    try:
+        oracle_report = _parse_declaration_oracle(output, selected.compiled_module)
+    except RuntimeError as error:
+        raise RuntimeError(
+            f"declaration oracle protocol failed for {selected.module}: {error}; "
+            f"see {log_path}"
+        ) from error
+    _atomic_write_json(report_path, oracle_report)
+    if code != 0 or oracle_report["status"] != "success":
+        category = oracle_report.get("failureCategory")
+        detail = oracle_report.get("failureDetail")
+        raise RuntimeError(
+            f"declaration oracle failed for {selected.module}: "
+            f"{category}: {detail}; see {log_path}"
+        )
+    return {
+        "path": str(log_path.resolve()),
+        "reportPath": str(report_path.resolve()),
+        "sha256": sha256(log_path.read_bytes()),
+        "reportSha256": sha256(report_path.read_bytes()),
+        "compileSuccess": True,
+        "seconds": elapsed,
+        "status": oracle_report["status"],
+        "report": oracle_report,
+    }
+
+
 def _query_dynamic_library(timeout: int, debug_root: Path) -> str:
     build_code, build_output, _build_elapsed = _run_command(
         ["lake", "build", "ExplicitLean:shared"], timeout
@@ -819,6 +976,9 @@ def _module_result(
             f"materialized module compilation failed for {selected.module} "
             f"(exit {materialized_code}); see {module_root / 'materialized.log'}"
         )
+    declaration_oracle = _run_declaration_oracle(
+        selected, original_path, materialized_path, module_root, dylib, timeout
+    )
     remaining = [
         entry
         for entry in inventory.syntax_inventory_file(
@@ -903,6 +1063,7 @@ def _module_result(
             "path": str(reports_path.resolve()),
             "sha256": report_hash,
         },
+        "declarationOracle": declaration_oracle,
         "totalCount": len(selected.occurrences),
         "materializeCount": len(selected.materialize),
         "retainCount": len(selected.retain),

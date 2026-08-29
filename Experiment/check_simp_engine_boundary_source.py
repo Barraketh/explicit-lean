@@ -131,6 +131,21 @@ def validate_transformation(value: object, label: str) -> dict[str, object]:
     return value
 
 
+def validate_environment_actions(value: object, label: str) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{label} must be an array: {value!r}")
+    result: list[dict[str, object]] = []
+    for action in value:
+        if not isinstance(action, dict) or set(action) != {"kind", "name"}:
+            raise RuntimeError(f"{label} contains an invalid action: {action!r}")
+        if action["kind"] != "realize_reserved_name":
+            raise RuntimeError(f"{label} contains an unsupported action: {action!r}")
+        if not isinstance(action["name"], str) or not action["name"]:
+            raise RuntimeError(f"{label} contains an invalid reserved name: {action!r}")
+        result.append(action)
+    return result
+
+
 def validate_report(report: object, expected_id: str) -> dict[str, object]:
     if not isinstance(report, dict):
         raise RuntimeError(f"artifact report must be an object: {report!r}")
@@ -172,6 +187,10 @@ def validate_report(report: object, expected_id: str) -> dict[str, object]:
         return report
     if status != "success":
         raise RuntimeError(f"artifact has invalid status: {report!r}")
+    validate_environment_actions(
+        report.get("environmentActions"),
+        f"artifact environmentActions for {expected_id}",
+    )
     locals_value = report.get("locals")
     if not isinstance(locals_value, list):
         raise RuntimeError(f"artifact locals must be an array: {report!r}")
@@ -282,6 +301,10 @@ def group_report_variants(
 
 
 def assert_grouping_rejections(report_list: list[object], expected_ids: list[str]) -> None:
+    validate_environment_actions(
+        [{"kind": "realize_reserved_name", "name": "«foo-bar».αfun.congr_simp"}],
+        "quoted/unicode environment action",
+    )
     try:
         group_report_variants([], expected_ids)
     except RuntimeError as error:
@@ -346,40 +369,6 @@ def format_transformation(
     return f"({input_term} ==> {result_term}{using})"
 
 
-def format_report(report: dict[str, object], continuation_indent: str = "  ") -> str:
-    if report["status"] == "failure":
-        return "simp_engine_boundary_apply_failure"
-    target = report["target"]
-    if not report["locals"]:
-        if target is None:
-            raise RuntimeError(f"target-only report has no target evidence: {report!r}")
-        # Keep the proof inside balanced evidence parentheses so a nested
-        # occurrence cannot greedily parse into its surrounding term.
-        input_term = indent_rendered_term(target["input"], continuation_indent)
-        result_term = indent_rendered_term(target["result"], continuation_indent)
-        replacement = (
-            f"simp_engine_boundary_apply ({input_term} ==> "
-            f"{result_term}"
-        )
-        if target["proof"] is not None:
-            replacement += (
-                " using "
-                + indent_rendered_term(target["proof"], continuation_indent)
-            )
-        return replacement + ")"
-
-    parts = ["simp_engine_boundary_apply"]
-    for local in report["locals"]:
-        parts.extend([
-            "at",
-            str(local["name"]),
-            format_transformation(local["transformation"], continuation_indent),
-        ])
-    if target is not None:
-        parts.extend(["⊢", format_transformation(target, continuation_indent)])
-    return " ".join(parts)
-
-
 def lean_string(value: str) -> str:
     """Render the selector's recorder-produced text as a Lean string literal."""
     return json.dumps(value, ensure_ascii=False)
@@ -424,12 +413,25 @@ def format_variant_outcome(
         return result + ")"
 
     target = report["target"]
+    actions = validate_environment_actions(
+        report.get("environmentActions"), "artifact environmentActions"
+    )
+
+    def encoded_prefix() -> str:
+        if not actions:
+            return "apply_encoded"
+        encoded_actions = ", ".join(
+            "realize_reserved_name " + lean_string(str(action["name"]))
+            for action in actions
+        )
+        return f"apply_encoded_with_actions [{encoded_actions}]"
+
     if not report["locals"]:
         if target is None:
             raise RuntimeError(f"target-only report has no target evidence: {report!r}")
-        return "apply_encoded " + encoded(target)
+        return encoded_prefix() + " " + encoded(target)
 
-    parts = ["apply_encoded"]
+    parts = [encoded_prefix()]
     for local in report["locals"]:
         parts.extend(
             [

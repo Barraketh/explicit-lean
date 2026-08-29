@@ -55,8 +55,7 @@ occurrence. The schema-2 representative gate now transforms all 33 calls in
 `Mathlib/Data/Fintype/List.lean`, all seven calls in
 `Mathlib/Algebra/Algebra/NonUnitalHom.lean`, and all three calls in
 `Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`. Every transformed
-copy compiles with zero remaining executable calls, but computational
-declaration-value equality is not yet checked. The last module records four distinct
+copy compiles with zero remaining executable calls. The last module records four distinct
 executions of one reusable occurrence and exercises a large `Matrix.cons_val`
 result; the focused quotation executes both a successful and a failed variant.
 The apply module has a checked import closure with no simplifier implementation.
@@ -64,8 +63,9 @@ A fourth representative module,
 `Mathlib/Algebra/Algebra/NonUnitalHom.lean`, guards parser compatibility with
 Mathlib commands whose grammar uses the identifier `apply`. This remains a
 representative materialization result, not a Mathlib-wide translation claim.
-The next canary must translate all 17 `AddConstMap/Basic` occurrences and add
-the declaration-value oracle.
+The 17-occurrence `AddConstMap/Basic` canary now also passes the mandatory
+declaration/environment oracle. The next gate extends that oracle to all four
+representative modules.
 
 The current scope-classification gate joins syntax ancestry to final
 compiled declaration types. Its 13-occurrence fixture separates theorem/proof
@@ -141,11 +141,12 @@ closed. A fresh one-module repair-review canary for
 `Mathlib/Algebra/AddConstMap/Basic.lean` transforms all 17 calls under schema 2.
 It observes 17 successful variants, compiles the materialized module, and
 verifies byte-for-byte authored source preservation outside the selected tactic
-ranges. No binder alpha-renaming was needed. Pre-commit manifests and reports
-are disposable because the commit changes their repository identity. This
-remains one bounded compile/materialization canary. Declaration-value equality
-has not yet been established, so it is not acceptance evidence for the revised
-contract.
+ranges. Its schema-3 shard report requires a successful declaration/environment
+oracle: 103 common public declarations compare successfully, two stock-only
+private proof helpers are omitted, and one reserved-name action recreates
+`AddConstMap.mk.congr_simp`. No binder alpha-renaming was needed. Pre-commit
+manifests and reports are disposable because the commit changes their repository
+identity. This is bounded semantic acceptance evidence, not a Mathlib-wide claim.
 
 ## Pinned environment and basic checks
 
@@ -160,12 +161,13 @@ lake build ExplicitLean ExplicitLeanMathlibAudit
 python3 Experiment/check_simp_engine_review.py
 python3 Experiment/check_simp_engine_boundary.py
 python3 Experiment/check_simp_engine_boundary_source.py
+python3 Experiment/check_simp_engine_declaration_oracle.py
 python3 Experiment/check_simp_engine_boundary_scope.py
 python3 Experiment/check_simp_engine_boundary_corpus.py
 python3 Experiment/check_simp_engine_boundary_mathlib.py
 # Bounded diagnostic over the existing pre-probe 101-unknown manifest.
 python3 Experiment/check_simp_engine_boundary_scope_unknowns.py
-# Current schema-2 canary target: materialize all 17 occurrences.
+# Current schema-3 canary target: materialize and semantically check all 17 occurrences.
 python3 Experiment/simp_engine_boundary_corpus.py manifest \
   --output .lake/boundary-corpus-manifest/add-const-map-canary.json \
   --module-prefix Mathlib/Algebra/AddConstMap/Basic.lean \

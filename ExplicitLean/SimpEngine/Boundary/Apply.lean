@@ -4,12 +4,33 @@ prelude
 public import Init.Prelude
 public meta import Lean.Meta.Tactic.Replace
 public meta import Lean.Meta.Tactic.Util
+public meta import Lean.ReservedNameAction
 
 public meta section
 
 open Lean Meta
 
 namespace ExplicitLean.SimpEngine.Boundary
+
+/-
+  An environment change which can be replayed without invoking the
+  simplifier. The representation is intentionally closed: a materialized
+  artifact may only ask Lean to run one of the registered reserved-name
+  generators for a specific name.
+-/
+inductive EnvironmentAction where
+  | realizeReservedName (name : Name)
+  deriving Inhabited, BEq
+
+private def executeEnvironmentAction : EnvironmentAction → MetaM Unit
+  | .realizeReservedName name => do
+      executeReservedNameAction name
+      unless (← getEnv).containsOnBranch name do
+        throwError s!"boundary_environment_action_failed:{name}"
+
+def executeEnvironmentActions (actions : Array EnvironmentAction) : MetaM Unit := do
+  for action in actions do
+    executeEnvironmentAction action
 
 /-- A closed transformation for one target or local subject. It contains the
     result of stock simplification, not a program for running simplification. -/
@@ -25,6 +46,7 @@ structure LocalArtifact where
 structure GoalArtifact where
   locals : Array LocalArtifact := #[]
   target? : Option TargetArtifact := none
+  environmentActions : Array EnvironmentAction := #[]
 
 inductive TargetTerminal where
   | transported
@@ -71,6 +93,7 @@ private def equalityTransport (input result proof value : Expr) : MetaM Expr := 
     proof-bearing declarations are then cleared. -/
 def applyGoalArtifact (goal : MVarId) (tail : List MVarId)
     (artifact : GoalArtifact) : MetaM (List MVarId × GoalTerminal) := do
+  executeEnvironmentActions artifact.environmentActions
   let mut current := goal
   let mut pending : Array Hypothesis := #[]
   let mut toClear : Array FVarId := #[]

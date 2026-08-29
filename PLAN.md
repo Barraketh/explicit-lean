@@ -59,8 +59,13 @@ The branch now also contains a separate boundary-state prototype:
 - `ExplicitLean/SimpEngine/Boundary/Tactic.lean` elaborates temporary explicit
   generated source without importing the recorder; and
 - `Experiment/check_simp_engine_boundary.py` checks target and location
-  behavior, apply import isolation, unchanged continuations, declaration types,
-  axiom subsets, and absence of `sorryAx`.
+  behavior, apply import isolation, and unchanged continuations.
+
+`Experiment/SimpEngineDeclarationOracle.lean` separately compares the completed
+stock and materialized modules: declaration kinds and metadata, definitionally
+equal types and non-`Prop` values (including opaque/irreducible values),
+recursor rules, compiler/runtime IR, persistent environment extensions,
+transitive axiom subsets, and absence of unresolved terms or `sorryAx`.
 
 `Experiment/check_simp_engine_boundary_source.py` is the first source-to-source
 gate. It currently inventories seventeen focused occurrences, including
@@ -84,15 +89,14 @@ unchanged. The custom-discharger assignment case is reproduced by elaborating
 the captured checked proof, so measurement has not justified a separate
 assignment-delta representation yet.
 
-The artifact and apply path are largely sort-neutral: they transform tactic
+The artifact and apply path are sort-neutral: they transform tactic
 goals, local declarations, metavariables, and constraints without requiring the
 enclosing declaration to be proof-valued. The scope classifier and schema-2
 manifest now record independent `executionRole`, `declarationKind`, and
-`action` fields; proof status never controls materialization. The declaration
-oracle is still proof-oriented, however, and fingerprint equality in the
-current comparator is only regression evidence. The revised acceptance
-comparator must perform actual definitional-equality checks; a matching hash is
-never semantic proof.
+`action` fields; proof status never controls materialization. The paired
+in-memory comparator uses actual definitional equality under one consistent
+fresh-identifier renaming. Fingerprints select recorded variants and aid
+diagnostics; a matching hash is never semantic proof.
 
 `Experiment/check_simp_engine_boundary_mathlib.py` now materializes every
 executable occurrence in four complete pinned source modules. It transforms all
@@ -195,9 +199,14 @@ current consumer correctly rejects it.
 current manifests. The schema-2 one-module
 `Mathlib/Algebra/AddConstMap/Basic.lean` canary materializes all 17 occurrences,
 observes 17 variants, compiles, and proves exact authored-source preservation
-outside the replaced ranges. It does not yet establish definitionally equal
-computational declaration values, so it is compile/materialization evidence
-rather than semantic acceptance.
+outside the replaced ranges. Its schema-3 materialization report now includes a
+mandatory declaration/environment oracle. That oracle accepts 103 common public
+declarations and omission of two stock-only private proof helpers, while checking
+all computational values, metadata, compiler IR, extensions, and axiom subsets.
+One reserved-name action recreates `AddConstMap.mk.congr_simp`. Compiler LCNF is
+compared structurally modulo a consistent renaming of local FVar IDs; module-doc
+text is exact while source ranges may shift for the tooling import; derived
+non-tooling module-use dependencies may shrink but may not grow.
 
 `Experiment/run.sh` retains the legacy regression checks and now also runs all
 boundary prototype commands. These are focused engineering gates, not a pinned
@@ -207,11 +216,9 @@ Once that path is accepted, the public `simp_engine_apply` syntax can move from
 schema-27 replay to boundary artifacts. Until then, code and reports must label
 the two implementations explicitly.
 
-The immediate engineering gaps are a real definitional-equality boundary
-comparator and declaration-value and environment-delta validation. The next
-bounded canary must translate all 17 `AddConstMap` occurrences and add the
-declaration-value checks that the current 33 `EqToHom`, 6 `Fintype/List`, and 7
-`NonUnitalHom` compile-only materializations do not yet provide.
+The immediate engineering gap is to apply the declaration/environment oracle
+to the current 33 `EqToHom`, 6 `Fintype/List`, and 7 `NonUnitalHom`
+representative materializations, then stabilize the schema from those results.
 Dependency-aware recording for the 66 reusable tactic-syntax
 occurrences and safe composition for the 91 nested occurrences follow. The
 current runner rejects reusable syntax and nested/overlapping replacement
@@ -537,9 +544,9 @@ discharger strategy, and simproc traces are not acceptance conditions.
 1. **Complete:** replace proof-only eligibility with execution-role and
    declaration-kind classification; make all executable computational
    occurrences candidates.
-2. Replace hash equality in the boundary oracle with a paired-state
+2. **Complete:** replace hash equality in the boundary oracle with a paired-state
    definitional-equality comparator and complete observable pre/post state.
-3. Add declaration-value and environment-delta comparison, including opaque,
+3. **Complete:** add declaration-value and environment-delta comparison, including opaque,
    irreducible, generated-command, and runtime-oriented cases.
 4. Revise the representative gates to transform all 17 `AddConstMap`, 33
    `EqToHom`, 6 `Fintype/List`, and 7 `NonUnitalHom` occurrences.
@@ -561,6 +568,6 @@ explicitly authorized unobserved paths now support the measured cases and are
 integrated in the representative translators. The deterministic manifest
 format, bounded smoke gate, and targeted old-unknown closure are in place. The
 old full-corpus eligible/excluded partition remains obsolete; the schema-2
-representative manifest is current. The immediate milestone is the true
-definitional-equality comparator and computational declaration oracle before
-reusable/nested corpus scaling resumes.
+representative manifest is current. The immediate milestone is declaration-oracle
+coverage for every representative module before schema stabilization and
+reusable/nested corpus scaling resume.
