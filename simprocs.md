@@ -93,20 +93,52 @@ inventory.
 
 ## Focused boundary cases
 
+The active boundary gate currently covers equality-producing, proof-free
+definitional, unchanged, target-closing, local-`False`, authored-hypothesis,
+dependent-context, and source-materialization behavior. An earlier broad
+`Mathlib/Data/Fintype/List.lean` round trip covers a committed `ExistsAndEq`
+result without a declaration-specific apply model. Its six calls are in
+non-proof declarations under the active scope classifier, so the scope-aware
+gate retains them; the broad run is renderer and boundary evidence rather than
+product-scope closure. The scope-aware
+`Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean` round trip covers
+all three proof-body calls, including a large `Matrix.cons_val` result and one
+occurrence with four selected boundary variants. A focused custom discharger
+does assign pre-existing expression and universe metavariables; both the
+in-memory comparator and serialized source round trip show that elaborating the
+checked proof reproduces those assignments without a separate delta. Focused
+pending-synthetic and postponed-constraint cases are preserved when stock
+`simp` leaves them unchanged.
+
+Scope classification is a separate source-to-source concern: the boundary probe
+records only which selected occurrence IDs executed and whether their final
+caller declarations are propositions. It intentionally does not record
+simproc order, registry state, or other simplifier internals. The pinned
+diagnostic closes the old 101 scope unknowns, and the regenerated full diagnostic
+manifest classifies all 83,425 occurrences with zero unknowns. One bounded
+`AddConstMap/Basic` canary materializes all nine eligible calls while preserving
+the exact eight exclusions and all authored source outside the replaced ranges.
+The full diagnostic predates the hardened implementation fingerprint and must
+be regenerated after commit. These results do not change the simproc stress-test
+scope or claim full-corpus materialization.
+
 The boundary prototype should include:
 
 1. proof-producing and definitional-only results;
 2. a changed result and an unchanged terminating result;
-3. a large shared result from `reduceDIte`, `fieldEq`, or `Matrix.cons_val`;
+3. a large shared result from `reduceDIte`, `fieldEq`, or `Matrix.cons_val`
+   (currently covered by `Matrix.cons_val`);
 4. the three measured `ExistsAndEq` pre-existing metavariable assignments;
 5. expression and universe metavariables plus postponed constraints;
 6. at least one custom discharger with a proof-only result;
 7. an instrumented custom discharger with a persistent assignment;
 8. an entire `simp` failure inside an unchanged tactic alternative; and
-9. an unchanged continuation that consumes each recorded effect.
+9. a continuation, unchanged except for any required binder alpha-renaming,
+   that consumes each recorded effect.
 
 The oracle is the stock call's canonical boundary snapshot and successful
-elaboration of the unchanged continuation. Matching a simproc trace is never an
+elaboration of the continuation, with only consistent binder alpha-renaming
+permitted outside the replaced call. Matching a simproc trace is never an
 acceptance condition.
 
 ## Extension rule

@@ -9,8 +9,12 @@ terminology.
 ## Goal and scope
 
 Explicit Lean replaces each source `simp` or `simp only` tactic occurrence in a
-Prop-valued proof body with generated source while leaving every tactic before
-and after that occurrence unchanged. The active correctness boundary is:
+Prop-valued proof body with generated source. Preserving every surrounding
+tactic and authored binder spelling is preferred because it gives the strongest
+local regression test, but it is not the semantic correctness boundary. The
+translator may consistently alpha-rename theorem parameters and their uses when
+generated source cannot otherwise refer to them. The active correctness boundary
+is:
 
 > Reproduce the externally visible proof state after each `simp` call, without
 > reproducing the internal simplifier execution.
@@ -37,30 +41,160 @@ with a parameterized boundary program later or fails closed as unobserved.
 
 ## Current implementation status
 
-The current Lean implementation records and replays schema-27 simplifier
+The legacy Lean implementation records and replays schema-27 simplifier
 operations. Its tactic happens to be named `simp_engine_apply`, but it still
 parses schema-27 certificate JSON, constructs a simp context, and invokes the
 operational replay engine. It is not the boundary-state replacement specified
 here.
 
-The current syntax inventory finds parser-level occurrences and stable ranges,
-including nested and quoted syntax, but it is not yet a proof-body scope
-classifier. The active harness must associate occurrences with enclosing
-declarations and distinguish Prop-valued proof execution, reusable tactic code,
-quoted data, and non-Prop construction before it can make a zero-call claim.
+The branch now also contains a separate boundary-state prototype:
 
-`Experiment/run.sh` is the passing legacy regression gate. No active boundary
-prototype or boundary acceptance command exists yet. The next task is to add a
-side-by-side prototype without weakening the legacy gate; suggested files are:
+- `ExplicitLean/SimpEngine/Boundary.lean` runs stock `simp` as the oracle,
+  captures a closed boundary artifact, restores the pre-state, applies the
+  artifact, and compares canonical post-state snapshots;
+- `ExplicitLean/SimpEngine/Boundary/Apply.lean` applies target and authored
+  hypothesis transformations in stock-visible order;
+- `ExplicitLean/SimpEngine/Boundary/Tactic.lean` elaborates temporary explicit
+  generated source without importing the recorder; and
+- `Experiment/check_simp_engine_boundary.py` checks target and location
+  behavior, apply import isolation, unchanged continuations, declaration types,
+  axiom subsets, and absence of `sorryAx`.
 
-- `ExplicitLean/SimpEngine/Boundary.lean` for boundary snapshots, comparison,
-  artifacts, selection, and apply-only transport;
-- `Experiment/SimpEngineBoundaryProbe.lean` for focused Lean fixtures; and
-- `Experiment/check_simp_engine_boundary.py` as the first active gate.
+`Experiment/check_simp_engine_boundary_source.py` is the first source-to-source
+gate. It currently inventories seventeen focused occurrences, including
+hypothesis locations, inaccessible binders, inline calls, two nested calls on
+one line, a custom discharger with pre-existing expression/universe assignments,
+transactional whole-tactic failure inside an unchanged alternative, and one
+quoted reusable occurrence that succeeds in one caller and fails in another,
+plus one explicitly authorized unobserved reusable occurrence that is replaced
+by a fail-closed tactic.
+It instruments them, captures artifacts, replaces the whole tactic, compiles
+the continuations, and requires a syntax-aware zero remaining count. Generated
+machine-oriented evidence refers to locals by deterministic declaration-index
+aliases and parses its fully explicit term strings only after variant selection;
+this survives macro hygiene and theorem-parameter alpha-renaming. A two-phase
+placeholder rewrite preserves source ranges and final indentation.
+
+The in-memory comparator has nineteen focused executions. In addition to the
+source cases, it explicitly preserves pre-existing pending synthetic
+metavariables and postponed constraints when stock `simp` leaves them
+unchanged. The custom-discharger assignment case is reproduced by elaborating
+the captured checked proof, so measurement has not justified a separate
+assignment-delta representation yet.
+
+`Experiment/check_simp_engine_boundary_mathlib.py` applies the same process to
+four complete pinned source modules after joining the scope classification.
+In `Mathlib/CategoryTheory/EqToHom.lean`, it transforms all 27 proof-body
+occurrences, retains all six non-proof occurrences, compiles the result, and
+finds zero remaining in-scope calls. In `Mathlib/Data/Fintype/List.lean`, all
+six occurrences are non-proof data construction, so none are transformed and
+all six are retained. In
+`Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`, all three
+occurrences are transformed; they produce six executions because one occurrence
+selects among four distinct pre-states reached via `all_goals`/`fin_cases`.
+The materialized copy compiles with zero remaining in-scope calls. Earlier broad
+round trips of all syntactic occurrences remain useful renderer stress evidence:
+`Fintype/List` exercises a committed `ExistsAndEq` result and beta-redex
+lowering, while `PosPart` exercises a large `Matrix.cons_val` result. These are
+representative module results, not a corpus claim.
+
+`Mathlib/Algebra/Algebra/NonUnitalHom.lean` contributes seven excluded
+occurrences and guards parser compatibility. This regression exposed an unused
+bare `apply` production in the generated boundary tactic grammar that changed
+how a Mathlib command parsed an identifier named `apply`; the production was
+removed. The materializer emits only the unambiguous `apply_encoded` form.
+
+`Experiment/check_simp_engine_boundary_scope.py` now conservatively joins syntax
+ancestry with the final compiled types and source ranges of the smallest
+enclosing declarations. Its 13-occurrence fixture distinguishes proof-valued
+declarations, computational definitions, proposition data (`def p : Prop`), a
+proof field inside non-proof structure construction, reusable tactic syntax,
+retained quotation data, irreducible definition RHSs, declaration-signature
+tactics, and generated commands. A standalone
+`ExplicitLean/SimpEngine/Boundary/ScopeProbe.lean` carries each selected source
+ID through a temporary copy, logs execution, and appends a report command that
+resolves final declaration types with `Meta.isProp`. Anonymous examples are
+renamed to temporary private definitions only for this measurement. Probe
+copies inject global `set_option Elab.async false`, so the report runs after all
+original bodies deterministically; the option and rename never reach
+materialized output. Missing caller/type, missing execution, duplicate or extra
+IDs, and mixed proof/non-proof observations fail closed.
+
+The fixture has two statically proof-valued declarations, three statically
+non-proof declarations, one reusable quotation, one retained quotation, one
+irreducible exclusion, one signature exclusion, two observed proof declarations,
+and two observed non-proof declarations. On the three representative Mathlib
+modules it classifies `EqToHom` as 27 proof-body and six non-proof occurrences,
+`Fintype/List` as six non-proof occurrences, and `PosPart` as three proof-body
+occurrences. The exact
+`Mathlib.Tactic.ToDual.«commandTo_dual_insert_cast_:=_»` command path is a narrow
+static `in_scope_generated_proof_command` exception: its elaborator consumes the
+RHS as the proof value of a generated theorem. Quotations outside that exact
+path remain unclassified until execution evidence distinguishes use from
+retention. Mathlib parsing uses the same pure `Mathlib` grammar environment as
+inventory; the controlled fixture's extra grammar is loaded only for the
+fixture.
+
+`Experiment/simp_engine_boundary_corpus.py` now defines that boundary-native
+manifest and its fail-closed construction rules. It pins repository, Lean,
+Mathlib, the complete active implementation source families, source, and module
+identities; retains modules with no supported calls; and joins every occurrence
+to its source-backed scope classification. Statically unclassified occurrences
+are probed one affected module per temporary process; compact execution
+evidence records the report module, caller/count summaries, final proof flags,
+status, and probe-only scheduling option in the occurrence record. The 3-module
+smoke has no unknowns and therefore does not invoke this probe. Byte-identical
+raw syntax records sharing one replaceable source range are collapsed and
+counted; conflicting records still fail. Its scope join and execution join
+preserve distinct paths/IDs and reject missing, duplicate, extra, or conflicting
+data. The builder requires a clean pinned Mathlib checkout and rechecks
+repository/toolchain identity, implementation hashes, and every selected source
+before emitting, rejecting the result if any of those inputs changed.
+Dirty-repository and unclassified diagnostic allowances are explicit manifest
+fields. Policy enforcement also precedes atomic output replacement, so a
+rejected run cannot publish a newly generated manifest. Its bounded smoke gate
+builds the same three-module manifest twice and requires byte-identical output
+with the exact 30 eligible and 12 excluded occurrence partition. A separate
+targeted diagnostic over the existing pre-probe manifest closes the old 101
+unknowns as 38 static non-proof commands, 3 signature exclusions, 5 generated
+proof commands, and 55 dynamically observed proof declarations, with zero
+unclassified.
+
+That classifier was then used to generate
+`.lake/boundary-corpus-manifest/manifest-scope-closed-v2.json` (SHA-256
+`541a2d71f338e53b55335f76c699b14f8a2f12532b9a8cd865cbbd369e34ff25`).
+It covers all 8,264 pinned Mathlib module files and inventories 83,425
+occurrences: 69,403 eligible and 14,022 excluded, with zero unclassified. Its
+explicit policy is `allowDirty: true, allowUnclassified: false`; because the
+working repository was dirty, this is diagnostic evidence and must not be
+uploaded as the clean archival closure report. It predates the repair that
+added the Lean inventory executable to the implementation fingerprint, so the
+current consumer rejects it and a clean full manifest must be regenerated from
+the committed implementation.
+
+`Experiment/boundary_materialize_shard.py` is the first fail-closed consumer of
+current manifests. A fresh one-module repair-review
+`Mathlib/Algebra/AddConstMap/Basic.lean` canary has 17 total occurrences. It
+observes and materializes all nine eligible occurrences as nine successful
+boundary variants, retains exactly eight excluded occurrences, compiles, and
+proves that authored source bytes outside the replaced tactic ranges are
+unchanged. It preserves all authored binders without alpha-renaming. The
+pre-commit manifest and report are disposable; committing changes their pinned
+repository identity, so the durable run begins by regenerating them.
+
+`Experiment/run.sh` retains the legacy regression checks and now also runs all
+boundary prototype commands. These are focused engineering gates, not a pinned
+Mathlib closure claim.
 
 Once that path is accepted, the public `simp_engine_apply` syntax can move from
 schema-27 replay to boundary artifacts. Until then, code and reports must label
 the two implementations explicitly.
+
+The next engineering gaps are dependency-aware recording for the 66 reusable
+tactic-syntax occurrences, safe composition for the 91 nested occurrences,
+larger deterministic materialization shards, and any generic state-delta or
+external-effect cases exposed by those shards. The current runner rejects
+reusable syntax and nested/overlapping replacement ranges rather than guessing.
 
 ## Correctness contract
 
@@ -90,11 +224,13 @@ renaming of fresh internal identifiers under which all of the following agree:
    same delta.
 5. Pre-existing postponed constraints or synthetic metavariables have
    equivalent status whenever the unchanged continuation can observe them.
-6. Scoped options and environment extensions are expected to remain unchanged.
-   If measurement finds that stock `simp` or a custom discharger persistently
-   changes another Core/Meta field that can affect the unchanged continuation's
-   proof state, the occurrence is an `external_effect_failure` until that effect
-   is represented and tested generically.
+6. Scoped options and continuation-visible environment extensions are expected
+   to remain unchanged. Elaborating a `simp` argument may create inaccessible
+   private helper declarations; the recorder inlines references to those helpers
+   into the closed artifact and restores the pre-call environment. Any persistent
+   environment or other Core/Meta change that an unchanged continuation can
+   observe is an `external_effect_failure` until that effect is represented and
+   tested generically.
 
 Fresh goal, local, expression-metavariable, and universe-metavariable identities
 need not be numerically equal. Simplifier caches, rule search order, internal
@@ -102,7 +238,8 @@ candidate rollback, used-theorem counters, messages and diagnostics, step
 counts, and simproc traces are outside the proof-state boundary.
 
 The prototype must implement one canonical snapshot/comparison function for
-this contract. Successful compilation of the unchanged continuation is the
+this contract. Successful compilation of the continuation—source-identical when
+possible and otherwise changed only by consistent binder alpha-renaming—is the
 end-to-end oracle, but it does not replace focused comparison tests for each
 listed field.
 
@@ -160,7 +297,11 @@ different scoped options. A later reviewed reduction to relevant options is
 permitted only after differential evidence.
 
 Recording may observe the same key more than once. Equal boundary variants are
-deduplicated. Unequal variants under one key are an
+deduplicated. The current generated dispatcher computes the canonical state,
+full options, and stable caller before elaborating any evidence, selects exactly
+one observed outcome, and fails closed when none matches. This non-backtracking
+selection is necessary so a selected failure variant escapes to the unchanged
+surrounding tactic control flow. Unequal variants under one key are an
 `ambiguous_boundary_variant`; the selector identity must be extended with the
 measured pre-call discriminator before materialization. Any extension must be
 stable in transformed source and computable without inspecting simp theorems,
@@ -184,9 +325,16 @@ by
 This replaces the whole original `simp ...` tactic. Its rule list, configuration,
 discharger, and location may be retained only as inert provenance inside closed
 data; the apply path must not elaborate them or reconstruct a simp context.
-“Leave the surrounding script unchanged” means the tactics before and after the
-replaced call are byte-for-byte unchanged except where source-range composition
-requires indentation or quotation handling.
+The preferred materialization leaves tactics before and after the replaced call
+byte-for-byte unchanged except for source-range composition. The current
+machine-oriented encoding uses deterministic declaration-index aliases for all
+locals so the same artifact works inside hygienic tactic quotations and after
+theorem-parameter alpha-renaming. A later readable renderer may retain authored
+names where safe. A translator may instead alpha-rename theorem parameters and
+all of their references; that fallback must preserve
+binder order, binder information, and types, and the declaration-equivalence
+gate must accept it before the module is counted as translated. Surrounding
+tactic structure may not otherwise change merely to make materialization pass.
 
 The syntax above is illustrative; the current parser still has the legacy
 schema-27 shape. The first prototype may use a temporary syntax name to prevent
@@ -214,6 +362,20 @@ run must:
 9. archive the inventory, classifications, compilation result, declaration
    checks, and remaining-call audit.
 
+Scope closure uses a source-backed, two-phase probe for only the occurrences
+left unclassified by the static pass. The temporary copy replaces each selected
+`simp` head with an ID-carrying standalone probe, disables asynchronous body
+elaboration with global `set_option Elab.async false`, and appends a report
+command after the original source. The report groups repeated executions,
+resolves the final declaration type, and records `Meta.isProp` evidence; it
+does not inspect simplifier internals. Anonymous `example` commands are
+temporarily renamed to private definitions so their final types survive
+elaboration. Missing/extra IDs, missing callers or types, missing execution,
+and mixed proof/non-proof observations remain unclassified. The exact
+`Mathlib.Tactic.ToDual.«commandTo_dual_insert_cast_:=_»` command is separately
+classified as a generated proof command because its elaborator consumes its RHS
+as a generated theorem proof; this is not a general caller-null fallback.
+
 An occurrence may be classified as `materialized`, `expected_failure`,
 `unobserved`, `out_of_scope_quotation`, `printer_failure`,
 `ambiguous_boundary_variant`, or `external_effect_failure`. Only the first four
@@ -235,7 +397,8 @@ Build the smallest end-to-end implementation against stock Lean:
 4. Restore the exact pre-call state.
 5. Apply the captured transformation through the new apply-only module.
 6. Compare the stock and apply snapshots with the canonical boundary comparator.
-7. Resume the exact original continuation.
+7. Resume the original continuation, unchanged when possible and otherwise
+   changed only by consistent binder alpha-renaming.
 8. Compare declaration types and transitive axiom sets.
 
 The focused matrix must cover:
@@ -253,7 +416,8 @@ The focused matrix must cover:
   measured `ExistsAndEq` examples;
 - pre-existing postponed constraints or synthetic metavariables;
 - custom dischargers and representative large/shared simproc outputs; and
-- an unchanged continuation that consumes every transformed boundary feature.
+- a continuation, unchanged except for any required binder alpha-renaming, that
+  consumes every transformed boundary feature.
 
 ### Prototype acceptance gate
 
@@ -322,5 +486,12 @@ discharger strategy, and simproc traces are not acceptance conditions.
 8. Improve `simp_engine_apply` arguments toward maximally human-readable source
    without weakening kernel, axiom, selector, or boundary checks.
 
-Durable report procedures are in [REPORTS.md](REPORTS.md). The next milestone is
-step 1, not another attempt to close schema-27 operational replay.
+Durable report procedures are in [REPORTS.md](REPORTS.md). The focused boundary,
+selector, conservative scope-classification, ID-carrying execution probe, and
+explicitly authorized unobserved paths now support the measured cases and are
+integrated in the representative translators. The deterministic manifest
+format, bounded smoke gate, and targeted old-unknown closure are in place; the
+full pinned diagnostic manifest and one exact-source-preserving materialization
+canary are also complete. The immediate milestone is designing dependency-aware
+handling for reusable tactic syntax, then scaling deterministic shards while
+closing nested-range and measured boundary failures.

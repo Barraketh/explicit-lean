@@ -88,7 +88,8 @@ private unsafe def parseModuleFully (path : System.FilePath)
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
   return (moduleSyntax, state.commandState.messages)
 
-private unsafe def inventoryFile (env : Environment) (path : System.FilePath) : IO UInt32 := do
+private unsafe def inventoryFile (env : Environment) (path : System.FilePath)
+    (allowElaborationErrors : Bool) : IO UInt32 := do
   let source ← IO.FS.readFile path
   let fileMap := FileMap.ofString source
   try
@@ -98,12 +99,14 @@ private unsafe def inventoryFile (env : Environment) (path : System.FilePath) : 
       parseModuleFully path source
     else
       pure (fastSyntax, fastMessages)
-    if messages.hasErrors then
+    if messages.hasErrors && !allowElaborationErrors then
       IO.eprintln s!"simp engine inventory could not parse {path} without recovery"
       for message in messages.toArray do
         if message.severity == .error then
           IO.eprintln s!"{message.pos.line}:{message.pos.column}: {← message.data.toString}"
       return 1
+    if messages.hasErrors then
+      IO.println s!"SIMP_ENGINE_INVENTORY_ELABORATION_ERRORS_ALLOWED file={path}"
     for entry in ExplicitLean.SimpEngine.Inventory.collect path.toString fileMap stx do
       IO.println (toJson entry).compress
     return 0
@@ -112,15 +115,17 @@ private unsafe def inventoryFile (env : Environment) (path : System.FilePath) : 
     return 1
 
 unsafe def main (args : List String) : IO UInt32 := do
-  if args.isEmpty then
-    IO.eprintln "usage: SimpEngineInventory.lean <Lean source file>..."
+  let allowElaborationErrors := args.contains "--allow-elaboration-errors"
+  let paths := args.filter (· != "--allow-elaboration-errors")
+  if paths.isEmpty then
+    IO.eprintln "usage: SimpEngineInventory.lean [--allow-elaboration-errors] <Lean source file>..."
     return 2
   Lean.initSearchPath (← Lean.findSysroot)
   Lean.enableInitializersExecution
   let env ← Lean.importModules #[{ module := `Mathlib }] {} (loadExts := true)
   let mut status := 0
-  for pathString in args do
-    let code ← inventoryFile env (System.FilePath.mk pathString)
+  for pathString in paths do
+    let code ← inventoryFile env (System.FilePath.mk pathString) allowElaborationErrors
     if code != 0 then
       status := code
   return status

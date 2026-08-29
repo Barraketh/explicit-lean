@@ -3,7 +3,9 @@
 Explicit Lean is a source-to-source translator for proof bodies. Its current
 target is every source `simp` and `simp only` tactic occurrence in the pinned
 Mathlib corpus. The translator replaces each occurrence with generated
-`simp_engine_apply` source while leaving the surrounding tactic script intact.
+`simp_engine_apply` source. It prefers to leave surrounding tactics and binder
+spellings intact, but may consistently alpha-rename theorem parameters when
+needed; semantic declaration and proof-state equivalence are the hard gates.
 
 The active correctness rule is:
 
@@ -35,16 +37,103 @@ If these documents conflict, `PLAN.md` controls the boundary-state project.
 This branch is the project restart and its own engineering lineage. Do not use
 `main` as a baseline for scope, completeness, or project decisions.
 
-The repository currently implements schema-27 operational recording and replay.
-That implementation has a passing focused gate, but it does **not** implement
-the active boundary-state design. In particular, the existing
+The repository retains schema-27 operational recording and replay as legacy
+evidence. In particular, the existing
 `simp_engine_apply` parser in `ExplicitLean/SimpEngine/Source.lean` still accepts
 schema-27 certificates and invokes the replay engine. The shared name must not
 be mistaken for completion of the new tactic.
 
-The next engineering milestone is the focused boundary prototype described in
-`PLAN.md`. Until that prototype adds its own test entry point, there is no test
-command that demonstrates the active goal.
+A separate boundary-state prototype now covers target and hypothesis locations,
+closed target and local-`False` outcomes, definitional and equality transport,
+dependent contexts, inaccessible local names, a custom discharger, declaration
+trust, transactional failure, pre-existing metavariable state, reusable tactic
+quotations, multi-variant selection, and source round trips. Its focused
+seventeen-occurrence source fixture includes one explicitly unobserved reusable
+occurrence. The scope-aware representative gate transforms all 27 proof-body
+calls in `Mathlib/CategoryTheory/EqToHom.lean` while retaining its six non-proof
+calls, retains all six non-proof calls in `Mathlib/Data/Fintype/List.lean`, and
+transforms all three proof-body calls in
+`Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`. Every transformed
+copy compiles with zero remaining in-scope calls and the exact excluded syntax
+inventory retained. The last module records four distinct executions of one
+reusable occurrence and exercises a large `Matrix.cons_val` result; the focused
+quotation executes both a successful and a failed variant. The apply module has
+a checked import closure with no simplifier implementation. A fourth
+representative module,
+`Mathlib/Algebra/Algebra/NonUnitalHom.lean`, guards parser compatibility with
+Mathlib commands whose grammar uses the identifier `apply`. This remains a
+representative materialization result, not a Mathlib-wide translation claim.
+
+The conservative scope-classification gate joins syntax ancestry to final
+compiled declaration types. Its 13-occurrence fixture separates theorem/proof
+definitions, computational definitions, proposition data, proof fields inside
+non-proof structures, reusable tactic syntax, retained quotations, irreducible
+definition RHSs, declaration-signature tactics, and generated commands. Four
+fixture occurrences are resolved by a temporary source probe: anonymous Prop
+and Nat examples exercise the temporary rename path, while generated proof and
+data declarations exercise final-environment lookup. The probe carries a
+stable occurrence ID into a standalone tactic, logs each execution, and emits
+sorted evidence only after the original commands finish under probe-only
+`set_option Elab.async false` scheduling. It never inspects simplifier internals
+or infers that a retained quotation executed. Missing, duplicate, mixed, or
+incomplete evidence remains unclassified.
+
+The exact `Mathlib.Tactic.ToDual.«commandTo_dual_insert_cast_:=_»` command path
+is a narrow static exception: its command elaborator consumes the RHS as the
+proof value of a generated theorem, so its five old diagnostic cases are
+classified as `in_scope_generated_proof_command` even though no active caller
+name is available during elaboration. The irreducible-definition and variable
+signature rules remain explicit exclusions. On the representative modules the
+gate finds 27 in-scope and six non-proof occurrences in `EqToHom`, six
+non-proof occurrences in `Fintype/List`, and three in-scope occurrences in
+`PosPart`. Mathlib sources are parsed in the same pure `Mathlib` grammar
+environment as the inventory; the fixture's custom grammar is isolated in a
+separate environment.
+Earlier broad module round trips remain useful renderer stress tests, but their
+out-of-scope calls do not count toward the product goal.
+
+The boundary-native corpus manifest records repository, Lean, Mathlib,
+implementation, source, and module identities together with a total
+source-backed classification. It counts and collapses only byte-identical raw
+syntax records that share one replaceable source range; conflicting records
+fail. Multiple scope-tree paths to that range are retained and must agree on
+the semantic classification. The implementation hash map is generated from
+the complete active boundary, inventory, classifier, and manifest source-file
+families rather than a hand-maintained subset. Manifest construction requires
+the pinned Mathlib checkout to be clean and rechecks repository identity,
+toolchain identity, implementation hashes, and every selected source after the
+run, rejecting results when any of those inputs changed. Diagnostic allowances
+for a dirty repository or unclassified occurrences are recorded explicitly in
+the artifact. Its smoke gate builds
+the representative 42-occurrence manifest twice, requires byte-identical output,
+and rejects
+missing, duplicate, and unclassified joins by default. Policy is checked before
+atomic output replacement, so a rejected run cannot leave a new manifest that
+looks successful. The existing diagnostic manifest's 101 old unknowns have
+since been closed by a bounded 27-module run: 38 static non-proof commands, 3
+signature exclusions, 5 generated proof commands, and 55 dynamically observed
+proof declarations, with zero unclassified.
+
+The resulting full pinned-corpus diagnostic manifest is
+`.lake/boundary-corpus-manifest/manifest-scope-closed-v2.json` (SHA-256
+`541a2d71f338e53b55335f76c699b14f8a2f12532b9a8cd865cbbd369e34ff25`).
+Across 8,264 module files it inventories 83,425 occurrences: 69,403 eligible,
+14,022 excluded, and zero unclassified. It was generated with the explicit
+`allowDirty: true` diagnostic policy, so it must not be uploaded or treated as
+the clean archival closure report. It also predates the commit-readiness
+hardening that added the Lean inventory executable to the implementation
+fingerprint, so the current runner intentionally rejects it. Regenerate the
+full manifest from the committed code before further corpus materialization.
+
+`Experiment/boundary_materialize_shard.py` consumes a current manifest fail
+closed. A fresh one-module repair-review canary for
+`Mathlib/Algebra/AddConstMap/Basic.lean` transforms all nine
+eligible calls, retains the exact eight excluded calls, observes nine successful
+variants, compiles the materialized module, and verifies byte-for-byte authored
+source preservation outside the selected tactic ranges. No binder alpha-renaming
+was needed. Pre-commit manifests and reports are disposable because the commit
+changes their repository identity. This remains one bounded canary, not
+full-corpus materialization.
 
 ## Pinned environment and basic checks
 
@@ -57,12 +146,34 @@ From the repository root:
 ```sh
 lake build ExplicitLean ExplicitLeanMathlibAudit
 python3 Experiment/check_simp_engine_review.py
+python3 Experiment/check_simp_engine_boundary.py
+python3 Experiment/check_simp_engine_boundary_source.py
+python3 Experiment/check_simp_engine_boundary_scope.py
+python3 Experiment/check_simp_engine_boundary_corpus.py
+python3 Experiment/check_simp_engine_boundary_mathlib.py
+# Bounded diagnostic over the existing pre-probe 101-unknown manifest.
+python3 Experiment/check_simp_engine_boundary_scope_unknowns.py
+# On a clean checkout, build a current one-module canary manifest and consume it.
+python3 Experiment/simp_engine_boundary_corpus.py manifest \
+  --output .lake/boundary-corpus-manifest/add-const-map-canary.json \
+  --module-prefix Mathlib/Algebra/AddConstMap/Basic.lean \
+  --inventory-batch-size 1 --scope-batch-size 1 --timeout 600
+python3 Experiment/boundary_materialize_shard.py \
+  --manifest .lake/boundary-corpus-manifest/add-const-map-canary.json \
+  --output .lake/boundary-materialization/add-const-map-canary/report.json \
+  --module Mathlib/Algebra/AddConstMap/Basic.lean \
+  --expect-total 17 --expect-eligible 9
 ```
 
-The Python command checks the reviewed schema-27 implementation and its frozen
-legacy contract. `Experiment/run.sh` runs the complete legacy schema-27 focused
-gate. Both are regression protection for reusable code and historical evidence;
-neither is the acceptance gate for the boundary-state translator.
+The review command checks the frozen schema-27 contract. The boundary commands
+check the active focused prototype, its focused source round trip, proof-body
+classification, deterministic manifest construction, and the representative
+Mathlib modules. The targeted scope-unknown command probes only
+the affected modules from the earlier diagnostic manifest. The shard command
+first builds a manifest bound to the current committed implementation and then
+reproduces the accepted single-module canary.
+`Experiment/run.sh` runs all legacy and active focused checks. None of these is
+yet the complete pinned-corpus acceptance gate.
 
 ## Repository map
 
@@ -71,14 +182,38 @@ neither is the acceptance gate for the boundary-state translator.
   stable source ranges, occurrence IDs, and compositional head rewriting. The
   current inventory deliberately over-approximates: it does not yet prove that
   an occurrence belongs to a Prop-valued proof body or distinguish executable
-  tactic syntax from every quotation. The boundary harness must add that scope
-  classification.
+  tactic syntax from every quotation. The boundary scope classifier supplies
+  that source-backed classification before manifest construction.
 - `ExplicitLean/SimpEngine/Recording.lean`: stock `Meta.simpGoal` oracle and
   goal/hypothesis transport patterns. Its current recorder is coupled to schema
   27 and should be mined, not adopted as the new artifact format.
-- `ExplicitLean/SimpEngine/Fingerprint.lean`: reusable expression, proof-state,
-  and options fingerprint components; the combined boundary selector still
-  needs its own reviewed definition.
+- `ExplicitLean/SimpEngine/Fingerprint.lean`: legacy schema-27 fingerprint
+  components. The active, simplifier-independent selector is
+  `ExplicitLean/SimpEngine/Boundary/Selector.lean`.
+- `ExplicitLean/SimpEngine/Boundary.lean` and `Boundary/`: active boundary
+  oracle/comparator, closed artifacts, canonical selector, non-backtracking
+  variant dispatch, simplifier-independent apply path, and temporary
+  generated-source elaborator.
+- `Experiment/check_simp_engine_boundary.py` and
+  `Experiment/check_simp_engine_boundary_source.py`: active focused behavior,
+  state, failure, trust, isolation, and source-materialization gates.
+- `Experiment/SimpEngineBoundaryScope.lean` and
+  `Experiment/check_simp_engine_boundary_scope.py`: conservative syntax-ancestry
+  and compiled-declaration proof-scope classification, plus the temporary
+  ID-carrying execution probe and final-type evidence join.
+- `ExplicitLean/SimpEngine/Boundary/ScopeProbe.lean`: standalone probe tactic
+  and appended report command used only in disposable source copies.
+- `Experiment/simp_engine_boundary_corpus.py` and
+  `Experiment/check_simp_engine_boundary_corpus.py`: deterministic pinned-input
+  manifest construction and its bounded fail-closed smoke gate.
+- `Experiment/boundary_materialize_shard.py`: manifest-driven bounded recording,
+  boundary materialization, exact source-preservation checking, compilation,
+  and provenance reporting.
+- `Experiment/check_simp_engine_boundary_scope_unknowns.py`: targeted closure
+  diagnostic for the pre-execution-evidence 101 unknowns.
+- `Experiment/check_simp_engine_boundary_mathlib.py`: scope-aware representative
+  Mathlib-module recording, materialization, compilation, exact exclusion
+  retention, and zero-in-scope-call gate.
 - `ExplicitLean/SimpEngine/Source.lean` and
   `ExplicitLean/SimpEngine/Replay.lean`: current schema-27 materialization and
   replay. These are legacy implementation, not the target apply path.
@@ -106,6 +241,7 @@ neither is the acceptance gate for the boundary-state translator.
 - **Recording:** running stock `simp` during translation to capture an oracle
   result and boundary delta.
 - **Materialization:** rewriting source occurrences to `simp_engine_apply` and
-  compiling the copied module with the original continuation unchanged.
+  compiling the copied module with the original continuation unchanged except,
+  when necessary, for consistent theorem-parameter alpha-renaming.
 - **Closed-world closure:** successful translation and compilation of every
   in-scope occurrence under the pinned corpus, toolchain, and build procedure.

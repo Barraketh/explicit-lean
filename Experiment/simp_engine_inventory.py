@@ -41,15 +41,23 @@ def occurrence_id(module: str, start: int, end: int) -> str:
     return hashlib.sha256(identity).hexdigest()[:16]
 
 
-def syntax_inventory_file(path: Path, module: str, timeout: int) -> list[dict[str, Any]]:
+def syntax_inventory_file(
+    path: Path,
+    module: str,
+    timeout: int,
+    *,
+    allow_elaboration_errors: bool = False,
+) -> list[dict[str, Any]]:
     command = [
         "lake",
         "env",
         "lean",
         "--run",
         "Experiment/SimpEngineInventory.lean",
-        str(path.resolve()),
     ]
+    if allow_elaboration_errors:
+        command.append("--allow-elaboration-errors")
+    command.append(str(path.resolve()))
     code, output, _ = run(command, timeout=timeout)
     if code != 0:
         raise RuntimeError(f"syntax inventory failed for {path}:\n{output}")
