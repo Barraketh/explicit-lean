@@ -98,11 +98,11 @@ definitional, unchanged, target-closing, local-`False`, authored-hypothesis,
 dependent-context, and source-materialization behavior. An earlier broad
 `Mathlib/Data/Fintype/List.lean` round trip covers a committed `ExistsAndEq`
 result without a declaration-specific apply model. Its six calls are in
-non-proof declarations under the active scope classifier, so the scope-aware
-gate retains them; the broad run is renderer and boundary evidence rather than
-product-scope closure. The scope-aware
+computational declarations, so the obsolete proof-only gate retains them. The
+revised gate must replace all six and compare the resulting declaration values
+by definitional equality. The scope-aware
 `Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean` round trip covers
-all three proof-body calls, including a large `Matrix.cons_val` result and one
+all three calls, including a large `Matrix.cons_val` result and one
 occurrence with four selected boundary variants. A focused custom discharger
 does assign pre-existing expression and universe metavariables; both the
 in-memory comparator and serialized source round trip show that elaborating the
@@ -112,15 +112,17 @@ pending-synthetic and postponed-constraint cases are preserved when stock
 
 Scope classification is a separate source-to-source concern: the boundary probe
 records only which selected occurrence IDs executed and whether their final
-caller declarations are propositions. It intentionally does not record
-simproc order, registry state, or other simplifier internals. The pinned
+caller declarations are propositions. Under the revised contract this selects
+the final declaration comparison rule; it does not determine eligibility. The
+probe intentionally does not record simproc order, registry state, or other
+simplifier internals. The pinned
 diagnostic closes the old 101 scope unknowns, and the regenerated full diagnostic
 manifest classifies all 83,425 occurrences with zero unknowns. One bounded
-`AddConstMap/Basic` canary materializes all nine eligible calls while preserving
-the exact eight exclusions and all authored source outside the replaced ranges.
+`AddConstMap/Basic` canary materializes nine calls and retains eight computational
+calls under the obsolete classifier; the revised canary must materialize all 17.
 The full diagnostic predates the hardened implementation fingerprint and must
-be regenerated after commit. These results do not change the simproc stress-test
-scope or claim full-corpus materialization.
+be regenerated with execution-role classification. These results do not change
+the simproc stress-test scope or claim full-corpus materialization.
 
 The boundary prototype should include:
 
@@ -134,12 +136,16 @@ The boundary prototype should include:
 7. an instrumented custom discharger with a persistent assignment;
 8. an entire `simp` failure inside an unchanged tactic alternative; and
 9. a continuation, unchanged except for any required binder alpha-renaming,
-   that consumes each recorded effect.
+   that consumes each recorded effect;
+10. transparent and opaque/irreducible computational declarations whose final
+    values are definitionally equal;
+11. non-`Prop` structures containing proof and computational fields; and
+12. declaration-signature/default and generated-command environment effects.
 
-The oracle is the stock call's canonical boundary snapshot and successful
-elaboration of the continuation, with only consistent binder alpha-renaming
-permitted outside the replaced call. Matching a simproc trace is never an
-acceptance condition.
+The oracle is a paired stock/apply state comparison using actual definitional
+equality, successful elaboration of the continuation, and final declaration
+value/environment comparison. Fingerprints are selectors and diagnostics only.
+Matching a simproc trace is never an acceptance condition.
 
 ## Extension rule
 

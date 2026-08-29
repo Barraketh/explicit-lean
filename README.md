@@ -1,15 +1,16 @@
 # Explicit Lean
 
-Explicit Lean is a source-to-source translator for proof bodies. Its current
-target is every source `simp` and `simp only` tactic occurrence in the pinned
-Mathlib corpus. The translator replaces each occurrence with generated
-`simp_engine_apply` source. It prefers to leave surrounding tactics and binder
-spellings intact, but may consistently alpha-rename theorem parameters when
-needed; semantic declaration and proof-state equivalence are the hard gates.
+Explicit Lean is a source-to-source translator for every executed source `simp`
+and `simp only` occurrence in the pinned Mathlib corpus, including calls that
+contribute to computational data. The translator replaces each occurrence with
+generated `simp_engine_apply` source. It prefers to leave surrounding tactics
+and binder spellings intact, but may consistently alpha-rename declaration
+parameters when needed; semantic declaration and elaboration-state equivalence
+are the hard gates.
 
 The active correctness rule is:
 
-> Reproduce the externally visible proof state after each `simp` call, without
+> Reproduce the semantically observable output of each `simp` call, without
 > reproducing the internal simplifier execution.
 
 The original `simp` may run while the translator records its result. The
@@ -49,22 +50,23 @@ dependent contexts, inaccessible local names, a custom discharger, declaration
 trust, transactional failure, pre-existing metavariable state, reusable tactic
 quotations, multi-variant selection, and source round trips. Its focused
 seventeen-occurrence source fixture includes one explicitly unobserved reusable
-occurrence. The scope-aware representative gate transforms all 27 proof-body
-calls in `Mathlib/CategoryTheory/EqToHom.lean` while retaining its six non-proof
-calls, retains all six non-proof calls in `Mathlib/Data/Fintype/List.lean`, and
-transforms all three proof-body calls in
+occurrence. These gates still implement the obsolete proof-only eligibility
+rule: they transform 27 of 33 calls in
+`Mathlib/CategoryTheory/EqToHom.lean`, retain all six calls in
+`Mathlib/Data/Fintype/List.lean`, and transform all three calls in
 `Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`. Every transformed
-copy compiles with zero remaining in-scope calls and the exact excluded syntax
-inventory retained. The last module records four distinct executions of one
-reusable occurrence and exercises a large `Matrix.cons_val` result; the focused
-quotation executes both a successful and a failed variant. The apply module has
-a checked import closure with no simplifier implementation. A fourth
-representative module,
+copy compiles under that older contract. The last module records four distinct
+executions of one reusable occurrence and exercises a large `Matrix.cons_val`
+result; the focused quotation executes both a successful and a failed variant.
+The apply module has a checked import closure with no simplifier implementation.
+A fourth representative module,
 `Mathlib/Algebra/Algebra/NonUnitalHom.lean`, guards parser compatibility with
 Mathlib commands whose grammar uses the identifier `apply`. This remains a
 representative materialization result, not a Mathlib-wide translation claim.
+The revised gates must translate all 33 `EqToHom`, 6 `Fintype/List`, 7
+`NonUnitalHom`, and 17 `AddConstMap/Basic` occurrences.
 
-The conservative scope-classification gate joins syntax ancestry to final
+The current scope-classification gate joins syntax ancestry to final
 compiled declaration types. Its 13-occurrence fixture separates theorem/proof
 definitions, computational definitions, proposition data, proof fields inside
 non-proof structures, reusable tactic syntax, retained quotations, irreducible
@@ -76,21 +78,21 @@ stable occurrence ID into a standalone tactic, logs each execution, and emits
 sorted evidence only after the original commands finish under probe-only
 `set_option Elab.async false` scheduling. It never inspects simplifier internals
 or infers that a retained quotation executed. Missing, duplicate, mixed, or
-incomplete evidence remains unclassified.
+incomplete evidence remains unclassified. Under the revised contract,
+proof/computational status selects how the final declaration is compared; it no
+longer determines whether an executed call is translated.
 
 The exact `Mathlib.Tactic.ToDual.«commandTo_dual_insert_cast_:=_»` command path
 is a narrow static exception: its command elaborator consumes the RHS as the
 proof value of a generated theorem, so its five old diagnostic cases are
 classified as `in_scope_generated_proof_command` even though no active caller
-name is available during elaboration. The irreducible-definition and variable
-signature rules remain explicit exclusions. On the representative modules the
-gate finds 27 in-scope and six non-proof occurrences in `EqToHom`, six
-non-proof occurrences in `Fintype/List`, and three in-scope occurrences in
-`PosPart`. Mathlib sources are parsed in the same pure `Mathlib` grammar
+name is available during elaboration. That exception and the current
+irreducible/signature exclusions belong to the obsolete classifier; generated,
+computational, and signature/default executions are all candidates now. Mathlib
+sources are parsed in the same pure `Mathlib` grammar
 environment as the inventory; the fixture's custom grammar is isolated in a
 separate environment.
-Earlier broad module round trips remain useful renderer stress tests, but their
-out-of-scope calls do not count toward the product goal.
+Earlier broad module round trips remain useful renderer stress tests.
 
 The boundary-native corpus manifest records repository, Lean, Mathlib,
 implementation, source, and module identities together with a total
@@ -118,22 +120,30 @@ The resulting full pinned-corpus diagnostic manifest is
 `.lake/boundary-corpus-manifest/manifest-scope-closed-v2.json` (SHA-256
 `541a2d71f338e53b55335f76c699b14f8a2f12532b9a8cd865cbbd369e34ff25`).
 Across 8,264 module files it inventories 83,425 occurrences: 69,403 eligible,
-14,022 excluded, and zero unclassified. It was generated with the explicit
-`allowDirty: true` diagnostic policy, so it must not be uploaded or treated as
-the clean archival closure report. It also predates the commit-readiness
-hardening that added the Lean inventory executable to the implementation
-fingerprint, so the current runner intentionally rejects it. Regenerate the
-full manifest from the committed code before further corpus materialization.
+14,022 excluded, and zero unclassified under the obsolete proof-only rule. The
+old exclusions comprise 13,981 occurrences in computational declarations, 38
+in special computational commands, and 3 in signatures/defaults. These
+categories are no longer excluded; every executable occurrence among them is a
+translation candidate. Because the old classifier did not independently
+separate executable code from syntax retained only as data, the exact revised
+candidate count is not yet known. The old manifest is inventory evidence, not a
+valid product partition. It was generated with the explicit `allowDirty: true`
+diagnostic policy, so it must not be uploaded or treated as the clean archival
+closure report. It also predates the commit-readiness hardening that added the
+Lean inventory executable to the implementation fingerprint, so the current
+runner intentionally rejects it. Regenerate the full manifest from the
+committed code before further corpus materialization.
 
 `Experiment/boundary_materialize_shard.py` consumes a current manifest fail
 closed. A fresh one-module repair-review canary for
-`Mathlib/Algebra/AddConstMap/Basic.lean` transforms all nine
-eligible calls, retains the exact eight excluded calls, observes nine successful
-variants, compiles the materialized module, and verifies byte-for-byte authored
-source preservation outside the selected tactic ranges. No binder alpha-renaming
-was needed. Pre-commit manifests and reports are disposable because the commit
-changes their repository identity. This remains one bounded canary, not
-full-corpus materialization.
+`Mathlib/Algebra/AddConstMap/Basic.lean` transforms nine
+calls and retains eight computational calls under the obsolete classifier. It
+observes nine successful variants, compiles the materialized module, and
+verifies byte-for-byte authored source preservation outside the selected tactic
+ranges. No binder alpha-renaming was needed. Pre-commit manifests and reports
+are disposable because the commit changes their repository identity. This
+remains one bounded canary, not full-corpus materialization or acceptance
+evidence for the revised contract.
 
 ## Pinned environment and basic checks
 
@@ -153,7 +163,7 @@ python3 Experiment/check_simp_engine_boundary_corpus.py
 python3 Experiment/check_simp_engine_boundary_mathlib.py
 # Bounded diagnostic over the existing pre-probe 101-unknown manifest.
 python3 Experiment/check_simp_engine_boundary_scope_unknowns.py
-# On a clean checkout, build a current one-module canary manifest and consume it.
+# Historical proof-only regression; the revised canary target is 17 eligible.
 python3 Experiment/simp_engine_boundary_corpus.py manifest \
   --output .lake/boundary-corpus-manifest/add-const-map-canary.json \
   --module-prefix Mathlib/Algebra/AddConstMap/Basic.lean \
@@ -166,9 +176,9 @@ python3 Experiment/boundary_materialize_shard.py \
 ```
 
 The review command checks the frozen schema-27 contract. The boundary commands
-check the active focused prototype, its focused source round trip, proof-body
-classification, deterministic manifest construction, and the representative
-Mathlib modules. The targeted scope-unknown command probes only
+check the active focused prototype, its focused source round trip, classification
+under the old contract, deterministic manifest construction, and the
+representative Mathlib modules. The targeted scope-unknown command probes only
 the affected modules from the earlier diagnostic manifest. The shard command
 first builds a manifest bound to the current committed implementation and then
 reproduces the accepted single-module canary.
@@ -180,10 +190,10 @@ yet the complete pinned-corpus acceptance gate.
 - `ExplicitLean/SimpEngine/Inventory.lean` and
   `Experiment/simp_engine_inventory.py`: syntax-aware occurrence inventory,
   stable source ranges, occurrence IDs, and compositional head rewriting. The
-  current inventory deliberately over-approximates: it does not yet prove that
-  an occurrence belongs to a Prop-valued proof body or distinguish executable
-  tactic syntax from every quotation. The boundary scope classifier supplies
-  that source-backed classification before manifest construction.
+  current inventory deliberately over-approximates: it does not yet distinguish
+  executed calls and reusable executable code from syntax retained as data. The
+  revised classifier must supply that source-backed execution role independently
+  of declaration result kind.
 - `ExplicitLean/SimpEngine/Recording.lean`: stock `Meta.simpGoal` oracle and
   goal/hypothesis transport patterns. Its current recorder is coupled to schema
   27 and should be mined, not adopted as the new artifact format.
@@ -227,8 +237,9 @@ yet the complete pinned-corpus acceptance gate.
 
 ## Terminology
 
-- **Source occurrence:** one parsed, in-scope `simp` or `simp only` tactic node,
-  identified by module and stable source range.
+- **Source occurrence:** one parsed `simp` or `simp only` tactic node, identified
+  by module and stable source range. It may be executable code or syntax retained
+  as data.
 - **Dynamic execution:** one elaboration-time execution of a source occurrence;
   an occurrence may execute zero, one, or several times.
 - **Boundary state:** the continuation-visible tactic/elaboration state
@@ -242,6 +253,7 @@ yet the complete pinned-corpus acceptance gate.
   result and boundary delta.
 - **Materialization:** rewriting source occurrences to `simp_engine_apply` and
   compiling the copied module with the original continuation unchanged except,
-  when necessary, for consistent theorem-parameter alpha-renaming.
+  when necessary, for consistent declaration-parameter alpha-renaming.
 - **Closed-world closure:** successful translation and compilation of every
-  in-scope occurrence under the pinned corpus, toolchain, and build procedure.
+  executable occurrence under the pinned corpus, toolchain, and build procedure,
+  with retained syntax data preserved separately.

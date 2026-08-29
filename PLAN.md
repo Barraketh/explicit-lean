@@ -8,15 +8,16 @@ terminology.
 
 ## Goal and scope
 
-Explicit Lean replaces each source `simp` or `simp only` tactic occurrence in a
-Prop-valued proof body with generated source. Preserving every surrounding
-tactic and authored binder spelling is preferred because it gives the strongest
-local regression test, but it is not the semantic correctness boundary. The
-translator may consistently alpha-rename theorem parameters and their uses when
-generated source cannot otherwise refer to them. The active correctness boundary
-is:
+Explicit Lean replaces each executed source `simp` or `simp only` tactic
+occurrence with generated source, regardless of whether the enclosing
+declaration produces a proof or computational data. Preserving every
+surrounding tactic and authored binder spelling is preferred because it gives
+the strongest local regression test, but it is not the semantic correctness
+boundary. The translator may consistently alpha-rename declaration parameters
+and their uses when generated source cannot otherwise refer to them. The active
+correctness boundary is:
 
-> Reproduce the externally visible proof state after each `simp` call, without
+> Reproduce the semantically observable output of each `simp` call, without
 > reproducing the internal simplifier execution.
 
 The replacement tactic is called `simp_engine_apply`. It may initially consume a
@@ -25,14 +26,15 @@ Lean source is a later presentation step.
 
 The first closure target is the pinned Mathlib corpus and toolchain recorded in
 `lake-manifest.json` and `lean-toolchain`. It includes parsed
-`Lean.Parser.Tactic.simp` nodes for `simp` and `simp only` that participate in
-elaborating Prop-valued declarations. The following are outside this milestone:
+`Lean.Parser.Tactic.simp` nodes for `simp` and `simp only` that execute, or form
+reusable executable tactic code, during the pinned build. The following are
+outside this milestone:
 
 - `simpa`, `simp_all`, `simp_rw`, `rw`, and tactics that merely call `simp`
   internally;
-- tactic syntax quoted and retained as data rather than executed while proving
-  an in-scope declaration; and
-- tactic use that constructs computational, non-Prop data.
+- tactic syntax quoted and retained as syntax data rather than executed; such a
+  value is not a `simp` call and changing it would change observable data; and
+- executions that occur only in a future downstream build.
 
 Reusable tactic or macro source that executes during the pinned build may have
 several recorded boundary variants. Syntax that could execute only in a future
@@ -72,7 +74,7 @@ It instruments them, captures artifacts, replaces the whole tactic, compiles
 the continuations, and requires a syntax-aware zero remaining count. Generated
 machine-oriented evidence refers to locals by deterministic declaration-index
 aliases and parses its fully explicit term strings only after variant selection;
-this survives macro hygiene and theorem-parameter alpha-renaming. A two-phase
+this survives macro hygiene and declaration-parameter alpha-renaming. A two-phase
 placeholder rewrite preserves source ranges and final indentation.
 
 The in-memory comparator has nineteen focused executions. In addition to the
@@ -82,13 +84,22 @@ unchanged. The custom-discharger assignment case is reproduced by elaborating
 the captured checked proof, so measurement has not justified a separate
 assignment-delta representation yet.
 
-`Experiment/check_simp_engine_boundary_mathlib.py` applies the same process to
-four complete pinned source modules after joining the scope classification.
-In `Mathlib/CategoryTheory/EqToHom.lean`, it transforms all 27 proof-body
-occurrences, retains all six non-proof occurrences, compiles the result, and
-finds zero remaining in-scope calls. In `Mathlib/Data/Fintype/List.lean`, all
-six occurrences are non-proof data construction, so none are transformed and
-all six are retained. In
+The artifact and apply path are largely sort-neutral: they transform tactic
+goals, local declarations, metavariables, and constraints without requiring the
+enclosing declaration to be proof-valued. The current classifier, representative
+gates, and declaration checks are still proof-oriented and therefore implement
+an obsolete narrower scope. Fingerprint equality in the current comparator is
+useful regression evidence, but the revised acceptance comparator must perform
+actual definitional-equality checks; a matching hash is never semantic proof.
+
+`Experiment/check_simp_engine_boundary_mathlib.py` applies the older proof-only
+scope to four complete pinned source modules. In
+`Mathlib/CategoryTheory/EqToHom.lean`, it transforms 27 occurrences and retains
+six occurrences in computational declarations. In
+`Mathlib/Data/Fintype/List.lean`, it retains all six occurrences. Under the new
+contract these retained occurrences are translation candidates: the revised
+gate must transform all 33 `EqToHom` occurrences and all six `Fintype/List`
+occurrences. In
 `Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`, all three
 occurrences are transformed; they produce six executions because one occurrence
 selects among four distinct pre-states reached via `all_goals`/`fin_cases`.
@@ -98,15 +109,16 @@ round trips of all syntactic occurrences remain useful renderer stress evidence:
 lowering, while `PosPart` exercises a large `Matrix.cons_val` result. These are
 representative module results, not a corpus claim.
 
-`Mathlib/Algebra/Algebra/NonUnitalHom.lean` contributes seven excluded
-occurrences and guards parser compatibility. This regression exposed an unused
-bare `apply` production in the generated boundary tactic grammar that changed
-how a Mathlib command parsed an identifier named `apply`; the production was
-removed. The materializer emits only the unambiguous `apply_encoded` form.
+`Mathlib/Algebra/Algebra/NonUnitalHom.lean` currently contributes seven retained
+computational occurrences and guards parser compatibility. The revised gate
+must transform all seven. This regression exposed an unused bare `apply`
+production in the generated boundary tactic grammar that changed how a Mathlib
+command parsed an identifier named `apply`; the production was removed. The
+materializer emits only the unambiguous `apply_encoded` form.
 
-`Experiment/check_simp_engine_boundary_scope.py` now conservatively joins syntax
-ancestry with the final compiled types and source ranges of the smallest
-enclosing declarations. Its 13-occurrence fixture distinguishes proof-valued
+`Experiment/check_simp_engine_boundary_scope.py` currently joins syntax ancestry
+with the final compiled types and source ranges of the smallest enclosing
+declarations. Its 13-occurrence fixture distinguishes proof-valued
 declarations, computational definitions, proposition data (`def p : Prop`), a
 proof field inside non-proof structure construction, reusable tactic syntax,
 retained quotation data, irreducible definition RHSs, declaration-signature
@@ -118,22 +130,26 @@ renamed to temporary private definitions only for this measurement. Probe
 copies inject global `set_option Elab.async false`, so the report runs after all
 original bodies deterministically; the option and rename never reach
 materialized output. Missing caller/type, missing execution, duplicate or extra
-IDs, and mixed proof/non-proof observations fail closed.
+IDs, and mixed observations fail closed.
+
+The revised classifier must not use `Meta.isProp` as an eligibility test. It
+must record two independent axes: whether syntax is an executed call, reusable
+executable code, or retained syntax data; and the semantic kind of the enclosing
+declaration or command. Proof/computational status selects the declaration
+comparison rule, not whether the occurrence is translated.
 
 The fixture has two statically proof-valued declarations, three statically
 non-proof declarations, one reusable quotation, one retained quotation, one
-irreducible exclusion, one signature exclusion, two observed proof declarations,
-and two observed non-proof declarations. On the three representative Mathlib
-modules it classifies `EqToHom` as 27 proof-body and six non-proof occurrences,
-`Fintype/List` as six non-proof occurrences, and `PosPart` as three proof-body
-occurrences. The exact
+irreducible computational case, one signature/default case, two observed proof
+declarations, and two observed computational declarations. The exact
 `Mathlib.Tactic.ToDual.«commandTo_dual_insert_cast_:=_»` command path is a narrow
-static `in_scope_generated_proof_command` exception: its elaborator consumes the
-RHS as the proof value of a generated theorem. Quotations outside that exact
-path remain unclassified until execution evidence distinguishes use from
-retention. Mathlib parsing uses the same pure `Mathlib` grammar environment as
-inventory; the controlled fixture's extra grammar is loaded only for the
-fixture.
+static generated-command case: its elaborator consumes the RHS as the proof
+value of a generated theorem. The new classifier should handle this as one
+instance of command output rather than a proof-only eligibility exception.
+Quotations remain unresolved until execution evidence distinguishes executable
+code from retained syntax data. Mathlib parsing uses the same pure `Mathlib`
+grammar environment as inventory; the controlled fixture's extra grammar is
+loaded only for the fixture.
 
 `Experiment/simp_engine_boundary_corpus.py` now defines that boundary-native
 manifest and its fail-closed construction rules. It pins repository, Lean,
@@ -154,33 +170,36 @@ Dirty-repository and unclassified diagnostic allowances are explicit manifest
 fields. Policy enforcement also precedes atomic output replacement, so a
 rejected run cannot publish a newly generated manifest. Its bounded smoke gate
 builds the same three-module manifest twice and requires byte-identical output
-with the exact 30 eligible and 12 excluded occurrence partition. A separate
-targeted diagnostic over the existing pre-probe manifest closes the old 101
-unknowns as 38 static non-proof commands, 3 signature exclusions, 5 generated
-proof commands, and 55 dynamically observed proof declarations, with zero
-unclassified.
+with the historical proof-only 30/12 partition. A separate targeted diagnostic
+over the existing pre-probe manifest resolved 38 computational commands, 3
+signature/default occurrences, 5 generated proof commands, and 55 dynamically
+observed proof declarations, with zero unclassified under that older schema.
 
 That classifier was then used to generate
 `.lake/boundary-corpus-manifest/manifest-scope-closed-v2.json` (SHA-256
 `541a2d71f338e53b55335f76c699b14f8a2f12532b9a8cd865cbbd369e34ff25`).
 It covers all 8,264 pinned Mathlib module files and inventories 83,425
-occurrences: 69,403 eligible and 14,022 excluded, with zero unclassified. Its
-explicit policy is `allowDirty: true, allowUnclassified: false`; because the
-working repository was dirty, this is diagnostic evidence and must not be
-uploaded as the clean archival closure report. It predates the repair that
-added the Lean inventory executable to the implementation fingerprint, so the
-current consumer rejects it and a clean full manifest must be regenerated from
-the committed implementation.
+occurrences. Its 69,403 eligible and 14,022 excluded split encodes the obsolete
+proof-only rule. The old rule excluded 13,981 occurrences in computational
+declarations, 38 in special computational commands, and 3 in
+signatures/defaults. Those categories are no longer exclusions: every
+executable occurrence among them is now a translation candidate. The old
+classifier did not independently establish execution role, so the revised
+candidate count is unknown until it separates executable code from syntax
+retained only as data. The old manifest remains inventory evidence only and
+must not be used for product closure. It was also generated with
+`allowDirty: true` and predates the hardened implementation fingerprint, so the
+current consumer correctly rejects it.
 
 `Experiment/boundary_materialize_shard.py` is the first fail-closed consumer of
 current manifests. A fresh one-module repair-review
 `Mathlib/Algebra/AddConstMap/Basic.lean` canary has 17 total occurrences. It
-observes and materializes all nine eligible occurrences as nine successful
-boundary variants, retains exactly eight excluded occurrences, compiles, and
-proves that authored source bytes outside the replaced tactic ranges are
-unchanged. It preserves all authored binders without alpha-renaming. The
-pre-commit manifest and report are disposable; committing changes their pinned
-repository identity, so the durable run begins by regenerating them.
+materializes nine occurrences and retains eight computational occurrences under
+the obsolete classifier. The revised canary must materialize all 17, compile,
+and establish definitionally equal computational declaration values as well as
+equivalent call boundaries. The earlier run still proves exact authored-source
+preservation for the nine ranges it replaced, but it is not evidence for the
+new product scope.
 
 `Experiment/run.sh` retains the legacy regression checks and now also runs all
 boundary prototype commands. These are focused engineering gates, not a pinned
@@ -190,11 +209,14 @@ Once that path is accepted, the public `simp_engine_apply` syntax can move from
 schema-27 replay to boundary artifacts. Until then, code and reports must label
 the two implementations explicitly.
 
-The next engineering gaps are dependency-aware recording for the 66 reusable
-tactic-syntax occurrences, safe composition for the 91 nested occurrences,
-larger deterministic materialization shards, and any generic state-delta or
-external-effect cases exposed by those shards. The current runner rejects
-reusable syntax and nested/overlapping replacement ranges rather than guessing.
+The immediate engineering gaps are the sort-neutral classifier and manifest
+schema, a real definitional-equality boundary comparator, and declaration-value
+and environment-delta validation. The first revised gates must translate all 17
+`AddConstMap`, 33 `EqToHom`, 6 `Fintype/List`, and 7 `NonUnitalHom`
+occurrences. Dependency-aware recording for the 66 reusable tactic-syntax
+occurrences and safe composition for the 91 nested occurrences follow. The
+current runner rejects reusable syntax and nested/overlapping replacement
+ranges rather than guessing.
 
 ## Correctness contract
 
@@ -202,10 +224,11 @@ Let `S` be the state immediately before one dynamic source execution. Running
 the original tactic with stock pinned Lean either succeeds with state `S_stock`
 or fails transactionally. From the same `S`, the generated replacement must
 produce a continuation-compatible `S_apply`, or fail transactionally under the
-same selector conditions, without invoking simplification. The exact unchanged
-continuation must then elaborate and kernel-check.
+same selector conditions, without invoking simplification. The original
+continuation must then elaborate and kernel-check. This rule applies equally to
+proof-valued and computational declarations.
 
-### Continuation-visible state
+### Semantically observable call boundary
 
 `S_stock` and `S_apply` are continuation-compatible when there is a consistent
 renaming of fresh internal identifiers under which all of the following agree:
@@ -214,41 +237,61 @@ renaming of fresh internal identifiers under which all of the following agree:
    Diagnostic wording and simplifier statistics do not have to match.
 2. The ordered goal list has the same length. Corresponding target types are
    definitionally equal.
-3. Each corresponding goal has the same ordered local context: declaration
-   kind, binder information, user-facing name, type, and optional local value.
-   Types and values may differ only by definitional equality and the consistent
-   identifier renaming.
-4. Expression and universe metavariables that existed before the call have the
-   same assignment status and definitionally equal assignments. Assignments
-   induced by elaborating the generated proof are allowed when they produce the
-   same delta.
-5. Pre-existing postponed constraints or synthetic metavariables have
-   equivalent status whenever the unchanged continuation can observe them.
-6. Scoped options and continuation-visible environment extensions are expected
-   to remain unchanged. Elaborating a `simp` argument may create inaccessible
-   private helper declarations; the recorder inlines references to those helpers
-   into the closed artifact and restores the pre-call environment. Any persistent
-   environment or other Core/Meta change that an unchanged continuation can
-   observe is an `external_effect_failure` until that effect is represented and
+3. Each corresponding goal has the same ordered local context under the
+   permitted renaming: declaration kind, binder information, type, and optional
+   local value. Types and values may differ only by definitional equality and
+   the consistent identifier renaming. User-facing names should be preserved;
+   when necessary, a consistent alpha-renaming and the corresponding rewrite of
+   the continuation are allowed.
+4. Every expression or universe metavariable reachable from the pre-state, the
+   resulting goals, or the continuation has the same assignment status and a
+   definitionally equal assignment. Fresh reachable metavariables correspond
+   under the same renaming.
+5. Postponed constraints, synthetic metavariables, and pending elaboration work
+   have equivalent status whenever later elaboration can observe them.
+6. Scoped options and continuation-visible Core, Meta, Term, and environment
+   deltas agree. Elaborating a `simp` argument may create private helper
+   declarations; the artifact may inline and remove them only when no later
+   elaboration or generated declaration can observe the difference. Any other
+   persistent change is an `external_effect_failure` until represented and
    tested generically.
 
 Fresh goal, local, expression-metavariable, and universe-metavariable identities
 need not be numerically equal. Simplifier caches, rule search order, internal
 candidate rollback, used-theorem counters, messages and diagnostics, step
-counts, and simproc traces are outside the proof-state boundary.
+counts, and simproc traces are outside the semantic boundary. Raw source
+spelling and performance are also outside it, although preserving surrounding
+source is preferred. Syntax deliberately retained as data is an output value,
+not an executed call, and must remain semantically unchanged.
 
-The prototype must implement one canonical snapshot/comparison function for
-this contract. Successful compilation of the continuation—source-identical when
-possible and otherwise changed only by consistent binder alpha-renaming—is the
-end-to-end oracle, but it does not replace focused comparison tests for each
-listed field.
+The prototype must implement one paired-state comparator for this contract.
+Fingerprints and hashes may route variants and improve diagnostics, but they do
+not establish equality. Acceptance requires actual definitional-equality checks
+performed in an isolated comparison state so that checking cannot mutate either
+execution. Successful compilation of the continuation—source-identical when
+possible and otherwise changed only by consistent binder alpha-renaming—is an
+end-to-end oracle, but it does not replace comparison of every listed field.
 
 ### Declaration boundary and trust
 
-For each translated declaration:
+For every declaration or command affected by translation:
 
-- its type must be definitionally equal to the original declaration's type;
-- its proof must contain no unresolved metavariables or `sorryAx`;
+- its declaration kind, safety, reducibility, level parameters, and externally
+  visible attributes must agree with the original;
+- its type must be definitionally equal to the original type;
+- if its type is a proposition, any accepted proof is allowed by proof
+  irrelevance;
+- if its type is not a proposition, its elaborated value must be definitionally
+  equal to the original value; this includes functions and data containing
+  proof fields;
+- opaque and irreducible values must compare their underlying bodies before
+  sealing and retain the same opacity and compiler metadata;
+- generated commands must produce an equivalent environment delta, including
+  declarations, attributes, registrations, and scoped extensions;
+- unsafe or runtime-oriented declarations must retain the same elaborated value
+  and compiler-relevant metadata, with a dedicated runtime oracle whenever
+  kernel comparison cannot cover an observable behavior;
+- no result may contain unresolved metavariables or `sorryAx`;
 - its transitive axiom set must be a subset of the original declaration's axiom
   set; and
 - the generated source must compile with the pinned unmodified Lean kernel.
@@ -256,10 +299,12 @@ For each translated declaration:
 Fewer axiom dependencies are allowed. Any necessary exception to the subset
 rule must be explicitly reviewed and documented before corpus acceptance.
 
-For two proofs of the same proposition, Lean's proof irrelevance makes the proof
-bodies definitionally equal. The project therefore does not reproduce the
-original proof-term structure; it reproduces the proposition, accepted proof,
-and continuation-visible state at each replaced call.
+Definitional equality is intentionally stronger than propositional or pointwise
+equality because later type checking and computation may reduce the value. A
+future relaxation requires a separately reviewed observational-equivalence
+oracle. For two proofs of the same proposition, Lean's proof irrelevance makes
+the proof bodies definitionally equal, so original proof-term structure remains
+outside the contract.
 
 ## Boundary artifact and selection
 
@@ -275,7 +320,8 @@ variants. A successful variant contains:
 - the resulting ordered goals; and
 - explicit deltas for pre-existing expression/universe metavariables and any
   other supported continuation-visible effect not established by elaborating
-  the generated proof.
+  the generated evidence; and
+- any supported observable environment delta plus a boundary-contract version.
 
 A failure variant contains no post-state mutation and causes the replacement to
 fail so that unchanged tactic alternatives behave as before. Exact error text is
@@ -287,7 +333,8 @@ Selection must not construct a simp context or consult simp theorems, simproc
 registries, or dischargers. The initial selector key is:
 
 1. stable source occurrence ID (`module:startByte:endByte` hash);
-2. canonical fingerprint of the complete ordered pre-call goal/context state;
+2. canonical fingerprint of the complete observable pre-call elaboration state,
+   including relevant assignments and pending constraints;
 3. a deterministic fingerprint of the full scoped Lean option map; and
 4. stable caller identity: module and enclosing declaration.
 
@@ -308,8 +355,9 @@ stable in transformed source and computable without inspecting simp theorems,
 registries, dischargers, or operational state. A missing key fails closed as
 `boundary_variant_missing`.
 
-The final boundary fingerprint is defensive validation, not replay authority.
-It uses the same canonical comparison model as the prototype oracle.
+The final boundary fingerprint is defensive validation, not replay authority or
+equality evidence. After selection and application, the paired-state comparator
+must perform the definitional-equality checks specified above.
 
 ### Generated source shape
 
@@ -329,8 +377,8 @@ The preferred materialization leaves tactics before and after the replaced call
 byte-for-byte unchanged except for source-range composition. The current
 machine-oriented encoding uses deterministic declaration-index aliases for all
 locals so the same artifact works inside hygienic tactic quotations and after
-theorem-parameter alpha-renaming. A later readable renderer may retain authored
-names where safe. A translator may instead alpha-rename theorem parameters and
+declaration-parameter alpha-renaming. A later readable renderer may retain authored
+names where safe. A translator may instead alpha-rename declaration parameters and
 all of their references; that fallback must preserve
 binder order, binder information, and types, and the declaration-equivalence
 gate must accept it before the module is counted as translated. Surrounding
@@ -346,41 +394,48 @@ The initial product claim is deliberately pinned and closed-world. A complete
 run must:
 
 1. freeze the exact Mathlib module manifest, clean-build command, environment,
-   and scope-classification version in the run manifest;
-2. inventory every parsed `simp`/`simp only` node and produce a source-backed
-   classification of whether it belongs to the stated scope;
+   semantic-contract version, and classification version in the run manifest;
+2. inventory every parsed `simp`/`simp only` node and classify it as an executed
+   call, reusable executable code, retained syntax data, or unresolved;
 3. collect every dynamic execution seen while compiling every module in the
    frozen manifest;
-4. rewrite every in-scope source occurrence, including occurrences with no
-   observed execution;
+4. rewrite every executable source occurrence, independent of whether its
+   enclosing declaration is proof-valued, including executable occurrences with
+   no observed execution;
 5. give observed executions unambiguous boundary variants;
 6. give an unobserved occurrence an explicit fail-closed replacement that
    raises `boundary_occurrence_unobserved` if it unexpectedly executes;
 7. compile the complete translated tree with the original continuations;
-8. report a syntax-aware zero count of remaining in-scope source occurrences;
-   and
-9. archive the inventory, classifications, compilation result, declaration
-   checks, and remaining-call audit.
+8. compare every affected declaration value and environment delta under the
+   declaration-boundary rules;
+9. report a syntax-aware zero count of remaining executable `simp` calls while
+   separately preserving retained syntax data; and
+10. archive the inventory, classifications, compilation result, declaration
+    checks, environment checks, and remaining-call audit.
 
 Scope closure uses a source-backed, two-phase probe for only the occurrences
 left unclassified by the static pass. The temporary copy replaces each selected
 `simp` head with an ID-carrying standalone probe, disables asynchronous body
 elaboration with global `set_option Elab.async false`, and appends a report
 command after the original source. The report groups repeated executions,
-resolves the final declaration type, and records `Meta.isProp` evidence; it
-does not inspect simplifier internals. Anonymous `example` commands are
+resolves the final declaration, and records its semantic kind, including
+`Meta.isProp`, safety, reducibility, and command context; these facts select a
+comparison rule rather than eligibility. It does not inspect simplifier
+internals. Anonymous `example` commands are
 temporarily renamed to private definitions so their final types survive
 elaboration. Missing/extra IDs, missing callers or types, missing execution,
-and mixed proof/non-proof observations remain unclassified. The exact
-`Mathlib.Tactic.ToDual.«commandTo_dual_insert_cast_:=_»` command is separately
-classified as a generated proof command because its elaborator consumes its RHS
-as a generated theorem proof; this is not a general caller-null fallback.
+and conflicting execution roles remain unresolved. Generated commands require
+explicit environment-delta classification; there is no proof-only exception.
 
 An occurrence may be classified as `materialized`, `expected_failure`,
-`unobserved`, `out_of_scope_quotation`, `printer_failure`,
-`ambiguous_boundary_variant`, or `external_effect_failure`. Only the first four
-may appear in a successful pinned closure, and every exclusion must retain a
-source range and reason.
+`unobserved_executable`, `retained_syntax_data`, `printer_failure`,
+`ambiguous_boundary_variant`, `external_effect_failure`,
+`declaration_value_mismatch`, or `environment_delta_mismatch`. Only the first
+four may appear in a successful pinned closure. Retained syntax data must keep
+its observable value and is not counted as a remaining call. If surrounding
+replacements shift its source locations, the normal declaration and environment
+checks must show that no semantic output changed; otherwise the renderer must
+preserve the relevant positions or the closure fails.
 
 This claim does not promise that a translated reusable tactic supports new
 downstream states. Encountering an unrecorded state fails closed and requires a
@@ -396,10 +451,12 @@ Build the smallest end-to-end implementation against stock Lean:
    expressions, transport proofs, terminals, and persistent assignment delta.
 4. Restore the exact pre-call state.
 5. Apply the captured transformation through the new apply-only module.
-6. Compare the stock and apply snapshots with the canonical boundary comparator.
+6. Compare the stock and apply states with the paired definitional-equality
+   comparator; use fingerprints only for selection and diagnostics.
 7. Resume the original continuation, unchanged when possible and otherwise
    changed only by consistent binder alpha-renaming.
-8. Compare declaration types and transitive axiom sets.
+8. Compare affected declaration types, non-`Prop` values, environment deltas,
+   safety/reducibility metadata, and transitive axiom sets.
 
 The focused matrix must cover:
 
@@ -417,7 +474,13 @@ The focused matrix must cover:
 - pre-existing postponed constraints or synthetic metavariables;
 - custom dischargers and representative large/shared simproc outputs; and
 - a continuation, unchanged except for any required binder alpha-renaming, that
-  consumes every transformed boundary feature.
+  consumes every transformed boundary feature;
+- a transparent computational definition whose value is definitionally equal;
+- a non-`Prop` structure containing proof and computational fields;
+- declaration-signature/default, generated-command, opaque/irreducible, and
+  runtime-oriented cases; and
+- a negative case whose transformed declaration compiles but has a
+  non-definitionally-equal computational value.
 
 ### Prototype acceptance gate
 
@@ -426,7 +489,9 @@ must establish:
 
 - focused snapshot equivalence for every contract field;
 - successful compilation with the original continuation unchanged;
-- definitionally equal declaration types and the axiom-subset rule;
+- actual, non-hash definitional equality at the call boundary;
+- definitionally equal declaration types and non-`Prop` values, equivalent
+  environment deltas, and the axiom-subset rule;
 - rejection of missing, ambiguous, mutated, and wrong-option variants; and
 - apply-path independence from simplification.
 
@@ -470,28 +535,31 @@ discharger strategy, and simproc traces are not acceptance conditions.
 
 ## Roadmap
 
-1. Implement and review the focused boundary prototype and active gate.
-2. Stabilize the boundary comparator, selector, artifact schema, and failure
-   classifications from measured focused cases.
-3. Produce readable, stable source for results, proof terms, local references,
-   universes, instances, and explicit assignment deltas.
-4. Adapt the source harness into a deterministic translator that replaces the
-   complete tactic occurrence while preserving the enclosing proof body.
-5. Run module-scale and then full pinned-corpus recording/materialization,
-   closing printer, ambiguity, and external-effect failures from measurements.
-6. Require zero remaining in-scope calls, compile the full translated tree, run
-   declaration type/axiom checks, and archive the closure report.
-7. Generalize boundary artifacts for reusable downstream contexts where demand
-   justifies it.
-8. Improve `simp_engine_apply` arguments toward maximally human-readable source
-   without weakening kernel, axiom, selector, or boundary checks.
+1. Replace proof-only eligibility with execution-role and declaration-kind
+   classification; make all executable computational occurrences candidates.
+2. Replace hash equality in the boundary oracle with a paired-state
+   definitional-equality comparator and complete observable pre/post state.
+3. Add declaration-value and environment-delta comparison, including opaque,
+   irreducible, generated-command, and runtime-oriented cases.
+4. Revise the representative gates to transform all 17 `AddConstMap`, 33
+   `EqToHom`, 6 `Fintype/List`, and 7 `NonUnitalHom` occurrences.
+5. Stabilize the selector, artifact schema, failure classifications, readable
+   source, local references, universes, instances, and explicit deltas from
+   those measurements.
+6. Add dependency-aware reusable tactic handling and safe nested-range
+   composition, then run increasingly large deterministic shards.
+7. Require zero remaining executable calls, compile the full translated tree,
+   compare declaration values/environment/axioms, and archive the closure
+   report.
+8. Generalize boundary artifacts for future downstream states where demand
+   justifies it, then improve arguments toward maximally human-readable source
+   without weakening semantic checks.
 
 Durable report procedures are in [REPORTS.md](REPORTS.md). The focused boundary,
 selector, conservative scope-classification, ID-carrying execution probe, and
 explicitly authorized unobserved paths now support the measured cases and are
 integrated in the representative translators. The deterministic manifest
-format, bounded smoke gate, and targeted old-unknown closure are in place; the
-full pinned diagnostic manifest and one exact-source-preserving materialization
-canary are also complete. The immediate milestone is designing dependency-aware
-handling for reusable tactic syntax, then scaling deterministic shards while
-closing nested-range and measured boundary failures.
+format, bounded smoke gate, and targeted old-unknown closure are in place, but
+their proof-only eligible/excluded partition is obsolete. The immediate
+milestone is the revised classifier, true definitional-equality comparator, and
+computational declaration oracle before reusable/nested corpus scaling resumes.
