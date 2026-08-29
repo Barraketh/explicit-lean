@@ -98,9 +98,9 @@ definitional, unchanged, target-closing, local-`False`, authored-hypothesis,
 dependent-context, and source-materialization behavior. An earlier broad
 `Mathlib/Data/Fintype/List.lean` round trip covers a committed `ExistsAndEq`
 result without a declaration-specific apply model. Its six calls are in
-computational declarations, so the obsolete proof-only gate retains them. The
-revised gate must replace all six and compare the resulting declaration values
-by definitional equality. The scope-aware
+computational declarations; the schema-2 representative gate now replaces all
+six and compiles the result. Definitionally equal declaration-value comparison
+is still required before this becomes semantic acceptance evidence. The scope-aware
 `Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean` round trip covers
 all three calls, including a large `Matrix.cons_val` result and one
 occurrence with four selected boundary variants. A focused custom discharger
@@ -117,9 +117,9 @@ the final declaration comparison rule; it does not determine eligibility. The
 probe intentionally does not record simproc order, registry state, or other
 simplifier internals. The pinned
 diagnostic closes the old 101 scope unknowns, and the regenerated full diagnostic
-manifest classifies all 83,425 occurrences with zero unknowns. One bounded
-`AddConstMap/Basic` canary materializes nine calls and retains eight computational
-calls under the obsolete classifier; the revised canary must materialize all 17.
+manifest classifies all 83,425 occurrences with zero unknowns. The schema-2
+`AddConstMap/Basic` canary materializes all 17 calls and compiles; it still needs
+the declaration-value oracle before it is semantic acceptance evidence.
 The full diagnostic predates the hardened implementation fingerprint and must
 be regenerated with execution-role classification. These results do not change
 the simproc stress-test scope or claim full-corpus materialization.

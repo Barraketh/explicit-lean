@@ -41,13 +41,14 @@ example : Nat := by
   simp (config := { failIfUnchanged := false }) only
   exact 0
 
--- The proof field belongs to a computational irreducible definition and is
--- excluded by the static command ancestry rule.
+-- The proof field belongs to a computational irreducible definition.  The
+-- scope classifier must still treat its `simp` as an executable computation.
 irreducible_def scopeIrreducible : ScopeRecord :=
   { value := 0
     proof := by simp }
 
--- This tactic is part of a declaration signature, not a proof body.
+-- This tactic is part of a declaration signature/default, not a proof body;
+-- it is still executable syntax and therefore remains a materialize candidate.
 variable (scopeVariableSignature : Nat := by simp)
 
 -- A generated theorem is elaborated by a nested command quotation. The

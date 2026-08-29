@@ -2,10 +2,10 @@
 """Run a bounded, manifest-driven Boundary materialization shard.
 
 The manifest is the authority for scope classification.  This runner only
-consumes selected, source-verified modules: it records eligible tactic calls
-in a disposable module-root copy, groups the resulting Boundary artifacts,
-materializes the complete eligible ranges, and checks that excluded syntax is
-the only supported simp syntax left in the generated copy.
+consumes selected, source-verified modules: it records materializable tactic
+calls in a disposable module-root copy, groups the resulting Boundary
+artifacts, materializes the complete materialize ranges, and checks that
+retained syntax is the only supported simp syntax left in the generated copy.
 """
 
 from __future__ import annotations
@@ -34,9 +34,9 @@ from check_simp_engine_boundary_source import (
 ROOT = Path(__file__).resolve().parents[1]
 MATHLIB = corpus.MATHLIB
 MANIFEST_KIND = "simp_engine_boundary_manifest"
-MANIFEST_SCHEMA = 1
+MANIFEST_SCHEMA = 2
 REPORT_KIND = "simp_engine_boundary_materialization_shard"
-REPORT_SCHEMA = 1
+REPORT_SCHEMA = 2
 ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 BOUNDARY_DEBUG_ROOT = ROOT / ".lake" / "boundary-materialization"
 
@@ -265,8 +265,8 @@ class SelectedModule:
     source_path: Path
     source: bytes
     occurrences: tuple[dict[str, Any], ...]
-    eligible: tuple[dict[str, Any], ...]
-    excluded: tuple[dict[str, Any], ...]
+    materialize: tuple[dict[str, Any], ...]
+    retain: tuple[dict[str, Any], ...]
 
 
 def _validate_occurrence(
@@ -301,26 +301,19 @@ def _validate_occurrence(
             f"{syntax_kind!r} != {expected_syntax_kind!r}"
         )
     inventory.validate_occurrence(source, result)
-    classification = _require_string(
-        result.get("classification"), f"{module} occurrence classification"
+    execution_role = _require_string(
+        result.get("executionRole"), f"{module} occurrence executionRole"
     )
-    disposition = _require_string(
-        result.get("disposition"), f"{module} occurrence disposition"
+    declaration_kind = _require_string(
+        result.get("declarationKind"), f"{module} occurrence declarationKind"
     )
-    if classification not in (
-        corpus.ELIGIBLE_CLASSIFICATIONS | corpus.EXCLUDED_CLASSIFICATIONS
-    ):
+    action = _require_string(result.get("action"), f"{module} occurrence action")
+    try:
+        scope.validate_scope_dimensions(execution_role, declaration_kind, action)
+    except RuntimeError as error:
         raise RuntimeError(
-            f"manifest occurrence has an unclassified/unknown classification in "
-            f"{module}:{start}: {classification!r}"
-        )
-    expected_disposition = corpus.classification_disposition(classification)
-    if disposition != expected_disposition:
-        raise RuntimeError(
-            f"manifest occurrence classification/disposition disagreement in "
-            f"{module}:{start}: {classification!r} -> {disposition!r}, "
-            f"expected {expected_disposition!r}"
-        )
+            f"manifest occurrence has invalid scope dimensions in {module}:{start}: {error}"
+        ) from error
     return result
 
 
@@ -329,16 +322,20 @@ def validate_manifest_selection(
     selected_names: list[str],
     *,
     expect_total: int | None,
-    expect_eligible: int | None,
+    expect_materialize: int | None,
 ) -> list[SelectedModule]:
+    try:
+        corpus.enforce_manifest_policy(manifest)
+    except RuntimeError as error:
+        raise RuntimeError(f"boundary manifest policy validation failed: {error}") from error
     if manifest.get("reportSchema") != MANIFEST_SCHEMA:
         raise RuntimeError(
             f"unsupported boundary manifest schema: {manifest.get('reportSchema')!r}"
         )
     if manifest.get("kind") != MANIFEST_KIND:
         raise RuntimeError(f"unexpected boundary manifest kind: {manifest.get('kind')!r}")
-    if manifest.get("allowUnclassified") is not False:
-        raise RuntimeError("boundary materialization requires allowUnclassified=false")
+    if manifest.get("allowUnresolved") is not False:
+        raise RuntimeError("boundary materialization requires allowUnresolved=false")
 
     modules = manifest.get("modules")
     if not isinstance(modules, list):
@@ -354,30 +351,43 @@ def validate_manifest_selection(
     declared_total = _require_int(
         manifest.get("occurrenceCount"), "manifest occurrenceCount", nonnegative=True
     )
-    declared_classifications = _validate_count_map(
-        manifest.get("countsByClassification"),
-        "countsByClassification",
-        corpus.ELIGIBLE_CLASSIFICATIONS | corpus.EXCLUDED_CLASSIFICATIONS,
+    declared_execution_roles = _validate_count_map(
+        manifest.get("countsByExecutionRole"),
+        "countsByExecutionRole",
+        corpus.EXECUTION_ROLES,
     )
-    declared_dispositions = _validate_count_map(
-        manifest.get("countsByDisposition"),
-        "countsByDisposition",
-        {"eligible", "excluded"},
+    declared_declaration_kinds = _validate_count_map(
+        manifest.get("countsByDeclarationKind"),
+        "countsByDeclarationKind",
+        corpus.DECLARATION_KINDS,
     )
-    if sum(declared_classifications.values()) != declared_total:
+    declared_actions = _validate_count_map(
+        manifest.get("countsByAction"),
+        "countsByAction",
+        corpus.ACTIONS,
+    )
+    if sum(declared_execution_roles.values()) != declared_total:
         raise RuntimeError(
-            "manifest classification counts do not sum to occurrenceCount: "
-            f"{declared_classifications} != {declared_total}"
+            "manifest execution-role counts do not sum to occurrenceCount: "
+            f"{declared_execution_roles} != {declared_total}"
         )
-    if sum(declared_dispositions.values()) != declared_total:
+    if sum(declared_declaration_kinds.values()) != declared_total:
         raise RuntimeError(
-            "manifest disposition counts do not sum to occurrenceCount: "
-            f"{declared_dispositions} != {declared_total}"
+            "manifest declaration-kind counts do not sum to occurrenceCount: "
+            f"{declared_declaration_kinds} != {declared_total}"
+        )
+    if sum(declared_actions.values()) != declared_total:
+        raise RuntimeError(
+            "manifest action counts do not sum to occurrenceCount: "
+            f"{declared_actions} != {declared_total}"
         )
 
-    module_records: dict[str, dict[str, Any]] = {}
-    actual_classifications: Counter[str] = Counter()
-    actual_dispositions: Counter[str] = Counter()
+    module_records: dict[
+        str, tuple[dict[str, Any], Path, bytes, tuple[dict[str, Any], ...]]
+    ] = {}
+    actual_execution_roles: Counter[str] = Counter()
+    actual_declaration_kinds: Counter[str] = Counter()
+    actual_actions: Counter[str] = Counter()
     seen_occurrence_ids: set[str] = set()
     all_occurrences = 0
     for raw_module in modules:
@@ -397,169 +407,138 @@ def validate_manifest_selection(
         expected_module_hash = sha256(module.encode("utf-8"))
         if raw_module.get("moduleHash") != expected_module_hash:
             raise RuntimeError(f"manifest module hash mismatch for {module}")
+        source_path = (MATHLIB / Path(*module.split("/"))).resolve()
+        try:
+            source_path.relative_to(MATHLIB.resolve())
+        except ValueError as error:
+            raise RuntimeError(
+                f"manifest Mathlib source escapes the pinned package: {module}"
+            ) from error
+        if not source_path.is_file():
+            raise RuntimeError(f"manifest Mathlib source is missing: {source_path}")
+        source = source_path.read_bytes()
+        expected_source_hash = _require_string(
+            raw_module.get("sourceHash"), f"manifest sourceHash for {module}"
+        )
+        actual_source_hash = sha256(source)
+        if actual_source_hash != expected_source_hash:
+            raise RuntimeError(
+                f"manifest source hash mismatch for {module}: "
+                f"{actual_source_hash} != {expected_source_hash}"
+            )
         occurrences = raw_module.get("occurrences")
         if not isinstance(occurrences, list):
             raise RuntimeError(f"manifest occurrences must be an array for {module}")
         all_occurrences += len(occurrences)
+        checked_occurrences: list[dict[str, Any]] = []
         for occurrence in occurrences:
-            classification = (
-                occurrence.get("classification")
-                if isinstance(occurrence, dict)
-                else None
-            )
-            disposition = (
-                occurrence.get("disposition") if isinstance(occurrence, dict) else None
-            )
-            checked_classification = _require_string(
-                classification, f"{module} occurrence classification"
-            )
-            checked_disposition = _require_string(
-                disposition, f"{module} occurrence disposition"
-            )
-            # Validate the manifest authority even for unselected modules.  We
-            # do not read their source here; selected source/range validation is
-            # performed below after the complete partition is checked.
-            if checked_classification not in (
-                corpus.ELIGIBLE_CLASSIFICATIONS | corpus.EXCLUDED_CLASSIFICATIONS
-            ):
-                raise RuntimeError(
-                    f"manifest contains unclassified occurrence in {module}: "
-                    f"{checked_classification!r}"
-                )
-            occurrence_id = _require_string(
-                occurrence.get("id") if isinstance(occurrence, dict) else None,
-                f"{module} occurrence id",
-            )
+            checked = _validate_occurrence(module, source, occurrence)
+            checked_occurrences.append(checked)
+            occurrence_id = str(checked["id"])
             if occurrence_id in seen_occurrence_ids:
                 raise RuntimeError(f"manifest contains duplicate occurrence ID: {occurrence_id}")
             seen_occurrence_ids.add(occurrence_id)
-            if isinstance(occurrence, dict):
-                start = _require_int(
-                    occurrence.get("startByte"),
-                    f"{module} occurrence startByte",
-                )
-                end = _require_int(
-                    occurrence.get("endByte"),
-                    f"{module} occurrence endByte",
-                )
-                if not 0 <= start < end:
-                    raise RuntimeError(
-                        f"manifest occurrence has an invalid range in {module}: "
-                        f"{start}:{end}"
-                    )
-                expected_id = inventory.occurrence_id(module, start, end)
-                if occurrence_id != expected_id:
-                    raise RuntimeError(
-                        f"manifest occurrence ID mismatch in {module}: "
-                        f"{occurrence_id} != {expected_id}"
-                    )
-            expected_disposition = corpus.classification_disposition(checked_classification)
-            if checked_disposition != expected_disposition:
-                raise RuntimeError(
-                    f"manifest classification/disposition disagreement in {module}: "
-                    f"{checked_classification!r} -> {checked_disposition!r}"
-                )
-            actual_classifications[checked_classification] += 1
-            actual_dispositions[checked_disposition] += 1
-        module_records[module] = raw_module
+            actual_execution_roles[str(checked["executionRole"])] += 1
+            actual_declaration_kinds[str(checked["declarationKind"])] += 1
+            actual_actions[str(checked["action"])] += 1
+        module_records[module] = (
+            raw_module,
+            source_path,
+            source,
+            tuple(checked_occurrences),
+        )
 
     if all_occurrences != declared_total:
         raise RuntimeError(
             f"manifest occurrence records do not sum to occurrenceCount: "
             f"{all_occurrences} != {declared_total}"
         )
-    if dict(sorted(actual_classifications.items())) != dict(
-        sorted(declared_classifications.items())
+    if dict(sorted(actual_execution_roles.items())) != dict(
+        sorted(declared_execution_roles.items())
     ):
         raise RuntimeError(
-            f"manifest classification counts disagree with occurrence records: "
-            f"{dict(actual_classifications)} != {declared_classifications}"
+            f"manifest execution-role counts disagree with occurrence records: "
+            f"{dict(actual_execution_roles)} != {declared_execution_roles}"
         )
-    if dict(sorted(actual_dispositions.items())) != dict(
-        sorted(declared_dispositions.items())
+    if dict(sorted(actual_declaration_kinds.items())) != dict(
+        sorted(declared_declaration_kinds.items())
     ):
         raise RuntimeError(
-            f"manifest disposition counts disagree with occurrence records: "
-            f"{dict(actual_dispositions)} != {declared_dispositions}"
+            f"manifest declaration-kind counts disagree with occurrence records: "
+            f"{dict(actual_declaration_kinds)} != {declared_declaration_kinds}"
+        )
+    if dict(sorted(actual_actions.items())) != dict(
+        sorted(declared_actions.items())
+    ):
+        raise RuntimeError(
+            f"manifest action counts disagree with occurrence records: "
+            f"{dict(actual_actions)} != {declared_actions}"
         )
 
     if len(selected_names) != len(set(selected_names)):
         raise RuntimeError(f"selected modules must be unique: {selected_names}")
     if not selected_names:
         raise RuntimeError("at least one --module is required")
-    if expect_total is not None or expect_eligible is not None:
+    if expect_total is not None or expect_materialize is not None:
         if len(selected_names) != 1:
             raise RuntimeError(
-                "--expect-total/--expect-eligible are only valid for one selected module"
+                "--expect-total/--expect-materialize are only valid for one selected module"
             )
 
     result: list[SelectedModule] = []
     for module in selected_names:
-        record = module_records.get(module)
-        if record is None:
+        validated = module_records.get(module)
+        if validated is None:
             raise RuntimeError(
                 f"selected module does not occur exactly once in manifest: {module}"
             )
-        source_path = (MATHLIB / Path(*module.split("/"))).resolve()
-        try:
-            source_path.relative_to(MATHLIB.resolve())
-        except ValueError as error:
-            raise RuntimeError(
-                f"selected Mathlib source escapes the pinned package: {module}"
-            ) from error
-        if not source_path.is_file():
-            raise RuntimeError(f"selected Mathlib source is missing: {source_path}")
-        source = source_path.read_bytes()
-        expected_source_hash = _require_string(
-            record.get("sourceHash"), f"manifest sourceHash for {module}"
-        )
-        actual_source_hash = sha256(source)
-        if actual_source_hash != expected_source_hash:
-            raise RuntimeError(
-                f"selected source hash mismatch for {module}: "
-                f"{actual_source_hash} != {expected_source_hash}"
-            )
-        raw_occurrences = record.get("occurrences")
-        assert isinstance(raw_occurrences, list)
-        checked_occurrences = [
-            _validate_occurrence(module, source, occurrence)
-            for occurrence in raw_occurrences
-        ]
+        _record, source_path, source, checked_occurrence_tuple = validated
+        checked_occurrences = list(checked_occurrence_tuple)
         _assert_nonoverlapping(checked_occurrences, module)
         reusable = [
             occurrence
             for occurrence in checked_occurrences
-            if occurrence["classification"] == "reusable_tactic_syntax"
+            if occurrence["executionRole"] == "reusable_executable"
         ]
         if reusable:
             ids = [str(occurrence["id"]) for occurrence in reusable]
             raise RuntimeError(
-                f"selected module contains reusable_tactic_syntax, which this "
+                f"selected module contains reusable_executable, which this "
                 f"runner does not support: {module}: {ids}"
             )
-        eligible = tuple(
+        materialize = tuple(
             occurrence
             for occurrence in checked_occurrences
-            if occurrence["disposition"] == "eligible"
+            if occurrence["action"] == "materialize"
         )
-        excluded = tuple(
+        retain = tuple(
             occurrence
             for occurrence in checked_occurrences
-            if occurrence["disposition"] == "excluded"
+            if occurrence["action"] == "retain"
         )
-        if not eligible:
+        unresolved = tuple(
+            occurrence
+            for occurrence in checked_occurrences
+            if occurrence["action"] == "unresolved"
+        )
+        if unresolved:
+            ids = [str(occurrence["id"]) for occurrence in unresolved]
             raise RuntimeError(
-                f"selected module has no eligible occurrences to materialize: {module}"
+                f"selected module contains unresolved occurrences: {module}: {ids}"
+            )
+        if not materialize:
+            raise RuntimeError(
+                f"selected module has no materialize occurrences: {module}"
             )
         if expect_total is not None and expect_total != len(checked_occurrences):
             raise RuntimeError(
                 f"--expect-total mismatch for {module}: expected {expect_total}, "
                 f"found {len(checked_occurrences)}"
             )
-        if expect_eligible is not None and expect_eligible != len(eligible):
+        if expect_materialize is not None and expect_materialize != len(materialize):
             raise RuntimeError(
-                f"--expect-eligible mismatch for {module}: expected {expect_eligible}, "
-                f"found {len(eligible)}"
+                f"--expect-materialize mismatch for {module}: expected {expect_materialize}, "
+                f"found {len(materialize)}"
             )
         result.append(
             SelectedModule(
@@ -568,8 +547,8 @@ def validate_manifest_selection(
                 source_path=source_path,
                 source=source,
                 occurrences=tuple(checked_occurrences),
-                eligible=eligible,
-                excluded=excluded,
+                materialize=materialize,
+                retain=retain,
             )
         )
     return result
@@ -667,11 +646,11 @@ def _assert_context_gaps(
 
 
 def instrumented_source(
-    source: bytes, eligible: list[dict[str, Any]]
+    source: bytes, materialize: list[dict[str, Any]]
 ) -> bytes:
     rewritten = inventory.rewrite_simp_heads(
         source,
-        eligible,
+        materialize,
         lambda entry: f'simp_engine_boundary_record "{entry["id"]}"',
     )
     return _inject_import(rewritten, "ExplicitLean.SimpEngine.Boundary")
@@ -770,12 +749,12 @@ def _module_result(
     module_slug = _sanitize_stem(selected.module.removeprefix("Mathlib/").removesuffix(".lean"))
     module_root = debug_root / module_slug
     original_path = _copy_at_module_root(module_root / "original", selected.module, selected.source)
-    instrumented = instrumented_source(selected.source, list(selected.eligible))
+    instrumented = instrumented_source(selected.source, list(selected.materialize))
     instrumented_path = _copy_at_module_root(module_root / "instrumented", selected.module, instrumented)
     _assert_context_gaps(
         selected.source,
         instrumented,
-        selected.eligible,
+        selected.materialize,
         imported="ExplicitLean.SimpEngine.Boundary",
         label=f"instrumented source {selected.module}",
     )
@@ -792,7 +771,7 @@ def _module_result(
     report_list = _parse_artifact_reports(instrumented_output)
     for report in report_list:
         _reject_forbidden_generated_text(report, f"artifact report for {selected.module}")
-    expected_ids = [str(entry["id"]) for entry in selected.eligible]
+    expected_ids = [str(entry["id"]) for entry in selected.materialize]
     observed_ids = {
         str(report["occurrence"])
         for report in report_list
@@ -815,7 +794,7 @@ def _module_result(
 
     materialized = replace_all_occurrences(
         selected.source,
-        list(selected.eligible),
+        list(selected.materialize),
         report_variants,
     )
     materialized = _inject_import(
@@ -827,7 +806,7 @@ def _module_result(
     _assert_context_gaps(
         selected.source,
         materialized,
-        selected.eligible,
+        selected.materialize,
         imported="ExplicitLean.SimpEngine.Boundary.Tactic",
         label=f"materialized source {selected.module}",
     )
@@ -850,16 +829,16 @@ def _module_result(
         )
         if entry["kind"] in inventory.SUPPORTED_KINDS
     ]
-    expected_excluded = Counter(
-        (str(entry["kind"]), str(entry["source"])) for entry in selected.excluded
+    expected_retained = Counter(
+        (str(entry["kind"]), str(entry["source"])) for entry in selected.retain
     )
     actual_remaining = Counter(
         (str(entry["kind"]), str(entry["source"])) for entry in remaining
     )
-    if actual_remaining != expected_excluded:
+    if actual_remaining != expected_retained:
         raise RuntimeError(
-            f"materialized syntax inventory differs from manifest-excluded inventory "
-            f"in {selected.module}: expected {expected_excluded}, found {actual_remaining}; "
+            f"materialized syntax inventory differs from manifest-retained inventory "
+            f"in {selected.module}: expected {expected_retained}, found {actual_remaining}; "
             f"generated source: {materialized_path}"
         )
 
@@ -885,12 +864,12 @@ def _module_result(
     unobserved_ordered = [occurrence_id for occurrence_id in expected_ids if occurrence_id in unobserved_ids]
     exact_preservation = {
         "verified": True,
-        "eligibleRangesReplaced": True,
-        "outsideEligibleRanges": "byte-identical",
+        "materializeRangesReplaced": True,
+        "outsideMaterializeRanges": "byte-identical",
         "authoredBindersPreserved": True,
         "alphaRenaming": False,
         "statement": (
-            "All authored source bytes outside whole eligible tactic ranges are "
+            "All authored source bytes outside whole materialize tactic ranges are "
             "byte-identical; only the selected ranges and the Boundary import "
             "are generated, with authored binders and surrounding source preserved."
         ),
@@ -925,10 +904,10 @@ def _module_result(
             "sha256": report_hash,
         },
         "totalCount": len(selected.occurrences),
-        "eligibleCount": len(selected.eligible),
-        "excludedCount": len(selected.excluded),
-        "eligibleIds": expected_ids,
-        "excludedIds": [str(entry["id"]) for entry in selected.excluded],
+        "materializeCount": len(selected.materialize),
+        "retainCount": len(selected.retain),
+        "materializeIds": expected_ids,
+        "retainIds": [str(entry["id"]) for entry in selected.retain],
         "observedIds": observed_ordered,
         "unobservedIds": unobserved_ordered,
         "executionReportCount": len(report_list),
@@ -936,8 +915,8 @@ def _module_result(
         "variantCounts": variant_counts,
         "executionStatusCounts": dict(sorted(execution_status_counts.items())),
         "variantStatusCounts": dict(sorted(variant_status_counts.items())),
-        "remainingExcludedCount": len(remaining),
-        "remainingExcludedMultiset": {
+        "remainingRetainedCount": len(remaining),
+        "remainingRetainedMultiset": {
             f"{kind}\u0000{source}": count
             for (kind, source), count in sorted(actual_remaining.items())
         },
@@ -979,7 +958,7 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         manifest,
         list(args.module),
         expect_total=args.expect_total,
-        expect_eligible=args.expect_eligible,
+        expect_materialize=args.expect_materialize,
     )
     runner_path = Path(__file__).resolve()
     runner_hash = sha256(runner_path.read_bytes())
@@ -1014,12 +993,12 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         aggregate_variant_status.update(module["variantStatusCounts"])
         aggregate_variant_count += int(module["variantCount"])
         aggregate_execution_count += int(module["executionReportCount"])
-        aggregate_remaining += int(module["remainingExcludedCount"])
+        aggregate_remaining += int(module["remainingRetainedCount"])
         observed_ids.extend(str(value) for value in module["observedIds"])
         unobserved_ids.extend(str(value) for value in module["unobservedIds"])
     total_count = sum(int(module["totalCount"]) for module in module_results)
-    eligible_count = sum(int(module["eligibleCount"]) for module in module_results)
-    excluded_count = sum(int(module["excludedCount"]) for module in module_results)
+    materialize_count = sum(int(module["materializeCount"]) for module in module_results)
+    retain_count = sum(int(module["retainCount"]) for module in module_results)
     report = {
         "kind": REPORT_KIND,
         "reportSchema": REPORT_SCHEMA,
@@ -1029,7 +1008,7 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         "manifest": {"path": str(manifest_path), "sha256": sha256(manifest_bytes)},
         "manifestPolicy": {
             "allowDirty": manifest.get("allowDirty"),
-            "allowUnclassified": manifest.get("allowUnclassified"),
+            "allowUnresolved": manifest.get("allowUnresolved"),
         },
         "provenance": {
             "repositoryCommit": provenance["repositoryCommit"],
@@ -1047,15 +1026,15 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         "selectedModules": [item.module for item in selected],
         "modules": module_results,
         "totalCount": total_count,
-        "eligibleCount": eligible_count,
-        "excludedCount": excluded_count,
+        "materializeCount": materialize_count,
+        "retainCount": retain_count,
         "observedIds": observed_ids,
         "unobservedIds": unobserved_ids,
         "executionReportCount": aggregate_execution_count,
         "variantCount": aggregate_variant_count,
         "executionStatusCounts": dict(sorted(aggregate_execution_status.items())),
         "variantStatusCounts": dict(sorted(aggregate_variant_status.items())),
-        "remainingExcludedCount": aggregate_remaining,
+        "remainingRetainedCount": aggregate_remaining,
         "exactSourcePreservation": {
             "verified": all(
                 bool(module["exactSourcePreservation"]["verified"])
@@ -1064,7 +1043,7 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
             "alphaRenaming": False,
             "statement": (
                 "Every selected module preserved authored source bytes outside whole "
-                "eligible tactic ranges exactly; authored binders and surrounding "
+                "materialize tactic ranges exactly; authored binders and surrounding "
                 "source were not alpha-renamed."
             ),
         },
@@ -1072,13 +1051,13 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         "aggregate": {
             "selectedModuleCount": len(module_results),
             "totalCount": total_count,
-            "eligibleCount": eligible_count,
-            "excludedCount": excluded_count,
+            "materializeCount": materialize_count,
+            "retainCount": retain_count,
             "observedCount": len(observed_ids),
             "unobservedCount": len(unobserved_ids),
             "executionReportCount": aggregate_execution_count,
             "variantCount": aggregate_variant_count,
-            "remainingExcludedCount": aggregate_remaining,
+            "remainingRetainedCount": aggregate_remaining,
         },
     }
     _atomic_write_json(output_path, report)
@@ -1095,7 +1074,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--module", action="append", required=True, help="Mathlib module path")
     result.add_argument("--expect-total", type=int)
-    result.add_argument("--expect-eligible", type=int)
+    result.add_argument("--expect-materialize", type=int)
     result.add_argument("--timeout", type=int, default=600)
     return result
 
@@ -1105,7 +1084,7 @@ def main() -> None:
     if args.timeout <= 0:
         print("boundary materialization shard failed: --timeout must be positive", file=sys.stderr)
         raise SystemExit(2)
-    for name in ("expect_total", "expect_eligible"):
+    for name in ("expect_total", "expect_materialize"):
         value = getattr(args, name)
         if value is not None and value < 0:
             print(f"boundary materialization shard failed: --{name.replace('_', '-')} must be nonnegative", file=sys.stderr)
@@ -1118,8 +1097,8 @@ def main() -> None:
     print(
         "boundary materialization shard: "
         f"modules={len(report['selectedModules'])}, "
-        f"total={report['totalCount']}, eligible={report['eligibleCount']}, "
-        f"excluded={report['excludedCount']}, observed={len(report['observedIds'])}, "
+        f"total={report['totalCount']}, materialize={report['materializeCount']}, "
+        f"retain={report['retainCount']}, observed={len(report['observedIds'])}, "
         f"unobserved={len(report['unobservedIds'])}, variants={report['variantCount']}: ok"
     )
 

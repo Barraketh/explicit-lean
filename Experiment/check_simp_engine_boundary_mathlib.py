@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Materialize in-scope ``simp`` occurrences in representative Mathlib modules.
+"""Materialize executable ``simp`` occurrences in representative Mathlib modules.
 
-Each eligible proof-body or reusable-syntax occurrence is recorded, replaced at
-its whole-occurrence range, and checked with the apply-only tactic. Excluded
-non-proof and retained-quotation occurrences must remain byte-for-byte present
-in the post-rewrite syntax inventory. The per-module debug trees intentionally
-remain separate so a failing materialization can be inspected in isolation.
+Each materialize candidate is recorded, replaced at its whole-occurrence
+range, and checked with the apply-only tactic. Retained syntax-data occurrences
+must remain byte-for-byte present in the post-rewrite syntax inventory. The
+per-module debug trees intentionally remain separate so a failing
+materialization can be inspected in isolation.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ DEBUG_ROOT = ROOT / ".lake" / "boundary-mathlib-debug"
 class ModuleSpec:
     module: str
     expected_occurrences: int
-    expected_eligible_occurrences: int
+    expected_materialize_occurrences: int
     debug_name: str
 
     @property
@@ -46,43 +46,30 @@ MODULES = (
     ModuleSpec(
         "Mathlib/CategoryTheory/EqToHom.lean",
         expected_occurrences=33,
-        expected_eligible_occurrences=27,
+        expected_materialize_occurrences=33,
         debug_name="eq-to-hom",
     ),
     ModuleSpec(
         "Mathlib/Data/Fintype/List.lean",
         expected_occurrences=6,
-        expected_eligible_occurrences=0,
+        expected_materialize_occurrences=6,
         debug_name="fintype-list",
     ),
     ModuleSpec(
         "Mathlib/Algebra/Algebra/NonUnitalHom.lean",
         expected_occurrences=7,
-        expected_eligible_occurrences=0,
+        expected_materialize_occurrences=7,
         debug_name="non-unital-hom-parser-compatibility",
     ),
     ModuleSpec(
         "Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean",
         expected_occurrences=3,
-        expected_eligible_occurrences=3,
+        expected_materialize_occurrences=3,
         debug_name="cstar-pos-part",
     ),
 )
 
 
-ELIGIBLE_CLASSIFICATIONS = {
-    "in_scope_generated_proof_command",
-    "in_scope_proof_declaration",
-    "in_scope_observed_proof_declaration",
-    "reusable_tactic_syntax",
-}
-EXCLUDED_CLASSIFICATIONS = {
-    "out_of_scope_declaration_signature",
-    "out_of_scope_nonproof_command",
-    "out_of_scope_nonproof_declaration",
-    "out_of_scope_observed_nonproof_declaration",
-    "out_of_scope_quotation",
-}
 
 
 def compiled_module_name(module: str) -> str:
@@ -136,34 +123,35 @@ def classify_entries(
             f"duplicate scope={duplicate_scope}, missing={missing}, extra={extra}"
         )
 
-    eligible: list[dict[str, object]] = []
-    excluded: list[dict[str, object]] = []
+    materialize: list[dict[str, object]] = []
+    retain: list[dict[str, object]] = []
     for key in sorted(all_keys):
         entry = inventory_by_key[key][0]
         occurrence = scope_by_key[key][0]
         result = scope.classify(occurrence, declarations)
-        classification = str(result["classification"])
-        if classification in ELIGIBLE_CLASSIFICATIONS:
-            eligible.append(entry)
-        elif classification in EXCLUDED_CLASSIFICATIONS:
-            excluded.append(entry)
+        action = str(result["action"])
+        if action == "materialize":
+            materialize.append(entry)
+        elif action == "retain":
+            retain.append(entry)
         else:
             raise RuntimeError(
                 f"scope classification is not actionable for {spec.module}: "
-                f"{classification} at {entry['startByte']}:{entry['endByte']} "
+                f"{result['executionRole']}/{result['declarationKind']} at "
+                f"{entry['startByte']}:{entry['endByte']} "
                 f"{entry['source']!r}; reason={result['reason']}"
             )
-    if len(eligible) + len(excluded) != len(entries):
+    if len(materialize) + len(retain) != len(entries):
         raise RuntimeError(
             f"scope classification did not partition {spec.module}: "
-            f"total={len(entries)}, eligible={len(eligible)}, excluded={len(excluded)}"
+            f"total={len(entries)}, materialize={len(materialize)}, retain={len(retain)}"
         )
-    if len(eligible) != spec.expected_eligible_occurrences:
+    if len(materialize) != spec.expected_materialize_occurrences:
         raise RuntimeError(
-            f"expected {spec.expected_eligible_occurrences} eligible occurrences in "
-            f"{spec.module}, found {len(eligible)}"
+            f"expected {spec.expected_materialize_occurrences} materialize occurrences in "
+            f"{spec.module}, found {len(materialize)}"
         )
-    return eligible, excluded
+    return materialize, retain
 
 
 def run(command: list[str], timeout: int = 600) -> str:
@@ -270,21 +258,20 @@ def check_module(
             f"expected {spec.expected_occurrences} supported occurrences in "
             f"{spec.module}, found {len(inventory)}: {inventory}"
         )
-    eligible, excluded = classify_entries(
+    materialize, retain = classify_entries(
         spec, inventory, occurrences_by_module, declarations_by_module
     )
-    # Replacing an eligible outer occurrence would also rewrite a nested
-    # excluded call. Fail closed until mixed-scope range composition has an
-    # explicit design.
+    # Replacing an outer occurrence would also rewrite a nested occurrence.
+    # Fail closed until mixed-scope range composition has an explicit design.
     assert_nonoverlapping(inventory, spec.module)
 
     work = DEBUG_ROOT / spec.debug_name
     instrumented_path = copy_at_module_root(
-        work / "instrumented", spec.module, instrumented_source(original, eligible)
+        work / "instrumented", spec.module, instrumented_source(original, materialize)
     )
     output = compile_copy(instrumented_path, dylib)
     report_list = parse_reports(output)
-    expected_ids = [str(entry["id"]) for entry in eligible]
+    expected_ids = [str(entry["id"]) for entry in materialize]
     reports_path = work / "artifact-reports.jsonl"
     reports_path.parent.mkdir(parents=True, exist_ok=True)
     reports_path.write_text(
@@ -298,7 +285,7 @@ def check_module(
             f"{error}; generated source: {instrumented_path}\n{output}"
         ) from error
 
-    materialized_bytes = materialize_source(original, eligible, reports)
+    materialized_bytes = materialize_source(original, materialize, reports)
     materialized_bytes = coverage.inject_import(
         materialized_bytes, "ExplicitLean.SimpEngine.Boundary.Tactic"
     )
@@ -316,24 +303,24 @@ def check_module(
         )
         if entry["kind"] in coverage.SUPPORTED_KINDS
     ]
-    excluded_multiset = Counter(
-        (str(entry["kind"]), str(entry["source"])) for entry in excluded
+    retain_multiset = Counter(
+        (str(entry["kind"]), str(entry["source"])) for entry in retain
     )
     remaining_multiset = Counter(
         (str(entry["kind"]), str(entry["source"])) for entry in remaining
     )
-    if remaining_multiset != excluded_multiset:
+    if remaining_multiset != retain_multiset:
         raise RuntimeError(
-            f"materialized syntax inventory differs from excluded inventory in "
-            f"{spec.module}: expected {excluded_multiset}, found {remaining_multiset}; "
+            f"materialized syntax inventory differs from retained inventory in "
+            f"{spec.module}: expected {retain_multiset}, found {remaining_multiset}; "
             f"generated source: {materialized_path}"
         )
 
     print(
         f"boundary {spec.module}: total={len(inventory)}, "
-        f"eligible={len(eligible)}, excluded={len(excluded)}; "
-        f"recorded eligible, materialized, compiled, zero remaining in-scope "
-        f"(excluded retained={len(remaining)}): ok"
+        f"materialize={len(materialize)}, retain={len(retain)}; "
+        f"recorded materialize, compiled, zero remaining executable "
+        f"(retained={len(remaining)}): ok"
     )
 
 

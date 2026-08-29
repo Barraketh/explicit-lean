@@ -86,32 +86,30 @@ assignment-delta representation yet.
 
 The artifact and apply path are largely sort-neutral: they transform tactic
 goals, local declarations, metavariables, and constraints without requiring the
-enclosing declaration to be proof-valued. The current classifier, representative
-gates, and declaration checks are still proof-oriented and therefore implement
-an obsolete narrower scope. Fingerprint equality in the current comparator is
-useful regression evidence, but the revised acceptance comparator must perform
-actual definitional-equality checks; a matching hash is never semantic proof.
+enclosing declaration to be proof-valued. The scope classifier and schema-2
+manifest now record independent `executionRole`, `declarationKind`, and
+`action` fields; proof status never controls materialization. The declaration
+oracle is still proof-oriented, however, and fingerprint equality in the
+current comparator is only regression evidence. The revised acceptance
+comparator must perform actual definitional-equality checks; a matching hash is
+never semantic proof.
 
-`Experiment/check_simp_engine_boundary_mathlib.py` applies the older proof-only
-scope to four complete pinned source modules. In
-`Mathlib/CategoryTheory/EqToHom.lean`, it transforms 27 occurrences and retains
-six occurrences in computational declarations. In
-`Mathlib/Data/Fintype/List.lean`, it retains all six occurrences. Under the new
-contract these retained occurrences are translation candidates: the revised
-gate must transform all 33 `EqToHom` occurrences and all six `Fintype/List`
-occurrences. In
+`Experiment/check_simp_engine_boundary_mathlib.py` now materializes every
+executable occurrence in four complete pinned source modules. It transforms all
+33 occurrences in `Mathlib/CategoryTheory/EqToHom.lean` and all six occurrences
+in `Mathlib/Data/Fintype/List.lean`. In
 `Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`, all three
 occurrences are transformed; they produce six executions because one occurrence
 selects among four distinct pre-states reached via `all_goals`/`fin_cases`.
-The materialized copy compiles with zero remaining in-scope calls. Earlier broad
+Each materialized copy compiles with zero remaining executable calls. Earlier broad
 round trips of all syntactic occurrences remain useful renderer stress evidence:
 `Fintype/List` exercises a committed `ExistsAndEq` result and beta-redex
 lowering, while `PosPart` exercises a large `Matrix.cons_val` result. These are
 representative module results, not a corpus claim.
 
-`Mathlib/Algebra/Algebra/NonUnitalHom.lean` currently contributes seven retained
-computational occurrences and guards parser compatibility. The revised gate
-must transform all seven. This regression exposed an unused bare `apply`
+`Mathlib/Algebra/Algebra/NonUnitalHom.lean` contributes seven transformed
+computational occurrences and guards parser compatibility. This regression
+exposed an unused bare `apply`
 production in the generated boundary tactic grammar that changed how a Mathlib
 command parsed an identifier named `apply`; the production was removed. The
 materializer emits only the unambiguous `apply_encoded` form.
@@ -132,11 +130,13 @@ original bodies deterministically; the option and rename never reach
 materialized output. Missing caller/type, missing execution, duplicate or extra
 IDs, and mixed observations fail closed.
 
-The revised classifier must not use `Meta.isProp` as an eligibility test. It
-must record two independent axes: whether syntax is an executed call, reusable
-executable code, or retained syntax data; and the semantic kind of the enclosing
+The classifier does not use `Meta.isProp` as an eligibility test. It records
+whether syntax is directly executable, reusable executable code, retained
+syntax data, or unresolved separately from the semantic kind of the enclosing
 declaration or command. Proof/computational status selects the declaration
-comparison rule, not whether the occurrence is translated.
+comparison rule, not whether the occurrence is translated. The focused fixture
+has 11 direct, one reusable, and one retained occurrence; 12 materialize and one
+is retained.
 
 The fixture has two statically proof-valued declarations, three statically
 non-proof declarations, one reusable quotation, one retained quotation, one
@@ -144,7 +144,7 @@ irreducible computational case, one signature/default case, two observed proof
 declarations, and two observed computational declarations. The exact
 `Mathlib.Tactic.ToDual.«commandTo_dual_insert_cast_:=_»` command path is a narrow
 static generated-command case: its elaborator consumes the RHS as the proof
-value of a generated theorem. The new classifier should handle this as one
+value of a generated theorem. The classifier handles this as one
 instance of command output rather than a proof-only eligibility exception.
 Quotations remain unresolved until execution evidence distinguishes executable
 code from retained syntax data. Mathlib parsing uses the same pure `Mathlib`
@@ -155,7 +155,7 @@ loaded only for the fixture.
 manifest and its fail-closed construction rules. It pins repository, Lean,
 Mathlib, the complete active implementation source families, source, and module
 identities; retains modules with no supported calls; and joins every occurrence
-to its source-backed scope classification. Statically unclassified occurrences
+to its source-backed scope classification. Statically unresolved occurrences
 are probed one affected module per temporary process; compact execution
 evidence records the report module, caller/count summaries, final proof flags,
 status, and probe-only scheduling option in the occurrence record. The 3-module
@@ -166,11 +166,11 @@ preserve distinct paths/IDs and reject missing, duplicate, extra, or conflicting
 data. The builder requires a clean pinned Mathlib checkout and rechecks
 repository/toolchain identity, implementation hashes, and every selected source
 before emitting, rejecting the result if any of those inputs changed.
-Dirty-repository and unclassified diagnostic allowances are explicit manifest
+Dirty-repository and unresolved diagnostic allowances are explicit manifest
 fields. Policy enforcement also precedes atomic output replacement, so a
 rejected run cannot publish a newly generated manifest. Its bounded smoke gate
 builds the same three-module manifest twice and requires byte-identical output
-with the historical proof-only 30/12 partition. A separate targeted diagnostic
+with all 42 occurrences marked `materialize`. A separate targeted diagnostic
 over the existing pre-probe manifest resolved 38 computational commands, 3
 signature/default occurrences, 5 generated proof commands, and 55 dynamically
 observed proof declarations, with zero unclassified under that older schema.
@@ -192,14 +192,12 @@ must not be used for product closure. It was also generated with
 current consumer correctly rejects it.
 
 `Experiment/boundary_materialize_shard.py` is the first fail-closed consumer of
-current manifests. A fresh one-module repair-review
-`Mathlib/Algebra/AddConstMap/Basic.lean` canary has 17 total occurrences. It
-materializes nine occurrences and retains eight computational occurrences under
-the obsolete classifier. The revised canary must materialize all 17, compile,
-and establish definitionally equal computational declaration values as well as
-equivalent call boundaries. The earlier run still proves exact authored-source
-preservation for the nine ranges it replaced, but it is not evidence for the
-new product scope.
+current manifests. The schema-2 one-module
+`Mathlib/Algebra/AddConstMap/Basic.lean` canary materializes all 17 occurrences,
+observes 17 variants, compiles, and proves exact authored-source preservation
+outside the replaced ranges. It does not yet establish definitionally equal
+computational declaration values, so it is compile/materialization evidence
+rather than semantic acceptance.
 
 `Experiment/run.sh` retains the legacy regression checks and now also runs all
 boundary prototype commands. These are focused engineering gates, not a pinned
@@ -209,11 +207,12 @@ Once that path is accepted, the public `simp_engine_apply` syntax can move from
 schema-27 replay to boundary artifacts. Until then, code and reports must label
 the two implementations explicitly.
 
-The immediate engineering gaps are the sort-neutral classifier and manifest
-schema, a real definitional-equality boundary comparator, and declaration-value
-and environment-delta validation. The first revised gates must translate all 17
-`AddConstMap`, 33 `EqToHom`, 6 `Fintype/List`, and 7 `NonUnitalHom`
-occurrences. Dependency-aware recording for the 66 reusable tactic-syntax
+The immediate engineering gaps are a real definitional-equality boundary
+comparator and declaration-value and environment-delta validation. The next
+bounded canary must translate all 17 `AddConstMap` occurrences and add the
+declaration-value checks that the current 33 `EqToHom`, 6 `Fintype/List`, and 7
+`NonUnitalHom` compile-only materializations do not yet provide.
+Dependency-aware recording for the 66 reusable tactic-syntax
 occurrences and safe composition for the 91 nested occurrences follow. The
 current runner rejects reusable syntax and nested/overlapping replacement
 ranges rather than guessing.
@@ -414,7 +413,7 @@ run must:
     checks, environment checks, and remaining-call audit.
 
 Scope closure uses a source-backed, two-phase probe for only the occurrences
-left unclassified by the static pass. The temporary copy replaces each selected
+left unresolved by the static pass. The temporary copy replaces each selected
 `simp` head with an ID-carrying standalone probe, disables asynchronous body
 elaboration with global `set_option Elab.async false`, and appends a report
 command after the original source. The report groups repeated executions,
@@ -535,8 +534,9 @@ discharger strategy, and simproc traces are not acceptance conditions.
 
 ## Roadmap
 
-1. Replace proof-only eligibility with execution-role and declaration-kind
-   classification; make all executable computational occurrences candidates.
+1. **Complete:** replace proof-only eligibility with execution-role and
+   declaration-kind classification; make all executable computational
+   occurrences candidates.
 2. Replace hash equality in the boundary oracle with a paired-state
    definitional-equality comparator and complete observable pre/post state.
 3. Add declaration-value and environment-delta comparison, including opaque,
@@ -559,7 +559,8 @@ Durable report procedures are in [REPORTS.md](REPORTS.md). The focused boundary,
 selector, conservative scope-classification, ID-carrying execution probe, and
 explicitly authorized unobserved paths now support the measured cases and are
 integrated in the representative translators. The deterministic manifest
-format, bounded smoke gate, and targeted old-unknown closure are in place, but
-their proof-only eligible/excluded partition is obsolete. The immediate
-milestone is the revised classifier, true definitional-equality comparator, and
-computational declaration oracle before reusable/nested corpus scaling resumes.
+format, bounded smoke gate, and targeted old-unknown closure are in place. The
+old full-corpus eligible/excluded partition remains obsolete; the schema-2
+representative manifest is current. The immediate milestone is the true
+definitional-equality comparator and computational declaration oracle before
+reusable/nested corpus scaling resumes.

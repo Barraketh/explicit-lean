@@ -50,12 +50,13 @@ dependent contexts, inaccessible local names, a custom discharger, declaration
 trust, transactional failure, pre-existing metavariable state, reusable tactic
 quotations, multi-variant selection, and source round trips. Its focused
 seventeen-occurrence source fixture includes one explicitly unobserved reusable
-occurrence. These gates still implement the obsolete proof-only eligibility
-rule: they transform 27 of 33 calls in
-`Mathlib/CategoryTheory/EqToHom.lean`, retain all six calls in
-`Mathlib/Data/Fintype/List.lean`, and transform all three calls in
+occurrence. The schema-2 representative gate now transforms all 33 calls in
+`Mathlib/CategoryTheory/EqToHom.lean`, all six calls in
+`Mathlib/Data/Fintype/List.lean`, all seven calls in
+`Mathlib/Algebra/Algebra/NonUnitalHom.lean`, and all three calls in
 `Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`. Every transformed
-copy compiles under that older contract. The last module records four distinct
+copy compiles with zero remaining executable calls, but computational
+declaration-value equality is not yet checked. The last module records four distinct
 executions of one reusable occurrence and exercises a large `Matrix.cons_val`
 result; the focused quotation executes both a successful and a failed variant.
 The apply module has a checked import closure with no simplifier implementation.
@@ -63,8 +64,8 @@ A fourth representative module,
 `Mathlib/Algebra/Algebra/NonUnitalHom.lean`, guards parser compatibility with
 Mathlib commands whose grammar uses the identifier `apply`. This remains a
 representative materialization result, not a Mathlib-wide translation claim.
-The revised gates must translate all 33 `EqToHom`, 6 `Fintype/List`, 7
-`NonUnitalHom`, and 17 `AddConstMap/Basic` occurrences.
+The next canary must translate all 17 `AddConstMap/Basic` occurrences and add
+the declaration-value oracle.
 
 The current scope-classification gate joins syntax ancestry to final
 compiled declaration types. Its 13-occurrence fixture separates theorem/proof
@@ -78,17 +79,18 @@ stable occurrence ID into a standalone tactic, logs each execution, and emits
 sorted evidence only after the original commands finish under probe-only
 `set_option Elab.async false` scheduling. It never inspects simplifier internals
 or infers that a retained quotation executed. Missing, duplicate, mixed, or
-incomplete evidence remains unclassified. Under the revised contract,
+incomplete evidence remains unresolved. The classifier publishes independent
+`executionRole`, `declarationKind`, and `action` fields; the fixture contains
+11 direct, one reusable, and one retained occurrence. Under the revised contract,
 proof/computational status selects how the final declaration is compared; it no
 longer determines whether an executed call is translated.
 
 The exact `Mathlib.Tactic.ToDual.«commandTo_dual_insert_cast_:=_»` command path
 is a narrow static exception: its command elaborator consumes the RHS as the
 proof value of a generated theorem, so its five old diagnostic cases are
-classified as `in_scope_generated_proof_command` even though no active caller
-name is available during elaboration. That exception and the current
-irreducible/signature exclusions belong to the obsolete classifier; generated,
-computational, and signature/default executions are all candidates now. Mathlib
+classified as `direct_executable`/`generated_proof` even though no active caller
+name is available during elaboration. Irreducible, generated, computational,
+and signature/default executions are all materialization candidates. Mathlib
 sources are parsed in the same pure `Mathlib` grammar
 environment as the inventory; the fixture's custom grammar is isolated in a
 separate environment.
@@ -105,11 +107,11 @@ families rather than a hand-maintained subset. Manifest construction requires
 the pinned Mathlib checkout to be clean and rechecks repository identity,
 toolchain identity, implementation hashes, and every selected source after the
 run, rejecting results when any of those inputs changed. Diagnostic allowances
-for a dirty repository or unclassified occurrences are recorded explicitly in
+for a dirty repository or unresolved occurrences are recorded explicitly in
 the artifact. Its smoke gate builds
 the representative 42-occurrence manifest twice, requires byte-identical output,
-and rejects
-missing, duplicate, and unclassified joins by default. Policy is checked before
+and rejects missing, duplicate, and unresolved joins by default. All 42
+representative occurrences are marked `materialize`. Policy is checked before
 atomic output replacement, so a rejected run cannot leave a new manifest that
 looks successful. The existing diagnostic manifest's 101 old unknowns have
 since been closed by a bounded 27-module run: 38 static non-proof commands, 3
@@ -136,14 +138,14 @@ committed code before further corpus materialization.
 
 `Experiment/boundary_materialize_shard.py` consumes a current manifest fail
 closed. A fresh one-module repair-review canary for
-`Mathlib/Algebra/AddConstMap/Basic.lean` transforms nine
-calls and retains eight computational calls under the obsolete classifier. It
-observes nine successful variants, compiles the materialized module, and
+`Mathlib/Algebra/AddConstMap/Basic.lean` transforms all 17 calls under schema 2.
+It observes 17 successful variants, compiles the materialized module, and
 verifies byte-for-byte authored source preservation outside the selected tactic
 ranges. No binder alpha-renaming was needed. Pre-commit manifests and reports
 are disposable because the commit changes their repository identity. This
-remains one bounded canary, not full-corpus materialization or acceptance
-evidence for the revised contract.
+remains one bounded compile/materialization canary. Declaration-value equality
+has not yet been established, so it is not acceptance evidence for the revised
+contract.
 
 ## Pinned environment and basic checks
 
@@ -163,7 +165,7 @@ python3 Experiment/check_simp_engine_boundary_corpus.py
 python3 Experiment/check_simp_engine_boundary_mathlib.py
 # Bounded diagnostic over the existing pre-probe 101-unknown manifest.
 python3 Experiment/check_simp_engine_boundary_scope_unknowns.py
-# Historical proof-only regression; the revised canary target is 17 eligible.
+# Current schema-2 canary target: materialize all 17 occurrences.
 python3 Experiment/simp_engine_boundary_corpus.py manifest \
   --output .lake/boundary-corpus-manifest/add-const-map-canary.json \
   --module-prefix Mathlib/Algebra/AddConstMap/Basic.lean \
@@ -172,12 +174,12 @@ python3 Experiment/boundary_materialize_shard.py \
   --manifest .lake/boundary-corpus-manifest/add-const-map-canary.json \
   --output .lake/boundary-materialization/add-const-map-canary/report.json \
   --module Mathlib/Algebra/AddConstMap/Basic.lean \
-  --expect-total 17 --expect-eligible 9
+  --expect-total 17 --expect-materialize 17
 ```
 
 The review command checks the frozen schema-27 contract. The boundary commands
-check the active focused prototype, its focused source round trip, classification
-under the old contract, deterministic manifest construction, and the
+check the active focused prototype, its focused source round trip, schema-2
+execution-role classification, deterministic manifest construction, and the
 representative Mathlib modules. The targeted scope-unknown command probes only
 the affected modules from the earlier diagnostic manifest. The shard command
 first builds a manifest bound to the current committed implementation and then
@@ -190,10 +192,9 @@ yet the complete pinned-corpus acceptance gate.
 - `ExplicitLean/SimpEngine/Inventory.lean` and
   `Experiment/simp_engine_inventory.py`: syntax-aware occurrence inventory,
   stable source ranges, occurrence IDs, and compositional head rewriting. The
-  current inventory deliberately over-approximates: it does not yet distinguish
-  executed calls and reusable executable code from syntax retained as data. The
-  revised classifier must supply that source-backed execution role independently
-  of declaration result kind.
+  inventory deliberately over-approximates source occurrences. The scope
+  classifier supplies the source-backed execution role independently of
+  declaration result kind.
 - `ExplicitLean/SimpEngine/Recording.lean`: stock `Meta.simpGoal` oracle and
   goal/hypothesis transport patterns. Its current recorder is coupled to schema
   27 and should be mined, not adopted as the new artifact format.
@@ -209,7 +210,7 @@ yet the complete pinned-corpus acceptance gate.
   state, failure, trust, isolation, and source-materialization gates.
 - `Experiment/SimpEngineBoundaryScope.lean` and
   `Experiment/check_simp_engine_boundary_scope.py`: conservative syntax-ancestry
-  and compiled-declaration proof-scope classification, plus the temporary
+  and compiled-declaration kind classification, plus the temporary
   ID-carrying execution probe and final-type evidence join.
 - `ExplicitLean/SimpEngine/Boundary/ScopeProbe.lean`: standalone probe tactic
   and appended report command used only in disposable source copies.
@@ -222,8 +223,8 @@ yet the complete pinned-corpus acceptance gate.
 - `Experiment/check_simp_engine_boundary_scope_unknowns.py`: targeted closure
   diagnostic for the pre-execution-evidence 101 unknowns.
 - `Experiment/check_simp_engine_boundary_mathlib.py`: scope-aware representative
-  Mathlib-module recording, materialization, compilation, exact exclusion
-  retention, and zero-in-scope-call gate.
+  Mathlib-module recording, materialization, compilation, retained-syntax
+  preservation, and zero-executable-call gate.
 - `ExplicitLean/SimpEngine/Source.lean` and
   `ExplicitLean/SimpEngine/Replay.lean`: current schema-27 materialization and
   replay. These are legacy implementation, not the target apply path.

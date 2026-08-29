@@ -79,6 +79,16 @@ def validate_execution_join() -> None:
         raise RuntimeError(
             f"missing caller/type evidence did not fail closed: {incomplete}"
         )
+    empty_caller = report("empty-caller", "", True)
+    try:
+        scope._execution_evidence(
+            {"empty-caller"}, [empty_caller], "Test.Module"
+        )
+    except RuntimeError as error:
+        if "invalid caller" not in str(error):
+            raise
+    else:
+        raise RuntimeError("empty scope execution caller was accepted")
     wrong_module = report("wrong-module", "Test.Module.proof", True)
     wrong_module["module"] = "Other.Module"
     try:
@@ -121,7 +131,7 @@ def validate_execution_join() -> None:
 
 
 def validate_manifest(manifest: dict[str, object]) -> None:
-    if manifest.get("reportSchema") != 1 or manifest.get("kind") != (
+    if manifest.get("reportSchema") != 2 or manifest.get("kind") != (
         "simp_engine_boundary_manifest"
     ):
         raise RuntimeError(f"unexpected manifest identity: {manifest}")
@@ -170,10 +180,21 @@ def validate_manifest(manifest: dict[str, object]) -> None:
         raise RuntimeError(
             f"manifest omitted active implementation sources: {sorted(missing_hashes)}"
         )
-    expected_dispositions = {"eligible": 30, "excluded": 12}
-    if manifest.get("countsByDisposition") != expected_dispositions:
+    expected_roles = {"direct_executable": 42}
+    if manifest.get("countsByExecutionRole") != expected_roles:
         raise RuntimeError(
-            f"unexpected scope partition: {manifest.get('countsByDisposition')}"
+            f"unexpected execution-role partition: {manifest.get('countsByExecutionRole')}"
+        )
+    expected_kinds = {"computational": 12, "proof": 30}
+    if manifest.get("countsByDeclarationKind") != expected_kinds:
+        raise RuntimeError(
+            "unexpected declaration-kind partition: "
+            f"{manifest.get('countsByDeclarationKind')}"
+        )
+    expected_actions = {"materialize": 42}
+    if manifest.get("countsByAction") != expected_actions:
+        raise RuntimeError(
+            f"unexpected action partition: {manifest.get('countsByAction')}"
         )
     modules = manifest.get("modules")
     if not isinstance(modules, list) or [module.get("module") for module in modules] != (
@@ -181,7 +202,7 @@ def validate_manifest(manifest: dict[str, object]) -> None:
     ):
         raise RuntimeError("manifest module ordering or coverage changed")
     seen: set[str] = set()
-    disposition_count = 0
+    action_count = 0
     for module in modules:
         module_name = str(module["module"])
         source = (corpus.MATHLIB / module_name).read_bytes()
@@ -196,10 +217,10 @@ def validate_manifest(manifest: dict[str, object]) -> None:
             checked = dict(occurrence)
             checked["module"] = module_name
             inventory.validate_occurrence(source, checked)
-            if occurrence["disposition"] not in {"eligible", "excluded"}:
-                raise RuntimeError(f"non-actionable occurrence: {occurrence}")
-            disposition_count += 1
-    if len(seen) != 42 or disposition_count != 42:
+            if occurrence["action"] != "materialize":
+                raise RuntimeError(f"non-materialize occurrence: {occurrence}")
+            action_count += 1
+    if len(seen) != 42 or action_count != 42:
         raise RuntimeError("manifest occurrences do not form a total partition")
 
 
@@ -232,6 +253,110 @@ def main() -> None:
 
         validate_manifest(manifests[0])
         materialize.verify_implementation_hashes(manifests[0])
+
+        legacy_field = copy.deepcopy(manifests[0])
+        legacy_field["allowUnclassified"] = False
+        try:
+            corpus.enforce_manifest_policy(legacy_field)
+        except RuntimeError as error:
+            if "top-level fields changed" not in str(error):
+                raise
+        else:
+            raise RuntimeError("schema-2 policy accepted a legacy manifest field")
+
+        noninteger_count = copy.deepcopy(manifests[0])
+        noninteger_count["moduleFileCount"] = float(
+            noninteger_count["moduleFileCount"]
+        )
+        try:
+            corpus.enforce_manifest_policy(noninteger_count)
+        except RuntimeError as error:
+            if "moduleFileCount must be a nonnegative integer" not in str(error):
+                raise
+        else:
+            raise RuntimeError("schema-2 policy accepted a non-integer count")
+
+        stale_nested_count = copy.deepcopy(manifests[0])
+        stale_nested_count["nestedOccurrenceCount"] += 1
+        try:
+            corpus.enforce_manifest_policy(stale_nested_count)
+        except RuntimeError as error:
+            if "nestedOccurrenceCount does not match" not in str(error):
+                raise
+        else:
+            raise RuntimeError("schema-2 policy accepted a stale nested count")
+
+        stale_duplicate_count = copy.deepcopy(manifests[0])
+        stale_duplicate_count["duplicateSyntaxRecords"] += 1
+        try:
+            corpus.enforce_manifest_policy(stale_duplicate_count)
+        except RuntimeError as error:
+            if "duplicateSyntaxRecords does not match" not in str(error):
+                raise
+        else:
+            raise RuntimeError("schema-2 policy accepted a stale duplicate count")
+
+        malformed_unselected = copy.deepcopy(manifests[0])
+        selected_module = str(malformed_unselected["modules"][0]["module"])
+        del malformed_unselected["modules"][1]["occurrences"][0]["kind"]
+        try:
+            materialize.validate_manifest_selection(
+                malformed_unselected,
+                [selected_module],
+                expect_total=None,
+                expect_materialize=None,
+            )
+        except RuntimeError as error:
+            if "occurrence in" not in str(error) or "missing=['kind']" not in str(error):
+                raise
+        else:
+            raise RuntimeError(
+                "materializer accepted a malformed occurrence in an unselected module"
+            )
+
+        forged_unselected_source = copy.deepcopy(manifests[0])
+        forged_unselected_source["modules"][1]["occurrences"][0]["source"] = ""
+        try:
+            materialize.validate_manifest_selection(
+                forged_unselected_source,
+                [selected_module],
+                expect_total=None,
+                expect_materialize=None,
+            )
+        except RuntimeError as error:
+            if "stale inventory" not in str(error):
+                raise
+        else:
+            raise RuntimeError(
+                "materializer accepted forged source in an unselected module"
+            )
+
+        malformed_scope_path = copy.deepcopy(manifests[0])
+        malformed_scope_path["modules"][1]["occurrences"][0]["scopePaths"][0] = "bad"
+        try:
+            corpus.enforce_manifest_policy(malformed_scope_path)
+        except RuntimeError as error:
+            if "scopePaths[0] must be an object" not in str(error):
+                raise
+        else:
+            raise RuntimeError("schema-2 policy accepted a malformed scope path")
+
+        malformed_declaration = copy.deepcopy(manifests[0])
+        declaration_occurrence = next(
+            occurrence
+            for module in malformed_declaration["modules"]
+            for occurrence in module["occurrences"]
+            if occurrence["declarations"]
+        )
+        del declaration_occurrence["declarations"][0]["name"]
+        try:
+            corpus.enforce_manifest_policy(malformed_declaration)
+        except RuntimeError as error:
+            if "declarations[0] fields changed" not in str(error):
+                raise
+        else:
+            raise RuntimeError("schema-2 policy accepted a malformed declaration")
+
         missing_inventory_executable = copy.deepcopy(manifests[0])
         del missing_inventory_executable["implementationHashes"][
             "Experiment/SimpEngineInventory.lean"
@@ -316,51 +441,57 @@ def main() -> None:
         rejected_path.write_bytes(sentinel)
 
         summary_tampered = copy.deepcopy(manifests[0])
-        summary_tampered["countsByDisposition"]["unclassified"] = 1
+        summary_tampered["countsByAction"]["unresolved"] = 1
         try:
             corpus.publish_manifest(rejected_path, summary_tampered)
         except RuntimeError as error:
-            if "countsByDisposition does not match occurrence records" not in str(error):
+            if "countsByAction does not match occurrence records" not in str(error):
                 raise
         else:
-            raise RuntimeError("manifest policy trusted a tampered disposition summary")
+            raise RuntimeError("manifest policy trusted a tampered action summary")
         if rejected_path.read_bytes() != sentinel:
             raise RuntimeError("policy rejection replaced the existing manifest")
 
         occurrence_tampered = copy.deepcopy(manifests[0])
         changed_occurrence = occurrence_tampered["modules"][0]["occurrences"][0]
-        original_classification = changed_occurrence["classification"]
-        original_disposition = changed_occurrence["disposition"]
-        changed_occurrence["classification"] = "unclassified"
-        changed_occurrence["disposition"] = "unclassified"
+        original_role = changed_occurrence["executionRole"]
+        original_kind = changed_occurrence["declarationKind"]
+        changed_occurrence["action"] = "unresolved"
         try:
             corpus.publish_manifest(rejected_path, occurrence_tampered)
         except RuntimeError as error:
-            if "countsByClassification does not match occurrence records" not in str(error):
+            if "invalid boundary manifest scope dimensions" not in str(error):
                 raise
         else:
-            raise RuntimeError("manifest policy trusted stale summary counts")
+            raise RuntimeError("manifest policy accepted inconsistent scope dimensions")
 
-        classifications = occurrence_tampered["countsByClassification"]
-        classifications[original_classification] -= 1
-        if classifications[original_classification] == 0:
-            del classifications[original_classification]
-        classifications["unclassified"] = 1
-        dispositions = occurrence_tampered["countsByDisposition"]
-        dispositions[original_disposition] -= 1
-        if dispositions[original_disposition] == 0:
-            del dispositions[original_disposition]
-        dispositions["unclassified"] = 1
+        changed_occurrence["executionRole"] = "direct_executable"
+        changed_occurrence["declarationKind"] = "unknown"
+        roles = occurrence_tampered["countsByExecutionRole"]
+        roles[original_role] -= 1
+        if roles[original_role] == 0:
+            del roles[original_role]
+        roles["direct_executable"] = roles.get("direct_executable", 0) + 1
+        kinds = occurrence_tampered["countsByDeclarationKind"]
+        kinds[original_kind] -= 1
+        if kinds[original_kind] == 0:
+            del kinds[original_kind]
+        kinds["unknown"] = 1
+        actions = occurrence_tampered["countsByAction"]
+        actions["materialize"] -= 1
+        if actions["materialize"] == 0:
+            del actions["materialize"]
+        actions["unresolved"] = 1
         try:
             corpus.publish_manifest(rejected_path, occurrence_tampered)
         except RuntimeError as error:
-            if "unclassified occurrences" not in str(error):
+            if "unresolved occurrences" not in str(error):
                 raise
         else:
-            raise RuntimeError("default manifest policy accepted an unclassified call")
+            raise RuntimeError("default manifest policy accepted an unresolved call")
         if rejected_path.read_bytes() != sentinel:
             raise RuntimeError("policy rejection replaced the existing manifest")
-        occurrence_tampered["allowUnclassified"] = True
+        occurrence_tampered["allowUnresolved"] = True
         corpus.publish_manifest(rejected_path, occurrence_tampered)
 
         try:
@@ -377,7 +508,7 @@ def main() -> None:
 
     print(
         "boundary corpus manifest: three modules, 42 occurrences, "
-        "eligible=30, excluded=12, deterministic and fail-closed: ok"
+        "materialize=42, retain=0, deterministic and fail-closed: ok"
     )
 
 

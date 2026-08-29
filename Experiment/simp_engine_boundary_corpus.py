@@ -19,21 +19,69 @@ import simp_engine_inventory as inventory
 
 ROOT = Path(__file__).resolve().parents[1]
 MATHLIB = inventory.MATHLIB
-REPORT_SCHEMA = 1
+REPORT_SCHEMA = 2
 
-ELIGIBLE_CLASSIFICATIONS = {
-    "in_scope_generated_proof_command",
-    "in_scope_proof_declaration",
-    "in_scope_observed_proof_declaration",
-    "reusable_tactic_syntax",
+# Re-export the shared schema vocabulary for manifest consumers.  Keeping one
+# source of truth prevents a classifier/consumer drift from silently changing
+# the closed-world partition.
+EXECUTION_ROLES = scope.EXECUTION_ROLES
+DECLARATION_KINDS = scope.DECLARATION_KINDS
+ACTIONS = scope.ACTIONS
+
+MANIFEST_FIELDS = {
+    "reportSchema",
+    "kind",
+    "allowDirty",
+    "allowUnresolved",
+    "repositoryCommit",
+    "mathlibCommit",
+    "lean",
+    "modulePrefix",
+    "moduleFileCount",
+    "inventoriedModuleCount",
+    "occurrenceCount",
+    "nestedOccurrenceCount",
+    "duplicateSyntaxRecords",
+    "duplicateScopeSyntaxRecords",
+    "fullFrontendFallbacks",
+    "scopeFrontendFallbacks",
+    "scopeProbe",
+    "countsByExecutionRole",
+    "countsByDeclarationKind",
+    "countsByAction",
+    "implementationHashes",
+    "modules",
 }
-EXCLUDED_CLASSIFICATIONS = {
-    "out_of_scope_declaration_signature",
-    "out_of_scope_nonproof_command",
-    "out_of_scope_nonproof_declaration",
-    "out_of_scope_observed_nonproof_declaration",
-    "out_of_scope_quotation",
+MODULE_FIELDS = {
+    "module",
+    "compiledModule",
+    "moduleHash",
+    "sourceHash",
+    "duplicateSyntaxRecords",
+    "duplicateScopeSyntaxRecords",
+    "occurrences",
 }
+OCCURRENCE_FIELDS = {
+    "id",
+    "kind",
+    "source",
+    "startByte",
+    "endByte",
+    "line",
+    "column",
+    "syntaxKind",
+    "ancestors",
+    "commandKind",
+    "commandStartByte",
+    "commandEndByte",
+    "scopePaths",
+    "executionRole",
+    "declarationKind",
+    "action",
+    "reason",
+    "declarations",
+}
+OCCURRENCE_OPTIONAL_FIELDS = {"executionEvidence"}
 
 IMPLEMENTATION_SOURCE_PATTERNS = (
     "ExplicitLean.lean",
@@ -331,12 +379,9 @@ def occurrence_key(entry: dict[str, Any]) -> tuple[int, int, str, str]:
     )
 
 
-def classification_disposition(classification: str) -> str:
-    if classification in ELIGIBLE_CLASSIFICATIONS:
-        return "eligible"
-    if classification in EXCLUDED_CLASSIFICATIONS:
-        return "excluded"
-    return "unclassified"
+def scope_action(execution_role: str, declaration_kind: str) -> str:
+    """Return the schema-2 action implied by a scope classification."""
+    return scope.expected_action(execution_role, declaration_kind)
 
 
 def join_scope_records(
@@ -382,7 +427,9 @@ def join_scope_records(
         semantic_classifications = {
             json.dumps(
                 {
-                    "classification": classified["classification"],
+                    "executionRole": classified["executionRole"],
+                    "declarationKind": classified["declarationKind"],
+                    "action": classified["action"],
                     "reason": classified["reason"],
                     "declarations": classified["declarations"],
                 },
@@ -397,7 +444,10 @@ def join_scope_records(
                 f"{sorted(semantic_classifications)}"
             )
         classified = classified_records[0]
-        classification = str(classified["classification"])
+        execution_role = str(classified["executionRole"])
+        declaration_kind = str(classified["declarationKind"])
+        action = str(classified["action"])
+        scope.validate_scope_dimensions(execution_role, declaration_kind, action)
         scope_paths_by_key: dict[str, dict[str, Any]] = {}
         for occurrence in scope_records:
             path = {
@@ -428,9 +478,10 @@ def join_scope_records(
                 "commandStartByte": canonical_path["commandStartByte"],
                 "commandEndByte": canonical_path["commandEndByte"],
                 "scopePaths": scope_paths,
-                "classification": classification,
+                "executionRole": execution_role,
+                "declarationKind": declaration_kind,
+                "action": action,
                 "reason": str(classified["reason"]),
-                "disposition": classification_disposition(classification),
                 "declarations": list(classified["declarations"]),
             }
         )
@@ -443,7 +494,7 @@ def build_manifest(
     module_prefix: str,
     expected_commit: str | None = None,
     allow_dirty: bool = False,
-    allow_unclassified: bool = False,
+    allow_unresolved: bool = False,
     inventory_batch_size: int = 2048,
     scope_batch_size: int = 128,
     timeout: int = 3600,
@@ -497,8 +548,9 @@ def build_manifest(
         scope_occurrences, scope_declarations, scope_fallbacks = {}, {}, []
 
     modules: list[dict[str, Any]] = []
-    classification_counts: Counter[str] = Counter()
-    disposition_counts: Counter[str] = Counter()
+    execution_role_counts: Counter[str] = Counter()
+    declaration_kind_counts: Counter[str] = Counter()
+    action_counts: Counter[str] = Counter()
     duplicate_scope_records = 0
     for module in sorted(inventories):
         compiled = compiled_module_name(module)
@@ -509,30 +561,31 @@ def build_manifest(
             scope_occurrences.get(compiled, []),
             scope_declarations.get(compiled, []),
         )
-        unclassified = [
+        unresolved = [
             occurrence
             for occurrence in classified
-            if occurrence["classification"] == "unclassified"
+            if occurrence["action"] == "unresolved"
         ]
-        if unclassified:
-            unknown_ids = {str(occurrence["id"]) for occurrence in unclassified}
+        if unresolved:
+            unknown_ids = {str(occurrence["id"]) for occurrence in unresolved}
             unknown_entries = [
                 entry for entry in entries if str(entry["id"]) in unknown_ids
             ]
             scope.apply_execution_evidence(
                 compiled,
                 sources[module],
-                unclassified,
+                unresolved,
                 entries=unknown_entries,
                 timeout=timeout,
             )
         duplicate_scope_records += module_scope_duplicates
-        classification_counts.update(
-            occurrence["classification"] for occurrence in classified
+        execution_role_counts.update(
+            occurrence["executionRole"] for occurrence in classified
         )
-        disposition_counts.update(
-            occurrence["disposition"] for occurrence in classified
+        declaration_kind_counts.update(
+            occurrence["declarationKind"] for occurrence in classified
         )
+        action_counts.update(occurrence["action"] for occurrence in classified)
         modules.append(
             {
                 "module": module,
@@ -566,7 +619,7 @@ def build_manifest(
         "reportSchema": REPORT_SCHEMA,
         "kind": "simp_engine_boundary_manifest",
         "allowDirty": allow_dirty,
-        "allowUnclassified": allow_unclassified,
+        "allowUnresolved": allow_unresolved,
         "repositoryCommit": repository_commit,
         "mathlibCommit": mathlib_commit,
         "lean": lean,
@@ -585,8 +638,9 @@ def build_manifest(
             "temporaryCopyOnly": True,
             "reportCommand": "simp_engine_boundary_scope_report",
         },
-        "countsByClassification": dict(sorted(classification_counts.items())),
-        "countsByDisposition": dict(sorted(disposition_counts.items())),
+        "countsByExecutionRole": dict(sorted(execution_role_counts.items())),
+        "countsByDeclarationKind": dict(sorted(declaration_kind_counts.items())),
+        "countsByAction": dict(sorted(action_counts.items())),
         "implementationHashes": initial_implementation_hashes,
         "modules": modules,
     }
@@ -605,14 +659,218 @@ def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def _declared_count_map(value: object, label: str) -> dict[str, int]:
+def _exact_fields(
+    value: dict[str, Any], required: set[str], label: str, optional: set[str] | None = None
+) -> None:
+    optional = optional or set()
+    missing = required - set(value)
+    extra = set(value) - required - optional
+    if missing or extra:
+        raise RuntimeError(
+            f"boundary manifest {label} fields changed: "
+            f"missing={sorted(missing)}, extra={sorted(extra)}"
+        )
+
+
+def _nonnegative_int(value: object, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise RuntimeError(f"boundary manifest {label} must be a nonnegative integer")
+    return value
+
+
+def _string(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"boundary manifest {label} must be a nonempty string")
+    return value
+
+
+def _optional_int(value: object, label: str) -> int | None:
+    if value is None:
+        return None
+    return _nonnegative_int(value, label)
+
+
+def _string_array(value: object, label: str) -> list[str]:
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise RuntimeError(f"boundary manifest {label} must be an array of strings")
+    return value
+
+
+def _validate_scope_path(value: object, label: str) -> None:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"boundary manifest {label} must be an object")
+    _exact_fields(
+        value,
+        {"ancestors", "commandKind", "commandStartByte", "commandEndByte"},
+        label,
+    )
+    _string_array(value.get("ancestors"), f"{label}.ancestors")
+    command_kind = value.get("commandKind")
+    if command_kind is not None and (
+        not isinstance(command_kind, str) or not command_kind
+    ):
+        raise RuntimeError(f"boundary manifest {label}.commandKind is invalid")
+    _optional_int(value.get("commandStartByte"), f"{label}.commandStartByte")
+    _optional_int(value.get("commandEndByte"), f"{label}.commandEndByte")
+
+
+def _validate_declaration(value: object, label: str) -> None:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"boundary manifest {label} must be an object")
+    _exact_fields(
+        value,
+        {
+            "module",
+            "name",
+            "startByte",
+            "endByte",
+            "selectionStartByte",
+            "selectionEndByte",
+            "isProof",
+        },
+        label,
+    )
+    _string(value.get("module"), f"{label}.module")
+    _string(value.get("name"), f"{label}.name")
+    start = _nonnegative_int(value.get("startByte"), f"{label}.startByte")
+    end = _nonnegative_int(value.get("endByte"), f"{label}.endByte")
+    selection_start = _nonnegative_int(
+        value.get("selectionStartByte"), f"{label}.selectionStartByte"
+    )
+    selection_end = _nonnegative_int(
+        value.get("selectionEndByte"), f"{label}.selectionEndByte"
+    )
+    if start > end or selection_start > selection_end:
+        raise RuntimeError(f"boundary manifest {label} has an invalid range")
+    if not isinstance(value.get("isProof"), bool):
+        raise RuntimeError(f"boundary manifest {label}.isProof must be a boolean")
+
+
+def _validate_execution_evidence(value: object, label: str) -> None:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"boundary manifest {label} must be an object")
+    _exact_fields(
+        value,
+        {"status", "executionCount", "callers", "module", "scheduling"},
+        label,
+    )
+    if value.get("status") not in {
+        "missing_execution",
+        "complete_proof_declaration",
+        "complete_nonproof_declaration",
+        "mixed_execution_classification",
+        "incomplete_execution_evidence",
+    }:
+        raise RuntimeError(f"boundary manifest {label}.status is invalid")
+    execution_count = _nonnegative_int(
+        value.get("executionCount"), f"{label}.executionCount"
+    )
+    callers = value.get("callers")
+    if not isinstance(callers, list):
+        raise RuntimeError(f"boundary manifest {label}.callers must be an array")
+    caller_count = 0
+    proof_values: set[bool] = set()
+    complete_callers = True
+    for index, caller in enumerate(callers):
+        caller_label = f"{label}.callers[{index}]"
+        if not isinstance(caller, dict):
+            raise RuntimeError(f"boundary manifest {caller_label} must be an object")
+        _exact_fields(
+            caller,
+            {"caller", "executionCount", "isProofDeclaration"},
+            caller_label,
+        )
+        caller_name = caller.get("caller")
+        if caller_name is not None:
+            _string(caller_name, f"{caller_label}.caller")
+        else:
+            complete_callers = False
+        item_count = _nonnegative_int(
+            caller.get("executionCount"), f"{caller_label}.executionCount"
+        )
+        if item_count == 0:
+            raise RuntimeError(
+                f"boundary manifest {caller_label}.executionCount must be positive"
+            )
+        caller_count += item_count
+        proof = caller.get("isProofDeclaration")
+        if proof is not None and not isinstance(proof, bool):
+            raise RuntimeError(
+                f"boundary manifest {caller_label}.isProofDeclaration is invalid"
+            )
+        if isinstance(proof, bool):
+            proof_values.add(proof)
+        else:
+            complete_callers = False
+    if caller_count != execution_count:
+        raise RuntimeError(
+            f"boundary manifest {label}.executionCount does not match callers"
+        )
+    module = value.get("module")
+    if module is not None:
+        _string(module, f"{label}.module")
+    if value.get("scheduling") != scope.SCOPE_PROBE_SCHEDULING:
+        raise RuntimeError(f"boundary manifest {label}.scheduling is invalid")
+    status = value["status"]
+    if status == "missing_execution":
+        if callers or execution_count != 0 or module is not None:
+            raise RuntimeError(f"boundary manifest {label} has invalid missing evidence")
+    elif module is None:
+        raise RuntimeError(f"boundary manifest {label}.module is required")
+    elif status == "complete_proof_declaration" and (
+        not complete_callers or proof_values != {True}
+    ):
+        raise RuntimeError(f"boundary manifest {label} has invalid proof evidence")
+    elif status == "complete_nonproof_declaration" and (
+        not complete_callers or proof_values != {False}
+    ):
+        raise RuntimeError(
+            f"boundary manifest {label} has invalid computational evidence"
+        )
+    elif status == "mixed_execution_classification" and (
+        not complete_callers or proof_values != {False, True}
+    ):
+        raise RuntimeError(f"boundary manifest {label} has invalid mixed evidence")
+
+
+def _nested_occurrence_count(occurrences: list[dict[str, Any]], module: str) -> int:
+    nested = 0
+    containing_ends: list[int] = []
+    previous_start: int | None = None
+    for occurrence in sorted(
+        occurrences,
+        key=lambda item: (int(item["startByte"]), -int(item["endByte"])),
+    ):
+        start = int(occurrence["startByte"])
+        end = int(occurrence["endByte"])
+        if start == previous_start:
+            raise RuntimeError(
+                f"boundary manifest has conflicting occurrence starts in {module}:{start}"
+            )
+        previous_start = start
+        while containing_ends and start >= containing_ends[-1]:
+            containing_ends.pop()
+        if containing_ends:
+            if end > containing_ends[-1]:
+                raise RuntimeError(
+                    f"boundary manifest has partially overlapping occurrences in {module}"
+                )
+            nested += 1
+        containing_ends.append(end)
+    return nested
+
+
+def _declared_count_map(
+    value: object, label: str, allowed: set[str]
+) -> dict[str, int]:
     if not isinstance(value, dict):
         raise RuntimeError(f"boundary manifest {label} must be an object")
     result: dict[str, int] = {}
     for key, count in value.items():
         if (
-            not isinstance(key, str)
-            or not key
+            key not in allowed
             or not isinstance(count, int)
             or isinstance(count, bool)
             or count < 0
@@ -623,58 +881,255 @@ def _declared_count_map(value: object, label: str) -> dict[str, int]:
 
 
 def enforce_manifest_policy(manifest: dict[str, Any]) -> None:
+    _exact_fields(manifest, MANIFEST_FIELDS, "top-level")
+    if (
+        not isinstance(manifest.get("reportSchema"), int)
+        or isinstance(manifest.get("reportSchema"), bool)
+        or manifest.get("reportSchema") != REPORT_SCHEMA
+    ):
+        raise RuntimeError(
+            f"boundary manifest schema must be {REPORT_SCHEMA}: "
+            f"{manifest.get('reportSchema')!r}"
+        )
+    if manifest.get("kind") != "simp_engine_boundary_manifest":
+        raise RuntimeError(
+            f"unexpected boundary manifest kind: {manifest.get('kind')!r}"
+        )
+    for field in ("allowDirty", "allowUnresolved"):
+        if not isinstance(manifest.get(field), bool):
+            raise RuntimeError(f"boundary manifest {field} must be a boolean")
+    _string(manifest.get("repositoryCommit"), "repositoryCommit")
+    _string(manifest.get("mathlibCommit"), "mathlibCommit")
+    if not isinstance(manifest.get("modulePrefix"), str):
+        raise RuntimeError("boundary manifest modulePrefix must be a string")
+    lean = manifest.get("lean")
+    if not isinstance(lean, dict):
+        raise RuntimeError("boundary manifest lean must be an object")
+    _exact_fields(lean, {"version", "commit"}, "lean")
+    _string(lean.get("version"), "lean.version")
+    _string(lean.get("commit"), "lean.commit")
+    for field in (
+        "moduleFileCount",
+        "inventoriedModuleCount",
+        "occurrenceCount",
+        "nestedOccurrenceCount",
+        "duplicateSyntaxRecords",
+        "duplicateScopeSyntaxRecords",
+    ):
+        _nonnegative_int(manifest.get(field), field)
+    for field in ("fullFrontendFallbacks", "scopeFrontendFallbacks"):
+        _string_array(manifest.get(field), field)
+    probe = manifest.get("scopeProbe")
+    if not isinstance(probe, dict):
+        raise RuntimeError("boundary manifest scopeProbe must be an object")
+    _exact_fields(
+        probe,
+        {"module", "scheduling", "temporaryCopyOnly", "reportCommand"},
+        "scopeProbe",
+    )
+    if probe != {
+        "module": scope.SCOPE_PROBE_IMPORT,
+        "scheduling": scope.SCOPE_PROBE_SCHEDULING,
+        "temporaryCopyOnly": True,
+        "reportCommand": "simp_engine_boundary_scope_report",
+    }:
+        raise RuntimeError("boundary manifest scopeProbe metadata is invalid")
+    hashes = manifest.get("implementationHashes")
+    if not isinstance(hashes, dict) or not hashes or not all(
+        isinstance(path, str)
+        and path
+        and isinstance(digest, str)
+        and digest
+        for path, digest in hashes.items()
+    ):
+        raise RuntimeError("boundary manifest implementationHashes is invalid")
     modules = manifest.get("modules")
     if not isinstance(modules, list):
         raise RuntimeError("boundary manifest modules must be an array")
-    classification_counts: Counter[str] = Counter()
-    disposition_counts: Counter[str] = Counter()
+    execution_role_counts: Counter[str] = Counter()
+    declaration_kind_counts: Counter[str] = Counter()
+    action_counts: Counter[str] = Counter()
     occurrence_count = 0
+    inventoried_module_count = 0
+    nested_occurrence_count = 0
+    duplicate_syntax_count = 0
+    duplicate_scope_count = 0
+    seen_modules: set[str] = set()
+    seen_ids: set[str] = set()
     for module in modules:
-        if not isinstance(module, dict) or not isinstance(module.get("occurrences"), list):
+        if not isinstance(module, dict):
             raise RuntimeError("boundary manifest has an invalid module record")
-        for occurrence in module["occurrences"]:
+        _exact_fields(module, MODULE_FIELDS, "module")
+        module_name = _string(module.get("module"), "module.module")
+        if module_name in seen_modules:
+            raise RuntimeError(f"boundary manifest has duplicate module: {module_name}")
+        seen_modules.add(module_name)
+        if not module_name.startswith("Mathlib/") or not module_name.endswith(".lean"):
+            raise RuntimeError(f"boundary manifest has invalid module path: {module_name}")
+        if module.get("compiledModule") != compiled_module_name(module_name):
+            raise RuntimeError(f"boundary manifest compiled module mismatch: {module_name}")
+        if module.get("moduleHash") != sha256(module_name.encode("utf-8")):
+            raise RuntimeError(f"boundary manifest module hash mismatch: {module_name}")
+        _string(module.get("sourceHash"), f"{module_name}.sourceHash")
+        module_duplicate_syntax = _nonnegative_int(
+            module.get("duplicateSyntaxRecords"),
+            f"{module_name}.duplicateSyntaxRecords",
+        )
+        module_duplicate_scope = _nonnegative_int(
+            module.get("duplicateScopeSyntaxRecords"),
+            f"{module_name}.duplicateScopeSyntaxRecords",
+        )
+        duplicate_syntax_count += module_duplicate_syntax
+        duplicate_scope_count += module_duplicate_scope
+        occurrences = module.get("occurrences")
+        if not isinstance(occurrences, list):
+            raise RuntimeError("boundary manifest module occurrences must be an array")
+        inventoried_module_count += bool(occurrences)
+        for occurrence in occurrences:
             if not isinstance(occurrence, dict):
                 raise RuntimeError("boundary manifest has an invalid occurrence record")
-            classification = occurrence.get("classification")
-            disposition = occurrence.get("disposition")
-            if not isinstance(classification, str) or not isinstance(disposition, str):
-                raise RuntimeError("boundary manifest occurrence has no classification/disposition")
-            expected_disposition = classification_disposition(classification)
-            if disposition != expected_disposition:
+            _exact_fields(
+                occurrence,
+                OCCURRENCE_FIELDS,
+                f"occurrence in {module_name}",
+                OCCURRENCE_OPTIONAL_FIELDS,
+            )
+            occurrence_id = _string(
+                occurrence.get("id"), f"{module_name} occurrence id"
+            )
+            if occurrence_id in seen_ids:
                 raise RuntimeError(
-                    "boundary manifest occurrence classification/disposition disagree"
+                    f"boundary manifest has duplicate occurrence id: {occurrence_id}"
                 )
-            classification_counts[classification] += 1
-            disposition_counts[disposition] += 1
+            seen_ids.add(occurrence_id)
+            kind = _string(occurrence.get("kind"), f"{module_name} occurrence kind")
+            if kind not in inventory.SUPPORTED_KINDS:
+                raise RuntimeError(
+                    f"boundary manifest has unsupported occurrence kind: {kind}"
+                )
+            if not isinstance(occurrence.get("source"), str):
+                raise RuntimeError("boundary manifest occurrence source must be a string")
+            start = _nonnegative_int(
+                occurrence.get("startByte"), f"{module_name} occurrence startByte"
+            )
+            end = _nonnegative_int(
+                occurrence.get("endByte"), f"{module_name} occurrence endByte"
+            )
+            if not start < end:
+                raise RuntimeError("boundary manifest occurrence range is invalid")
+            if occurrence_id != inventory.occurrence_id(module_name, start, end):
+                raise RuntimeError("boundary manifest occurrence ID does not match its range")
+            _nonnegative_int(occurrence.get("line"), f"{module_name} occurrence line")
+            _nonnegative_int(occurrence.get("column"), f"{module_name} occurrence column")
+            if occurrence.get("syntaxKind") != "Lean.Parser.Tactic.simp":
+                raise RuntimeError("boundary manifest occurrence syntax kind is invalid")
+            _string_array(
+                occurrence.get("ancestors"), f"{module_name} occurrence ancestors"
+            )
+            command_kind = occurrence.get("commandKind")
+            if command_kind is not None and not isinstance(command_kind, str):
+                raise RuntimeError("boundary manifest occurrence commandKind is invalid")
+            _optional_int(
+                occurrence.get("commandStartByte"),
+                f"{module_name} occurrence commandStartByte",
+            )
+            _optional_int(
+                occurrence.get("commandEndByte"),
+                f"{module_name} occurrence commandEndByte",
+            )
+            scope_paths = occurrence.get("scopePaths")
+            if not isinstance(scope_paths, list) or not scope_paths:
+                raise RuntimeError("boundary manifest occurrence scopePaths is invalid")
+            for index, path in enumerate(scope_paths):
+                _validate_scope_path(
+                    path, f"{module_name} occurrence scopePaths[{index}]"
+                )
+            declarations = occurrence.get("declarations")
+            if not isinstance(declarations, list):
+                raise RuntimeError("boundary manifest occurrence declarations is invalid")
+            for index, declaration in enumerate(declarations):
+                _validate_declaration(
+                    declaration, f"{module_name} occurrence declarations[{index}]"
+                )
+            _string(occurrence.get("reason"), f"{module_name} occurrence reason")
+            if "executionEvidence" in occurrence:
+                _validate_execution_evidence(
+                    occurrence["executionEvidence"],
+                    f"{module_name} occurrence executionEvidence",
+                )
+            execution_role = occurrence.get("executionRole")
+            declaration_kind = occurrence.get("declarationKind")
+            action = occurrence.get("action")
+            try:
+                checked_role, checked_kind, checked_action = (
+                    scope.validate_scope_dimensions(
+                        execution_role, declaration_kind, action
+                    )
+                )
+            except RuntimeError as error:
+                raise RuntimeError(
+                    f"invalid boundary manifest scope dimensions: {error}"
+                ) from error
+            execution_role_counts[checked_role] += 1
+            declaration_kind_counts[checked_kind] += 1
+            action_counts[checked_action] += 1
             occurrence_count += 1
+        nested_occurrence_count += _nested_occurrence_count(occurrences, module_name)
 
-    declared_classifications = _declared_count_map(
-        manifest.get("countsByClassification"), "countsByClassification"
+    declared_execution_roles = _declared_count_map(
+        manifest.get("countsByExecutionRole"), "countsByExecutionRole", EXECUTION_ROLES
     )
-    declared_dispositions = _declared_count_map(
-        manifest.get("countsByDisposition"), "countsByDisposition"
+    declared_declaration_kinds = _declared_count_map(
+        manifest.get("countsByDeclarationKind"),
+        "countsByDeclarationKind",
+        DECLARATION_KINDS,
     )
-    if dict(sorted(classification_counts.items())) != dict(
-        sorted(declared_classifications.items())
+    declared_actions = _declared_count_map(
+        manifest.get("countsByAction"), "countsByAction", ACTIONS
+    )
+    if dict(sorted(execution_role_counts.items())) != dict(
+        sorted(declared_execution_roles.items())
     ):
         raise RuntimeError(
-            "boundary manifest countsByClassification does not match occurrence records"
+            "boundary manifest countsByExecutionRole does not match occurrence records"
         )
-    if dict(sorted(disposition_counts.items())) != dict(
-        sorted(declared_dispositions.items())
+    if dict(sorted(declaration_kind_counts.items())) != dict(
+        sorted(declared_declaration_kinds.items())
     ):
         raise RuntimeError(
-            "boundary manifest countsByDisposition does not match occurrence records"
+            "boundary manifest countsByDeclarationKind does not match occurrence records"
         )
-    if manifest.get("moduleFileCount") != len(modules):
+    if dict(sorted(action_counts.items())) != dict(
+        sorted(declared_actions.items())
+    ):
+        raise RuntimeError(
+            "boundary manifest countsByAction does not match occurrence records"
+        )
+    if manifest["moduleFileCount"] != len(modules):
         raise RuntimeError("boundary manifest moduleFileCount does not match module records")
-    if manifest.get("occurrenceCount") != occurrence_count:
-        raise RuntimeError("boundary manifest occurrenceCount does not match occurrence records")
-
-    unclassified = disposition_counts.get("unclassified", 0)
-    if unclassified and manifest.get("allowUnclassified") is not True:
+    if manifest["inventoriedModuleCount"] != inventoried_module_count:
         raise RuntimeError(
-            f"boundary manifest contains {unclassified} unclassified occurrences"
+            "boundary manifest inventoriedModuleCount does not match module records"
+        )
+    if manifest["occurrenceCount"] != occurrence_count:
+        raise RuntimeError("boundary manifest occurrenceCount does not match occurrence records")
+    if manifest["nestedOccurrenceCount"] != nested_occurrence_count:
+        raise RuntimeError(
+            "boundary manifest nestedOccurrenceCount does not match occurrence records"
+        )
+    if manifest["duplicateSyntaxRecords"] != duplicate_syntax_count:
+        raise RuntimeError(
+            "boundary manifest duplicateSyntaxRecords does not match module records"
+        )
+    if manifest["duplicateScopeSyntaxRecords"] != duplicate_scope_count:
+        raise RuntimeError(
+            "boundary manifest duplicateScopeSyntaxRecords does not match module records"
+        )
+
+    unresolved = action_counts.get("unresolved", 0)
+    if unresolved and manifest.get("allowUnresolved") is not True:
+        raise RuntimeError(
+            f"boundary manifest contains {unresolved} unresolved occurrences"
         )
 
 
@@ -691,7 +1146,7 @@ def build_manifest_command(args: argparse.Namespace) -> None:
         module_prefix=args.module_prefix,
         expected_commit=args.commit or None,
         allow_dirty=args.allow_dirty,
-        allow_unclassified=args.allow_unclassified,
+        allow_unresolved=args.allow_unresolved,
         inventory_batch_size=args.inventory_batch_size,
         scope_batch_size=args.scope_batch_size,
         timeout=args.timeout,
@@ -702,7 +1157,7 @@ def build_manifest_command(args: argparse.Namespace) -> None:
         "boundary corpus manifest: "
         f"modules={manifest['moduleFileCount']}, "
         f"occurrences={manifest['occurrenceCount']}, "
-        f"dispositions={manifest['countsByDisposition']}: ok"
+        f"actions={manifest['countsByAction']}: ok"
     )
 
 
@@ -718,7 +1173,7 @@ def parser() -> argparse.ArgumentParser:
     manifest.add_argument("--scope-batch-size", type=int, default=128)
     manifest.add_argument("--timeout", type=int, default=3600)
     manifest.add_argument("--allow-dirty", action="store_true")
-    manifest.add_argument("--allow-unclassified", action="store_true")
+    manifest.add_argument("--allow-unresolved", action="store_true")
     manifest.set_defaults(function=build_manifest_command)
     return result
 

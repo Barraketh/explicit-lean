@@ -24,6 +24,83 @@ SCOPE_PROBE_IMPORT = "ExplicitLean.SimpEngine.Boundary.ScopeProbe"
 SCOPE_PROBE_SCHEDULING = "set_option Elab.async false"
 TO_DUAL_PROOF_COMMAND = "Mathlib.Tactic.ToDual.«commandTo_dual_insert_cast_:=_»"
 
+# These are the only scope dimensions published in the schema-2 manifest.
+# Keep the vocabulary here so the classifier, manifest builder, and consumers
+# validate exactly the same closed set of values.
+EXECUTION_ROLES = {
+    "direct_executable",
+    "reusable_executable",
+    "retained_syntax_data",
+    "unresolved",
+}
+DECLARATION_KINDS = {
+    "proof",
+    "computational",
+    "generated_proof",
+    "generated_computational",
+    "signature_or_default",
+    "caller_dependent",
+    "not_applicable",
+    "mixed",
+    "unknown",
+}
+ACTIONS = {"materialize", "retain", "unresolved"}
+DECLARATION_KINDS_BY_ROLE = {
+    "direct_executable": {
+        "proof",
+        "computational",
+        "generated_proof",
+        "generated_computational",
+        "signature_or_default",
+        "mixed",
+        "unknown",
+    },
+    "reusable_executable": {"caller_dependent"},
+    "retained_syntax_data": {"not_applicable"},
+    "unresolved": {"mixed", "unknown"},
+}
+
+
+def expected_action(execution_role: str, declaration_kind: str) -> str:
+    """Return the fail-closed action implied by the two scope dimensions."""
+    if execution_role == "retained_syntax_data" and declaration_kind == "not_applicable":
+        return "retain"
+    if execution_role == "reusable_executable" and declaration_kind == "caller_dependent":
+        return "materialize"
+    if execution_role == "direct_executable" and declaration_kind in {
+        "proof",
+        "computational",
+        "generated_proof",
+        "generated_computational",
+        "signature_or_default",
+    }:
+        return "materialize"
+    return "unresolved"
+
+
+def validate_scope_dimensions(
+    execution_role: object, declaration_kind: object, action: object
+) -> tuple[str, str, str]:
+    """Validate and cross-check one manifest scope triple."""
+    if not isinstance(execution_role, str) or execution_role not in EXECUTION_ROLES:
+        raise RuntimeError(f"invalid execution role: {execution_role!r}")
+    if not isinstance(declaration_kind, str) or declaration_kind not in DECLARATION_KINDS:
+        raise RuntimeError(f"invalid declaration kind: {declaration_kind!r}")
+    if not isinstance(action, str) or action not in ACTIONS:
+        raise RuntimeError(f"invalid scope action: {action!r}")
+    if declaration_kind not in DECLARATION_KINDS_BY_ROLE[execution_role]:
+        raise RuntimeError(
+            "declaration kind is incompatible with execution role: "
+            f"{execution_role}/{declaration_kind}"
+        )
+    expected = expected_action(execution_role, declaration_kind)
+    if action != expected:
+        raise RuntimeError(
+            "scope dimensions imply a different action: "
+            f"{execution_role}/{declaration_kind} -> {expected}, found {action}"
+        )
+    return execution_role, declaration_kind, action
+
 
 @dataclass(frozen=True)
 class ModuleSpec:
@@ -49,6 +126,11 @@ SPECS = (
         "Mathlib.Data.Fintype.List",
         ROOT / ".lake/packages/mathlib/Mathlib/Data/Fintype/List.lean",
         6,
+    ),
+    ModuleSpec(
+        "Mathlib.Algebra.Algebra.NonUnitalHom",
+        ROOT / ".lake/packages/mathlib/Mathlib/Algebra/Algebra/NonUnitalHom.lean",
+        7,
     ),
     ModuleSpec(
         "Mathlib.Analysis.CStarAlgebra.SpecialFunctions.PosPart",
@@ -218,6 +300,14 @@ def containing_declarations(
 def classify(
     occurrence: dict[str, object], declarations: list[dict[str, object]]
 ) -> dict[str, object]:
+    """Classify one occurrence along independent execution/scope axes.
+
+    The old classifier collapsed proof-vs-data and executable-vs-retained into
+    one proof-only label.  That made computational calls look out of scope.
+    This classifier keeps those decisions independent and derives the action
+    only after both dimensions are known.  Quoted syntax is deliberately
+    fail-closed unless a temporary execution probe resolves it.
+    """
     ancestors = occurrence.get("ancestors")
     if not isinstance(ancestors, list) or not all(
         isinstance(kind, str) for kind in ancestors
@@ -237,49 +327,75 @@ def classify(
     )
     candidates = containing_declarations(occurrence, declarations)
 
-    if any(
-        kind == "Lean.Elab.Command.command_Irreducible_def____"
-        for kind in ancestors
-    ):
-        classification = "out_of_scope_nonproof_command"
-        reason = (
-            "tactic is in the RHS of an irreducible computational definition; "
-            "a generated _def declaration shares the source range"
-        )
-    elif command_kind == "Lean.Parser.Command.variable":
-        classification = "out_of_scope_declaration_signature"
-        reason = "tactic occurs in a declaration signature/default value, not a proof body"
+    # #check consumes the quotation as Syntax data.  This must be checked
+    # before declaration ancestry because the quoted tactic is not executed by
+    # the surrounding command at all.
+    if quoted and command_kind == "Lean.Parser.Command.check":
+        execution_role = "retained_syntax_data"
+        declaration_kind = "not_applicable"
+        reason = "#check retains the tactic quotation as Syntax data"
+    # A quotation in a macro/elaborator is reusable executable syntax.  It is
+    # not tied to the declaration in which a caller eventually expands it.
+    elif reusable:
+        execution_role = "reusable_executable"
+        declaration_kind = "caller_dependent"
+        reason = "tactic quotation belongs to a reusable macro/elaborator command"
+    # This generated theorem command is known statically to materialize a
+    # proof-valued declaration.
     elif TO_DUAL_PROOF_COMMAND in ancestors:
-        classification = "in_scope_generated_proof_command"
+        execution_role = "direct_executable"
+        declaration_kind = "generated_proof"
         reason = (
             "to_dual_insert_cast elaborates its command RHS as the proof value "
             "of a generated theorem"
         )
-    elif reusable:
-        classification = "reusable_tactic_syntax"
-        reason = "tactic quotation belongs to a reusable macro/elaborator command"
-    elif candidates and all(not bool(candidate["isProof"]) for candidate in candidates):
-        classification = "out_of_scope_nonproof_declaration"
-        reason = "smallest enclosing compiled declarations are all non-proof-valued"
+    # Any other quotation might execute (for example inside run_cmd) or might
+    # remain syntax data.  This check precedes command/declaration rules because
+    # a quoted tactic in an irreducible RHS or default can still be retained as
+    # a Syntax value rather than executed.
+    elif quoted:
+        execution_role = "unresolved"
+        declaration_kind = "unknown"
+        reason = "quoted occurrence requires execution evidence"
+    # Irreducible definitions generate an implementation command whose body is
+    # computational even when the body contains proof fields.
+    elif any(
+        kind == "Lean.Elab.Command.command_Irreducible_def____"
+        for kind in ancestors
+    ):
+        execution_role = "direct_executable"
+        declaration_kind = "computational"
+        reason = (
+            "tactic is in the RHS of an irreducible computational definition"
+        )
+    elif command_kind == "Lean.Parser.Command.variable":
+        execution_role = "direct_executable"
+        declaration_kind = "signature_or_default"
+        reason = "tactic occurs in a declaration signature/default value, not a proof body"
+
     elif candidates and all(bool(candidate["isProof"]) for candidate in candidates):
-        if quoted:
-            classification = "unclassified"
-            reason = "quotation inside a proof declaration may be retained or executed"
-        else:
-            classification = "in_scope_proof_declaration"
-            reason = "smallest enclosing compiled declarations are all proof-valued"
-    elif quoted and command_kind == "Lean.Parser.Command.check":
-        classification = "out_of_scope_quotation"
-        reason = "#check retains the tactic quotation as Syntax data"
+        execution_role = "direct_executable"
+        declaration_kind = "proof"
+        reason = "smallest enclosing compiled declarations are all proof-valued"
+    elif candidates and all(not bool(candidate["isProof"]) for candidate in candidates):
+        execution_role = "direct_executable"
+        declaration_kind = "computational"
+        reason = "smallest enclosing compiled declarations are all non-proof-valued"
     elif candidates:
-        classification = "unclassified"
+        execution_role = "direct_executable"
+        declaration_kind = "mixed"
         reason = "smallest enclosing declarations disagree on proof-valued status"
     else:
-        classification = "unclassified"
-        reason = "no conservative declaration or quotation rule applies"
+        execution_role = "direct_executable"
+        declaration_kind = "unknown"
+        reason = "no conservative declaration rule applies; execution evidence may resolve it"
+
+    action = expected_action(execution_role, declaration_kind)
 
     return {
-        "classification": classification,
+        "executionRole": execution_role,
+        "declarationKind": declaration_kind,
+        "action": action,
         "reason": reason,
         "occurrence": occurrence,
         "declarations": candidates,
@@ -545,7 +661,9 @@ def _execution_evidence(
                 "scope execution evidence returned the wrong module: "
                 f"expected {module!r}, found {report_module!r}"
             )
-        if caller is not None and not isinstance(caller, str):
+        if caller is not None and (
+            not isinstance(caller, str) or not caller.strip()
+        ):
             raise RuntimeError(f"scope execution evidence has invalid caller: {report!r}")
         if (
             not isinstance(execution_count, int)
@@ -648,7 +766,7 @@ def _result_occurrence(result: dict[str, object]) -> dict[str, object]:
     required = {"startByte", "endByte", "kind", "source"}
     if required <= set(result):
         return result
-    raise RuntimeError(f"unclassified scope result has no occurrence: {result!r}")
+    raise RuntimeError(f"unresolved scope result has no occurrence: {result!r}")
 
 
 def resolve_execution_evidence(
@@ -662,7 +780,7 @@ def resolve_execution_evidence(
     """Compile one temporary source copy and join its carried probe IDs.
 
     ``entries`` and ``occurrences`` are intentionally restricted to the
-    statically unclassified calls.  The source copy is disposable: anonymous
+    statically unresolved calls.  The source copy is disposable: anonymous
     examples are renamed only so their final declaration types can be resolved
     by the report command, and no renamed source is ever materialized.
     """
@@ -734,11 +852,18 @@ def apply_execution_evidence(
     entries: Sequence[dict[str, object]] | None = None,
     timeout: int = 600,
 ) -> dict[str, dict[str, object]]:
-    """Resolve only unclassified results and mutate them with audit evidence."""
+    """Resolve action-unresolved results and mutate them with audit evidence.
+
+    Quoted occurrences are classified as generated declarations when the probe
+    observes a complete caller.  Nonquoted occurrences retain their known
+    direct-executable role and use the observed caller only to fill in a
+    missing proof/computational declaration kind.  Mixed or incomplete
+    evidence remains unresolved.
+    """
     unknown = [
         result
         for result in results
-        if result.get("classification") == "unclassified"
+        if result.get("action") == "unresolved"
     ]
     if not unknown:
         return {}
@@ -767,7 +892,7 @@ def apply_execution_evidence(
             entry = provided_by_key.get(_occurrence_key(occurrence))
             if entry is None:
                 raise RuntimeError(
-                    f"execution entry does not match an unclassified result in {module}: "
+                    f"execution entry does not match an unresolved result in {module}: "
                     f"{occurrence!r}"
                 )
             occurrence_id = str(entry["id"])
@@ -791,57 +916,98 @@ def apply_execution_evidence(
         observed = evidence[occurrence_id]
         result["executionEvidence"] = observed
         status = observed["status"]
+        occurrence = _result_occurrence(result)
+        ancestors = occurrence.get("ancestors")
+        quoted = isinstance(ancestors, list) and any(
+            isinstance(kind, str) and kind.endswith(".quot") for kind in ancestors
+        )
+        declarations = result.get("declarations")
+        generated = quoted and isinstance(declarations, list) and not declarations
         if status == "complete_proof_declaration":
-            result["classification"] = "in_scope_observed_proof_declaration"
+            result["executionRole"] = "direct_executable"
+            result["declarationKind"] = (
+                "generated_proof" if generated else "proof"
+            )
+            result["action"] = "materialize"
             result["reason"] = (
                 "temporary source instrumentation observed executions whose "
                 "final caller declarations are all proof-valued"
             )
         elif status == "complete_nonproof_declaration":
-            result["classification"] = "out_of_scope_observed_nonproof_declaration"
+            result["executionRole"] = "direct_executable"
+            result["declarationKind"] = (
+                "generated_computational" if generated else "computational"
+            )
+            result["action"] = "materialize"
             result["reason"] = (
                 "temporary source instrumentation observed executions whose "
                 "final caller declarations are all non-proof-valued"
             )
         elif status == "mixed_execution_classification":
+            result["executionRole"] = "unresolved" if quoted else "direct_executable"
+            result["declarationKind"] = "mixed"
+            result["action"] = "unresolved"
             result["reason"] = (
                 "executions resolved to both proof and non-proof declarations; "
-                "classification fails closed"
+                "scope action fails closed"
             )
         elif status == "missing_execution":
+            result["executionRole"] = "unresolved" if quoted else "direct_executable"
+            result["declarationKind"] = "unknown"
+            result["action"] = "unresolved"
             result["reason"] = (
                 "selected source occurrence did not execute in the temporary "
-                "probe copy; classification fails closed"
+                "probe copy; scope action fails closed"
             )
         else:
+            result["executionRole"] = "unresolved" if quoted else "direct_executable"
+            result["declarationKind"] = "unknown"
+            result["action"] = "unresolved"
             result["reason"] = (
-                "temporary execution evidence was incomplete; classification "
+                "temporary execution evidence was incomplete; scope action "
                 "fails closed"
             )
-        result["disposition"] = (
-            "eligible"
-            if result["classification"] == "in_scope_observed_proof_declaration"
-            else "excluded"
-            if result["classification"] == "out_of_scope_observed_nonproof_declaration"
-            else "unclassified"
+        validate_scope_dimensions(
+            result.get("executionRole"),
+            result.get("declarationKind"),
+            result.get("action"),
         )
     return evidence
 
 
 def assert_fixture(results: list[dict[str, object]]) -> None:
-    counts = Counter(str(result["classification"]) for result in results)
-    expected = {
-        "in_scope_proof_declaration": 2,
-        "out_of_scope_nonproof_declaration": 3,
-        "reusable_tactic_syntax": 1,
-        "out_of_scope_quotation": 1,
-        "out_of_scope_nonproof_command": 1,
-        "out_of_scope_declaration_signature": 1,
-        "in_scope_observed_proof_declaration": 2,
-        "out_of_scope_observed_nonproof_declaration": 2,
+    role_counts = Counter(str(result["executionRole"]) for result in results)
+    expected_roles = {
+        "direct_executable": 11,
+        "reusable_executable": 1,
+        "retained_syntax_data": 1,
     }
-    if dict(counts) != expected:
-        raise RuntimeError(f"scope fixture classification mismatch: {counts}\n{results}")
+    if dict(role_counts) != expected_roles:
+        raise RuntimeError(f"scope fixture execution-role mismatch: {role_counts}\n{results}")
+    kind_counts = Counter(str(result["declarationKind"]) for result in results)
+    expected_kinds = {
+        "proof": 3,
+        "computational": 5,
+        "generated_proof": 1,
+        "generated_computational": 1,
+        "signature_or_default": 1,
+        "caller_dependent": 1,
+        "not_applicable": 1,
+    }
+    if dict(kind_counts) != expected_kinds:
+        raise RuntimeError(
+            f"scope fixture declaration-kind mismatch: {kind_counts}\n{results}"
+        )
+    action_counts = Counter(str(result["action"]) for result in results)
+    expected_actions = {"materialize": 12, "retain": 1}
+    if dict(action_counts) != expected_actions:
+        raise RuntimeError(f"scope fixture action mismatch: {action_counts}\n{results}")
+    for result in results:
+        validate_scope_dimensions(
+            result.get("executionRole"),
+            result.get("declarationKind"),
+            result.get("action"),
+        )
 
     prop_data = [
         result
@@ -851,8 +1017,8 @@ def assert_fixture(results: list[dict[str, object]]) -> None:
             for declaration in result["declarations"]
         )
     ]
-    if len(prop_data) != 1 or prop_data[0]["classification"] != (
-        "out_of_scope_nonproof_declaration"
+    if len(prop_data) != 1 or prop_data[0]["declarationKind"] != (
+        "computational"
     ) or any(bool(declaration["isProof"]) for declaration in prop_data[0]["declarations"]):
         raise RuntimeError(
             "`def scopePropData : Prop` was not classified as proposition data"
@@ -924,29 +1090,47 @@ def main() -> None:
         results = [classify(occurrence, declarations) for occurrence in occurrences]
         if len(results) != len(occurrences):
             raise RuntimeError(f"scope classification did not partition {spec.module}")
-        if any(result["classification"] == "unclassified" for result in results):
+        if any(result["action"] == "unresolved" for result in results):
             apply_execution_evidence(
                 spec.module,
                 spec.source.read_bytes(),
                 results,
                 timeout=600,
             )
-        counts = Counter(str(result["classification"]) for result in results)
+        for result in results:
+            validate_scope_dimensions(
+                result.get("executionRole"),
+                result.get("declarationKind"),
+                result.get("action"),
+            )
+        role_counts = Counter(str(result["executionRole"]) for result in results)
+        action_counts = Counter(str(result["action"]) for result in results)
         if spec.fixture:
             assert_fixture(results)
-        unclassified = [
-            result for result in results if result["classification"] == "unclassified"
+        unresolved = [
+            result for result in results if result["action"] == "unresolved"
         ]
         print(
             f"boundary scope {spec.module}: {len(results)} occurrences, "
-            + ", ".join(f"{kind}={count}" for kind, count in sorted(counts.items()))
+            + ", ".join(
+                f"role.{kind}={count}" for kind, count in sorted(role_counts.items())
+            )
+            + ", "
+            + ", ".join(
+                f"action.{kind}={count}" for kind, count in sorted(action_counts.items())
+            )
         )
-        for result in unclassified:
+        for result in unresolved:
             occurrence = result["occurrence"]
             print(
-                "boundary scope unclassified: "
+                "boundary scope unresolved: "
                 f"{spec.module}:{occurrence['line']}:{occurrence['column']} "
                 f"{result['reason']}; source={occurrence['source']!r}"
+            )
+        if unresolved:
+            raise RuntimeError(
+                f"scope checker left {len(unresolved)} unresolved occurrences in "
+                f"{spec.module}"
             )
 
 
