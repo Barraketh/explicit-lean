@@ -76,6 +76,10 @@ example (P : Nat → Prop) (n : Nat) (h : P n) : P (n + 0) := by
   simp_engine_boundary_probe only [Nat.add_zero]
   exact h
 
+example : True := by
+  simp_engine_boundary_comparator_self_test
+  exact True.intro
+
 -- Target closure after simplification proves the target equal to `True`.
 example (n : Nat) : n + 0 = n := by
   simp_engine_boundary_probe only [Nat.add_zero]

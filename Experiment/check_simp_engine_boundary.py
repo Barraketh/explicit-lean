@@ -26,6 +26,7 @@ IMPORT_RE = re.compile(
     r"((?:all\s+)?[A-Za-z0-9_.]+(?:\s+[A-Za-z0-9_.]+)*)\s*$"
 )
 PROBE_MARKER = "SIMP_ENGINE_BOUNDARY_PROBE"
+SELF_TEST_MARKER = "SIMP_ENGINE_BOUNDARY_COMPARATOR_SELF_TEST ok"
 PROBE_MARKER_RE = re.compile(
     r"^SIMP_ENGINE_BOUNDARY_PROBE "
     r"outcome=(?P<outcome>transported|closed_true|closed_false) "
@@ -152,6 +153,10 @@ def main() -> None:
         raise RuntimeError(query.stdout)
     dylib = query_json_string(query.stdout, "lake query ExplicitLean:shared")
     location_output = compile_probe(dylib, LOCATION_PROBE)
+    if location_output.count(SELF_TEST_MARKER) != 1:
+        raise RuntimeError(
+            f"expected exactly one comparator self-test marker\n{location_output}"
+        )
     parsed_markers = parse_probe_markers(location_output)
     failed = [
         fields
