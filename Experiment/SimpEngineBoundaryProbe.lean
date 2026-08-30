@@ -20,10 +20,13 @@ class BoundaryPendingClass : Prop where
 
 instance : BoundaryPendingClass := ⟨True.intro⟩
 
+def boundaryPersistentTagTarget : Nat := 0
+
 syntax "boundary_insert_assignment_goal" : tactic
 syntax "boundary_assign_preexisting_mvars" : tactic
 syntax "boundary_pending_typeclass_probe" : tactic
 syntax "boundary_postponed_constraint_probe" : tactic
+syntax "boundary_mutate_persistent_extension" : tactic
 
 elab_rules : tactic
   | `(tactic| boundary_insert_assignment_goal) => withMainContext do
@@ -70,6 +73,9 @@ elab_rules : tactic
       unless (← getPostponed).size == saved.size + 1 do
         throwError "boundary apply changed a stock-preserved postponed constraint"
       setPostponed saved
+  | `(tactic| boundary_mutate_persistent_extension) => withMainContext do
+      Lean.addDocStringCore ``boundaryPersistentTagTarget
+        "boundary-only persistent-extension mutation"
 
 -- Equality-proof transport followed by an unchanged continuation.
 example (P : Nat → Prop) (n : Nat) (h : P n) : P (n + 0) := by
@@ -184,3 +190,11 @@ example (P : Nat → Prop) (n : Nat) (h : P n) : P (n + 0) := by
 example (P : Nat → Prop) (n : Nat) (h : P n) : P (n + 0) := by
   boundary_postponed_constraint_probe
   exact h
+
+-- Persistent extension changes made by the stock discharger are not replayed
+-- by a materialized artifact, so the immediate-boundary comparator must reject
+-- this call instead of treating it as an unobserved occurrence.
+example (p q : Prop) (h : p) (hpq : p → q) : q := by
+  fail_if_success simp_engine_boundary_probe
+    (disch := boundary_mutate_persistent_extension <;> assumption) [hpq]
+  exact hpq h

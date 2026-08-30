@@ -12,6 +12,27 @@ open Lean Meta
 
 namespace ExplicitLean.SimpEngine.Boundary
 
+/- The boundary artifact protocol is deliberately independent of the legacy
+   schema-27 certificate/replay format. Keep these literals synchronized with
+   Experiment/boundary_protocol.py. They are part of the artifact-schema
+   semantics, so changing an encoding literal requires bumping the artifact
+   schema. Generated source validates that schema before it elaborates any
+   evidence or executes an environment action. -/
+def boundaryArtifactKind : String := "simp_engine_boundary_artifact"
+def boundaryArtifactSchema : Nat := 1
+def boundarySelectorSchema : Nat := 1
+def boundarySemanticContract : String := "boundary-observable-v1"
+def boundaryArtifactTermEncoding : String := "lean_source_v1"
+def boundaryArtifactLocalReferenceEncoding : String := "local_decl_index_v1"
+def boundaryArtifactUniverseEncoding : String := "inferred_at_application"
+def boundaryArtifactInstanceEncoding : String := "inferred_at_application"
+
+/- Marker lines emitted by the recording tactic are authenticated against the
+   compiler process that requested them. Direct probes which do not provide
+   this environment variable use the explicit unauthenticated token. -/
+def boundaryRunNonceEnv : String := "SIMP_ENGINE_BOUNDARY_RUN_NONCE"
+def boundaryUnauthenticatedRunNonce : String := "unauthenticated"
+
 /-
   An environment change which can be replayed without invoking the
   simplifier. The representation is intentionally closed: a materialized

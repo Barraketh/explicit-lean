@@ -1605,6 +1605,110 @@ private def boundaryEnvironmentDelta (basis : PreBoundaryBasis)
 private def boundaryEnvironmentPrivateName (basis : PreBoundaryBasis) (name : Name) : Bool :=
   isPrivateName name || (name.isInternalDetail && !isReservedName basis.environment name)
 
+/-
+  `ModuleData.entries` is the serialized view of persistent environment
+  extensions.  Private-proof bookkeeping and the typed dependency/tag rules
+  below are narrow closed-world exceptions.  Every other persistent extension
+  must be byte-for-byte identical at the simp boundary.
+
+  Keep these exceptions exact.  In particular, do not suffix-match private
+  extension names: a project extension with a lookalike name is observable and
+  must be compared.
+-/
+private def boundaryIsPermittedPersistentExtension (name : Name) : Bool :=
+  name == `Lean.declRangeExt ||
+    name == "_private.Lean.Util.CollectAxioms.0.Lean.exportedAxiomsExt".toName ||
+    name == "_private.Lean.OriginalConstKind.0.Lean.privateConstKindsExt".toName
+
+private def boundaryExtraModUsesExtensionName : Name :=
+  "_private.Lean.ExtraModUses.0.Lean.extraModUses".toName
+
+private def boundaryIsTypedTagExtension (name : Name) : Bool :=
+  name == `Lean.backwardDefeqAttr || name == `Lean.defeqAttr
+
+private unsafe def boundaryCurrentExtraModUsesImpl (data : ModuleData) : Array ExtraModUse :=
+  match data.entries.find? (fun entry => entry.1 == boundaryExtraModUsesExtensionName) with
+  | some (_, entries) => unsafeCast entries
+  | none => #[]
+
+@[implemented_by boundaryCurrentExtraModUsesImpl]
+private opaque boundaryCurrentExtraModUses (data : ModuleData) : Array ExtraModUse
+
+private def normalizedBoundaryExtraModUses (uses : Array ExtraModUse) : Array ExtraModUse :=
+  uses.foldl (init := #[]) (fun result use =>
+      if result.contains use then result else result.push use)
+    |>.qsort fun lhs rhs =>
+      s!"{lhs.module}|{lhs.isExported}|{lhs.isMeta}" <
+        s!"{rhs.module}|{rhs.isExported}|{rhs.isMeta}"
+
+/- Stock simplification may record imports of theorem-provider modules that the
+   closed artifact no longer consults. Omitting those dependency hints is safe;
+   adding a dependency absent from stock is not. This is the same typed subset
+   rule enforced by the completed-module declaration oracle. -/
+private def compareBoundaryExtraModUses (stockData appliedData : ModuleData) : TacticM Unit := do
+  let stock := normalizedBoundaryExtraModUses (boundaryCurrentExtraModUses stockData)
+  let applied := normalizedBoundaryExtraModUses (boundaryCurrentExtraModUses appliedData)
+  unless applied.all stock.contains do
+    throwError "boundary_comparison_extra_module_uses_not_stock_subset"
+
+private def normalizeBoundaryModuleData (data : ModuleData)
+    (name : Name) (entries : Array EnvExtensionEntry) : ModuleData :=
+  { data with
+    imports := #[]
+    constNames := #[]
+    constants := #[]
+    extraConstNames := #[]
+    entries := #[(name, entries)] }
+
+/- CompactedRegion is intentionally an unsafe runtime primitive.  The opaque
+   declaration keeps that implementation detail out of the kernel-visible
+   boundary checker while retaining the deterministic bytes produced by the
+   same serializer used by the declaration oracle. -/
+private unsafe def serializeBoundaryModuleDataImpl (data : ModuleData) : IO ByteArray := do
+  IO.FS.withTempFile fun _ path => do
+    let compactor ← CompactedRegion.save path `_simp_engine_boundary_extension data #[] none
+    Runtime.forget compactor
+    IO.FS.readBinFile path
+
+@[implemented_by serializeBoundaryModuleDataImpl]
+private opaque serializeBoundaryModuleData (data : ModuleData) : IO ByteArray
+
+private def boundaryPersistentExtensionEntries (data : ModuleData) :
+    Array (Name × Array EnvExtensionEntry) :=
+  data.entries.qsort (fun lhs rhs => lhs.1.toString < rhs.1.toString)
+
+private def compareBoundaryPersistentExtensions
+    (stockData appliedData : ModuleData) : TacticM Unit := do
+  compareBoundaryExtraModUses stockData appliedData
+  let stockEntries := boundaryPersistentExtensionEntries stockData
+  let appliedEntries := boundaryPersistentExtensionEntries appliedData
+  let stockNames := stockEntries.map (·.1)
+  let appliedNames := appliedEntries.map (·.1)
+  let names := (stockNames ++ appliedNames).qsort (fun lhs rhs => lhs.toString < rhs.toString)
+    |>.foldl (init := #[]) fun result name =>
+      if result.contains name then result else result.push name
+  for name in names do
+    if boundaryIsPermittedPersistentExtension name ||
+        name == boundaryExtraModUsesExtensionName ||
+        boundaryIsTypedTagExtension name then
+      continue
+    let some (_, stockValues) := stockEntries.find? (fun entry => entry.1 == name)
+      | throwError s!"boundary_comparison_missing_stock_extension:{name}"
+    let some (_, appliedValues) := appliedEntries.find? (fun entry => entry.1 == name)
+      | throwError s!"boundary_comparison_missing_applied_extension:{name}"
+    let stockNormalized := normalizeBoundaryModuleData stockData name stockValues
+    let appliedNormalized := normalizeBoundaryModuleData appliedData name appliedValues
+    let stockBytes ← serializeBoundaryModuleData stockNormalized
+    let stockBytesAgain ← serializeBoundaryModuleData stockNormalized
+    unless stockBytes == stockBytesAgain do
+      throwError s!"boundary_comparison_nondeterministic_extension_serialization:{name}"
+    let appliedBytes ← serializeBoundaryModuleData appliedNormalized
+    let appliedBytesAgain ← serializeBoundaryModuleData appliedNormalized
+    unless appliedBytes == appliedBytesAgain do
+      throwError s!"boundary_comparison_nondeterministic_extension_serialization:{name}"
+    unless stockBytes == appliedBytes do
+      throwError s!"boundary_comparison_extension_state:{name}"
+
 private def boundaryPrivateProofDeclaration (basis : PreBoundaryBasis)
     (environment : Environment) (info : ConstantInfo) : TacticM Bool := do
   if !boundaryEnvironmentPrivateName basis info.name then
@@ -1615,6 +1719,44 @@ private def boundaryPrivateProofDeclaration (basis : PreBoundaryBasis)
       withEnv environment <| withLCtx {} #[] <|
         withRestoredBoundaryFullMetaState <| isProp info.type
   | _ => pure false
+
+private unsafe def boundaryCurrentTagEntriesImpl (data : ModuleData)
+    (extensionName : Name) : Array Name :=
+  match data.entries.find? (fun entry => entry.1 == extensionName) with
+  | some (_, entries) => unsafeCast entries
+  | none => #[]
+
+@[implemented_by boundaryCurrentTagEntriesImpl]
+private opaque boundaryCurrentTagEntries (data : ModuleData)
+    (extensionName : Name) : Array Name
+
+private def compareBoundaryTagAttribute (basis : PreBoundaryBasis) (label : String)
+    (tagAttr : TagAttribute) (stockEnvironment appliedEnvironment : Environment)
+    (stockData appliedData : ModuleData) : TacticM Unit := do
+  let stockDeclarations := boundaryEnvironmentDeclarations stockEnvironment
+  let appliedDeclarations := boundaryEnvironmentDeclarations appliedEnvironment
+  let stockTagged := boundaryCurrentTagEntries stockData tagAttr.ext.name
+  let appliedTagged := boundaryCurrentTagEntries appliedData tagAttr.ext.name
+  let names := (stockTagged ++ appliedTagged)
+    |>.qsort (fun lhs rhs => lhs.toString < rhs.toString)
+    |>.foldl (init := #[]) fun result name =>
+      if result.contains name then result else result.push name
+  for name in names do
+    let stockInfo? := stockDeclarations.find? (fun info => info.name == name)
+    let appliedInfo? := appliedDeclarations.find? (fun info => info.name == name)
+    let stockPrivateProof ← match stockInfo? with
+      | some info => boundaryPrivateProofDeclaration basis stockEnvironment info
+      | none => pure false
+    let appliedPrivateProof ← match appliedInfo? with
+      | some info => boundaryPrivateProofDeclaration basis appliedEnvironment info
+      | none => pure false
+    let everyPresentDeclarationIsPrivateProof :=
+      (stockInfo?.isNone || stockPrivateProof) &&
+        (appliedInfo?.isNone || appliedPrivateProof)
+    if everyPresentDeclarationIsPrivateProof then
+      continue
+    unless stockTagged.contains name == appliedTagged.contains name do
+      throwError s!"boundary_comparison_extension_state:{label}:{name}"
 
 private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
     (stockEnvironment : Environment) : TacticM (Array EnvironmentAction) := do
@@ -1720,6 +1862,13 @@ private def compareBoundaryDeclaration (stockEnvironment : Environment)
 private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
     (stockEnvironment appliedEnvironment : Environment)
     (actions : Array EnvironmentAction) : TacticM Unit := do
+  let stockModuleData ← Lean.mkModuleData stockEnvironment .private
+  let appliedModuleData ← Lean.mkModuleData appliedEnvironment .private
+  compareBoundaryPersistentExtensions stockModuleData appliedModuleData
+  compareBoundaryTagAttribute basis "backwardDefeqAttr" Lean.backwardDefeqAttr
+    stockEnvironment appliedEnvironment stockModuleData appliedModuleData
+  compareBoundaryTagAttribute basis "defeqAttr" Lean.defeqAttr
+    stockEnvironment appliedEnvironment stockModuleData appliedModuleData
   let stockDelta := boundaryEnvironmentDelta basis stockEnvironment
   let appliedDelta := boundaryEnvironmentDelta basis appliedEnvironment
   let stockPublic :=
@@ -1846,45 +1995,78 @@ private def transformationJson (transformation : TargetArtifact) : TacticM Json 
     ("proof", proofJson)
   ]
 
-private def artifactReportJson (occurrence : String) (selector : Json)
-    (artifact : GoalArtifact) : TacticM Json := withBoundaryEncodedSourceContext do
+private def artifactTerminal (artifact : GoalArtifact) : String :=
+  if artifact.locals.any (·.transformation.result.isFalse) then
+    "closed_from_local_false"
+  else if artifact.target?.any (·.result.isTrue) then
+    "closed_from_target_true"
+  else
+    "open"
+
+private def appliedTerminal (terminal : GoalTerminal) : String :=
+  match terminal with
+  | .open => "open"
+  | .closedFromLocalFalse => "closed_from_local_false"
+  | .closedFromTargetTrue => "closed_from_target_true"
+
+private def artifactEncodingJson : Json := Json.mkObj [
+  ("terms", Json.str boundaryArtifactTermEncoding),
+  ("locals", Json.str boundaryArtifactLocalReferenceEncoding),
+  ("universes", Json.str boundaryArtifactUniverseEncoding),
+  ("instances", Json.str boundaryArtifactInstanceEncoding)
+]
+
+private def boundaryRecordingNonce : TacticM String := do
+  match ← IO.getEnv boundaryRunNonceEnv with
+  | some nonce =>
+    if nonce.isEmpty then
+      pure boundaryUnauthenticatedRunNonce
+    else
+      pure nonce
+  | none =>
+    pure boundaryUnauthenticatedRunNonce
+
+private def emitBoundaryJsonMarker (marker : String) (payload : Json) : TacticM Unit := do
+  let nonce ← boundaryRecordingNonce
+  IO.println s!"{marker}{nonce} {payload.compress}"
+
+private def artifactReportJson (occId : String) (selector : Json)
+    (artifact : GoalArtifact) (terminal : String) : TacticM Json :=
+  withBoundaryEncodedSourceContext do
   let mut localReports := #[]
   for localArtifact in artifact.locals do
     let decl ← localArtifact.fvarId.getDecl
     localReports := localReports.push <| Json.mkObj [
-      ("name", Json.str decl.userName.toString),
-      ("index", toJson decl.index),
+      ("userName", Json.str decl.userName.toString),
+      ("reference", Json.mkObj [
+        ("kind", Json.str "local_decl_index"),
+        ("index", toJson decl.index)
+      ]),
       ("transformation", ← transformationJson localArtifact.transformation)
     ]
   let targetJson ← artifact.target?.mapM transformationJson
-  -- The flat target fields keep the first target-only materializer deliberately
-  -- simple while the structured fields support full locations.
-  let (inputJson, resultJson, proofJson) ← match artifact.target? with
-    | none => pure (Json.null, Json.null, Json.null)
-    | some targetArtifact => do
-        let proofJson ← match targetArtifact.proof? with
-          | none => pure Json.null
-          | some proof => pure (Json.str (← renderArtifactExpr proof))
-        pure (
-          Json.str (← renderArtifactExpr targetArtifact.input),
-          Json.str (← renderArtifactExpr targetArtifact.result),
-          proofJson)
   return Json.mkObj [
-    ("occurrence", Json.str occurrence),
+    ("kind", Json.str boundaryArtifactKind),
+    ("schema", toJson boundaryArtifactSchema),
+    ("semanticContract", Json.str boundarySemanticContract),
+    ("occurrence", Json.str occId),
     ("selector", selector),
     ("status", Json.str "success"),
+    ("terminal", Json.str terminal),
+    ("encoding", artifactEncodingJson),
+    ("stateDeltas", Json.arr #[]),
     ("environmentActions", Json.arr (artifact.environmentActions.map
       boundaryEnvironmentActionJson)),
     ("locals", Json.arr localReports),
-    ("target", targetJson.getD Json.null),
-    ("input", inputJson),
-    ("result", resultJson),
-    ("proof", proofJson)
+    ("target", targetJson.getD Json.null)
   ]
 
-private def failureReportJson (occurrence : String) (selector : Json) : Json :=
+private def failureReportJson (occId : String) (selector : Json) : Json :=
   Json.mkObj [
-    ("occurrence", Json.str occurrence),
+    ("kind", Json.str boundaryArtifactKind),
+    ("schema", toJson boundaryArtifactSchema),
+    ("semanticContract", Json.str boundarySemanticContract),
+    ("occurrence", Json.str occId),
     ("selector", selector),
     ("status", Json.str "failure")
   ]
@@ -1892,8 +2074,32 @@ private def failureReportJson (occurrence : String) (selector : Json) : Json :=
 /-- Failed tactics roll back ordinary messages when an enclosing alternative
     catches the exception. Emit the closed failure observation directly so the
     translation harness can materialize the same transactional failure. -/
-private def emitFailureReport (occurrence : String) (selector : Json) : TacticM Unit :=
-  IO.println s!"SIMP_ENGINE_BOUNDARY_ARTIFACT {(failureReportJson occurrence selector).compress}"
+private def emitFailureReport (occId : String) (selector : Json) : TacticM Unit :=
+  emitBoundaryJsonMarker "SIMP_ENGINE_BOUNDARY_ARTIFACT "
+    (failureReportJson occId selector)
+
+private def recordingAbortJson (occId moduleName stage detail : String) : Json :=
+  Json.mkObj [
+    ("kind", Json.str "simp_engine_boundary_recording_abort"),
+    ("schema", toJson (1 : Nat)),
+    ("occurrence", Json.str occId),
+    ("module", Json.str moduleName),
+    ("stage", Json.str stage),
+    ("detail", Json.str detail)
+  ]
+
+/-- This marker uses direct IO so an enclosing `first` or `try` cannot roll it
+    back with ordinary tactic messages. A fingerprinting or post-stock recorder
+    failure is an infrastructure abort, never evidence that the call was
+    unobserved. -/
+private def emitRecordingAbort (occId stage : String) (error : Exception) : TacticM Unit := do
+  let detail ← try
+    error.toMessageData.toString
+  catch _ =>
+    pure "boundary recorder raised an unrenderable exception"
+  let moduleName := (← getEnv).mainModule.toString
+  emitBoundaryJsonMarker "SIMP_ENGINE_BOUNDARY_RECORDING_ABORT "
+    (recordingAbortJson occId moduleName stage detail)
 
 private def runBoundaryProbe (simpStx : Syntax)
     (reportRequest? : Option (String × Json) := none) : TacticM GoalArtifact := do
@@ -1903,63 +2109,67 @@ private def runBoundaryProbe (simpStx : Syntax)
     resolveLocation simpStx
   catch error =>
     pre.restore
-    if let some (occurrence, selector) := reportRequest? then
-      emitFailureReport occurrence selector
+    if let some (occId, selector) := reportRequest? then
+      emitFailureReport occId selector
     throw error
   let stockClosed ← try
     executeStockLocation simpStx selection
   catch error =>
     pre.restore
-    if let some (occurrence, selector) := reportRequest? then
-      emitFailureReport occurrence selector
+    if let some (occId, selector) := reportRequest? then
+      emitFailureReport occId selector
     throw error
-  let stock ← boundarySnapshot basis
-  let stockEnvironment ← getEnv
-  let environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
-  let stockState ← Tactic.saveState
-  pre.restore
-  let artifact ← try
-    captureGoalArtifact basis simpStx selection
-  catch error =>
+  let postStockAction : TacticM GoalArtifact := do
+    let stock ← boundarySnapshot basis
+    let stockEnvironment ← getEnv
+    let environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
+    let stockState ← Tactic.saveState
     pre.restore
-    throw error
-  let artifact := { artifact with environmentActions }
-  -- Rendering must happen in the original local context. Proof-bearing local
-  -- transformations clear their old declarations during apply, after which a
-  -- pretty printer can no longer recover valid source names for the artifact.
-  let report? ← reportRequest?.mapM fun (occurrence, selector) =>
-    artifactReportJson occurrence selector artifact
-  pre.restore
-  let initialGoals ← getGoals
-  let (applyGoals, applyTerminal) ←
-    applyGoalArtifact initialGoals.head! initialGoals.tail artifact
-  setGoals applyGoals
-  let applied ← boundarySnapshot basis
-  let appliedState ← Tactic.saveState
-  try
+    let artifact ← captureGoalArtifact basis simpStx selection
+    let artifact := { artifact with environmentActions }
+    let terminal := artifactTerminal artifact
+    -- Rendering must happen in the original local context. Proof-bearing local
+    -- transformations clear their old declarations during apply, after which a
+    -- pretty printer can no longer recover valid source names for the artifact.
+    let report? ← reportRequest?.mapM fun (occId, selector) =>
+      artifactReportJson occId selector artifact terminal
+    pre.restore
+    let initialGoals ← getGoals
+    let (applyGoals, applyTerminal) ←
+      applyGoalArtifact initialGoals.head! initialGoals.tail artifact
+    unless terminal == appliedTerminal applyTerminal do
+      throwError s!"boundary_terminal_mismatch: artifact={terminal}; \
+        apply={appliedTerminal applyTerminal}"
+    setGoals applyGoals
+    let applied ← boundarySnapshot basis
+    let appliedState ← Tactic.saveState
     compareBoundaryStates basis stockState appliedState stock applied
     compareBoundaryEnvironment basis stockEnvironment (← getEnv) environmentActions
+    let applyClosed := applyTerminal != .open
+    unless stockClosed == applyClosed do
+      throwError "boundary_terminal_mismatch: stockClosed={stockClosed}; apply={repr applyTerminal}"
+    let outcome := match applyTerminal with
+      | .open => "transported"
+      | .closedFromLocalFalse => "closed_false"
+      | .closedFromTargetTrue => "closed_true"
+    let transformations := artifact.locals.map (·.transformation) ++ artifact.target?.toArray
+    let evidence := if transformations.any (·.proof?.isSome) then
+        "equality"
+      else if transformations.all fun item => item.input == item.result then
+        "unchanged"
+      else
+        "defeq"
+    logInfo m!"SIMP_ENGINE_BOUNDARY_PROBE outcome={outcome} evidence={evidence} equivalent=true"
+    if let some report := report? then
+      emitBoundaryJsonMarker "SIMP_ENGINE_BOUNDARY_ARTIFACT " report
+    return artifact
+  try
+    postStockAction
   catch error =>
     pre.restore
+    if let some (occId, _) := reportRequest? then
+      emitRecordingAbort occId "post_stock" error
     throw error
-  let applyClosed := applyTerminal != .open
-  unless stockClosed == applyClosed do
-    throwError "boundary_terminal_mismatch: stockClosed={stockClosed}; apply={repr applyTerminal}"
-  let outcome := match applyTerminal with
-    | .open => "transported"
-    | .closedFromLocalFalse => "closed_false"
-    | .closedFromTargetTrue => "closed_true"
-  let transformations := artifact.locals.map (·.transformation) ++ artifact.target?.toArray
-  let evidence := if transformations.any (·.proof?.isSome) then
-      "equality"
-    else if transformations.all fun item => item.input == item.result then
-      "unchanged"
-    else
-      "defeq"
-  logInfo m!"SIMP_ENGINE_BOUNDARY_PROBE outcome={outcome} evidence={evidence} equivalent=true"
-  if let some report := report? then
-    logInfo m!"SIMP_ENGINE_BOUNDARY_ARTIFACT {report.compress}"
-  return artifact
 
 elab_rules : tactic
   | `(tactic| simp_engine_boundary_comparator_self_test) => withMainContext do
@@ -1968,13 +2178,21 @@ elab_rules : tactic
       let inner := mkNode ``Lean.Parser.Tactic.simp #[
         mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
       discard <| runBoundaryProbe inner
-  | `(tactic| simp_engine_boundary_record $occurrence:str $args:boundarySimpArgs) =>
+  | `(tactic| simp_engine_boundary_record $occurrenceId:str $args:boundarySimpArgs) =>
       withMainContext do
+        let occId := occurrenceId.getString
+        unless !occId.isEmpty do
+          throwError "invalid_boundary_occurrence"
         let goals ← getGoals
-        let preState ← boundaryProofStateFingerprint goals
+        let preState ← try
+          boundaryProofStateFingerprintWithTerm goals (← getThe Term.State)
+        catch error =>
+          emitRecordingAbort occId "prestate_fingerprint" error
+          throw error
         let caller? ← Term.getDeclName?
         let selector := Json.mkObj [
-          ("occurrence", Json.str occurrence.getString),
+          ("selectorSchema", toJson boundarySelectorSchema),
+          ("occurrence", Json.str occId),
           ("preState", toJson preState),
           ("options", Json.str (boundaryOptionsFingerprint (← getOptions))),
           ("module", Json.str (← getEnv).mainModule.toString),
@@ -1983,6 +2201,6 @@ elab_rules : tactic
         ]
         let inner := mkNode ``Lean.Parser.Tactic.simp #[
           mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
-        discard <| runBoundaryProbe inner (some (occurrence.getString, selector))
+        discard <| runBoundaryProbe inner (some (occId, selector))
 
 end ExplicitLean.SimpEngine.Boundary

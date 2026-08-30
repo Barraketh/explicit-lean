@@ -4,6 +4,7 @@ prelude
 public meta import Lean.Meta.Basic
 public meta import Lean.Meta.InferType
 public meta import Lean.Data.Json
+public meta import Lean.Elab.Term.TermElabM
 
 public meta section
 
@@ -40,6 +41,504 @@ private def metavariableKindTag : MetavarKind → String
   | .natural => "natural"
   | .synthetic => "synthetic"
   | .syntheticOpaque => "syntheticOpaque"
+
+/-
+  The selector needs to distinguish states that have the same visible goals but
+  differ in continuation-relevant bookkeeping.  These encoders deliberately
+  use a length-prefixed representation rather than a human-readable printer:
+  delimiters in names, syntax, or expressions therefore cannot make two
+  different records share a payload.  The resulting payload is hashed before
+  it is put on the wire.
+
+  The routing-state portion below is a conservative observer of inputs that
+  can affect the current simp execution.  It starts at the current goals and
+  pending term work, then follows every expression and universe metavariable
+  referenced by those roots.  Diagnostic tables, the global postponed queue,
+  and other continuation state are checked by the result comparator instead of
+  selecting a different simp outcome.  Mvars which were allocated by the
+  surrounding elaborator but cannot affect this execution are deliberately
+  ignored; their allocation order is not stable when the recorder and
+  generated replacement have different syntax.  IDs are assigned encounter
+  ordinals, never serialized directly.  Free-variable IDs are canonicalized by
+  their local-declaration index, with an encounter ordinal only for genuinely
+  free IDs.
+-/
+
+private def encodeField (value : String) : String :=
+  s!"{value.length}:{value}"
+
+private def encodeFields (tag : String) (fields : Array String) : String :=
+  fields.foldl (init := encodeField tag) fun result field =>
+    result ++ encodeField field
+
+private def encodeList (tag : String) (fields : List String) : String :=
+  encodeFields tag fields.toArray
+
+private def encodeOption (f : α → String) : Option α → String
+  | none => encodeFields "none" #[]
+  | some value => encodeFields "some" #[f value]
+
+private def rawName (name : Name) : String := name.toString
+
+private structure BoundaryCanonicalIds where
+  fvars : Std.HashMap FVarId String := {}
+  nextFreeFVar : Nat := 0
+  mvars : Std.HashMap MVarId String := {}
+  nextFreeMVar : Nat := 0
+  lmvars : Std.HashMap LMVarId String := {}
+  nextFreeLMVar : Nat := 0
+  mvarOrder : Array MVarId := #[]
+  lmvarOrder : Array LMVarId := #[]
+  missingMVars : Array MVarId := #[]
+  missingLMVars : Array LMVarId := #[]
+
+private abbrev RawM := StateT BoundaryCanonicalIds MetaM
+
+private def rawOptionM {α : Type} (f : α → RawM String) : Option α → RawM String
+  | none => pure <| encodeFields "none" #[]
+  | some value => do
+      let encoded ← f value
+      pure <| encodeFields "some" #[encoded]
+
+private def rawFVarId (id : FVarId) : RawM String := do
+  let state ← get
+  if let some canonical := state.fvars.get? id then
+    return canonical
+  let canonical := encodeFields "fvar-free" #[toString state.nextFreeFVar]
+  modify fun state => { state with
+    fvars := state.fvars.insert id canonical
+    nextFreeFVar := state.nextFreeFVar + 1 }
+  return canonical
+
+private def seedLocalFVar (id : FVarId) (index : Nat) : RawM Unit := do
+  let state ← get
+  if state.fvars.contains id then
+    pure ()
+  else
+    -- Local declaration indices are stable across the recorder/materializer
+    -- round trip.  Use the index directly, even when independently-created
+    -- local contexts contain different FVarId values.
+    let canonical := encodeFields "fvar-local" #[toString index]
+    modify fun state => { state with fvars := state.fvars.insert id canonical }
+
+private def rawMVarId (id : MVarId) : RawM String := do
+  let state ← get
+  if let some canonical := state.mvars.get? id then
+    return canonical
+  let ordinal := state.nextFreeMVar
+  let canonical := encodeFields "mvar" #[toString ordinal]
+  modify fun state => { state with
+    mvars := state.mvars.insert id canonical
+    nextFreeMVar := ordinal + 1
+    mvarOrder := state.mvarOrder.push id }
+  return canonical
+
+private def rawLMVarId (id : LMVarId) : RawM String := do
+  let state ← get
+  if let some canonical := state.lmvars.get? id then
+    return canonical
+  let ordinal := state.nextFreeLMVar
+  let canonical := encodeFields "lmvar" #[toString ordinal]
+  modify fun state => { state with
+    lmvars := state.lmvars.insert id canonical
+    nextFreeLMVar := ordinal + 1
+    lmvarOrder := state.lmvarOrder.push id }
+  return canonical
+
+private def rawBinderInfo (binderInfo : BinderInfo) : String := binderInfoTag binderInfo
+
+private def rawLiteral : Literal → String
+  | .natVal value => encodeFields "natVal" #[toString value]
+  | .strVal value => encodeFields "strVal" #[value]
+
+private def observingMetaState (action : MetaM α) : MetaM α := do
+  let core ← getThe Core.State
+  let metaState ← getThe Meta.State
+  try action finally
+    modifyThe Core.State fun _ => core
+    modifyThe Meta.State fun _ => metaState
+
+mutual
+
+private partial def rawMVarRoot (id : MVarId) : RawM String := do
+  let mctx ← getMCtx
+  match mctx.eAssignment.find? id with
+  | some value =>
+      pure <| encodeFields "assigned-root" #[← rawExpr value]
+  | none => match mctx.dAssignment.find? id with
+    | some assignment =>
+        let id ← rawMVarId id
+        let fvars ← assignment.fvars.mapM rawExpr
+        let pending ← rawMVarRoot assignment.mvarIdPending
+        pure <| encodeFields "delayed-root" #[id,
+          encodeFields "fvars" fvars, pending]
+    | none =>
+        pure <| encodeFields "unassigned-root" #[← rawMVarId id]
+
+private partial def rawLevel (input : Level) : RawM String := do
+  let input ← instantiateLevelMVars input
+  match input with
+  | .zero => pure <| encodeFields "zero" #[]
+  | .succ level => do
+      let level ← rawLevel level
+      pure <| encodeFields "succ" #[level]
+  | .max lhs rhs => do
+      let lhs ← rawLevel lhs
+      let rhs ← rawLevel rhs
+      pure <| encodeFields "max" #[lhs, rhs]
+  | .imax lhs rhs => do
+      let lhs ← rawLevel lhs
+      let rhs ← rawLevel rhs
+      pure <| encodeFields "imax" #[lhs, rhs]
+  | .param name => pure <| encodeFields "param" #[rawName name]
+  | .mvar id => do
+      let id ← rawLMVarId id
+      pure <| encodeFields "mvar" #[id]
+
+private partial def rawExpr (input : Expr) : RawM String := do
+  let input ← instantiateMVars input
+  match input with
+  | .bvar index => pure <| encodeFields "bvar" #[toString index]
+  | .fvar id => do
+      let id ← rawFVarId id
+      pure <| encodeFields "fvar" #[id]
+  | .mvar id => do
+      let id ← rawMVarRoot id
+      pure <| encodeFields "mvar" #[id]
+  | .sort level => do
+      let level ← rawLevel level
+      pure <| encodeFields "sort" #[level]
+  | .const name levels => do
+      let levels ← levels.mapM rawLevel
+      pure <| encodeFields "const" #[rawName name, encodeList "levels" levels]
+  | .app function argument => do
+      let function ← rawExpr function
+      let argument ← rawExpr argument
+      pure <| encodeFields "app" #[function, argument]
+  | .lam _ type body binderInfo => do
+      let type ← rawExpr type
+      let body ← rawExpr body
+      pure <| encodeFields "lam" #[type, body, rawBinderInfo binderInfo]
+  | .forallE _ type body binderInfo => do
+      let type ← rawExpr type
+      let body ← rawExpr body
+      pure <| encodeFields "forallE" #[type, body, rawBinderInfo binderInfo]
+  | .letE _ type value body nondep => do
+      let type ← rawExpr type
+      let value ← rawExpr value
+      let body ← rawExpr body
+      pure <| encodeFields "letE" #[type, value, body, toString nondep]
+  | .lit literal => pure <| encodeFields "lit" #[rawLiteral literal]
+  | .mdata data child => do
+      let child ← rawExpr child
+      pure <| encodeFields "mdata" #[toString data, child]
+  | .proj name index child => do
+      let child ← rawExpr child
+      pure <| encodeFields "proj" #[rawName name, toString index, child]
+
+end
+
+private def rawLocalDecl (decl : LocalDecl) : RawM String := do
+  let fvarId ← rawFVarId decl.fvarId
+  match decl with
+  | .cdecl index _ _ type binderInfo kind =>
+      let type ← rawExpr type
+      -- Local declaration names are presentation-only.  The visible state
+      -- already identifies a local by its stable declaration index, so a
+      -- theorem-parameter alpha rename must not invalidate a selector.
+      return encodeFields "cdecl" #[toString index, fvarId,
+        type, rawBinderInfo binderInfo, localDeclKindTag kind]
+  | .ldecl index _ _ type value nondep kind =>
+      let type ← rawExpr type
+      let value ← rawExpr value
+      return encodeFields "ldecl" #[toString index, fvarId,
+        type, value, toString nondep, localDeclKindTag kind]
+
+private def rawLocalContext (lctx : LocalContext) : RawM String := do
+  for decl? in lctx.decls.toArray do
+    if let some decl := decl? then
+      seedLocalFVar decl.fvarId decl.index
+  let decls ← lctx.decls.toArray.mapM fun decl? =>
+    match decl? with
+    | none => pure <| encodeFields "empty" #[]
+    | some decl => rawLocalDecl decl
+  let auxDecls := lctx.auxDeclToFullName.toList.toArray
+    |>.qsort (fun lhs rhs => toString lhs.1.name < toString rhs.1.name)
+  let auxDecls ← auxDecls.mapM fun (fvarId, fullName) => do
+    let fvarId ← rawFVarId fvarId
+    return encodeFields "aux" #[fvarId, rawName fullName]
+  return encodeFields "local-context" #[encodeFields "decls" decls,
+    encodeFields "aux-decls" auxDecls]
+
+private def rawLocalInstances (instances : LocalInstances) : RawM String := do
+  let encoded ← instances.mapM fun localInstance => do
+    let fvar ← rawExpr localInstance.fvar
+    return encodeFields "instance" #[rawName localInstance.className, fvar]
+  pure <| encodeFields "local-instances" encoded
+
+private def rawMetavarKind : MetavarKind → String := metavariableKindTag
+
+private def rawMetavarDecl (decl : MetavarDecl) : RawM String := do
+  let lctx ← rawLocalContext decl.lctx
+  let type ← rawExpr decl.type
+  let instances ← rawLocalInstances decl.localInstances
+  -- Goal names affect tactic presentation/routing such as `case`, but not the
+  -- behavior of simp on this goal.  The unchanged continuation and result
+  -- comparator remain responsible for preserving that externally visible
+  -- state.
+  return encodeFields "metavar-decl" #[lctx, type,
+    toString decl.depth, instances, rawMetavarKind decl.kind,
+    toString decl.numScopeArgs]
+
+private def rawLevelMetavarDecl (decl : LevelMetavarDecl) : String :=
+  encodeFields "level-metavar-decl" #[toString decl.depth]
+
+private def rawMessageDataShape (message : MessageData) : String :=
+  -- Message wording and lazy formatting are diagnostics, not execution state.
+  encodeFields "message-data" #[rawName (MessageData.kind message),
+    toString (MessageData.isTrace message)]
+
+private def syntaxPreresolvedDescriptor : Syntax.Preresolved → String
+  | .namespace namespaceName =>
+      encodeFields "namespace" #[rawName namespaceName]
+  | .decl declarationName fields =>
+      encodeFields "declaration" #[rawName declarationName,
+        encodeList "fields" fields]
+
+/- SourceInfo is deliberately omitted here: source positions and whitespace
+   cannot affect the current simp execution selected by this key, and they
+   necessarily move when the authored tactic is replaced.  The post-call
+   comparator still checks the full pending Syntax values exactly. -/
+private partial def syntaxStableDescriptor : Syntax → String
+  | .missing => encodeFields "missing" #[]
+  | .atom _ value => encodeFields "atom" #[value]
+  | .ident _ rawValue value preresolved =>
+      encodeFields "ident" #[Substring.Raw.Internal.toString rawValue,
+        rawName value,
+        encodeList "preresolved" (preresolved.map syntaxPreresolvedDescriptor)]
+  | .node _ kind arguments =>
+      encodeFields "node" #[rawName kind,
+        encodeFields "arguments" (arguments.map syntaxStableDescriptor)]
+
+private def rawMacroStack (stack : Lean.Elab.MacroStack) : String :=
+  encodeList "macro-stack" <| stack.map fun entry =>
+    encodeFields "macro" #[syntaxStableDescriptor entry.before,
+      syntaxStableDescriptor entry.after]
+
+private def rawSavedContext (context : Lean.Elab.Term.SavedContext) : String :=
+  encodeFields "saved-context" #[encodeOption rawName context.declName?,
+    toString context.options, encodeList "open-decls" (context.openDecls.map toString),
+    rawMacroStack context.macroStack, toString context.errToSorry,
+    encodeList "level-names" (context.levelNames.map rawName),
+    toString context.fixedTermElabs.size]
+
+private def savedContextHasOpaqueFixedTermElabs
+    (context : Lean.Elab.Term.SavedContext) : Bool :=
+  !context.fixedTermElabs.isEmpty
+
+private def rawTacticMVarKind : Lean.Elab.Term.TacticMVarKind → String
+  | .term => encodeFields "term" #[]
+  | .autoParam argName => encodeFields "auto-param" #[rawName argName]
+  | .fieldAutoParam fieldName structName =>
+      encodeFields "field-auto-param" #[rawName fieldName, rawName structName]
+
+private def rawSyntheticMVarKind : Lean.Elab.Term.SyntheticMVarKind → RawM String
+  | .typeClass extraErrorMsg? =>
+      pure <| encodeFields "type-class" #[encodeOption rawMessageDataShape extraErrorMsg?]
+  | .coe header? expectedType expression function? mkErrorMsg? => do
+      let expectedType ← rawExpr expectedType
+      let expression ← rawExpr expression
+      let function ← rawOptionM rawExpr function?
+      return encodeFields "coe" #[encodeOption id header?, expectedType,
+        expression, function, toString mkErrorMsg?.isSome]
+  | .tactic tacticCode context kind delayOnMVars =>
+      pure <| encodeFields "tactic" #[syntaxStableDescriptor tacticCode,
+        rawSavedContext context,
+        rawTacticMVarKind kind, toString delayOnMVars]
+  | .postponed context => pure <| encodeFields "postponed" #[rawSavedContext context]
+
+private def syntheticMVarKindHasOpaqueFixedTermElabs
+    : Lean.Elab.Term.SyntheticMVarKind → Bool
+  | .typeClass _ => false
+  | .coe _ _ _ _ _ => false
+  | .tactic _ context _ _ => savedContextHasOpaqueFixedTermElabs context
+  | .postponed context => savedContextHasOpaqueFixedTermElabs context
+
+private def termStateHasOpaqueFixedTermElabs
+    (state : Lean.Elab.Term.State) : Bool :=
+  state.pendingMVars.any fun id =>
+    match state.syntheticMVars.toList.find? (fun entry => entry.1 == id) with
+    | none => false
+    | some (_, decl) => syntheticMVarKindHasOpaqueFixedTermElabs decl.kind
+
+private def rawSyntheticMVarDecl (decl : Lean.Elab.Term.SyntheticMVarDecl) : RawM String := do
+  let kind ← rawSyntheticMVarKind decl.kind
+  return encodeFields "synthetic-mvar-decl" #[syntaxStableDescriptor decl.stx, kind]
+
+private def rawTerminationBy (terminationBy : Lean.Elab.TerminationBy) : String :=
+  encodeFields "termination-by" #[toString terminationBy.ref,
+    toString terminationBy.structural,
+    encodeList "vars" (terminationBy.vars.toList.map toString),
+    toString terminationBy.body, toString terminationBy.synthetic]
+
+private def rawPartialFixpoint (partialFixpoint : Lean.Elab.PartialFixpoint) : String :=
+  let kind := match partialFixpoint.fixpointType with
+    | .partialFixpoint => "partial"
+    | .coinductiveFixpoint => "coinductive"
+    | .inductiveFixpoint => "inductive"
+  encodeFields "partial-fixpoint" #[toString partialFixpoint.ref,
+    encodeOption toString partialFixpoint.term?, kind]
+
+private def rawDecreasingBy (decreasingBy : Lean.Elab.DecreasingBy) : String :=
+  encodeFields "decreasing-by" #[toString decreasingBy.ref, toString decreasingBy.tactic]
+
+private def rawTerminationHints (hints : Lean.Elab.TerminationHints) : String :=
+  encodeFields "termination-hints" #[toString hints.ref,
+    encodeOption toString hints.terminationBy??,
+    encodeOption rawTerminationBy hints.terminationBy?,
+    encodeOption rawPartialFixpoint hints.partialFixpoint?,
+    encodeOption rawDecreasingBy hints.decreasingBy?, toString hints.extraParams]
+
+private def rawAttribute (attr : Lean.Elab.Attribute) : String :=
+  encodeFields "attribute" #[toString attr.kind, rawName attr.name, toString attr.stx]
+
+private def rawLetRecToLift (entry : Lean.Elab.Term.LetRecToLift) : RawM String := do
+  let fvarId ← rawFVarId entry.fvarId
+  let lctx ← rawLocalContext entry.lctx
+  let instances ← rawLocalInstances entry.localInstances
+  let type ← rawExpr entry.type
+  let value ← rawExpr entry.val
+  let mvarId ← rawMVarRoot entry.mvarId
+  return encodeFields "let-rec" #[toString entry.ref, fvarId,
+    encodeList "attributes" (entry.attrs.toList.map rawAttribute),
+    rawName entry.shortDeclName, rawName entry.declName,
+    encodeOption rawName entry.parentName?, lctx, instances, type, value, mvarId,
+    rawTerminationHints entry.termination, toString entry.binders,
+    encodeOption (fun doc => encodeFields "doc" #[toString doc.1, toString doc.2])
+      entry.docString?]
+
+private def orderedPendingSyntheticEntries
+    (state : Lean.Elab.Term.State) : Array (MVarId × Lean.Elab.Term.SyntheticMVarDecl) :=
+  state.pendingMVars.toArray.filterMap fun id =>
+    state.syntheticMVars.toList.find? (fun entry => entry.1 == id)
+
+private def rawDelayedAssignment (assignment : DelayedMetavarAssignment) : RawM String := do
+  let fvars ← assignment.fvars.mapM rawExpr
+  let pending ← rawMVarRoot assignment.mvarIdPending
+  pure <| encodeFields "delayed" #[encodeFields "fvars" fvars, pending]
+
+private def rawMVarAliases (mctx : MetavarContext) (id : MVarId) : String :=
+  let names := mctx.userNames.toList.filter (·.2 == id) |>.map fun entry => rawName entry.1
+  encodeList "user-names" names
+
+private def rawMVarRecords (mctx : MetavarContext)
+    (visibleGoals : Std.HashSet MVarId) : RawM (Array String) := do
+  let mut records := #[]
+  let mut next := 0
+  while next < (← get).mvarOrder.size do
+    let id := (← get).mvarOrder[next]!
+    next := next + 1
+    match mctx.decls.find? id with
+    | none =>
+        modify fun state => { state with missingMVars := state.missingMVars.push id }
+    | some decl =>
+        let declaration ← rawMetavarDecl decl
+        let assignment ← match mctx.eAssignment.find? id with
+          | none => pure <| encodeFields "none" #[]
+          | some value => do
+              let value ← rawExpr value
+              pure <| encodeFields "some" #[value]
+        let delayed ← match mctx.dAssignment.find? id with
+          | none => pure <| encodeFields "none" #[]
+          | some value => pure <| encodeFields "some" #[(← rawDelayedAssignment value)]
+        /- The public goal fingerprint below already covers an active goal's
+           target, context, instances, and declaration metadata using the
+           proof-insensitive canonical expression policy.  Walking its raw
+           declaration above is still necessary to discover nested mvars, but
+           serializing it again would make routing depend on proof terms and
+           internal goal names. -/
+        let isOrdinaryVisibleGoal := visibleGoals.contains id &&
+          !mctx.dAssignment.contains id
+        unless isOrdinaryVisibleGoal do
+          let canonical ← rawMVarId id
+          records := records.push <| encodeFields "mvar-record-v1" #[canonical,
+            digest "selector-mvar-aliases" (rawMVarAliases mctx id),
+            digest "selector-mvar-declaration" declaration,
+            digest "selector-mvar-assignment" assignment,
+            digest "selector-mvar-delayed" delayed]
+  pure records
+
+private def rawLMVarRecords (mctx : MetavarContext) : RawM (Array String) := do
+  let mut records := #[]
+  let mut next := 0
+  while next < (← get).lmvarOrder.size do
+    let id := (← get).lmvarOrder[next]!
+    next := next + 1
+    match mctx.lDecls.find? id with
+    | none =>
+        modify fun state => { state with missingLMVars := state.missingLMVars.push id }
+    | some decl =>
+        let assignment ← match mctx.lAssignment.find? id with
+          | none => pure <| encodeFields "none" #[]
+          | some value => pure <| encodeFields "some" #[(← rawLevel value)]
+        let canonical ← rawLMVarId id
+        records := records.push <| encodeFields "lmvar-record-v1" #[canonical,
+          digest "selector-lmvar-declaration" (rawLevelMetavarDecl decl),
+          digest "selector-lmvar-assignment" assignment]
+  pure records
+
+private def rawTermRoots (state : Lean.Elab.Term.State) : RawM String := do
+  -- `pendingMVars` is Lean's authoritative ordered work list.  `Tactic.run`
+  -- temporarily removes dormant sibling work from that list while the active
+  -- tactic executes, leaving its table entries as non-routable bookkeeping.
+  let pendingMVars ← state.pendingMVars.toArray.mapM rawMVarRoot
+  let syntheticMVars ← (orderedPendingSyntheticEntries state).mapM fun (id, decl) => do
+    let id ← rawMVarRoot id
+    let decl ← rawSyntheticMVarDecl decl
+    pure <| encodeFields "synthetic" #[id, decl]
+  let letRecs ← state.letRecsToLift.mapM rawLetRecToLift
+  let result := encodeFields "term-roots-v1" #[
+    encodeFields "pending" #[toString pendingMVars.size,
+      digest "selector-pending-mvars" (encodeFields "pending-mvars" pendingMVars)],
+    encodeFields "synthetic" #[toString syntheticMVars.size,
+      digest "selector-synthetic-mvars" (encodeFields "synthetic-mvars" syntheticMVars)],
+    encodeFields "let-recs" #[toString letRecs.length,
+      digest "selector-let-recs" (encodeList "let-recs-to-lift" letRecs)]]
+  pure result
+
+private def rawSelectorStatePayload (goals : List MVarId)
+    (termState? : Option (Lean.Elab.Term.State)) : MetaM String := do
+  if let some termState := termState? then
+    if termStateHasOpaqueFixedTermElabs termState then
+      throwError "boundary_selector_opaque_fixed_term_elabs"
+  let mctx ← getMCtx
+  let action : RawM String := do
+    -- The root order is part of the canonical traversal: current goals,
+    -- pending/synthetic term work, then let-rec roots.  Referenced
+    -- declarations are appended exactly once as the queue is drained below.
+    let goalRoots ← goals.toArray.mapM fun goal => do
+      let id ← rawMVarRoot goal
+      pure <| encodeFields "goal" #[id]
+    let termRoots ← match termState? with
+      | none => pure <| encodeFields "term-state-absent" #[]
+      | some state => rawTermRoots state
+    let visibleGoals := goals.foldl (init := {}) fun result goal => result.insert goal
+    let mvarRecords ← rawMVarRecords mctx visibleGoals
+    let lmvarRecords ← rawLMVarRecords mctx
+    let result := encodeFields "selector-state-v1" #[
+      encodeFields "depth" #[toString mctx.depth],
+      encodeFields "level-assign-depth" #[toString mctx.levelAssignDepth],
+      digest "selector-goal-roots" (encodeFields "goals" goalRoots),
+      termRoots,
+      encodeFields "selector-mvars" mvarRecords,
+      encodeFields "selector-lmvars" lmvarRecords]
+    return result
+  let (payload, state) ← action.run {}
+  unless state.missingMVars.isEmpty do
+    throwError "boundary_selector_unknown_reachable_mvar"
+  unless state.missingLMVars.isEmpty do
+    throwError "boundary_selector_unknown_reachable_level_mvar"
+  pure payload
 
 private structure CanonicalState where
   exprMVars : Std.HashMap MVarId Nat := {}
@@ -181,17 +680,11 @@ private partial def canonicalExprHash (lctx : LocalContext) (eraseProofs : Bool)
       exprHashes := state.exprHashes.insert expression result }
   return result
 
-private def observingMetaState (action : MetaM α) : MetaM α := do
-  let core ← getThe Core.State
-  let metaState ← getThe Meta.State
-  try action finally
-    modifyThe Core.State fun _ => core
-    modifyThe Meta.State fun _ => metaState
-
 private def runCanonicalHash (lctx : LocalContext) (expression : Expr)
     (state : CanonicalState := {}) : MetaM (UInt64 × CanonicalState) := do
-  withLCtx lctx (← getLocalInstances) do
-    (canonicalExprHash lctx true #[] {} expression).run state
+  observingMetaState do
+    withLCtx lctx (← getLocalInstances) do
+      (canonicalExprHash lctx true #[] {} expression).run state
 
 /-- A canonical, ordered fingerprint of one open-goal proof state.
 
@@ -244,8 +737,20 @@ private def goalFingerprint (goal : MVarId) (state : CanonicalState) :
       String.intercalate "|" instances.toList
     pure (s!"{targetHash}", context, metavariable, state)
 
-private def proofStateFingerprintImpl (goals : List MVarId) :
+private def proofStateFingerprintImpl (goals : List MVarId)
+    (termState? : Option (Lean.Elab.Term.State) := none) :
     MetaM BoundaryStateFingerprint := do
+  -- Lean tactic combinators define the active proof state by its unsolved
+  -- goals; assigned entries can remain transiently in `Tactic.State.goals`
+  -- until the surrounding evaluator prunes them.  Recorder and generated
+  -- syntax can trigger that pruning at different instants, so canonicalize it
+  -- here just as `Tactic.getUnsolvedGoals` does at the tactic boundary.
+  let goals ← goals.filterM fun goal => return !(← goal.isAssigned)
+  -- Capture the continuation graph before any presentation-oriented hashing.
+  -- Canonical expression hashing may ask the kernel/meta layer proof/type
+  -- questions; each such query is isolated below, but ordering the raw state
+  -- first also makes this invariant explicit.
+  let completeState ← rawSelectorStatePayload goals termState?
   let mut targets := #[]
   let mut contexts := #[]
   let mut metavariables := #[]
@@ -261,8 +766,9 @@ private def proofStateFingerprintImpl (goals : List MVarId) :
     targetFingerprint := digest "targets" (String.intercalate "|" targets.toList)
     localContextFingerprint := digest "goal-contexts"
       (String.intercalate "|" contexts.toList)
-    metavariableContextFingerprint := digest "metavariable-context"
-      (String.intercalate "|" metavariables.toList)
+    metavariableContextFingerprint := encodeFields "metavariable-context-v1" #[
+      digest "selector-visible-goals" (encodeList "goals" metavariables.toList),
+      digest "selector-complete-state" completeState]
     goalCount := targets.size
   }
 
@@ -278,6 +784,23 @@ def boundaryExprFingerprintHash (expression : Expr) : MetaM String :=
 def boundaryProofStateFingerprint (goals : List MVarId) :
     MetaM BoundaryStateFingerprint :=
   observingMetaState <| proofStateFingerprintImpl goals
+
+/-
+  `MetaM` is deliberately not given access to the enclosing `Term.State`.
+  Callers that run at the elaborator/tactic boundary should use this helper,
+  passing the outer term state they observed at that same boundary.  Keeping
+  the original MetaM API above is useful for metaprograms that have no term
+  state, while this variant prevents pending/postponed elaboration work from
+  being silently omitted by the production selector.
+-/
+def boundaryProofStateFingerprintWithTerm (goals : List MVarId)
+    (termState : Lean.Elab.Term.State) : MetaM BoundaryStateFingerprint :=
+  observingMetaState <| proofStateFingerprintImpl goals (some termState)
+
+def boundaryTermStateFingerprint (termState : Lean.Elab.Term.State) : MetaM String :=
+  observingMetaState <| do
+    let payload ← rawSelectorStatePayload [] (some termState)
+    pure <| digest "boundary-term-state" payload
 
 /-- Return a deterministic fingerprint of the complete scoped `Options` map. -/
 def boundaryOptionsFingerprint (options : Options) : String :=

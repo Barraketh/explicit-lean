@@ -2,9 +2,11 @@
 
 Explicit Lean is a source-to-source translator for every executed source `simp`
 and `simp only` occurrence in the pinned Mathlib corpus, including calls that
-contribute to computational data. The translator replaces each occurrence with
-generated `simp_engine_apply` source. It prefers to leave surrounding tactics
-and binder spellings intact, but may consistently alpha-rename declaration
+contribute to computational data. The production replacement will use the
+public name `simp_engine_apply`; the current boundary prototype emits
+`simp_engine_boundary_select` with an `apply_encoded` branch after selecting a
+recorded variant. It prefers to leave surrounding tactics and binder spellings
+intact, but may consistently alpha-rename declaration
 parameters when needed; semantic declaration and elaboration-state equivalence
 are the hard gates.
 
@@ -138,13 +140,12 @@ committed code before further corpus materialization.
 
 `Experiment/boundary_materialize_shard.py` consumes a current manifest fail
 closed. A fresh one-module repair-review canary for
-`Mathlib/Algebra/AddConstMap/Basic.lean` transforms all 17 calls under schema 2.
-It observes 17 successful variants, compiles the materialized module, and
-verifies byte-for-byte authored source preservation outside the selected tactic
-ranges. Its schema-3 shard report requires a successful declaration/environment
-oracle: 103 common public declarations compare successfully, two stock-only
-private proof helpers are omitted, and one reserved-name action recreates
-`AddConstMap.mk.congr_simp`. No binder alpha-renaming was needed. Pre-commit
+`Mathlib/Algebra/AddConstMap/Basic.lean` transforms all 17 calls under manifest
+schema 2 and publishes a schema-4 shard report. The report carries artifact
+schema 1, selector schema 1, semantic contract
+`boundary-observable-v1`, the exact encoding policy, and one ordered
+classification result per selected occurrence. The generated report records
+the compilation, source-preservation, and declaration/environment checks. Pre-commit
 manifests and reports are disposable because the commit changes their repository
 identity. This is bounded semantic acceptance evidence, not a Mathlib-wide claim.
 
@@ -167,7 +168,7 @@ python3 Experiment/check_simp_engine_boundary_corpus.py
 python3 Experiment/check_simp_engine_boundary_mathlib.py
 # Bounded diagnostic over the existing pre-probe 101-unknown manifest.
 python3 Experiment/check_simp_engine_boundary_scope_unknowns.py
-# Current schema-3 canary target: materialize and semantically check all 17 occurrences.
+# Current schema-4 canary target: materialize and semantically check all 17 occurrences.
 python3 Experiment/simp_engine_boundary_corpus.py manifest \
   --output .lake/boundary-corpus-manifest/add-const-map-canary.json \
   --module-prefix Mathlib/Algebra/AddConstMap/Basic.lean \
@@ -254,9 +255,11 @@ yet the complete pinned-corpus acceptance gate.
   *certificate*; new code should prefer boundary terminology.
 - **Recording:** running stock `simp` during translation to capture an oracle
   result and boundary delta.
-- **Materialization:** rewriting source occurrences to `simp_engine_apply` and
-  compiling the copied module with the original continuation unchanged except,
-  when necessary, for consistent declaration-parameter alpha-renaming.
+- **Materialization:** rewriting source occurrences to the current
+  `simp_engine_boundary_select` prototype and compiling the copied module with
+  the original continuation unchanged except, when necessary, for consistent
+  declaration-parameter alpha-renaming. The production public form is intended
+  to be `simp_engine_apply`.
 - **Closed-world closure:** successful translation and compilation of every
   executable occurrence under the pinned corpus, toolchain, and build procedure,
   with retained syntax data preserved separately.

@@ -1,0 +1,993 @@
+"""Shared protocol definitions and validators for boundary artifacts.
+
+The Lean recorder and the Python materializers intentionally share these
+literal protocol values.  This module is the single Python implementation of
+the wire-format checks; source rewriting and report reduction should not
+reimplement them independently.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+import difflib
+import json
+import os
+import re
+import secrets
+from typing import Any, Iterable
+
+
+# Keep these values synchronized with the public constants in
+# ExplicitLean/SimpEngine/Boundary/Apply.lean.
+ARTIFACT_KIND = "simp_engine_boundary_artifact"
+ARTIFACT_SCHEMA = 1
+SEMANTIC_CONTRACT = "boundary-observable-v1"
+SELECTOR_SCHEMA = 1
+
+SUCCESS_STATUS = "success"
+FAILURE_STATUS = "failure"
+TERMINALS = {
+    "open",
+    "closed_from_local_false",
+    "closed_from_target_true",
+}
+
+# These strings are part of the artifact wire format. The encoding describes
+# how the materializer interprets a field, not a printer or implementation
+# module version.
+TERM_ENCODING = "lean_source_v1"
+LOCAL_REFERENCE_ENCODING = "local_decl_index_v1"
+UNIVERSE_ENCODING = "inferred_at_application"
+INSTANCE_ENCODING = "inferred_at_application"
+ENCODING = {
+    "terms": TERM_ENCODING,
+    "locals": LOCAL_REFERENCE_ENCODING,
+    "universes": UNIVERSE_ENCODING,
+    "instances": INSTANCE_ENCODING,
+}
+
+# This is the exact protocol identity embedded in schema-4 materialization
+# reports. Keep the object deliberately small: the report is identified by
+# the artifact wire format, not by a Python runner or a Mathlib shard.
+ARTIFACT_PROTOCOL = {
+    "kind": ARTIFACT_KIND,
+    "schema": ARTIFACT_SCHEMA,
+    "semanticContract": SEMANTIC_CONTRACT,
+    "selectorSchema": SELECTOR_SCHEMA,
+    "encoding": ENCODING,
+}
+
+SELECTOR_FIELDS = frozenset(
+    {"selectorSchema", "occurrence", "preState", "options", "module", "caller"}
+)
+PRE_STATE_FIELDS = frozenset(
+    {
+        "targetFingerprint",
+        "localContextFingerprint",
+        "metavariableContextFingerprint",
+        "goalCount",
+    }
+)
+SUCCESS_REPORT_FIELDS = frozenset(
+    {
+        "kind",
+        "schema",
+        "semanticContract",
+        "occurrence",
+        "selector",
+        "status",
+        "terminal",
+        "encoding",
+        "stateDeltas",
+        "environmentActions",
+        "locals",
+        "target",
+    }
+)
+FAILURE_REPORT_FIELDS = frozenset(
+    {"kind", "schema", "semanticContract", "occurrence", "selector", "status"}
+)
+LOCAL_FIELDS = frozenset({"reference", "userName", "transformation"})
+LOCAL_REFERENCE_FIELDS = frozenset({"kind", "index"})
+TRANSFORMATION_FIELDS = frozenset({"input", "result", "proof"})
+ENVIRONMENT_ACTION_KINDS = {"realize_reserved_name"}
+
+# These are successful per-occurrence outcomes.  They must not be confused
+# with abort categories: an abort stops the run and publishes no successful
+# occurrence classification.
+OCCURRENCE_CLASSIFICATIONS = {
+    "materialized",
+    "expected_failure",
+    "unobserved_executable",
+    "retained_syntax_data",
+}
+ABORT_CATEGORIES = {
+    "printer_failure",
+    "ambiguous_boundary_variant",
+    "external_effect_failure",
+    "declaration_value_mismatch",
+    "environment_delta_mismatch",
+}
+
+UNSTABLE_RENDER_RE = re.compile(r"\?[_A-Za-z]")
+FORBIDDEN_AXIOM = "sorryAx"
+FORBIDDEN_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_'])(?:sorry|admit)(?![A-Za-z0-9_'])"
+)
+
+# A recorder can fail while fingerprinting or after stock ``simp`` has already
+# run. The enclosing tactic may catch that exception and continue, so this
+# marker is the durable nonce-framed process record that prevents consumers
+# from mistaking the occurrence for an unobserved call.
+RECORDING_ABORT_MARKER = "SIMP_ENGINE_BOUNDARY_RECORDING_ABORT "
+RECORDING_ABORT_KIND = "simp_engine_boundary_recording_abort"
+RECORDING_ABORT_SCHEMA = 1
+RECORDING_ABORT_FIELDS = frozenset(
+    {"kind", "schema", "occurrence", "module", "stage", "detail"}
+)
+
+# Marker lines cross a compiler-process boundary through combined stdout and
+# stderr.  Authored Lean diagnostics can contain the old marker text, so every
+# production recording process gets a fresh nonce and consumers accept only
+# the exact marker/nonce/JSON framing for that process.  The explicit token is
+# for direct probes that intentionally do not arrange a recording environment;
+# it is not authentication for a production run.
+RUN_NONCE_ENV = "SIMP_ENGINE_BOUNDARY_RUN_NONCE"
+UNAUTHENTICATED_RUN_NONCE = "unauthenticated"
+
+
+def fresh_run_nonce() -> str:
+    """Return a high-entropy nonce for one recording subprocess."""
+    return secrets.token_urlsafe(32)
+
+
+def recording_subprocess_environment() -> tuple[dict[str, str], str]:
+    """Copy the current environment and add a fresh recording nonce."""
+    nonce = fresh_run_nonce()
+    environment = os.environ.copy()
+    environment[RUN_NONCE_ENV] = nonce
+    return environment, nonce
+
+
+def marker_prefix(marker: str, nonce: str) -> str:
+    """Build the exact prefix used by a framed JSON marker line."""
+    if not marker or not marker.endswith(" "):
+        raise RuntimeError(f"marker must end in one framing space: {marker!r}")
+    if not nonce or any(character.isspace() for character in nonce):
+        raise RuntimeError(f"marker nonce must be nonempty and whitespace-free: {nonce!r}")
+    return marker + nonce + " "
+
+
+def parse_framed_json_lines(
+    output: str,
+    *,
+    marker: str,
+    expected_nonce: str,
+    label: str,
+) -> list[object]:
+    """Parse only marker lines authenticated by ``expected_nonce``.
+
+    A line beginning with the marker but carrying a different nonce or any
+    other framing is rejected.  Marker text appearing later in ordinary
+    compiler output is not treated as a report.
+    """
+    prefix = marker_prefix(marker, expected_nonce)
+    reports: list[object] = []
+    for line in output.splitlines():
+        if line.startswith(marker) and not line.startswith(prefix):
+            raise RuntimeError(f"{label} marker has wrong nonce or framing: {line!r}")
+        if not line.startswith(prefix):
+            continue
+        payload = line[len(prefix) :]
+        if not payload:
+            raise RuntimeError(f"{label} marker has an empty JSON payload")
+        try:
+            reports.append(json.loads(payload))
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"invalid {label} marker line: {line}") from error
+    return reports
+
+
+def _require_int(value: object, label: str, *, nonnegative: bool = False) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RuntimeError(f"{label} must be an integer: {value!r}")
+    if nonnegative and value < 0:
+        raise RuntimeError(f"{label} must be nonnegative: {value!r}")
+    return value
+
+
+def _require_nonempty_string(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"{label} must be a nonempty string: {value!r}")
+    return value
+
+
+def artifact_protocol() -> dict[str, object]:
+    """Return a fresh copy of the artifact protocol identity."""
+    return {
+        "kind": ARTIFACT_KIND,
+        "schema": ARTIFACT_SCHEMA,
+        "semanticContract": SEMANTIC_CONTRACT,
+        "selectorSchema": SELECTOR_SCHEMA,
+        "encoding": dict(ENCODING),
+    }
+
+
+def validate_artifact_protocol(
+    value: object, label: str = "artifactProtocol"
+) -> dict[str, object]:
+    """Validate the exact artifact identity carried by a shard report."""
+    if not isinstance(value, dict) or set(value) != set(ARTIFACT_PROTOCOL):
+        raise RuntimeError(f"{label} has invalid fields: {value!r}")
+    if value["kind"] != ARTIFACT_KIND:
+        raise RuntimeError(f"{label} has invalid kind: {value!r}")
+    if _require_int(value["schema"], f"{label}.schema") != ARTIFACT_SCHEMA:
+        raise RuntimeError(f"{label} has unsupported schema: {value!r}")
+    if value["semanticContract"] != SEMANTIC_CONTRACT:
+        raise RuntimeError(f"{label} has invalid semantic contract: {value!r}")
+    if (
+        _require_int(value["selectorSchema"], f"{label}.selectorSchema")
+        != SELECTOR_SCHEMA
+    ):
+        raise RuntimeError(f"{label} has unsupported selector schema: {value!r}")
+    if value["encoding"] != ENCODING:
+        raise RuntimeError(f"{label} has unsupported encoding: {value!r}")
+    return value
+
+
+def validate_rendered_term(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise RuntimeError(f"{label} must be a string: {value!r}")
+    for sentinel in ("⋯", "✝"):
+        if sentinel in value:
+            raise RuntimeError(f"{label} contains unstable printer output {sentinel!r}")
+    invalid_source = re.search(r"@fun(?=\s|\{|\()|@\(let", value)
+    if invalid_source:
+        raise RuntimeError(
+            f"{label} contains invalid explicit-printer source "
+            f"{invalid_source.group(0)!r}"
+        )
+    if UNSTABLE_RENDER_RE.search(value):
+        raise RuntimeError(f"{label} contains an internal metavariable name: {value!r}")
+    return value
+
+
+def validate_transformation(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != TRANSFORMATION_FIELDS:
+        raise RuntimeError(f"{label} has invalid fields: {value!r}")
+    validate_rendered_term(value["input"], f"{label} input")
+    validate_rendered_term(value["result"], f"{label} result")
+    proof = value["proof"]
+    if proof is not None:
+        validate_rendered_term(proof, f"{label} proof")
+    return value
+
+
+def validate_environment_actions(value: object, label: str) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{label} must be an array: {value!r}")
+    result: list[dict[str, object]] = []
+    previous_name: str | None = None
+    for action in value:
+        if not isinstance(action, dict) or set(action) != {"kind", "name"}:
+            raise RuntimeError(f"{label} contains an invalid action: {action!r}")
+        if (
+            not isinstance(action["kind"], str)
+            or action["kind"] not in ENVIRONMENT_ACTION_KINDS
+        ):
+            raise RuntimeError(f"{label} contains an unsupported action: {action!r}")
+        name = _require_nonempty_string(action["name"], f"{label} reserved name")
+        if previous_name is not None and name <= previous_name:
+            raise RuntimeError(
+                f"{label} reserved names must be strictly sorted and unique: {value!r}"
+            )
+        previous_name = name
+        result.append(action)
+    return result
+
+
+def validate_selector(
+    value: object,
+    expected_occurrence: str,
+    expected_module: str | None = None,
+) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != SELECTOR_FIELDS:
+        raise RuntimeError(f"artifact selector has invalid fields: {value!r}")
+    schema = value["selectorSchema"]
+    if _require_int(schema, "artifact selector schema") != SELECTOR_SCHEMA:
+        raise RuntimeError(f"unsupported artifact selector schema: {schema!r}")
+    occurrence = _require_nonempty_string(
+        value["occurrence"], "artifact selector occurrence"
+    )
+    if occurrence != expected_occurrence:
+        raise RuntimeError(
+            f"artifact selector occurrence mismatch: expected {expected_occurrence}, "
+            f"got {occurrence!r}"
+        )
+    pre_state = value["preState"]
+    if not isinstance(pre_state, dict) or set(pre_state) != PRE_STATE_FIELDS:
+        raise RuntimeError(f"artifact selector has invalid pre-state: {value!r}")
+    for field in (
+        "targetFingerprint",
+        "localContextFingerprint",
+        "metavariableContextFingerprint",
+    ):
+        _require_nonempty_string(pre_state[field], f"artifact selector preState.{field}")
+    _require_int(pre_state["goalCount"], "artifact selector preState.goalCount", nonnegative=True)
+    _require_nonempty_string(value["options"], "artifact selector options")
+    module = _require_nonempty_string(value["module"], "artifact selector module")
+    if expected_module is not None and module != expected_module:
+        raise RuntimeError(
+            f"artifact selector module mismatch: expected {expected_module!r}, got {module!r}"
+        )
+    caller = value["caller"]
+    if caller is not None and (
+        not isinstance(caller, str) or not caller
+    ):
+        raise RuntimeError(
+            f"artifact selector caller must be a nonempty string or null: {caller!r}"
+        )
+    return value
+
+
+def validate_local_reference(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != LOCAL_REFERENCE_FIELDS:
+        raise RuntimeError(f"{label} has invalid fields: {value!r}")
+    if value["kind"] != "local_decl_index":
+        raise RuntimeError(f"{label} has unsupported kind: {value!r}")
+    _require_int(value["index"], f"{label} index", nonnegative=True)
+    return value
+
+
+def validate_local(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != LOCAL_FIELDS:
+        raise RuntimeError(f"{label} has invalid fields: {value!r}")
+    if not isinstance(value["userName"], str):
+        raise RuntimeError(f"{label} userName must be a string: {value!r}")
+    validate_local_reference(value["reference"], f"{label} reference")
+    validate_transformation(value["transformation"], f"{label} transformation")
+    return value
+
+
+def validate_report(
+    report: object,
+    expected_occurrence: str,
+    expected_module: str | None = None,
+) -> dict[str, object]:
+    if not isinstance(report, dict):
+        raise RuntimeError(f"artifact report must be an object: {report!r}")
+    if report.get("kind") != ARTIFACT_KIND:
+        raise RuntimeError(f"artifact has invalid kind: {report!r}")
+    schema = report.get("schema")
+    if _require_int(schema, "artifact schema") != ARTIFACT_SCHEMA:
+        raise RuntimeError(f"unsupported artifact schema: {schema!r}")
+    if report.get("semanticContract") != SEMANTIC_CONTRACT:
+        raise RuntimeError(f"artifact has invalid semantic contract: {report!r}")
+    occurrence = report.get("occurrence")
+    if not isinstance(occurrence, str) or not occurrence:
+        raise RuntimeError(f"artifact occurrence must be a nonempty string: {report!r}")
+    if occurrence != expected_occurrence:
+        raise RuntimeError(
+            f"artifact occurrence mismatch: expected {expected_occurrence}, "
+            f"got {report.get('occurrence')!r}"
+        )
+    status = report.get("status")
+    if (
+        not isinstance(status, str)
+        or status not in {SUCCESS_STATUS, FAILURE_STATUS}
+    ):
+        raise RuntimeError(f"artifact has invalid status: {report!r}")
+    validate_selector(report.get("selector"), expected_occurrence, expected_module)
+    if status == FAILURE_STATUS:
+        if set(report) != FAILURE_REPORT_FIELDS:
+            raise RuntimeError(f"failure artifact contains success data: {report!r}")
+        return report
+
+    if set(report) != SUCCESS_REPORT_FIELDS:
+        raise RuntimeError(f"success artifact has invalid fields: {report!r}")
+    terminal = report["terminal"]
+    if not isinstance(terminal, str) or terminal not in TERMINALS:
+        raise RuntimeError(f"artifact has invalid terminal: {terminal!r}")
+    if report["encoding"] != ENCODING:
+        raise RuntimeError(f"artifact has unsupported encoding: {report!r}")
+    if report["stateDeltas"] != []:
+        raise RuntimeError(
+            "boundary_state_delta_unsupported: artifact stateDeltas must be exactly []"
+        )
+    validate_environment_actions(report["environmentActions"], "artifact environmentActions")
+    locals_value = report["locals"]
+    if not isinstance(locals_value, list):
+        raise RuntimeError(f"artifact locals must be an array: {report!r}")
+    local_indices: set[int] = set()
+    for position, local in enumerate(locals_value):
+        label = f"artifact local[{position}]"
+        validate_local(local, label)
+        reference = local["reference"]
+        index = int(reference["index"])
+        if index in local_indices:
+            raise RuntimeError(
+                f"local declaration indices are not unique: {locals_value!r}"
+            )
+        local_indices.add(index)
+    target = report["target"]
+    if target is not None:
+        validate_transformation(target, "artifact target")
+    elif not locals_value:
+        raise RuntimeError(f"artifact has neither locals nor target: {report!r}")
+    local_closed_false = any(
+        local["transformation"]["result"].strip() == "False"
+        for local in locals_value
+    )
+    target_closed_true = (
+        target is not None and target["result"].strip() == "True"
+    )
+    if terminal == "closed_from_local_false":
+        if not local_closed_false or target is not None:
+            raise RuntimeError(
+                "closed_from_local_false requires a local False result and no "
+                "surviving target"
+            )
+    elif terminal == "closed_from_target_true":
+        if not target_closed_true or local_closed_false:
+            raise RuntimeError(
+                "closed_from_target_true requires a target True result and no "
+                "earlier local False result"
+            )
+    elif local_closed_false or target_closed_true:
+        raise RuntimeError(
+            "open terminal contradicts a local False or target True closure result"
+        )
+    return report
+
+
+def _walk_strings(value: object) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            if isinstance(key, str):
+                yield key
+            yield from _walk_strings(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            yield from _walk_strings(child)
+
+
+def reject_forbidden_generated_text(value: object, label: str) -> None:
+    """Reject proof-hole axioms and hole tokens in generated protocol data."""
+    for text in _walk_strings(value):
+        if FORBIDDEN_AXIOM in text:
+            raise RuntimeError(f"{label} contains forbidden {FORBIDDEN_AXIOM}")
+        match = FORBIDDEN_TOKEN_RE.search(text)
+        if match:
+            raise RuntimeError(
+                f"{label} contains introduced forbidden token {match.group(0)!r}"
+            )
+
+
+def check_recording_abort_markers(
+    output: str,
+    *,
+    expected_nonce: str,
+    expected_occurrence: str | None = None,
+    expected_module: str | None = None,
+) -> None:
+    """Fail closed if a recorder reported an infrastructure failure.
+
+    The marker is deliberately parsed even when another valid marker was
+    already found, so a malformed second marker cannot be hidden behind the
+    first.  A valid marker always raises: callers must never classify it as an
+    unobserved occurrence.
+    """
+    markers: list[dict[str, object]] = []
+    for raw in parse_framed_json_lines(
+        output,
+        marker=RECORDING_ABORT_MARKER,
+        expected_nonce=expected_nonce,
+        label="boundary recording-abort",
+    ):
+        value = raw
+        if not isinstance(value, dict) or set(value) != RECORDING_ABORT_FIELDS:
+            raise RuntimeError(
+                f"malformed boundary recording-abort marker fields: {value!r}"
+            )
+        if value["kind"] != RECORDING_ABORT_KIND:
+            raise RuntimeError(
+                f"malformed boundary recording-abort marker kind: {value!r}"
+            )
+        schema = value["schema"]
+        if (
+            isinstance(schema, bool)
+            or not isinstance(schema, int)
+            or schema != RECORDING_ABORT_SCHEMA
+        ):
+            raise RuntimeError(
+                f"malformed boundary recording-abort marker schema: {value!r}"
+            )
+        occurrence = _require_nonempty_string(
+            value["occurrence"], "recording-abort occurrence"
+        )
+        if expected_occurrence is not None and occurrence != expected_occurrence:
+            raise RuntimeError(
+                "boundary recording-abort occurrence mismatch: "
+                f"expected {expected_occurrence!r}, got {occurrence!r}"
+            )
+        module = _require_nonempty_string(value["module"], "recording-abort module")
+        if expected_module is not None and module != expected_module:
+            raise RuntimeError(
+                "boundary recording-abort module mismatch: "
+                f"expected {expected_module!r}, got {module!r}"
+            )
+        _require_nonempty_string(value["stage"], "recording-abort stage")
+        _require_nonempty_string(value["detail"], "recording-abort detail")
+        markers.append(value)
+    if markers:
+        first = markers[0]
+        raise RuntimeError(
+            "boundary recording abort: "
+            f"occurrence={first['occurrence']!r}, stage={first['stage']!r}, "
+            f"detail={first['detail']}"
+        )
+
+
+def _without_import_candidates(source: bytes, imported: str) -> list[bytes]:
+    """Return the two supported, unambiguous import-removal candidates.
+
+    The source checker injects a leading newline with the import, while the
+    shard runner inserts the import immediately after the authored import
+    header.  Trying both exact fragments keeps import removal independent of
+    the source-range proof below; the exact expected-output comparison selects
+    the one actually used by the caller.
+    """
+    candidates: list[bytes] = []
+    for injected in (
+        f"\nimport {imported}\n".encode("utf-8"),
+        f"import {imported}\n".encode("utf-8"),
+    ):
+        if source.count(injected) != 1:
+            continue
+        position = source.index(injected)
+        candidate = source[:position] + source[position + len(injected) :]
+        if candidate not in candidates:
+            candidates.append(candidate)
+    if not candidates:
+        raise RuntimeError(
+            "generated source does not contain one expected injected import: "
+            f"{imported}"
+        )
+    return candidates
+
+
+def _selected_ranges(
+    original: bytes, entries: Iterable[dict[str, Any]], label: str
+) -> list[tuple[int, int]]:
+    result: list[tuple[int, int]] = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"{label} entry[{index}] must be an object")
+        start = _require_int(entry.get("startByte"), f"{label} entry[{index}].startByte")
+        end = _require_int(entry.get("endByte"), f"{label} entry[{index}].endByte")
+        if start < 0 or end <= start or end > len(original):
+            raise RuntimeError(
+                f"{label} entry[{index}] has invalid source range [{start},{end})"
+            )
+        result.append((start, end))
+    result.sort()
+    for previous, current in zip(result, result[1:]):
+        if current[0] < previous[1]:
+            raise RuntimeError(
+                f"{label} has overlapping selected ranges: {previous}, {current}"
+            )
+    return result
+
+
+def _assert_changes_within_ranges(
+    original: bytes,
+    generated_without_import: bytes,
+    ranges: list[tuple[int, int]],
+    label: str,
+) -> None:
+    """Independently prove diff operations touch only selected source ranges."""
+    matcher = difflib.SequenceMatcher(
+        None, original, generated_without_import, autojunk=False
+    )
+    for tag, original_start, original_end, _generated_start, _generated_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if original_start == original_end:
+            permitted = any(start <= original_start <= end for start, end in ranges)
+        else:
+            permitted = any(
+                start <= original_start and original_end <= end
+                for start, end in ranges
+            )
+        if not permitted:
+            raise RuntimeError(
+                f"{label} changes authored bytes outside selected ranges: "
+                f"{tag} at [{original_start},{original_end})"
+            )
+
+
+def assert_exact_source_preservation(
+    original: bytes,
+    generated: bytes,
+    entries: Iterable[dict[str, Any]],
+    *,
+    imported: str,
+    label: str,
+    expected_without_import: bytes,
+) -> None:
+    """Prove that only the known transformation and import changed source.
+
+    The diff-based check independently proves that every deletion, corruption,
+    replacement, or insertion is confined to a selected original range.  The
+    exact pre-import comparison is retained as a second check that the selected
+    replacements themselves equal the recorded transformation.
+    """
+    ranges = _selected_ranges(original, entries, label)
+    errors: list[str] = []
+    for generated_without_import in _without_import_candidates(generated, imported):
+        try:
+            _assert_changes_within_ranges(
+                original, generated_without_import, ranges, label
+            )
+            if generated_without_import != expected_without_import:
+                raise RuntimeError(
+                    f"{label} does not match its recorded transformation"
+                )
+        except RuntimeError as error:
+            errors.append(str(error))
+            continue
+        return
+    raise RuntimeError(
+        f"{label} failed exact source preservation: " + "; ".join(errors)
+    )
+
+
+def selector_key(report: dict[str, object]) -> str:
+    """Return all runtime selector values except closed-artifact provenance."""
+    selector = report["selector"]
+    if not isinstance(selector, dict):
+        raise RuntimeError(f"artifact selector must be an object: {report!r}")
+    # Callers validate the complete selector first.  The artifact is already
+    # scoped to one occurrence/module, so those two provenance values need not
+    # distinguish variants, but the selector schema is retained in the key.
+    caller = selector["caller"]
+    if caller is None:
+        caller = ""
+    return json.dumps(
+        {
+            "selectorSchema": selector["selectorSchema"],
+            "preState": selector["preState"],
+            "options": selector["options"],
+            "caller": caller,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def artifact_payload(report: dict[str, object]) -> str:
+    return json.dumps(
+        {key: value for key, value in report.items() if key != "selector"},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def group_report_variants(
+    report_list: list[object],
+    expected_ids: list[str],
+    *,
+    expected_module: str | None = None,
+    unobserved_ids: set[str] | None = None,
+) -> dict[str, list[dict[str, object]]]:
+    unobserved_ids = set() if unobserved_ids is None else set(unobserved_ids)
+    if not unobserved_ids.issubset(expected_ids):
+        raise RuntimeError(
+            f"unobserved occurrence IDs are not in the inventory: {sorted(unobserved_ids)}"
+        )
+    grouped: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
+    modules: dict[str, str] = {}
+    for raw_report in report_list:
+        if not isinstance(raw_report, dict) or not isinstance(
+            raw_report.get("occurrence"), str
+        ):
+            raise RuntimeError(f"artifact report has no string occurrence: {raw_report!r}")
+        occurrence = raw_report["occurrence"]
+        if occurrence not in expected_ids:
+            raise RuntimeError(f"artifact report has unknown occurrence: {raw_report!r}")
+        selector = raw_report.get("selector")
+        if isinstance(selector, dict) and isinstance(selector.get("module"), str):
+            prior_module = modules.get(occurrence)
+            if prior_module is not None and prior_module != selector["module"]:
+                raise RuntimeError(
+                    f"artifact occurrence has conflicting modules: {occurrence}"
+                )
+            modules[occurrence] = selector["module"]
+        grouped[occurrence].append(
+            validate_report(raw_report, occurrence, expected_module)
+        )
+    missing = set(expected_ids) - set(grouped)
+    if set(grouped) - set(expected_ids) or missing != unobserved_ids:
+        raise RuntimeError(
+            f"artifact occurrence map mismatch: expected {expected_ids}, "
+            f"found {sorted(grouped)}, explicitly unobserved {sorted(unobserved_ids)}"
+        )
+    result: dict[str, list[dict[str, object]]] = {}
+    for occurrence in expected_ids:
+        if occurrence in unobserved_ids:
+            result[occurrence] = []
+            continue
+        by_selector: dict[str, dict[str, object]] = {}
+        for report in grouped[occurrence]:
+            key = selector_key(report)
+            previous = by_selector.get(key)
+            if previous is not None and artifact_payload(previous) != artifact_payload(report):
+                raise RuntimeError(
+                    f"ambiguous_boundary_variant:{occurrence}: selector={key}"
+                )
+            by_selector[key] = report
+        result[occurrence] = [by_selector[key] for key in sorted(by_selector)]
+    return result
+
+
+def classify_occurrence(
+    action: str, execution_count: int, variant_count: int, statuses: list[str]
+) -> str:
+    """Classify one selected occurrence after a successful run."""
+    _require_int(execution_count, "occurrence executionCount", nonnegative=True)
+    _require_int(variant_count, "occurrence variantCount", nonnegative=True)
+    if not isinstance(statuses, list):
+        raise RuntimeError(f"occurrence variant statuses must be an array: {statuses!r}")
+    if any(status not in {SUCCESS_STATUS, FAILURE_STATUS} for status in statuses):
+        raise RuntimeError(f"occurrence variant has invalid status: {statuses!r}")
+    if action == "retain":
+        if execution_count != 0 or variant_count != 0 or statuses:
+            raise RuntimeError(
+                "retained occurrence must have zero executions and variants"
+            )
+        return "retained_syntax_data"
+    if action != "materialize":
+        raise RuntimeError(f"unsupported successful occurrence action: {action!r}")
+    if execution_count == 0:
+        if variant_count != 0 or statuses:
+            raise RuntimeError(
+                "unobserved occurrence must have zero variants and statuses"
+            )
+        return "unobserved_executable"
+    if variant_count == 0 or variant_count > execution_count:
+        raise RuntimeError(
+            "observed occurrence must have at least one variant and no more "
+            "variants than executions"
+        )
+    if len(statuses) != variant_count:
+        raise RuntimeError(
+            "occurrence variant statuses do not match variantCount: "
+            f"{len(statuses)} != {variant_count}"
+        )
+    if all(status == FAILURE_STATUS for status in statuses):
+        return "expected_failure"
+    return "materialized"
+
+
+def _variant_counts(statuses: list[str], label: str) -> tuple[int, int]:
+    if not isinstance(statuses, list):
+        raise RuntimeError(f"{label} must be an array: {statuses!r}")
+    if any(status not in {SUCCESS_STATUS, FAILURE_STATUS} for status in statuses):
+        raise RuntimeError(f"{label} contains an invalid status: {statuses!r}")
+    return (
+        sum(status == SUCCESS_STATUS for status in statuses),
+        sum(status == FAILURE_STATUS for status in statuses),
+    )
+
+
+def validate_occurrence_result(
+    value: object,
+    expected_id: str,
+    *,
+    statuses: list[str] | None = None,
+) -> dict[str, object]:
+    fields = {
+        "occurrence",
+        "action",
+        "classification",
+        "executionCount",
+        "variantCount",
+        "successVariantCount",
+        "failureVariantCount",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise RuntimeError(f"invalid successful occurrence result: {value!r}")
+    if value["occurrence"] != expected_id:
+        raise RuntimeError(f"occurrence result ID mismatch: {value!r}")
+    if (
+        not isinstance(value["action"], str)
+        or value["action"] not in {"materialize", "retain"}
+    ):
+        raise RuntimeError(f"invalid occurrence result action: {value!r}")
+    if (
+        not isinstance(value["classification"], str)
+        or value["classification"] not in OCCURRENCE_CLASSIFICATIONS
+    ):
+        raise RuntimeError(f"invalid occurrence result classification: {value!r}")
+    _require_int(value["executionCount"], "occurrence executionCount", nonnegative=True)
+    _require_int(value["variantCount"], "occurrence variantCount", nonnegative=True)
+    _require_int(
+        value["successVariantCount"],
+        "occurrence successVariantCount",
+        nonnegative=True,
+    )
+    _require_int(
+        value["failureVariantCount"],
+        "occurrence failureVariantCount",
+        nonnegative=True,
+    )
+    execution_count = value["executionCount"]
+    variant_count = value["variantCount"]
+    success_variant_count = value["successVariantCount"]
+    failure_variant_count = value["failureVariantCount"]
+    action = value["action"]
+    classification = value["classification"]
+    if success_variant_count + failure_variant_count != variant_count:
+        raise RuntimeError(
+            f"occurrence variant status counts do not match variantCount: {value!r}"
+        )
+    if action == "retain":
+        if (
+            classification != "retained_syntax_data"
+            or execution_count != 0
+            or variant_count != 0
+        ):
+            raise RuntimeError(f"retained occurrence has invalid result: {value!r}")
+    elif classification == "retained_syntax_data":
+        raise RuntimeError(
+            f"materialized occurrence has retained classification: {value!r}"
+        )
+    elif classification == "unobserved_executable":
+        if execution_count != 0 or variant_count != 0:
+            raise RuntimeError(f"unobserved occurrence has observations: {value!r}")
+    elif classification in {"expected_failure", "materialized"}:
+        if (
+            execution_count == 0
+            or variant_count == 0
+            or variant_count > execution_count
+        ):
+            raise RuntimeError(f"observed occurrence has invalid counts: {value!r}")
+        if classification == "expected_failure" and (
+            success_variant_count != 0 or failure_variant_count == 0
+        ):
+            raise RuntimeError(
+                f"expected-failure occurrence has a successful variant: {value!r}"
+            )
+        if classification == "materialized" and success_variant_count == 0:
+            raise RuntimeError(
+                f"materialized occurrence has no successful variant: {value!r}"
+            )
+    if statuses is not None:
+        success_count, failure_count = _variant_counts(
+            statuses, "occurrence variant statuses"
+        )
+        if (
+            success_variant_count != success_count
+            or failure_variant_count != failure_count
+        ):
+            raise RuntimeError(
+                "occurrence variant status counts disagree with variant statuses: "
+                f"{value!r}"
+            )
+        expected = classify_occurrence(action, execution_count, variant_count, statuses)
+        if classification != expected:
+            raise RuntimeError(
+                "occurrence classification disagrees with observed variants: "
+                f"expected {expected!r}, got {classification!r}"
+            )
+    return value
+
+
+def make_occurrence_result(
+    occurrence: str,
+    action: str,
+    execution_count: int,
+    variants: list[dict[str, object]],
+) -> dict[str, object]:
+    """Build and validate one successful per-occurrence summary record."""
+    _require_nonempty_string(occurrence, "occurrence result occurrence")
+    if not isinstance(variants, list):
+        raise RuntimeError(f"occurrence variants must be an array: {variants!r}")
+    statuses: list[str] = []
+    for variant in variants:
+        if not isinstance(variant, dict):
+            raise RuntimeError(f"occurrence variant must be an object: {variant!r}")
+        status = variant.get("status")
+        if not isinstance(status, str):
+            raise RuntimeError(
+                f"occurrence variant status must be a string: {variant!r}"
+            )
+        statuses.append(status)
+    variant_count = len(variants)
+    classification = classify_occurrence(
+        action, execution_count, variant_count, statuses
+    )
+    result = {
+        "occurrence": occurrence,
+        "action": action,
+        "classification": classification,
+        "executionCount": execution_count,
+        "variantCount": variant_count,
+        "successVariantCount": sum(
+            variant.get("status") == SUCCESS_STATUS for variant in variants
+        ),
+        "failureVariantCount": sum(
+            variant.get("status") == FAILURE_STATUS for variant in variants
+        ),
+    }
+    return validate_occurrence_result(result, occurrence, statuses=statuses)
+
+
+def occurrence_classification_counts(
+    results: list[dict[str, object]],
+) -> dict[str, int]:
+    """Return a deterministic four-class count map for validated results."""
+    counts = {name: 0 for name in sorted(OCCURRENCE_CLASSIFICATIONS)}
+    for result in results:
+        classification = result.get("classification")
+        if classification not in counts:
+            raise RuntimeError(f"invalid occurrence result classification: {result!r}")
+        counts[classification] += 1
+    return counts
+
+
+def validate_occurrence_summary(
+    results: object,
+    expected_ids: list[str],
+    expected_actions: list[str],
+    classification_counts: object,
+) -> dict[str, int]:
+    """Validate order, action partition, counts, and classification summary."""
+    if not isinstance(results, list):
+        raise RuntimeError(f"occurrenceResults must be an array: {results!r}")
+    if len(expected_ids) != len(expected_actions):
+        raise RuntimeError("occurrence summary expectations have different lengths")
+    if len(expected_ids) != len(set(expected_ids)):
+        raise RuntimeError(f"occurrence summary expectations contain duplicate IDs: {expected_ids!r}")
+    if len(results) != len(expected_ids):
+        raise RuntimeError(
+            f"occurrenceResults length mismatch: {len(results)} != {len(expected_ids)}"
+        )
+    for index, (result, expected_id, expected_action) in enumerate(
+        zip(results, expected_ids, expected_actions)
+    ):
+        checked = validate_occurrence_result(result, expected_id)
+        if checked["action"] != expected_action:
+            raise RuntimeError(
+                f"occurrence result action mismatch at {index}: "
+                f"{checked['action']!r} != {expected_action!r}"
+            )
+    computed = occurrence_classification_counts(results)
+    if not isinstance(classification_counts, dict):
+        raise RuntimeError(
+            "occurrenceClassificationCounts must be an object: "
+            f"{classification_counts!r}"
+        )
+    if set(classification_counts) != set(computed):
+        raise RuntimeError(
+            "occurrenceClassificationCounts fields changed: "
+            f"{sorted(classification_counts)} != {sorted(computed)}"
+        )
+    for classification, count in classification_counts.items():
+        _require_int(
+            count,
+            f"occurrenceClassificationCounts.{classification}",
+            nonnegative=True,
+        )
+    if classification_counts != computed:
+        raise RuntimeError(
+            "occurrenceClassificationCounts do not match occurrenceResults: "
+            f"{classification_counts!r} != {computed!r}"
+        )
+    if sum(computed.values()) != len(expected_ids):
+        raise RuntimeError(
+            "occurrence classification counts do not sum to totalCount"
+        )
+    return computed

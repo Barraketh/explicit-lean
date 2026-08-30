@@ -7,10 +7,22 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
-import re
-from collections import defaultdict
 
 from simp_engine_inventory import inject_import, rewrite_simp_heads, syntax_inventory_file
+from boundary_protocol import (
+    ARTIFACT_KIND,
+    ARTIFACT_SCHEMA,
+    SEMANTIC_CONTRACT,
+    SELECTOR_SCHEMA,
+    assert_exact_source_preservation,
+    check_recording_abort_markers,
+    parse_framed_json_lines,
+    recording_subprocess_environment,
+    group_report_variants,
+    reject_forbidden_generated_text,
+    validate_report,
+    validate_environment_actions,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +31,9 @@ ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 INVENTORY_TIMEOUT = 300
 
 
-def run(command: list[str], timeout: int = 300) -> str:
+def run(
+    command: list[str], timeout: int = 300, *, env: dict[str, str] | None = None
+) -> str:
     result = subprocess.run(
         command,
         cwd=ROOT,
@@ -28,6 +42,7 @@ def run(command: list[str], timeout: int = 300) -> str:
         stderr=subprocess.STDOUT,
         timeout=timeout,
         check=False,
+        env=env,
     )
     if result.returncode:
         raise RuntimeError(result.stdout)
@@ -45,8 +60,24 @@ def query_json_string(output: str, label: str) -> str:
     return value
 
 
-def compile_source(dylib: str, source: Path) -> str:
-    return run(["lake", "env", "lean", f"--load-dynlib={dylib}", str(source)])
+def compile_source(
+    dylib: str, source: Path, *, env: dict[str, str] | None = None
+) -> str:
+    command = ["lake", "env", "lean", f"--load-dynlib={dylib}"]
+    # Instrumented and materialized copies live in different disposable
+    # directories.  Give both the same source root so Lean assigns the same
+    # logical module name; the generated artifact's module provenance is then
+    # checked by the apply elaborator instead of being weakened for fixtures.
+    if source.parent.name == "Experiment":
+        command.extend(["-R", str(source.parent.parent)])
+    command.append(str(source))
+    return run(command, env=env)
+
+
+def compile_recording_source(dylib: str, source: Path) -> tuple[str, str]:
+    """Compile one instrumented source with an authenticated recording nonce."""
+    environment, nonce = recording_subprocess_environment()
+    return compile_source(dylib, source, env=environment), nonce
 
 
 def replace_occurrence(source: bytes, start: int, end: int, replacement: str) -> bytes:
@@ -96,217 +127,207 @@ def replace_all_occurrences(
     return source
 
 
-IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_']*$")
-UNSTABLE_RENDER_RE = re.compile(r"\?[_A-Za-z]")
+def expect_validation_error(
+    report: object,
+    occurrence: str,
+    message: str,
+    *,
+    expected_module: str | None = None,
+) -> None:
+    try:
+        validate_report(report, occurrence, expected_module)
+    except RuntimeError as error:
+        if message not in str(error):
+            raise RuntimeError(
+                f"expected validation error containing {message!r}, got {error}"
+            ) from error
+    else:
+        raise RuntimeError(f"invalid boundary mutation was accepted: {message}")
 
 
-def validate_rendered_term(value: str, label: str) -> None:
-    for sentinel in ("⋯", "✝"):
-        if sentinel in value:
-            raise RuntimeError(f"{label} contains unstable printer output {sentinel!r}")
-    invalid_source = re.search(r"@fun(?=\s|\{|\()|@\(let", value)
-    if invalid_source:
-        raise RuntimeError(
-            f"{label} contains invalid explicit-printer source "
-            f"{invalid_source.group(0)!r}"
-        )
-    if UNSTABLE_RENDER_RE.search(value):
-        raise RuntimeError(f"{label} contains an internal metavariable name: {value!r}")
+def assert_protocol_mutations(report_list: list[object], expected_ids: list[str]) -> None:
+    """Exercise the closed protocol's fail-closed checks without Lean fixtures."""
+    success = next(
+        (
+            report
+            for report in report_list
+            if isinstance(report, dict) and report.get("status") == "success"
+        ),
+        None,
+    )
+    failure = next(
+        (
+            report
+            for report in report_list
+            if isinstance(report, dict) and report.get("status") == "failure"
+        ),
+        None,
+    )
+    if not isinstance(success, dict) or not isinstance(failure, dict):
+        raise RuntimeError("protocol mutation tests require both success and failure reports")
+    occurrence = str(success["occurrence"])
+    module = success["selector"]["module"]
 
+    def copy_success() -> dict[str, object]:
+        return json.loads(json.dumps(success))
 
-def validate_transformation(value: object, label: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise RuntimeError(f"{label} must be an object, got {value!r}")
-    for field in ("input", "result", "proof"):
-        if field not in value:
-            raise RuntimeError(f"{label} is missing `{field}`: {value!r}")
-    if not isinstance(value["input"], str) or not isinstance(value["result"], str):
-        raise RuntimeError(f"{label} input/result must be strings: {value!r}")
-    if value["proof"] is not None and not isinstance(value["proof"], str):
-        raise RuntimeError(f"{label} proof must be a string or null: {value!r}")
-    validate_rendered_term(value["input"], f"{label} input")
-    validate_rendered_term(value["result"], f"{label} result")
-    if value["proof"] is not None:
-        validate_rendered_term(value["proof"], f"{label} proof")
-    return value
+    mutated = copy_success()
+    mutated["unexpected"] = True
+    expect_validation_error(mutated, occurrence, "success artifact has invalid fields")
 
+    mutated = json.loads(json.dumps(failure))
+    mutated["target"] = None
+    expect_validation_error(
+        mutated, str(failure["occurrence"]), "failure artifact contains success data"
+    )
 
-def validate_environment_actions(value: object, label: str) -> list[dict[str, object]]:
-    if not isinstance(value, list):
-        raise RuntimeError(f"{label} must be an array: {value!r}")
-    result: list[dict[str, object]] = []
-    for action in value:
-        if not isinstance(action, dict) or set(action) != {"kind", "name"}:
-            raise RuntimeError(f"{label} contains an invalid action: {action!r}")
-        if action["kind"] != "realize_reserved_name":
-            raise RuntimeError(f"{label} contains an unsupported action: {action!r}")
-        if not isinstance(action["name"], str) or not action["name"]:
-            raise RuntimeError(f"{label} contains an invalid reserved name: {action!r}")
-        result.append(action)
-    return result
+    mutated = copy_success()
+    mutated["schema"] = True
+    expect_validation_error(mutated, occurrence, "artifact schema must be an integer")
+    mutated = copy_success()
+    mutated["schema"] = ARTIFACT_SCHEMA + 1
+    expect_validation_error(mutated, occurrence, "unsupported artifact schema")
+    mutated = copy_success()
+    mutated["kind"] = "wrong_kind"
+    expect_validation_error(mutated, occurrence, "artifact has invalid kind")
+    mutated = copy_success()
+    mutated["semanticContract"] = "wrong_contract"
+    expect_validation_error(mutated, occurrence, "artifact has invalid semantic contract")
 
-
-def validate_report(report: object, expected_id: str) -> dict[str, object]:
-    if not isinstance(report, dict):
-        raise RuntimeError(f"artifact report must be an object: {report!r}")
-    if report.get("occurrence") != expected_id:
-        raise RuntimeError(
-            f"artifact occurrence mismatch: expected {expected_id}, "
-            f"got {report.get('occurrence')!r}"
-        )
-    selector = report.get("selector")
+    selector = copy_success()["selector"]
     if not isinstance(selector, dict):
-        raise RuntimeError(f"artifact selector must be an object: {report!r}")
-    pre_state = selector.get("preState")
-    if not isinstance(pre_state, dict) or set(pre_state) != {
-        "targetFingerprint",
-        "localContextFingerprint",
-        "metavariableContextFingerprint",
-        "goalCount",
-    }:
-        raise RuntimeError(f"artifact selector has invalid pre-state: {selector!r}")
-    if any(
-        not isinstance(pre_state[field], str)
-        for field in (
-            "targetFingerprint",
-            "localContextFingerprint",
-            "metavariableContextFingerprint",
-        )
-    ) or not isinstance(pre_state["goalCount"], int) or isinstance(
-        pre_state["goalCount"], bool
-    ):
-        raise RuntimeError(f"artifact selector pre-state has invalid fields: {selector!r}")
-    if not isinstance(selector.get("options"), str):
-        raise RuntimeError(f"artifact selector options must be a string: {selector!r}")
-    if selector.get("caller") is not None and not isinstance(selector.get("caller"), str):
-        raise RuntimeError(f"artifact selector caller must be a string or null: {selector!r}")
-    status = report.get("status")
-    if status == "failure":
-        if set(report) != {"occurrence", "selector", "status"}:
-            raise RuntimeError(f"failure artifact contains success data: {report!r}")
-        return report
-    if status != "success":
-        raise RuntimeError(f"artifact has invalid status: {report!r}")
-    validate_environment_actions(
-        report.get("environmentActions"),
-        f"artifact environmentActions for {expected_id}",
+        raise RuntimeError("protocol mutation test requires a selector")
+    mutated = copy_success()
+    mutated["selector"]["selectorSchema"] = True
+    expect_validation_error(mutated, occurrence, "artifact selector schema must be an integer")
+    mutated = copy_success()
+    mutated["selector"]["selectorSchema"] = 2
+    expect_validation_error(mutated, occurrence, "unsupported artifact selector schema")
+    mutated = copy_success()
+    mutated["selector"]["occurrence"] = "other_occurrence"
+    expect_validation_error(mutated, occurrence, "artifact selector occurrence mismatch")
+    mutated = copy_success()
+    mutated["selector"]["module"] = "Other.Module"
+    expect_validation_error(
+        mutated, occurrence, "artifact selector module mismatch", expected_module=module
     )
-    locals_value = report.get("locals")
-    if not isinstance(locals_value, list):
-        raise RuntimeError(f"artifact locals must be an array: {report!r}")
-    names: set[str] = set()
-    previous_index = -1
-    for local in locals_value:
-        if not isinstance(local, dict):
-            raise RuntimeError(f"artifact local must be an object: {local!r}")
-        name = local.get("name")
-        index = local.get("index")
-        if not isinstance(name, str) or not IDENTIFIER_RE.fullmatch(name):
-            raise RuntimeError(f"unsafe emitted local identifier: {name!r}")
-        if name in names:
-            raise RuntimeError(f"duplicate emitted local identifier: {name}")
-        names.add(name)
-        if not isinstance(index, int) or isinstance(index, bool) or index <= previous_index:
-            raise RuntimeError(f"local declaration order is not strict: {locals_value!r}")
-        previous_index = index
-        validate_transformation(local.get("transformation"), f"local {name}")
-    target = report.get("target")
-    if target is not None:
-        validate_transformation(target, "target")
-    elif not locals_value:
-        raise RuntimeError(f"artifact has neither locals nor target: {report!r}")
-
-    # Target-only reports retain flat fields for compatibility. Keep them
-    # checked against the structured target so the materializer never silently
-    # emits a different transformation.
-    flat = {
-        "input": report.get("input"),
-        "result": report.get("result"),
-        "proof": report.get("proof"),
-    }
-    if target is not None and not locals_value:
-        if flat != target:
-            raise RuntimeError(f"flat/structured target report mismatch: {report!r}")
-    return report
-
-
-def selector_key(report: dict[str, object]) -> str:
-    """Return the runtime-relevant selector key, excluding module provenance."""
-    selector = report["selector"]
-    if not isinstance(selector, dict):
-        raise RuntimeError(f"artifact selector must be an object: {report!r}")
-    return json.dumps(
-        {
-            "preState": selector["preState"],
-            "options": selector["options"],
-            "caller": selector["caller"],
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+    mutated = copy_success()
+    mutated["selector"]["caller"] = True
+    expect_validation_error(
+        mutated,
+        occurrence,
+        "artifact selector caller must be a nonempty string or null",
     )
-
-
-def artifact_payload(report: dict[str, object]) -> str:
-    return json.dumps(
-        {key: value for key, value in report.items() if key not in {"selector"}},
-        sort_keys=True,
-        separators=(",", ":"),
+    mutated = copy_success()
+    mutated["selector"]["caller"] = ""
+    expect_validation_error(
+        mutated,
+        occurrence,
+        "artifact selector caller must be a nonempty string or null",
     )
+    mutated = copy_success()
+    mutated["selector"]["preState"]["goalCount"] = True
+    expect_validation_error(mutated, occurrence, "artifact selector preState.goalCount must be an integer")
+    mutated = copy_success()
+    mutated["selector"]["preState"]["goalCount"] = -1
+    expect_validation_error(mutated, occurrence, "artifact selector preState.goalCount must be nonnegative")
+
+    mutated = copy_success()
+    mutated["stateDeltas"] = [{"kind": "unsupported"}]
+    expect_validation_error(mutated, occurrence, "boundary_state_delta_unsupported")
+    mutated = copy_success()
+    mutated["encoding"]["term"] = "wrong_encoding"
+    expect_validation_error(mutated, occurrence, "artifact has unsupported encoding")
+    mutated = copy_success()
+    mutated["terminal"] = {"closed": True}
+    expect_validation_error(mutated, occurrence, "artifact has invalid terminal")
+
+    local_report = next(
+        (
+            report
+            for report in report_list
+            if isinstance(report, dict)
+            and report.get("status") == "success"
+            and isinstance(report.get("locals"), list)
+            and report["locals"]
+        ),
+        None,
+    )
+    if not isinstance(local_report, dict):
+        raise RuntimeError("protocol mutation tests require local evidence")
+    local_occurrence = str(local_report["occurrence"])
+
+    def copy_local_report() -> dict[str, object]:
+        return json.loads(json.dumps(local_report))
+
+    mutated = copy_local_report()
+    mutated["locals"][0]["reference"]["kind"] = "fvar_id"
+    expect_validation_error(mutated, local_occurrence, "unsupported kind")
+    mutated = copy_local_report()
+    mutated["locals"][0]["reference"]["index"] = True
+    expect_validation_error(mutated, local_occurrence, "index must be an integer")
+    mutated = copy_local_report()
+    mutated["locals"][0]["reference"]["index"] = -1
+    expect_validation_error(mutated, local_occurrence, "index must be nonnegative")
+    mutated = copy_local_report()
+    mutated["locals"][0]["transformation"]["extra"] = True
+    expect_validation_error(mutated, local_occurrence, "transformation has invalid fields")
+
+    locals_value = local_report["locals"]
+    if not isinstance(locals_value, list) or not locals_value:
+        raise RuntimeError("protocol mutation test requires a local array")
+    # The fixture currently has only one location occurrence in many runs.
+    # Add a second structurally valid local record solely for testing the
+    # ordering/uniqueness invariant; no generated source is materialized from
+    # this synthetic mutation.
+    pair_report = copy_local_report()
+    first_local = json.loads(json.dumps(pair_report["locals"][0]))
+    second_local = json.loads(json.dumps(first_local))
+    first_local["reference"]["index"] = 1
+    second_local["reference"]["index"] = 2
+    pair_report["locals"] = [first_local, second_local]
+    mutated = json.loads(json.dumps(pair_report))
+    mutated["locals"][1]["reference"]["index"] = 1
+    expect_validation_error(
+        mutated, local_occurrence, "local declaration indices are not unique"
+    )
+    mutated = json.loads(json.dumps(pair_report))
+    # Source order is not a numeric-order requirement.  A descending index
+    # sequence is a valid representation of the recorder's authored local
+    # order and must remain accepted.
+    mutated["locals"][1]["reference"]["index"] = 0
+    validate_report(mutated, local_occurrence, module)
 
 
-def group_report_variants(
+def assert_grouping_rejections(
     report_list: list[object],
     expected_ids: list[str],
-    *,
-    unobserved_ids: set[str] | None = None,
-) -> dict[str, list[dict[str, object]]]:
-    unobserved_ids = set() if unobserved_ids is None else unobserved_ids
-    if not unobserved_ids.issubset(expected_ids):
-        raise RuntimeError(
-            f"unobserved occurrence IDs are not in the inventory: {sorted(unobserved_ids)}"
-        )
-    grouped: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
-    for raw_report in report_list:
-        if not isinstance(raw_report, dict) or not isinstance(
-            raw_report.get("occurrence"), str
-        ):
-            raise RuntimeError(f"artifact report has no string occurrence: {raw_report!r}")
-        occurrence = raw_report["occurrence"]
-        if occurrence not in expected_ids:
-            raise RuntimeError(f"artifact report has unknown occurrence: {raw_report!r}")
-        grouped[occurrence].append(validate_report(raw_report, occurrence))
-    missing = set(expected_ids) - set(grouped)
-    if set(grouped) - set(expected_ids) or missing != unobserved_ids:
-        raise RuntimeError(
-            f"artifact occurrence map mismatch: expected {expected_ids}, "
-            f"found {sorted(grouped)}, explicitly unobserved {sorted(unobserved_ids)}"
-        )
-
-    result: dict[str, list[dict[str, object]]] = {}
-    for occurrence in expected_ids:
-        if occurrence in unobserved_ids:
-            result[occurrence] = []
-            continue
-        by_selector: dict[str, dict[str, object]] = {}
-        for report in grouped[occurrence]:
-            key = selector_key(report)
-            previous = by_selector.get(key)
-            if previous is not None and artifact_payload(previous) != artifact_payload(report):
-                raise RuntimeError(
-                    f"ambiguous_boundary_variant:{occurrence}: selector={key}"
-                )
-            by_selector[key] = report
-        result[occurrence] = [by_selector[key] for key in sorted(by_selector)]
-    return result
-
-
-def assert_grouping_rejections(report_list: list[object], expected_ids: list[str]) -> None:
+    expected_module: str,
+) -> None:
+    assert_protocol_mutations(report_list, expected_ids)
     validate_environment_actions(
         [{"kind": "realize_reserved_name", "name": "«foo-bar».αfun.congr_simp"}],
         "quoted/unicode environment action",
     )
+    for actions in (
+        [
+            {"kind": "realize_reserved_name", "name": "z"},
+            {"kind": "realize_reserved_name", "name": "a"},
+        ],
+        [
+            {"kind": "realize_reserved_name", "name": "same"},
+            {"kind": "realize_reserved_name", "name": "same"},
+        ],
+    ):
+        try:
+            validate_environment_actions(actions, "environment action mutation")
+        except RuntimeError as error:
+            if "strictly sorted and unique" not in str(error):
+                raise
+        else:
+            raise RuntimeError("unsorted or duplicate environment actions were accepted")
     try:
-        group_report_variants([], expected_ids)
+        group_report_variants([], expected_ids, expected_module=expected_module)
     except RuntimeError as error:
         if "artifact occurrence map mismatch" not in str(error):
             raise
@@ -328,11 +349,11 @@ def assert_grouping_rejections(report_list: list[object], expected_ids: list[str
     if not isinstance(target, dict) or not isinstance(target.get("result"), str):
         raise RuntimeError("ambiguity rejection test requires target evidence")
     target["result"] += " "
-    if not mutated["locals"]:
-        mutated["result"] = target["result"]
     occurrence = str(success["occurrence"])
     try:
-        group_report_variants([success, mutated], [occurrence])
+        group_report_variants(
+            [success, mutated], [occurrence], expected_module=expected_module
+        )
     except RuntimeError as error:
         if "ambiguous_boundary_variant" not in str(error):
             raise
@@ -396,6 +417,27 @@ def format_selector_values(report: dict[str, object]) -> str:
     )
 
 
+def format_artifact_header(report: dict[str, object]) -> str:
+    """Render the closed artifact's provenance before any variant evidence."""
+    selector = report["selector"]
+    if not isinstance(selector, dict):
+        raise RuntimeError(f"artifact selector must be an object: {report!r}")
+    occurrence = report.get("occurrence")
+    module = selector.get("module")
+    if not isinstance(occurrence, str) or not occurrence:
+        raise RuntimeError(f"artifact occurrence must be a nonempty string: {report!r}")
+    if not isinstance(module, str) or not module:
+        raise RuntimeError(f"artifact module must be a nonempty string: {report!r}")
+    return (
+        "(artifact_kind := "
+        f"{lean_string(ARTIFACT_KIND)} artifact_schema := {ARTIFACT_SCHEMA} "
+        f"selector_schema := {SELECTOR_SCHEMA} "
+        "semantic_contract := "
+        f"{lean_string(SEMANTIC_CONTRACT)} occurrence_id := {lean_string(occurrence)} "
+        f"recorded_module := {lean_string(module)})"
+    )
+
+
 def format_variant_outcome(
     report: dict[str, object], continuation_indent: str
 ) -> str:
@@ -433,10 +475,11 @@ def format_variant_outcome(
 
     parts = [encoded_prefix()]
     for local in report["locals"]:
+        reference = local["reference"]
         parts.extend(
             [
                 "at_index",
-                str(local["index"]),
+                str(reference["index"]),
                 encoded(local["transformation"]),
             ]
         )
@@ -451,20 +494,180 @@ def format_report_variants(
     if not reports:
         return "simp_engine_boundary_occurrence_unobserved"
 
+    first_occurrence = reports[0].get("occurrence")
+    if not isinstance(first_occurrence, str) or not first_occurrence:
+        raise RuntimeError(f"artifact occurrence must be a nonempty string: {reports[0]!r}")
+    first_selector = reports[0].get("selector")
+    if not isinstance(first_selector, dict):
+        raise RuntimeError(f"artifact selector must be an object: {reports[0]!r}")
+    expected_module = first_selector.get("module")
+    if not isinstance(expected_module, str) or not expected_module:
+        raise RuntimeError(f"artifact module must be a nonempty string: {reports[0]!r}")
+    for report in reports:
+        validate_report(report, first_occurrence, expected_module)
+
     # Selection is non-backtracking: the dispatcher first chooses an exact
     # observed pre-state and only then executes its outcome. This preserves an
     # intentional failure so the unchanged surrounding `first`/`try` sees it.
     artifact_indent = continuation_indent + "  "
     parts = ["simp_engine_boundary_select"]
+    parts.append(format_artifact_header(reports[0]))
     for report in reports:
         parts.append(
             continuation_indent
             + "| "
+            + lean_string(str(report["occurrence"]))
+            + " "
             + format_selector_values(report)
             + " => "
             + format_variant_outcome(report, artifact_indent)
         )
     return "\n".join(parts)
+
+
+def header_fixture_source(
+    kind: str,
+    schema: int,
+    selector_schema: int,
+    contract: str,
+    occurrence: str,
+    module: str,
+) -> str:
+    """Make a tiny selector fixture whose outcome is never elaborated."""
+    header = (
+        "(artifact_kind := "
+        f"{lean_string(kind)} artifact_schema := {schema} "
+        f"selector_schema := {selector_schema} "
+        "semantic_contract := "
+        f"{lean_string(contract)} occurrence_id := {lean_string(occurrence)} "
+        f"recorded_module := {lean_string(module)})"
+    )
+    # The fingerprints are intentionally arbitrary: header validation must
+    # happen before selector matching, evidence elaboration, or environment
+    # actions. The failure outcome also avoids depending on any term printer.
+    return "\n".join(
+        [
+            "import ExplicitLean.SimpEngine.Boundary.Tactic",
+            "theorem boundaryHeaderValidationFixture : True := by",
+            f"  simp_engine_boundary_select {header}",
+            f'    | {lean_string(occurrence or "headerMutation")} "target" "locals" "mvars" 1 "options" "" => failure',
+            "",
+        ]
+    )
+
+
+def assert_generated_header_rejections(
+    dylib: str, work: Path, report: dict[str, object]
+) -> None:
+    """Check stable fail-closed errors before the generated tactic can run."""
+    selector = report.get("selector")
+    if not isinstance(selector, dict):
+        raise RuntimeError("header mutation test requires a selector")
+    occurrence = report.get("occurrence")
+    module = selector.get("module")
+    if not isinstance(occurrence, str) or not occurrence:
+        raise RuntimeError("header mutation test requires a nonempty occurrence")
+    if not isinstance(module, str) or not module:
+        raise RuntimeError("header mutation test requires a nonempty module")
+
+    cases = [
+        (ARTIFACT_KIND, ARTIFACT_SCHEMA + 1, SELECTOR_SCHEMA, SEMANTIC_CONTRACT,
+         occurrence, module,
+         "unsupported_boundary_artifact_schema"),
+        (ARTIFACT_KIND, ARTIFACT_SCHEMA, SELECTOR_SCHEMA + 1, SEMANTIC_CONTRACT,
+         occurrence, module, "unsupported_boundary_selector_schema"),
+        (ARTIFACT_KIND, ARTIFACT_SCHEMA, SELECTOR_SCHEMA, "wrong-contract",
+         occurrence, module,
+         "unsupported_boundary_semantic_contract"),
+        ("wrong-kind", ARTIFACT_SCHEMA, SELECTOR_SCHEMA, SEMANTIC_CONTRACT,
+         occurrence, module, "unsupported_boundary_artifact_kind"),
+        (ARTIFACT_KIND, ARTIFACT_SCHEMA, SELECTOR_SCHEMA, SEMANTIC_CONTRACT, "", module,
+         "invalid_boundary_occurrence"),
+        (ARTIFACT_KIND, ARTIFACT_SCHEMA, SELECTOR_SCHEMA, SEMANTIC_CONTRACT,
+         occurrence, "Other.Module",
+         "boundary_module_mismatch"),
+    ]
+    mutation_root = work / "header-mutations"
+    source_path = mutation_root / "Experiment" / SOURCE.name
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    for index, (kind, schema, selector_schema, contract, occ_id, module_name,
+            expected_error) in enumerate(cases):
+        source_path.write_text(
+            header_fixture_source(
+                kind, schema, selector_schema, contract, occ_id, module_name
+            ),
+            encoding="utf-8",
+        )
+        try:
+            compile_source(dylib, source_path)
+        except RuntimeError as error:
+            if expected_error not in str(error):
+                raise RuntimeError(
+                    f"header mutation {index} expected {expected_error!r}, got {error}"
+                ) from error
+        else:
+            raise RuntimeError(f"header mutation {index} was accepted")
+
+
+def assert_caught_recording_abort_is_fatal(dylib: str, work: Path) -> None:
+    """A caught post-stock recorder failure must not look unobserved."""
+    fixture = work / "recording-abort" / "Experiment" / "SimpEngineBoundaryRecordingAbort.lean"
+    fixture.parent.mkdir(parents=True, exist_ok=True)
+    fixture.write_text(
+        """module
+
+import Mathlib
+public meta import ExplicitLean.SimpEngine.Boundary
+
+open Lean Meta Elab Tactic
+
+syntax "boundary_abort_mutating_discharger" : tactic
+
+elab_rules : tactic
+  | `(tactic| boundary_abort_mutating_discharger) => withMainContext do
+      addDecl <| .axiomDecl {
+        name := `boundaryRecordingAbortCaught.abortHelper
+        levelParams := []
+        type := mkConst ``True
+        isUnsafe := false
+      }
+      evalTactic (← `(tactic| assumption))
+
+theorem boundaryRecordingAbortCaught (p q : Prop) (h : p) (hpq : p → q) : q := by
+  first
+  | simp_engine_boundary_record "recording-abort-test"
+      (disch := boundary_abort_mutating_discharger) [hpq]
+  | exact hpq h
+""",
+        encoding="utf-8",
+    )
+    output, nonce = compile_recording_source(dylib, fixture)
+    artifact_reports = parse_framed_json_lines(
+        output,
+        marker=ARTIFACT_MARKER,
+        expected_nonce=nonce,
+        label="boundary artifact",
+    )
+    if artifact_reports:
+        raise RuntimeError(
+            "post-stock recording abort incorrectly emitted a usable artifact report\n"
+            + output
+        )
+    try:
+        check_recording_abort_markers(
+            output,
+            expected_nonce=nonce,
+            expected_occurrence="recording-abort-test",
+            expected_module="Experiment.SimpEngineBoundaryRecordingAbort",
+        )
+    except RuntimeError as error:
+        if "boundary recording abort" not in str(error):
+            raise
+    else:
+        raise RuntimeError(
+            "caught post-stock recorder failure emitted no durable abort marker\n"
+            + output
+        )
 
 
 def main() -> None:
@@ -480,25 +683,42 @@ def main() -> None:
         raise RuntimeError(f"expected seventeen source occurrences, found {len(entries)}: {entries}")
     original = SOURCE.read_bytes()
 
-    instrumented = rewrite_simp_heads(
+    instrumented_without_import = rewrite_simp_heads(
         original,
         entries,
         lambda item: f'simp_engine_boundary_record "{item["id"]}"',
     )
-    instrumented = inject_import(instrumented, "ExplicitLean.SimpEngine.Boundary")
+    instrumented = inject_import(
+        instrumented_without_import, "ExplicitLean.SimpEngine.Boundary"
+    )
+    expected_module = "Experiment.SimpEngineBoundarySourceInput"
+    assert_exact_source_preservation(
+        original,
+        instrumented,
+        entries,
+        imported="ExplicitLean.SimpEngine.Boundary",
+        label="instrumented source Experiment.SimpEngineBoundarySourceInput",
+        expected_without_import=instrumented_without_import,
+    )
 
     temporary_root = ROOT / ".lake"
     temporary_root.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="boundary-source-", dir=temporary_root) as raw_dir:
         work = Path(raw_dir)
-        instrumented_path = work / "Instrumented.lean"
+        instrumented_path = work / "instrumented" / "Experiment" / SOURCE.name
+        instrumented_path.parent.mkdir(parents=True, exist_ok=True)
         instrumented_path.write_bytes(instrumented)
-        output = compile_source(dylib, instrumented_path)
-        report_list = [
-            json.loads(line.split(ARTIFACT_MARKER, 1)[1])
-            for line in output.splitlines()
-            if ARTIFACT_MARKER in line
-        ]
+        output, nonce = compile_recording_source(dylib, instrumented_path)
+        check_recording_abort_markers(
+            output, expected_nonce=nonce, expected_module=expected_module
+        )
+        report_list = parse_framed_json_lines(
+            output,
+            marker=ARTIFACT_MARKER,
+            expected_nonce=nonce,
+            label="boundary artifact",
+        )
+        reject_forbidden_generated_text(report_list, "boundary artifact reports")
         expected_ids = [str(entry["id"]) for entry in entries]
         unobserved_ids = {
             str(entry["id"])
@@ -509,24 +729,43 @@ def main() -> None:
             raise RuntimeError(
                 f"expected one explicitly unobserved fixture occurrence, found {unobserved_ids}"
             )
-        assert_grouping_rejections(report_list, expected_ids)
+        assert_grouping_rejections(report_list, expected_ids, expected_module)
         try:
             reports = group_report_variants(
-                report_list, expected_ids, unobserved_ids=unobserved_ids
+                report_list,
+                expected_ids,
+                expected_module=expected_module,
+                unobserved_ids=unobserved_ids,
             )
         except RuntimeError as error:
             raise RuntimeError(f"{error}\n{output}") from error
 
-        materialized = replace_all_occurrences(original, entries, reports)
+        materialized_without_import = replace_all_occurrences(original, entries, reports)
         materialized = inject_import(
-            materialized, "ExplicitLean.SimpEngine.Boundary.Tactic"
+            materialized_without_import, "ExplicitLean.SimpEngine.Boundary.Tactic"
         )
-        materialized_path = work / "Materialized.lean"
+        assert_exact_source_preservation(
+            original,
+            materialized,
+            entries,
+            imported="ExplicitLean.SimpEngine.Boundary.Tactic",
+            label="materialized source Experiment.SimpEngineBoundarySourceInput",
+            expected_without_import=materialized_without_import,
+        )
+        materialized_path = work / "materialized" / "Experiment" / SOURCE.name
+        materialized_path.parent.mkdir(parents=True, exist_ok=True)
         materialized_path.write_bytes(materialized)
+        success = next(
+            report
+            for report in report_list
+            if isinstance(report, dict) and report.get("status") == "success"
+        )
+        assert_generated_header_rejections(dylib, work, success)
+        assert_caught_recording_abort_is_fatal(dylib, work)
         compile_source(dylib, materialized_path)
         remaining = syntax_inventory_file(
             materialized_path,
-            "Experiment.MaterializedBoundarySource",
+            "Experiment.SimpEngineBoundarySourceInput.materialized",
             INVENTORY_TIMEOUT,
             allow_elaboration_errors=True,
         )

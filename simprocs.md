@@ -8,10 +8,11 @@ The detailed schema-27 semantic models are historical and are described in
 ## Design rule
 
 A simproc is opaque code that stock `simp` may run while the translator records
-an original source call. Generated `simp_engine_apply` source does not invoke
-the simproc or reconstruct its algorithm. It applies the checked result
-expression and proof returned by stock Lean, plus any continuation-visible state
-delta identified by the boundary comparator.
+an original source call. The current generated `simp_engine_boundary_select`
+prototype (whose production public name is intended to be `simp_engine_apply`)
+does not invoke the simproc or reconstruct its algorithm. It applies the checked
+result expression and proof returned by stock Lean, plus any
+continuation-visible state delta identified by the boundary comparator.
 
 A simproc name or trace may be retained as diagnostic provenance. It is not
 apply authority. Candidate order, registry placement, dispositions, rollback,
@@ -120,8 +121,9 @@ probe intentionally does not record simproc order, registry state, or other
 simplifier internals. The pinned
 diagnostic closes the old 101 scope unknowns, and the regenerated full diagnostic
 manifest classifies all 83,425 occurrences with zero unknowns. The schema-2
-`AddConstMap/Basic` canary materializes all 17 calls, compiles, and passes the
-schema-3 declaration/environment oracle, including computational values,
+`AddConstMap/Basic` canary uses a manifest schema 2 and publishes a schema-4
+shard report after materializing all 17 calls, compiling, and passing the
+schema-1 declaration/environment oracle, including computational values,
 compiler IR, persistent extensions, and axiom subsets. The full five-module
 representative gate now supplies the same semantic check for every listed
 module. The full diagnostic predates the hardened implementation fingerprint

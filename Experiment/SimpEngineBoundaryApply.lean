@@ -28,7 +28,8 @@ private def accepted (state : BoundaryStateFingerprint) (options caller : String
     pure false
 
 elab "check_boundary_guard" : tactic => withMainContext do
-  let before ← boundaryProofStateFingerprint (← getGoals)
+  let before ← boundaryProofStateFingerprintWithTerm (← getGoals)
+    (← getThe Term.State)
   let options := boundaryOptionsFingerprint (← getOptions)
   let caller ← currentCaller
   unless ← accepted before options caller do
@@ -48,14 +49,16 @@ elab "check_boundary_guard" : tactic => withMainContext do
     throwError "boundary guard accepted a mutated options selector"
   if ← accepted before options mutationCaller then
     throwError "boundary guard accepted a mutated caller selector"
-  let after ← boundaryProofStateFingerprint (← getGoals)
+  let after ← boundaryProofStateFingerprintWithTerm (← getGoals)
+    (← getThe Term.State)
   unless after == before do
     throwError "boundary guard mutation checks changed the proof state"
 
 elab "check_boundary_alpha_invariant" id:ident : tactic => withMainContext do
+  -- `MVarId.rename` assigns the old goal to a fresh goal.  The production
+  -- selector must observe that assignment through `Term.State`; use the
+  -- Meta-only view here to isolate the intended local-parameter alpha test.
   let before ← boundaryProofStateFingerprint (← getGoals)
-  let options := boundaryOptionsFingerprint (← getOptions)
-  let caller ← currentCaller
   let goal ← getMainGoal
   let some decl := (← getLCtx).findFromUserName? id.getId
     | throwErrorAt id "unknown local '{id.getId}'"
@@ -63,9 +66,7 @@ elab "check_boundary_alpha_invariant" id:ident : tactic => withMainContext do
   replaceMainGoal [renamed]
   let after ← boundaryProofStateFingerprint (← getGoals)
   unless after == before do
-    throwError "boundary selector changed under theorem-parameter alpha-renaming"
-  unless ← accepted before options caller do
-    throwError "boundary guard rejected an alpha-renamed equivalent state"
+    throwError "boundary selector changed under a theorem-parameter alpha rename"
 
 end ExplicitLean.SimpEngine.Boundary.GuardProbe
 

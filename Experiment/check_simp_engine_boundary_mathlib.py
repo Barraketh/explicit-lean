@@ -14,15 +14,21 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 from collections import Counter
+import subprocess
 
 import boundary_materialize_shard as materializer
 import simp_engine_boundary_corpus as corpus
 import simp_engine_inventory as coverage
 import check_simp_engine_boundary_scope as scope
-from check_simp_engine_boundary_source import (
+from boundary_protocol import (
+    assert_exact_source_preservation,
+    check_recording_abort_markers,
+    parse_framed_json_lines,
+    recording_subprocess_environment,
     group_report_variants,
-    replace_all_occurrences,
+    reject_forbidden_generated_text,
 )
+from check_simp_engine_boundary_source import replace_all_occurrences
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -168,8 +174,26 @@ def classify_entries(
     return materialize, retain
 
 
-def run(command: list[str], timeout: int = 600) -> str:
-    code, output, _ = coverage.run(command, timeout=timeout)
+def run(
+    command: list[str],
+    timeout: int = 600,
+    *,
+    env: dict[str, str] | None = None,
+) -> str:
+    if env is None:
+        code, output, _ = coverage.run(command, timeout=timeout)
+    else:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout,
+            check=False,
+            env=env,
+        )
+        code, output = completed.returncode, completed.stdout
     if code:
         raise RuntimeError(output)
     return output
@@ -192,10 +216,18 @@ def dynamic_library() -> str:
     return value
 
 
-def compile_copy(path: Path, dylib: str) -> str:
+def compile_copy(
+    path: Path, dylib: str, *, env: dict[str, str] | None = None
+) -> str:
     command = coverage.lean_command(path)
     command.insert(3, f"--load-dynlib={dylib}")
-    return run(command, timeout=600)
+    return run(command, timeout=600, env=env)
+
+
+def compile_recording_copy(path: Path, dylib: str) -> tuple[str, str]:
+    """Compile one instrumented copy with an authenticated recording nonce."""
+    environment, nonce = recording_subprocess_environment()
+    return compile_copy(path, dylib, env=environment), nonce
 
 
 def assert_nonoverlapping(
@@ -243,18 +275,6 @@ def materialize_source(
     return replace_all_occurrences(source, entries, reports)
 
 
-def parse_reports(output: str) -> list[object]:
-    reports: list[object] = []
-    for line in output.splitlines():
-        if ARTIFACT_MARKER not in line:
-            continue
-        try:
-            reports.append(json.loads(line.split(ARTIFACT_MARKER, 1)[1]))
-        except json.JSONDecodeError as error:
-            raise RuntimeError(f"invalid artifact report line: {line}") from error
-    return reports
-
-
 def check_module(
     spec: ModuleSpec,
     dylib: str,
@@ -281,11 +301,38 @@ def check_module(
 
     work = DEBUG_ROOT / spec.debug_name
     original_path = copy_at_module_root(work / "original", spec.module, original)
-    instrumented_path = copy_at_module_root(
-        work / "instrumented", spec.module, instrumented_source(original, materialize)
+    instrumented_without_import = coverage.rewrite_simp_heads(
+        original,
+        materialize,
+        lambda entry: f'simp_engine_boundary_record "{entry["id"]}"',
     )
-    output = compile_copy(instrumented_path, dylib)
-    report_list = parse_reports(output)
+    instrumented_bytes = coverage.inject_import(
+        instrumented_without_import, "ExplicitLean.SimpEngine.Boundary"
+    )
+    assert_exact_source_preservation(
+        original,
+        instrumented_bytes,
+        materialize,
+        imported="ExplicitLean.SimpEngine.Boundary",
+        label=f"instrumented source {spec.module}",
+        expected_without_import=instrumented_without_import,
+    )
+    instrumented_path = copy_at_module_root(
+        work / "instrumented", spec.module, instrumented_bytes
+    )
+    output, nonce = compile_recording_copy(instrumented_path, dylib)
+    check_recording_abort_markers(
+        output,
+        expected_nonce=nonce,
+        expected_module=compiled_module_name(spec.module),
+    )
+    report_list = parse_framed_json_lines(
+        output,
+        marker=ARTIFACT_MARKER,
+        expected_nonce=nonce,
+        label=f"boundary artifact for {spec.module}",
+    )
+    reject_forbidden_generated_text(report_list, f"artifact reports for {spec.module}")
     expected_ids = [str(entry["id"]) for entry in materialize]
     reports_path = work / "artifact-reports.jsonl"
     reports_path.parent.mkdir(parents=True, exist_ok=True)
@@ -294,15 +341,27 @@ def check_module(
         encoding="utf-8",
     )
     try:
-        reports = group_report_variants(report_list, expected_ids)
+        reports = group_report_variants(
+            report_list,
+            expected_ids,
+            expected_module=compiled_module_name(spec.module),
+        )
     except RuntimeError as error:
         raise RuntimeError(
             f"{error}; generated source: {instrumented_path}\n{output}"
         ) from error
 
-    materialized_bytes = materialize_source(original, materialize, reports)
+    materialized_without_import = materialize_source(original, materialize, reports)
     materialized_bytes = coverage.inject_import(
-        materialized_bytes, "ExplicitLean.SimpEngine.Boundary.Tactic"
+        materialized_without_import, "ExplicitLean.SimpEngine.Boundary.Tactic"
+    )
+    assert_exact_source_preservation(
+        original,
+        materialized_bytes,
+        materialize,
+        imported="ExplicitLean.SimpEngine.Boundary.Tactic",
+        label=f"materialized source {spec.module}",
+        expected_without_import=materialized_without_import,
     )
     materialized_path = copy_at_module_root(
         work / "materialized", spec.module, materialized_bytes

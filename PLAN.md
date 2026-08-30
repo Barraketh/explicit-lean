@@ -110,10 +110,10 @@ executable occurrence in five complete pinned source modules: all 17 calls in
 `Mathlib/CategoryTheory/EqToHom.lean`, all six in
 `Mathlib/Data/Fintype/List.lean`, all seven in
 `Mathlib/Algebra/Algebra/NonUnitalHom.lean`, and all three in
-`Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`. Every
-materialized copy compiles with zero remaining executable calls and passes the
-declaration/environment oracle. The successful reports respectively accounted for
-141, 134, 10, 165, and 5 declarations, with 103, 71, 5, 104, and 5 common
+`Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`. Every materialized
+copy compiles with zero remaining executable calls and passes the
+declaration/environment oracle. The successful reports respectively accounted
+for 141, 134, 10, 165, and 5 declarations, with 103, 71, 5, 104, and 5 common
 public declarations. Here `checkedDeclarationCount` is the number processed
 under the applicable comparison or private-proof rule, not the number receiving
 a definitional-equality comparison.
@@ -211,8 +211,14 @@ current consumer correctly rejects it.
 current manifests. The schema-2 one-module
 `Mathlib/Algebra/AddConstMap/Basic.lean` canary materializes all 17 occurrences,
 observes 17 variants, compiles, and proves exact authored-source preservation
-outside the replaced ranges. Its schema-3 materialization report now includes a
-mandatory declaration/environment oracle. That oracle accepts 103 common public
+outside the replaced ranges. Its schema-4 materialization report now includes a
+mandatory declaration/environment oracle and one ordered result record for every
+selected occurrence. Each record is one of the four successful classifications:
+`materialized`, `expected_failure`, `unobserved_executable`, or
+`retained_syntax_data`. The report also records the exact schema-1 artifact
+identity and protocol encoding, while aborting without publishing a successful
+report for printer, variant, effect, declaration-value, or environment failures.
+That oracle accepts 103 common public
 declarations and omission of two stock-only private proof helpers, while checking
 all computational values, metadata, compiler IR, extensions, and axiom subsets.
 One reserved-name action recreates `AddConstMap.mk.congr_simp`. Compiler LCNF is
@@ -228,13 +234,11 @@ Once that path is accepted, the public `simp_engine_apply` syntax can move from
 schema-27 replay to boundary artifacts. Until then, code and reports must label
 the two implementations explicitly.
 
-The representative declaration/environment gate is complete for all five
-modules above. The immediate engineering gap is to stabilize the selector,
-artifact schema, failure classifications, readable source, local references,
-universes, instances, and explicit deltas from those measurements.
-Dependency-aware recording for the 66 reusable tactic-syntax
-occurrences and safe composition for the 91 nested occurrences follow. The
-current runner rejects reusable syntax and nested/overlapping replacement
+The schema-1 artifact, schema-1 selector, and schema-4 shard report are now
+stabilized and pass the focused, corpus-smoke, and five-module semantic gates.
+The immediate next milestone is dependency-aware recording for the 66 reusable
+tactic-syntax occurrences and safe composition for the 91 nested occurrences.
+The current runner rejects reusable syntax and nested/overlapping replacement
 ranges rather than guessing.
 
 ## Correctness contract
@@ -276,12 +280,17 @@ renaming of fresh internal identifiers under which all of the following agree:
    tested generically.
 
 Fresh goal, local, expression-metavariable, and universe-metavariable identities
-need not be numerically equal. Simplifier caches, rule search order, internal
-candidate rollback, used-theorem counters, messages and diagnostics, step
-counts, and simproc traces are outside the semantic boundary. Raw source
-spelling and performance are also outside it, although preserving surrounding
-source is preferred. Syntax deliberately retained as data is an output value,
-not an executed call, and must remain semantically unchanged.
+need not be numerically equal. The corresponding allocator positions in
+`Core.State` (`ngen`, `auxDeclNGen`, and `nextMacroScope`) are likewise internal
+identities: later generated names may differ only under the same consistent
+alpha-renaming, while every declaration, expression, extension entry, and other
+observable consequence remains subject to this contract. Simplifier caches,
+rule search order, internal candidate rollback, used-theorem counters, messages
+and diagnostics, step counts, and simproc traces are outside the semantic
+boundary. Raw source spelling and performance are also outside it, although
+preserving surrounding source is preferred. Syntax deliberately retained as
+data is an output value, not an executed call, and must remain semantically
+unchanged.
 
 The prototype must implement one paired-state comparator for this contract.
 Fingerprints and hashes may route variants and improve diagnostics, but they do
@@ -341,14 +350,36 @@ variants. A successful variant contains:
 - ordered subject terminals: replace, assert-and-clear, close from `False`,
   close target from `True`, or transport target;
 - the resulting ordered goals; and
-- explicit deltas for pre-existing expression/universe metavariables and any
-  other supported continuation-visible effect not established by elaborating
-  the generated evidence; and
-- any supported observable environment delta plus a boundary-contract version.
+- `stateDeltas`, which is currently required to be exactly empty because no
+  continuation-visible effect independent of the encoded transformations,
+  environment actions, and consistently renamed fresh state has been admitted;
+  and
+- any supported observable environment action (currently reserved-name
+  realization) plus a boundary-contract version.
 
 A failure variant contains no post-state mutation and causes the replacement to
 fail so that unchanged tactic alternatives behave as before. Exact error text is
-diagnostic only.
+diagnostic only. A pre-state fingerprinting failure, or any recording,
+rendering, application, or comparison failure after stock `simp` succeeds, is
+different: the recorder emits a durable
+`simp_engine_boundary_recording_abort` marker through direct IO. This marker
+survives an enclosing tactic alternative and makes every consumer abort; a
+missing success report may be classified as unobserved only when no such marker
+was emitted.
+
+The artifact wire identity is `kind=simp_engine_boundary_artifact`,
+`schema=1`, `semanticContract=boundary-observable-v1`, and
+`selectorSchema=1`. Its encoding policy is `terms=lean_source_v1`,
+`locals=local_decl_index_v1`, and `universes` and `instances` inferred at
+application. Local references use `LocalDecl.index`, not generated FVar IDs.
+Universes and instances are inferred only after an exact selector match and are
+then checked by the semantic boundary and declaration/environment gates.
+The four encoding literals are part of artifact-schema-1 semantics: changing
+any encoding requires an artifact schema bump even though generated tactic
+headers carry the schema rather than repeating those literals. The
+`stateDeltas` field is currently required to be exactly empty: no independent
+continuation-visible delta is admitted. Environment actions are the only
+explicit effect currently supported.
 
 ### Dynamic selection rule
 
@@ -356,10 +387,15 @@ Selection must not construct a simp context or consult simp theorems, simproc
 registries, or dischargers. The initial selector key is:
 
 1. stable source occurrence ID (`module:startByte:endByte` hash);
-2. canonical fingerprint of the complete observable pre-call elaboration state,
-   including relevant assignments and pending constraints;
+2. canonical fingerprint of the pre-call state that can affect the current
+   `simp` outcome, including reachable assignments and pending synthetic work;
 3. a deterministic fingerprint of the full scoped Lean option map; and
 4. stable caller identity: module and enclosing declaration.
+
+The artifact's module and source occurrence ID are exact provenance, validated
+before selector matching or evidence elaboration. Materializers pass the known
+compiled module and manifest occurrence to the grouping validator; a
+self-reported module cannot broaden the selection scope.
 
 The full option map is intentionally conservative: the current schema-27 source
 gate has already observed one source occurrence with the same goal under
@@ -407,9 +443,9 @@ binder order, binder information, and types, and the declaration-equivalence
 gate must accept it before the module is counted as translated. Surrounding
 tactic structure may not otherwise change merely to make materialization pass.
 
-The syntax above is illustrative; the current parser still has the legacy
-schema-27 shape. The first prototype may use a temporary syntax name to prevent
-accidental confusion.
+The syntax above is illustrative. The current parser uses the
+`simp_engine_boundary_select` artifact header and machine-oriented encoded
+variants described below; its durable artifact wire identity is schema 1.
 
 ## Closed-world corpus completion
 
@@ -450,15 +486,21 @@ elaboration. Missing/extra IDs, missing callers or types, missing execution,
 and conflicting execution roles remain unresolved. Generated commands require
 explicit environment-delta classification; there is no proof-only exception.
 
-An occurrence may be classified as `materialized`, `expected_failure`,
-`unobserved_executable`, `retained_syntax_data`, `printer_failure`,
-`ambiguous_boundary_variant`, `external_effect_failure`,
-`declaration_value_mismatch`, or `environment_delta_mismatch`. Only the first
-four may appear in a successful pinned closure. Retained syntax data must keep
-its observable value and is not counted as a remaining call. If surrounding
-replacements shift its source locations, the normal declaration and environment
-checks must show that no semantic output changed; otherwise the renderer must
-preserve the relevant positions or the closure fails.
+Successful shard reports contain exactly one result for every selected
+occurrence. The only successful occurrence classifications are
+`materialized`, `expected_failure`, `unobserved_executable`, and
+`retained_syntax_data`. Their execution and deduplicated-variant counts are
+validated against the selected manifest action partition. The five abort
+categories are `printer_failure`, `ambiguous_boundary_variant`,
+`external_effect_failure`, `declaration_value_mismatch`, and
+`environment_delta_mismatch`. An abort publishes no successful shard report;
+the CLI may emit one machine-readable failure marker. The unsupported
+environment-delta comparison is mapped to `external_effect_failure`, while
+declaration-oracle categories are preserved unchanged. Retained syntax data must
+keep its observable value and is not counted as a remaining call. If
+surrounding replacements shift its source locations, the normal declaration and
+environment checks must show that no semantic output changed; otherwise the
+renderer must preserve the relevant positions or the closure fails.
 
 This claim does not promise that a translated reusable tactic supports new
 downstream states. Encountering an unrecorded state fails closed and requires a
@@ -568,9 +610,10 @@ discharger strategy, and simproc traces are not acceptance conditions.
 4. **Complete:** revise the representative gates to transform all 17
    `AddConstMap`, 33 `EqToHom`, 6 `Fintype/List`, 7 `NonUnitalHom`, and 3
    `PosPart` occurrences, with declaration/environment oracle checks.
-5. Stabilize the selector, artifact schema, failure classifications, readable
-   source, local references, universes, instances, and explicit deltas from
-   those measurements.
+5. **Complete for the representative boundary:** stabilize the selector, artifact schema, failure
+   classifications, local references, universes, instances, and explicit
+   deltas from those measurements. Maximally human-readable rendering is
+   intentionally deferred to Step 8.
 6. Add dependency-aware reusable tactic handling and safe nested-range
    composition, then run increasingly large deterministic shards.
 7. Require zero remaining executable calls, compile the full translated tree,
@@ -587,5 +630,6 @@ integrated in the representative translators. The deterministic manifest
 format, bounded smoke gate, and targeted old-unknown closure are in place. The
 old full-corpus eligible/excluded partition remains obsolete; the schema-2
 representative manifest is current. The declaration-oracle coverage milestone
-is complete for every representative module. The next milestone is schema and
-artifact stabilization before reusable/nested corpus scaling resumes.
+is complete for every representative module. The next milestone is
+reusable/nested handling; maximally human-readable artifact rendering remains a
+later Step-8 presentation task.

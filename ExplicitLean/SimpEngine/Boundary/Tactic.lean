@@ -54,7 +54,13 @@ syntax "apply_encoded_with_actions" boundaryEncodedActions boundaryEncodedLocati
   boundaryVariantOutcome
 
 declare_syntax_cat boundaryVariant
-syntax "| " str str str num str str " => " boundaryVariantOutcome : boundaryVariant
+syntax "| " str str str str num str str " => " boundaryVariantOutcome : boundaryVariant
+
+declare_syntax_cat boundaryArtifactHeader
+syntax "(" "artifact_kind" ":=" str "artifact_schema" ":=" num
+  "selector_schema" ":=" num "semantic_contract" ":=" str
+  "occurrence_id" ":=" str "recorded_module" ":=" str ")" :
+  boundaryArtifactHeader
 
 syntax (name := simpEngineBoundaryApplyDefEq)
   "simp_engine_boundary_apply" "(" term "==>" term ")" : tactic
@@ -79,6 +85,7 @@ syntax (name := simpEngineBoundaryOccurrenceUnobserved)
 
 syntax (name := simpEngineBoundarySelect)
   "simp_engine_boundary_select "
+    boundaryArtifactHeader
     withPosition((ppDedent(ppLine) colGe boundaryVariant)+) : tactic
 
 end Lean.Parser.Tactic
@@ -270,7 +277,8 @@ private def runBoundaryGuard (targetFingerprint localContextFingerprint
         metavariableContextFingerprint
         goalCount
       }
-      let actual ← boundaryProofStateFingerprint (← getGoals)
+      let actual ← boundaryProofStateFingerprintWithTerm (← getGoals)
+        (← getThe Term.State)
       let actualOptions := boundaryOptionsFingerprint (← getOptions)
       let actualCaller := boundaryCallerIdentity? (← Term.getDeclName?)
       unless actual == expected && actualOptions == optionsFingerprint &&
@@ -286,17 +294,24 @@ private def runBoundaryVariantMissing : TacticM Unit := do
   throwError "boundary_variant_missing"
 
 private structure ExpectedBoundarySelector where
+  artifactOccurrence : String
   state : BoundaryStateFingerprint
   options : String
   caller : String
 
-private def parseBoundaryVariant (variant : Syntax) :
+private def parseBoundaryVariant (variant : Syntax) (artifactOccurrence : String) :
     TacticM (ExpectedBoundarySelector × Syntax) := do
   match variant with
-  | `(boundaryVariant| | $targetFingerprint:str $localContextFingerprint:str
-      $metavariableContextFingerprint:str $goalCount:num $optionsFingerprint:str
-      $caller:str => $outcome:boundaryVariantOutcome) =>
+  | `(boundaryVariant| | $occurrenceId:str $targetFingerprint:str
+      $localContextFingerprint:str $metavariableContextFingerprint:str $goalCount:num
+      $optionsFingerprint:str $caller:str => $outcome:boundaryVariantOutcome) =>
+      let occId := occurrenceId.getString
+      unless !occId.isEmpty do
+        throwError "invalid_boundary_occurrence"
+      unless occId == artifactOccurrence do
+        throwError "invalid_boundary_occurrence"
       return ({
+        artifactOccurrence := occId
         state := {
           targetFingerprint := targetFingerprint.getString
           localContextFingerprint := localContextFingerprint.getString
@@ -307,6 +322,24 @@ private def parseBoundaryVariant (variant : Syntax) :
         caller := caller.getString
       }, outcome)
   | _ => throwError "invalid boundary variant"
+
+private def validateArtifactHeader (kind : String) (schema selectorSchema : Nat)
+    (contract occId moduleName : String) : TacticM Unit := do
+  unless kind == boundaryArtifactKind do
+    throwError "unsupported_boundary_artifact_kind"
+  unless schema == boundaryArtifactSchema do
+    throwError "unsupported_boundary_artifact_schema"
+  unless selectorSchema == boundarySelectorSchema do
+    throwError "unsupported_boundary_selector_schema"
+  unless contract == boundarySemanticContract do
+    throwError "unsupported_boundary_semantic_contract"
+  unless !occId.isEmpty do
+    throwError "invalid_boundary_occurrence"
+  unless !moduleName.isEmpty do
+    throwError "boundary_module_mismatch"
+  let currentModule := (← getEnv).mainModule.toString
+  unless currentModule == moduleName do
+    throwError "boundary_module_mismatch"
 
 private def runBoundaryVariantOutcome (outcome : Syntax) : TacticM Unit := do
   match outcome with
@@ -331,20 +364,27 @@ private def runBoundaryVariantOutcome (outcome : Syntax) : TacticM Unit := do
       runExplicitEncodedLocationApply actions locals targetSyntax?
   | _ => throwError "invalid boundary variant outcome"
 
-private def runBoundarySelect (variants : Array Syntax) : TacticM Unit := do
-  let actualState ← boundaryProofStateFingerprint (← getGoals)
+private def runBoundarySelect (kind : String) (schema selectorSchema : Nat)
+    (contract occId moduleName : String) (variants : Array Syntax) : TacticM Unit := do
+  validateArtifactHeader kind schema selectorSchema contract occId moduleName
+  -- A malformed sibling is a protocol error even if another variant would
+  -- otherwise select, so validate the complete serialized set first.
+  let parsedVariants ← variants.mapM (parseBoundaryVariant · occId)
+  let actualState ← boundaryProofStateFingerprintWithTerm (← getGoals)
+    (← getThe Term.State)
   let actualOptions := boundaryOptionsFingerprint (← getOptions)
   let actualCaller := boundaryCallerIdentity? (← Term.getDeclName?)
   let mut selected? : Option Syntax := none
-  for variant in variants do
-    let (expected, outcome) ← parseBoundaryVariant variant
+  for (expected, outcome) in parsedVariants do
     if actualState == expected.state && actualOptions == expected.options &&
         actualCaller == expected.caller then
       if selected?.isSome then
         throwError "ambiguous_boundary_variant"
       selected? := some outcome
   let some selected := selected?
-    | runBoundaryVariantMissing
+    | throwError "boundary_variant_missing: actualState={repr actualState}; \
+        actualOptions={actualOptions}; actualCaller={actualCaller}; \
+        expectedStates={repr (parsedVariants.map (·.1.state))}"
   -- Selection itself is observational. Execute the chosen outcome only after
   -- the search has completed, so an intentional recorded failure propagates
   -- to the original surrounding tactic control flow instead of backtracking
@@ -373,7 +413,16 @@ elab_rules : tactic
       runBoundaryVariantMissing
   | `(tactic| simp_engine_boundary_occurrence_unobserved) =>
       throwError "boundary_occurrence_unobserved"
-  | `(tactic| simp_engine_boundary_select $variants:boundaryVariant*) =>
-      runBoundarySelect variants
+  | `(tactic| simp_engine_boundary_select
+      $header:boundaryArtifactHeader $variants:boundaryVariant*) =>
+      match header with
+      | `(boundaryArtifactHeader| (artifact_kind := $kind:str artifact_schema := $schema:num
+          selector_schema := $selectorSchema:num semantic_contract := $contract:str
+          occurrence_id := $occId:str recorded_module := $moduleName:str)) =>
+          let schema := schema.raw.isNatLit?.getD 0
+          let selectorSchema := selectorSchema.raw.isNatLit?.getD 0
+          runBoundarySelect kind.getString schema selectorSchema contract.getString
+            occId.getString moduleName.getString variants
+      | _ => throwError "invalid boundary artifact header"
 
 end ExplicitLean.SimpEngine.Boundary

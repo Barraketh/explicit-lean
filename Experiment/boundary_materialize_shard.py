@@ -17,6 +17,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -25,10 +26,21 @@ from typing import Any, Iterable
 import check_simp_engine_boundary_scope as scope
 import simp_engine_boundary_corpus as corpus
 import simp_engine_inventory as inventory
-from check_simp_engine_boundary_source import (
+from boundary_protocol import (
+    ABORT_CATEGORIES,
+    artifact_protocol,
+    assert_exact_source_preservation,
+    check_recording_abort_markers,
     group_report_variants,
-    replace_all_occurrences,
+    make_occurrence_result,
+    occurrence_classification_counts,
+    parse_framed_json_lines,
+    recording_subprocess_environment,
+    reject_forbidden_generated_text,
+    validate_artifact_protocol,
+    validate_occurrence_summary,
 )
+from check_simp_engine_boundary_source import replace_all_occurrences
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,17 +48,15 @@ MATHLIB = corpus.MATHLIB
 MANIFEST_KIND = "simp_engine_boundary_manifest"
 MANIFEST_SCHEMA = 2
 REPORT_KIND = "simp_engine_boundary_materialization_shard"
-REPORT_SCHEMA = 3
+REPORT_SCHEMA = 4
 ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 DECLARATION_ORACLE_MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
 DECLARATION_ORACLE_KIND = "simp_engine_declaration_oracle"
 DECLARATION_ORACLE_SCHEMA = 1
 BOUNDARY_DEBUG_ROOT = ROOT / ".lake" / "boundary-materialization"
-
-# These are generated terms and source, not authored input.  In particular,
-# an artifact containing sorryAx would make the translation report unsound.
-FORBIDDEN_AXIOM = "sorryAx"
-FORBIDDEN_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_'])(?:sorry|admit)(?![A-Za-z0-9_'])")
+FAILURE_MARKER = "SIMP_ENGINE_BOUNDARY_MATERIALIZATION_FAILURE "
+FAILURE_KIND = "simp_engine_boundary_materialization_failure"
+FAILURE_SCHEMA = 1
 
 
 def sha256(data: bytes) -> str:
@@ -67,6 +77,58 @@ def _require_string(value: object, label: str) -> str:
     return value
 
 
+def abort_category(error: BaseException) -> str | None:
+    """Map known boundary aborts to the stable report taxonomy."""
+    message = str(error)
+    if "ambiguous_boundary_variant" in message:
+        return "ambiguous_boundary_variant"
+    if (
+        "boundary_comparison_unsupported_environment_delta" in message
+        or "boundary_state_delta_unsupported" in message
+        or "boundary_comparison_extra_module_uses" in message
+        or "boundary_comparison_missing_stock_extension" in message
+        or "boundary_comparison_missing_applied_extension" in message
+        or "boundary_comparison_nondeterministic_extension_serialization" in message
+        or "boundary_comparison_extension_state" in message
+    ):
+        return "external_effect_failure"
+    if "declaration_value_mismatch" in message:
+        return "declaration_value_mismatch"
+    if "environment_delta_mismatch" in message:
+        return "environment_delta_mismatch"
+    if (
+        "unstable printer output" in message
+        or "invalid explicit-printer source" in message
+        or "internal metavariable name" in message
+    ):
+        return "printer_failure"
+    return None
+
+
+def emit_failure_marker(error: BaseException, stream: Any = sys.stderr) -> bool:
+    """Emit the exact stable failure marker for a known boundary abort."""
+    category = abort_category(error)
+    if category is None:
+        return False
+    if category not in ABORT_CATEGORIES:
+        raise RuntimeError(f"unknown boundary abort category: {category}") from error
+    print(
+        FAILURE_MARKER
+        + json.dumps(
+            {
+                "kind": FAILURE_KIND,
+                "schema": FAILURE_SCHEMA,
+                "category": category,
+                "detail": str(error),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        file=stream,
+    )
+    return True
+
+
 def _command_output(command: list[str], timeout: int, label: str) -> str:
     code, output, _elapsed = _run_command(command, timeout)
     if code != 0:
@@ -75,7 +137,7 @@ def _command_output(command: list[str], timeout: int, label: str) -> str:
 
 
 def _run_command(
-    command: list[str], timeout: int
+    command: list[str], timeout: int, *, env: dict[str, str] | None = None
 ) -> tuple[int, str, float]:
     started = time.monotonic()
     try:
@@ -87,6 +149,7 @@ def _run_command(
             stderr=subprocess.STDOUT,
             timeout=timeout,
             check=False,
+            env=env,
         )
         return completed.returncode, completed.stdout, time.monotonic() - started
     except subprocess.TimeoutExpired as error:
@@ -171,6 +234,12 @@ def resolve_output_path(raw_output: str, manifest_path: Path) -> Path:
             continue
         raise RuntimeError(f"materialization report targets protected source: {output_path}")
     return output_path
+
+
+def invalidate_output(output_path: Path) -> None:
+    """Remove only this run's exact report and atomic-write temporary sibling."""
+    output_path.unlink(missing_ok=True)
+    output_path.with_name(output_path.name + ".tmp").unlink(missing_ok=True)
 
 
 def verify_environment(manifest: dict[str, Any], timeout: int) -> dict[str, Any]:
@@ -339,6 +408,8 @@ def validate_manifest_selection(
         raise RuntimeError(f"unexpected boundary manifest kind: {manifest.get('kind')!r}")
     if manifest.get("allowUnresolved") is not False:
         raise RuntimeError("boundary materialization requires allowUnresolved=false")
+    if manifest.get("allowDirty") is not False:
+        raise RuntimeError("boundary materialization requires allowDirty=false")
 
     modules = manifest.get("modules")
     if not isinstance(modules, list):
@@ -488,8 +559,22 @@ def validate_manifest_selection(
                 "--expect-total/--expect-materialize are only valid for one selected module"
             )
 
+    selected_set = set(selected_names)
+    if len(selected_set) != len(selected_names):
+        raise RuntimeError("selected modules must be unique")
+    unknown_selected = selected_set - set(module_records)
+    if unknown_selected:
+        raise RuntimeError(
+            "selected module does not occur exactly once in manifest: "
+            f"{sorted(unknown_selected)}"
+        )
+    manifest_module_order = [
+        str(raw_module["module"])
+        for raw_module in modules
+        if isinstance(raw_module, dict) and str(raw_module.get("module")) in selected_set
+    ]
     result: list[SelectedModule] = []
-    for module in selected_names:
+    for module in manifest_module_order:
         validated = module_records.get(module)
         if validated is None:
             raise RuntimeError(
@@ -557,6 +642,83 @@ def validate_manifest_selection(
     return result
 
 
+def verify_selected_classifications(
+    selected: list[SelectedModule], timeout: int
+) -> None:
+    """Recompute selected source inventory and scope metadata from pinned inputs.
+
+    A manifest is an immutable selection, not authority for semantic metadata:
+    every source identity and execution-role/declaration-kind/action triple is
+    reproduced with the same inventory, scope, and execution-evidence helpers
+    used by the corpus builder before any materialization is attempted.
+    """
+    paths = [item.source_path for item in selected]
+    by_module, _fallbacks = corpus.inventory_paths(
+        paths, batch_size=max(1, len(paths)), timeout=timeout
+    )
+    inventories: dict[str, list[dict[str, Any]]] = {}
+    specs: list[scope.ModuleSpec] = []
+    for item in selected:
+        entries, _nested, _duplicates = corpus.validate_module_inventory(
+            item.module, item.source, by_module.get(item.module, [])
+        )
+        inventories[item.module] = entries
+        specs.append(
+            scope.ModuleSpec(
+                item.compiled_module,
+                item.source_path,
+                len(entries),
+            )
+        )
+    occurrences_by_module, declarations_by_module, _scope_fallbacks = (
+        scope.load_records_with_fallbacks(specs, batch_size=max(1, len(specs)))
+    )
+    identity_fields = (
+        "id",
+        "kind",
+        "source",
+        "startByte",
+        "endByte",
+        "syntaxKind",
+        "executionRole",
+        "declarationKind",
+        "action",
+    )
+    for item in selected:
+        entries = inventories[item.module]
+        classified, _duplicate_scope_records = corpus.join_scope_records(
+            item.module,
+            entries,
+            occurrences_by_module.get(item.compiled_module, []),
+            declarations_by_module.get(item.compiled_module, []),
+        )
+        unresolved = [entry for entry in classified if entry["action"] == "unresolved"]
+        if unresolved:
+            unresolved_ids = {str(entry["id"]) for entry in unresolved}
+            scope.apply_execution_evidence(
+                item.compiled_module,
+                item.source,
+                unresolved,
+                entries=[entry for entry in entries if str(entry["id"]) in unresolved_ids],
+                timeout=timeout,
+            )
+        if len(classified) != len(item.occurrences):
+            raise RuntimeError(
+                f"selected source inventory changed for {item.module}: "
+                f"{len(classified)} != {len(item.occurrences)}"
+            )
+        for index, (recorded, recomputed) in enumerate(
+            zip(item.occurrences, classified)
+        ):
+            for field in identity_fields:
+                if recorded.get(field) != recomputed.get(field):
+                    raise RuntimeError(
+                        f"selected manifest classification mismatch for {item.module} "
+                        f"occurrence[{index}].{field}: recorded "
+                        f"{recorded.get(field)!r}, recomputed {recomputed.get(field)!r}"
+                    )
+
+
 def _sanitize_stem(value: str) -> str:
     result = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-")
     return result or "shard"
@@ -566,11 +728,30 @@ def debug_root_for(output: Path) -> Path:
     base = BOUNDARY_DEBUG_ROOT.resolve()
     try:
         relative = output.resolve().relative_to(base)
-    except ValueError:
-        name = output.stem
-    else:
-        name = relative.parts[0] if relative.parts else output.stem
-    return base / _sanitize_stem(name)
+    except ValueError as error:
+        raise RuntimeError(f"debug output escapes boundary root: {output}") from error
+    if not relative.parts:
+        raise RuntimeError(f"debug output cannot be the boundary root: {output}")
+    return output.resolve().parent / (_sanitize_stem(output.stem) + "-run")
+
+
+def clear_debug_root(path: Path) -> None:
+    """Clear only the validated run subtree, never the shared debug root."""
+    base = BOUNDARY_DEBUG_ROOT.resolve()
+    # Resolve the parent but not the leaf: if a stale run root is a symlink,
+    # unlink that exact symlink instead of following it and deleting its target.
+    resolved = path.parent.resolve() / path.name
+    try:
+        relative = resolved.relative_to(base)
+    except ValueError as error:
+        raise RuntimeError(f"debug run subtree escapes boundary root: {path}") from error
+    if not relative.parts or resolved == base:
+        raise RuntimeError("refusing to clear the shared boundary debug root")
+    if resolved.is_symlink() or (resolved.exists() and not resolved.is_dir()):
+        resolved.unlink()
+    elif resolved.exists():
+        shutil.rmtree(resolved)
+    resolved.mkdir(parents=True, exist_ok=True)
 
 
 def _copy_at_module_root(root: Path, module: str, source: bytes) -> Path:
@@ -602,16 +783,6 @@ def _inject_import(source: bytes, imported: str) -> bytes:
     return source[:import_offset] + injected + source[import_offset:]
 
 
-def _remove_import(source: bytes, imported: str) -> bytes:
-    injected = _injected_import(imported)
-    if source.count(injected) != 1:
-        raise RuntimeError(
-            f"generated source does not contain one expected injected import: {imported}"
-        )
-    position = source.index(injected)
-    return source[:position] + source[position + len(injected) :]
-
-
 def _assert_context_gaps(
     original: bytes,
     generated: bytes,
@@ -619,33 +790,16 @@ def _assert_context_gaps(
     *,
     imported: str,
     label: str,
+    expected_without_import: bytes,
 ) -> None:
-    """Check that source gaps around replaced ranges remain byte-identical.
-
-    Generated artifact text is intentionally opaque here.  The ordered gap
-    check proves that all authored bytes outside the selected whole ranges are
-    retained; the only other permitted change is the known import injection.
-    """
-    generated = _remove_import(generated, imported)
-    ordered = sorted(entries, key=lambda entry: int(entry["startByte"]))
-    original_cursor = 0
-    generated_cursor = 0
-    for index, entry in enumerate(ordered):
-        start = int(entry["startByte"])
-        gap = original[original_cursor:start]
-        found = generated.find(gap, generated_cursor)
-        if found < 0:
-            raise RuntimeError(
-                f"{label} does not preserve an authored source gap before "
-                f"{entry['id']}"
-            )
-        if index == 0 and found != 0:
-            raise RuntimeError(f"{label} changes authored source before the first range")
-        generated_cursor = found + len(gap)
-        original_cursor = int(entry["endByte"])
-    trailing = original[original_cursor:]
-    if not generated.endswith(trailing):
-        raise RuntimeError(f"{label} does not preserve the authored source suffix")
+    assert_exact_source_preservation(
+        original,
+        generated,
+        entries,
+        imported=imported,
+        label=label,
+        expected_without_import=expected_without_import,
+    )
 
 
 def instrumented_source(
@@ -657,43 +811,6 @@ def instrumented_source(
         lambda entry: f'simp_engine_boundary_record "{entry["id"]}"',
     )
     return _inject_import(rewritten, "ExplicitLean.SimpEngine.Boundary")
-
-
-def _parse_artifact_reports(output: str) -> list[object]:
-    reports: list[object] = []
-    for line in output.splitlines():
-        if ARTIFACT_MARKER not in line:
-            continue
-        payload = line.split(ARTIFACT_MARKER, 1)[1].strip()
-        try:
-            reports.append(json.loads(payload))
-        except json.JSONDecodeError as error:
-            raise RuntimeError(f"invalid artifact report line: {line}") from error
-    return reports
-
-
-def _walk_strings(value: object) -> Iterable[str]:
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for key, child in value.items():
-            if isinstance(key, str):
-                yield key
-            yield from _walk_strings(child)
-    elif isinstance(value, (list, tuple)):
-        for child in value:
-            yield from _walk_strings(child)
-
-
-def _reject_forbidden_generated_text(value: object, label: str) -> None:
-    for text in _walk_strings(value):
-        if FORBIDDEN_AXIOM in text:
-            raise RuntimeError(f"{label} contains forbidden {FORBIDDEN_AXIOM}")
-        match = FORBIDDEN_TOKEN_RE.search(text)
-        if match:
-            raise RuntimeError(
-                f"{label} contains introduced forbidden token {match.group(0)!r}"
-            )
 
 
 def _canonical_json_line(value: object) -> str:
@@ -710,10 +827,16 @@ def _write_jsonl(path: Path, values: list[object]) -> None:
     )
 
 
-def _compile_copy(path: Path, dylib: str, timeout: int) -> tuple[int, str, float]:
+def _compile_copy(
+    path: Path,
+    dylib: str,
+    timeout: int,
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[int, str, float]:
     command = inventory.lean_command(path)
     command.insert(3, f"--load-dynlib={dylib}")
-    return _run_command(command, timeout)
+    return _run_command(command, timeout, env=env)
 
 
 DECLARATION_ORACLE_COUNT_FIELDS = {
@@ -915,20 +1038,36 @@ def _module_result(
         selected.materialize,
         imported="ExplicitLean.SimpEngine.Boundary",
         label=f"instrumented source {selected.module}",
+        expected_without_import=inventory.rewrite_simp_heads(
+            selected.source,
+            list(selected.materialize),
+            lambda entry: f'simp_engine_boundary_record "{entry["id"]}"',
+        ),
     )
 
+    recording_environment, recording_nonce = recording_subprocess_environment()
     instrumented_code, instrumented_output, instrumented_elapsed = _compile_copy(
-        instrumented_path, dylib, timeout
+        instrumented_path, dylib, timeout, env=recording_environment
     )
     _write_text(module_root / "instrumented.log", instrumented_output)
+    check_recording_abort_markers(
+        instrumented_output,
+        expected_nonce=recording_nonce,
+        expected_module=selected.compiled_module,
+    )
     if instrumented_code != 0:
         raise RuntimeError(
             f"instrumented module compilation failed for {selected.module} "
             f"(exit {instrumented_code}); see {module_root / 'instrumented.log'}"
         )
-    report_list = _parse_artifact_reports(instrumented_output)
+    report_list = parse_framed_json_lines(
+        instrumented_output,
+        marker=ARTIFACT_MARKER,
+        expected_nonce=recording_nonce,
+        label=f"boundary artifact for {selected.module}",
+    )
     for report in report_list:
-        _reject_forbidden_generated_text(report, f"artifact report for {selected.module}")
+        reject_forbidden_generated_text(report, f"artifact report for {selected.module}")
     expected_ids = [str(entry["id"]) for entry in selected.materialize]
     observed_ids = {
         str(report["occurrence"])
@@ -940,6 +1079,7 @@ def _module_result(
         report_variants = group_report_variants(
             report_list,
             expected_ids,
+            expected_module=selected.compiled_module,
             unobserved_ids=unobserved_ids,
         )
     except RuntimeError as error:
@@ -949,6 +1089,29 @@ def _module_result(
         ) from error
     reports_path = module_root / "artifact-reports.jsonl"
     _write_jsonl(reports_path, report_list)
+
+    execution_counts: Counter[str] = Counter(
+        str(report["occurrence"])
+        for report in report_list
+        if isinstance(report, dict)
+    )
+    occurrence_ids = [str(entry["id"]) for entry in selected.occurrences]
+    occurrence_actions = [str(entry["action"]) for entry in selected.occurrences]
+    occurrence_results = [
+        make_occurrence_result(
+            occurrence_id,
+            action,
+            execution_counts.get(occurrence_id, 0),
+            report_variants.get(occurrence_id, []),
+        )
+        for occurrence_id, action in zip(occurrence_ids, occurrence_actions)
+    ]
+    occurrence_counts = validate_occurrence_summary(
+        occurrence_results,
+        occurrence_ids,
+        occurrence_actions,
+        occurrence_classification_counts(occurrence_results),
+    )
 
     materialized = replace_all_occurrences(
         selected.source,
@@ -967,6 +1130,11 @@ def _module_result(
         selected.materialize,
         imported="ExplicitLean.SimpEngine.Boundary.Tactic",
         label=f"materialized source {selected.module}",
+        expected_without_import=replace_all_occurrences(
+            selected.source,
+            list(selected.materialize),
+            report_variants,
+        ),
     )
     materialized_code, materialized_output, materialized_elapsed = _compile_copy(
         materialized_path, dylib, timeout
@@ -1073,6 +1241,8 @@ def _module_result(
         "totalCount": len(selected.occurrences),
         "materializeCount": len(selected.materialize),
         "retainCount": len(selected.retain),
+        "occurrenceResults": occurrence_results,
+        "occurrenceClassificationCounts": occurrence_counts,
         "materializeIds": expected_ids,
         "retainIds": [str(entry["id"]) for entry in selected.retain],
         "observedIds": observed_ordered,
@@ -1096,8 +1266,889 @@ def _atomic_write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(encoded, encoding="utf-8")
-    temporary.replace(path)
+    try:
+        temporary.write_text(encoded, encoding="utf-8")
+        temporary.replace(path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+SHARD_REPORT_FIELDS = frozenset(
+    {
+        "kind",
+        "reportSchema",
+        "reportIdentity",
+        "artifactProtocol",
+        "manifestPath",
+        "manifestHash",
+        "manifest",
+        "manifestPolicy",
+        "provenance",
+        "repositoryCommit",
+        "mathlibCommit",
+        "lean",
+        "runnerPath",
+        "runnerHash",
+        "runner",
+        "selectedModules",
+        "modules",
+        "totalCount",
+        "materializeCount",
+        "retainCount",
+        "occurrenceResults",
+        "occurrenceClassificationCounts",
+        "observedIds",
+        "unobservedIds",
+        "executionReportCount",
+        "variantCount",
+        "executionStatusCounts",
+        "variantStatusCounts",
+        "remainingRetainedCount",
+        "exactSourcePreservation",
+        "compileSuccess",
+        "aggregate",
+    }
+)
+MODULE_REPORT_FIELDS = frozenset(
+    {
+        "module",
+        "compiledModule",
+        "sourcePath",
+        "originalPath",
+        "instrumentedPath",
+        "materializedPath",
+        "reportPath",
+        "originalHash",
+        "instrumentedHash",
+        "materializedHash",
+        "reportHash",
+        "original",
+        "instrumented",
+        "materialized",
+        "artifactReport",
+        "declarationOracle",
+        "totalCount",
+        "materializeCount",
+        "retainCount",
+        "occurrenceResults",
+        "occurrenceClassificationCounts",
+        "materializeIds",
+        "retainIds",
+        "observedIds",
+        "unobservedIds",
+        "executionReportCount",
+        "variantCount",
+        "variantCounts",
+        "executionStatusCounts",
+        "variantStatusCounts",
+        "remainingRetainedCount",
+        "remainingRetainedMultiset",
+        "exactSourcePreservation",
+        "compileSuccess",
+    }
+)
+AGGREGATE_FIELDS = frozenset(
+    {
+        "selectedModuleCount",
+        "totalCount",
+        "materializeCount",
+        "retainCount",
+        "occurrenceClassificationCounts",
+        "observedCount",
+        "unobservedCount",
+        "executionReportCount",
+        "variantCount",
+        "remainingRetainedCount",
+    }
+)
+PATH_HASH_FIELDS = frozenset({"path", "sha256"})
+COMPILED_ARTIFACT_FIELDS = frozenset({"path", "sha256", "compileSuccess", "seconds"})
+SOURCE_PRESERVATION_TOP_FIELDS = frozenset(
+    {"verified", "alphaRenaming", "statement"}
+)
+SOURCE_PRESERVATION_MODULE_FIELDS = frozenset(
+    {
+        "verified",
+        "materializeRangesReplaced",
+        "outsideMaterializeRanges",
+        "authoredBindersPreserved",
+        "alphaRenaming",
+        "statement",
+    }
+)
+PROVENANCE_FIELDS = frozenset(
+    {
+        "repositoryCommit",
+        "mathlibCommit",
+        "lean",
+        "manifestRepositoryCommit",
+        "manifestMathlibCommit",
+    }
+)
+MANIFEST_POLICY_FIELDS = frozenset({"allowDirty", "allowUnresolved"})
+ORACLE_WRAPPER_FIELDS = frozenset(
+    {
+        "path",
+        "reportPath",
+        "sha256",
+        "reportSha256",
+        "compileSuccess",
+        "seconds",
+        "status",
+        "report",
+    }
+)
+
+
+def _exact_fields(value: object, fields: frozenset[str], label: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != fields:
+        found = (
+            sorted(key for key in value if isinstance(key, str))
+            if isinstance(value, dict)
+            else value
+        )
+        raise RuntimeError(f"{label} fields changed: expected {sorted(fields)}, found {found}")
+    return value
+
+
+def _require_bool(value: object, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise RuntimeError(f"{label} must be a boolean: {value!r}")
+    return value
+
+
+def _require_number(value: object, label: str) -> float | int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError(f"{label} must be a number: {value!r}")
+    if value < 0:
+        raise RuntimeError(f"{label} must be nonnegative: {value!r}")
+    return value
+
+
+def _validate_string_list(
+    value: object, label: str, *, unique: bool = True
+) -> list[str]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{label} must be an array: {value!r}")
+    result: list[str] = []
+    for index, item in enumerate(value):
+        result.append(_require_string(item, f"{label}[{index}]"))
+    if unique and len(set(result)) != len(result):
+        raise RuntimeError(f"{label} contains duplicate IDs: {result!r}")
+    return result
+
+
+def _validate_count_map(
+    value: object, label: str, allowed: set[str] | frozenset[str] | None = None
+) -> dict[str, int]:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{label} must be an object: {value!r}")
+    result: dict[str, int] = {}
+    for key, raw_count in value.items():
+        if not isinstance(key, str) or (allowed is not None and key not in allowed):
+            raise RuntimeError(f"{label} has an unknown key: {key!r}")
+        result[key] = _require_int(raw_count, f"{label}.{key}", nonnegative=True)
+    return result
+
+
+def _validate_hash_ref(value: object, label: str) -> dict[str, Any]:
+    result = _exact_fields(value, PATH_HASH_FIELDS, label)
+    _require_string(result["path"], f"{label}.path")
+    _require_string(result["sha256"], f"{label}.sha256")
+    return result
+
+
+def _validate_compiled_artifact(value: object, label: str) -> dict[str, Any]:
+    result = _exact_fields(value, COMPILED_ARTIFACT_FIELDS, label)
+    _require_string(result["path"], f"{label}.path")
+    _require_string(result["sha256"], f"{label}.sha256")
+    if not _require_bool(result["compileSuccess"], f"{label}.compileSuccess"):
+        raise RuntimeError(f"{label}.compileSuccess must be true")
+    _require_number(result["seconds"], f"{label}.seconds")
+    return result
+
+
+def _validate_source_preservation(
+    value: object, label: str, *, module: bool
+) -> dict[str, Any]:
+    fields = SOURCE_PRESERVATION_MODULE_FIELDS if module else SOURCE_PRESERVATION_TOP_FIELDS
+    result = _exact_fields(value, fields, label)
+    if not _require_bool(result["verified"], f"{label}.verified"):
+        raise RuntimeError(f"{label}.verified must be true")
+    if _require_bool(result["alphaRenaming"], f"{label}.alphaRenaming") is not False:
+        raise RuntimeError(f"{label}.alphaRenaming must be false")
+    _require_string(result["statement"], f"{label}.statement")
+    if module:
+        if not _require_bool(
+            result["materializeRangesReplaced"], f"{label}.materializeRangesReplaced"
+        ):
+            raise RuntimeError(f"{label}.materializeRangesReplaced must be true")
+        if result["outsideMaterializeRanges"] != "byte-identical":
+            raise RuntimeError(
+                f"{label}.outsideMaterializeRanges must be byte-identical"
+            )
+        if not _require_bool(
+            result["authoredBindersPreserved"], f"{label}.authoredBindersPreserved"
+        ):
+            raise RuntimeError(f"{label}.authoredBindersPreserved must be true")
+    return result
+
+
+def _validate_oracle_wrapper(
+    value: object, label: str, expected_module: str
+) -> dict[str, Any]:
+    result = _exact_fields(value, ORACLE_WRAPPER_FIELDS, label)
+    for field in ("path", "reportPath", "sha256", "reportSha256"):
+        _require_string(result[field], f"{label}.{field}")
+    if not _require_bool(result["compileSuccess"], f"{label}.compileSuccess"):
+        raise RuntimeError(f"{label}.compileSuccess must be true")
+    _require_number(result["seconds"], f"{label}.seconds")
+    if result["status"] != "success":
+        raise RuntimeError(f"{label}.status must be success")
+    oracle = result["report"]
+    if not isinstance(oracle, dict):
+        raise RuntimeError(f"{label}.report must be an object")
+    parsed = _parse_declaration_oracle(
+        DECLARATION_ORACLE_MARKER + json.dumps(oracle), expected_module
+    )
+    if parsed != oracle:
+        raise RuntimeError(f"{label}.report changed during validation")
+    return result
+
+
+def _validate_status_map(value: object, label: str) -> dict[str, int]:
+    return _validate_count_map(value, label, {"success", "failure"})
+
+
+def _validate_module_report(value: object, index: int) -> dict[str, Any]:
+    label = f"modules[{index}]"
+    module = _exact_fields(value, MODULE_REPORT_FIELDS, label)
+    module_name = _require_string(module["module"], f"{label}.module")
+    if not module_name.startswith("Mathlib/") or not module_name.endswith(".lean"):
+        raise RuntimeError(f"{label}.module is not a Mathlib .lean path: {module_name!r}")
+    expected_compiled = corpus.compiled_module_name(module_name)
+    if module["compiledModule"] != expected_compiled:
+        raise RuntimeError(
+            f"{label}.compiledModule mismatch: {module['compiledModule']!r} != "
+            f"{expected_compiled!r}"
+        )
+    for field in (
+        "sourcePath",
+        "originalPath",
+        "instrumentedPath",
+        "materializedPath",
+        "reportPath",
+        "originalHash",
+        "instrumentedHash",
+        "materializedHash",
+        "reportHash",
+    ):
+        _require_string(module[field], f"{label}.{field}")
+    original = _validate_hash_ref(module["original"], f"{label}.original")
+    if module["originalPath"] != original["path"] or module["originalHash"] != original["sha256"]:
+        raise RuntimeError(f"{label}.original duplicate fields disagree")
+    instrumented = _validate_compiled_artifact(
+        module["instrumented"], f"{label}.instrumented"
+    )
+    if (
+        module["instrumentedPath"] != instrumented["path"]
+        or module["instrumentedHash"] != instrumented["sha256"]
+    ):
+        raise RuntimeError(f"{label}.instrumented duplicate fields disagree")
+    materialized = _validate_compiled_artifact(
+        module["materialized"], f"{label}.materialized"
+    )
+    if (
+        module["materializedPath"] != materialized["path"]
+        or module["materializedHash"] != materialized["sha256"]
+    ):
+        raise RuntimeError(f"{label}.materialized duplicate fields disagree")
+    artifact = _validate_hash_ref(module["artifactReport"], f"{label}.artifactReport")
+    if module["reportPath"] != artifact["path"] or module["reportHash"] != artifact["sha256"]:
+        raise RuntimeError(f"{label}.artifactReport duplicate fields disagree")
+    _validate_oracle_wrapper(
+        module["declarationOracle"], f"{label}.declarationOracle", expected_compiled
+    )
+    _validate_source_preservation(
+        module["exactSourcePreservation"], f"{label}.exactSourcePreservation", module=True
+    )
+    if not _require_bool(module["compileSuccess"], f"{label}.compileSuccess"):
+        raise RuntimeError(f"{label}.compileSuccess must be true")
+
+    total_count = _require_int(module["totalCount"], f"{label}.totalCount", nonnegative=True)
+    materialize_count = _require_int(
+        module["materializeCount"], f"{label}.materializeCount", nonnegative=True
+    )
+    retain_count = _require_int(module["retainCount"], f"{label}.retainCount", nonnegative=True)
+    materialize_ids = _validate_string_list(module["materializeIds"], f"{label}.materializeIds")
+    retain_ids = _validate_string_list(module["retainIds"], f"{label}.retainIds")
+    if set(materialize_ids) & set(retain_ids):
+        raise RuntimeError(f"{label} materialize and retain IDs overlap")
+    if materialize_count != len(materialize_ids) or retain_count != len(retain_ids):
+        raise RuntimeError(f"{label} action counts disagree with action IDs")
+    occurrence_results = module["occurrenceResults"]
+    result_ids = []
+    result_actions = []
+    if not isinstance(occurrence_results, list):
+        raise RuntimeError(f"{label}.occurrenceResults must be an array")
+    for raw in occurrence_results:
+        if not isinstance(raw, dict):
+            raise RuntimeError(f"{label}.occurrenceResults contains a non-object")
+        result_ids.append(_require_string(raw.get("occurrence"), "occurrence result ID"))
+        result_actions.append(raw.get("action"))
+    if any(action not in {"materialize", "retain"} for action in result_actions):
+        raise RuntimeError(f"{label}.occurrenceResults contains an invalid action")
+    if len(result_ids) != len(set(result_ids)):
+        raise RuntimeError(f"{label}.occurrenceResults contains duplicate IDs")
+    if set(result_ids) != set(materialize_ids) | set(retain_ids):
+        raise RuntimeError(f"{label}.occurrenceResults IDs disagree with action IDs")
+    if [id for id, action in zip(result_ids, result_actions) if action == "materialize"] != materialize_ids:
+        raise RuntimeError(f"{label}.materializeIds order disagrees with occurrenceResults")
+    if [id for id, action in zip(result_ids, result_actions) if action == "retain"] != retain_ids:
+        raise RuntimeError(f"{label}.retainIds order disagrees with occurrenceResults")
+    expected_actions = [str(action) for action in result_actions]
+    occurrence_counts = validate_occurrence_summary(
+        occurrence_results,
+        result_ids,
+        expected_actions,
+        module["occurrenceClassificationCounts"],
+    )
+    if total_count != len(result_ids) or total_count != materialize_count + retain_count:
+        raise RuntimeError(f"{label} total/action counts disagree")
+    if module["occurrenceClassificationCounts"] != occurrence_counts:
+        raise RuntimeError(f"{label} occurrence classification counts disagree")
+
+    observed_ids = _validate_string_list(module["observedIds"], f"{label}.observedIds")
+    unobserved_ids = _validate_string_list(module["unobservedIds"], f"{label}.unobservedIds")
+    if set(observed_ids) & set(unobserved_ids):
+        raise RuntimeError(f"{label} observed/unobserved IDs overlap")
+    if set(observed_ids) | set(unobserved_ids) != set(materialize_ids):
+        raise RuntimeError(f"{label} observed/unobserved IDs do not partition materialize IDs")
+    by_id = {raw["occurrence"]: raw for raw in occurrence_results}
+    if [id for id in materialize_ids if id in set(observed_ids)] != observed_ids:
+        raise RuntimeError(f"{label}.observedIds order disagrees with materialize IDs")
+    if [id for id in materialize_ids if id in set(unobserved_ids)] != unobserved_ids:
+        raise RuntimeError(f"{label}.unobservedIds order disagrees with materialize IDs")
+    for occurrence_id in materialize_ids:
+        result = by_id[occurrence_id]
+        if (result["executionCount"] == 0) != (occurrence_id in set(unobserved_ids)):
+            raise RuntimeError(f"{label} observed status disagrees for {occurrence_id}")
+
+    variant_counts = _validate_count_map(
+        module["variantCounts"], f"{label}.variantCounts"
+    )
+    if set(variant_counts) != set(materialize_ids):
+        raise RuntimeError(f"{label}.variantCounts IDs disagree with materialize IDs")
+    for occurrence_id in materialize_ids:
+        if variant_counts[occurrence_id] != by_id[occurrence_id]["variantCount"]:
+            raise RuntimeError(f"{label}.variantCounts disagrees for {occurrence_id}")
+    execution_report_count = _require_int(
+        module["executionReportCount"], f"{label}.executionReportCount", nonnegative=True
+    )
+    calculated_execution_count = sum(int(raw["executionCount"]) for raw in occurrence_results)
+    if execution_report_count != calculated_execution_count:
+        raise RuntimeError(f"{label}.executionReportCount disagrees with occurrence results")
+    execution_status_counts = _validate_status_map(
+        module["executionStatusCounts"], f"{label}.executionStatusCounts"
+    )
+    if sum(execution_status_counts.values()) != execution_report_count:
+        raise RuntimeError(f"{label}.executionStatusCounts do not sum to executionReportCount")
+    variant_count = _require_int(module["variantCount"], f"{label}.variantCount", nonnegative=True)
+    if variant_count != sum(int(raw["variantCount"]) for raw in occurrence_results):
+        raise RuntimeError(f"{label}.variantCount disagrees with occurrence results")
+    variant_status_counts = _validate_status_map(
+        module["variantStatusCounts"], f"{label}.variantStatusCounts"
+    )
+    expected_variant_status_counts: Counter[str] = Counter()
+    for raw in occurrence_results:
+        expected_variant_status_counts["success"] += int(raw["successVariantCount"])
+        expected_variant_status_counts["failure"] += int(raw["failureVariantCount"])
+    expected_variant_status_counts = Counter(
+        {key: value for key, value in expected_variant_status_counts.items() if value}
+    )
+    if variant_status_counts != dict(expected_variant_status_counts):
+        raise RuntimeError(f"{label}.variantStatusCounts disagree with occurrence results")
+    if sum(variant_status_counts.values()) != variant_count:
+        raise RuntimeError(f"{label}.variantStatusCounts do not sum to variantCount")
+    remaining_count = _require_int(
+        module["remainingRetainedCount"], f"{label}.remainingRetainedCount", nonnegative=True
+    )
+    multiset = module["remainingRetainedMultiset"]
+    if not isinstance(multiset, dict):
+        raise RuntimeError(f"{label}.remainingRetainedMultiset must be an object")
+    for key, count in multiset.items():
+        if not isinstance(key, str):
+            raise RuntimeError(f"{label}.remainingRetainedMultiset has a non-string key")
+        _require_int(count, f"{label}.remainingRetainedMultiset.{key}", nonnegative=True)
+    if sum(int(count) for count in multiset.values()) != remaining_count:
+        raise RuntimeError(f"{label}.remainingRetainedMultiset does not sum to remaining count")
+    return module
+
+
+def validate_shard_identity(value: object) -> dict[str, object]:
+    """Validate schema/kind/protocol identity shared by every shard report."""
+    if not isinstance(value, dict):
+        raise RuntimeError(f"materialization shard report must be an object: {value!r}")
+    report_schema = value.get("reportSchema")
+    if (
+        not isinstance(report_schema, int)
+        or isinstance(report_schema, bool)
+        or report_schema != REPORT_SCHEMA
+    ):
+        raise RuntimeError(
+            f"materialization shard report schema must be {REPORT_SCHEMA}: "
+            f"{report_schema!r}"
+        )
+    if value.get("kind") != REPORT_KIND:
+        raise RuntimeError(f"materialization shard report kind is invalid: {value!r}")
+    if value.get("reportIdentity") != {
+        "kind": REPORT_KIND,
+        "reportSchema": REPORT_SCHEMA,
+    }:
+        raise RuntimeError(f"materialization shard report identity is invalid: {value!r}")
+    validate_artifact_protocol(value.get("artifactProtocol"))
+    return value
+
+
+def validate_shard_shape(value: object) -> dict[str, object]:
+    """Validate exact schema-4 structure and internal count coherence.
+
+    This deliberately does not read referenced files.  Publication additionally
+    requires ``verify_shard_evidence``, which binds this shape to the selected
+    manifest and the durable run artifacts.
+    """
+    value = _exact_fields(value, SHARD_REPORT_FIELDS, "materialization shard report")
+    validate_shard_identity(value)
+    for field in (
+        "manifestPath",
+        "manifestHash",
+        "repositoryCommit",
+        "mathlibCommit",
+        "runnerPath",
+        "runnerHash",
+    ):
+        _require_string(value[field], f"materialization shard report.{field}")
+    manifest = _validate_hash_ref(value["manifest"], "materialization shard report.manifest")
+    if value["manifestPath"] != manifest["path"] or value["manifestHash"] != manifest["sha256"]:
+        raise RuntimeError("materialization shard report manifest duplicate fields disagree")
+    runner = _validate_hash_ref(value["runner"], "materialization shard report.runner")
+    if value["runnerPath"] != runner["path"] or value["runnerHash"] != runner["sha256"]:
+        raise RuntimeError("materialization shard report runner duplicate fields disagree")
+    policy = _exact_fields(value["manifestPolicy"], MANIFEST_POLICY_FIELDS, "manifestPolicy")
+    _require_bool(policy["allowDirty"], "manifestPolicy.allowDirty")
+    _require_bool(policy["allowUnresolved"], "manifestPolicy.allowUnresolved")
+    provenance = _exact_fields(value["provenance"], PROVENANCE_FIELDS, "provenance")
+    for field in (
+        "repositoryCommit",
+        "mathlibCommit",
+        "manifestRepositoryCommit",
+        "manifestMathlibCommit",
+    ):
+        _require_string(provenance[field], f"provenance.{field}")
+    lean = _exact_fields(provenance["lean"], frozenset({"version", "commit"}), "provenance.lean")
+    _require_string(lean["version"], "provenance.lean.version")
+    _require_string(lean["commit"], "provenance.lean.commit")
+    if value["lean"] != lean:
+        raise RuntimeError("top-level lean provenance disagrees")
+    if value["repositoryCommit"] != provenance["repositoryCommit"]:
+        raise RuntimeError("top-level repository commit disagrees with provenance")
+    if value["mathlibCommit"] != provenance["mathlibCommit"]:
+        raise RuntimeError("top-level Mathlib commit disagrees with provenance")
+    _validate_source_preservation(
+        value["exactSourcePreservation"],
+        "materialization shard report.exactSourcePreservation",
+        module=False,
+    )
+    if not _require_bool(value["compileSuccess"], "materialization shard report.compileSuccess"):
+        raise RuntimeError("materialization shard report.compileSuccess must be true")
+    selected_modules = _validate_string_list(
+        value["selectedModules"], "materialization shard report.selectedModules"
+    )
+    modules_value = value["modules"]
+    if not isinstance(modules_value, list) or not modules_value:
+        raise RuntimeError("materialization shard report.modules must be a nonempty array")
+    modules = [_validate_module_report(module, index) for index, module in enumerate(modules_value)]
+    module_names = [str(module["module"]) for module in modules]
+    if module_names != selected_modules:
+        raise RuntimeError("selectedModules order/identity disagrees with modules")
+    if len(module_names) != len(set(module_names)):
+        raise RuntimeError("materialization shard report contains duplicate modules")
+
+    expected_occurrence_results = [
+        result for module in modules for result in module["occurrenceResults"]
+    ]
+    if value["occurrenceResults"] != expected_occurrence_results:
+        raise RuntimeError("top-level occurrenceResults disagree with module results")
+    expected_ids = [str(result["occurrence"]) for result in expected_occurrence_results]
+    expected_actions = [str(result["action"]) for result in expected_occurrence_results]
+    if len(expected_ids) != len(set(expected_ids)):
+        raise RuntimeError("top-level occurrenceResults contain duplicate IDs")
+    top_occurrence_counts = validate_occurrence_summary(
+        value["occurrenceResults"],
+        expected_ids,
+        expected_actions,
+        value["occurrenceClassificationCounts"],
+    )
+    if value["occurrenceClassificationCounts"] != top_occurrence_counts:
+        raise RuntimeError("top-level occurrence classification counts disagree")
+    totals = {
+        "totalCount": sum(int(module["totalCount"]) for module in modules),
+        "materializeCount": sum(int(module["materializeCount"]) for module in modules),
+        "retainCount": sum(int(module["retainCount"]) for module in modules),
+        "executionReportCount": sum(int(module["executionReportCount"]) for module in modules),
+        "variantCount": sum(int(module["variantCount"]) for module in modules),
+        "remainingRetainedCount": sum(int(module["remainingRetainedCount"]) for module in modules),
+    }
+    for field, expected in totals.items():
+        actual = _require_int(value[field], f"materialization shard report.{field}", nonnegative=True)
+        if actual != expected:
+            raise RuntimeError(f"top-level {field} disagrees with module totals")
+    expected_observed = [str(item) for module in modules for item in module["observedIds"]]
+    expected_unobserved = [str(item) for module in modules for item in module["unobservedIds"]]
+    if value["observedIds"] != expected_observed:
+        raise RuntimeError("top-level observedIds disagree with module results")
+    if value["unobservedIds"] != expected_unobserved:
+        raise RuntimeError("top-level unobservedIds disagree with module results")
+    _validate_string_list(value["observedIds"], "materialization shard report.observedIds")
+    _validate_string_list(value["unobservedIds"], "materialization shard report.unobservedIds")
+    if set(expected_observed) & set(expected_unobserved):
+        raise RuntimeError("top-level observedIds and unobservedIds overlap")
+    expected_execution_status: Counter[str] = Counter()
+    expected_variant_status: Counter[str] = Counter()
+    for module in modules:
+        expected_execution_status.update(module["executionStatusCounts"])
+        expected_variant_status.update(module["variantStatusCounts"])
+    actual_execution_status = _validate_status_map(
+        value["executionStatusCounts"], "materialization shard report.executionStatusCounts"
+    )
+    actual_variant_status = _validate_status_map(
+        value["variantStatusCounts"], "materialization shard report.variantStatusCounts"
+    )
+    if actual_execution_status != dict(expected_execution_status):
+        raise RuntimeError("top-level executionStatusCounts disagree with modules")
+    if actual_variant_status != dict(expected_variant_status):
+        raise RuntimeError("top-level variantStatusCounts disagree with modules")
+    aggregate = _exact_fields(value["aggregate"], AGGREGATE_FIELDS, "aggregate")
+    for field in AGGREGATE_FIELDS - {"occurrenceClassificationCounts"}:
+        _require_int(aggregate[field], f"aggregate.{field}", nonnegative=True)
+    _validate_count_map(
+        aggregate["occurrenceClassificationCounts"],
+        "aggregate.occurrenceClassificationCounts",
+        frozenset(
+            {
+                "materialized",
+                "expected_failure",
+                "unobserved_executable",
+                "retained_syntax_data",
+            }
+        ),
+    )
+    expected_aggregate = {
+        "selectedModuleCount": len(modules),
+        "totalCount": totals["totalCount"],
+        "materializeCount": totals["materializeCount"],
+        "retainCount": totals["retainCount"],
+        "occurrenceClassificationCounts": top_occurrence_counts,
+        "observedCount": len(expected_observed),
+        "unobservedCount": len(expected_unobserved),
+        "executionReportCount": totals["executionReportCount"],
+        "variantCount": totals["variantCount"],
+        "remainingRetainedCount": totals["remainingRetainedCount"],
+    }
+    if aggregate != expected_aggregate:
+        raise RuntimeError(
+            "aggregate disagrees with validated report values: "
+            f"expected {expected_aggregate!r}, found {aggregate!r}"
+        )
+    return value
+
+
+def validate_shard_protocol(value: object) -> dict[str, object]:
+    """Backward-compatible name for schema-4 shape validation."""
+    return validate_shard_shape(value)
+
+
+def _read_evidence_file(path_value: object, expected: Path, label: str) -> bytes:
+    recorded = Path(_require_string(path_value, f"{label}.path")).resolve()
+    expected = expected.resolve()
+    if recorded != expected:
+        raise RuntimeError(
+            f"{label} path identity mismatch: {recorded} != {expected}"
+        )
+    if not recorded.is_file():
+        raise RuntimeError(f"{label} evidence file does not exist: {recorded}")
+    return recorded.read_bytes()
+
+
+def _validate_evidence_hash(
+    data: bytes, expected_hash: object, label: str
+) -> None:
+    recorded = _require_string(expected_hash, f"{label}.sha256")
+    actual = sha256(data)
+    if actual != recorded:
+        raise RuntimeError(f"{label} hash mismatch: {actual} != {recorded}")
+
+
+def _parse_jsonl_evidence(data: bytes, label: str) -> list[object]:
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RuntimeError(f"{label} is not UTF-8") from error
+    values: list[object] = []
+    for index, line in enumerate(text.splitlines()):
+        if not line:
+            raise RuntimeError(f"{label} contains an empty JSONL line at {index}")
+        try:
+            values.append(json.loads(line))
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"{label} contains invalid JSON at line {index}") from error
+    canonical = "".join(_canonical_json_line(value) + "\n" for value in values)
+    if text != canonical:
+        raise RuntimeError(f"{label} is not canonical JSONL")
+    return values
+
+
+def verify_shard_evidence(
+    report: object,
+    *,
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    manifest_bytes: bytes,
+    selected: list[SelectedModule],
+    debug_root: Path,
+    timeout: int,
+) -> dict[str, object]:
+    """Bind a valid schema-4 shape to selected manifest and durable files."""
+    report = validate_shard_shape(report)
+    resolved_manifest = manifest_path.resolve()
+    if report["manifestPath"] != str(resolved_manifest):
+        raise RuntimeError("report manifestPath does not identify the selected manifest")
+    if report["manifestHash"] != sha256(manifest_bytes):
+        raise RuntimeError("report manifestHash does not match selected manifest bytes")
+    manifest_data = _read_evidence_file(
+        report["manifest"]["path"], resolved_manifest, "manifest"
+    )
+    if manifest_data != manifest_bytes:
+        raise RuntimeError("selected manifest bytes changed before evidence verification")
+    _validate_evidence_hash(manifest_data, report["manifest"]["sha256"], "manifest")
+
+    repository_commit = _require_string(
+        manifest.get("repositoryCommit"), "manifest repositoryCommit"
+    )
+    mathlib_commit = _require_string(
+        manifest.get("mathlibCommit"), "manifest mathlibCommit"
+    )
+    if (
+        report["repositoryCommit"] != repository_commit
+        or report["provenance"]["manifestRepositoryCommit"] != repository_commit
+        or report["provenance"]["repositoryCommit"] != repository_commit
+    ):
+        raise RuntimeError("report repository commit is not bound to the manifest")
+    if (
+        report["mathlibCommit"] != mathlib_commit
+        or report["provenance"]["manifestMathlibCommit"] != mathlib_commit
+        or report["provenance"]["mathlibCommit"] != mathlib_commit
+    ):
+        raise RuntimeError("report Mathlib commit is not bound to the manifest")
+    if report["lean"] != manifest.get("lean"):
+        raise RuntimeError("report Lean identity is not bound to the manifest")
+    if report["manifestPolicy"] != {
+        "allowDirty": False,
+        "allowUnresolved": False,
+    }:
+        raise RuntimeError("report manifest policy is not closed")
+
+    runner_path = Path(__file__).resolve()
+    runner_data = _read_evidence_file(report["runner"]["path"], runner_path, "runner")
+    _validate_evidence_hash(runner_data, report["runner"]["sha256"], "runner")
+    if report["runnerHash"] != sha256(runner_data):
+        raise RuntimeError("report runnerHash does not match the executing runner")
+
+    if report["selectedModules"] != [item.module for item in selected]:
+        raise RuntimeError("report selectedModules differ from manifest selection")
+    if len(report["modules"]) != len(selected):
+        raise RuntimeError("report module count differs from manifest selection")
+
+    for module_report, item in zip(report["modules"], selected):
+        if module_report["module"] != item.module:
+            raise RuntimeError("report module identity differs from manifest selection")
+        module_root = debug_root / _sanitize_stem(
+            item.module.removeprefix("Mathlib/").removesuffix(".lean")
+        )
+        expected_paths = {
+            "original": module_root / "original" / Path(*item.module.split("/")),
+            "instrumented": module_root / "instrumented" / Path(*item.module.split("/")),
+            "materialized": module_root / "materialized" / Path(*item.module.split("/")),
+            "artifactReport": module_root / "artifact-reports.jsonl",
+            "oracleLog": module_root / "declaration-oracle.log",
+            "oracleReport": module_root / "declaration-oracle-report.json",
+        }
+        source_data = _read_evidence_file(
+            module_report["sourcePath"], item.source_path, f"{item.module} source"
+        )
+        if source_data != item.source:
+            raise RuntimeError(f"{item.module} source bytes changed from manifest selection")
+
+        original_data = _read_evidence_file(
+            module_report["original"]["path"],
+            expected_paths["original"],
+            f"{item.module} original",
+        )
+        _validate_evidence_hash(
+            original_data, module_report["original"]["sha256"], f"{item.module} original"
+        )
+        if original_data != item.source or module_report["originalHash"] != sha256(item.source):
+            raise RuntimeError(f"{item.module} original is not the selected source")
+
+        instrumented_data = _read_evidence_file(
+            module_report["instrumented"]["path"],
+            expected_paths["instrumented"],
+            f"{item.module} instrumented",
+        )
+        _validate_evidence_hash(
+            instrumented_data,
+            module_report["instrumented"]["sha256"],
+            f"{item.module} instrumented",
+        )
+        if instrumented_data != instrumented_source(item.source, list(item.materialize)):
+            raise RuntimeError(f"{item.module} instrumented evidence is not reproducible")
+
+        artifact_data = _read_evidence_file(
+            module_report["artifactReport"]["path"],
+            expected_paths["artifactReport"],
+            f"{item.module} artifact report",
+        )
+        _validate_evidence_hash(
+            artifact_data,
+            module_report["artifactReport"]["sha256"],
+            f"{item.module} artifact report",
+        )
+        reports = _parse_jsonl_evidence(artifact_data, f"{item.module} artifact report")
+        for artifact in reports:
+            reject_forbidden_generated_text(artifact, f"artifact report for {item.module}")
+        materialize_ids = [str(entry["id"]) for entry in item.materialize]
+        observed = {
+            str(artifact["occurrence"])
+            for artifact in reports
+            if isinstance(artifact, dict) and isinstance(artifact.get("occurrence"), str)
+        }
+        unobserved = set(materialize_ids) - observed
+        variants = group_report_variants(
+            reports,
+            materialize_ids,
+            expected_module=item.compiled_module,
+            unobserved_ids=unobserved,
+        )
+        execution_counts: Counter[str] = Counter(
+            str(artifact["occurrence"])
+            for artifact in reports
+            if isinstance(artifact, dict)
+        )
+        expected_results = [
+            make_occurrence_result(
+                str(entry["id"]),
+                str(entry["action"]),
+                execution_counts.get(str(entry["id"]), 0),
+                variants.get(str(entry["id"]), []),
+            )
+            for entry in item.occurrences
+        ]
+        if module_report["occurrenceResults"] != expected_results:
+            raise RuntimeError(
+                f"{item.module} occurrence results are not derived from artifact evidence"
+            )
+        expected_execution_statuses: Counter[str] = Counter(
+            str(artifact["status"])
+            for artifact in reports
+            if isinstance(artifact, dict)
+        )
+        if module_report["executionStatusCounts"] != dict(
+            sorted(expected_execution_statuses.items())
+        ):
+            raise RuntimeError(
+                f"{item.module} execution statuses are not derived from artifact evidence"
+            )
+        if module_report["materializeIds"] != materialize_ids or module_report[
+            "retainIds"
+        ] != [str(entry["id"]) for entry in item.retain]:
+            raise RuntimeError(f"{item.module} action IDs differ from selected manifest")
+        expected_observed = [value for value in materialize_ids if value in observed]
+        expected_unobserved = [value for value in materialize_ids if value in unobserved]
+        if (
+            module_report["observedIds"] != expected_observed
+            or module_report["unobservedIds"] != expected_unobserved
+        ):
+            raise RuntimeError(f"{item.module} observation IDs differ from artifacts")
+
+        expected_materialized = _inject_import(
+            replace_all_occurrences(item.source, list(item.materialize), variants),
+            "ExplicitLean.SimpEngine.Boundary.Tactic",
+        )
+        materialized_data = _read_evidence_file(
+            module_report["materialized"]["path"],
+            expected_paths["materialized"],
+            f"{item.module} materialized",
+        )
+        _validate_evidence_hash(
+            materialized_data,
+            module_report["materialized"]["sha256"],
+            f"{item.module} materialized",
+        )
+        if materialized_data != expected_materialized:
+            raise RuntimeError(f"{item.module} materialized evidence is not reproducible")
+        remaining = [
+            entry
+            for entry in inventory.syntax_inventory_file(
+                expected_paths["materialized"],
+                f"{item.module}.materialized",
+                timeout,
+                allow_elaboration_errors=True,
+            )
+            if entry["kind"] in inventory.SUPPORTED_KINDS
+        ]
+        actual_remaining = Counter(
+            (str(entry["kind"]), str(entry["source"])) for entry in remaining
+        )
+        expected_remaining = Counter(
+            (str(entry["kind"]), str(entry["source"])) for entry in item.retain
+        )
+        recorded_remaining = {
+            f"{kind}\u0000{source}": count
+            for (kind, source), count in sorted(expected_remaining.items())
+        }
+        if actual_remaining != expected_remaining:
+            raise RuntimeError(
+                f"{item.module} materialized inventory differs from retained manifest"
+            )
+        if (
+            module_report["remainingRetainedCount"] != sum(expected_remaining.values())
+            or module_report["remainingRetainedMultiset"] != recorded_remaining
+        ):
+            raise RuntimeError(
+                f"{item.module} remaining retained evidence differs from manifest"
+            )
+
+        oracle = module_report["declarationOracle"]
+        oracle_log = _read_evidence_file(
+            oracle["path"], expected_paths["oracleLog"], f"{item.module} oracle log"
+        )
+        _validate_evidence_hash(oracle_log, oracle["sha256"], f"{item.module} oracle log")
+        oracle_report_data = _read_evidence_file(
+            oracle["reportPath"],
+            expected_paths["oracleReport"],
+            f"{item.module} oracle report",
+        )
+        _validate_evidence_hash(
+            oracle_report_data, oracle["reportSha256"], f"{item.module} oracle report"
+        )
+        try:
+            durable_oracle = json.loads(oracle_report_data)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"{item.module} oracle report is invalid JSON") from error
+        if durable_oracle != oracle["report"]:
+            raise RuntimeError(f"{item.module} oracle wrapper differs from durable report")
+    return report
 
 
 def run_shard(args: argparse.Namespace) -> dict[str, Any]:
@@ -1105,6 +2156,13 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
     if not manifest_path.is_absolute():
         manifest_path = ROOT / manifest_path
     manifest_path = manifest_path.resolve()
+    # Invalidate the exact requested destination before any validation or
+    # compiler work.  A failed rerun must not leave a previous success that a
+    # consumer could mistake for the current run.
+    output_path = resolve_output_path(args.output, manifest_path)
+    invalidate_output(output_path)
+    debug_root = debug_root_for(output_path)
+    clear_debug_root(debug_root)
     if not manifest_path.is_file():
         raise RuntimeError(f"manifest does not exist: {manifest_path}")
     manifest_bytes = manifest_path.read_bytes()
@@ -1115,11 +2173,13 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
     if not isinstance(manifest, dict):
         raise RuntimeError("manifest root must be an object")
 
-    output_path = resolve_output_path(args.output, manifest_path)
-    debug_root = debug_root_for(output_path)
-    debug_root.mkdir(parents=True, exist_ok=True)
-
     verify_implementation_hashes(manifest)
+    if manifest.get("allowDirty") is not False:
+        raise RuntimeError("boundary materialization requires allowDirty=false")
+    corpus.assert_repository(
+        _require_string(manifest.get("repositoryCommit"), "manifest repositoryCommit"),
+        False,
+    )
     provenance = verify_environment(manifest, args.timeout)
     selected = validate_manifest_selection(
         manifest,
@@ -1127,6 +2187,7 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         expect_total=args.expect_total,
         expect_materialize=args.expect_materialize,
     )
+    verify_selected_classifications(selected, args.timeout)
     runner_path = Path(__file__).resolve()
     runner_hash = sha256(runner_path.read_bytes())
     dylib = _query_dynamic_library(args.timeout, debug_root)
@@ -1155,6 +2216,7 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
     aggregate_remaining = 0
     observed_ids: list[str] = []
     unobserved_ids: list[str] = []
+    occurrence_results: list[dict[str, object]] = []
     for module in module_results:
         aggregate_execution_status.update(module["executionStatusCounts"])
         aggregate_variant_status.update(module["variantStatusCounts"])
@@ -1163,13 +2225,32 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         aggregate_remaining += int(module["remainingRetainedCount"])
         observed_ids.extend(str(value) for value in module["observedIds"])
         unobserved_ids.extend(str(value) for value in module["unobservedIds"])
+        occurrence_results.extend(module["occurrenceResults"])
     total_count = sum(int(module["totalCount"]) for module in module_results)
     materialize_count = sum(int(module["materializeCount"]) for module in module_results)
     retain_count = sum(int(module["retainCount"]) for module in module_results)
+    expected_occurrence_ids = [
+        str(entry["id"])
+        for module in selected
+        for entry in module.occurrences
+    ]
+    expected_occurrence_actions = [
+        str(entry["action"])
+        for module in selected
+        for entry in module.occurrences
+    ]
+    aggregate_occurrence_counts = validate_occurrence_summary(
+        occurrence_results,
+        expected_occurrence_ids,
+        expected_occurrence_actions,
+        occurrence_classification_counts(occurrence_results),
+    )
+    validate_artifact_protocol(artifact_protocol())
     report = {
         "kind": REPORT_KIND,
         "reportSchema": REPORT_SCHEMA,
         "reportIdentity": {"kind": REPORT_KIND, "reportSchema": REPORT_SCHEMA},
+        "artifactProtocol": artifact_protocol(),
         "manifestPath": str(manifest_path),
         "manifestHash": sha256(manifest_bytes),
         "manifest": {"path": str(manifest_path), "sha256": sha256(manifest_bytes)},
@@ -1195,6 +2276,8 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         "totalCount": total_count,
         "materializeCount": materialize_count,
         "retainCount": retain_count,
+        "occurrenceResults": occurrence_results,
+        "occurrenceClassificationCounts": aggregate_occurrence_counts,
         "observedIds": observed_ids,
         "unobservedIds": unobserved_ids,
         "executionReportCount": aggregate_execution_count,
@@ -1220,6 +2303,7 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
             "totalCount": total_count,
             "materializeCount": materialize_count,
             "retainCount": retain_count,
+            "occurrenceClassificationCounts": aggregate_occurrence_counts,
             "observedCount": len(observed_ids),
             "unobservedCount": len(unobserved_ids),
             "executionReportCount": aggregate_execution_count,
@@ -1227,6 +2311,17 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
             "remainingRetainedCount": aggregate_remaining,
         },
     }
+    validate_shard_shape(report)
+    verify_shard_evidence(
+        report,
+        manifest=manifest,
+        manifest_path=manifest_path,
+        manifest_bytes=manifest_bytes,
+        selected=selected,
+        debug_root=debug_root,
+        timeout=args.timeout,
+    )
+    corpus.assert_repository(provenance["repositoryCommit"], False)
     _atomic_write_json(output_path, report)
     return report
 
@@ -1259,6 +2354,7 @@ def main() -> None:
     try:
         report = run_shard(args)
     except Exception as error:
+        emit_failure_marker(error)
         print(f"boundary materialization shard failed: {error}", file=sys.stderr)
         raise SystemExit(1) from error
     print(
