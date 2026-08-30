@@ -598,8 +598,14 @@ private unsafe def checkDeclarationSets (stockEnvironment appliedEnvironment : E
   let mut result := { counts with commonPublicDeclarations := stockPublic.size }
   for stockInfo in stockDeclarations do
     if let some appliedInfo := appliedMap.find? stockInfo.name then
-      compareDeclaration stockEnvironment appliedEnvironment stockInfo appliedInfo
-        s!"{stockInfo.name}"
+      let stockPrivateProof ← privateProofDeclaration stockEnvironment stockInfo
+      let appliedPrivateProof ← privateProofDeclaration appliedEnvironment appliedInfo
+      unless stockPrivateProof == appliedPrivateProof do
+        oracleFailure "declaration_set_mismatch"
+          s!"private-proof classification differs for {stockInfo.name}"
+      unless stockPrivateProof do
+        compareDeclaration stockEnvironment appliedEnvironment stockInfo appliedInfo
+          s!"{stockInfo.name}"
       result := { result with checkedDeclarations := result.checkedDeclarations + 1 }
     else
       unless ← privateProofDeclaration stockEnvironment stockInfo do

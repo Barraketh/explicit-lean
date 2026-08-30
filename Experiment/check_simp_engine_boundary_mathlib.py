@@ -15,6 +15,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from collections import Counter
 
+import boundary_materialize_shard as materializer
+import simp_engine_boundary_corpus as corpus
 import simp_engine_inventory as coverage
 import check_simp_engine_boundary_scope as scope
 from check_simp_engine_boundary_source import (
@@ -33,6 +35,7 @@ class ModuleSpec:
     module: str
     expected_occurrences: int
     expected_materialize_occurrences: int
+    expected_oracle_counts: tuple[int, int, int, int, int, int]
     debug_name: str
 
     @property
@@ -44,27 +47,38 @@ class ModuleSpec:
 
 MODULES = (
     ModuleSpec(
+        "Mathlib/Algebra/AddConstMap/Basic.lean",
+        expected_occurrences=17,
+        expected_materialize_occurrences=17,
+        expected_oracle_counts=(143, 141, 103, 2, 0, 141),
+        debug_name="add-const-map",
+    ),
+    ModuleSpec(
         "Mathlib/CategoryTheory/EqToHom.lean",
         expected_occurrences=33,
         expected_materialize_occurrences=33,
+        expected_oracle_counts=(139, 139, 71, 5, 5, 134),
         debug_name="eq-to-hom",
     ),
     ModuleSpec(
         "Mathlib/Data/Fintype/List.lean",
         expected_occurrences=6,
         expected_materialize_occurrences=6,
+        expected_oracle_counts=(15, 10, 5, 5, 0, 10),
         debug_name="fintype-list",
     ),
     ModuleSpec(
         "Mathlib/Algebra/Algebra/NonUnitalHom.lean",
         expected_occurrences=7,
         expected_materialize_occurrences=7,
+        expected_oracle_counts=(165, 165, 104, 0, 0, 165),
         debug_name="non-unital-hom-parser-compatibility",
     ),
     ModuleSpec(
         "Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean",
         expected_occurrences=3,
         expected_materialize_occurrences=3,
+        expected_oracle_counts=(5, 5, 5, 0, 0, 5),
         debug_name="cstar-pos-part",
     ),
 )
@@ -266,6 +280,7 @@ def check_module(
     assert_nonoverlapping(inventory, spec.module)
 
     work = DEBUG_ROOT / spec.debug_name
+    original_path = copy_at_module_root(work / "original", spec.module, original)
     instrumented_path = copy_at_module_root(
         work / "instrumented", spec.module, instrumented_source(original, materialize)
     )
@@ -316,15 +331,49 @@ def check_module(
             f"generated source: {materialized_path}"
         )
 
+    declaration_oracle = materializer.run_declaration_oracle(
+        spec.module,
+        original_path,
+        materialized_path,
+        work,
+        dylib,
+        600,
+    )
+    oracle_report = declaration_oracle["report"]
+    oracle_counts = (
+        oracle_report["stockDeclarationCount"],
+        oracle_report["appliedDeclarationCount"],
+        oracle_report["commonPublicDeclarationCount"],
+        oracle_report["stockOnlyPrivateProofCount"],
+        oracle_report["appliedOnlyPrivateProofCount"],
+        oracle_report["checkedDeclarationCount"],
+    )
+    if oracle_counts != spec.expected_oracle_counts:
+        raise RuntimeError(
+            f"declaration oracle coverage changed for {spec.module}: "
+            f"expected {spec.expected_oracle_counts}, found {oracle_counts}"
+        )
+
     print(
         f"boundary {spec.module}: total={len(inventory)}, "
         f"materialize={len(materialize)}, retain={len(retain)}; "
         f"recorded materialize, compiled, zero remaining executable "
-        f"(retained={len(remaining)}): ok"
+        f"(retained={len(remaining)}); "
+        "declaration/environment oracle passed "
+        f"(accounted={oracle_report['checkedDeclarationCount']}): ok"
     )
 
 
+def invalidate_oracle_evidence() -> None:
+    for spec in MODULES:
+        module_root = DEBUG_ROOT / spec.debug_name
+        for name in ("declaration-oracle.log", "declaration-oracle-report.json"):
+            (module_root / name).unlink(missing_ok=True)
+
+
 def main() -> None:
+    invalidate_oracle_evidence()
+    initial_environment = corpus.verify_environment()
     for spec in MODULES:
         if not spec.source.is_file():
             raise RuntimeError(f"Mathlib source not found: {spec.source}")
@@ -345,6 +394,14 @@ def main() -> None:
             occurrences_by_module,
             declarations_by_module,
         )
+    try:
+        final_environment = corpus.verify_environment()
+    except Exception:
+        invalidate_oracle_evidence()
+        raise
+    if final_environment != initial_environment:
+        invalidate_oracle_evidence()
+        raise RuntimeError("pinned environment changed during representative gate")
 
 
 if __name__ == "__main__":

@@ -50,22 +50,22 @@ dependent contexts, inaccessible local names, a custom discharger, declaration
 trust, transactional failure, pre-existing metavariable state, reusable tactic
 quotations, multi-variant selection, and source round trips. Its focused
 seventeen-occurrence source fixture includes one explicitly unobserved reusable
-occurrence. The schema-2 representative gate now transforms all 33 calls in
-`Mathlib/CategoryTheory/EqToHom.lean`, all six calls in
-`Mathlib/Data/Fintype/List.lean`, all seven calls in
-`Mathlib/Algebra/Algebra/NonUnitalHom.lean`, and all three calls in
+occurrence. The representative gate now transforms all 17 calls in
+`Mathlib/Algebra/AddConstMap/Basic.lean`, all 33 in
+`Mathlib/CategoryTheory/EqToHom.lean`, all six in
+`Mathlib/Data/Fintype/List.lean`, all seven in
+`Mathlib/Algebra/Algebra/NonUnitalHom.lean`, and all three in
 `Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`. Every transformed
-copy compiles with zero remaining executable calls. The last module records four distinct
-executions of one reusable occurrence and exercises a large `Matrix.cons_val`
-result; the focused quotation executes both a successful and a failed variant.
+copy compiles with zero remaining executable calls and passes the mandatory
+declaration/environment oracle; the oracle accounts for 141, 134, 10, 165, and
+5 declarations respectively under the public/computational and private-proof
+rules. The last module records four distinct executions of
+one occurrence and exercises a large `Matrix.cons_val` result; the focused
+quotation executes both a successful and a failed variant.
 The apply module has a checked import closure with no simplifier implementation.
-A fourth representative module,
-`Mathlib/Algebra/Algebra/NonUnitalHom.lean`, guards parser compatibility with
-Mathlib commands whose grammar uses the identifier `apply`. This remains a
-representative materialization result, not a Mathlib-wide translation claim.
-The 17-occurrence `AddConstMap/Basic` canary now also passes the mandatory
-declaration/environment oracle. The next gate extends that oracle to all four
-representative modules.
+`Mathlib/Algebra/Algebra/NonUnitalHom.lean` guards parser compatibility with
+Mathlib commands whose grammar uses the identifier `apply`. These results are
+bounded semantic acceptance evidence, not a Mathlib-wide translation claim.
 
 The current scope-classification gate joins syntax ancestry to final
 compiled declaration types. Its 13-occurrence fixture separates theorem/proof

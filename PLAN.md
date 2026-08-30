@@ -66,6 +66,12 @@ stock and materialized modules: declaration kinds and metadata, definitionally
 equal types and non-`Prop` values (including opaque/irreducible values),
 recursor rules, compiler/runtime IR, persistent environment extensions,
 transitive axiom subsets, and absence of unresolved terms or `sorryAx`.
+Private-like proof declarations (theorems or `Prop`-valued definitions/opaques),
+including generated `_proof_N` helpers, are closed-world proof artifacts: they
+may be added or omitted, or differ in type and metadata. A same-name
+proof/non-proof classification change fails. Public metadata and types, every
+non-`Prop` value, public axiom subsets, compiler IR, and relevant extension state
+remain checked, and applied expressions remain resolved and `sorry`-free.
 
 `Experiment/check_simp_engine_boundary_source.py` is the first source-to-source
 gate. It currently inventories seventeen focused occurrences, including
@@ -99,17 +105,23 @@ fresh-identifier renaming. Fingerprints select recorded variants and aid
 diagnostics; a matching hash is never semantic proof.
 
 `Experiment/check_simp_engine_boundary_mathlib.py` now materializes every
-executable occurrence in four complete pinned source modules. It transforms all
-33 occurrences in `Mathlib/CategoryTheory/EqToHom.lean` and all six occurrences
-in `Mathlib/Data/Fintype/List.lean`. In
-`Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`, all three
-occurrences are transformed; they produce six executions because one occurrence
-selects among four distinct pre-states reached via `all_goals`/`fin_cases`.
-Each materialized copy compiles with zero remaining executable calls. Earlier broad
-round trips of all syntactic occurrences remain useful renderer stress evidence:
-`Fintype/List` exercises a committed `ExistsAndEq` result and beta-redex
-lowering, while `PosPart` exercises a large `Matrix.cons_val` result. These are
-representative module results, not a corpus claim.
+executable occurrence in five complete pinned source modules: all 17 calls in
+`Mathlib/Algebra/AddConstMap/Basic.lean`, all 33 in
+`Mathlib/CategoryTheory/EqToHom.lean`, all six in
+`Mathlib/Data/Fintype/List.lean`, all seven in
+`Mathlib/Algebra/Algebra/NonUnitalHom.lean`, and all three in
+`Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean`. Every
+materialized copy compiles with zero remaining executable calls and passes the
+declaration/environment oracle. The successful reports respectively accounted for
+141, 134, 10, 165, and 5 declarations, with 103, 71, 5, 104, and 5 common
+public declarations. Here `checkedDeclarationCount` is the number processed
+under the applicable comparison or private-proof rule, not the number receiving
+a definitional-equality comparison.
+
+Earlier broad round trips remain useful renderer stress evidence:
+`Fintype/List` exercises a committed `ExistsAndEq` result and
+beta-redex lowering, while `PosPart` exercises a large `Matrix.cons_val`
+result. These are representative module results, not a corpus claim.
 
 `Mathlib/Algebra/Algebra/NonUnitalHom.lean` contributes seven transformed
 computational occurrences and guards parser compatibility. This regression
@@ -216,9 +228,10 @@ Once that path is accepted, the public `simp_engine_apply` syntax can move from
 schema-27 replay to boundary artifacts. Until then, code and reports must label
 the two implementations explicitly.
 
-The immediate engineering gap is to apply the declaration/environment oracle
-to the current 33 `EqToHom`, 6 `Fintype/List`, and 7 `NonUnitalHom`
-representative materializations, then stabilize the schema from those results.
+The representative declaration/environment gate is complete for all five
+modules above. The immediate engineering gap is to stabilize the selector,
+artifact schema, failure classifications, readable source, local references,
+universes, instances, and explicit deltas from those measurements.
 Dependency-aware recording for the 66 reusable tactic-syntax
 occurrences and safe composition for the 91 nested occurrences follow. The
 current runner rejects reusable syntax and nested/overlapping replacement
@@ -280,7 +293,11 @@ end-to-end oracle, but it does not replace comparison of every listed field.
 
 ### Declaration boundary and trust
 
-For every declaration or command affected by translation:
+Private-like proof declarations are the closed-world exception described above:
+they may be added or omitted, or differ in kind, type, and metadata, but a
+same-name proof/non-proof classification change fails. The following
+requirements apply to every public declaration and every non-proof declaration
+or command affected by translation:
 
 - its declaration kind, safety, reducibility, level parameters, and externally
   visible attributes must agree with the original;
@@ -298,8 +315,8 @@ For every declaration or command affected by translation:
   and compiler-relevant metadata, with a dedicated runtime oracle whenever
   kernel comparison cannot cover an observable behavior;
 - no result may contain unresolved metavariables or `sorryAx`;
-- its transitive axiom set must be a subset of the original declaration's axiom
-  set; and
+- each public declaration's transitive axiom set must be a subset of the
+  original declaration's axiom set; and
 - the generated source must compile with the pinned unmodified Lean kernel.
 
 Fewer axiom dependencies are allowed. Any necessary exception to the subset
@@ -548,8 +565,9 @@ discharger strategy, and simproc traces are not acceptance conditions.
    definitional-equality comparator and complete observable pre/post state.
 3. **Complete:** add declaration-value and environment-delta comparison, including opaque,
    irreducible, generated-command, and runtime-oriented cases.
-4. Revise the representative gates to transform all 17 `AddConstMap`, 33
-   `EqToHom`, 6 `Fintype/List`, and 7 `NonUnitalHom` occurrences.
+4. **Complete:** revise the representative gates to transform all 17
+   `AddConstMap`, 33 `EqToHom`, 6 `Fintype/List`, 7 `NonUnitalHom`, and 3
+   `PosPart` occurrences, with declaration/environment oracle checks.
 5. Stabilize the selector, artifact schema, failure classifications, readable
    source, local references, universes, instances, and explicit deltas from
    those measurements.
@@ -568,6 +586,6 @@ explicitly authorized unobserved paths now support the measured cases and are
 integrated in the representative translators. The deterministic manifest
 format, bounded smoke gate, and targeted old-unknown closure are in place. The
 old full-corpus eligible/excluded partition remains obsolete; the schema-2
-representative manifest is current. The immediate milestone is declaration-oracle
-coverage for every representative module before schema stabilization and
-reusable/nested corpus scaling resume.
+representative manifest is current. The declaration-oracle coverage milestone
+is complete for every representative module. The next milestone is schema and
+artifact stabilization before reusable/nested corpus scaling resumes.

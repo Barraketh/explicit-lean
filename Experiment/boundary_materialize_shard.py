@@ -820,14 +820,15 @@ def _parse_declaration_oracle(
     return report
 
 
-def _run_declaration_oracle(
-    selected: SelectedModule,
+def run_declaration_oracle(
+    module: str,
     original_path: Path,
     materialized_path: Path,
     module_root: Path,
     dylib: str,
     timeout: int,
 ) -> dict[str, Any]:
+    compiled_module = corpus.compiled_module_name(module)
     command = [
         "lake",
         "env",
@@ -835,7 +836,7 @@ def _run_declaration_oracle(
         f"--load-dynlib={dylib}",
         "--run",
         "Experiment/SimpEngineDeclarationOracle.lean",
-        selected.compiled_module,
+        compiled_module,
         str(original_path),
         str(materialized_path),
     ]
@@ -844,10 +845,10 @@ def _run_declaration_oracle(
     report_path = module_root / "declaration-oracle-report.json"
     _write_text(log_path, output)
     try:
-        oracle_report = _parse_declaration_oracle(output, selected.compiled_module)
+        oracle_report = _parse_declaration_oracle(output, compiled_module)
     except RuntimeError as error:
         raise RuntimeError(
-            f"declaration oracle protocol failed for {selected.module}: {error}; "
+            f"declaration oracle protocol failed for {module}: {error}; "
             f"see {log_path}"
         ) from error
     _atomic_write_json(report_path, oracle_report)
@@ -855,7 +856,7 @@ def _run_declaration_oracle(
         category = oracle_report.get("failureCategory")
         detail = oracle_report.get("failureDetail")
         raise RuntimeError(
-            f"declaration oracle failed for {selected.module}: "
+            f"declaration oracle failed for {module}: "
             f"{category}: {detail}; see {log_path}"
         )
     return {
@@ -976,8 +977,13 @@ def _module_result(
             f"materialized module compilation failed for {selected.module} "
             f"(exit {materialized_code}); see {module_root / 'materialized.log'}"
         )
-    declaration_oracle = _run_declaration_oracle(
-        selected, original_path, materialized_path, module_root, dylib, timeout
+    declaration_oracle = run_declaration_oracle(
+        selected.module,
+        original_path,
+        materialized_path,
+        module_root,
+        dylib,
+        timeout,
     )
     remaining = [
         entry

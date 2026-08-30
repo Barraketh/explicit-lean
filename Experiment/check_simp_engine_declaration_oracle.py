@@ -33,6 +33,8 @@ class Case:
     applied: str
     accepted: bool
     category: str | None = None
+    private_proof_counts: tuple[int, int, int] | None = None
+    detail_contains: str | None = None
 
 
 def source(body: str) -> str:
@@ -149,6 +151,51 @@ CASES = (
         True,
     ),
     Case(
+        "private-proof-helper-metadata-difference",
+        source(
+            "private theorem oraclePrivateHelper : True := True.intro\n"
+            "theorem oracleSample : True := True.intro"
+        ),
+        source(
+            "private opaque oraclePrivateHelper : True := True.intro\n"
+            "theorem oracleSample : True := True.intro"
+        ),
+        True,
+        private_proof_counts=(0, 0, 2),
+    ),
+    Case(
+        "private-proof-helper-type-difference",
+        source(
+            "private theorem oracleWarmup : True ∧ True := "
+            "⟨True.intro, True.intro⟩\n"
+            "private theorem oraclePrivateHelper : True := True.intro\n"
+            "theorem oracleSample : True := True.intro"
+        ),
+        source(
+            "private theorem oracleWarmup : True ∧ True := "
+            "⟨True.intro, True.intro⟩\n"
+            "private theorem oraclePrivateHelper : True ∧ True := "
+            "⟨True.intro, True.intro⟩\n"
+            "theorem oracleSample : True := True.intro"
+        ),
+        True,
+        private_proof_counts=(0, 0, 3),
+    ),
+    Case(
+        "private-proof-classification-mismatch",
+        source(
+            "private theorem oraclePrivateHelper : True := True.intro\n"
+            "theorem oracleSample : True := True.intro"
+        ),
+        source(
+            "private def oraclePrivateHelper : Nat := 1\n"
+            "theorem oracleSample : True := True.intro"
+        ),
+        False,
+        "declaration_set_mismatch",
+        detail_contains="private-proof classification differs",
+    ),
+    Case(
         "private-computational-omission",
         source(
             "private def oraclePrivateHelper : Nat := 1\n"
@@ -259,6 +306,24 @@ def check_case(case: Case, dylib: str, root: Path, ordinal: int) -> None:
     if case.category is not None and (not isinstance(detail, str) or not detail):
         raise RuntimeError(
             f"{case.name}: expected a failure detail, got {report};\n{completed.stdout}"
+        )
+    if case.private_proof_counts is not None:
+        actual_counts = (
+            report.get("stockOnlyPrivateProofCount"),
+            report.get("appliedOnlyPrivateProofCount"),
+            report.get("checkedDeclarationCount"),
+        )
+        if actual_counts != case.private_proof_counts:
+            raise RuntimeError(
+                f"{case.name}: expected private-proof/accounted counts "
+                f"{case.private_proof_counts}, got {actual_counts};\n{completed.stdout}"
+            )
+    if case.detail_contains is not None and (
+        not isinstance(detail, str) or case.detail_contains not in detail
+    ):
+        raise RuntimeError(
+            f"{case.name}: expected detail containing {case.detail_contains!r}, "
+            f"got {detail!r};\n{completed.stdout}"
         )
 
 
