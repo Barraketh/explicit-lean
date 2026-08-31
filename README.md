@@ -292,5 +292,11 @@ The cold certificate validator compares normal serialized compiler outputs and
 requires matching independent, audited, and paired compilations before an
 output can be published. Acceptance remains on hold pending fresh report-schema-11
 validation and certification of the translated dependency tree.
+Completed, unpublished cold certificates can optionally use
+`python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json` to share
+identical files within each source group. The helper verifies the full receipt before
+and after, retains every path and byte, and requires a single writer. Run it from
+the matching frozen project before publication. Its inode counts are not APFS
+physical allocation measurements.
 See `tracking/STATUS.md` for current provisional counts; readability follows
 complete explicit coverage.

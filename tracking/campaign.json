@@ -942,6 +942,14 @@
         ".lake/week-2026-08-31/certificate-storage-root-verification.json",
         ".lake/week-2026-08-31/translated-prefix-diagnosis-root-verification.json"
       ]
+    },
+    {
+      "at": "2026-08-31T19:10:03.310598+00:00",
+      "summary": "Promoted opt-in certificate_storage.py after two rootfix-review cycles,5focusedtests,genuine5stagecoldcertificate with24files/8inodes/16replacements, and mainCLIrepeat0replacements underproductionreceiptverification. Rootarchived everyreceiptimplementation input. No existingcone/sharedcache cleanup; invoke beforepublication onfuturecompleted certificates. Mainsequence integration committed8afe18c; forwardrecordprototype needs explicit returnedcontinuation because Leanfinally closesover pretrymutablevalue. Raw-vs-decoded strategy stillbeingisolated, so earlierraw-forward comparison didnotproveencodingdifference.",
+      "evidence": [
+        ".lake/week-2026-08-31/certificate-storage-root-verification.json",
+        ".lake/week-2026-08-31/certificate-storage-main-genuine-repeat.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1198,6 +1206,7 @@
     }
   ],
   "latestCommits": [
+    "8afe18c",
     "55f49fb",
     "f231289",
     "a17ef7f",
@@ -1323,7 +1332,7 @@
     },
     {
       "id": "certificate-storage-prototype",
-      "status": "genuine_fixture_verified_pending_main_promotion",
+      "status": "integrated_opt_in_cli_verified",
       "rootVerification": ".lake/week-2026-08-31/certificate-storage-root-verification.json",
       "helper": ".lake/certificate-storage-prototype/dedup.py",
       "focusedTests": 5,
@@ -1333,7 +1342,10 @@
       "duplicatePathsReplaced": 16,
       "repeatReplacements": 0,
       "receiptAndAllBytesPreserved": true,
-      "wholeMathlib": false
+      "wholeMathlib": false,
+      "mainHelper": "Experiment/certificate_storage.py",
+      "mainTests": "Experiment/check_certificate_storage.py",
+      "mainGenuineRepeat": ".lake/week-2026-08-31/certificate-storage-main-genuine-repeat.json"
     }
   ],
   "prototypeCoverage": {
@@ -1697,11 +1709,18 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 43674427392,
-    "checkedAt": "2026-08-31T17:36:47.331238+00:00",
-    "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
+    "lastFreeBytes": 36274622464,
+    "checkedAt": "2026-08-31T19:10:03.310598+00:00",
+    "command": "campaign_worker.py --minimum-free-bytes (default12GiB)",
+    "losslessCertificateStorage": {
+      "command": "python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json",
+      "stage": "Completed unpublished certificate only; verify before/after; callbeforepublication in futurefrozencone runner.",
+      "scope": "Exact originalbytes/alllogicalpaths; stock/appliedgroups separate; no receipt changes, no sharedpackage mutation, no automatic existingevidence cleanup.",
+      "rootVerification": ".lake/week-2026-08-31/certificate-storage-root-verification.json",
+      "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
+    }
   },
-  "updatedAt": "2026-08-31T19:07:07.725678+00:00",
+  "updatedAt": "2026-08-31T19:10:03.310598+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
