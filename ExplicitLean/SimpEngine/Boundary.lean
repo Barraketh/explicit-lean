@@ -1996,6 +1996,15 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
             mappedAnchor?.isSome))
       else
         throwError s!"boundary_comparison_unsupported_declaration_metadata:{info.name}"
+  let congruences := actions.filterMap fun action => match action with
+    | .declareCongruence name payload => some (name, payload)
+    | _ => none
+  if congruences.size == actions.size && helpers.isEmpty && matchers.isEmpty then
+    if let some (key, payload) ← encodeBoundaryCongruenceSequence?
+        basis.environment stockEnvironment basis.checkedDeclarationNames congruences then
+      return #[.realizeGroups key payload]
+  for (key, payload) in ← encodeBoundaryCachedCongruences basis.environment stockEnvironment basis.checkedDeclarationNames do
+    actions := actions.push (.realizeGroups key payload)
   let ordinaryDeclarations := actions.map boundaryEnvironmentActionName ++ helpers.map (·.name)
   let mut priorMatcherEquations : Array Name := #[]
   for (anchor, eqns) in matchers do

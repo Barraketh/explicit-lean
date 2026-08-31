@@ -52,6 +52,13 @@ invocations to their exact sources, commands, runtime hashes, nonces and logs;
 historical reports require their frozen consumers. Complete translated Mathlib
 coverage and cold certification remain pending.
 
+A bounded V2 realization sequence handles a fresh imported congruence followed
+by an authentic completed local congruence. It authenticates both descriptor
+phases and preserves exact document text, count and order; only source ranges
+are normalized to match the declaration oracle’s existing policy. The nine-call
+Unitization prototype passes fresh replay and the full oracle. Production
+rerunning and whole-tree acceptance remain separate.
+
 The repository retains schema-27 operational recording and replay as legacy
 evidence. In particular, the existing
 `simp_engine_apply` parser in `ExplicitLean/SimpEngine/Source.lean` still accepts

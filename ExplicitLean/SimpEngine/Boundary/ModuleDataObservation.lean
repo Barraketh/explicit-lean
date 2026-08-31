@@ -16,6 +16,7 @@ prelude
 public meta import Lean.Meta.Basic
 public meta import ExplicitLean.SimpEngine.Boundary.NoSynthesis
 meta import all Lean.Environment
+meta import all Lean.DocString.Extension
 meta import all Lean.LibrarySuggestions.SymbolFrequency
 meta import all Lean.LibrarySuggestions.SineQuaNon
 
@@ -57,7 +58,28 @@ private def prepareTriggers (localMap importedMap : NameMap Nat) :
         map := LibrarySuggestions.SineQuaNon.insertTrigger map trigger name tolerance
   return map
 
-private unsafe def observePrivateModuleDataImpl (env : Environment) : IO ModuleData := do
+private def moduleDocExtensionName : Name :=
+  "_private.Lean.DocString.Extension.0.Lean.moduleDocExt".toName
+
+/-- The completed source/cold declaration oracle compares module documents by
+    exact count, order and text, while DeclarationRange follows source layout.
+    Opt-in cached-congruence certificates use that same typed policy. The
+    registered extension identity guards the pinned ModuleDoc cast; suffix
+    lookalikes retain their original bytes. No environment state is changed. -/
+private unsafe def canonicalModuleDocEntries
+    (extension : PersistentEnvExtension EnvExtensionEntry EnvExtensionEntry EnvExtensionState)
+    (entries : OLeanEntries (Array EnvExtensionEntry)) : IO (OLeanEntries (Array EnvExtensionEntry)) := do
+  if extension.name != moduleDocExtensionName then return entries
+  unless extension.toEnvExtension.idx == moduleDocExt.toEnvExtension.idx &&
+      moduleDocExt.name == moduleDocExtensionName do
+    throw <| IO.userError "observed_module_doc_extension_identity"
+  let canonical (values : Array EnvExtensionEntry) := values.map fun value =>
+    let doc : ModuleDoc := unsafeCast value
+    unsafeCast ({ doc with declarationRange := default } : ModuleDoc)
+  return ⟨canonical entries.exported, canonical entries.server, canonical entries.private⟩
+
+private unsafe def observePrivateModuleDataImpl (env : Environment)
+    (canonicalModuleDocs := false) : IO ModuleData := do
   let env := env.setExporting false
   let extensions ← persistentEnvExtensionsRef.get
   let mut localMap? : Option (NameMap Nat) := none
@@ -86,7 +108,9 @@ private unsafe def observePrivateModuleDataImpl (env : Environment) : IO ModuleD
         let importedMap ← importedFrequency env
         let triggers ← runExportMeta env (prepareTriggers localMap importedMap)
         pure <| OLeanEntries.uniform #[unsafeCast triggers]
-    else pure <| extension.exportEntriesFn env state
+    else do
+      let entries := extension.exportEntriesFn env state
+      if canonicalModuleDocs then canonicalModuleDocEntries extension entries else pure entries
     allEntries := allEntries.push (extension.name, entries)
   let filterNonEmpty (level : OLeanLevel) :=
     allEntries.filterMap fun (name, entries) => do
@@ -102,8 +126,9 @@ private unsafe def observePrivateModuleDataImpl (env : Environment) : IO ModuleD
 /-- Private export data with the pinned LibrarySuggestions frequency/trigger export
 computations performed without writing their global caches. All other extension
 callbacks are retained unchanged and may write these or other caches; this does
-not assert their observational purity. -/
+not assert their observational purity. ModuleDoc ranges are canonicalized only
+when explicitly requested; default observations retain their raw entries. -/
 @[implemented_by observePrivateModuleDataImpl]
-opaque observePrivateModuleData (env : Environment) : IO ModuleData
+opaque observePrivateModuleData (env : Environment) (canonicalModuleDocs := false) : IO ModuleData
 
 end ExplicitLean.SimpEngine.Boundary

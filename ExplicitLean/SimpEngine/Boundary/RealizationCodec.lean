@@ -3,12 +3,14 @@ prelude
 
 public meta import ExplicitLean.SimpEngine.Boundary.ModuleDataObservation
 public meta import ExplicitLean.SimpEngine.Boundary.EquationCodec
+public meta import ExplicitLean.SimpEngine.Boundary.CongruenceCodec
 public meta import ExplicitLean.SimpEngine.Boundary.MatcherCodec
 public meta import Lean.Meta.Tactic.AuxLemma
 public meta import ExplicitLean.SimpEngine.Boundary.SparseCasesCodec
 meta import all Lean.Environment
 meta import all Lean.Meta.Basic
 meta import all ExplicitLean.SimpEngine.Boundary.EquationCodec
+meta import all ExplicitLean.SimpEngine.Boundary.CongruenceCodec
 meta import all ExplicitLean.SimpEngine.Boundary.MatcherCodec
 
 public meta section
@@ -120,14 +122,14 @@ private def memberEnvironment (env : Environment) (member : AsyncConst) : IO Env
       «public» := { env.base.public with extensions } } }
 
 private def memberMetadata (env : Environment) (member : AsyncConst)
-    (requireEmptyAux := true) : MetaM Json := do
+    (requireEmptyAux := true) (canonicalModuleDocs := false) : MetaM Json := do
   let view ← memberEnvironment env member
   let aux := auxLemmasExt.getState view
   -- The first bounded group contract admits no auxiliary proof cache effects.
   unless !requireEmptyAux || aux.lemmas.isEmpty do throwError "activation_nonempty_aux_cache"
   let matchState := boundaryMatchStateJson (Match.matchEqnsExt.getState view)
   let eqnState := equationStateJson (eqnsExt.getState view)
-  let data ← observePrivateModuleData view
+  let data ← observePrivateModuleData view canonicalModuleDocs
   let mut entries := #[]
   for (name, values) in data.entries.qsort (fun a b => Name.quickLt a.1 b.1) do
     -- The same three diagnostic/private-proof bookkeeping exceptions used by
@@ -702,7 +704,7 @@ private def sameAsyncObject (a b : AsyncConst) : Bool := unsafe ptrEq a b
 
 private def asyncAddress (a : AsyncConst) : USize := unsafe ptrAddrUnsafe a
 
-private partial def localDagNode (env : Environment) (member : AsyncConst) (auxiliary := false) :
+private partial def localDagNode (env : Environment) (member : AsyncConst) (auxiliary := false) (canonicalModuleDocs := false) :
     StateT LocalDagState MetaM Nat := do
   if let some position := (← get).memoIndex[asyncAddress member]? then
     let some (other, index) := (← get).memo[position]?
@@ -726,7 +728,7 @@ private partial def localDagNode (env : Environment) (member : AsyncConst) (auxi
     | none => pure Json.null
     | some task => do
       unless ← IO.hasFinished task do throwError "boundary_local_cached_pending_extensions"
-      let .arr metadata ← memberMetadata env member (requireEmptyAux := !auxiliary)
+      let .arr metadata ← memberMetadata env member (requireEmptyAux := !auxiliary) canonicalModuleDocs
         | throwError "boundary_local_aux_metadata_shape"
       if auxiliary then pure <| Json.arr (metadata.push (← localAuxCacheJson env member))
       else pure <| Json.arr metadata
@@ -746,11 +748,11 @@ private partial def localDagNode (env : Environment) (member : AsyncConst) (auxi
       throwError "boundary_local_cached_graph_duplicate"
     seen := seen.insert name
     normalizedSeen := normalizedSeen.insert normalizedName
-    let childId ← localDagNode env child auxiliary
+    let childId ← localDagNode env child auxiliary canonicalModuleDocs
     let some mapped := children.map.find? name | throwError "boundary_local_cached_graph_map"
     let some normalized := children.normalizedTrie.find? normalizedName
       | throwError "boundary_local_cached_graph_trie"
-    unless (← localDagNode env mapped auxiliary) == childId && (← localDagNode env normalized auxiliary) == childId do
+    unless (← localDagNode env mapped auxiliary canonicalModuleDocs) == childId && (← localDagNode env normalized auxiliary canonicalModuleDocs) == childId do
       throwError "boundary_local_cached_graph_lookup_conflict"
     refs := refs.push childId
   let node := Json.arr #[signature, .bool member.isRealized, metadata, toJson refs]
@@ -784,7 +786,8 @@ private def localOwnerWitness (env : Environment) (owner : Name) : MetaM Json :=
     represented. Persistent metadata retains the existing three diagnostic
     exclusions; this introduces no new extension or descriptor exemption. -/
 private def localCachedDescriptor (env : Environment) (owner key : Name)
-    (auxiliary := false) : MetaM Json := do
+    (auxiliary := false) (canonicalModuleDocs := false) : MetaM Json := do
+  unless !canonicalModuleDocs || auxiliary do throwError "boundary_local_docs_require_auxiliary"
   discard <| localOwnerWitness env owner
   let result ← completedCacheResult env owner key
   let [member] := result.newConsts.private | throwError "boundary_local_cached_group_shape"
@@ -803,8 +806,8 @@ private def localCachedDescriptor (env : Environment) (owner key : Name)
       publicInfo.levelParams == info.levelParams && Expr.equal publicInfo.type info.type do
     throwError "boundary_local_cached_public_interface"
   let (roots, state) ← (do
-    let privateRoot ← localDagNode env member auxiliary
-    let publicRoot ← localDagNode env publicMember auxiliary
+    let privateRoot ← localDagNode env member auxiliary canonicalModuleDocs
+    let publicRoot ← localDagNode env publicMember auxiliary canonicalModuleDocs
     pure (privateRoot, publicRoot)).run { checked := ← IO.wait env.checked }
   if !auxiliary then
     return .arr #[.str "completed_local_cached_v1", encodeBoundaryName owner,
@@ -828,9 +831,63 @@ private def localCachedDescriptor (env : Environment) (owner key : Name)
       let some index := references[oldIndex]? | throwError "boundary_local_aux_entry_bounds"
       return Json.arr (fields.set! 5 (toJson index))
     return Json.arr (fields.set! 2 (.arr (metadata.set! 4 (.arr entries))))
-  return .arr #[.str "completed_local_cached_aux_v1", encodeBoundaryName owner,
+  return .arr #[.str (if canonicalModuleDocs then "completed_local_cached_aux_docs_v1" else "completed_local_cached_aux_v1"), encodeBoundaryName owner,
     encodeBoundaryName key, .arr nodes, toJson roots.1, toJson roots.2,
     .arr (order.map fun index => state.auxProofs[index]!.2)]
+
+/-- Completed local congruences can be checked already while still absent from
+    the caller branch. Their activation remains an observable realization. -/
+def encodeBoundaryCachedCongruences (before stock : Environment) (checkedBefore : NameSet) :
+    MetaM (Array (Name × String)) := do
+  let mut result := #[]
+  for key in ← branchDelta before stock do
+    if !checkedBefore.contains key then continue
+    let owner := key.getPrefix
+    if stock.isImportedConst owner then continue
+    let some kinds := congrKindsExt.find? stock key | continue
+    let some (.thmInfo thm) := stock.checked.get.find? key
+      | throwError "boundary_cached_congruence_root_kind"
+    unless !isPrivateName key && (← branchDelta before stock true).contains key do
+      throwError "boundary_cached_congruence_visibility"
+    unless (← branchDelta before stock) == #[key] do
+      throwError "boundary_cached_congruence_requires_sequence"
+    let witness ← withEnv before <| localOwnerWitness before owner
+    unless witness == (← withEnv stock <| localOwnerWitness stock owner) do
+      throwError "boundary_cached_congruence_owner_changed"
+    let descriptor ← withEnv before <| localCachedDescriptor before owner key true true
+    let stockDescriptor ← withEnv stock <| localCachedDescriptor stock owner key true true
+    unless descriptor == stockDescriptor do
+      throwError "boundary_cached_congruence_descriptor_changed"
+    let source ← withEnv stock <| encodeBoundaryCongruence owner thm kinds
+    let payload := Json.arr #[.str "boundary_local_cached_congruence_v2", .bool true,
+      nameArrayJson #[key], nameArrayJson #[key],
+      boundaryMatchStateJson (Match.matchEqnsExt.getState before),
+      boundaryMatchStateJson (Match.matchEqnsExt.getState stock),
+      equationStateJson (eqnsExt.getState before), equationStateJson (eqnsExt.getState stock),
+      boundarySparseCacheJson before, boundarySparseCacheJson stock,
+      .arr #[encodeBoundaryName owner, encodeBoundaryName key, witness, descriptor, .str source]]
+    result := result.push (key, payload.compress)
+  return result
+
+private def executeLocalCachedCongruenceRoot (owner key : Name) (witness descriptor : Json)
+    (congruenceSource : String) (canonicalModuleDocs := false) : MetaM Unit := do
+  let before ← getEnv
+  unless !isPrivateName key && key.getPrefix == owner && !before.containsOnBranch key do
+    throwError "boundary_cached_congruence_identity"
+  let (congruenceOwner, _, _) ← ofExcept (parseCongruencePayload congruenceSource)
+  unless congruenceOwner == owner do throwError "boundary_cached_congruence_owner"
+  validateCongruenceAnchor owner key
+  unless (← localOwnerWitness before owner) == witness do
+    throwError "boundary_cached_congruence_owner_conflict"
+  unless (← localCachedDescriptor before owner key true canonicalModuleDocs) == descriptor do
+    throwError "boundary_cached_congruence_descriptor_conflict"
+  realizeBoundaryConst owner key (throwError "boundary_cached_congruence_forbidden_callback")
+  unless (← localCachedDescriptor (← getEnv) owner key true canonicalModuleDocs) == descriptor do
+    throwError "boundary_cached_congruence_descriptor_changed"
+  -- The authentic cached activation supplied the declaration. The ordinary
+  -- congruence checker now validates its exact checked body and argument kinds.
+  unless (← getEnv).containsOnBranch key do throwError "boundary_cached_congruence_missing_root"
+  executeBoundaryCongruence key congruenceSource
 
 private def encodeLocalCachedBatch? (before stock : Environment) (checkedBefore : NameSet)
     (equations matchers : Array (Name × String)) : MetaM (Option (Name × String)) := do
@@ -900,7 +957,8 @@ private def executeLocalCachedBatch (anchor : Name) (source : String) : MetaM Un
       matchBefore, matchAfter, eqnsBefore, eqnsAfter, sparseBefore, sparseAfter,
       .arr #[ownerJson, keyJson, witness, descriptor, .str equationSource]] ← ofExcept (Json.parse source)
     | throwError "boundary_local_cached_invalid_payload"
-  unless tag == "boundary_local_cached_v1" || tag == "boundary_local_cached_aux_v1" do
+  unless tag == "boundary_local_cached_v1" || tag == "boundary_local_cached_aux_v1" ||
+      tag == "boundary_local_cached_congruence_v1" || tag == "boundary_local_cached_congruence_v2" do
     throwError "boundary_local_cached_invalid_version"
   let auxiliary := tag == "boundary_local_cached_aux_v1"
   let owner ← ofExcept (decodeBoundaryName ownerJson)
@@ -912,7 +970,10 @@ private def executeLocalCachedBatch (anchor : Name) (source : String) : MetaM Un
   unless boundaryMatchStateJson (Match.matchEqnsExt.getState before) == matchBefore &&
       equationStateJson (eqnsExt.getState before) == eqnsBefore && boundarySparseCacheJson before == sparseBefore do
     throwError "boundary_local_cached_before"
-  executeLocalCachedRoot owner key witness descriptor equationSource auxiliary
+  if tag == "boundary_local_cached_congruence_v1" || tag == "boundary_local_cached_congruence_v2" then
+    executeLocalCachedCongruenceRoot owner key witness descriptor equationSource (tag == "boundary_local_cached_congruence_v2")
+  else
+    executeLocalCachedRoot owner key witness descriptor equationSource auxiliary
   let after ← getEnv
   unless (← branchDelta before after) == #[key] && (← branchDelta before after true) == #[key] &&
       boundaryMatchStateJson (Match.matchEqnsExt.getState after) == matchAfter &&
@@ -1076,7 +1137,9 @@ def executeBoundaryRealizationBatch (expectedAnchor : Name) (source : String) : 
   match json with
   | .arr values =>
     if values[0]? == some (.str "boundary_local_cached_v1") ||
-        values[0]? == some (.str "boundary_local_cached_aux_v1") then
+        values[0]? == some (.str "boundary_local_cached_aux_v1") ||
+        values[0]? == some (.str "boundary_local_cached_congruence_v1") ||
+        values[0]? == some (.str "boundary_local_cached_congruence_v2") then
       executeLocalCachedBatch expectedAnchor source
     else if values[0]? == some (.str "boundary_realization_batch_v2") then
       executeBoundaryRealizationBatchV2 expectedAnchor source
@@ -1090,6 +1153,10 @@ def boundaryRealizationBatchMembers (source : String) : MetaM (Bool × Array Nam
     | .arr #[.str "boundary_local_cached_v1", .bool true, privateNames, publicNames,
         _, _, _, _, _, _, _]
     | .arr #[.str "boundary_local_cached_aux_v1", .bool true, privateNames, publicNames,
+        _, _, _, _, _, _, _]
+    | .arr #[.str "boundary_local_cached_congruence_v1", .bool true, privateNames, publicNames,
+        _, _, _, _, _, _, _]
+    | .arr #[.str "boundary_local_cached_congruence_v2", .bool true, privateNames, publicNames,
         _, _, _, _, _, _, _] => pure (true, privateNames, publicNames)
     | .arr #[.str "boundary_realization_batch_v1", .bool cached, privateNames, publicNames,
         _, _, _, _, _, _, _] => pure (cached, privateNames, publicNames)

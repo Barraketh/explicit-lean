@@ -384,12 +384,12 @@
     }
   ],
   "nextActions": [
-    "Finish forward-applied recorder diagnosis: preserve exact state/generator checks and identify remaining ExtraModUses dependency deltas before integrating any mode/report contract changes.",
-    "Decouple scope analysis from replay-engine imports and builds in an isolated prototype, compare fresh representative201-module scope results before designing stable analysis cache identity. Never rebind old provenance hashes.",
-    "Fresh schema11 inventory is independently verified (8260modules83414calls); preserve separately tracked4modules11calls/66totalreusable5unresolved obligations. Prepare new frozen bounded workers only after old live leases end and runtime/manifest identities agree.",
-    "Use current failure/throughput review to select high-yield families; obtain fresh witnesses for auxiliary-name generator effect and Cubic missing-cover family. Keep strict guards.",
+    "Run freshly frozen production report12 Unitization shard after V2 cached-congruence integration; preserve bounded private controls and zero whole-tree acceptance.",
+    "Integrate verified two-line scope import decoupling; implement content-bound analysis checkpoint identity so replay changes do not force repeated full scope analysis. Never rebind old provenance hashes.",
+    "Implement bounded ordered fresh-local-equation then cached-local-equation realization for Cubic aa693119975056ee; preserve complete owner/descriptor/state/generator checks.",
+    "Freeze current runtime and generate fresh complete manifest with reusable analysis checkpoints, then resume bounded indexed production workers; old schema10 worker ended and old reports remain provisional.",
     "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and complete source/execution ownership.",
-    "Invoke optional certificate storage only after complete frozen-runtime cold certification and before publication; it does not itself establish source-comment provenance.",
+    "Assemble translated dependency tree and cold-certify outputs; invoke optional certificate storage only before publication after complete validation.",
     "After complete explicit coverage and translated-tree acceptance, mine readable normal forms and other common tactics if time remains."
   ],
   "checkpoints": [
@@ -994,6 +994,13 @@
     {
       "at": "2026-08-31T20:02:00.989443+00:00",
       "summary": "Report12 integrated Python, default applied recording, exact canonical actualnative runtime/command/source/cwd/nonces/log bindings for all3processes. Oracle builds before receipt and invokes actualbinary directly. Main6puretests incl producerorder and4existingvalidators/23fullconsumertamperingcontrols pass; actualfreshschema12nativepipeline pending. Corpusacceptedcoverage unchanged0. Actualrebuiltanalysis201outputs nowequal06f07b...; explicit4excludedcontrols stillrunning. Unitization18docmetadata leaves typeddecoded only+20line range shifts with exacttext; opt-in normalizer approved consistent with existing fulloracle moduleDoc policy, inprivate Solfix-review."
+    },
+    {
+      "at": "2026-08-31T20:13:45.734595+00:00",
+      "id": "cached-congruence-v2-and-production12-smoke",
+      "status": "bounded_verified",
+      "verification": ".lake/week-2026-08-31/congruence-doc-policy-root-verification.json",
+      "note": "Main31-job Lean build, six schema12 tests and four full Python validators pass. Unitization9-call private pipeline and45unique invocation receipts verified; fresh main production rerun pending. Separate production12 two-module26-call smoke fully revalidated. Whole-corpus acceptance unchanged."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1786,7 +1793,33 @@
       "fullConsumerTamperingControls": 23,
       "sourceFileBindings": ".lake/week-2026-08-31/schema12-integration-files.json",
       "wholeMathlib": false,
-      "acceptedCampaignCoverage": false
+      "acceptedCampaignCoverage": false,
+      "productionSmoke": {
+        "reportSha256": "5164e0121101e84086425d0fa039e2b06dabd3c30ff96f9b9a27f5b546fad145",
+        "rootVerification": ".lake/week-2026-08-31/schema12-smoke-root-verification.json",
+        "modules": 2,
+        "sourceCalls": 26,
+        "variants": 31,
+        "nativeInvocations": 6,
+        "status": "full_production_consumer_independently_verified",
+        "wrapperLimitation": "Extra postcondition used missing totalOccurrences field after production run succeeded; original wrapper error retained, independent verifier checks actual totalCount=26 and all evidence.",
+        "acceptedCampaignCoverage": false
+      }
+    },
+    "cachedCongruenceSequence": {
+      "status": "integrated_bounded_v2_production_rerun_pending",
+      "handoffManifestSha256": "fc7dde4f31595835845a193fa1a6105d6dd107655860eed08897db136002cf5f",
+      "rootVerification": ".lake/week-2026-08-31/congruence-doc-policy-root-verification.json",
+      "mainBuild": ".lake/congruence-doc-policy-main-build.log",
+      "mainBuildJobs": 31,
+      "boundedModule": "Mathlib/Algebra/Algebra/Subalgebra/Unitization.lean",
+      "sourceCalls": 9,
+      "runtimeNegativeControls": 11,
+      "wireCases": 12,
+      "legacyLocalProcesses": 20,
+      "legacyWireNegatives": 15,
+      "sourceRangePolicy": "V2 canonicalizes only exact registered moduleDocExt DeclarationRange; exact text/count/order retained. Existing default/raw V1 contracts unchanged.",
+      "wholeMathlib": false
     }
   },
   "failureTriage": {
@@ -1821,7 +1854,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T20:02:00.989443+00:00",
+  "updatedAt": "2026-08-31T20:13:45.734595+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
