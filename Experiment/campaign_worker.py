@@ -32,6 +32,7 @@ from translation_index import (
     claim_work,
     connect,
     import_manifest,
+    order_retryable,
     plan_work,
     record_result,
 )
@@ -257,6 +258,11 @@ def run_worker(
     manifest_path, manifest_bytes, manifest_value, manifest_hash = _read_manifest(manifest)
     materializer.verify_implementation_hashes(manifest_value)
     selected, skipped_empty = _selected_modules(manifest_value, modules)
+    manifest_order = {
+        raw["module"]: index
+        for index, raw in enumerate(manifest_value["modules"])
+        if isinstance(raw, dict) and isinstance(raw.get("module"), str)
+    }
     output = Path(output_root).resolve()
     manifest_location = Path(manifest).absolute()
     if manifest_location.is_relative_to(output) or manifest_path.is_relative_to(output):
@@ -327,6 +333,8 @@ def run_worker(
                 skipped_verified += 1
             else:
                 retryable.append(module)
+        if retry_failed:
+            retryable = order_retryable(connection, retryable, manifest_order=manifest_order)
         if max_modules is not None:
             retryable = retryable[:max_modules]
         planned = plan_work(

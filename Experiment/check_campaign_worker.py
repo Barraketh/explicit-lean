@@ -264,6 +264,30 @@ class CampaignWorkerTests(unittest.TestCase):
         self.assertEqual(second["processed"], 1)
         self.assertEqual(calls, ["Mathlib/A.lean", "Mathlib/B.lean", "Mathlib/C.lean"])
 
+    def test_retry_limit_does_not_starve_never_attempted_modules(self) -> None:
+        manifest = self.manifest_many(["A", "B", "C", "D"])
+        calls: list[str] = []
+
+        def invoke(path, output, module, timeout):
+            calls.append(module)
+            if module.endswith("A.lean"):
+                return 1, "persistent failure"
+            output.write_text(json.dumps(self.fake_report(
+                manifest, module, unobserved=module.endswith("B.lean")
+            )), encoding="utf-8")
+            return 0, "ok"
+
+        first = self.run_fixture(manifest, invoke, max_modules=2)
+        self.assertEqual(first["processed"], 2)
+        second = self.run_fixture(manifest, invoke, max_modules=2, retry_failed=True)
+        self.assertEqual(second["processed"], 2)
+        self.assertEqual(calls, [
+            "Mathlib/A.lean", "Mathlib/B.lean", "Mathlib/C.lean", "Mathlib/D.lean",
+        ])
+        third = self.run_fixture(manifest, invoke, max_modules=2, retry_failed=True)
+        self.assertEqual(third["processed"], 2)
+        self.assertEqual(calls[-2:], ["Mathlib/A.lean", "Mathlib/B.lean"])
+
     def test_budget_denial_and_default_empty_module_skip(self) -> None:
         manifest = self.manifest(empty=True)
         with mock.patch.object(worker, "MATHLIB", self.root), \

@@ -907,6 +907,45 @@ def plan_work(
     return planned
 
 
+def order_retryable(
+    connection: sqlite3.Connection, modules: Sequence[str],
+    *, manifest_order: Mapping[str, int] | None = None,
+) -> list[str]:
+    """Order bounded retry work so repeated failures cannot starve fresh work.
+
+    Modules with no recorded attempt are placed first.  Previously attempted
+    modules are then ordered by their attempt count and oldest attempt, with
+    manifest order (when supplied) as the final stable tie-breaker.  Keeping
+    module names out of the tie-breaker makes ordering independent of naming.
+    """
+    indexed = {module: index for index, module in enumerate(modules)}
+    if len(indexed) != len(modules):
+        raise IndexError("retry ordering modules must be unique")
+    if not indexed:
+        return []
+    placeholders = ",".join("?" for _ in modules)
+    rows = connection.execute(
+        "SELECT q.module, q.attempt_count, MIN(a.started_at) AS oldest_attempt "
+        "FROM work_queue q LEFT JOIN attempts a ON a.module=q.module "
+        f"WHERE q.module IN ({placeholders}) GROUP BY q.module",
+        tuple(modules),
+    ).fetchall()
+    details = {
+        row["module"]: (int(row["attempt_count"]), row["oldest_attempt"])
+        for row in rows
+    }
+    return sorted(
+        modules,
+        key=lambda module: (
+            0 if details.get(module, (0, None))[0] == 0 else 1,
+            details.get(module, (0, None))[0],
+            details.get(module, (0, None))[1] is not None,
+            details.get(module, (0, None))[1] if details.get(module, (0, None))[1] is not None else 0,
+            (manifest_order or {}).get(module, indexed[module]),
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class Lease:
     attempt_id: int
