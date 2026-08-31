@@ -959,6 +959,15 @@
         ".lake/week-2026-08-31/schema11-inventory-root-verification.json",
         ".lake/forward-recording-independent-review.md"
       ]
+    },
+    {
+      "at": "2026-08-31T19:32:43.475436+00:00",
+      "summary": "Root verified initialforwardhandoff3024hashes13persistedinvocations:8controls andexact20ExtraModUses differences, nofullpassforoldcandidate. SharedTacticdispatcher newcandidatefullExtra replay/oracle passed168decl120public44extensions24calls(23roots+1covered), but laterfinalrun invalidatedbyconcurrentPythonedit; exact5fielddelta archivedandrestored. Repeatingall12controls/fullrununderexclusiveSolownership. Separate schema12Pythonworktree preparedbyroot. FreshUnitization1734864 trace provesmissingalreadychecked localcongruenceactivation, not an arbitrarycounterstep; exactcachedcongruenceprototypecurrentlyfailsstrictbefore/stockdescriptor equality. Noacceptedcoveragechange.",
+      "evidence": [
+        ".lake/week-2026-08-31/forward-recording-root-verification.json",
+        ".lake/week-2026-08-31/dispatcher-concurrent-write/restoration.json",
+        ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype/.lake/aux-generator-diagnosis-frozen-ngaviqxn/manifest.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1362,6 +1371,14 @@
       "mainTests": "Experiment/check_certificate_storage.py",
       "mainGenuineRepeat": ".lake/week-2026-08-31/certificate-storage-main-genuine-repeat.json",
       "commit": "7bd0092"
+    },
+    {
+      "id": "cached-local-congruence-activation",
+      "status": "strict_descriptor_difference_under_diagnosis",
+      "snapshot": ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype",
+      "witnessManifestSha256": "34aff3098527adc556b9613596181f505cd9c0692e44a73ee46e1b2cbd917b9c",
+      "finding": "Unitization1734864b48394331 stock/capture realize StarAlgHom.codRestrict.congr_simp plus prechecked/offbranch NonUnitalStarSubalgebra.unitization.congr_simp; replay onlyfirst. Pre/stock/appliedgeneratorindices1/3/2. No generatorpatch proposed; missingcheckedactivation needs exactauthenticcachewitness. Balancefocusedcurrentcheckmatchesgenerator3; Bilinearfails earlieractivation_nonempty_aux_cache.",
+      "acceptedCampaignCoverage": false
     }
   ],
   "prototypeCoverage": {
@@ -1736,7 +1753,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T19:16:08.141328+00:00",
+  "updatedAt": "2026-08-31T19:32:43.475436+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
