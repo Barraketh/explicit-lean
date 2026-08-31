@@ -111,10 +111,18 @@ def record(work: Path, dylib: str, *, failure: bool = False) -> dict:
 
 
 def select(report: dict, *, outcome: str | None = None, duplicate: bool = False) -> str:
-    branch = (
-        f'      | "{OCCURRENCE}" {source.format_selector_values(report)} => '
-        + (outcome if outcome is not None else source.format_variant_outcome(report, "        "))
-    )
+    if report["status"] == "failure":
+        branch = (
+            f'      | "{OCCURRENCE}" {source.format_selector_values(report)} => '
+            + (outcome if outcome is not None else "failure")
+        )
+    else:
+        generator = source.format_stock_generator(report)
+        branch = (
+            f'      | "{OCCURRENCE}" {source.format_selector_values(report)} '
+        f'@@ {generator} => '
+            + (outcome if outcome is not None else source.format_variant_outcome(report, "        "))
+        )
     return ("simp_engine_boundary_select " + source.format_artifact_header(report)
             + "\n" + branch + ("\n" + branch if duplicate else ""))
 
@@ -122,6 +130,37 @@ def select(report: dict, *, outcome: str | None = None, duplicate: bool = False)
 def lean_matrix(work: Path, dylib: str) -> None:
     success = record(work, dylib)
     failure = record(work, dylib, failure=True)
+    # The post-stock generator is an authenticated structural witness. Exercise
+    # its Python fail-closed shape checks before rendering any replay source.
+    for label, mutate, fragment in (
+        ("missing-generator", lambda report: report.pop("stockGenerator"),
+         "success artifact has invalid fields"),
+        ("boolean-index", lambda report: report["stockGenerator"].update(idx=True),
+         "stockGenerator.idx must be an integer"),
+        ("malformed-name", lambda report: report["stockGenerator"].update(namePrefix=[["bad", "x"]]),
+         "namePrefix component tag is invalid"),
+        ("boolean-parent", lambda report: report["stockGenerator"].update(parentIdxs=[True]),
+         "parentIdxs[0] must be an integer"),
+    ):
+        mutated = copy.deepcopy(success)
+        mutate(mutated)
+        try:
+            protocol.validate_report(mutated, OCCURRENCE, MODULE)
+        except RuntimeError as error:
+            if fragment not in str(error):
+                raise RuntimeError(f"{label}: expected {fragment!r}, got {error}") from error
+        else:
+            raise RuntimeError(f"{label}: malformed stock generator was accepted")
+    print("post-generator protocol mutations: malformed structural witnesses rejected: ok", flush=True)
+
+    mismatched = copy.deepcopy(success)
+    mismatched["stockGenerator"]["idx"] += 1
+    valid_select = select(success)
+    valid_branch = valid_select.split("\n", 1)[1]
+    generator_marker = " @@ " + source.format_stock_generator(success) + " =>"
+    missing_sibling = valid_branch.replace(generator_marker, " =>", 1)
+    witnessed_failure_branch = valid_branch.split(" => ", 1)[0] + " => failure"
+    witnessed_failure = valid_select.split("\n", 1)[0] + "\n" + witnessed_failure_branch
     missing = copy.deepcopy(success)
     missing["selector"]["preState"]["targetFingerprint"] = "unrecorded-target"
     encoded_true = json.dumps(["expr_dag_v2", 0, [["c", [["s", "True"]], []]], 0])
@@ -131,6 +170,12 @@ def lean_matrix(work: Path, dylib: str) -> None:
     same = f"({q(encoded_true)} ==> {q(encoded_true)})"
     cases = [
         ("valid-replay", select(success), False, "first", None),
+        ("mismatched-generator", select(mismatched), False, "first",
+         "boundary_replay_post_generator_mismatch"),
+        ("missing-generator-sibling", valid_select + "\n" + missing_sibling,
+         False, "first", "boundary success is missing a stock generator"),
+        ("witnessed-failure", witnessed_failure, False, "first",
+         "boundary failure must not carry a stock generator"),
         ("recorded-failure", select(failure), True, "first", None),
         ("missing", select(missing), False, "first", "boundary_variant_missing"),
         ("ambiguous", select(success, duplicate=True), False, "first", "ambiguous_boundary_variant"),
@@ -182,6 +227,19 @@ def lean_matrix(work: Path, dylib: str) -> None:
             "log": str(log), "logSha256": materializer.sha256(log.read_bytes()),
         })
         print(f"replay abort Lean matrix: {name}: ok", flush=True)
+    ordinary = write_fixture(
+        work, "ordinary-stock-generator-identifier",
+        """module
+import ExplicitLean.SimpEngine.Boundary.Tactic
+
+def stock_generator (x : Nat) : Nat := x
+theorem ordinaryStockGeneratorIdentifier : stock_generator 1 = 1 := by rfl
+""",
+    )
+    output = source.compile_source(dylib, ordinary)
+    if "error" in output.lower():
+        raise RuntimeError("ordinary stock_generator identifier failed to compile\n" + output)
+    print("stock_generator ordinary identifier parser regression: ok", flush=True)
     (work / "matrix.json").write_text(json.dumps(evidence, indent=2) + "\n")
 
 

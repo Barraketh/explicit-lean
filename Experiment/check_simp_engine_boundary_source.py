@@ -26,6 +26,7 @@ from boundary_protocol import (
     reject_forbidden_generated_text,
     validate_report,
     validate_environment_actions,
+    validate_stock_generator,
 )
 
 
@@ -530,6 +531,14 @@ def format_variant_outcome(
     return " ".join(parts)
 
 
+def format_stock_generator(report: dict[str, object]) -> str:
+    """Render the structural post-stock generator in the branch preamble."""
+    stock_generator = validate_stock_generator(report["stockGenerator"])
+    return lean_string(
+        json.dumps(stock_generator, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
+    )
+
+
 def format_report_variants(
     reports: list[dict[str, object]], continuation_indent: str = "  "
 ) -> str:
@@ -555,15 +564,17 @@ def format_report_variants(
     parts = ["simp_engine_boundary_select"]
     parts.append(format_artifact_header(reports[0]))
     for report in reports:
-        parts.append(
+        branch = (
             continuation_indent
             + "| "
             + lean_string(str(report["occurrence"]))
             + " "
             + format_selector_values(report)
-            + " => "
-            + format_variant_outcome(report, artifact_indent)
         )
+        if report["status"] == "success":
+            branch += " @@ " + format_stock_generator(report)
+        branch += " => " + format_variant_outcome(report, artifact_indent)
+        parts.append(branch)
     return "\n".join(parts)
 
 

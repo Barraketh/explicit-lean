@@ -27,7 +27,7 @@ from boundary_expr_codec import (
 # Keep these values synchronized with the public constants in
 # ExplicitLean/SimpEngine/Boundary/Apply.lean.
 ARTIFACT_KIND = "simp_engine_boundary_artifact"
-ARTIFACT_SCHEMA = 3
+ARTIFACT_SCHEMA = 4
 SEMANTIC_CONTRACT = "boundary-observable-v1"
 SELECTOR_SCHEMA = 2
 
@@ -83,6 +83,7 @@ SUCCESS_REPORT_FIELDS = frozenset(
         "occurrence",
         "selector",
         "status",
+        "stockGenerator",
         "terminal",
         "encoding",
         "stateDeltas",
@@ -91,6 +92,37 @@ SUCCESS_REPORT_FIELDS = frozenset(
         "target",
     }
 )
+
+GENERATOR_FIELDS = frozenset({"namePrefix", "idx", "parentIdxs"})
+
+
+def validate_stock_generator(
+    value: object, label: str = "artifact stockGenerator"
+) -> dict[str, object]:
+    """Validate the structural post-stock DeclNameGenerator witness."""
+    if not isinstance(value, dict) or set(value) != GENERATOR_FIELDS:
+        raise RuntimeError(f"{label} has invalid fields: {value!r}")
+    prefix = value["namePrefix"]
+    if not isinstance(prefix, list):
+        raise RuntimeError(f"{label}.namePrefix must be a structural Name array: {prefix!r}")
+    for position, part in enumerate(prefix):
+        if not isinstance(part, list) or len(part) != 2:
+            raise RuntimeError(f"{label}.namePrefix[{position}] is invalid: {part!r}")
+        if part[0] == "s":
+            if not isinstance(part[1], str):
+                raise RuntimeError(f"{label}.namePrefix string component is invalid: {part!r}")
+        elif part[0] == "n":
+            if not isinstance(part[1], int) or isinstance(part[1], bool) or part[1] < 0:
+                raise RuntimeError(f"{label}.namePrefix numeric component is invalid: {part!r}")
+        else:
+            raise RuntimeError(f"{label}.namePrefix component tag is invalid: {part!r}")
+    _require_int(value["idx"], f"{label}.idx", nonnegative=True)
+    parents = value["parentIdxs"]
+    if not isinstance(parents, list):
+        raise RuntimeError(f"{label}.parentIdxs must be an array: {parents!r}")
+    for position, parent in enumerate(parents):
+        _require_int(parent, f"{label}.parentIdxs[{position}]", nonnegative=True)
+    return value
 FAILURE_REPORT_FIELDS = frozenset(
     {"kind", "schema", "semanticContract", "occurrence", "selector", "status"}
 )
@@ -402,6 +434,7 @@ def validate_report(
 
     if set(report) != SUCCESS_REPORT_FIELDS:
         raise RuntimeError(f"success artifact has invalid fields: {report!r}")
+    validate_stock_generator(report["stockGenerator"])
     terminal = report["terminal"]
     if not isinstance(terminal, str) or terminal not in TERMINALS:
         raise RuntimeError(f"artifact has invalid terminal: {terminal!r}")

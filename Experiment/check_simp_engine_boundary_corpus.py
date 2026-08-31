@@ -495,6 +495,7 @@ def validate_occurrence_protocol() -> None:
                 "caller": None,
             },
             "status": "success",
+            "stockGenerator": {"namePrefix": [], "idx": 0, "parentIdxs": []},
             "terminal": terminal,
             "encoding": {
                 "terms": "lean_expr_dag_v2",
@@ -1076,6 +1077,7 @@ def validate_shard_report_protocol() -> None:
                 "caller": None,
             },
             "status": "success",
+            "stockGenerator": {"namePrefix": [], "idx": 0, "parentIdxs": []},
             "terminal": "open",
             "encoding": artifact_protocol()["encoding"],
             "stateDeltas": [],

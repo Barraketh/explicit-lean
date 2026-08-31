@@ -2362,7 +2362,8 @@ private def emitBoundaryJsonMarker (marker : String) (payload : Json) : TacticM 
   IO.println s!"\n{marker}{nonce} {payload.compress}"
 
 private def artifactReportJson (basis : PreBoundaryBasis) (occId : String) (selector : Json)
-    (artifact : GoalArtifact) (terminal : String) : TacticM Json :=
+    (artifact : GoalArtifact) (terminal : String)
+    (stockGenerator : DeclNameGenerator) : TacticM Json :=
   withBoundaryEncodedSourceContext do
   let mut localReports := #[]
   for localArtifact in artifact.locals do
@@ -2383,6 +2384,7 @@ private def artifactReportJson (basis : PreBoundaryBasis) (occId : String) (sele
     ("occurrence", Json.str occId),
     ("selector", selector),
     ("status", Json.str "success"),
+    ("stockGenerator", encodeBoundaryDeclNameGenerator stockGenerator),
     ("terminal", Json.str terminal),
     ("encoding", artifactEncodingJson),
     ("stateDeltas", Json.arr #[]),
@@ -2480,7 +2482,7 @@ private def runBoundaryProbe (simpStx : Syntax)
     -- transformations clear their old declarations during apply, after which a
     -- pretty printer can no longer recover valid source names for the artifact.
     let report? ← reportRequest?.mapM fun (occId, selector) =>
-      artifactReportJson basis occId selector artifact terminal
+      artifactReportJson basis occId selector artifact terminal stockGenerator
     restoreTrialInput
     let initialGoals ← getGoals
     let (applyGoals, applyTerminal) ←

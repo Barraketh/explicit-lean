@@ -59,7 +59,8 @@ syntax "apply_encoded_with_actions" boundaryEncodedActions boundaryEncodedEviden
 syntax "apply_encoded_with_actions" boundaryEncodedActions boundaryEncodedLocationEvidence :
   boundaryVariantOutcome
 
-declare_syntax_cat boundaryVariant
+declare_syntax_cat boundaryVariant (behavior := symbol)
+syntax "| " str str str str num str str " @@ " str " => " boundaryVariantOutcome : boundaryVariant
 syntax "| " str str str str num str str " => " boundaryVariantOutcome : boundaryVariant
 
 declare_syntax_cat boundaryArtifactHeader
@@ -383,18 +384,58 @@ private structure ExpectedBoundarySelector where
   state : BoundaryStateFingerprint
   options : String
   caller : String
+  stockGenerator? : Option DeclNameGenerator
+
+private def parseStockGenerator (source : String) : TacticM DeclNameGenerator := do
+  let json ← match Json.parse source with
+    | .ok json => pure json
+    | .error error => throwError "invalid boundary stock generator: {error}"
+  let object ← match json.getObj? with
+    | .ok object => pure object
+    | .error error => throwError "invalid boundary stock generator object: {error}"
+  unless object.size == 3 do
+    throwError "invalid boundary stock generator fields"
+  let namePrefix ← match json.getObjVal? "namePrefix" with
+    | .ok prefixJson =>
+      match decodeBoundaryName prefixJson with
+      | .ok name => pure name
+      | .error error => throwError "invalid boundary stock generator name: {error}"
+    | .error error => throwError "invalid boundary stock generator name field: {error}"
+  let idx ← match json.getObjVal? "idx" with
+    | .ok value =>
+      match value.getNat? with
+      | .ok n => pure n
+      | .error error => throwError "invalid boundary stock generator idx: {error}"
+    | .error error => throwError "invalid boundary stock generator idx field: {error}"
+  let parentsJson ← match json.getObjVal? "parentIdxs" with
+    | .ok value =>
+      match value.getArr? with
+      | .ok values => pure values
+      | .error error => throwError "invalid boundary stock generator parents: {error}"
+    | .error error => throwError "invalid boundary stock generator parents field: {error}"
+  let parentIdxs ← parentsJson.toList.mapM fun value =>
+    match value.getNat? with
+    | .ok n => pure n
+    | .error error => throwError "invalid boundary stock generator parent index: {error}"
+  return { namePrefix, idx, parentIdxs }
 
 private def parseBoundaryVariant (variant : Syntax) (artifactOccurrence : String) :
     TacticM (ExpectedBoundarySelector × Syntax) := do
   match variant with
   | `(boundaryVariant| | $occurrenceId:str $targetFingerprint:str
       $localContextFingerprint:str $metavariableContextFingerprint:str $goalCount:num
-      $optionsFingerprint:str $caller:str => $outcome:boundaryVariantOutcome) =>
+      $optionsFingerprint:str $caller:str @@ $stockGenerator:str
+      => $outcome:boundaryVariantOutcome) =>
       let occId := occurrenceId.getString
       unless !occId.isEmpty do
         throwError "invalid_boundary_occurrence"
       unless occId == artifactOccurrence do
         throwError "invalid_boundary_occurrence"
+      let stockGenerator ← parseStockGenerator stockGenerator.getString
+      match outcome with
+      | `(boundaryVariantOutcome| failure) =>
+          throwError "boundary failure must not carry a stock generator"
+      | _ => pure ()
       return ({
         artifactOccurrence := occId
         state := {
@@ -405,6 +446,30 @@ private def parseBoundaryVariant (variant : Syntax) (artifactOccurrence : String
         }
         options := optionsFingerprint.getString
         caller := caller.getString
+        stockGenerator? := some stockGenerator
+      }, outcome)
+  | `(boundaryVariant| | $occurrenceId:str $targetFingerprint:str
+      $localContextFingerprint:str $metavariableContextFingerprint:str $goalCount:num
+      $optionsFingerprint:str $caller:str => $outcome:boundaryVariantOutcome) =>
+      let occId := occurrenceId.getString
+      unless !occId.isEmpty do
+        throwError "invalid boundary occurrence"
+      unless occId == artifactOccurrence do
+        throwError "invalid boundary occurrence"
+      match outcome with
+      | `(boundaryVariantOutcome| failure) => pure ()
+      | _ => throwError "boundary success is missing a stock generator"
+      return ({
+        artifactOccurrence := occId
+        state := {
+          targetFingerprint := targetFingerprint.getString
+          localContextFingerprint := localContextFingerprint.getString
+          metavariableContextFingerprint := metavariableContextFingerprint.getString
+          goalCount := goalCount.raw.isNatLit?.getD 0
+        }
+        options := optionsFingerprint.getString
+        caller := caller.getString
+        stockGenerator? := none
       }, outcome)
   | _ => throwError "invalid boundary variant"
 
@@ -448,7 +513,8 @@ private def runBoundaryVariantOutcome (outcome : Syntax) : TacticM Unit := do
   | _ => throwError "invalid boundary variant outcome"
 
 private def runBoundarySelect (kind : String) (schema selectorSchema : Nat)
-    (contract occId moduleName : String) (variants : Array Syntax) : TacticM Syntax := do
+    (contract occId moduleName : String) (variants : Array Syntax) :
+    TacticM (Syntax × Option DeclNameGenerator) := do
   validateArtifactHeader kind schema selectorSchema contract occId moduleName
   -- A malformed sibling is a protocol error even if another variant would
   -- otherwise select, so validate the complete serialized set first.
@@ -457,13 +523,13 @@ private def runBoundarySelect (kind : String) (schema selectorSchema : Nat)
     (← getThe Term.State)
   let actualOptions := boundaryOptionsFingerprint (← getOptions)
   let actualCaller := boundaryCallerIdentity? (← Term.getDeclName?)
-  let mut selected? : Option Syntax := none
+  let mut selected? : Option (Syntax × Option DeclNameGenerator) := none
   for (expected, outcome) in parsedVariants do
     if actualState == expected.state && actualOptions == expected.options &&
         actualCaller == expected.caller then
       if selected?.isSome then
         throwError "ambiguous_boundary_variant"
-      selected? := some outcome
+      selected? := some (outcome, expected.stockGenerator?)
   let some selected := selected?
     | throwError "boundary_variant_missing: actualState={repr actualState}; \
         actualOptions={actualOptions}; actualCaller={actualCaller}; \
@@ -513,10 +579,20 @@ elab_rules : tactic
           -- Distinguish stock failure structurally, never by exception text:
           -- malformed evidence may itself produce any exception message.
           match selected with
-          | `(boundaryVariantOutcome| failure) =>
-              throwError "boundary_recorded_tactic_failure"
-          | _ => withReplayAbort occId.getString "apply" <|
-              runBoundaryVariantOutcome selected
+          | (outcome, stockGenerator?) =>
+              match outcome with
+              | `(boundaryVariantOutcome| failure) =>
+                  throwError "boundary_recorded_tactic_failure"
+              | _ =>
+                  withReplayAbort occId.getString "apply" do
+                    let some stockGenerator := stockGenerator?
+                      | throwError "boundary_missing_post_generator"
+                    runBoundaryVariantOutcome outcome
+                    let actual ← getDeclNGen
+                    unless actual.namePrefix == stockGenerator.namePrefix &&
+                        actual.idx == stockGenerator.idx &&
+                        actual.parentIdxs == stockGenerator.parentIdxs do
+                      throwError "boundary_replay_post_generator_mismatch"
       | _ => withReplayAbort "<invalid-header>" "select" do
           throwError "invalid boundary artifact header"
 

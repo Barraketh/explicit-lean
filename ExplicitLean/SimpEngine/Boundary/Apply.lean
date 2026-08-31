@@ -23,13 +23,23 @@ namespace ExplicitLean.SimpEngine.Boundary
    schema. Generated source validates that schema before it elaborates any
    evidence or executes an environment action. -/
 def boundaryArtifactKind : String := "simp_engine_boundary_artifact"
-def boundaryArtifactSchema : Nat := 3
+def boundaryArtifactSchema : Nat := 4
 def boundarySelectorSchema : Nat := 2
 def boundarySemanticContract : String := "boundary-observable-v1"
 def boundaryArtifactTermEncoding : String := "lean_expr_dag_v2"
 def boundaryArtifactLocalReferenceEncoding : String := "local_decl_index_v1"
 def boundaryArtifactUniverseEncoding : String := "pre_boundary_universe_reference_v1"
 def boundaryArtifactInstanceEncoding : String := "explicit_terms_v1"
+
+/- The successful artifact carries the exact post-stock auxiliary declaration
+   generator.  Names are encoded structurally, rather than through
+   `Name.toString`, so replay can authenticate the complete generator state. -/
+def encodeBoundaryDeclNameGenerator (generator : DeclNameGenerator) : Json :=
+  Json.mkObj [
+    ("namePrefix", encodeBoundaryName generator.namePrefix),
+    ("idx", toJson generator.idx),
+    ("parentIdxs", Json.arr (generator.parentIdxs.toArray.map toJson))
+  ]
 
 /- Marker lines emitted by the recording tactic are authenticated against the
    compiler process that requested them. Direct probes which do not provide
