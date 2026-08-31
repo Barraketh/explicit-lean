@@ -228,9 +228,21 @@
     },
     {
       "id": "fresh-post-generator-guard",
-      "owner": "/root/tree_build_plan",
+      "owner": "coordinator with Luna implementation and review",
+      "status": "completed",
+      "description": "Integratede3af2f2 artifact4/report10 structural stock generator and fresh post-success assertion inside fatal replay guard. Main17replay+17source+17multiple+10groupcontrols pass;1672hashes/46nonce logs checked. Historical truncatedoldflat now rejected by exactpostgencheck;415additionalhashes verified. No setters or offset actions. Python rendering canonicalized; existing valid protocol fixtures updated."
+    },
+    {
+      "id": "ordered-recursive-realizations",
+      "owner": "coordinator with assigned agent",
       "status": "in_progress",
-      "description": "Capture exact original successful stock auxiliary generator and assert it after fresh decoded replay. Artifact4/report10 planned; no setter or counter-offset action."
+      "description": "Private Sol implementation for ModifyLast: authenticated matcher member order and recursive overlapping equation groups. Two original fresh/cached processes establish9branch members,gen1to5,unique projected cover;347archivehashes independently checked. No replay acceptance yet."
+    },
+    {
+      "id": "complete-command-context-audit",
+      "owner": "coordinator with assigned agent",
+      "status": "in_progress",
+      "description": "Luna prototype uses actual Language.Lean.process command snapshots; baseline and localsyntax controls pass, remaining small fixtures and immutable handoff pending."
     }
   ],
   "blockers": [
@@ -267,21 +279,20 @@
     {
       "id": "final-grammar-coverage-audit",
       "status": "open",
-      "detail": "Actual-header fix is integrated. Read-only local syntax/macro controls compile and force full frontend fallback, capturing nested simp; no source-local omission reproduced. 246sourcefiles contain grammar-extension markers (risk population only). Silent wrong parse without fallback is not ruled out; full command-context audit still required before closure. Evidence: .lake/week-2026-08-31/source-local-grammar-audit.md."
+      "detail": "Actual-header inventory integrated; new full-command-context prototype uses actual Language.Lean.process snapshots. Baseline/localsyntax fixtures pass; quoted-data/actual-header controls and integration remain pending. No complete-corpus audit claim."
     },
     {
       "id": "fresh-replay-cache-grouping",
-      "status": "open",
-      "detail": "Default-async truncated Lookmap source reproduces stock7-membergroup/gen1\u21925 vs fresh replay1-membergroup/gen1\u21927. Shared cache priming masked original recording trial. Sol prototyping exact nested realization group; Luna implementing fresh post-generator assertion. Report9 provisional until new guard and fresh revalidation."
+      "status": "resolved",
+      "detail": "Original truncatedLookmap cache-priming defect repaired by exact group replay9b35bf6 and freshpostgenerator assertione3af2f2. Current4/10 fullLookmap10calls33declarations20public22extensions remaining0; historicalflatnegative is rejected. Olderreports9remainprovisional until fresh10 revalidation."
     }
   ],
   "nextActions": [
-    "Frozen9 first23root diagnostic run and8260module inventory are complete. Before bulk dispatch, integrate exact fresh post-generator assertion (artifact4/report10) and strict realization groups, freeze the engine, and run new validation. Reuse analysis only under a verified matching analysis identity; do not relabel old reports.",
-    "Both old schema7-diverse and schema9 first23workers finished. Start new-schema priority/full workers only after the fresh guard and exact group replay are integrated; preserve old failures as diagnostics.",
-    "Integrate sparse matcher-v2 and disjoint multiple-bundle support after their bounded reviews. Address explicit activation of completed cached realizations without arbitrary generator changes.",
-    "Use actual source-header imports for all single-file remaining-call audits and final translated-tree audits. Full translated-output semantic comparison remains required.",
-    "Resolve reusable executable66calls and5unresolvedquotations, preserve all originals and source/execution ownership; no finite caller-table equivalence claims.",
-    "After full explicit coverage and full-tree validation, improve readability and then other tactics if time remains."
+    "Freeze committedartifact4/report10 engine, validate its project cache, generate fresh priority/full manifests, then start disjoint incremental workers. Do not relabel old reports or analysis identities.",
+    "Continue private ordered matcher/recursive realization support for ModifyLast; investigate new Control.Basic naming effect from exact stock observations.",
+    "Integrate the actual-command-context audit and run translated-output semantic oracles against a fully isolated translated dependency tree.",
+    "Resolve reusable executable66calls and5unresolved quotations, preserving original comments and source/execution ownership; no unqualified finite-caller-table equivalence claims.",
+    "After complete explicit coverage and full-tree validation, improve readability and extend to other common tactics if time remains."
   ],
   "checkpoints": [
     {
@@ -694,6 +705,11 @@
         ".lake/week-2026-08-31/sparse-main-wire-helper.log",
         ".lake/week-2026-08-31/sparse-main-wire-matcher.log"
       ]
+    },
+    {
+      "at": "2026-08-31T15:30:34.486345+00:00",
+      "summary": "Committedexactgroupreplay9b35bf6 andfreshpostgeneratorguarde3af2f2. Current4/10focusedchecks pass;fullLookmap10passes,Control.Basic failsclosedatnewjoinM_map_joinM site. Allold691calls/66modules remainprovisionalpendingfresh10workers. Budget23%; noactiveDBleases. Nextfreeze/dispatch. Knownlegacyauxfixture expects a later cache error but aborts earlier at boundary_local_theorem_multiple_cache_keys; no production guard relaxed.",
+      "evidence": ".lake/week-2026-08-31/schema10-focused-verification.json"
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -906,7 +922,9 @@
     "2ae2609",
     "af21f51",
     "617c69d",
-    "db59a3e"
+    "db59a3e",
+    "9b35bf6",
+    "e3af2f2"
   ],
   "experiments": [
     {
@@ -1041,11 +1059,11 @@
         "independentVerification": ".lake/week-2026-08-31/schema8-forest-verification.json"
       }
     ],
-    "currentArtifactSchema": 3,
+    "currentArtifactSchema": 4,
     "currentSelectorSchema": 2,
-    "minimumReportSchema": 9,
-    "integratedEngineCommit": "f3db7d4",
-    "focusedEvidenceManifest": ".lake/week-2026-08-31/schema9-final-focused-evidence.json"
+    "minimumReportSchema": 10,
+    "integratedEngineCommit": "e3af2f2",
+    "focusedEvidenceManifest": ".lake/week-2026-08-31/schema10-focused-verification.json"
   },
   "failureTriage": {
     "command": "python3 Experiment/campaign_failures.py",
@@ -1057,19 +1075,19 @@
     "scope": "six failed roots from schema8 frontier; diagnostic grouping only",
     "modules": {
       "Mathlib/Order/Interval/Set/Defs.lean": "declaration oracle name mismatch; retest helper+generator fix",
-      "Mathlib/Data/List/ModifyLast.lean": "Sparse helper committeddb59a3e. Prior5-site recording rejected8c5e9b6d6a02734e generatorstock5/applied4; exact groups integrated but single-matcher capture gate remains under review. No accepted translation.",
+      "Mathlib/Data/List/ModifyLast.lean": "Raw stock requires interleaved sparse matcher order and overlapping recursive equation groups. Private versioned implementation in progress; do not merely relax >1 gate. Diagnosis .lake/search-free-mathlib/snapshots/single-child-realization-prototype/.lake/single-child/design.md.",
       "Mathlib/Data/String/Lemmas.lean": "matcher equation capture-complete-local state mismatch",
       "Mathlib/Data/Int/Init.lean": "Main bounded7-site/148-declaration pipeline passes; strict actual-import remaining scan0. Await fresh closed schema9 report.",
-      "Mathlib/Data/List/Lookmap.lean": "Multiple bundles integrated2ae2609; fresh process uncovers nested-realization grouping mismatch. Exact group codec and fresh post-generator guard under implementation.",
-      "Mathlib/Control/Basic.lean": "Reserved failure keyword fixed; current full pipeline rejects fish_pipe auxiliary generator stock2/applied1, cached branch activation under investigation."
+      "Mathlib/Data/List/Lookmap.lean": "Combinedartifact4/report10 boundedpipelinepasses10calls,33declarations20public22extensionstates,remaining0. Evidence .lake/boundary-materialization/integrated-groups-_ze7z1e2. Requires frozen manifest/worker rerun for indexed acceptance.",
+      "Mathlib/Control/Basic.lean": "Current4/10 gets past fish_pipe but rejects05514633fc5cec8c joinM_map_joinM stockgen3/applied2. Bounded Luna raw-stock shape investigation assigned; no acceptance."
     }
   },
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 68862906368,
-    "checkedAt": "2026-08-31T14:49:52.169752+00:00",
+    "lastFreeBytes": 65024319488,
+    "checkedAt": "2026-08-31T15:30:34.486345+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T15:13:17.258772+00:00"
+  "updatedAt": "2026-08-31T15:30:34.486345+00:00"
 }
