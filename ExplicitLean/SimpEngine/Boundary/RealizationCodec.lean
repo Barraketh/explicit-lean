@@ -646,6 +646,10 @@ private structure LocalDagState where
   auxProofs : Array (TheoremVal × Json) := #[]
   auxProofIndex : NameMap Nat := {}
   nodes : Array Json := #[]
+  -- Bound the serialized witness before it can become an unbounded log line.
+  -- This is a resource guard only: descriptors are never truncated or
+  -- projected to fit the bound.
+  descriptorBytes : Nat := 0
   -- Retaining objects makes the pointer memo safe from address reuse. Pointer
   -- identity is only an optimization: output deduplication uses exact JSON.
   memo : Array (AsyncConst × Nat) := #[]
@@ -708,6 +712,11 @@ private def sameAsyncObject (a b : AsyncConst) : Bool := unsafe ptrEq a b
 
 private def asyncAddress (a : AsyncConst) : USize := unsafe ptrAddrUnsafe a
 
+-- ExtraDegeneracy's authenticated auxiliary payload is 11,015,063 bytes;
+-- leave bounded headroom while rejecting Unitization's measured 71,368,653
+-- bytes of serialized DAG nodes.
+private def localCachedDescriptorByteLimit : Nat := 16 * 1024 * 1024
+
 private partial def localDagNode (env : Environment) (member : AsyncConst) (auxiliary := false) (canonicalModuleDocs := false) :
     StateT LocalDagState MetaM Nat := do
   if let some position := (← get).memoIndex[asyncAddress member]? then
@@ -762,12 +771,18 @@ private partial def localDagNode (env : Environment) (member : AsyncConst) (auxi
   let node := Json.arr #[signature, .bool member.isRealized, metadata, toJson refs]
   let state ← get
   let index := (state.nodes.findIdx? (· == node)).getD state.nodes.size
-  let nodes := if index == state.nodes.size then state.nodes.push node else state.nodes
+  let isNew := index == state.nodes.size
+  let nodeBytes := node.compress.utf8ByteSize
+  let descriptorBytes := state.descriptorBytes + if isNew then nodeBytes else 0
+  if descriptorBytes > localCachedDescriptorByteLimit then
+    throwError "boundary_comparison_unsupported_environment_delta:local_cached_descriptor_size_limit"
+  let nodes := if isNew then state.nodes.push node else state.nodes
   set ({
     checked := state.checked
     auxProofs := state.auxProofs
     auxProofIndex := state.auxProofIndex
     nodes := nodes
+    descriptorBytes := descriptorBytes
     memo := state.memo.push (member, index)
     memoIndex := state.memoIndex.insert (asyncAddress member) state.memo.size
     visiting := state.visiting.pop } : LocalDagState)
