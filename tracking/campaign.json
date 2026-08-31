@@ -45,8 +45,8 @@
     {
       "id": "occurrence-index",
       "owner": "/root/occurrence_index",
-      "status": "in_progress",
-      "description": "SQLite history and incremental queue pass focused checks; exact Lean header extraction is being added."
+      "status": "completed",
+      "description": "Durable SQLite index and exact Lean header dependency extraction committed at bab90be; complete diagnostic inventory imported."
     },
     {
       "id": "fast-lean-tools",
@@ -86,15 +86,21 @@
     },
     {
       "id": "captured-theorem-declarations",
-      "owner": "/root/review_fixes",
+      "owner": "/root/congruence_codec",
       "status": "in_progress",
-      "description": "Replace reserved-name callbacks with captured, kernel-checked theorem declarations."
+      "description": "Generic checked theorem codec committed at d73b4c2. Controlled realization with captured congruence metadata is in progress to preserve namespace/extension semantics."
     },
     {
       "id": "inventory-checkpoints",
       "owner": "/root/inventory_checkpoints",
+      "status": "completed",
+      "description": "Atomic completed syntax/scope checkpoints with source/implementation freshness and exact expected occurrence counts committed at b990bef."
+    },
+    {
+      "id": "resumable-campaign-worker",
+      "owner": "/root/occurrence_index",
       "status": "in_progress",
-      "description": "Optional atomic checkpoints and progress logs for completed syntax/scope batches."
+      "description": "Bounded worker connecting closed manifests, leases, existing verified shard runner, and durable per-module outcomes."
     }
   ],
   "blockers": [
@@ -111,15 +117,15 @@
     {
       "id": "reserved-theorem-generation",
       "status": "open",
-      "detail": "ReservedNameAction callbacks can run metaprograms. AddConstMap.mk.congr_simp was observed. The standalone codec preflights constants with skipRealize=true; Luna is implementing captured theorem declarations through checked addDecl instead of callback replay."
+      "detail": "Direct captured addDecl changes namespace extension state relative to reserved-name realization. Preserve realization-branch semantics using only captured checked declarations, and test in a fresh process so shared realization caches cannot hide generator replay. Full comparator remains unchanged."
     }
   ],
   "nextActions": [
-    "Import the completed 83,425-call diagnostic inventory into the index with exact Lean header dependencies, and classify the five unresolved calls.",
-    "Collect exact Lean header dependency extraction and inventory/scope batch checkpoints from Luna.",
-    "Integrate captured theorem declarations and strict Expr DAG artifact schema 2, then rerun the 66-call representative gate.",
-    "Keep unresolved and failed cases in the index. Add canonical references to existing boundary metavariables when needed.",
-    "Once the production encoding is stable, run verified incremental shards from frozen inputs; resolve reusable tactic ownership and validate the entire translated tree before readability work."
+    "Integrate captured congruence theorem realization with exact argument-kind metadata, then validate in a fresh process and rerun the unchanged semantic boundary comparator.",
+    "Commit stable production schema2 and create separate frozen snapshots for representative gates and the fresh campaign manifest.",
+    "Collect the bounded campaign worker, then run closed module shards with per-module checkpoints and honest coverage.",
+    "Use .lake/week-2026-08-31/unresolved-strategy.md to exercise and replace the four unresolved executable quotations; audit Zify configuration syntax separately from its downstream meta simplifier.",
+    "Resolve reusable caller ownership, assemble and verify the translated dependency tree, then improve readability."
   ],
   "checkpoints": [
     {
@@ -212,6 +218,18 @@
     {
       "at": "2026-08-31T09:39:39.431171+00:00",
       "summary": "Fresh frozen diagnostic inventory completed successfully: 8,264 modules; 83,425 calls; 83,420 materialization candidates; 66 reusable executable calls; 91 nested calls; five unresolved quotations in DeriveEncodable, Lift (two), Nontriviality/Core, and Zify. The unresolved records are preserved under .lake/week-2026-08-31/corpus-unresolved.json. No production translated-coverage claim is made."
+    },
+    {
+      "at": "2026-08-31T09:50:00.844407+00:00",
+      "summary": "Production schema2 integration now compiles: raw expression DAG application and captured checked theorem actions replace term elaboration and reserved-name replay. Python protocol validators pass. Main expression fixture passed. Source gate interrupted by a concurrent dependency rebuild removing Apply.olean; rerun in a frozen snapshot is required, no source-gate success claimed."
+    },
+    {
+      "at": "2026-08-31T09:52:11.012449+00:00",
+      "summary": "Exact Lean header extraction covered all 8,264 modules in 5.69s. Luna imported 83,425 occurrence facts and 26,396 import edges into a diagnostic SQLite index in 7.68s; coordinator reran all 10 index checks successfully. Schema2 boundary gate exposed a real namespacesExt mismatch from direct addDecl; captured declaration replay must preserve Lean realization-branch semantics. Assigned fix and fresh-process validation to Luna, preserving the full comparator."
+    },
+    {
+      "at": "2026-08-31T10:00:37.710413+00:00",
+      "summary": "Committed exact dependency index (bab90be), validated checkpoint batches (b990bef), and generic closed theorem codec (d73b4c2). Coordinator checks: 10 index tests; checkpoint freshness/corruption/zero-count/nonzero-missing checks; process timeout and scope propagation checks; generic declaration fixture including actual reserved-name negative control and early proposition checks. New generated-selector expression fixture passed. Production schema2 remains uncommitted pending congruence realization semantics; no verified translated coverage claimed."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -223,7 +241,10 @@
     "188e649",
     "0c4e537",
     "2e73bcf",
-    "113d9b3"
+    "113d9b3",
+    "bab90be",
+    "b990bef",
+    "d73b4c2"
   ],
   "experiments": [
     {
@@ -290,5 +311,15 @@
     "unresolvedDetails": ".lake/week-2026-08-31/corpus-unresolved.json",
     "moduleCount": 8264,
     "occurrenceCount": 83425
+  },
+  "database": {
+    "path": ".lake/search-free-mathlib/translation-index.sqlite3",
+    "status": "complete_diagnostic_inventory",
+    "modules": 8264,
+    "occurrenceFacts": 83425,
+    "importEdges": 26396,
+    "unresolved": 5,
+    "verifiedTranslations": 0,
+    "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   }
 }
