@@ -872,6 +872,23 @@ def instrumented_source(
     return _inject_import(rewritten, "ExplicitLean.SimpEngine.Boundary")
 
 
+def instrumentation_replacement_lengths(
+    source: bytes, entries: list[dict[str, Any]], *, recording_mode: str = "stock"
+) -> list[int]:
+    """Lengths of the instrumented outer tactics, in validated source order.
+
+    Only the four-byte ``simp`` head grows. A ``%$`` head annotation moves
+    before the injected arguments but retains every original byte.
+    """
+    tactic = _recording_tactic(recording_mode)
+    roots, _ = replacement_plan(source, entries, "instrumentation lengths")
+    return [
+        int(entry["endByte"]) - int(entry["startByte"])
+        + len(f'{tactic} "{entry["id"]}"'.encode("utf-8")) - 4
+        for entry in roots
+    ]
+
+
 def _canonical_json_line(value: object) -> str:
     return json.dumps(
         value, sort_keys=True, ensure_ascii=False, separators=(",", ":")
@@ -1169,6 +1186,9 @@ def _module_result(
             selected.source,
             roots,
             lambda entry: f'{tactic} "{entry["id"]}"',
+        ),
+        replacement_lengths=instrumentation_replacement_lengths(
+            selected.source, selected.materialize, recording_mode=recording_mode
         ),
     )
 

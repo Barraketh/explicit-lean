@@ -340,6 +340,12 @@
       "status": "completed",
       "owner": "coordinator with Luna tests and review",
       "description": "Content-bound identity excludes replay-only project inputs but includes fiveanalysis modules, native executables and pinned package/toolchain source/runtimeclosure. Prewarm beforecapture, perbatch native/source/ctimeguards includinghits, fullclosurebefore/end. Real replay-edit two-run reusedbothcheckpoints withfresh manifestprovenance."
+    },
+    {
+      "id": "linear-instrumentation-source-guard",
+      "owner": "coordinator",
+      "status": "completed_fresh_production_pending",
+      "description": "Instrumentation now supplies exact sorted outer-tactic replacement lengths to existing independent linear byte-gap validator. Authored bytes/import/expected-render checks unchanged; no diff fallback. Unicode/head-antiquotation/nested/stock-applied and corrupted-context controls pass. Actual45call Finprod olddiff timesout6s with captured difflib stack; linear guard passes0.002s. Six schema12 tests pass."
     }
   ],
   "blockers": [
@@ -390,7 +396,7 @@
     }
   ],
   "nextActions": [
-    "Finish and independently verify fresh schema12 closed8260module/83414call manifest; start bounded500module indexed worker under live budget/disk guards. Four excluded source modules remain required.",
+    "Finish current8260module analysis/cache publication; integrate imminent Finprod fix and linear source guard, freeze current runtime, reuseanalysischeckpoints for freshfullmanifest and bounded500moduleworker. Avoid starting known-stale worker during finalfixreview.",
     "Complete Finprod deterministic branch reservation plus authenticated active imported equation registration, rollback controls and full45call production replay/oracle.",
     "Preserve exact ToAdditive metadata for List.Basic51; typed fresh diagnostic identified two missing private proof translations. Keep strict oracle while investigating checked-declaration replay.",
     "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and full source/execution ownership.",
@@ -1024,6 +1030,10 @@
     {
       "at": "2026-08-31T21:03:12.219863+00:00",
       "summary": "Fresh production Cubic20/29variants independently verified1103hashes/3native invocations/147decl131public39extensions. Full current inventory completed all5inventory batches, scope analysis running. Aesop branch reservation cause verified7862hashes; active imported equation registration additionally exposed in strict prototype. Fresh ToAdditive typed diagnostic verified1092hashes, strict failure retained. Weekly48%; no accepted corpus coverage increment."
+    },
+    {
+      "at": "2026-08-31T21:12:39.020278+00:00",
+      "summary": "Production instrumentation still used quadratic bytewise diff, identified during fullFinprod run.20line length-witness addition preserves existing exact byte-gap validator; actual45callsource olddiff bounded6s timeout/stack vslinear0.002s, all corruption/nested/Unicode/head-annotation controls and6schema12tests pass. Finprod privatewhole45 now passes fulloracle; finallegacycontrols/freeze pending. Broadworker held for imminent finalruntime freeze."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1509,6 +1519,20 @@
       "rootVerification": ".lake/week-2026-08-31/toadditive-typed-root-verification.json",
       "finding": "Exact registered extension lookup and recursive typed fields show75stock/73applied entries;73common entries/order/lookups identical. Two stock-only current-module private proof\u2192private proof translations have identity reorder/noArg. Fresh receipt/native/source/log bindings verified1092hashes. No metadata exemption approved; investigating exact preservation. Earlier wrong-snapshot diagnostic remains quarantined, not evidence.",
       "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "linear-instrumentation-benchmark",
+      "status": "verified_bounded_performance_not_compiler_evidence",
+      "report": ".lake/week-2026-08-31/instrumentation-gap-benchmark-jkxre69m/report.json",
+      "sourceArchives": ".lake/week-2026-08-31/instrumentation-gap-benchmark-jkxre69m/source-archives.json",
+      "sourceBytes": 68444,
+      "calls": 45,
+      "oldDiffTimedOutAfterSeconds": 6,
+      "linearSeconds": 0.002033290918916464,
+      "tests": [
+        ".lake/instrumentation-linear-source-tests.log",
+        ".lake/instrumentation-linear-schema12-tests.log"
+      ]
     }
   ],
   "prototypeCoverage": {
@@ -2006,7 +2030,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T21:03:12.219863+00:00",
+  "updatedAt": "2026-08-31T21:12:39.020278+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
