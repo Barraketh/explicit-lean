@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 0,
+    "verifiedTranslatedOccurrences": 7,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle, plus local matcher and auxiliary-cache state comparison (report schema 8). Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
@@ -28,9 +28,9 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 180,
-    "provisionalCachedModules": 20,
+    "verifiedTranslatedModules": 2,
+    "provisionalCachedOccurrences": 254,
+    "provisionalCachedModules": 22,
     "minimumAcceptedReportSchema": 8
   },
   "work": [
@@ -153,6 +153,18 @@
       "owner": "coordinator with Luna controls",
       "status": "in_progress",
       "description": "Standalone checked public theorem/cache/tag codec copied to main after12prototype controls/30independently verified hashes. No production action integration yet."
+    },
+    {
+      "id": "captured-matcher-bundles",
+      "status": "completed",
+      "owner": "coordinator with Sol implementation",
+      "description": "6b99b9a: one authenticated private splitter/equation bundle plus independently supported equation/congruence actions. Strict checked bodies/metadata/local+async state. Root41jobbuild,12freshsourcecontrols andpure4protocolspassed; frozenprototype698hashes/35noncelogs independently verified; Nat.Init5calls/139declarations passed prototype."
+    },
+    {
+      "id": "oracle-checked-domain",
+      "status": "completed",
+      "owner": "coordinator with Sol implementation",
+      "description": "7839c0f: typed inline/matcher metadata owners resolved in checked constants view. Main4controls passed: identical asyncmatcher/privatecomputation accepted; changedinline/bodyrejected. No privatecomputation exemption."
     }
   ],
   "blockers": [
@@ -453,6 +465,31 @@
         "No schema8 frozen campaign acceptance reports yet.",
         "Public theorem codec remains standalone; no productionaction support yet."
       ]
+    },
+    {
+      "at": "2026-08-31T12:36:15.892507+00:00",
+      "summary": "Committed standalone publiccodec73b487b, auxguard994e5c3, diagnosticnamesf629783, matcher6b99b9a andoraclecheckedview7839c0f. Mainmergedbuild41jobs,12matchersourceprocesses,pure4protocols,4oraclecontrolspassed. Frozenmatcher698hashes/35noncelogsverified. Fresh7839c0f frontiermanifest91modules146calls built (syntax32.90s/scope32.17s), sourceworkerstarting. Genericstateeffects/privatehelpernamecollision investigation runsseparately; publiccodecnotproductionintegrated. Weekly12%.",
+      "evidence": [
+        ".lake/search-free-mathlib/snapshots/matcher-codec-prototype/.lake/matcher-codec/final-evidence/manifest.json",
+        ".lake/week-2026-08-31/matcher-integration-build.log",
+        ".lake/week-2026-08-31/match-state-async/fixture-iaawrw_t/report.json",
+        ".lake/week-2026-08-31/oracle-checked-domain-main",
+        ".lake/search-free-mathlib/snapshots/schema8-frontier/.lake/schema8-frontier-manifest.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T12:40:41.591720+00:00",
+      "summary": "Fresh schema8 frozen Function.Defs and Nat.Init passed (7 source calls). Independent public wire validator committed9a74d7f after3real payloads and6mutations passed. Same-scope synthetic probe now isolates both recording trial leakage and omitted private helper naming effects; exact helper replay design is pending. Strict translated forest runner in progress. Weekly usage13%.",
+      "evidence": [
+        ".lake/public-theorem-codec/wire-validator-report.json",
+        ".lake/search-free-mathlib/snapshots/schema8-frontier/.lake/boundary-materialization/schema8-frontier/Logic-Function-Defs-74.json",
+        ".lake/search-free-mathlib/snapshots/schema8-frontier/.lake/boundary-materialization/schema8-frontier/Data-Nat-Init-77.json"
+      ],
+      "limitations": [
+        "No full translated Mathlib tree.",
+        "Standalone public theorem codec not yet integrated into production actions.",
+        "Generator state is not yet an independently validated boundary effect."
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -566,6 +603,18 @@
       "status": "running",
       "modules": 100,
       "expectedOccurrences": 1323
+    },
+    {
+      "id": "schema8-frontier",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema8-frontier",
+      "commit": "7839c0f",
+      "status": "running",
+      "log": ".lake/schema8-frontier-worker.log",
+      "inventoriedModules": 91,
+      "modules": 21,
+      "expectedOccurrences": 146,
+      "note": "Fresh closed manifest: 91 modules, 146 calls. Function.Defs (2 calls) and Nat.Init (5 calls) passed; 19 remaining frontier roots running. Strict translated forest validation follows source reports.",
+      "sessionId": 51150
     }
   ],
   "latestCommits": [
@@ -597,7 +646,13 @@
     "38492ab",
     "6287642",
     "7b4c71c",
-    "560bbab"
+    "560bbab",
+    "994e5c3",
+    "73b487b",
+    "f629783",
+    "6b99b9a",
+    "7839c0f",
+    "9a74d7f"
   ],
   "experiments": [
     {
@@ -672,7 +727,7 @@
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 0,
+    "verifiedTranslations": 7,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
