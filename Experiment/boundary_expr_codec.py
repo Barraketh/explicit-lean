@@ -183,3 +183,143 @@ def validate_equation_payload(source: object, expected_name: object = None,
     if suffix not in {"eq_def", "eq_unfold"} and not re.fullmatch(r"eq_[0-9]+(?:_[0-9]+)*", suffix):
         raise RuntimeError(f"{label} has an unsupported equation name")
     return value
+
+
+def validate_definition_payload(source: object, expected_name: object,
+                                label: str = "boundary definition") -> list[Any]:
+    if not isinstance(source, str):
+        raise RuntimeError(f"{label} must be a string")
+    try:
+        value = json.loads(source)
+    except (ValueError, RecursionError) as error:
+        raise RuntimeError(f"{label} is not a definition payload") from error
+    if not (isinstance(value, list) and len(value) == 8
+            and value[0] == "boundary_definition_dag_v1"
+            and _name(expected_name) and expected_name and value[1] == expected_name
+            and value[2] == [expected_name] and value[5] == "safe"):
+        raise RuntimeError(f"{label} has an invalid safe singleton definition header")
+    levels, hints = value[3:5]
+    if (not isinstance(levels, list) or any(not _name(n) or not n for n in levels)
+            or len({json.dumps(n) for n in levels}) != len(levels)):
+        raise RuntimeError(f"{label} has invalid universes")
+    if not (hints in (["opaque"], ["abbrev"]) or
+            (isinstance(hints, list) and len(hints) == 2 and hints[0] == "regular"
+             and _nat(hints[1]) and hints[1] <= 4294967295)):
+        raise RuntimeError(f"{label} has invalid reducibility hints")
+    validate_expr_dag(value[6], f"{label} type")
+    validate_expr_dag(value[7], f"{label} value")
+    return value
+
+
+def validate_matcher_payload(source: object, expected_anchor: object,
+                             label: str = "boundary matcher") -> list[Any]:
+    """Validate the closed bundle format; Lean checks declarations/provenance.
+
+    An anchor already exists. Its private equation/splitter declarations form
+    the action's added names; the anchor is never a declared member.
+    """
+    def reject(detail: str) -> None:
+        raise RuntimeError(f"{label}: {detail}")
+
+    def key(name: object) -> str:
+        if not _name(name) or not name:
+            reject("invalid name")
+        return json.dumps(name, separators=(",", ":"))
+
+    def names(value: object) -> list:
+        if not isinstance(value, list) or len({key(n) for n in value}) != len(value):
+            reject("invalid or duplicate names")
+        return value
+
+    def info(value: object) -> None:
+        if not (isinstance(value, list) and len(value) == 6 and
+                _nat(value[0]) and _nat(value[1]) and isinstance(value[2], list) and
+                (value[3] is None or _nat(value[3])) and isinstance(value[4], list)
+                and len(value[4]) == value[1] and isinstance(value[5], list)):
+            reject("invalid MatcherInfo")
+        for alt in value[2]:
+            if not (isinstance(alt, list) and len(alt) == 3 and _nat(alt[0])
+                    and _nat(alt[1]) and type(alt[2]) is bool):
+                reject("invalid alternative info")
+        for name in value[4]:
+            if name is not None:
+                key(name)
+        seen = set()
+        for entry in value[5]:
+            if not (isinstance(entry, list) and len(entry) == 2 and _nat(entry[0])
+                    and entry[0] < len(value[2]) and entry[0] not in seen
+                    and isinstance(entry[1], list) and all(_nat(n) and n < len(value[2]) for n in entry[1])
+                    and len(set(entry[1])) == len(entry[1])):
+                reject("invalid overlap map")
+            seen.add(entry[0])
+
+    def eqns(value: object) -> None:
+        if not isinstance(value, list) or len(value) != 3:
+            reject("invalid MatchEqns")
+        names(value[0]); key(value[1]); info(value[2])
+        if value[1] in value[0] or len(value[0]) != len(value[2][2]):
+            reject("invalid equation count or splitter name")
+
+    def match_state(value: object) -> tuple[dict, set]:
+        if not (isinstance(value, list) and len(value) == 2 and isinstance(value[0], list)):
+            reject("invalid matcher state")
+        mapping = {}
+        for entry in value[0]:
+            if not isinstance(entry, list) or len(entry) != 2:
+                reject("invalid matcher state entry")
+            name = key(entry[0]); eqns(entry[1])
+            if name in mapping:
+                reject("duplicate matcher state key")
+            mapping[name] = entry[1]
+        return mapping, {key(n) for n in names(value[1])}
+
+    def equation_state(value: object) -> None:
+        if not isinstance(value, list):
+            reject("invalid equation registration map")
+        seen = set()
+        for entry in value:
+            if not isinstance(entry, list) or len(entry) != 2:
+                reject("invalid equation registration entry")
+            name = key(entry[0]); key(entry[1])
+            if name in seen:
+                reject("duplicate equation registration")
+            seen.add(name)
+
+    if not isinstance(source, str):
+        reject("payload must be a string")
+    try:
+        value = json.loads(source)
+    except (ValueError, RecursionError) as error:
+        raise RuntimeError(f"{label}: invalid JSON") from error
+    if not (isinstance(value, list) and len(value) == 15
+            and value[0] == "boundary_matcher_bundle_v1" and value[1] == expected_anchor):
+        reject("invalid matcher bundle header or anchor")
+    anchor_key = key(expected_anchor)
+    info(value[2]); eqns(value[3])
+    eqn_names, splitter, _ = value[3]
+    if not eqn_names or len(eqn_names) != len(value[2][2]) or value[5] != "inline" or value[6] is not None:
+        reject("unsupported matcher bundle metadata")
+    if expected_anchor in eqn_names or expected_anchor == splitter:
+        reject("anchor is not a new declaration")
+    validate_definition_payload(value[4], splitter, label)
+    if not isinstance(value[7], list) or len(value[7]) != len(eqn_names):
+        reject("invalid captured equation list")
+    for expected, equation in zip(eqn_names, value[7]):
+        if not (isinstance(equation, list) and len(equation) == 6 and equation[0] == expected
+                and type(equation[2]) is bool and type(equation[3]) is bool
+                and all(n is None or n == expected_anchor for n in equation[4:])):
+            reject("invalid captured equation metadata")
+        theorem = validate_theorem_payload(equation[1], expected, label)
+        if theorem[2] != [expected]:
+            reject("matcher theorem declaration group must be singleton")
+    before, before_eqns = match_state(value[8])
+    after, after_eqns = match_state(value[9])
+    match_state(value[10])
+    member_keys = {key(n) for n in eqn_names}
+    if anchor_key in before or before_eqns & member_keys:
+        reject("nonfresh matcher snapshot")
+    if after != {**before, anchor_key: value[3]} or after_eqns != before_eqns | member_keys:
+        reject("invalid matcher snapshot transition")
+    for state in value[11:15]:
+        equation_state(state)
+    return value

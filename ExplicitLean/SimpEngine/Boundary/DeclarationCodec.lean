@@ -199,4 +199,79 @@ def executeBoundaryTheorem (expectedName : Name) (source : String) : MetaM Unit 
   | none =>
       addDecl (.thmDecl thm)
 
+/- The matcher prototype only needs safe, nonrecursive singleton definitions.
+   Keep this separate from theorem proof irrelevance: a cached definition's
+   body and reducibility metadata must agree as well as its type. -/
+private def definitionHintsJson : ReducibilityHints → Json
+  | .opaque => .arr #[.str "opaque"]
+  | .abbrev => .arr #[.str "abbrev"]
+  | .regular height => .arr #[.str "regular", toJson height.toNat]
+
+private def decodeDefinitionHints : Json → Except String ReducibilityHints
+  | .arr #[.str "opaque"] => pure .opaque
+  | .arr #[.str "abbrev"] => pure .abbrev
+  | .arr #[.str "regular", heightJson] => do
+      let height ← heightJson.getNat?
+      if height > 4294967295 then throw "definition height overflow"
+      pure (.regular height.toUInt32)
+  | _ => throw "invalid definition hints"
+
+def encodeBoundaryDefinition (value : DefinitionVal) : MetaM String := do
+  unless value.safety == .safe do
+    throwError "boundary_definition_unsafe"
+  unless value.all == [value.name] do
+    throwError "boundary_definition_unsupported_group"
+  if value.name.isAnonymous then throwError "boundary_definition_anonymous_name"
+  if (value.type.find? (·.isConstOf value.name)).isSome ||
+      (value.value.find? (·.isConstOf value.name)).isSome then
+    throwError "boundary_definition_recursive_reference"
+  ensureCheckedClosed value.type
+  ensureCheckedClosed value.value
+  unless ← isDefEq (← inferType value.value) value.type do
+    throwError "boundary_definition_value_type_mismatch"
+  let levels ← encodeLevelParams value.levelParams
+  let typeSource ← encodeBoundaryExpr value.type
+  let valueSource ← encodeBoundaryExpr value.value
+  return (Json.arr #[.str "boundary_definition_dag_v1", encodeBoundaryName value.name,
+    .arr #[encodeBoundaryName value.name], levels, definitionHintsJson value.hints,
+    .str "safe", .str typeSource, .str valueSource]).compress
+
+def executeBoundaryDefinition (expectedName : Name) (source : String) : MetaM Unit := do
+  let parsed : Except String (Name × List Name × ReducibilityHints × String × String) := do
+    let json ← Json.parse source
+    let .arr #[.str "boundary_definition_dag_v1", nameJson, .arr #[allNameJson],
+        levelsJson, hintsJson, .str "safe", .str typeSource, .str valueSource] := json
+      | throw "invalid safe singleton definition payload"
+    let name ← decodeBoundaryName nameJson
+    unless name == (← decodeBoundaryName allNameJson) do throw "foreign definition group"
+    pure (name, ← decodeLevelParams levelsJson, ← decodeDefinitionHints hintsJson,
+      typeSource, valueSource)
+  let (name, levelParams, hints, typeSource, valueSource) ← match parsed with
+    | .ok result => pure result
+    | .error error => throwError "boundary_definition_decode_error:{error}"
+  unless name == expectedName && !name.isAnonymous do
+    throwError "boundary_definition_foreign_name"
+  let type ← decodeBoundaryExpr typeSource
+  let value ← decodeBoundaryExpr valueSource
+  if (type.find? (·.isConstOf name)).isSome || (value.find? (·.isConstOf name)).isSome then
+    throwError "boundary_definition_recursive_reference"
+  ensureCheckedClosed type
+  ensureCheckedClosed value
+  unless ← isDefEq (← inferType value) type do
+    throwError "boundary_definition_value_type_mismatch"
+  let decl : DefinitionVal := {
+    name, levelParams, type, value, hints, safety := .safe, all := [name] }
+  match (← getEnv).find? name (skipRealize := true) with
+  | some (.defnInfo existing) =>
+      unless existing.levelParams == decl.levelParams && existing.all == decl.all &&
+          existing.safety == decl.safety &&
+          definitionHintsJson existing.hints == definitionHintsJson decl.hints do
+        throwError "boundary_definition_existing_metadata_conflict"
+      unless ← isDefEq existing.type decl.type do
+        throwError "boundary_definition_existing_type_conflict"
+      unless ← isDefEq existing.value decl.value do
+        throwError "boundary_definition_existing_value_conflict"
+  | some _ => throwError "boundary_definition_existing_kind_conflict"
+  | none => addDecl (.defnDecl decl)
+
 end ExplicitLean.SimpEngine.Boundary

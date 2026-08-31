@@ -4,6 +4,7 @@ prelude
 public import Init.Prelude
 public meta import ExplicitLean.SimpEngine.Boundary.CongruenceCodec
 public meta import ExplicitLean.SimpEngine.Boundary.EquationCodec
+public meta import ExplicitLean.SimpEngine.Boundary.MatcherCodec
 public meta import Lean.Meta.Tactic.Replace
 public meta import Lean.Meta.Tactic.Util
 
@@ -42,11 +43,13 @@ def boundaryUnauthenticatedRunNonce : String := "unauthenticated"
 inductive EnvironmentAction where
   | declareCongruence (name : Name) (payload : String)
   | declareEquation (name : Name) (payload : String)
+  | declareMatcher (anchor : Name) (payload : String)
   deriving Inhabited, BEq
 
 private def executeEnvironmentAction : EnvironmentAction → MetaM Unit
   | .declareCongruence name payload => executeBoundaryCongruence name payload
   | .declareEquation name payload => executeBoundaryEquation name payload
+  | .declareMatcher anchor payload => executeBoundaryMatcher anchor payload
 
 def executeEnvironmentActions (actions : Array EnvironmentAction) : MetaM Unit := do
   for action in actions do

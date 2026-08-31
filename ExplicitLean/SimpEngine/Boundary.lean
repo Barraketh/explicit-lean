@@ -400,6 +400,7 @@ private def boundaryComparisonMismatch {α : Type} (label : String) : TacticM α
 private def boundaryEnvironmentActionName : EnvironmentAction → Name
   | EnvironmentAction.declareCongruence name _ => name
   | EnvironmentAction.declareEquation name _ => name
+  | EnvironmentAction.declareMatcher anchor _ => anchor
 
 private def boundaryEnvironmentActionJson (action : EnvironmentAction) : Json :=
   match action with
@@ -413,6 +414,12 @@ private def boundaryEnvironmentActionJson (action : EnvironmentAction) : Json :=
       ("kind", Json.str "declare_equation"),
       ("name", Json.str name.toString),
       ("nameParts", encodeBoundaryName name),
+      ("declaration", Json.str payload)
+    ]
+  | EnvironmentAction.declareMatcher anchor payload => Json.mkObj [
+      ("kind", Json.str "declare_matcher"),
+      ("name", Json.str anchor.toString),
+      ("nameParts", encodeBoundaryName anchor),
       ("declaration", Json.str payload)
     ]
 
@@ -1849,9 +1856,30 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
     (stockEnvironment : Environment) : TacticM (Array EnvironmentAction) := do
   let declarations := (boundaryEnvironmentDelta basis stockEnvironment).qsort
     (fun lhs rhs => lhs.name.toString < rhs.name.toString)
+  -- A generated splitter's typed async snapshot authenticates bundle ownership.
+  -- Capture accepts one complete bundle plus independently supported public
+  -- equation/congruence actions; every other added declaration fails closed.
+  let mut matcher? : Option (Name × Match.MatchEqns) := none
+  for info in declarations do
+    if let .defnInfo _ := info then
+      let state := Match.matchEqnsExt.getState stockEnvironment
+        (asyncMode := .async .asyncEnv) (asyncDecl := info.name)
+      let candidates := state.map.toArray.filter (fun (_, eqns) => eqns.splitterName == info.name)
+      unless candidates.isEmpty do
+        unless candidates.size == 1 do
+          throwError "boundary_matcher_ambiguous_capture_provenance"
+        if matcher?.isSome then
+          throwError "boundary_matcher_multiple_bundles_unsupported"
+        matcher? := some candidates[0]!
+  let members := matcher?.map (fun (_, eqns) => eqns.eqnNames.push eqns.splitterName)
+    |>.getD #[]
   let mut actions : Array EnvironmentAction := #[]
   for info in declarations do
+    if members.contains info.name then
+      continue
     if boundaryEnvironmentPrivateName basis info.name then
+      if matcher?.isSome then
+        throwError s!"boundary_matcher_unsupported_extra_declaration:{info.name}"
       unless ← boundaryPrivateProofDeclaration basis stockEnvironment info do
         throwError s!"boundary_comparison_unsupported_environment_delta:{info.name}"
     else
@@ -1884,6 +1912,17 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
             mappedAnchor?.isSome))
       else
         throwError s!"boundary_comparison_unsupported_declaration_metadata:{info.name}"
+  if let some (anchor, eqns) := matcher? then
+    let otherDeclarations := actions.map boundaryEnvironmentActionName
+    let priorEquationDeclarations := actions.filterMap fun action => match action with
+      | .declareEquation name _ => if name.toString < anchor.toString then some name else none
+      | _ => none
+    let payload ← withEnv stockEnvironment <| encodeBoundaryMatcher
+      basis.environment basis.checkedDeclarationNames anchor eqns
+      otherDeclarations priorEquationDeclarations
+    actions := actions.push (.declareMatcher anchor payload)
+    actions := actions.qsort fun lhs rhs =>
+      (boundaryEnvironmentActionName lhs).toString < (boundaryEnvironmentActionName rhs).toString
   return actions
 
 private def boundaryConstantMetadataEq
@@ -2022,9 +2061,23 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
   let appliedPublicNames := appliedPublic.map (·.name)
   unless stockPublicNames == appliedPublicNames do
     throwError "boundary_comparison_unsupported_environment_delta"
-  let actionNames := actions.map boundaryEnvironmentActionName
+  let actionNames := actions.filterMap fun action => match action with
+    | .declareMatcher _ _ => none
+    | _ => some (boundaryEnvironmentActionName action)
   unless actionNames == stockPublicNames do
     throwError "boundary_comparison_unsupported_environment_delta"
+  -- A matcher action names an existing anchor, while its added members are
+  -- private. Require every captured member on both sides, including proof
+  -- members that the general private-proof omission policy would permit.
+  for action in actions do
+    if let .declareMatcher anchor payload := action then
+      let members ← withEnv stockEnvironment <| boundaryMatcherDeclarationNames anchor payload
+      for name in members do
+        let some stockInfo := stockDelta.find? (·.name == name)
+          | throwError s!"boundary_matcher_missing_stock_member:{name}"
+        let some appliedInfo := appliedDelta.find? (·.name == name)
+          | throwError s!"boundary_matcher_missing_applied_member:{name}"
+        compareBoundaryDeclaration stockEnvironment stockInfo appliedInfo
   for stockInfo in stockPublic do
     let some appliedInfo := appliedDelta.find? (fun info => info.name == stockInfo.name)
       | throwError "boundary_comparison_unsupported_environment_delta"

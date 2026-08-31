@@ -16,7 +16,7 @@ import re
 import secrets
 from typing import Any, Iterable
 
-from boundary_expr_codec import validate_expr_dag, validate_theorem_payload, validate_congruence_payload, validate_equation_payload, expr_is_constant
+from boundary_expr_codec import validate_expr_dag, validate_theorem_payload, validate_congruence_payload, validate_equation_payload, validate_matcher_payload, expr_is_constant
 
 
 # Keep these values synchronized with the public constants in
@@ -92,7 +92,7 @@ FAILURE_REPORT_FIELDS = frozenset(
 LOCAL_FIELDS = frozenset({"reference", "userName", "transformation"})
 LOCAL_REFERENCE_FIELDS = frozenset({"kind", "index"})
 TRANSFORMATION_FIELDS = frozenset({"input", "result", "proof"})
-ENVIRONMENT_ACTION_KINDS = {"declare_congruence", "declare_equation"}
+ENVIRONMENT_ACTION_KINDS = {"declare_congruence", "declare_equation", "declare_matcher"}
 
 # These are successful per-occurrence outcomes.  They must not be confused
 # with abort categories: an abort stops the run and publishes no successful
@@ -283,8 +283,9 @@ def validate_environment_actions(value: object, label: str) -> list[dict[str, ob
             raise RuntimeError(
                 f"{label} reserved names must be strictly sorted and unique: {value!r}"
             )
-        validator = (validate_congruence_payload if action["kind"] == "declare_congruence"
-                     else validate_equation_payload)
+        validator = {"declare_congruence": validate_congruence_payload,
+                     "declare_equation": validate_equation_payload,
+                     "declare_matcher": validate_matcher_payload}[action["kind"]]
         validator(action["declaration"], action["nameParts"], label)
         exact_name = json.dumps(action["nameParts"], separators=(",", ":"))
         if exact_name in seen_names:
@@ -484,6 +485,9 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
                     continue
                 if encoded[0] == "boundary_theorem_dag_v1":
                     validate_theorem_payload(text, encoded[1] if len(encoded) > 1 else None, label)
+                    continue
+                if encoded[0] == "boundary_matcher_bundle_v1":
+                    validate_matcher_payload(text, encoded[1] if len(encoded) > 1 else None, label)
                     continue
         if FORBIDDEN_AXIOM in text:
             raise RuntimeError(f"{label} contains forbidden {FORBIDDEN_AXIOM}")
