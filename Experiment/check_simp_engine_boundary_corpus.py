@@ -457,6 +457,24 @@ def validate_occurrence_protocol() -> None:
             pass
         else:
             raise RuntimeError(f"forbidden generated token was accepted: {forbidden}")
+    materialize.reject_compiler_sorry_warning(
+        "Test.lean:1:1: warning: unused variable", "clean compiler output"
+    )
+    for diagnostic in (
+        "Test.lean:1:1: warning: declaration uses `sorry`",
+        "Test.lean:1:1: warning: declaration uses 'sorry'",
+        "Test.lean:1:1: warning: declaration uses sorry",
+        "Test.lean:1:1: warning: declaration uses sorryAx.",
+    ):
+        try:
+            materialize.reject_compiler_sorry_warning(
+                diagnostic, "forged compiler output"
+            )
+        except RuntimeError as error:
+            if "contains a declaration using sorry" not in str(error):
+                raise
+        else:
+            raise RuntimeError(f"compiler sorry warning was accepted: {diagnostic}")
 
     def artifact(
         terminal: str,

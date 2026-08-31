@@ -1117,6 +1117,7 @@ def replay_guard_evidence(
 ) -> dict[str, Any]:
     """Scan the complete subprocess output before publishing its guard evidence."""
     check_replay_abort_markers(output, expected_nonce=nonce, expected_module=module)
+    reject_compiler_sorry_warning(output, f"replay output for {module}")
     log_bytes = log_path.read_bytes()
     if log_bytes.decode("utf-8") != output:
         raise RuntimeError("replay guard log differs from scanned process output")
@@ -1129,6 +1130,21 @@ def replay_guard_evidence(
     }
     _validate_replay_guard(evidence, "replay guard")
     return evidence
+
+
+def reject_compiler_sorry_warning(output: str, label: str) -> None:
+    """Reject compiler output whose declaration depends on ``sorryAx``.
+
+    Artifact payloads already reject authored ``sorry`` tokens.  This separate
+    output check also catches ``sorryAx`` inserted by elaborator error recovery
+    or by generated syntax outside an artifact payload.  Durable report
+    verification applies the same check to every authenticated compiler log.
+    """
+    if re.search(
+        r"warning:\s+declaration uses\s+[`'‘’“”]?(?:sorry|sorryAx)[`'‘’“”]?(?:\s|[.,;:]|$)",
+        output,
+    ):
+        raise RuntimeError(f"{label} contains a declaration using sorry")
 
 
 def _query_dynamic_library(timeout: int, debug_root: Path) -> str:
@@ -1209,6 +1225,9 @@ def _module_result(
             f"instrumented module compilation failed for {selected.module} "
             f"(exit {instrumented_code}); see {module_root / 'instrumented.log'}"
         )
+    reject_compiler_sorry_warning(
+        instrumented_output, f"recording output for {selected.compiled_module}"
+    )
     report_list = parse_framed_json_lines(
         instrumented_output,
         marker=ARTIFACT_MARKER,
@@ -1750,6 +1769,7 @@ def _validate_module_invocations(
         text = data.decode("utf-8")
         check_recording_abort_markers(text, expected_nonce=nonces[label], expected_module=item.compiled_module)
         check_replay_abort_markers(text, expected_nonce=nonces[label], expected_module=item.compiled_module)
+        reject_compiler_sorry_warning(text, f"{item.module} {label} log")
         if label == "recording" and parse_framed_json_lines(
             text, marker=ARTIFACT_MARKER, expected_nonce=nonces[label],
             label=f"{item.module} recording artifacts",
