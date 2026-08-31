@@ -2083,6 +2083,12 @@ private def preservedFreshTheoremNames
         names := names.insert name
   return names
 
+private def boundaryLocalTheoremActions
+    (actions : Array EnvironmentAction) : Array EnvironmentAction :=
+  actions.filter fun action => match action with
+    | .declareLocalTheorems _ _ => true
+    | _ => false
+
 private def boundaryConstantMetadataEq
     (stock applied : ConstantInfo) : Bool :=
   match stock, applied with
@@ -2542,7 +2548,8 @@ private def runBoundaryProbe (simpStx : Syntax)
   let postStockAction : TacticM (GoalArtifact × String × Tactic.SavedState × DeclNameGenerator) := do
     let stock ← boundarySnapshot basis
     let capturedEnvironmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
-    let preservedFreshTheorems ← preservedFreshTheoremNames capturedEnvironmentActions
+    let capturedLocalTheoremActions := boundaryLocalTheoremActions capturedEnvironmentActions
+    let preservedFreshTheorems ← preservedFreshTheoremNames capturedLocalTheoremActions
     let mut environmentActions := capturedEnvironmentActions
     if reportRequest?.isSome && environmentActions.isEmpty && (preGenerator.namePrefix != stockGenerator.namePrefix ||
         preGenerator.idx != stockGenerator.idx || preGenerator.parentIdxs != stockGenerator.parentIdxs) then
@@ -2558,9 +2565,10 @@ private def runBoundaryProbe (simpStx : Syntax)
       environmentActions := #[.reserveDeclarationBranch preGenerator.namePrefix payload]
     restoreTrialInput
     let artifact ← captureGoalArtifact basis simpStx selection preservedFreshTheorems
-    let replayEnvironmentActions ← captureBoundaryEnvironmentActions basis (← getEnv)
-    unless replayEnvironmentActions == capturedEnvironmentActions do
-      throwError "boundary_environment_actions_changed_during_capture"
+    unless capturedLocalTheoremActions.isEmpty do
+      let replayEnvironmentActions ← captureBoundaryEnvironmentActions basis (← getEnv)
+      unless boundaryLocalTheoremActions replayEnvironmentActions == capturedLocalTheoremActions do
+        throwError "boundary_local_theorem_actions_changed_during_capture"
     let use ← protectBoundaryReferences basis.expressionReferences artifact.expressions
     use.checkContext stockMCtx
     use.checkUnchanged
