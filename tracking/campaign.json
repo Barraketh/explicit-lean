@@ -297,7 +297,7 @@
       "id": "local-owner-equation-realizations",
       "owner": "Sol bounded repair after Luna prototype review",
       "status": "in_progress",
-      "description": "Luna local-owner witness omitted actual saved context and nested async trees; not integrated. Repair now narrows to authenticated local cached-only tasks, exact current owner and bounded complete async DAG descriptor, failure-only callback/no fresh fallback. Fresh local producer remains unsupported pending saved-context authentication."
+      "description": "Authenticated local-cached-only primitive integrated. ExtraDegeneracy closed80-entry auxiliary cache witness under separate versioned fix-review. Fresh local production and sequence composition remain unsupported; do not infer pre-stock memo presence from shared cache refs."
     },
     {
       "id": "preexisting-expression-metavariable-references",
@@ -316,6 +316,12 @@
       "owner": "coordinator consumer with Sol native comparator",
       "status": "completed",
       "description": "Integrated native V2 emitted3oleanviews+IR comparison without exporter callbacks and five-fresh-process/six-family consumer. Main and private43checks/76stageprocesses each pass; real late/first exporter counterexamples reject at separate layers. Root1446hashes/150nonces plus native1198hashes/26binding mutations independently verified. Caller still owns source/comment provenance and complete translated dependency/runtime closure; no whole-corpus acceptance."
+    },
+    {
+      "id": "local-cached-owner-primitive",
+      "owner": "coordinator with Sol implementation after Luna review",
+      "status": "completed",
+      "description": "Separate cached-only local equation action authenticates current safe owner and full bounded AsyncConst DAG. No fresh fallback or saved-context equivalence claim. Main59-job build/20compiler+15wire+8kind/13field controls pass; root source/comment regenerated and inputs archived. Frozen imported10process/5wire regression passed. Cubic target passes; fullCubic and Extra80-entryauxcache remain separate."
     }
   ],
   "blockers": [
@@ -881,6 +887,14 @@
         ".lake/week-2026-08-31/cold-consumer-v2-root-verification.json",
         ".lake/week-2026-08-31/cold-bridge-v2-root-verification.json",
         ".lake/week-2026-08-31/mixed-observer-nat-basic-root-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T18:21:40.512389+00:00",
+      "summary": "Integrated local cached-owner primitive after frozen231hash/30nonce verification and main20process/15wire/13field controls. Root regenerated Cubic target replacement and original comment; archived main inputs. Managed process runner is the sole integration fix. Pending search guard, larger local aux cache, multiple-helper composition and translated tree remain separate obligations.",
+      "evidence": [
+        ".lake/week-2026-08-31/local-cached-handoff-root-verification.json",
+        ".lake/week-2026-08-31/local-cached-main-root-verification.json"
       ]
     }
   ],
@@ -1450,6 +1464,18 @@
       "publicationCandidate": "ordinary-applied only",
       "sourceCommentProvenanceAccepted": false,
       "wholeMathlib": false
+    },
+    "localCachedOwner": {
+      "mainReport": "/Users/ptsier/projects/explicit-lean/.lake/local-cached-owner-check/controls-pgzbmdya/report.json",
+      "mainReportSha256": "03cb3c17e481d253ea0c0cdb72528cc288e0c94c6cc79b9952d832d1aa71f000",
+      "mainRootVerification": ".lake/week-2026-08-31/local-cached-main-root-verification.json",
+      "handoffRootVerification": ".lake/week-2026-08-31/local-cached-handoff-root-verification.json",
+      "handoffManifestSha256": "a31f1159fbc847f2fe5bde6096294fe4b6f8968f5efd12bbd9541b01f7695377",
+      "mainCompilerProcesses": 20,
+      "mainWireNegatives": 15,
+      "constantFieldMutations": 13,
+      "scope": "single authentic completed local cached equation root; full structural owner and nested async DAG; no fresh production or nonempty auxiliary-proof cache",
+      "wholeMathlib": false
     }
   },
   "failureTriage": {
@@ -1477,7 +1503,7 @@
     "checkedAt": "2026-08-31T17:36:47.331238+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T18:08:49.612907+00:00",
+  "updatedAt": "2026-08-31T18:21:40.512389+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

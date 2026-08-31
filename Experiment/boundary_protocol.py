@@ -535,6 +535,11 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
                 if encoded[0] == "boundary_local_theorems_bundle_v1":
                     validate_local_theorems_payload(text, encoded[1] if len(encoded) > 1 else None, label)
                     continue
+                if encoded[0] == "boundary_local_cached_v1":
+                    anchor = encoded[10][1] if (len(encoded) == 11 and isinstance(encoded[10], list)
+                                                and len(encoded[10]) == 5) else None
+                    validate_realization_payload(text, anchor, label)
+                    continue
                 if encoded[0] == "boundary_realization_batch_v1":
                     validate_realization_payload(text, encoded[10][0][1] if len(encoded) == 11 and encoded[10] else None, label)
                     continue

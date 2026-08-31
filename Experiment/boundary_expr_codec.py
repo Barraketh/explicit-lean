@@ -775,6 +775,111 @@ def validate_realization_payload(source: object, expected_anchor: object,
         value = json.loads(source)
     except (ValueError, RecursionError) as error:
         raise RuntimeError(f"{label}: invalid JSON") from error
+    if isinstance(value, list) and value and value[0] == "boundary_local_cached_v1":
+        if not (len(value) == 11 and value[1] is True and isinstance(value[10], list)
+                and len(value[10]) == 5):
+            reject("invalid local cached header")
+        owner, root, witness, graph, equation = value[10]
+        key(owner); key(root); key(expected_anchor)
+        if root != expected_anchor or root[:-1] != owner or any(_private_name(n) for n in (owner, root)):
+            reject("invalid local cached identity")
+        if names(value[2]) != [root] or names(value[3]) != [root]:
+            reject("invalid local cached members")
+        match_state(value[4]); match_state(value[5]); equation_state(value[6]); equation_state(value[7])
+        sparse_state(value[8]); sparse_state(value[9])
+
+        def full_constant(sig: object) -> None:
+            sizes = {"axiom": 5, "definition": 8, "theorem": 6, "opaque": 7,
+                     "quotient": 5, "inductive": 12, "constructor": 9, "recursor": 12}
+            if not (isinstance(sig, list) and sig and isinstance(sig[0], str)
+                    and sig[0] in sizes and len(sig) == sizes[sig[0]]):
+                reject("invalid local constant shape")
+            kind = sig[0]
+            key(sig[1]); names(sig[2]); validate_struct_expr_dag(sig[3], label)
+            if kind in {"definition", "theorem", "opaque"}:
+                validate_struct_expr_dag(sig[4], label); names(sig[-1])
+            if kind == "definition":
+                hints = sig[5]
+                if not (hints in (["opaque"], ["abbrev"]) or isinstance(hints, list)
+                        and len(hints) == 2 and hints[0] == "regular" and _nat(hints[1])
+                        and hints[1] <= 4294967295):
+                    reject("invalid local definition hints")
+                if not isinstance(sig[6], str) or sig[6] not in {"safe", "unsafe", "partial"}:
+                    reject("invalid local definition safety")
+            if kind == "axiom" and type(sig[4]) is not bool or kind == "opaque" and type(sig[5]) is not bool:
+                reject("invalid local constant safety")
+            if kind == "quotient" and (not isinstance(sig[4], str) or sig[4] not in {"type", "ctor", "lift", "ind"}):
+                reject("invalid local quotient kind")
+            if kind == "inductive":
+                if not all(_nat(sig[i]) for i in (4, 5, 8)) or not all(type(sig[i]) is bool for i in (9, 10, 11)):
+                    reject("invalid local inductive metadata")
+                names(sig[6]); names(sig[7])
+            if kind == "constructor":
+                key(sig[4])
+                if not all(_nat(sig[i]) for i in (5, 6, 7)) or type(sig[8]) is not bool:
+                    reject("invalid local constructor metadata")
+            if kind == "recursor":
+                names(sig[4])
+                if not (all(_nat(sig[i]) for i in (5, 6, 7, 8)) and isinstance(sig[9], list)
+                        and all(type(sig[i]) is bool for i in (10, 11))):
+                    reject("invalid local recursor metadata")
+                for rule in sig[9]:
+                    if not (isinstance(rule, list) and len(rule) == 3 and _nat(rule[1])):
+                        reject("invalid local recursor rule")
+                    key(rule[0]); validate_struct_expr_dag(rule[2], label)
+        full_constant(witness)
+        if witness[0] != "definition" or witness[1] != owner or witness[6] != "safe":
+            reject("invalid local owner witness")
+        if not (isinstance(graph, list) and len(graph) == 6 and graph[0] == "completed_local_cached_v1"
+                and graph[1] == owner and graph[2] == root and isinstance(graph[3], list)
+                and 0 < len(graph[3]) <= 2048 and all(_nat(n) and n < len(graph[3]) for n in graph[4:])):
+            reject("invalid local cached graph")
+        nodes = graph[3]
+        encoded_nodes = set()
+        depths = []
+        for index, node in enumerate(nodes):
+            if not (isinstance(node, list) and len(node) == 4 and type(node[1]) is bool
+                    and isinstance(node[3], list) and all(_nat(n) and n < index for n in node[3])):
+                reject("invalid local cached node")
+            full_constant(node[0])
+            names([nodes[n][0][1] for n in node[3]])
+            depth = 1 + max((depths[n] for n in node[3]), default=0)
+            if depth > 512:
+                reject("local cached graph depth")
+            depths.append(depth)
+            encoded = json.dumps(node, separators=(",", ":"))
+            if encoded in encoded_nodes:
+                reject("noncanonical duplicate local node")
+            encoded_nodes.add(encoded)
+            meta = node[2]
+            if meta is not None:
+                if not (isinstance(meta, list) and len(meta) == 4 and isinstance(meta[3], list)):
+                    reject("invalid local cached metadata")
+                match_state(meta[0]); equation_state(meta[1]); sparse_state(meta[2])
+                seen = set()
+                for ext in meta[3]:
+                    if not (isinstance(ext, list) and len(ext) == 2 and isinstance(ext[1], str)
+                            and len(ext[1]) % 2 == 0 and re.fullmatch(r"[0-9a-f]+", ext[1])):
+                        reject("invalid local persistent bytes")
+                    k = key(ext[0])
+                    if k in seen:
+                        reject("duplicate local persistent extension")
+                    seen.add(k)
+        private, public = (nodes[i] for i in graph[4:])
+        if not (private[1] is True and public[1] is True and private[2] is not None and public[2] is not None
+                and private[0][0] == "theorem" and public[0][0] == "axiom"
+                and private[0][1] == root and public[0][1:4] == private[0][1:4] and public[0][4] is False):
+            reject("invalid local root interface")
+        reachable = set(graph[4:])
+        for index in reversed(range(len(nodes))):
+            if index in reachable:
+                reachable.update(nodes[index][3])
+        if len(reachable) != len(nodes):
+            reject("unused local cached node")
+        payload = validate_equation_payload(equation, root, label)
+        if payload[1] != owner:
+            reject("local equation owner mismatch")
+        return value
     if isinstance(value, list) and value and value[0] == "boundary_realization_sequence_v1":
         if not (len(value) == 13 and isinstance(value[10], list) and value[10]
                 and isinstance(value[11], list) and len(value[11]) == len(value[10])
