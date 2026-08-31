@@ -65,6 +65,12 @@ calls and 29 variants pass the private recording/replay pipeline and full
 oracle, including proof, owner, registration and snapshot mutation controls.
 The main build passes; a fresh production run is still required.
 
+Inventory and scope checkpoints have a separate content identity for their
+analysis sources, native executables, and pinned dependencies. Replay-only
+edits can reuse that analysis; each resulting manifest still records current
+replay provenance. Sources and runtimes are checked before, during, and after
+the run. Broad dependency hashing is amortized across a full manifest.
+
 The repository retains schema-27 operational recording and replay as legacy
 evidence. In particular, the existing
 `simp_engine_apply` parser in `ExplicitLean/SimpEngine/Source.lean` still accepts

@@ -334,6 +334,12 @@
       "owner": "coordinator with Sol implementation and Luna review",
       "status": "completed",
       "description": "Shared Tactic dispatcher and fully validated applied continuation integrated; stock diagnostic unchanged. Main65-job build,12fresh controls and2038root hash assertions pass. Frozen fullExtra24calls(23roots+1nested)/168declarations/120public/44extensions passes;6562root hash assertions15independent invocation receipts. Production report12 integration remains pending; no accepted corpus increment."
+    },
+    {
+      "id": "analysis-checkpoint-identity",
+      "status": "completed",
+      "owner": "coordinator with Luna tests and review",
+      "description": "Content-bound identity excludes replay-only project inputs but includes fiveanalysis modules, native executables and pinned package/toolchain source/runtimeclosure. Prewarm beforecapture, perbatch native/source/ctimeguards includinghits, fullclosurebefore/end. Real replay-edit two-run reusedbothcheckpoints withfresh manifestprovenance."
     }
   ],
   "blockers": [
@@ -384,7 +390,7 @@
     }
   ],
   "nextActions": [
-    "Finish analysis checkpoint review and integrate content-bound analysis-only identity; live replay-edit two-run reuse passes. Scope decoupling already integrated6e4c76f.",
+    "Analysischeckpointidentity integrated and livecross-replay-edit reuseverified. Generatefreshcurrentfullmanifest once; reuseanalysischeckpoints acrossfutureenginechanges while keeping replayartifacts/provenance current.",
     "Freeze current runtime; run fresh production Cubic20 and create fresh complete manifest with reusable analysis checkpoints; resume bounded indexed production workers under disk/budget guard.",
     "Trace Finprod emptydelta generator consumption and reproduce ToAdditive private proof metadata mismatch in NEW isolated snapshot; keep strict guards.",
     "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and full source/execution ownership.",
@@ -1571,6 +1577,17 @@
         "endByte": 2471
       },
       "scope": "Allsourcehashes/ranges/exacttext verified; dynamic exported behavior remains unresolved, no finitecaller equivalence claim."
+    },
+    "analysisCheckpointIdentity": {
+      "status": "integrated_live_reuse_verified",
+      "rootVerification": ".lake/week-2026-08-31/analysis-checkpoint-identity-root-verification.json",
+      "schema": 1,
+      "liveTestCalls": 6,
+      "firstRunSeconds": 90.2284,
+      "cachedRunSeconds": 58.413,
+      "sameInventoryAndScopeKeys": true,
+      "freshManifestProvenanceChanged": true,
+      "limitation": "About50seconds broadclosure hashing permanifest; use large batches. Fullfreshmanifest undernewcurrentengine pending. Oldmanifests neverrebound."
     }
   },
   "database": {
@@ -1954,7 +1971,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T20:43:20.488248+00:00",
+  "updatedAt": "2026-08-31T20:47:12.255803+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

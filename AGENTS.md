@@ -25,3 +25,8 @@ August 31 instructions, recorded there, supersede earlier roadmap choices.
   do not assume permission to continue spending. Never buy or redeem credits.
 - Record completed work, reproducible checks, blockers, and next actions in the
   tracker; keep large generated trees and logs under `.lake`.
+
+- When assigned a new private snapshot, create it and verify its absolute path
+  and HEAD before editing. Existing frozen evidence snapshots are read-only,
+  even if filesystem permissions permit writes. Never reuse an old invocation
+  nonce or receipt for a new run. Do not alter evidence to repair a failed check.

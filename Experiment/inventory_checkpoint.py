@@ -247,6 +247,8 @@ class CheckpointStore:
         inputs = self.inputs(operation, modules, source_hashes, parameters=parameters)
         cached = self.load(inputs, validator=validator)
         if cached is not None:
+            if freshness is not None:
+                freshness()
             return cached
         try:
             payload = producer()

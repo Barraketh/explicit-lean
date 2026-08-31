@@ -142,7 +142,7 @@ def test_inventory_and_scope_hits_skip_batch_producers() -> None:
             return SimpleNamespace(
                 returncode=0,
                 stdout=json.dumps({
-                    "file": str(module_path), "kind": "simp", "startByte": 0,
+                    "file": str(module_path.resolve()), "kind": "simp", "startByte": 0,
                     "endByte": 4, "line": 1, "column": 0,
                     "syntaxKind": "Lean.Parser.Tactic.simp", "source": "simp",
                 }) + "\n",

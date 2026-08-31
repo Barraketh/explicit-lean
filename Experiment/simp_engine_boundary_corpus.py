@@ -16,6 +16,7 @@ from typing import Any, Sequence
 import check_simp_engine_boundary_scope as scope
 import check_simp_engine_pin as pin
 from inventory_checkpoint import CheckpointStore
+import analysis_checkpoint_identity
 import simp_engine_inventory as inventory
 from process_runner import run_process
 
@@ -104,6 +105,7 @@ IMPLEMENTATION_SOURCE_PATTERNS = (
     "Experiment/simp_engine_inventory.py",
     "Experiment/simp_engine_boundary_corpus.py",
     "Experiment/inventory_checkpoint.py",
+    "Experiment/analysis_checkpoint_identity.py",
     "Experiment/boundary_expr_codec.py",
 )
 
@@ -629,6 +631,7 @@ def build_manifest(
     initial_implementation_hashes = implementation_hashes()
     checkpoint = None
     implementation_freshness = None
+    analysis_identity_snapshot = None
     if checkpoint_root is not None:
         checkpoint_path = Path(checkpoint_root).resolve()
         package_root = (ROOT / ".lake/packages").resolve()
@@ -640,20 +643,41 @@ def build_manifest(
             raise RuntimeError(
                 "checkpoint root must be outside the shared .lake/packages tree"
             )
+        run_process(
+            ["lake", "build", "simpEngineInventory", "simpEngineBoundaryScope",
+             "ExplicitLean.SimpEngine.Boundary.ScopeFixture",
+             "ExplicitLean.SimpEngine.Boundary.ScopeProbe"],
+            cwd=ROOT, check=True, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, timeout=timeout,
+        )
+        analysis_arguments = {
+            "inventory_binary": ROOT / ".lake/build/bin/simpEngineInventory",
+            "scope_binary": ROOT / ".lake/build/bin/simpEngineBoundaryScope",
+        }
+        analysis_freshness_snapshot = analysis_checkpoint_identity.cheap_snapshot(
+            ROOT, **analysis_arguments
+        )
+        analysis_identity_snapshot = analysis_checkpoint_identity.identity(
+            ROOT, **analysis_arguments
+        )
         checkpoint = CheckpointStore(
             checkpoint_path,
             identity={
-                "repositoryCommit": repository_commit,
+                **analysis_identity_snapshot,
                 "mathlibCommit": mathlib_commit,
-                "lean": lean,
                 "python": sys.version,
-                "implementationHashes": initial_implementation_hashes,
-                "pinnedPackages": pinned_package_identity(),
             },
         )
-        implementation_freshness = lambda: require_unchanged_hashes(
-            "implementation", initial_implementation_hashes, implementation_hashes()
-        )
+        def implementation_freshness() -> None:
+            require_unchanged_hashes(
+                "implementation", initial_implementation_hashes, implementation_hashes()
+            )
+            if analysis_checkpoint_identity.cheap_snapshot(
+                ROOT, **analysis_arguments
+            ) != analysis_freshness_snapshot:
+                raise RuntimeError("analysis inputs changed during checkpointed run")
+
+        implementation_freshness()
     sources = {module_path(path): path.read_bytes() for path in selected}
     by_module, fallbacks = inventory_paths(
         selected,
@@ -776,6 +800,15 @@ def build_manifest(
         implementation_hashes(),
     )
     assert_repository(repository_commit, allow_dirty)
+    if analysis_identity_snapshot is not None:
+        assert implementation_freshness is not None
+        implementation_freshness()
+        analysis_identity_final = analysis_checkpoint_identity.identity(
+            ROOT, **analysis_arguments
+        )
+        if analysis_identity_final != analysis_identity_snapshot:
+            raise RuntimeError("analysis identity changed during run")
+        implementation_freshness()
     final_mathlib_commit, final_lean = verify_environment()
     if final_mathlib_commit != mathlib_commit or final_lean != lean:
         raise RuntimeError("pinned_environment_changed_during_run")
