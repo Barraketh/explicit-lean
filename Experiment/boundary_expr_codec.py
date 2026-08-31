@@ -48,7 +48,8 @@ def _level(value: Any, reference_count: int | None = None) -> bool:
     return True
 
 
-def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool) -> list[Any]:
+def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool,
+                       structural: bool = False) -> list[Any]:
     if not isinstance(source, str):
         raise RuntimeError(f"{label} must be a string")
     if len(source.encode("utf-8")) > 64 * 1024 * 1024:
@@ -65,7 +66,7 @@ def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool) 
         _, reference_count, nodes, root = value
     else:
         if not (isinstance(value, list) and len(value) == 3
-                and value[0] == EXPR_DAG_VERSION):
+                and value[0] == ("expr_struct_dag_v1" if structural else EXPR_DAG_VERSION)):
             raise RuntimeError(f"{label} has an invalid expression DAG header")
         _, nodes, root = value
     if not isinstance(nodes, list) or not _nat(root) or root >= len(nodes):
@@ -80,6 +81,8 @@ def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool) 
         valid = False
         if tag in ("b", "f", "n"):
             valid = len(node) == 2 and _nat(node[1])
+            if structural and tag == "f":
+                valid = False
         elif tag == "t":
             valid = len(node) == 2 and isinstance(node[1], str)
         elif tag == "s":
@@ -99,6 +102,23 @@ def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool) 
         elif tag == "p":
             valid = len(node) == 4 and _name(node[1]) and _nat(node[2])
             references = node[3:]
+        elif tag == "m" and structural:
+            valid = len(node) == 3 and isinstance(node[1], list)
+            references = node[2:]
+            if valid:
+                for entry in node[1]:
+                    if not (isinstance(entry, list) and len(entry) == 2 and _name(entry[0])
+                            and isinstance(entry[1], list) and len(entry[1]) == 2):
+                        valid = False
+                        break
+                    kind, data = entry[1]
+                    if not ((kind == "string" and isinstance(data, str))
+                            or (kind == "bool" and type(data) is bool)
+                            or (kind == "name" and _name(data))
+                            or (kind == "nat" and _nat(data))
+                            or (kind == "int" and type(data) is int)):
+                        valid = False
+                        break
         if not valid or any(not _nat(ref) or ref >= index for ref in references):
             raise RuntimeError(f"{label} has an invalid node or forward reference at {index}")
         if tag in ("c", "p") and node[1] == [["s", "sorryAx"]]:
@@ -109,6 +129,10 @@ def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool) 
 def validate_expr_dag(source: object, label: str = "boundary expression") -> list[Any]:
     """Validate the closed v1 expression format; boundary references are forbidden."""
     return _validate_expr_dag(source, label, boundary_universes=False)
+
+
+def validate_struct_expr_dag(source: object, label: str = "structural expression") -> list[Any]:
+    return _validate_expr_dag(source, label, boundary_universes=False, structural=True)
 
 
 def validate_boundary_expr_dag(source: object, label: str = "boundary expression") -> list[Any]:
@@ -220,7 +244,7 @@ def validate_definition_payload(source: object, expected_name: object,
     except (ValueError, RecursionError) as error:
         raise RuntimeError(f"{label} is not a definition payload") from error
     if not (isinstance(value, list) and len(value) == 8
-            and value[0] == "boundary_definition_dag_v1"
+            and isinstance(value[0], str) and value[0] in {"boundary_definition_dag_v1", "boundary_definition_dag_v2"}
             and _name(expected_name) and expected_name and value[1] == expected_name
             and value[2] == [expected_name] and value[5] == "safe"):
         raise RuntimeError(f"{label} has an invalid safe singleton definition header")
@@ -232,8 +256,9 @@ def validate_definition_payload(source: object, expected_name: object,
             (isinstance(hints, list) and len(hints) == 2 and hints[0] == "regular"
              and _nat(hints[1]) and hints[1] <= 4294967295)):
         raise RuntimeError(f"{label} has invalid reducibility hints")
-    validate_expr_dag(value[6], f"{label} type")
-    validate_expr_dag(value[7], f"{label} value")
+    validator = validate_struct_expr_dag if value[0] == "boundary_definition_dag_v2" else validate_expr_dag
+    validator(value[6], f"{label} type")
+    validator(value[7], f"{label} value")
     return value
 
 
@@ -541,6 +566,30 @@ def validate_matcher_payload_v2(source: object, expected_anchor: object,
     return value
 
 
+def validate_matcher_payload_v3(source: object, expected_anchor: object,
+                              label: str = "boundary matcher") -> list[Any]:
+    if not isinstance(source, str):
+        raise RuntimeError(f"{label}: payload must be a string")
+    try:
+        value = json.loads(source)
+    except (ValueError, RecursionError) as error:
+        raise RuntimeError(f"{label}: invalid JSON") from error
+    if not (isinstance(value, list) and len(value) == 20
+            and value[0] == "boundary_matcher_bundle_v3"):
+        raise RuntimeError(f"{label}: invalid matcher bundle v3 header")
+    validate_matcher_payload_v2(json.dumps(["boundary_matcher_bundle_v2", *value[1:19]],
+                                         separators=(",", ":")), expected_anchor, label)
+    members = [entry[0] for entry in value[15]] + value[3][0] + [value[3][1]]
+    order = value[19]
+    key = lambda name: json.dumps(name, separators=(",", ":"))
+    if (not isinstance(order, list) or any(not _name(n) or not n for n in order)
+            or sorted(map(key, order)) != sorted(map(key, members))
+            or [n for n in order if n in value[3][0]] != value[3][0]
+            or order[-1:] != [value[3][1]]):
+        raise RuntimeError(f"{label}: invalid matcher declaration order")
+    return value
+
+
 def validate_matcher_payload(source: object, expected_anchor: object,
                              label: str = "boundary matcher") -> list[Any]:
     """Dispatch strict validation for legacy v1 and sparse-aware v2 bundles."""
@@ -551,6 +600,8 @@ def validate_matcher_payload(source: object, expected_anchor: object,
             header = None
         if isinstance(header, list) and header and header[0] == "boundary_matcher_bundle_v2":
             return validate_matcher_payload_v2(source, expected_anchor, label)
+        if isinstance(header, list) and header and header[0] == "boundary_matcher_bundle_v3":
+            return validate_matcher_payload_v3(source, expected_anchor, label)
     return _validate_matcher_payload_v1(source, expected_anchor, label)
 
 
@@ -636,11 +687,13 @@ def validate_realization_payload(source: object, expected_anchor: object,
             seen.add(encoded)
 
     def descriptor(value: object, owner: object, root: object) -> tuple[list, list]:
-        if not (isinstance(value, list) and len(value) == 6 and value[0] == "completed_realization_v1"
+        if not (isinstance(value, list) and len(value) == 6 and isinstance(value[0], str)
+                and value[0] in {"completed_realization_v1", "completed_realization_v2"}
                 and value[1] is True and value[2] == owner and value[3] == root
                 and isinstance(value[4], list) and value[4] and isinstance(value[5], list)):
             reject("invalid completed group descriptor")
         key(owner); key(root)
+        expression_validator = validate_struct_expr_dag if value[0] == "completed_realization_v2" else validate_expr_dag
         def members(entries: list, public: bool) -> list:
             result = []
             signatures = {}
@@ -683,7 +736,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
                 expected_size = {"theorem": 5, "definition": 7, "public-proof-interface": 4}[sig[0]]
                 if len(sig) != expected_size or (public != (sig[0] == "public-proof-interface")):
                     reject("invalid declaration signature shape")
-                key(sig[1]); names(sig[2]); validate_expr_dag(sig[3], label)
+                key(sig[1]); names(sig[2]); expression_validator(sig[3], label)
                 if not public:
                     names(sig[4])
                 if sig[0] == "definition":
@@ -692,7 +745,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
                             isinstance(hints, list) and len(hints) == 2 and hints[0] == "regular"
                             and _nat(hints[1]) and hints[1] <= 4294967295):
                         reject("invalid definition hints")
-                    validate_expr_dag(sig[6], label)
+                    expression_validator(sig[6], label)
                 if not (isinstance(meta, list) and len(meta) == 4 and isinstance(meta[3], list)):
                     reject("invalid member metadata")
                 match_state(meta[0]); equation_state(meta[1]); sparse_state(meta[2]); seen_exts = set()
@@ -722,6 +775,79 @@ def validate_realization_payload(source: object, expected_anchor: object,
         value = json.loads(source)
     except (ValueError, RecursionError) as error:
         raise RuntimeError(f"{label}: invalid JSON") from error
+    if isinstance(value, list) and value and value[0] == "boundary_realization_batch_v2":
+        if not (len(value) == 12 and type(value[1]) is bool
+                and isinstance(value[10], list) and value[10]
+                and isinstance(value[11], list) and value[11]):
+            reject("invalid recursive batch header")
+        key(expected_anchor); names(value[2]); names(value[3])
+        match_state(value[4]); match_state(value[5]); equation_state(value[6]); equation_state(value[7])
+        sparse_state(value[8]); sparse_state(value[9])
+        node_members, node_public, depths, identities = [], [], [], set()
+        nodes, roots = value[10:12]
+        for index, node in enumerate(nodes):
+            if not (isinstance(node, list) and len(node) == 6
+                    and isinstance(node[0], str) and node[0] in {"matcher", "equation"}
+                    and isinstance(node[4], list)):
+                reject("invalid recursive node")
+            kind, owner, root_name, payload, children, captured = node
+            identity = (key(owner), key(root_name))
+            if identity in identities:
+                reject("duplicate recursive node")
+            identities.add(identity)
+            if (any(not _nat(i) or i >= index for i in children)
+                    or len(set(children)) != len(children)):
+                reject("non-topological recursive children")
+            depth = max((depths[i] + 1 for i in children), default=0)
+            if depth > 2:
+                reject("recursive producer depth unsupported")
+            depths.append(depth)
+            if not (isinstance(captured, list) and captured and captured[0] == "completed_realization_v2"):
+                reject("recursive nodes require structural descriptors")
+            private, public = descriptor(captured, owner, root_name)
+            if kind == "matcher":
+                if children or public or not _private_name(root_name):
+                    reject("invalid recursive matcher")
+                if value[1]:
+                    if payload is not None:
+                        reject("cached recursive matcher has producer")
+                else:
+                    matcher = validate_matcher_payload(payload, owner, label)
+                    if matcher[0] != "boundary_matcher_bundle_v3" or matcher[19] != private:
+                        reject("recursive matcher member mismatch")
+            else:
+                if _private_name(root_name) or root_name[:-1] != owner:
+                    reject("foreign recursive equation owner")
+                equation = validate_equation_payload(payload, root_name, label)
+                if equation[1] != owner:
+                    reject("recursive equation anchor mismatch")
+                child_private = [n for i in children for n in node_members[i]]
+                child_public = [n for i in children for n in node_public[i]]
+                if child_private + [root_name] != private or child_public + [root_name] != public:
+                    reject("recursive child closure mismatch")
+                for i in children:
+                    if nodes[i][0] == "equation" and json.loads(nodes[i][3])[5]:
+                        reject("nested equation registration unsupported")
+            node_members.append(private); node_public.append(public)
+        if (any(not _nat(i) or i >= len(nodes) for i in roots)
+                or len(set(roots)) != len(roots)
+                or any(nodes[i][0] != "equation" for i in roots)):
+            reject("invalid recursive roots")
+        reachable = set(roots)
+        for index in range(len(nodes) - 1, -1, -1):
+            if index in reachable:
+                reachable.update(nodes[index][4])
+        if len(reachable) != len(nodes):
+            reject("unused recursive node")
+        private, public = [], []
+        for i in roots:
+            if nodes[i][2] in private:
+                reject("recursive root already active")
+            private.extend(n for n in node_members[i] if n not in private)
+            public.extend(n for n in node_public[i] if n not in public)
+        if private != value[2] or public != value[3] or nodes[roots[0]][2] != expected_anchor:
+            reject("recursive projected order or anchor mismatch")
+        return value
     if not (isinstance(value, list) and len(value) == 11 and value[0] == "boundary_realization_batch_v1"
             and type(value[1]) is bool and isinstance(value[10], list) and value[10]):
         reject("invalid batch header")
@@ -752,8 +878,10 @@ def validate_realization_payload(source: object, expected_anchor: object,
             else:
                 matcher = validate_matcher_payload(payload, anchor, label)
                 sparse_names = ([entry[0] for entry in matcher[15]]
-                                if matcher[0] == "boundary_matcher_bundle_v2" else [])
-                if sparse_names + matcher[3][0] + [matcher[3][1]] != child_private:
+                                if matcher[0] in {"boundary_matcher_bundle_v2", "boundary_matcher_bundle_v3"} else [])
+                matcher_names = (matcher[19] if matcher[0] == "boundary_matcher_bundle_v3"
+                                 else sparse_names + matcher[3][0] + [matcher[3][1]])
+                if matcher_names != child_private:
                     reject("nested matcher member mismatch")
             child_names.extend(child_private)
         if child_names + [root_name] != private:

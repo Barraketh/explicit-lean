@@ -2017,7 +2017,7 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
     let (anchor, payload) ← withEnv stockEnvironment <|
       encodeBoundaryLocalTheorems basis.environment helpers
     actions := actions.push (.declareLocalTheorems anchor payload)
-  if helpers.isEmpty && (declarations.isEmpty || matchers.size > 1) then
+  if helpers.isEmpty && (declarations.isEmpty || matchers.size > 0) then
     let equations := actions.filterMap fun action => match action with
       | .declareEquation name source => some (name, source)
       | _ => none

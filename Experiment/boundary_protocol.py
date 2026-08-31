@@ -17,7 +17,7 @@ import secrets
 from typing import Any, Iterable
 
 from boundary_expr_codec import (
-    validate_boundary_expr_dag, boundary_expr_is_constant, validate_expr_dag,
+    validate_boundary_expr_dag, boundary_expr_is_constant, validate_expr_dag, validate_struct_expr_dag,
     validate_theorem_payload, validate_congruence_payload, validate_equation_payload,
     validate_matcher_payload, validate_local_theorems_payload, validate_realization_payload,
     expr_is_constant,
@@ -520,6 +520,9 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
                 if encoded[0] == "expr_dag_v1":
                     validate_expr_dag(text, label)
                     continue
+                if encoded[0] == "expr_struct_dag_v1":
+                    validate_struct_expr_dag(text, label)
+                    continue
                 if encoded[0] == "boundary_equation_v1":
                     validate_equation_payload(text, None, label)
                     continue
@@ -535,7 +538,18 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
                 if encoded[0] == "boundary_realization_batch_v1":
                     validate_realization_payload(text, encoded[10][0][1] if len(encoded) == 11 and encoded[10] else None, label)
                     continue
-                if encoded[0] in {"boundary_matcher_bundle_v1", "boundary_matcher_bundle_v2"}:
+                if encoded[0] == "boundary_realization_batch_v2":
+                    anchor = None
+                    if (len(encoded) == 12 and isinstance(encoded[10], list)
+                            and isinstance(encoded[11], list) and encoded[11]
+                            and type(encoded[11][0]) is int
+                            and 0 <= encoded[11][0] < len(encoded[10])):
+                        node = encoded[10][encoded[11][0]]
+                        if isinstance(node, list) and len(node) == 6:
+                            anchor = node[2]
+                    validate_realization_payload(text, anchor, label)
+                    continue
+                if encoded[0] in {"boundary_matcher_bundle_v1", "boundary_matcher_bundle_v2", "boundary_matcher_bundle_v3"}:
                     validate_matcher_payload(text, encoded[1] if len(encoded) > 1 else None, label)
                     continue
         if FORBIDDEN_AXIOM in text:

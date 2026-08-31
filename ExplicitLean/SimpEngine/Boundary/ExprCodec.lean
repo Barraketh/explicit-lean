@@ -76,14 +76,46 @@ private structure EncodeState where
   references : Array LMVarId := #[]
   nodes : Array Json := #[]
   memo : Std.HashMap Expr Nat := {}
+  structural : Bool := false
+  structuralMemo : ExprStructMap Nat := {}
 
 private abbrev EncodeM := StateT EncodeState MetaM
 
+private def encodeScalarMetadata (data : MData) : MetaM Json := do
+  let entries ← data.entries.toArray.mapM fun (name, value) => do
+    let value ← match value with
+      | .ofString v => pure <| Json.arr #[.str "string", .str v]
+      | .ofBool v => pure <| Json.arr #[.str "bool", .bool v]
+      | .ofName v => pure <| Json.arr #[.str "name", encodeBoundaryName v]
+      | .ofNat v => pure <| Json.arr #[.str "nat", toJson v]
+      | .ofInt v => pure <| Json.arr #[.str "int", toJson v]
+      | .ofSyntax _ => throwError "boundary_struct_expr_syntax_metadata_unsupported"
+    pure <| Json.arr #[encodeBoundaryName name, value]
+  return .arr entries
+
+private def decodeScalarMetadata (json : Json) : Except String MData := do
+  let entries ← (← json.getArr?).toList.mapM fun entry => do
+    let .arr #[name, value] := entry | throw "invalid structural metadata entry"
+    let value ← match value with
+      | .arr #[.str "string", .str v] => pure <| DataValue.ofString v
+      | .arr #[.str "bool", .bool v] => pure <| DataValue.ofBool v
+      | .arr #[.str "name", v] => pure <| DataValue.ofName (← decodeBoundaryName v)
+      | .arr #[.str "nat", v] => pure <| DataValue.ofNat (← v.getNat?)
+      | .arr #[.str "int", v] => pure <| DataValue.ofInt (← v.getInt?)
+      | _ => throw "unsupported structural metadata value"
+    pure (← decodeBoundaryName name, value)
+  -- Preserve list order and duplicate keys exactly; do not normalize a KVMap.
+  return { entries }
+
 private partial def encodeExpr (expr : Expr) : EncodeM Nat := do
-  if let some index := (← get).memo[expr]? then
+  let state ← get
+  let structural := state.structural
+  let existing := if structural then state.structuralMemo[(⟨expr⟩ : ExprStructEq)]? else state.memo[expr]?
+  if let some index := existing then
     return index
-  if let .mdata _ child := expr then
-    return ← encodeExpr child
+  if !structural then
+    if let .mdata _ child := expr then
+      return ← encodeExpr child
   let references := (← get).references
   let node : Json ← match expr with
     | .bvar index => pure <| .arr #[.str "b", toJson index]
@@ -108,9 +140,13 @@ private partial def encodeExpr (expr : Expr) : EncodeM Nat := do
     | .lit (.strVal value) => pure <| .arr #[.str "t", .str value]
     | .proj name index child => do
         pure <| .arr #[.str "p", encodeBoundaryName name, toJson index, toJson (← encodeExpr child)]
-    | .mdata .. => unreachable!
+    | .mdata data child =>
+        pure <| .arr #[.str "m", ← encodeScalarMetadata data, toJson (← encodeExpr child)]
   let index := (← get).nodes.size
-  modify fun state => { nodes := state.nodes.push node, memo := state.memo.insert expr index, references := state.references }
+  modify fun state => { state with
+    nodes := state.nodes.push node
+    memo := if structural then state.memo else state.memo.insert expr index
+    structuralMemo := if structural then state.structuralMemo.insert ⟨expr⟩ index else state.structuralMemo }
   return index
 
 def encodeBoundaryExpr (expr : Expr) : MetaM String := do
@@ -218,5 +254,34 @@ def decodeBoundaryExprWithUniverses (source : String) (references : Array LMVarI
     MetaM Expr := do
   validateUniverseReferences references
   decodeBoundaryExprCore source (some references)
+
+/-- Exact closed syntax, including binder names/info and ordered scalar MData.
+    ExprStructMap uses Expr.equal, not alpha equivalence or definitional equality.
+    Existing expression tags retain their original metadata-erasing semantics. -/
+def encodeBoundaryStructExpr (expr : Expr) : MetaM String := do
+  if expr.hasFVar || expr.hasMVar || expr.hasLevelMVar then
+    throwError "boundary_struct_expr_not_closed"
+  let (root, state) ← (encodeExpr expr).run { structural := true }
+  return (Json.arr #[.str "expr_struct_dag_v1", .arr state.nodes, toJson root]).compress
+
+def decodeBoundaryStructExpr (source : String) : MetaM Expr := do
+  if source.utf8ByteSize > 64 * 1024 * 1024 then
+    throwError "boundary_struct_expr_source_limit"
+  let env ← getEnv
+  let result : Except String Expr := do
+    let .arr #[.str "expr_struct_dag_v1", .arr rawNodes, root] ← Json.parse source
+      | throw "invalid structural expression encoding"
+    if rawNodes.size > 2000000 then throw "structural expression node limit"
+    let mut nodes := #[]
+    for raw in rawNodes do
+      let expr ← match raw with
+        | .arr #[.str "m", data, child] =>
+          pure <| .mdata (← decodeScalarMetadata data) (← childAt nodes child)
+        | _ => decodeNode env {} #[] nodes raw
+      nodes := nodes.push expr
+    childAt nodes root
+  match result with
+  | .ok expr => return expr
+  | .error error => throwError "boundary_struct_expr_decode_error:{error}"
 
 end ExplicitLean.SimpEngine.Boundary

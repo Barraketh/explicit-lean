@@ -89,9 +89,11 @@ private def validatePayload (payload : CapturedSparseCases) : MetaM Unit := do
   let json ← match Json.parse payload.definition with
     | .ok json => pure json
     | .error error => throwError "boundary_sparse_definition:{error}"
-  let .arr #[.str "boundary_definition_dag_v1", name, .arr #[allName], _,
+  let .arr #[.str tag, name, .arr #[allName], _,
       .arr #[.str "abbrev"], .str "safe", _, _] := json
     | throwError "boundary_sparse_expected_safe_abbreviation"
+  unless tag == "boundary_definition_dag_v1" || tag == "boundary_definition_dag_v2" do
+    throwError "boundary_sparse_definition_version"
   unless name == encodeBoundaryName payload.name && allName == name do
     throwError "boundary_sparse_definition_identity"
 
@@ -127,7 +129,8 @@ def checkBoundarySparseCases (expectedName : Name) (source : String) : MetaM Uni
 
 /-- Capture requires actual typed provenance in a completed realization's cache.
     The surrounding action separately checks declaration closure and dependencies. -/
-def encodeBoundarySparseCases (before : Environment) (name owner : Name) : MetaM String := do
+def encodeBoundarySparseCases (before : Environment) (name owner : Name)
+    (structural := false) : MetaM String := do
   let env ← getEnv
   if before.containsOnBranch name then throwError "boundary_sparse_not_fresh"
   let cache := sparseCasesOnCacheExt.getState env
@@ -140,7 +143,7 @@ def encodeBoundarySparseCases (before : Environment) (name owner : Name) : MetaM
   let some (.defnInfo definition) := env.find? name (skipRealize := true)
     | throwError "boundary_sparse_expected_definition"
   let payload : CapturedSparseCases := {
-    name, definition := ← encodeBoundaryDefinition definition, key, info }
+    name, definition := ← encodeBoundaryDefinition definition structural, key, info }
   validatePayload payload
   checkMetadata payload
   return (payloadJson payload).compress

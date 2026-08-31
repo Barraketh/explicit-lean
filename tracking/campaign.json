@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 234,
+    "verifiedTranslatedOccurrences": 326,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
@@ -28,7 +28,7 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 26,
+    "verifiedTranslatedModules": 34,
     "provisionalCachedOccurrences": 0,
     "provisionalCachedModules": 0,
     "minimumAcceptedReportSchema": 10
@@ -235,8 +235,8 @@
     {
       "id": "ordered-recursive-realizations",
       "owner": "coordinator with assigned agent",
-      "status": "in_progress",
-      "description": "Private implementation passes12recursive fresh/cached/mutation controls,10legacy groups,17multiple-matchers and15ordered/metadata controls; handoff/integration pending. Full ModifyLast5 still rejects fourth mixed cached/fresh case."
+      "status": "completed",
+      "description": "Integrated strict structural expression/definition encoding, exact matcher declaration order and finite recursive realization batches. Main4/10 build,15ordered+12recursive+10legacygroup+17multiple controls,5wire negatives,17replay-guard and17source gates pass (source fixture includes1explicit unobserved). Root1866hash checks/54nonces. Full ModifyLast fourth mixed boundary remains unsupported; no full-module credit."
     },
     {
       "id": "complete-command-context-audit",
@@ -249,6 +249,18 @@
       "owner": "Luna implementation with coordinator review",
       "status": "completed",
       "description": "Reuse dependency identity/source memos within one preflight pass, retaining fresh selected-root checks and a fresh planning pass. Root shared-dependency fixture and source-change rejection checks pass. Independent96-module benchmark:4.61s\u21920.113s, identical keys (about41x for this preflight sample). Active frozen workers are unchanged; apply on next dispatch."
+    },
+    {
+      "id": "mixed-realization-sequences",
+      "owner": "coordinator with assigned Sol agent",
+      "status": "in_progress",
+      "description": "New isolated mixed sequence prototype for cached activation then ordinary helper and fresh equation then cached recursive groups. Exact typed per-node modes/ordered branch transitions; final full descriptor checks. Prior v1/v2 semantics unchanged."
+    },
+    {
+      "id": "raw-oracle-certified-output",
+      "owner": "coordinator with assigned Sol agent",
+      "status": "in_progress",
+      "description": "Isolated removal-only raw checked-domain oracle and optional normal frontend outputs in quarantine. Existing controls pass provisionally; final guarded regression handoff pending. Inherited checked-only private-helper false rejection remains fail-closed; historical Lookmap sources are not portable to changed runtime."
     }
   ],
   "blockers": [
@@ -295,8 +307,8 @@
   ],
   "nextActions": [
     "Monitor schema10-campaign pipelines: sessions38300priority/72713full, fresh manifests first then automatic disjoint worker dispatch. Reuse only matching identities; oldreports remain provisional. Do not duplicate live jobs or replan live leases.",
-    "Integrate reviewed ordered matcher/recursive realization handoff, preserving artifact4/report10 guards; then support mixed cached activation and fresh helper/equation segments.",
-    "Prototype raw checked-domain oracle validation without self replay, then same-frontend output serialization with quarantined artifact promotion. Fresh certified translated cone required; old artifacts remain provisional for output binding.",
+    "Finish mixed-sequence prototype for Control.Basic/ModifyLast and triage unsupported root shapes; strict generator guards stay unchanged.",
+    "Review/integrate raw-oracle output provenance prototype; build a fresh certified translated cone with source-pair checks, actual-command audits and whole-family quarantine/promotion.",
     "Resolve reusable executable66calls and5unresolved quotations, preserving original comments and source/execution ownership; no unqualified finite-caller-table equivalence claims.",
     "After complete explicit coverage and full-tree validation, improve readability and extend to other common tactics if time remains."
   ],
@@ -755,6 +767,16 @@
         ".lake/week-2026-08-31/certified-output-design-review/manifest.json",
         ".lake/week-2026-08-31/certificate-revalidation-design.md"
       ]
+    },
+    {
+      "at": "2026-08-31T16:29:41.730566+00:00",
+      "summary": "Ordered structural matcher/recursive realization milestone integrated after main4/10 build and focused regressions. Root reverified2209private archive files/59logs plus1866main hashes/54logs. First ModifyLast source boundary passes fresh/cached; fourth mixed boundary still assigned. Shared packages and frozen campaign workers unchanged.",
+      "evidence": [
+        ".lake/week-2026-08-31/ordered-recursive-handoff-root-verification.log",
+        ".lake/week-2026-08-31/ordered-recursive-main-checkpoint.json",
+        ".lake/week-2026-08-31/ordered-recursive-main-verification.json",
+        ".lake/week-2026-08-31/mixed-segment-design/manifest.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1173,6 +1195,14 @@
       "translatedConeAudit": ".lake/week-2026-08-31/schema10-cone-audit-verification.json",
       "translatedConeAuditReportSha256": "608b7fc619c7bcb9cccf8b2f4f1b52bd8e1269a7de980f919fd6dd881c07d2f4",
       "wholeMathlib": false
+    },
+    "orderedRecursiveRealizations": {
+      "artifactSchema": 4,
+      "reportSchema": 10,
+      "mainEvidence": ".lake/week-2026-08-31/ordered-recursive-main-checkpoint.json",
+      "privateHandoffSha256": "669301b33c096a57a4b3a6d290d82cc60818792dbf5f275921cadcc6f7b70194",
+      "wholeModifyLast": false,
+      "performanceNote": "Two-site fresh/cached fixture is5.2MiB source and observed about24GiB peak RSS on64GiB Mac. Avoid concurrent heavy ModifyLast controls; investigate sharing-preserving storage separately without weakening descriptors."
     }
   },
   "failureTriage": {
@@ -1199,5 +1229,5 @@
     "checkedAt": "2026-08-31T15:30:34.486345+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T16:15:56.704281+00:00"
+  "updatedAt": "2026-08-31T16:29:41.730566+00:00"
 }

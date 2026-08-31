@@ -71,9 +71,11 @@ private def completedCacheResult (env : Environment) (owner key : Name) : IO Env
 
 private def nameArrayJson (names : Array Name) : Json := .arr (names.map encodeBoundaryName)
 
-private def constantSignature (info : ConstantInfo) (publicProofView := false) : MetaM Json := do
+private def constantSignature (info : ConstantInfo) (publicProofView := false)
+    (structural := false) : MetaM Json := do
+  let encode := if structural then encodeBoundaryStructExpr else encodeBoundaryExpr
   let common := #[encodeBoundaryName info.name, nameArrayJson info.levelParams.toArray,
-    .str (← encodeBoundaryExpr info.type)]
+    .str (← encode info.type)]
   match info with
   | .thmInfo info => return .arr (#[.str "theorem"] ++ common ++ #[nameArrayJson info.all.toArray])
   | .defnInfo info =>
@@ -83,7 +85,7 @@ private def constantSignature (info : ConstantInfo) (publicProofView := false) :
       | .regular h => Json.arr #[.str "regular", toJson h.toNat]
     unless info.safety == .safe do throwError "activation_unsafe_definition"
     return .arr (#[.str "definition"] ++ common ++ #[nameArrayJson info.all.toArray,
-      hints, .str (← encodeBoundaryExpr info.value)])
+      hints, .str (← encode info.value)])
   | .axiomInfo info =>
     unless publicProofView && !info.isUnsafe do throwError "activation_unexpected_axiom"
     return .arr (#[.str "public-proof-interface"] ++ common)
@@ -145,7 +147,8 @@ private def memberMetadata (env : Environment) (member : AsyncConst) : MetaM Jso
   return .arr #[matchState, eqnState, boundarySparseCacheJson view, .arr entries]
 
 private partial def nestedMemberJson (fuel : Nat) (env : Environment)
-    (allowed : Array Name) (member : AsyncConst) (publicView : Bool) : MetaM Json := do
+    (allowed : Array Name) (member : AsyncConst) (publicView : Bool)
+    (structural := false) : MetaM Json := do
   if fuel == 0 then throwError "activation_nested_branch_depth"
   unless (← IO.hasFinished member.constInfo.constInfo) &&
       (← IO.hasFinished member.constInfo.sig) && (← IO.hasFinished member.aconstsImpl) do
@@ -153,9 +156,10 @@ private partial def nestedMemberJson (fuel : Nat) (env : Environment)
   let info := member.constInfo.constInfo.get
   let sig := member.constInfo.sig.get
   unless member.constInfo.name == info.name && member.constInfo.kind == ConstantKind.ofConstantInfo info &&
-      sig.name == info.name && sig.levelParams == info.levelParams && sig.type == info.type do
+      sig.name == info.name && sig.levelParams == info.levelParams &&
+      (if structural then Expr.equal sig.type info.type else sig.type == info.type) do
     throwError "activation_async_signature_conflict"
-  let signature ← constantSignature info publicView
+  let signature ← constantSignature info publicView structural
   let metadata ← match member.exts? with
     | none => pure Json.null
     | some task => do
@@ -174,18 +178,19 @@ private partial def nestedMemberJson (fuel : Nat) (env : Environment)
     if seen.contains child.constInfo.name then throwError "activation_nested_branch_duplicate"
     seen := seen.insert child.constInfo.name
     let prior := allowed.takeWhile (· != child.constInfo.name)
-    let expected ← nestedMemberJson (fuel - 1) env prior child publicView
+    let expected ← nestedMemberJson (fuel - 1) env prior child publicView structural
     let some mapped := children.map.find? child.constInfo.name
       | throwError "activation_nested_branch_map"
     let some normalized := children.normalizedTrie.find? (privateToUserName child.constInfo.name)
       | throwError "activation_nested_branch_trie"
-    unless (← nestedMemberJson (fuel - 1) env prior mapped publicView) == expected &&
-        (← nestedMemberJson (fuel - 1) env prior normalized publicView) == expected do
+    unless (← nestedMemberJson (fuel - 1) env prior mapped publicView structural) == expected &&
+        (← nestedMemberJson (fuel - 1) env prior normalized publicView structural) == expected do
       throwError "activation_nested_branch_lookup_conflict"
     nested := nested.push expected
   return .arr #[signature, .bool member.isRealized, metadata, .arr nested]
 
-private def completedCacheDescriptor (env : Environment) (owner key : Name) : MetaM Json := do
+private def completedCacheDescriptor (env : Environment) (owner key : Name)
+    (structural := false) : MetaM Json := do
   let checked ← IO.wait env.checked
   let result ← completedCacheResult env owner key
   let mut privateMembers := #[]
@@ -194,10 +199,10 @@ private def completedCacheDescriptor (env : Environment) (owner key : Name) : Me
     let info := member.constInfo.constInfo.get
     let some checked := checked.find? info.name
       | throwError "activation_unchecked_member:{info.name}"
-    let signature ← constantSignature info
-    unless (← constantSignature checked) == signature do
+    let signature ← constantSignature info (structural := structural)
+    unless (← constantSignature checked (structural := structural)) == signature do
       throwError "activation_checked_member_conflict:{info.name}"
-    let tree ← nestedMemberJson (result.newConsts.private.length + 1) env priorNames member false
+    let tree ← nestedMemberJson (result.newConsts.private.length + 1) env priorNames member false structural
     privateMembers := privateMembers.push (.arr #[signature, ← memberMetadata env member, tree])
     priorNames := priorNames.push info.name
   let mut publicMembers := #[]
@@ -208,12 +213,13 @@ private def completedCacheDescriptor (env : Environment) (owner key : Name) : Me
       | throwError "activation_foreign_public_member"
     let privateInfo := privateMember.constInfo.constInfo.get
     unless privateInfo.isTheorem && privateInfo.levelParams == info.levelParams &&
-        privateInfo.type == info.type do throwError "activation_public_view_conflict"
-    let tree ← nestedMemberJson (result.newConsts.public.length + 1) env priorNames member true
-    publicMembers := publicMembers.push (.arr #[← constantSignature info true,
+        (if structural then Expr.equal privateInfo.type info.type else privateInfo.type == info.type) do
+      throwError "activation_public_view_conflict"
+    let tree ← nestedMemberJson (result.newConsts.public.length + 1) env priorNames member true structural
+    publicMembers := publicMembers.push (.arr #[← constantSignature info true structural,
       ← memberMetadata env member, tree])
     priorNames := priorNames.push info.name
-  return .arr #[.str "completed_realization_v1", .bool (env.isImportedConst owner),
+  return .arr #[.str (if structural then "completed_realization_v2" else "completed_realization_v1"), .bool (env.isImportedConst owner),
     encodeBoundaryName owner, encodeBoundaryName key, .arr privateMembers, .arr publicMembers]
 
 /- A group descriptor is a validation witness, never a constructor for Lean's
@@ -279,7 +285,10 @@ private def namesFromJson (json : Json) : MetaM (Array Name) := do
   return result
 
 private def checkDescriptor (owner key : Name) (expected : Json) : MetaM Unit := do
-  let actual ← completedCacheDescriptor (← getEnv) owner key
+  let structural := match expected with
+    | .arr values => values[0]? == some (.str "completed_realization_v2")
+    | _ => false
+  let actual ← completedCacheDescriptor (← getEnv) owner key structural
   unless actual == expected do throwError "boundary_realization_cached_descriptor_conflict:{key}"
 
 private def nestedMatcherPayload (source : String) : MetaM String := do
@@ -300,7 +309,7 @@ private def nestedMatcherPayload (source : String) : MetaM String := do
     Fresh production initially supports an equation root with zero or more
     independently closed matcher children in the empty imported callback state.
     Every other closure stays unsupported. -/
-def encodeBoundaryRealizationBatch? (before stock : Environment) (checkedBefore : NameSet)
+private def encodeBoundaryRealizationBatchV1? (before stock : Environment) (checkedBefore : NameSet)
     (equations matchers : Array (Name × String)) : MetaM (Option (Name × String)) := do
   let added ← branchDelta before stock
   if added.isEmpty then return none
@@ -387,7 +396,7 @@ private def executeCapturedRoot (children : Array Json) (root : Name)
 
 /-- No generator is invoked. Cached mode preflights completed tasks and uses a
     failure-only callback; producer mode runs only the captured closed closure. -/
-def executeBoundaryRealizationBatch (expectedAnchor : Name) (source : String) : MetaM Unit := do
+private def executeBoundaryRealizationBatchV1 (expectedAnchor : Name) (source : String) : MetaM Unit := do
   let .arr #[.str "boundary_realization_batch_v1", .bool cached, privateNames, publicNames,
       matchBefore, matchAfter, eqnsBefore, eqnsAfter, sparseBefore, sparseAfter, .arr roots] ← ofExcept (Json.parse source)
     | throwError "boundary_realization_invalid_payload"
@@ -453,12 +462,303 @@ def executeBoundaryRealizationBatch (expectedAnchor : Name) (source : String) : 
       boundarySparseCacheJson after == sparseAfter do
     throwError "boundary_realization_caller_after_conflict"
 
+/- Version two retains complete descriptors but models the actual deduplicating
+   activation API. A root may include a completed earlier group's members.
+   Nodes are a finite topological producer table, never inferred on replay. -/
+private structure RealizationNode where
+  kind : String
+  owner : Name
+  key : Name
+  source : Json
+  children : Array Nat
+  descriptor : Json
+  deriving Inhabited
+
+private def realizationNodeJson (node : RealizationNode) : Json :=
+  .arr #[.str node.kind, encodeBoundaryName node.owner, encodeBoundaryName node.key,
+    node.source, toJson node.children, node.descriptor]
+
+private partial def projectedCovers (groups : Array CachedGroup)
+    (privateNames publicNames : Array Name) (activePrivate activePublic : Array Name := #[]) :
+    Array (Array CachedGroup) := Id.run do
+  if privateNames.isEmpty then return if publicNames.isEmpty then #[#[]] else #[]
+  let mut results := #[]
+  for group in groups do
+    if activePrivate.contains group.key then continue
+    let newPrivate := group.members.filter (!activePrivate.contains ·)
+    let newPublic := group.publicMembers.filter (!activePublic.contains ·)
+    if newPrivate.isEmpty || privateNames.take newPrivate.size != newPrivate ||
+        publicNames.take newPublic.size != newPublic then continue
+    for suffix in projectedCovers groups (privateNames.drop newPrivate.size)
+        (publicNames.drop newPublic.size) (activePrivate ++ newPrivate) (activePublic ++ newPublic) do
+      results := results.push (#[group] ++ suffix)
+      if results.size > 1 then return results
+  return results
+
+private def descriptorNames (owner key : Name) (descriptor : Json) : MetaM (Array Name × Array Name) := do
+  let .arr #[.str "completed_realization_v2", .bool true, ownerJson, keyJson,
+      .arr privateEntries, .arr publicEntries] := descriptor
+    | throwError "boundary_realization_v2_descriptor"
+  unless ownerJson == encodeBoundaryName owner && keyJson == encodeBoundaryName key do
+    throwError "boundary_realization_v2_descriptor_identity"
+  let names ← #[privateEntries, publicEntries] |>.mapM fun entries => do
+    let values ← entries.mapM fun entry => do
+      let .arr #[.arr signature, _, _] := entry
+        | throwError "boundary_realization_v2_member"
+      let some name := signature[1]? | throwError "boundary_realization_v2_signature"
+      pure name
+    namesFromJson (.arr values)
+  unless names[0]!.back? == some key && names[1]!.all names[0]!.contains do
+    throwError "boundary_realization_v2_member_identity"
+  return (names[0]!, names[1]!)
+
+private partial def captureRealizationNode (fuel : Nat) (stock : Environment)
+    (cached : Bool) (candidates : Array CachedGroup) (equations matchers : Array (Name × String))
+    (group : CachedGroup) : StateT (Array RealizationNode) MetaM Nat := do
+  if fuel == 0 then throwError "boundary_realization_v2_depth_unsupported"
+  if let some index := (← get).findIdx? (fun node => node.owner == group.owner && node.key == group.key) then
+    return index
+  unless stock.isImportedConst group.owner && group.members.back? == some group.key do
+    throwError "boundary_realization_v2_owner"
+  let descriptor ← completedCacheDescriptor stock group.owner group.key (structural := true)
+  let (kind, source, children) ← if isPrivateName group.key then do
+      let state := Match.matchEqnsExt.getState stock (asyncMode := .async .asyncEnv) (asyncDecl := group.key)
+      let some eqns := state.map.find? group.owner
+        | throwError "boundary_realization_v2_child_not_matcher"
+      unless eqns.splitterName == group.key && group.publicMembers.isEmpty do
+        throwError "boundary_realization_v2_matcher_key"
+      let source ← if cached then pure Json.null else do
+        let some (_, source) := matchers.find? (·.1 == group.owner)
+          | throwError "boundary_realization_missing_captured_matcher"
+        unless (← boundaryMatcherDeclarationNames group.owner source) == group.members do
+          throwError "boundary_realization_matcher_members_conflict"
+        pure (.str (← nestedMatcherPayload source))
+      pure ("matcher", source, #[])
+    else do
+      unless group.key.getPrefix == group.owner do throwError "boundary_realization_v2_equation_owner"
+      let source ← if cached then do
+          let some (.thmInfo thm) := stock.checked.get.find? group.key
+            | throwError "boundary_realization_root_not_theorem"
+          let mapping := (eqnsExt.getState stock).mapInv.find? group.key
+          unless mapping.isNone || mapping == some group.owner do throwError "boundary_realization_root_mapping"
+          encodeBoundaryEquation group.owner thm (defeqAttr.hasTag stock group.key)
+            (backwardDefeqAttr.hasTag stock group.key) mapping.isSome
+        else do
+          let some (_, source) := equations.find? (·.1 == group.key)
+            | throwError "boundary_realization_missing_captured_root"
+          pure source
+      let childNames := group.members.pop
+      let childCandidates := candidates.filter fun child => child.members.size < group.members.size &&
+        !child.members.isEmpty && child.members.all childNames.contains
+      let covers := groupCovers childCandidates childNames
+      unless covers.size == 1 do throwError "boundary_realization_ambiguous_nested_cover"
+      let children ← covers[0]!.mapM fun child =>
+        captureRealizationNode (fuel - 1) stock cached candidates equations matchers child
+      pure ("equation", Json.str source, children)
+  let nodes ← get
+  let index := nodes.size
+  set (nodes.push { kind, owner := group.owner, key := group.key, source, children, descriptor })
+  return index
+
+private def encodeBoundaryRealizationBatchV2? (before stock : Environment) (checkedBefore : NameSet)
+    (equations matchers : Array (Name × String)) : MetaM (Option (Name × String)) := withEnv stock do
+  let added ← branchDelta before stock
+  if added.isEmpty then return none
+  let publicAdded ← branchDelta before stock true
+  let candidates ← candidateGroups stock
+  let eligible := candidates.filter fun group => !group.members.isEmpty &&
+    group.members.all added.contains && group.members.all (!before.containsOnBranch ·) &&
+    !isPrivateName group.key && group.key.getPrefix == group.owner && stock.isImportedConst group.owner
+  let covers := projectedCovers eligible added publicAdded
+  unless covers.size == 1 do throwError "boundary_realization_ambiguous_or_missing_projected_cover"
+  let groups := covers[0]!
+  let cached := added.all checkedBefore.contains
+  unless cached || added.all (!checkedBefore.contains ·) do
+    throwError "boundary_realization_mixed_checked_closure"
+  let (roots, nodes) ← (groups.mapM fun group =>
+    captureRealizationNode 3 stock cached candidates equations matchers group).run #[]
+  unless cached || ((nodes.filter (·.kind == "equation") |>.map (·.key)).qsort Name.quickLt ==
+      (equations.map (·.1)).qsort Name.quickLt &&
+      (nodes.filter (·.kind == "matcher") |>.map (·.owner)).qsort Name.quickLt ==
+      (matchers.map (·.1)).qsort Name.quickLt) do
+    throwError "boundary_realization_unclaimed_actions"
+  let payload := Json.arr #[.str "boundary_realization_batch_v2", .bool cached,
+    nameArrayJson added, nameArrayJson publicAdded,
+    boundaryMatchStateJson (Match.matchEqnsExt.getState before),
+    boundaryMatchStateJson (Match.matchEqnsExt.getState stock),
+    equationStateJson (eqnsExt.getState before), equationStateJson (eqnsExt.getState stock),
+    boundarySparseCacheJson before, boundarySparseCacheJson stock,
+    .arr (nodes.map realizationNodeJson), toJson roots]
+  return some (groups[0]!.key, payload.compress)
+
+def encodeBoundaryRealizationBatch? (before stock : Environment) (checkedBefore : NameSet)
+    (equations matchers : Array (Name × String)) : MetaM (Option (Name × String)) := do
+  let added ← branchDelta before stock
+  if added.isEmpty then return none
+  let candidates ← candidateGroups stock
+  let eligible := candidates.filter fun group => !group.members.isEmpty &&
+    group.members.all added.contains && group.members.all (!before.containsOnBranch ·)
+  -- Do not reinterpret a legacy cover or recover from arbitrary capture errors.
+  if (groupCovers eligible added).isEmpty then
+    encodeBoundaryRealizationBatchV2? before stock checkedBefore equations matchers
+  else
+    encodeBoundaryRealizationBatchV1? before stock checkedBefore equations matchers
+
+private def parseRealizationNodes (cached : Bool) (values : Array Json) : MetaM (Array RealizationNode) := do
+  let mut nodes : Array RealizationNode := #[]
+  let mut depths : Array Nat := #[]
+  for value in values do
+    let .arr #[.str kind, owner, key, source, .arr children, descriptor] := value
+      | throwError "boundary_realization_v2_node"
+    let owner ← ofExcept (decodeBoundaryName owner)
+    let key ← ofExcept (decodeBoundaryName key)
+    unless (← getEnv).isImportedConst owner && !key.isAnonymous &&
+        !(nodes.any fun node => node.owner == owner && node.key == key) do
+      throwError "boundary_realization_v2_node_identity"
+    let children ← children.mapM (Lean.ofExcept ∘ Json.getNat?)
+    unless children.all (· < nodes.size) && children.toList.eraseDups.length == children.size do
+      throwError "boundary_realization_v2_non_topological_children"
+    let depth := children.foldl (fun depth i => max depth (depths[i]! + 1)) 0
+    if depth > 2 then throwError "boundary_realization_v2_depth_unsupported"
+    let (members, publicMembers) ← descriptorNames owner key descriptor
+    if kind == "matcher" then
+      unless isPrivateName key && children.isEmpty && publicMembers.isEmpty do
+        throwError "boundary_realization_v2_matcher_node"
+      if cached then
+        unless source == .null do throwError "boundary_realization_v2_cached_producer"
+      else
+        let .str source := source | throwError "boundary_realization_v2_missing_matcher"
+        unless (← ofExcept (parseMatcher source)).declarationOrder.isSome do
+          throwError "boundary_realization_v2_unordered_matcher"
+        unless (← boundaryMatcherDeclarationNames owner source) == members do
+          throwError "boundary_realization_matcher_members_conflict"
+    else if kind == "equation" then
+      let .str source := source | throwError "boundary_realization_v2_missing_equation"
+      let (equationOwner, _, _, _, _) ← ofExcept (parseEquationPayload source)
+      unless equationOwner == owner && !isPrivateName key do throwError "boundary_realization_v2_equation_owner"
+      validateEquationAnchor owner key
+      let mut childMembers := #[]
+      let mut childPublic := #[]
+      for i in children do
+        let child := nodes[i]!
+        let (privateNames, publicNames) ← descriptorNames child.owner child.key child.descriptor
+        childMembers := childMembers ++ privateNames
+        childPublic := childPublic ++ publicNames
+        if child.kind == "equation" then
+          let .str source := child.source | throwError "boundary_realization_v2_missing_equation"
+          let (_, _, _, _, registration) ← ofExcept (parseEquationPayload source)
+          if registration then throwError "boundary_realization_v2_nested_registration_unsupported"
+      unless childMembers.push key == members && childPublic.push key == publicMembers do
+        throwError "boundary_realization_v2_nested_closure"
+    else throwError "boundary_realization_v2_unknown_kind"
+    nodes := nodes.push { kind, owner, key, source, children, descriptor }
+    depths := depths.push depth
+  return nodes
+
+private partial def preflightNodeCaches (nodes : Array RealizationNode) (cached : Bool) (index : Nat) : MetaM Unit := do
+  let node := nodes[index]!
+  if cached then checkDescriptor node.owner node.key node.descriptor
+  else discard <| completedCacheResult (← getEnv) node.owner node.key
+  for child in node.children do preflightNodeCaches nodes cached child
+
+private partial def executeRealizationNode (nodes : Array RealizationNode) (cached : Bool) (index : Nat) : MetaM Unit := do
+  let node := nodes[index]!
+  if (← getEnv).containsOnBranch node.key then throwError "boundary_realization_v2_root_already_active"
+  let existing ← lookupCacheTask (← getEnv) node.owner node.key
+  if cached || existing.isSome then preflightNodeCaches nodes cached index
+  if node.kind == "matcher" then
+    if cached || existing.isSome then
+      realizeConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
+    else
+      let .str source := node.source | throwError "boundary_realization_v2_missing_matcher"
+      executeBoundaryMatcher node.owner source
+    let state := Match.matchEqnsExt.getState (← getEnv)
+      (asyncMode := .async .asyncEnv) (asyncDecl := node.key)
+    let some eqns := state.map.find? node.owner
+      | throwError "boundary_realization_v2_child_not_matcher"
+    unless eqns.splitterName == node.key do throwError "boundary_realization_v2_matcher_key"
+  else
+    let .str source := node.source | throwError "boundary_realization_v2_missing_equation"
+    let (_, theoremSource, defeqTag, backwardTag, registration) ← ofExcept (parseEquationPayload source)
+    if cached || existing.isSome then
+      realizeConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
+    else
+      realizeConst node.owner node.key do
+        unless boundaryMatchStateJson (Match.matchEqnsExt.getState (← getEnv)) == .arr #[.arr #[], .arr #[]] &&
+            equationStateJson (eqnsExt.getState (← getEnv)) == .arr #[] &&
+            boundarySparseCacheJson (← getEnv) == .arr #[] &&
+            (auxLemmasExt.getState (← getEnv)).lemmas.isEmpty do
+          throwError "boundary_realization_nonempty_producer_context"
+        for child in node.children do executeRealizationNode nodes cached child
+        realizeCapturedEquation node.key theoremSource defeqTag backwardTag
+    executeBoundaryTheorem node.key theoremSource
+    unless defeqAttr.hasTag (← getEnv) node.key == defeqTag &&
+        backwardDefeqAttr.hasTag (← getEnv) node.key == backwardTag do
+      throwError "boundary_realization_root_tags"
+    registerCapturedEquation node.owner node.key registration
+  -- Full descriptors are checked after the complete batch. Persistent export
+  -- functions also inspect the checked declaration domain (e.g. symbolFrequency),
+  -- so an intermediate imported callback is not the captured final domain.
+
+private def executeBoundaryRealizationBatchV2 (expectedAnchor : Name) (source : String) : MetaM Unit := do
+  let .arr #[.str "boundary_realization_batch_v2", .bool cached, privateNames, publicNames,
+      matchBefore, matchAfter, eqnsBefore, eqnsAfter, sparseBefore, sparseAfter, .arr values, .arr roots] ← ofExcept (Json.parse source)
+    | throwError "boundary_realization_invalid_payload"
+  let added ← namesFromJson privateNames
+  let publicAdded ← namesFromJson publicNames
+  let nodes ← parseRealizationNodes cached values
+  let roots ← roots.mapM (Lean.ofExcept ∘ Json.getNat?)
+  unless !roots.isEmpty && roots.all (· < nodes.size) &&
+      roots.toList.eraseDups.length == roots.size do throwError "boundary_realization_v2_roots"
+  unless nodes[roots[0]!]!.key == expectedAnchor do throwError "boundary_realization_foreign_anchor"
+  let mut reachable := roots
+  for i in (List.range nodes.size).reverse do
+    if reachable.contains i then
+      for child in nodes[i]!.children do
+        if !reachable.contains child then reachable := reachable.push child
+  unless reachable.size == nodes.size do throwError "boundary_realization_v2_unused_node"
+  let before ← getEnv
+  unless added.all (!before.containsOnBranch ·) do throwError "boundary_realization_members_already_active"
+  unless boundaryMatchStateJson (Match.matchEqnsExt.getState before) == matchBefore &&
+      equationStateJson (eqnsExt.getState before) == eqnsBefore && boundarySparseCacheJson before == sparseBefore do
+    throwError "boundary_realization_caller_before_conflict"
+  let mut seenPrivate := #[]
+  let mut seenPublic := #[]
+  for root in roots do
+    let node := nodes[root]!
+    unless node.kind == "equation" do throwError "boundary_realization_v2_private_root"
+    let (members, publicMembers) ← descriptorNames node.owner node.key node.descriptor
+    seenPrivate := seenPrivate ++ members.filter (!seenPrivate.contains ·)
+    seenPublic := seenPublic ++ publicMembers.filter (!seenPublic.contains ·)
+    executeRealizationNode nodes cached root
+    unless (← branchDelta before (← getEnv)) == seenPrivate &&
+        (← branchDelta before (← getEnv) true) == seenPublic do
+      throwError "boundary_realization_branch_transition_conflict"
+  unless seenPrivate == added && seenPublic == publicAdded do throwError "boundary_realization_v2_projected_order"
+  for node in nodes do checkDescriptor node.owner node.key node.descriptor
+  let after ← getEnv
+  unless boundaryMatchStateJson (Match.matchEqnsExt.getState after) == matchAfter &&
+      equationStateJson (eqnsExt.getState after) == eqnsAfter && boundarySparseCacheJson after == sparseAfter do
+    throwError "boundary_realization_caller_after_conflict"
+
+def executeBoundaryRealizationBatch (expectedAnchor : Name) (source : String) : MetaM Unit := do
+  let json ← ofExcept (Json.parse source)
+  match json with
+  | .arr values =>
+    if values[0]? == some (.str "boundary_realization_batch_v2") then
+      executeBoundaryRealizationBatchV2 expectedAnchor source
+    else executeBoundaryRealizationBatchV1 expectedAnchor source
+  | _ => throwError "boundary_realization_invalid_payload"
+
 /-- Every listed member remains independently required by Boundary's checker.
     Cached activations add no checked declarations. -/
 def boundaryRealizationBatchMembers (source : String) : MetaM (Bool × Array Name × Array Name) := do
-  let .arr #[.str "boundary_realization_batch_v1", .bool cached, privateNames, publicNames,
-      _, _, _, _, _, _, _] ← ofExcept (Json.parse source)
-    | throwError "boundary_realization_invalid_payload"
+  let (cached, privateNames, publicNames) ← match ← ofExcept (Json.parse source) with
+    | .arr #[.str "boundary_realization_batch_v1", .bool cached, privateNames, publicNames,
+        _, _, _, _, _, _, _] => pure (cached, privateNames, publicNames)
+    | .arr #[.str "boundary_realization_batch_v2", .bool cached, privateNames, publicNames,
+        _, _, _, _, _, _, _, _] => pure (cached, privateNames, publicNames)
+    | _ => throwError "boundary_realization_invalid_payload"
   return (cached, ← namesFromJson privateNames, ← namesFromJson publicNames)
 
 end ExplicitLean.SimpEngine.Boundary
