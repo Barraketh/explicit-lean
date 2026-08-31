@@ -20,18 +20,18 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 66,
+    "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle, plus local matcher-state comparison (report schema 7). Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
+    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle, plus local matcher and auxiliary-cache state comparison (report schema 8). Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 8,
-    "provisionalCachedOccurrences": 0,
-    "provisionalCachedModules": 0,
-    "minimumAcceptedReportSchema": 7
+    "verifiedTranslatedModules": 0,
+    "provisionalCachedOccurrences": 180,
+    "provisionalCachedModules": 20,
+    "minimumAcceptedReportSchema": 8
   },
   "work": [
     {
@@ -141,6 +141,18 @@
       "owner": "coordinator with Sol implementation",
       "status": "completed",
       "description": "Snapshot pre-boundary checked declaration names and subtract in the same checked domain. Avoid attributing earlier async realizations to an unrelated simp call. No generator reset or public-name exemption."
+    },
+    {
+      "id": "local-auxiliary-cache-guard",
+      "owner": "coordinator with Luna review",
+      "status": "completed",
+      "description": "Schema8 typed local+async AuxLemmas comparison;13reviewed controls passed including public-key-to-private-proof, malformed private caches and realasync fresh/cached. Original public/async falseacceptance reproduced with old runtime. Private omission applies only to fresh valid PRIVATE keys; preexisting and public entries exact."
+    },
+    {
+      "id": "captured-public-theorems",
+      "owner": "coordinator with Luna controls",
+      "status": "in_progress",
+      "description": "Standalone checked public theorem/cache/tag codec copied to main after12prototype controls/30independently verified hashes. No production action integration yet."
     }
   ],
   "blockers": [
@@ -168,13 +180,18 @@
       "id": "swallowed-replay-failures",
       "status": "resolved",
       "detail": "Committed45c8f56. Reached replay errors emit process output surviving tactic catches; intended recorded stock failure remains ordinary. Schema6 requires two fresh compiler nonces and durable log rescans."
+    },
+    {
+      "id": "local-auxiliary-cache-state",
+      "status": "resolved",
+      "detail": "Typed local+async comparison plus13controls and old-runtime falseacceptance witnesses. Schema8minimum; prior module/cone reports remain provisional until current frozen reruns."
     }
   ],
   "nextActions": [
-    "Finish frozen schema7 direct/diverse workers; review failures and expand current translated dependency closure.",
+    "Finish schema7 diagnostic batches while integrating schema8 aux-cache guards and matcher support. Rerun acceptance under final frozen implementation.",
     "Keep full diagnostic source inventory and unresolved backlog; defer another full manifest run until the diverse batch stabilizes the implementation.",
     "Resolve reusable source/execution ownership and metaprogram equivalence rather than bypassing the shard rejection; collect positive unresolved caller evidence.",
-    "39module/2call translated cone passed schema7; expand strict translated import closure after more source modules pass.",
+    "Build next strict translated layer from .lake/week-2026-08-31/schema8-frontier-selection.json:91modules,21source-call modules,146calls; support sources have zero simp calls.",
     "After full explicit coverage and full-tree validation, improve readability and then other tactics if time remains."
   ],
   "checkpoints": [
@@ -421,6 +438,21 @@
         "39module cone contains only2replacedcalls; other37modules have no source simp sites.",
         "New schema7 workers remain active; counts are timestamped, not final."
       ]
+    },
+    {
+      "at": "2026-08-31T12:25:38.388189+00:00",
+      "summary": "Aux-cache guard completed with13meaningful runtime controls, independent Luna review and archived old-runtime falseacceptances. Private omission requires fresh valid private key; public/preexisting entries preserved in local and async state. Main39job buildpassed and standalonepubliccodec12casespassed.42call/3module manifest protocolcheckpassed.17sourcegatepassed before final private-key tightening; final13controls include positiveprivateproofcase after tightening. All schema7results nowprovisional. Nexttranslatedfrontier91modules/146calls selected. Matcher+oracle integration pending finalhandoff.",
+      "evidence": [
+        ".lake/week-2026-08-31/aux-cache-guard-verification.json",
+        ".lake/week-2026-08-31/aux-state-controls-reviewed.log",
+        ".lake/week-2026-08-31/aux-state-source-final.log",
+        ".lake/week-2026-08-31/schema8-corpus-protocol.log",
+        ".lake/public-theorem-codec/fixture-jrgb2xn_/report.json"
+      ],
+      "limitations": [
+        "No schema8 frozen campaign acceptance reports yet.",
+        "Public theorem codec remains standalone; no productionaction support yet."
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -517,9 +549,13 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/schema7-broad",
       "commit": "560bbab",
       "log": ".lake/schema7-direct.log",
-      "status": "running",
+      "status": "completed_provisional",
       "modules": 13,
-      "expectedOccurrences": 150
+      "expectedOccurrences": 150,
+      "succeededModules": 11,
+      "failedModules": 2,
+      "provisionalCalls": 90,
+      "note": "Coherent declaration delta resolves Set15/ExistsUnique8 old oracle failures. Nat.Init5 and SimpleGraph55 still fail old frozen runtime; matcher prototype nowpasses Nat.Init under8 butunintegrated."
     },
     {
       "id": "schema7-diverse",
@@ -636,7 +672,7 @@
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 66,
+    "verifiedTranslations": 0,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
@@ -666,7 +702,7 @@
         "replacedCalls": 2,
         "report": ".lake/search-free-mathlib/snapshots/schema7-broad/.lake/translated-first-cone-schema7/report.json",
         "reportSha256": "598669c5068374b5e4da7be4a423e681dd840a997fa27c45632e4403cfeccebc",
-        "status": "passed_schema7_bounded_cone",
+        "status": "compiled_provisional_pending_schema8_aux_cache_check",
         "wholeMathlib": false,
         "independentVerification": ".lake/week-2026-08-31/schema7-cone-verification.json"
       }

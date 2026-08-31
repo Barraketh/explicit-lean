@@ -1776,6 +1776,37 @@ private def boundaryPrivateProofDeclaration (basis : PreBoundaryBasis)
         withRestoredBoundaryFullMetaState <| isProp info.type
   | _ => pure false
 
+/- Auxiliary lemma caches are local environment state, not serialized module
+   entries. Preserve every pre-existing entry and every public helper entry.
+   The existing private-proof omission policy applies only to a newly inserted
+   private cache key whose value is a genuinely private, newly checked proof, with
+   matching type, universes and requested definitional-equality tag. -/
+private def normalizeBoundaryAuxLemmas (basis : PreBoundaryBasis)
+    (before : AuxLemmas) (environment : Environment) (state : AuxLemmas) :
+    TacticM AuxLemmas := do
+  let mut result : AuxLemmas := {}
+  for (key, value) in state.lemmas.toArray do
+    let mut canOmit := false
+    if key.isPrivate && (before.lemmas.find? key).isNone &&
+        !basis.checkedDeclarationNames.contains value.1 then
+      if let some info := environment.constants.find? value.1 then
+        if key.type == info.type && value.2 == info.levelParams &&
+            (!key.defeq || Lean.defeqAttr.hasTag environment value.1) then
+          canOmit ← boundaryPrivateProofDeclaration basis environment info
+    unless canOmit do
+      result := { result with lemmas := result.lemmas.insert key value }
+  return result
+
+private def compareBoundaryAuxLemmas (basis : PreBoundaryBasis) (label : String)
+    (before : AuxLemmas) (stockEnvironment appliedEnvironment : Environment)
+    (stock applied : AuxLemmas) : TacticM Unit := do
+  let stock ← normalizeBoundaryAuxLemmas basis before stockEnvironment stock
+  let applied ← normalizeBoundaryAuxLemmas basis before appliedEnvironment applied
+  let entries := stock.lemmas.toArray
+  unless entries.size == applied.lemmas.toArray.size &&
+      entries.all (fun (key, value) => applied.lemmas.find? key == some value) do
+    throwError s!"boundary_comparison_local_aux_lemmas_state:{label}"
+
 private unsafe def boundaryCurrentTagEntriesImpl (data : ModuleData)
     (extensionName : Name) : Array Name :=
   match data.entries.find? (fun entry => entry.1 == extensionName) with
@@ -1944,6 +1975,9 @@ private def compareBoundaryDeclaration (stockEnvironment : Environment)
 private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
     (stockEnvironment appliedEnvironment : Environment)
     (actions : Array EnvironmentAction) : TacticM Unit := do
+  let beforeAux := auxLemmasExt.getState basis.environment
+  compareBoundaryAuxLemmas basis "local" beforeAux stockEnvironment appliedEnvironment
+    (auxLemmasExt.getState stockEnvironment) (auxLemmasExt.getState appliedEnvironment)
   -- Match-equation metadata is local and absent from ModuleData. Realizations
   -- also retain local state in their completed declaration snapshots. Check
   -- every current-stage name, including private proofs and existing names.
@@ -1954,6 +1988,15 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
       boundaryEnvironmentDeclarations appliedEnvironment).foldl
     (fun names info => names.insert info.name) ({} : NameSet)
   for name in names do
+    let before := if basis.checkedDeclarationNames.contains name then
+        auxLemmasExt.getState (asyncMode := .async .asyncEnv)
+          (asyncDecl := name) basis.environment
+      else beforeAux
+    compareBoundaryAuxLemmas basis name.toString before stockEnvironment appliedEnvironment
+      (auxLemmasExt.getState (asyncMode := .async .asyncEnv)
+        (asyncDecl := name) stockEnvironment)
+      (auxLemmasExt.getState (asyncMode := .async .asyncEnv)
+        (asyncDecl := name) appliedEnvironment)
     unless boundaryMatchEqnsStateEq
         (Match.matchEqnsExt.getState (asyncMode := .async .asyncEnv)
           (asyncDecl := name) stockEnvironment)
