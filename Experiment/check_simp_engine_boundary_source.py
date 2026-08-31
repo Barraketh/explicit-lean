@@ -567,7 +567,11 @@ def format_report_variants(
     # observed pre-state and only then executes its outcome. This preserves an
     # intentional failure so the unchanged surrounding `first`/`try` sees it.
     artifact_indent = continuation_indent + "  "
-    parts = ["simp_engine_boundary_select"]
+    # Parenthesize the whole selector tactic.  Its variant list uses the same
+    # ``|`` token as enclosing ``first``/``try`` syntax; without a tactic
+    # group, an authored sibling branch is consumed as another selector
+    # variant and fails while parsing its expected string literal.
+    parts = ["(simp_engine_boundary_select"]
     parts.append(format_artifact_header(reports[0]))
     for report in reports:
         branch = (
@@ -581,7 +585,7 @@ def format_report_variants(
             branch += " @@ " + format_stock_generator(report)
         branch += " => " + format_variant_outcome(report, artifact_indent)
         parts.append(branch)
-    return "\n".join(parts)
+    return "\n".join(parts) + ")"
 
 
 def header_fixture_source(
