@@ -15,6 +15,7 @@ from typing import Any, Sequence
 import check_simp_engine_boundary_scope as scope
 import check_simp_engine_pin as pin
 import simp_engine_inventory as inventory
+from process_runner import run_process
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +93,7 @@ IMPLEMENTATION_SOURCE_PATTERNS = (
     "Experiment/SimpEngineBoundary*.lean",
     "Experiment/SimpEngineDeclarationOracle.lean",
     "Experiment/lean_toolchain_cache.py",
+    "Experiment/process_runner.py",
     "Experiment/boundary_materialize_shard.py",
     "Experiment/check_simp_engine_boundary*.py",
     "Experiment/boundary_protocol.py",
@@ -256,7 +258,7 @@ def inventory_batch(
         "inventory",
         *(str(path.resolve()) for path in paths),
     ]
-    completed = subprocess.run(
+    completed = run_process(
         command,
         cwd=ROOT,
         text=True,

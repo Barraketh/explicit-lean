@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 
 from simp_engine_inventory import inject_import, rewrite_simp_heads, syntax_inventory_file
+from process_runner import run_process
 from boundary_protocol import (
     ARTIFACT_KIND,
     ARTIFACT_SCHEMA,
@@ -35,7 +36,7 @@ INVENTORY_TIMEOUT = 300
 def run(
     command: list[str], timeout: int = 300, *, env: dict[str, str] | None = None
 ) -> str:
-    result = subprocess.run(
+    result = run_process(
         command,
         cwd=ROOT,
         text=True,

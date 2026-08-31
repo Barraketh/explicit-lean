@@ -11,6 +11,8 @@ import sys
 import time
 from typing import Any, Callable
 
+from process_runner import run_process
+
 
 ROOT = Path(__file__).resolve().parent.parent
 MATHLIB = ROOT / ".lake" / "packages" / "mathlib"
@@ -20,7 +22,7 @@ SUPPORTED_KINDS = {"simp", "simp_only"}
 def run(command: list[str], *, timeout: int | None = None) -> tuple[int, str, float]:
     started = time.monotonic()
     try:
-        result = subprocess.run(
+        result = run_process(
             command,
             cwd=ROOT,
             text=True,

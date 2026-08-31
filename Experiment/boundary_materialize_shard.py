@@ -28,6 +28,7 @@ from typing import Any, Iterable
 import check_simp_engine_boundary_scope as scope
 import simp_engine_boundary_corpus as corpus
 import simp_engine_inventory as inventory
+from process_runner import run_process
 from boundary_protocol import (
     ABORT_CATEGORIES,
     OCCURRENCE_CLASSIFICATIONS,
@@ -148,7 +149,7 @@ def _run_command(
 ) -> tuple[int, str, float]:
     started = time.monotonic()
     try:
-        completed = subprocess.run(
+        completed = run_process(
             command,
             cwd=ROOT,
             text=True,

@@ -14,6 +14,7 @@ import tempfile
 from collections.abc import Sequence
 
 import simp_engine_inventory as inventory
+from process_runner import run_process
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,7 +144,7 @@ SPECS = (
 
 
 def run(command: list[str], timeout: int = 600) -> str:
-    result = subprocess.run(
+    result = run_process(
         command,
         cwd=ROOT,
         text=True,
