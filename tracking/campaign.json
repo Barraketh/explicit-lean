@@ -84,15 +84,19 @@
       "id": "reusable-tactic-ownership",
       "status": "open",
       "detail": "Reusable tactic source ownership and execution-module identity plus transformed metaprogram equivalence remain to be resolved for corpus closure."
+    },
+    {
+      "id": "reserved-theorem-generation",
+      "status": "open",
+      "detail": "ReservedNameAction callbacks can run metaprograms. AddConstMap.mk.congr_simp was observed. The standalone codec preflights constants with skipRealize=true; Luna is implementing captured theorem declarations through checked addDecl instead of callback replay."
     }
   ],
   "nextActions": [
-    "Poll frozen corpus inventory session79919; preserve unresolved backlog and import diagnostic results to durable index",
-    "Poll focused PosPart prototype rerun; pp.instances=true and pp.coercions=false",
-    "Collect index followup fixes: immediate queue semantics, diagnostic intake, robust imports",
-    "Collect independent Luna searchfree audit; decide production contract and validation before broad translation",
-    "Review and commit snapshot helper; assemble incremental scheduler using immutable runs and verified result cache",
-    "Resolve reusable tactic ownership/execution identities and verify entire translated dependency tree before readability"
+    "Poll frozen full inventory session 79919; scope classification is active and the final manifest is not yet ready.",
+    "Collect exact Lean header dependency extraction and inventory/scope batch checkpoints from Luna.",
+    "Integrate captured theorem declarations and strict Expr DAG artifact schema 2, then rerun the 66-call representative gate.",
+    "Keep unresolved and failed cases in the index. Add canonical references to existing boundary metavariables when needed.",
+    "Once the production encoding is stable, run verified incremental shards from frozen inputs; resolve reusable tactic ownership and validate the entire translated tree before readability work."
   ],
   "checkpoints": [
     {
@@ -169,6 +173,14 @@
     },
     {
       "summary": "Snapshot isolation and scope timeout propagation reviewed and fixed; helper documents shared package caches require coordinator no-writes lease. Current full syntax scan8264modules finished; scope stage running. Independent audit confirms trace alone misses tactic/default-instance search. Closed shared Expr DAG prototype compiles; roundtrip edge-case test under review."
+    },
+    {
+      "at": "2026-08-31T09:20:37.276659+00:00",
+      "summary": "FocusedPosPart3passed compile/inventory/declarationoraclewithpp.coercions=false; totalrepresentatives66inboundedruns. RawExprDAGcodeccompiledandpassedroundtrip/sharedreferences/literals/names/projections/malformednodeandunresolvedmvarrejectionprobe; integrationbuildinprogress. No productionartifactschemamigration yet."
+    },
+    {
+      "at": "2026-08-31T09:32:42.867871+00:00",
+      "summary": "The raw Expr DAG prototype passed the 17-call source fixture (including one explicitly unobserved occurrence) and the three-call PosPart gate with its semantic oracle. PosPart artifacts shrank from 6,602,372 to 186,517 bytes. The main, not-yet-integrated codec now rejects implicit reserved-constant generation and ambiguous local indices; its build and focused fixture passed. The Python wire validator accepted all 14 real PosPart terms. Eight index tests passed; a full header audit found 21 valid import-all forms unsupported by the Python lexer, so exact Lean header extraction is being added."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -180,13 +192,6 @@
       "log": ".lake/campaign-inventory.log",
       "sessionId": 79919,
       "status": "running"
-    },
-    {
-      "command": "Focused pp.instances=true/pp.coercions=false PosPart gate",
-      "directory": ".lake/search-free-mathlib/evidence-prototype",
-      "log": ".lake/prototype-pospart-fixed.log",
-      "sessionId": 95741,
-      "status": "running"
     }
   ],
   "latestCommits": [
@@ -194,7 +199,8 @@
     "fae96be",
     "2105937",
     "188e649",
-    "0c4e537"
+    "0c4e537",
+    "2e73bcf"
   ],
   "experiments": [
     {
@@ -213,14 +219,15 @@
       "Mathlib.Algebra.AddConstMap.Basic",
       "Mathlib.CategoryTheory.EqToHom",
       "Mathlib.Data.Fintype.List",
-      "Mathlib.Algebra.Algebra.NonUnitalHom"
+      "Mathlib.Algebra.Algebra.NonUnitalHom",
+      "Mathlib.Analysis.CStarAlgebra.SpecialFunctions.PosPart"
     ],
-    "materializedMathlibOccurrences": 63,
+    "materializedMathlibOccurrences": 66,
     "instanceSearchAudit": "fresh evidence passed; 14 old replacements rejected by positive control",
-    "fullSearchFreeContract": "not yet established; independent audit in progress",
+    "fullSearchFreeContract": "Not established by term-source encoding: independent audit reproduced tacticsearch withnoinstance traces. RawExpr DAG prototype underdevelopment.",
     "partialFiveModuleGate": [
-      "First4 modules passed63 calls",
-      "PosPart3 rejected instance-search coercion notation; focused rerun after correcting printer setting"
+      "First4 modules passed63calls withpp.instances=true/pp.coercions=true",
+      "PosPart3 passed afterpp.coercions=false; nowhole5modulererununderunifiedsetting yet"
     ]
   },
   "packageWriteLease": {
@@ -230,5 +237,25 @@
       ".lake/packages"
     ],
     "constraint": "No source or build-artifact writes in shared pinned packages while frozen/prototype runs are active. Project-only builds allowed when dependencies are already current. For package changes use a separate private copy after existing runs finish."
+  },
+  "rawDagPrototype": {
+    "path": ".lake/search-free-mathlib/evidence-prototype",
+    "status": "Passed bounded recording and application tests; not yet the production artifact schema.",
+    "sourceFixtureOccurrences": 17,
+    "sourceFixtureUnobservedOccurrences": 1,
+    "mathlibModules": {
+      "Mathlib.Analysis.CStarAlgebra.SpecialFunctions.PosPart": 3
+    },
+    "posPartArtifactBytes": 186517,
+    "previousExplicitSourceArtifactBytes": 6602372,
+    "logs": [
+      ".lake/prototype-expr-dag-source.log",
+      ".lake/prototype-expr-dag-pospart.log"
+    ],
+    "limitations": [
+      "The prototype lacks the constant preflight now implemented in the main standalone codec.",
+      "The prototype still uses schema 1 metadata and a temporary mixed validator; strict schema 2 migration is pending.",
+      "Unresolved expression and universe metavariables are rejected; existing boundary metavariables will need canonical references."
+    ]
   }
 }
