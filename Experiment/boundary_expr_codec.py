@@ -775,6 +775,117 @@ def validate_realization_payload(source: object, expected_anchor: object,
         value = json.loads(source)
     except (ValueError, RecursionError) as error:
         raise RuntimeError(f"{label}: invalid JSON") from error
+    if isinstance(value, list) and value and value[0] == "boundary_realization_sequence_v1":
+        if not (len(value) == 13 and isinstance(value[10], list) and value[10]
+                and isinstance(value[11], list) and len(value[11]) == len(value[10])
+                and all(type(mode) is bool for mode in value[11])
+                and isinstance(value[12], list) and value[12]):
+            reject("invalid mixed sequence header")
+        key(expected_anchor); names(value[1]); names(value[2]); names(value[3])
+        match_state(value[4]); match_state(value[5]); equation_state(value[6]); equation_state(value[7])
+        sparse_state(value[8]); sparse_state(value[9])
+        nodes, modes, steps = value[10:13]
+        identities = set()
+        for index, node in enumerate(nodes):
+            if not (isinstance(node, list) and len(node) == 6 and isinstance(node[4], list)):
+                reject("invalid sequence node")
+            identity = (key(node[1]), key(node[2]))
+            if identity in identities:
+                reject("duplicate sequence node")
+            identities.add(identity)
+            if (any(not _nat(i) or i >= index for i in node[4])
+                    or len(set(node[4])) != len(node[4])
+                    or any(modes[i] != modes[index] for i in node[4])):
+                reject("sequence child mode or order mismatch")
+        private, public, fresh, reachable = [], [], [], set()
+        helper_count = 0
+        registrations = set()
+        for step_index, step in enumerate(steps):
+            if not (isinstance(step, list) and step and isinstance(step[0], str)):
+                reject("invalid sequence step")
+            if step[0] == "registration":
+                if not (len(step) == 3 and isinstance(step[2], str)):
+                    reject("invalid active equation registration")
+                registration_key = key(step[1])
+                if registration_key in registrations or step[1] in value[1]:
+                    reject("registration overlap")
+                registrations.add(registration_key)
+                try:
+                    registration = json.loads(step[2])
+                except (ValueError, RecursionError) as error:
+                    raise RuntimeError(f"{label}: invalid active registration JSON") from error
+                if not (isinstance(registration, list) and len(registration) == 6
+                        and registration[0] == "boundary_active_equation_registration_v1"
+                        and registration[2] == step[1] and type(registration[4]) is bool
+                        and type(registration[5]) is bool):
+                    reject("invalid active registration fields")
+                owner = registration[1]; key(owner)
+                if step[1][:-1] != owner or _private_name(step[1]) or step[1][-1][0] != "s":
+                    reject("active registration owner or name")
+                suffix = step[1][-1][1]
+                if suffix not in {"eq_def", "eq_unfold"} and not re.fullmatch(r"eq_[0-9]+(?:_[0-9]+)*", suffix):
+                    reject("active registration equation suffix")
+                signature = registration[3]
+                if not (isinstance(signature, list) and len(signature) in {4, 5}
+                        and signature[0] in {"theorem", "public-proof-interface"}
+                        and len(signature) == (5 if signature[0] == "theorem" else 4)
+                        and signature[1] == step[1]):
+                    reject("active registration theorem signature")
+                names(signature[2]); validate_struct_expr_dag(signature[3], label)
+                if signature[0] == "theorem":
+                    names(signature[4])
+                if any(entry[0] == step[1] for entry in value[6]) or [step[1], owner] not in value[7]:
+                    reject("active registration caller mapping")
+                continue
+            if step[0] == "group":
+                if not (len(step) == 2 and _nat(step[1]) and step[1] < len(nodes)):
+                    reject("invalid sequence group index")
+                root = step[1]
+                if nodes[root][0] != "equation":
+                    reject("sequence root is not equation")
+                closure = {root}
+                for i in range(root, -1, -1):
+                    if i in closure:
+                        closure.update(nodes[i][4])
+                reachable.update(closure)
+                order = sorted(closure)
+                mapping = {old: new for new, old in enumerate(order)}
+                subnodes = [nodes[i][:4] + [[mapping[c] for c in nodes[i][4]], nodes[i][5]] for i in order]
+                member_names, public_names = descriptor(nodes[root][5], nodes[root][1], nodes[root][2])
+                # Reuse the unchanged homogeneous graph validator. This is a
+                # validation-only view, never a fabricated Lean cache/branch.
+                subgraph = ["boundary_realization_batch_v2", modes[root], member_names, public_names,
+                            *value[4:10], subnodes, [mapping[root]]]
+                validate_realization_payload(json.dumps(subgraph, separators=(",", ":")), nodes[root][2], label)
+                root_name = nodes[root][2]
+                is_fresh = not modes[root]
+            elif step[0] == "helper":
+                helper_count += 1
+                if not (len(step) == 5 and type(step[3]) is bool):
+                    reject("invalid sequence helper")
+                root_name = step[1]; key(root_name)
+                bundle = validate_local_theorems_payload(step[2], root_name, label)
+                equation_state(step[4])
+                if (len(bundle[2]) != 1 or bundle[2][0][0] != root_name
+                        or any(root_name in descriptor(n[5], n[1], n[2])[0] for n in nodes)):
+                    reject("sequence helper is not independent singleton")
+                member_names, public_names = [root_name], [root_name] if step[3] else []
+                is_fresh = True
+            else:
+                reject("unknown sequence step")
+            if (not private and root_name != expected_anchor) or root_name in private:
+                reject("sequence anchor or repeated root")
+            new_members = [name for name in member_names if name not in private]
+            if any((name in value[3]) != is_fresh for name in new_members):
+                reject("sequence fresh membership mismatch")
+            private.extend(new_members)
+            public.extend(name for name in public_names if name not in public)
+            if is_fresh:
+                fresh.extend(new_members)
+        if (helper_count > 1 or len(reachable) != len(nodes) or private != value[1]
+                or public != value[2] or fresh != value[3] or not fresh or len(fresh) >= len(private)):
+            reject("sequence cover or delta mismatch")
+        return value
     if isinstance(value, list) and value and value[0] == "boundary_realization_batch_v2":
         if not (len(value) == 12 and type(value[1]) is bool
                 and isinstance(value[10], list) and value[10]

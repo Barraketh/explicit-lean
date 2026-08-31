@@ -2013,6 +2013,17 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
       otherDeclarations (priorEquationDeclarations ++ priorMatcherEquations) sparseDeclarations
     actions := actions.push (.declareMatcher anchor payload)
     priorMatcherEquations := priorMatcherEquations ++ eqns.eqnNames
+  let equations := actions.filterMap fun action => match action with
+    | .declareEquation name source => some (name, source)
+    | _ => none
+  let matcherActions := actions.filterMap fun action => match action with
+    | .declareMatcher name source => some (name, source)
+    | _ => none
+  if equations.size + matcherActions.size == actions.size then
+    if let some (anchor, payload) ← encodeBoundaryRealizationSequence?
+        basis.environment stockEnvironment basis.checkedDeclarationNames
+        (declarations.map (·.name)) equations matcherActions helpers then
+      return #[.realizeGroups anchor payload]
   unless helpers.isEmpty do
     let (anchor, payload) ← withEnv stockEnvironment <|
       encodeBoundaryLocalTheorems basis.environment helpers
@@ -2143,6 +2154,10 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
   for action in actions do
     if let .declareLocalTheorems anchor payload := action then
       helperNames := helperNames ++ (← boundaryLocalTheoremNames anchor payload)
+    if let .realizeGroups anchor payload := action then
+      if isBoundaryRealizationSequence payload then
+        let (_, _, helpers) ← boundaryRealizationSequenceMembers anchor payload
+        helperNames := helperNames ++ helpers.map (·.1)
   compareBoundaryHelperCache helperNames "local"
     (auxLemmasExt.getState stockEnvironment) (auxLemmasExt.getState appliedEnvironment)
   let beforeAux := auxLemmasExt.getState basis.environment
@@ -2205,9 +2220,14 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
     | _ => some (boundaryEnvironmentActionName action)
   let mut groupPublicNames := #[]
   for action in actions do
-    if let .realizeGroups _ payload := action then
-      let (cached, members, publicMembers) ← boundaryRealizationBatchMembers payload
-      unless cached do groupPublicNames := groupPublicNames ++ publicMembers
+    if let .realizeGroups anchor payload := action then
+      let (members, newPublic) ← if isBoundaryRealizationSequence payload then do
+          let (members, newPublic, _) ← boundaryRealizationSequenceMembers anchor payload
+          pure (members, newPublic)
+        else do
+          let (cached, members, publicMembers) ← boundaryRealizationBatchMembers payload
+          pure (members, if cached then #[] else publicMembers)
+      groupPublicNames := groupPublicNames ++ newPublic
       for name in members do
         let some stockInfo := stockEnvironment.checked.get.find? name
           | throwError "boundary_realization_missing_stock_member:{name}"

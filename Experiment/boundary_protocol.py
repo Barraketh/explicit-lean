@@ -549,6 +549,22 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
                             anchor = node[2]
                     validate_realization_payload(text, anchor, label)
                     continue
+                if encoded[0] == "boundary_realization_sequence_v1":
+                    anchor = None
+                    if (len(encoded) == 13 and isinstance(encoded[10], list)
+                            and isinstance(encoded[12], list) and encoded[12]):
+                        step = next((step for step in encoded[12] if isinstance(step, list)
+                                     and step and step[0] != "registration"), None)
+                        if isinstance(step, list) and step:
+                            if step[0] == "helper" and len(step) == 5:
+                                anchor = step[1]
+                            elif (step[0] == "group" and len(step) == 2 and type(step[1]) is int
+                                  and 0 <= step[1] < len(encoded[10])):
+                                node = encoded[10][step[1]]
+                                if isinstance(node, list) and len(node) == 6:
+                                    anchor = node[2]
+                    validate_realization_payload(text, anchor, label)
+                    continue
                 if encoded[0] in {"boundary_matcher_bundle_v1", "boundary_matcher_bundle_v2", "boundary_matcher_bundle_v3"}:
                     validate_matcher_payload(text, encoded[1] if len(encoded) > 1 else None, label)
                     continue

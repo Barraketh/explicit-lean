@@ -6,7 +6,7 @@ public meta import ExplicitLean.SimpEngine.Boundary.CongruenceCodec
 public meta import ExplicitLean.SimpEngine.Boundary.EquationCodec
 public meta import ExplicitLean.SimpEngine.Boundary.MatcherCodec
 public meta import ExplicitLean.SimpEngine.Boundary.LocalTheoremCodec
-public meta import ExplicitLean.SimpEngine.Boundary.RealizationCodec
+public meta import ExplicitLean.SimpEngine.Boundary.SequenceCodec
 public meta import Lean.Meta.Tactic.Replace
 public meta import Lean.Meta.Tactic.Util
 
@@ -65,7 +65,7 @@ private def executeEnvironmentAction : EnvironmentAction → MetaM Unit
   | .declareEquation name payload => executeBoundaryEquation name payload
   | .declareMatcher anchor payload => executeBoundaryMatcher anchor payload
   | .declareLocalTheorems anchor payload => executeBoundaryLocalTheorems anchor payload
-  | .realizeGroups anchor payload => executeBoundaryRealizationBatch anchor payload
+  | .realizeGroups anchor payload => executeBoundaryRealizationEffects anchor payload
 
 def executeEnvironmentActions (actions : Array EnvironmentAction) : MetaM Unit := do
   for action in actions do

@@ -29,8 +29,8 @@
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 513,
-    "provisionalCachedModules": 55,
+    "provisionalCachedOccurrences": 744,
+    "provisionalCachedModules": 74,
     "minimumAcceptedReportSchema": 10,
     "validationHold": "Metadata export hooks mutate a process-global symbol-frequency cache. Observational boundary/audit reads and equivalence to separate fresh compilations must be repaired and revalidated; existing generated candidates and proof checks are preserved."
   },
@@ -254,14 +254,14 @@
     {
       "id": "mixed-realization-sequences",
       "owner": "coordinator with assigned Sol agent",
-      "status": "in_progress",
-      "description": "New isolated mixed sequence prototype for cached activation then ordinary helper and fresh equation then cached recursive groups. Exact typed per-node modes/ordered branch transitions; final full descriptor checks. Prior v1/v2 semantics unchanged."
+      "status": "completed",
+      "description": "Versioned mixed sequence contract integrated: checked/fresh root modes, exact ordered branch transitions, ordinary helper snapshots and authenticated preexisting public equation registrations. Main32mixed+10legacy process checks/19wire,17multiple matcher,17source and17replay guard gates pass. Root1131mainhashes/42nonces plus1597private hashes/64nonces checked. Full-module acceptance remains under global metadata hold."
     },
     {
       "id": "raw-oracle-certified-output",
       "owner": "coordinator with assigned Sol agent",
-      "status": "in_progress",
-      "description": "Isolated removal-only raw checked-domain oracle and optional normal frontend outputs in quarantine. Existing controls pass provisionally; final guarded regression handoff pending. Inherited checked-only private-helper false rejection remains fail-closed; historical Lookmap sources are not portable to changed runtime."
+      "status": "completed",
+      "description": "Superseded by integrated same-frontend-compiler-output and quarantined-module-certificates milestones; global metadata/fresh-compilation acceptance hold remains."
     },
     {
       "id": "same-frontend-compiler-output",
@@ -292,6 +292,18 @@
       "owner": "coordinator with Sol diagnosis",
       "status": "completed",
       "description": "CommandAudit enumerates private checked declarations using pinned mkModuleData fold order directly, without invoking persistent export hooks. Root57jobbuild and29process/10wire checks pass;174diagnosis hashes and main inputs/logs independently verified. Broader boundary metadata observation and frontend-isolation acceptance hold remain."
+    },
+    {
+      "id": "local-owner-equation-realizations",
+      "owner": "Luna private prototype",
+      "status": "in_progress",
+      "description": "Versioned local checked definition owner support for Cubic.toPoly and ExtraDegeneracy.s; legacy imported-only contracts unchanged. Exact owner/context witnesses and fresh/cached controls pending fix-review."
+    },
+    {
+      "id": "preexisting-expression-metavariable-references",
+      "owner": "Sol private diagnosis",
+      "status": "in_progress",
+      "description": "Three original source sites reference one unchanged pre-selector syntheticOpaque mvar in input/proof/result. Diagnose transitive occurs/type/delayed cycles before versioned support; no production codec yet."
     }
   ],
   "blockers": [
@@ -816,6 +828,15 @@
         ".lake/week-2026-08-31/audit-export-observation-handoff-root-verification.json",
         ".lake/week-2026-08-31/audit-export-observation-main-verification.json"
       ]
+    },
+    {
+      "at": "2026-08-31T17:19:59.201576+00:00",
+      "summary": "Mixed realization sequences integrated after focused original-source and regression gates, immutable main/private evidence independently rechecked. Cold metadata-only probe confirms exact symbolFrequency+sineQueNon differences in historical ordinary outputs. Observational helper fix is in private review and has made fresh frequency outputs agree; extraModUses broad-import issue being narrowed without exemption.",
+      "evidence": [
+        ".lake/week-2026-08-31/mixed-sequence-main-evidence-rtu9vyr5/manifest.json",
+        ".lake/week-2026-08-31/mixed-sequence-main-regressions-verification.json",
+        ".lake/week-2026-08-31/cold-metadata-yhpko__p/report.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1285,7 +1306,22 @@
       "diagnosisManifestSha256": "5f39e8eb73ee682d3284d6daa7b4d21b898467ceb91d9861eaf3dc5f06a84aba",
       "diagnosisVerification": ".lake/week-2026-08-31/audit-export-observation-handoff-root-verification.json",
       "auditRepairVerification": ".lake/week-2026-08-31/audit-export-observation-main-verification.json",
-      "independentColdOutputs": "Ordinary stock/applied fresh processes write equal declaration counts but different symbolFrequency maps20vs10 in all3olean views; do not infer metadata equivalence from same-process oracle."
+      "independentColdOutputs": "Ordinary stock/applied fresh processes write equal declaration counts but different symbolFrequency maps20vs10 in all3olean views; do not infer metadata equivalence from same-process oracle.",
+      "coldArtifactDiagnostic": {
+        "report": ".lake/week-2026-08-31/cold-metadata-yhpko__p/report.json",
+        "sha256": "94c67f473189bad9bb5c05520ed5fb1f90d4b4c9240fab3ad1e1b20ba11f1867",
+        "result": "Two self comparisons pass; original cold stock/applied differs in symbolFrequency and sineQueNon in all3views, typedLCNF and extraConstNames equal. No root import/initialization.",
+        "design": ".lake/week-2026-08-31/cold-artifact-comparison-design.md"
+      }
+    },
+    "mixedRealizationSequences": {
+      "mainEvidence": ".lake/week-2026-08-31/mixed-sequence-main-evidence-rtu9vyr5/manifest.json",
+      "mainEvidenceSha256": "41fd690a08f30a648d56d5750cd33c738d181809e063b6348aafbf164c10076b",
+      "regressionsVerification": ".lake/week-2026-08-31/mixed-sequence-main-regressions-verification.json",
+      "privateHandoffVerification": ".lake/week-2026-08-31/mixed-sequence-handoff-root-verification.json",
+      "mainExtraGuard": "Lean active registration rejects private names, matching Python contract.",
+      "excludedAttempt": "control-z8bwswt8 loaded stale shared library; explicit shared rebuild corrected test setup; fresh rerun controls passed.",
+      "wholeMathlib": false
     }
   },
   "failureTriage": {
@@ -1298,7 +1334,7 @@
     "scope": "six failed roots from schema8 frontier; diagnostic grouping only",
     "modules": {
       "Mathlib/Order/Interval/Set/Defs.lean": "declaration oracle name mismatch; retest helper+generator fix",
-      "Mathlib/Data/List/ModifyLast.lean": "Raw stock requires interleaved sparse matcher order and overlapping recursive equation groups. Private versioned implementation in progress; do not merely relax >1 gate. Diagnosis .lake/search-free-mathlib/snapshots/single-child-realization-prototype/.lake/single-child/design.md.",
+      "Mathlib/Data/List/ModifyLast.lean": "Mixed fourth boundary now supported by versioned sequence; main focused original-source checks pass. Private full5site compilation remains provisional under metadata hold; combined fresh runtime rerun pending.",
       "Mathlib/Data/String/Lemmas.lean": "matcher equation capture-complete-local state mismatch",
       "Mathlib/Data/Int/Init.lean": "Main bounded7-site/148-declaration pipeline passes; strict actual-import remaining scan0. Await fresh closed schema9 report.",
       "Mathlib/Data/List/Lookmap.lean": "Combinedartifact4/report10 boundedpipelinepasses10calls,33declarations20public22extensionstates,remaining0. Evidence .lake/boundary-materialization/integrated-groups-_ze7z1e2. Requires frozen manifest/worker rerun for indexed acceptance.",
@@ -1312,5 +1348,5 @@
     "checkedAt": "2026-08-31T16:48:11.809480+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T17:07:10.768401+00:00"
+  "updatedAt": "2026-08-31T17:19:59.201576+00:00"
 }
