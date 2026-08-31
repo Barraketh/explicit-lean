@@ -2,6 +2,7 @@ module
 prelude
 
 public meta import ExplicitLean.SimpEngine.Boundary.DeclarationCodec
+public meta import ExplicitLean.SimpEngine.Boundary.SparseCasesCodec
 public meta import Lean.Meta.Match.MatchEqsExt
 public meta import Lean.Meta.Eqns
 public meta import Lean.Compiler.InlineAttrs
@@ -152,9 +153,13 @@ private structure CapturedMatcher where
   asyncEquationAfter : Json
   localEquationBefore : Json
   localEquationAfter : Json
+  sparseHelpers : Array (Name × String)
+  asyncSparseBefore : Json
+  asyncSparseAfter : Json
+  localSparseState : Json
 
 private def matcherJson (bundle : CapturedMatcher) : Json :=
-  .arr #[.str "boundary_matcher_bundle_v1", encodeBoundaryName bundle.anchor,
+  .arr #[.str "boundary_matcher_bundle_v2", encodeBoundaryName bundle.anchor,
     boundaryMatcherInfoJson bundle.anchorInfo, boundaryMatchEqnsJson bundle.eqns,
     .str bundle.splitterSource, inlineJson bundle.splitterInline,
     (bundle.splitterInfo.map boundaryMatcherInfoJson).getD .null,
@@ -163,14 +168,20 @@ private def matcherJson (bundle : CapturedMatcher) : Json :=
       optionNameJson eqn.asyncRegistration, optionNameJson eqn.localRegistration]),
     boundaryMatchStateJson bundle.snapshotBefore, boundaryMatchStateJson bundle.snapshotAfter,
     boundaryMatchStateJson bundle.localState, bundle.asyncEquationBefore,
-    bundle.asyncEquationAfter, bundle.localEquationBefore, bundle.localEquationAfter]
+    bundle.asyncEquationAfter, bundle.localEquationBefore, bundle.localEquationAfter,
+    .arr (bundle.sparseHelpers.map fun (name, source) => .arr #[encodeBoundaryName name, .str source]),
+    bundle.asyncSparseBefore, bundle.asyncSparseAfter, bundle.localSparseState]
 
 private def parseMatcher (source : String) : Except String CapturedMatcher := do
   let json ← Json.parse source
-  let .arr #[.str "boundary_matcher_bundle_v1", anchor, anchorInfo, eqns,
+  let .arr #[.str "boundary_matcher_bundle_v2", anchor, anchorInfo, eqns,
       .str splitterSource, inlineAttr, splitterInfo, .arr equations,
       snapshotBefore, snapshotAfter, localState, asyncEquationBefore, asyncEquationAfter,
-      localEquationBefore, localEquationAfter] := json | throw "invalid matcher bundle"
+      localEquationBefore, localEquationAfter, .arr sparseHelpers,
+      asyncSparseBefore, asyncSparseAfter, localSparseState] := json | throw "invalid matcher bundle"
+  let sparseHelpers ← sparseHelpers.mapM fun json => do
+    let .arr #[name, .str source] := json | throw "invalid sparse helper"
+    pure (← decodeBoundaryName name, source)
   let equations ← equations.mapM fun json => do
     let .arr #[name, .str source, .bool defeqTag, .bool backwardTag, asyncReg, localReg] := json
       | throw "invalid captured equation"
@@ -186,7 +197,8 @@ private def parseMatcher (source : String) : Except String CapturedMatcher := do
       else some <$> decodeMatcherInfo splitterInfo,
     equations, snapshotBefore := ← decodeMatchState snapshotBefore,
     snapshotAfter := ← decodeMatchState snapshotAfter, localState := ← decodeMatchState localState,
-    asyncEquationBefore, asyncEquationAfter, localEquationBefore, localEquationAfter }
+    asyncEquationBefore, asyncEquationAfter, localEquationBefore, localEquationAfter,
+    sparseHelpers, asyncSparseBefore, asyncSparseAfter, localSparseState }
 
 private def matcherStateAt (env : Environment) (name : Name) : MatchEqnsExtState :=
   matchEqnsExt.getState env (asyncMode := .async .asyncEnv) (asyncDecl := name)
@@ -201,6 +213,9 @@ private def checkState (label : String) (actual expected : MatchEqnsExtState) : 
 private def checkEquationState (label : String) (actual : EqnsExtState) (expected : Json) : MetaM Unit :=
   unless equationStateJson actual == expected do
     throwError "boundary_matcher_equation_state_conflict:{label}"
+
+private def checkSparseState (label : String) (actual expected : Json) : MetaM Unit := do
+  unless actual == expected do throwError "boundary_matcher_sparse_cache_conflict:{label}"
 
 private def insertCapturedEquation (name : Name) (registration : Option Name) : MetaM Unit := do
   match (eqnsExt.getState (← getEnv)).mapInv.find? name with
@@ -249,6 +264,13 @@ private def validateBundle (bundle : CapturedMatcher) : MetaM Unit := do
     altInfos := bundle.anchorInfo.altInfos }
   unless boundaryMatcherInfoJson metadataWithoutAlts == boundaryMatcherInfoJson bundle.anchorInfo do
     throwError "boundary_matcher_unrelated_splitter_metadata"
+  let mut sparseNames : NameSet := {}
+  for (name, source) in bundle.sparseHelpers do
+    unless (← boundarySparseCasesName source) == name &&
+        bundle.eqns.splitterName.isPrefixOf name && name != bundle.eqns.splitterName &&
+        !bundle.eqns.eqnNames.contains name && !sparseNames.contains name do
+      throwError "boundary_matcher_sparse_helper_identity"
+    sparseNames := sparseNames.insert name
   for eqn in bundle.equations do
     let theoremJson ← match Json.parse eqn.source with
       | .ok json => pure json
@@ -284,9 +306,10 @@ private def checkCapturedMatcherConstants (before : Environment) (available : Na
     requires no hidden resolution. -/
 def encodeBoundaryMatcher (before : Environment) (checkedBefore : NameSet) (anchor : Name)
     (eqns : MatchEqns) (otherDeclarations : Array Name := #[])
-    (priorEquationDeclarations : Array Name := #[]) : MetaM String := do
+    (priorEquationDeclarations : Array Name := #[])
+    (sparseDeclarations : Array Name := #[]) : MetaM String := do
   let stock ← getEnv
-  let members := eqns.eqnNames.push eqns.splitterName
+  let members := sparseDeclarations ++ eqns.eqnNames.push eqns.splitterName
   unless members.all (!before.containsOnBranch ·) do throwError "boundary_matcher_not_fresh"
   let delta := stock.constants.foldStage2 (s := #[]) fun names name _ =>
     if checkedBefore.contains name then names else names.push name
@@ -320,9 +343,24 @@ def encodeBoundaryMatcher (before : Environment) (checkedBefore : NameSet) (anch
   let finalEquationState := (members ++ otherDeclarations).foldl addRegistration localBefore
   checkEquationState "capture-complete-local" stockLocalEquations
     (equationStateJson finalEquationState)
-  let mut equations := #[]
+  let localSparseState := boundarySparseCacheJson before
+  checkSparseState "capture-local" (boundarySparseCacheJson stock) localSparseState
+  let asyncSparseAfter := boundarySparseCacheJson stock (some eqns.splitterName)
+  let mut sparseHelpers := #[]
   let mut available : NameSet := {}
+  for name in sparseDeclarations do
+    let some (.defnInfo helper) := stock.find? name (skipRealize := true)
+      | throwError "boundary_matcher_sparse_helper_expected_definition"
+    checkCapturedMatcherConstants before available helper.type
+    checkCapturedMatcherConstants before available helper.value
+    checkSparseState "capture-sparse-member" (boundarySparseCacheJson stock (some name)) asyncSparseAfter
+    let source ← encodeBoundarySparseCases before name eqns.splitterName
+    sparseHelpers := sparseHelpers.push (name, source)
+    available := available.insert name
+  let asyncSparseBefore ← boundarySparseCacheWithout stock eqns.splitterName (sparseHelpers.map (·.2))
+  let mut equations := #[]
   for name in eqns.eqnNames do
+    checkSparseState "capture-equation-member" (boundarySparseCacheJson stock (some name)) asyncSparseAfter
     checkState "capture-member" (matcherStateAt stock name) snapshotAfter
     checkEquationState "capture-member" (equationStateAt stock name)
       (equationStateJson asyncEquationAfter)
@@ -351,7 +389,8 @@ def encodeBoundaryMatcher (before : Environment) (checkedBefore : NameSet) (anch
     asyncEquationBefore := equationStateJson asyncEquationBefore,
     asyncEquationAfter := equationStateJson asyncEquationAfter,
     localEquationBefore := equationStateJson localEquationBefore,
-    localEquationAfter := equationStateJson localEquationAfter }
+    localEquationAfter := equationStateJson localEquationAfter,
+    sparseHelpers, asyncSparseBefore, asyncSparseAfter, localSparseState }
   validateBundle bundle
   return (matcherJson bundle).compress
 
@@ -363,13 +402,16 @@ def boundaryMatcherDeclarationNames (anchor : Name) (source : String) : MetaM (A
     | .error error => throwError "boundary_matcher_decode_error:{error}"
   unless bundle.anchor == anchor do throwError "boundary_matcher_foreign_anchor"
   validateBundle bundle
-  return bundle.eqns.eqnNames.push bundle.eqns.splitterName
+  return bundle.sparseHelpers.map (·.1) ++ bundle.eqns.eqnNames.push bundle.eqns.splitterName
 
 private def realizeCapturedMatcher (bundle : CapturedMatcher) : MetaM Unit := do
   checkState "realization-before" (matchEqnsExt.getState (← getEnv)) bundle.snapshotBefore
   checkEquationState "realization-before" (eqnsExt.getState (← getEnv)) bundle.asyncEquationBefore
-  -- Generation emits equation proofs first. The bounded capture rejects any
-  -- extra helper closure; each decoder preflights known constants before checking.
+  checkSparseState "realization-before" (boundarySparseCacheJson (← getEnv)) bundle.asyncSparseBefore
+  for (name, source) in bundle.sparseHelpers do
+    executeBoundarySparseCases name source
+  checkSparseState "realization-after-helpers" (boundarySparseCacheJson (← getEnv)) bundle.asyncSparseAfter
+  -- Captured helpers precede equation proofs; each decoder preflights constants.
   for eqn in bundle.equations do
     executeBoundaryTheorem eqn.name eqn.source
     if eqn.defeqTag then defeqAttr.setTag eqn.name
@@ -386,6 +428,7 @@ private def realizeCapturedMatcher (bundle : CapturedMatcher) : MetaM Unit := do
   registerMatchEqns bundle.anchor bundle.eqns
   checkState "realization-after" (matchEqnsExt.getState (← getEnv)) bundle.snapshotAfter
   checkEquationState "realization-after" (eqnsExt.getState (← getEnv)) bundle.asyncEquationAfter
+  checkSparseState "realization-after" (boundarySparseCacheJson (← getEnv)) bundle.asyncSparseAfter
 
 def executeBoundaryMatcher (expectedAnchor : Name) (source : String) : MetaM Unit := do
   let bundle ← match parseMatcher source with
@@ -395,7 +438,10 @@ def executeBoundaryMatcher (expectedAnchor : Name) (source : String) : MetaM Uni
   validateBundle bundle
   checkState "caller-before" (matchEqnsExt.getState (← getEnv)) bundle.localState
   checkEquationState "caller-before" (eqnsExt.getState (← getEnv)) bundle.localEquationBefore
+  checkSparseState "caller-before" (boundarySparseCacheJson (← getEnv)) bundle.localSparseState
   realizeConst bundle.anchor bundle.eqns.splitterName (realizeCapturedMatcher bundle)
+  for (name, source) in bundle.sparseHelpers do
+    checkBoundarySparseCases name source
   -- Cached realizations skip the closure, so independently revalidate every
   -- declaration and its exact attached metadata before changing caller state.
   for eqn in bundle.equations do
@@ -412,12 +458,14 @@ def executeBoundaryMatcher (expectedAnchor : Name) (source : String) : MetaM Uni
     (asyncDecl := bundle.eqns.splitterName)).map.find? bundle.eqns.splitterName
   unless actualInfo.map boundaryMatcherInfoJson == bundle.splitterInfo.map boundaryMatcherInfoJson do
     throwError "boundary_matcher_splitter_metadata_conflict"
-  for name in bundle.eqns.eqnNames.push bundle.eqns.splitterName do
+  for name in bundle.sparseHelpers.map (·.1) ++ bundle.eqns.eqnNames.push bundle.eqns.splitterName do
+    checkSparseState "realized-member" (boundarySparseCacheJson env (some name)) bundle.asyncSparseAfter
     unless env.containsOnBranch name do throwError "boundary_matcher_missing_member"
     checkState "realized-member" (matcherStateAt env name) bundle.snapshotAfter
     checkEquationState "realized-member" (equationStateAt env name) bundle.asyncEquationAfter
   for eqn in bundle.equations do
     insertCapturedEquation eqn.name eqn.localRegistration
+  checkSparseState "caller-after" (boundarySparseCacheJson (← getEnv)) bundle.localSparseState
   checkState "caller-after" (matchEqnsExt.getState (← getEnv)) bundle.localState
   checkEquationState "caller-after" (eqnsExt.getState (← getEnv)) bundle.localEquationAfter
 

@@ -1936,6 +1936,22 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
         matchers := matchers.push candidate
         members := members ++ names
   matchers := matchers.qsort (fun lhs rhs => lhs.1.toString < rhs.1.toString)
+  -- Sparse helpers need both typed cache provenance and the owning splitter's
+  -- namespace. A prefix alone never exempts an unknown computational declaration.
+  let mut sparseByAnchor : Std.HashMap Name (Array Name) := {}
+  for info in declarations do
+    if !members.contains info.name && isSparseCasesOn stockEnvironment info.name then
+      let candidates := matchers.filter fun (_, eqns) =>
+        eqns.splitterName.isPrefixOf info.name &&
+          (sparseCasesOnCacheExt.getState stockEnvironment
+            (asyncMode := .async .asyncEnv) (asyncDecl := eqns.splitterName)).toArray.any
+              (fun (_, name) => name == info.name)
+      unless candidates.size == 1 do
+        throwError "boundary_sparse_ambiguous_matcher_owner:{info.name}"
+      let anchor := candidates[0]!.1
+      sparseByAnchor := sparseByAnchor.insert anchor
+        ((sparseByAnchor.getD anchor #[]).push info.name)
+      members := members.push info.name
   let mut actions : Array EnvironmentAction := #[]
   let mut helpers : Array TheoremVal := #[]
   for info in declarations do
@@ -1979,14 +1995,15 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
   let ordinaryDeclarations := actions.map boundaryEnvironmentActionName ++ helpers.map (·.name)
   let mut priorMatcherEquations : Array Name := #[]
   for (anchor, eqns) in matchers do
-    let currentMembers := eqns.eqnNames.push eqns.splitterName
+    let sparseDeclarations := sparseByAnchor.getD anchor #[]
+    let currentMembers := sparseDeclarations ++ eqns.eqnNames.push eqns.splitterName
     let otherDeclarations := ordinaryDeclarations ++ members.filter (!currentMembers.contains ·)
     let priorEquationDeclarations := actions.filterMap fun action => match action with
       | .declareEquation name _ => if name.toString < anchor.toString then some name else none
       | _ => none
     let payload ← withEnv stockEnvironment <| encodeBoundaryMatcher
       basis.environment basis.checkedDeclarationNames anchor eqns
-      otherDeclarations (priorEquationDeclarations ++ priorMatcherEquations)
+      otherDeclarations (priorEquationDeclarations ++ priorMatcherEquations) sparseDeclarations
     actions := actions.push (.declareMatcher anchor payload)
     priorMatcherEquations := priorMatcherEquations ++ eqns.eqnNames
   unless helpers.isEmpty do

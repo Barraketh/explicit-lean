@@ -237,7 +237,7 @@ def validate_definition_payload(source: object, expected_name: object,
     return value
 
 
-def validate_matcher_payload(source: object, expected_anchor: object,
+def _validate_matcher_payload_v1(source: object, expected_anchor: object,
                              label: str = "boundary matcher") -> list[Any]:
     """Validate the closed bundle format; Lean checks declarations/provenance.
 
@@ -406,3 +406,149 @@ def validate_local_theorems_payload(source: object, expected_anchor: object,
     if expected_anchor not in names:
         reject("anchor is not a member")
     return value
+
+
+def _private_name(value: object) -> bool:
+    return _name(value) and bool(value) and value[0] == ["s", "_private"]
+
+
+def _validate_sparse_key(value: object, label: str) -> None:
+    if (not isinstance(value, list) or len(value) != 3 or not _name(value[0])
+            or not value[0] or not isinstance(value[1], list)
+            or type(value[2]) is not bool or any(not _name(n) or not n for n in value[1])):
+        raise RuntimeError(f"{label} has an invalid sparse cache key")
+    if len({json.dumps(n, separators=(",", ":")) for n in value[1]}) != len(value[1]):
+        raise RuntimeError(f"{label} has duplicate sparse constructors")
+
+
+def _validate_sparse_cache(value: object, label: str) -> dict[str, tuple[object, object]]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{label} must be an array")
+    result: dict[str, tuple[object, object]] = {}
+    previous = ""
+    for entry in value:
+        if not isinstance(entry, list) or len(entry) != 2:
+            raise RuntimeError(f"{label} has an invalid cache entry")
+        _validate_sparse_key(entry[0], label)
+        if not _name(entry[1]) or not entry[1]:
+            raise RuntimeError(f"{label} has an invalid cache value")
+        cache_key = json.dumps(entry[0], separators=(",", ":"))
+        if cache_key in result:
+            raise RuntimeError(f"{label} has duplicate cache keys")
+        encoded = json.dumps(entry, separators=(",", ":"), ensure_ascii=False)
+        if encoded <= previous:
+            raise RuntimeError(f"{label} must be sorted and unique")
+        previous = encoded
+        result[cache_key] = (entry[0], entry[1])
+    return result
+
+
+def validate_sparse_payload(source: object, expected_name: object = None,
+                            label: str = "boundary sparse cases") -> list[Any]:
+    """Validate the structural v1 sparse-helper payload nested in matcher v2."""
+    if not isinstance(source, str):
+        raise RuntimeError(f"{label} must be a string")
+    try:
+        value = json.loads(source)
+    except (ValueError, RecursionError) as error:
+        raise RuntimeError(f"{label} is not sparse cases JSON") from error
+    if not (isinstance(value, list) and len(value) == 5
+            and value[0] == "boundary_sparse_cases_v1" and _name(value[1]) and value[1]):
+        raise RuntimeError(f"{label} has an invalid sparse cases header")
+    if expected_name is not None and value[1] != expected_name:
+        raise RuntimeError(f"{label} has a mismatched helper name")
+    if not _private_name(value[1]):
+        raise RuntimeError(f"{label} helper is not private")
+    if not isinstance(value[2], str):
+        raise RuntimeError(f"{label} definition is not a string")
+    definition = validate_definition_payload(value[2], value[1], label)
+    if definition[4] != ["abbrev"] or definition[5] != "safe":
+        raise RuntimeError(f"{label} definition is not a safe abbreviation")
+    key = value[3]
+    _validate_sparse_key(key, label)
+    if key[2] is not True:
+        raise RuntimeError(f"{label} cache key is not private")
+    info = value[4]
+    if (not isinstance(info, list) or len(info) != 4 or not _name(info[0]) or not info[0]
+            or not _nat(info[1]) or not _nat(info[2]) or not isinstance(info[3], list)
+            or any(not _name(n) or not n for n in info[3])):
+        raise RuntimeError(f"{label} has invalid sparse metadata")
+    if info[0] != key[0] or info[3] != key[1]:
+        raise RuntimeError(f"{label} metadata does not match its cache key")
+    if info[2] != info[1] + len(info[3]) + 2:
+        raise RuntimeError(f"{label} metadata arity is inconsistent")
+    if definition[1] != value[1] or definition[2] != [value[1]]:
+        raise RuntimeError(f"{label} definition identity mismatch")
+    return value
+
+
+def validate_matcher_payload_v2(source: object, expected_anchor: object,
+                                 label: str = "boundary matcher") -> list[Any]:
+    """Reuse the common bundle checks, then validate the sparse cache transition."""
+    def reject(detail: str) -> None:
+        raise RuntimeError(f"{label}: {detail}")
+
+    def key(name: object) -> str:
+        if not _name(name) or not name:
+            reject("invalid name")
+        return json.dumps(name, separators=(",", ":"))
+
+    if not isinstance(source, str):
+        reject("payload must be a string")
+    try:
+        value = json.loads(source)
+    except (ValueError, RecursionError) as error:
+        raise RuntimeError(f"{label}: invalid JSON") from error
+    if not (isinstance(value, list) and len(value) == 19
+            and value[0] == "boundary_matcher_bundle_v2" and value[1] == expected_anchor):
+        reject("invalid matcher bundle v2 header or anchor")
+    common = ["boundary_matcher_bundle_v1", *value[1:15]]
+    _validate_matcher_payload_v1(json.dumps(common, separators=(",", ":")), expected_anchor, label)
+    eqn_names, splitter, _ = value[3]
+    if value[3][2][0:2] != value[2][0:2] or value[3][2][3:] != value[2][3:]:
+        reject("unrelated splitter metadata")
+    if not _private_name(splitter) or any(not _private_name(n) for n in eqn_names):
+        reject("matcher members must be private")
+    member_keys = {key(n) for n in eqn_names}
+    if not isinstance(value[15], list):
+        reject("invalid sparse helper list")
+    sparse_names = set()
+    helper_keys: dict[str, tuple[object, object]] = {}
+    for helper in value[15]:
+        if not isinstance(helper, list) or len(helper) != 2:
+            reject("invalid sparse helper entry")
+        helper_key = key(helper[0])
+        if helper[0][:len(splitter)] != splitter:
+            reject("sparse helper is outside splitter namespace")
+        if helper_key in sparse_names or helper_key in member_keys or helper_key == key(splitter):
+            reject("duplicate sparse helper name")
+        sparse_names.add(helper_key)
+        sparse = validate_sparse_payload(helper[1], helper[0], label)
+        sparse_key = json.dumps(sparse[3], separators=(",", ":"))
+        if sparse_key in helper_keys:
+            reject("duplicate sparse helper cache key")
+        helper_keys[sparse_key] = (sparse[3], helper[0])
+    sparse_before = _validate_sparse_cache(value[16], label + " asyncSparseBefore")
+    sparse_after = _validate_sparse_cache(value[17], label + " asyncSparseAfter")
+    _validate_sparse_cache(value[18], label + " localSparseState")
+    if any(cache_key not in sparse_after or sparse_after[cache_key][1] != helper[1]
+           for cache_key, helper in helper_keys.items()):
+        reject("async sparse cache lacks a captured helper")
+    expected_before = {cache_key: entry for cache_key, entry in sparse_after.items()
+                       if cache_key not in helper_keys}
+    if sparse_before != expected_before:
+        reject("invalid async sparse cache transition")
+    return value
+
+
+def validate_matcher_payload(source: object, expected_anchor: object,
+                             label: str = "boundary matcher") -> list[Any]:
+    """Dispatch strict validation for legacy v1 and sparse-aware v2 bundles."""
+    if isinstance(source, str):
+        try:
+            header = json.loads(source)
+        except (ValueError, RecursionError):
+            header = None
+        if isinstance(header, list) and header and header[0] == "boundary_matcher_bundle_v2":
+            return validate_matcher_payload_v2(source, expected_anchor, label)
+    return _validate_matcher_payload_v1(source, expected_anchor, label)

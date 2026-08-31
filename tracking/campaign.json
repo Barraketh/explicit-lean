@@ -181,8 +181,8 @@
     {
       "id": "sparse-matcher-helper",
       "owner": "coordinator",
-      "status": "in_progress",
-      "description": "Main uncommitted v2 codec/classifier build passes;17multiple+12existingcontrols pass. Independent old standalone16controls rechecked110hashes. FullModifyLast5calls now reaches generator mismatch stock5/applied4 on firstcall; no coverage claim. Portable fresh driver cleanup pending."
+      "status": "completed",
+      "description": "Integrated sparse-helper closed definition/typed cache codec and matcher-v2 support. Mainbuild46jobs,17multiple+12existing+16freshcompilercontrols pass;124freshhashes independently checked. Portablefourdrivers verified264handoff hashes,42wirecontrols; copiedmain and reran21wirecontrols on fresh mainpayloads. FullModifyLast5 remains unaccepted pending combinedrealization-group fix."
     },
     {
       "id": "translated-schema8-forest",
@@ -222,9 +222,9 @@
     },
     {
       "id": "cached-realization-activation",
-      "owner": "/root/unresolved_probe_finish",
-      "status": "in_progress",
-      "description": "Fresh truncated default-async Lookmap exposes stock7-memberoutergroup/gen1\u21925 vs flatreplay1-member/gen1\u21927. Root archived22inputs and independently checked4nonce logs plus state drift. Scratch nested outer-group replay fixes grouping/counter; strict descriptor and cached-only activation production codecs pending."
+      "owner": "coordinator",
+      "status": "reviewed_pending_integration",
+      "description": "Frozen strict groupcodec independently verified660hashes/34nonce logs/471unchangedinputs. FullLookmap10calls33declarations, actualheader remaining0; truncateddefaultasync7members/gen1to5. Mainmerge staged, including sparse-v2 Python member accounting; mainartifact4/report10 tests pending."
     },
     {
       "id": "fresh-post-generator-guard",
@@ -675,6 +675,25 @@
       "evidence": [
         ".lake/week-2026-08-31/worker-storage-controls.log"
       ]
+    },
+    {
+      "at": "2026-08-31T15:02:17.370412+00:00",
+      "summary": "Independent verification: strict group handoff660hashes/34noncelogs/471unchanged inputs plus main sparse16freshcontrols/124hashes. Group mainmerge prepared separately while portablewire checks complete. Root found caught-missing-generator and unselected-sibling gaps in draft freshguard; Luna fixing with Sol independentreview. No bulk dispatch or acceptedcoverage yet.",
+      "evidence": [
+        ".lake/week-2026-08-31/group-handoff-verification.json",
+        ".lake/week-2026-08-31/sparse-main-fresh-verification.json",
+        ".lake/week-2026-08-31/final-command-audit-design.md"
+      ]
+    },
+    {
+      "at": "2026-08-31T15:05:15.619220+00:00",
+      "summary": "Sparse-v2 and four portable test drivers ready for commit after rootdiff review. Main fresh9+7 compiler controls,17multiple,12existing,5pairedcacheguard and21wire controls passed; frozen portablehandoff another42wire controls validated. Main group merge staged and frozen660hashes validated. Freshpost-generator guard still awaiting two reviewed fixes; no acceptedcoverage or bulkdispatch.",
+      "evidence": [
+        ".lake/week-2026-08-31/sparse-main-fresh-verification.json",
+        ".lake/week-2026-08-31/sparse-driver-handoff-verification.json",
+        ".lake/week-2026-08-31/sparse-main-wire-helper.log",
+        ".lake/week-2026-08-31/sparse-main-wire-matcher.log"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -885,7 +904,8 @@
     "4e1142c",
     "f3db7d4",
     "2ae2609",
-    "af21f51"
+    "af21f51",
+    "617c69d"
   ],
   "experiments": [
     {

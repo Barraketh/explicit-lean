@@ -497,7 +497,7 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
                 if encoded[0] == "boundary_local_theorems_bundle_v1":
                     validate_local_theorems_payload(text, encoded[1] if len(encoded) > 1 else None, label)
                     continue
-                if encoded[0] == "boundary_matcher_bundle_v1":
+                if encoded[0] in {"boundary_matcher_bundle_v1", "boundary_matcher_bundle_v2"}:
                     validate_matcher_payload(text, encoded[1] if len(encoded) > 1 else None, label)
                     continue
         if FORBIDDEN_AXIOM in text:
