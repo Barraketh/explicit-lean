@@ -98,15 +98,21 @@
     },
     {
       "id": "resumable-campaign-worker",
-      "owner": "/root/occurrence_index",
-      "status": "in_progress",
-      "description": "Bounded worker connecting closed manifests, leases, existing verified shard runner, and durable per-module outcomes."
+      "owner": "coordinator (Luna initial implementation; Sol integration after capacity error)",
+      "status": "completed",
+      "description": "Bounded worker committed54fcbd0. Strict preflight, explicit implementation/toolchain/dependency identities, per-module leases, budget checks and durable outcomes. Restarts skip unchanged failures/partial results and advance beyond verified prefixes. Seven worker and10index checks passed."
     },
     {
       "id": "unresolved-caller-probes",
-      "owner": "/root/unresolved_callers",
+      "owner": "/root/unresolved_probe_finish",
       "status": "in_progress",
       "description": "Exercise four unresolved quotations with caller fixtures against instrumented copies; evidence only, no translation claim."
+    },
+    {
+      "id": "translated-import-isolation",
+      "owner": "/root/tree_build_plan",
+      "status": "in_progress",
+      "description": "Direct pinned Lean invocation with explicit search path, stock Mathlib fallback excluded and negative dependency-resolution fixture."
     }
   ],
   "blockers": [
@@ -262,6 +268,10 @@
     {
       "at": "2026-08-31T10:32:39.198384+00:00",
       "summary": "Nested process timeout fix committeda2173da after old-code positive control and real three-group regression. Fresh closed subset inventory stopped on legitimate duplicate parser paths in Types.Basic; fixed count validation to count unique source identities while preserving all paths and unchanged semantic join (0804eaf). Focused real8-call/9-record regression passed and second run hit checkpoint in0.00s. No new closed full manifest published. First worker batch will use a small freshly generated manifest at its final committed revision."
+    },
+    {
+      "at": "2026-08-31T10:35:22.250782+00:00",
+      "summary": "Luna worker and unresolved-probe agents hit capacity. Coordinator finished worker integration/fix-review and committed54fcbd0;7worker+10index checks passed. Started frozen20-module/231-call worker batch in schema2-worker-one with fresh bounded manifest generation and master SQLite result index. Caller probes escalated narrowly to inherited Sol; Luna continues import-isolation helper. Current weekly usage5%."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -306,6 +316,23 @@
       "log": ".lake/fin-probe.log",
       "status": "failed_expected_unsupported",
       "detail": "Fresh26-call manifest succeeded; shard selection rejects1reusable executable call before recording."
+    },
+    {
+      "id": "worker-batch-one",
+      "sessionId": 84576,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-worker-one",
+      "commit": "54fcbd0",
+      "log": ".lake/worker-batch.log",
+      "status": "running",
+      "modules": 20,
+      "expectedOccurrences": 231,
+      "database": ".lake/search-free-mathlib/translation-index.sqlite3",
+      "limits": {
+        "maxModules": 20,
+        "moduleTimeoutSeconds": 900,
+        "maxSeconds": 3600
+      },
+      "note": "Fresh closed small manifest generated before dispatch; includes known reusable rejection cases deliberately. Coverage counted only after validated complete reports."
     }
   ],
   "latestCommits": [
@@ -325,7 +352,9 @@
     "531a3ad",
     "a8fea49",
     "a2173da",
-    "0804eaf"
+    "0804eaf",
+    "585bb83",
+    "54fcbd0"
   ],
   "experiments": [
     {
