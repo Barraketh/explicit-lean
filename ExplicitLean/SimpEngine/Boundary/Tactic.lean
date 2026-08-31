@@ -4,6 +4,7 @@ prelude
 public meta import ExplicitLean.SimpEngine.Boundary.Apply
 public meta import ExplicitLean.SimpEngine.Boundary.Selector
 public meta import Lean.Elab.Tactic.ElabTerm
+public meta import Lean.Meta.Check
 
 public meta section
 
@@ -39,7 +40,8 @@ syntax boundaryEncodedLocalEvidence+ (boundaryEncodedTargetEvidence)? :
   boundaryEncodedLocationEvidence
 
 declare_syntax_cat boundaryEncodedEnvironmentAction
-syntax "realize_reserved_name" str : boundaryEncodedEnvironmentAction
+syntax "declare_congruence" str str : boundaryEncodedEnvironmentAction
+syntax "declare_equation" str str : boundaryEncodedEnvironmentAction
 
 declare_syntax_cat boundaryEncodedActions
 syntax "[" boundaryEncodedEnvironmentAction,* "]" : boundaryEncodedActions
@@ -146,11 +148,6 @@ private def elaborateEvidence (stx : Syntax) : TacticM TargetArtifact := do
     elabTermEnsuringType proofSyntax (some expectedProofType)
   return { input, result, proof? }
 
-private def parseEncodedTerm (source : String) : TacticM Syntax := do
-  match Parser.runParserCategory (← getEnv) `term source with
-  | .ok stx => return stx
-  | .error message => throwError "invalid encoded boundary term: {message}"
-
 private def elaborateEncodedEvidence (stx : Syntax) : TacticM TargetArtifact := do
   let (inputSource, resultSource, proofSource?) ←
     match stx with
@@ -159,11 +156,19 @@ private def elaborateEncodedEvidence (stx : Syntax) : TacticM TargetArtifact := 
     | `(boundaryEncodedEvidence| ($input:str ==> $result:str using $proof:str)) =>
         pure (input.getString, result.getString, some proof.getString)
     | _ => throwError "invalid encoded boundary evidence"
-  let input ← elaborateType (← parseEncodedTerm inputSource)
-  let result ← elaborateType (← parseEncodedTerm resultSource)
+  let input ← decodeBoundaryExpr inputSource
+  let result ← decodeBoundaryExpr resultSource
+  check input
+  check result
+  unless (← whnf (← inferType input)).isSort && (← whnf (← inferType result)).isSort do
+    throwError "boundary_expr_expected_types"
   let expectedProofType ← mkEq input result
   let proof? ← proofSource?.mapM fun proofSource => do
-    elabTermEnsuringType (← parseEncodedTerm proofSource) (some expectedProofType)
+    let proof ← decodeBoundaryExpr proofSource
+    check proof
+    unless ← isDefEq (← inferType proof) expectedProofType do
+      throwError "boundary_expr_proof_type_mismatch"
+    return proof
   return { input, result, proof? }
 
 private def runExplicitApply (inputSyntax resultSyntax : Syntax)
@@ -213,11 +218,26 @@ private def parseEncodedEnvironmentActions
   let mut result : Array EnvironmentAction := #[]
   for action in actions do
     match action with
-    | `(boundaryEncodedEnvironmentAction| realize_reserved_name $name:str) =>
-        let name := name.getString.toName
+    | `(boundaryEncodedEnvironmentAction| declare_congruence $name:str $payload:str) =>
+        let nameJson ← match Json.parse name.getString with
+          | .ok json => pure json
+          | .error error => throwError "invalid encoded declaration name: {error}"
+        let name ← match decodeBoundaryName nameJson with
+          | .ok name => pure name
+          | .error error => throwError "invalid encoded declaration name: {error}"
         if name.isAnonymous then
-          throwError "invalid encoded reserved-name action"
-        result := result.push (EnvironmentAction.realizeReservedName name)
+          throwError "invalid encoded declaration name"
+        result := result.push (.declareCongruence name payload.getString)
+    | `(boundaryEncodedEnvironmentAction| declare_equation $name:str $payload:str) =>
+        let nameJson ← match Json.parse name.getString with
+          | .ok json => pure json
+          | .error error => throwError "invalid encoded declaration name: {error}"
+        let name ← match decodeBoundaryName nameJson with
+          | .ok name => pure name
+          | .error error => throwError "invalid encoded declaration name: {error}"
+        if name.isAnonymous then
+          throwError "invalid encoded declaration name"
+        result := result.push (.declareEquation name payload.getString)
     | _ => throwError "invalid encoded environment action"
   return result
 
@@ -225,11 +245,11 @@ private def runExplicitEncodedApply (actions : Array Syntax) (evidence : Syntax)
   withMainContext do
     withBoundaryEncodedSourceContext do
       let environmentActions ← parseEncodedEnvironmentActions actions
+      executeEnvironmentActions environmentActions
       let artifact ← elaborateEncodedEvidence evidence
       let goals ← getGoals
       let (next, _) ← applyGoalArtifact goals.head! goals.tail {
         target? := some artifact
-        environmentActions
       }
       setGoals next
 
@@ -238,6 +258,7 @@ private def runExplicitEncodedLocationApply (actions : Array Syntax)
   withMainContext do
   withBoundaryEncodedSourceContext do
     let environmentActions ← parseEncodedEnvironmentActions actions
+    executeEnvironmentActions environmentActions
     let lctx ← getLCtx
     let mut locals := #[]
     for entrySyntax in localSyntax do
@@ -261,7 +282,6 @@ private def runExplicitEncodedLocationApply (actions : Array Syntax)
     let (next, _) ← applyGoalArtifact goals.head! goals.tail {
       locals
       target?
-      environmentActions
     }
     setGoals next
 

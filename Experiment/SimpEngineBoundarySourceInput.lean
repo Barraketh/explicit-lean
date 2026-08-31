@@ -51,7 +51,9 @@ theorem boundarySourceFixture
 theorem boundarySourceClosed (n : Nat) : n + 0 = n := by
   simp only [Nat.add_zero]
 
-def boundarySourceAlias (n : Nat) : Nat := n
+-- Expose the body so the generated equation theorem is public and its
+-- declaration action must survive a fresh materialized-source compilation.
+@[expose] def boundarySourceAlias (n : Nat) : Nat := n
 
 theorem boundarySourceDefEq
     (P : Nat → Prop) (n : Nat) (h : P n) : P (boundarySourceAlias n) := by

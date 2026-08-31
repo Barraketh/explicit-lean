@@ -388,8 +388,8 @@ below. A successful variant contains:
   continuation-visible effect independent of the encoded transformations,
   environment actions, and consistently renamed fresh state has been admitted;
   and
-- any supported observable environment action (currently reserved-name
-  realization) plus a boundary-contract version.
+- any supported observable environment action (captured, checked theorem
+  declarations) plus a boundary-contract version.
 
 A failure variant contains no post-state mutation and causes the replacement to
 fail so that unchanged tactic alternatives behave as before. Exact error text is
@@ -402,18 +402,32 @@ missing success report may be classified as unobserved only when no such marker
 was emitted.
 
 The artifact wire identity is `kind=simp_engine_boundary_artifact`,
-`schema=1`, `semanticContract=boundary-observable-v1`, and
-`selectorSchema=1`. Its encoding policy is `terms=lean_source_v1`,
-`locals=local_decl_index_v1`, and `universes` and `instances` inferred at
-application. Local references use `LocalDecl.index`, not generated FVar IDs.
-Universes and instances are inferred only after an exact selector match and are
-then checked by the semantic boundary and declaration/environment gates.
-The four encoding literals are part of artifact-schema-1 semantics: changing
-any encoding requires an artifact schema bump even though generated tactic
-headers carry the schema rather than repeating those literals. The
-`stateDeltas` field is currently required to be exactly empty: no independent
-continuation-visible delta is admitted. Environment actions are the only
-explicit effect currently supported.
+`schema=2`, `semanticContract=boundary-observable-v1`, and
+`selectorSchema=1`. Its encoding policy is `terms=lean_expr_dag_v1`,
+`locals=local_decl_index_v1`, `universes=explicit_levels_v1`, and
+`instances=explicit_terms_v1`. Expressions are reconstructed directly from a
+shared DAG containing every application argument and universe level. Decoding
+never parses Lean terms or invokes the term elaborator, typeclass synthesis,
+coercion insertion, tactics, or reserved-name generators. Unresolved expression
+and universe metavariables are rejected; support for canonical references to
+pre-existing boundary metavariables is still pending. Local references use
+`LocalDecl.index`, not generated FVar IDs. Missing constants fail before lookup
+could trigger realization. Captured generated theorems carry their exact names,
+universe parameters, declaration-group metadata, types, and proof bodies; replay
+uses checked `addDecl` inside a controlled `realizeConst` declaration branch,
+with all fresh dependencies inlined during recording. Supported congruence
+declarations also carry the original anchor and exact argument-kind metadata.
+Equation declarations carry their definition-equality tags and equation map
+entry. Replay preserves these captured effects without inferring tags.
+The branch runs only this captured insertion; it never calls a registered proof
+generator. Fresh-process tests are required because shared realization caches
+can otherwise conceal a missing declaration callback.
+
+These encoding literals are part of artifact-schema-2 semantics. The
+`stateDeltas` field remains exactly empty: no independent continuation-visible
+delta is admitted. Environment actions are the only explicit effect currently
+supported. The final declaration/environment oracle remains required; accepting
+a syntactically valid DAG is not proof verification.
 
 ### Dynamic selection rule
 
@@ -479,7 +493,7 @@ tactic structure may not otherwise change merely to make materialization pass.
 
 The syntax above is illustrative. The current parser uses the
 `simp_engine_boundary_select` artifact header and machine-oriented encoded
-variants described below; its durable artifact wire identity is schema 1.
+variants described below; its durable artifact wire identity is schema 2.
 
 ### Nested occurrence coverage
 

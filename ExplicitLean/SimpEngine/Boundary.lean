@@ -383,13 +383,22 @@ private def boundaryComparisonMismatch {α : Type} (label : String) : TacticM α
   throwError s!"boundary_comparison_mismatch:{label}"
 
 private def boundaryEnvironmentActionName : EnvironmentAction → Name
-  | EnvironmentAction.realizeReservedName name => name
+  | EnvironmentAction.declareCongruence name _ => name
+  | EnvironmentAction.declareEquation name _ => name
 
 private def boundaryEnvironmentActionJson (action : EnvironmentAction) : Json :=
   match action with
-  | EnvironmentAction.realizeReservedName name => Json.mkObj [
-      ("kind", Json.str "realize_reserved_name"),
-      ("name", Json.str name.toString)
+  | EnvironmentAction.declareCongruence name payload => Json.mkObj [
+      ("kind", Json.str "declare_congruence"),
+      ("name", Json.str name.toString),
+      ("nameParts", encodeBoundaryName name),
+      ("declaration", Json.str payload)
+    ]
+  | EnvironmentAction.declareEquation name payload => Json.mkObj [
+      ("kind", Json.str "declare_equation"),
+      ("name", Json.str name.toString),
+      ("nameParts", encodeBoundaryName name),
+      ("declaration", Json.str payload)
     ]
 
 private def boundaryMetavarKindEq : MetavarKind → MetavarKind → Bool
@@ -1545,7 +1554,8 @@ private def runBoundaryComparatorSelfTest : TacticM Unit := do
       throwError "boundary_environment_action_self_test_name_already_present"
     unless isReservedName environment reservedName do
       throwError "boundary_environment_action_self_test_name_not_reserved"
-    executeEnvironmentActions #[EnvironmentAction.realizeReservedName reservedName]
+    -- This is a recorder-side positive control, never artifact application.
+    executeReservedNameAction reservedName
     unless (← getEnv).containsOnBranch reservedName do
       throwError "boundary_environment_action_self_test_replay_failed"
     IO.println "SIMP_ENGINE_BOUNDARY_COMPARATOR_SELF_TEST ok"
@@ -1770,7 +1780,33 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
     else
       unless isReservedName basis.environment info.name do
         throwError s!"boundary_comparison_unsupported_environment_delta:{info.name}"
-      actions := actions.push (EnvironmentAction.realizeReservedName info.name)
+      let .thmInfo thm := info
+        | throwError s!"boundary_comparison_unsupported_environment_delta:{info.name}"
+      -- Inline all post-boundary constants, so each captured declaration
+      -- depends only on the saved environment and sorted replay is sufficient.
+      let thm := { thm with
+        type := ← closeFreshConstants basis thm.type
+        value := ← closeFreshConstants basis thm.value }
+      let anchor := info.name.getPrefix
+      unless (basis.environment.find? anchor (skipRealize := true)).isSome do
+        throwError s!"boundary_comparison_unsupported_declaration_anchor:{anchor}"
+      if let some kinds := congrKindsExt.find? stockEnvironment info.name then
+        actions := actions.push (.declareCongruence info.name
+          (← encodeBoundaryCongruence anchor thm kinds))
+      else if let .str _ suffix := info.name then
+        unless isEqnLikeSuffix suffix do
+          throwError s!"boundary_comparison_unsupported_declaration_metadata:{info.name}"
+        let mappedAnchor? := (eqnsExt.getState stockEnvironment).mapInv.find? info.name
+        if let some mappedAnchor := mappedAnchor? then
+          unless mappedAnchor == anchor do
+            throwError s!"boundary_comparison_unsupported_equation_mapping:{info.name}"
+        actions := actions.push (.declareEquation info.name
+          (← encodeBoundaryEquation anchor thm
+            (Lean.defeqAttr.hasTag stockEnvironment info.name)
+            (Lean.backwardDefeqAttr.hasTag stockEnvironment info.name)
+            mappedAnchor?.isSome))
+      else
+        throwError s!"boundary_comparison_unsupported_declaration_metadata:{info.name}"
   return actions
 
 private def boundaryConstantMetadataEq
@@ -1949,41 +1985,10 @@ private def captureGoalArtifact (basis : PreBoundaryBasis) (simpStx : Syntax)
         return { locals, target? := some targetArtifact }
       return { locals }
 
-/-- Eliminate beta redexes whose explicit pretty-printed form would begin with
-    the invalid source token `@fun`. This is deliberately narrower than term
-    normalization: it visits the expression tree and contracts only applications
-    whose head is a lambda, preserving the artifact up to definitional equality. -/
-private def prepareArtifactExprForSource (expression : Expr) : MetaM Expr :=
-  Core.transform expression (pre := fun subexpression => do
-    let reduced := subexpression.headBeta
-    if reduced == subexpression then
-      return .continue
-    return .visit reduced)
-
-/-- Render artifact terms as source, not as display text. The settings are based
-    on the earlier proof-source experiment: make elaboration-relevant arguments
-    explicit, expose all proof/deep subterms, and disable notation that can lose
-    information. Universe and metavariable arguments remain inferable holes;
-    their internal identifiers are not stable source names. -/
-private def renderArtifactExpr (expression : Expr) : MetaM String := do
-  let expression ← prepareArtifactExprForSource expression
-  let rendered ← withOptions (fun options => options
-      |>.setBool `pp.explicit true
-      |>.setBool `pp.instances false
-      |>.setBool `pp.universes false
-      |>.setBool `pp.fullNames true
-      |>.setBool `pp.proofs true
-      |>.setBool `pp.deepTerms true
-      |>.setBool `pp.notation false
-      |>.setBool `pp.match false
-      |>.setBool `pp.fieldNotation false
-      |>.setBool `pp.structureInstances false
-      |>.setBool `pp.coercions false
-      |>.setBool `pp.mvars false
-      |>.set `pp.maxSteps (100000000 : Nat)
-      |>.set `pp.width (1000000 : Nat)) do
-    ppExpr expression
-  return toString rendered
+/-- Encode the captured kernel expression directly. No source parser, term
+    elaborator, instance search, or universe inference runs during decoding. -/
+private def renderArtifactExpr (expression : Expr) : MetaM String :=
+  encodeBoundaryExpr expression
 
 private def transformationJson (transformation : TargetArtifact) : TacticM Json := do
   let proofJson ← match transformation.proof? with

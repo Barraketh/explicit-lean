@@ -2,9 +2,10 @@ module
 prelude
 
 public import Init.Prelude
+public meta import ExplicitLean.SimpEngine.Boundary.CongruenceCodec
+public meta import ExplicitLean.SimpEngine.Boundary.EquationCodec
 public meta import Lean.Meta.Tactic.Replace
 public meta import Lean.Meta.Tactic.Util
-public meta import Lean.ReservedNameAction
 
 public meta section
 
@@ -19,13 +20,13 @@ namespace ExplicitLean.SimpEngine.Boundary
    schema. Generated source validates that schema before it elaborates any
    evidence or executes an environment action. -/
 def boundaryArtifactKind : String := "simp_engine_boundary_artifact"
-def boundaryArtifactSchema : Nat := 1
+def boundaryArtifactSchema : Nat := 2
 def boundarySelectorSchema : Nat := 1
 def boundarySemanticContract : String := "boundary-observable-v1"
-def boundaryArtifactTermEncoding : String := "lean_source_v1"
+def boundaryArtifactTermEncoding : String := "lean_expr_dag_v1"
 def boundaryArtifactLocalReferenceEncoding : String := "local_decl_index_v1"
-def boundaryArtifactUniverseEncoding : String := "inferred_at_application"
-def boundaryArtifactInstanceEncoding : String := "inferred_at_application"
+def boundaryArtifactUniverseEncoding : String := "explicit_levels_v1"
+def boundaryArtifactInstanceEncoding : String := "explicit_terms_v1"
 
 /- Marker lines emitted by the recording tactic are authenticated against the
    compiler process that requested them. Direct probes which do not provide
@@ -34,20 +35,18 @@ def boundaryRunNonceEnv : String := "SIMP_ENGINE_BOUNDARY_RUN_NONCE"
 def boundaryUnauthenticatedRunNonce : String := "unauthenticated"
 
 /-
-  An environment change which can be replayed without invoking the
-  simplifier. The representation is intentionally closed: a materialized
-  artifact may only ask Lean to run one of the registered reserved-name
-  generators for a specific name.
+  Captured congruence declarations and their argument metadata are reconstructed
+  and kernel checked in Lean's declaration branch. Application never invokes
+  reserved-name generators or proof-search callbacks.
 -/
 inductive EnvironmentAction where
-  | realizeReservedName (name : Name)
+  | declareCongruence (name : Name) (payload : String)
+  | declareEquation (name : Name) (payload : String)
   deriving Inhabited, BEq
 
 private def executeEnvironmentAction : EnvironmentAction → MetaM Unit
-  | .realizeReservedName name => do
-      executeReservedNameAction name
-      unless (← getEnv).containsOnBranch name do
-        throwError s!"boundary_environment_action_failed:{name}"
+  | .declareCongruence name payload => executeBoundaryCongruence name payload
+  | .declareEquation name payload => executeBoundaryEquation name payload
 
 def executeEnvironmentActions (actions : Array EnvironmentAction) : MetaM Unit := do
   for action in actions do

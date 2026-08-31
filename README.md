@@ -142,7 +142,7 @@ committed code before further corpus materialization.
 closed. The one-module canary for
 `Mathlib/Algebra/AddConstMap/Basic.lean` transforms all 17 calls under manifest
 schema 2. The current schema-5 report format carries artifact
-schema 1, selector schema 1, semantic contract
+schema 2, selector schema 1, semantic contract
 `boundary-observable-v1`, the exact encoding policy, and one ordered
 classification result per selected occurrence. The generated report records
 the compilation, source-preservation, and declaration/environment checks. Pre-commit
@@ -275,3 +275,10 @@ yet the complete pinned-corpus acceptance gate.
 - **Closed-world closure:** successful translation and compilation of every
   executable occurrence under the pinned corpus, toolchain, and build procedure,
   with retained syntax data preserved separately.
+
+The August 31–September 8 campaign is tracked in `WEEKLY.md` and
+`tracking/campaign.json`. A fresh diagnostic inventory accounts for 83,425 calls
+across 8,264 modules, including 66 reusable executable calls and five unresolved
+quotations. It is not translated coverage. Artifact schema 2 replaces printed
+Lean source with raw expression DAGs and captured, kernel-checked theorem
+declarations; full-corpus translation and readability work remain in progress.

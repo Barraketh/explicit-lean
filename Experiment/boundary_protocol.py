@@ -16,11 +16,13 @@ import re
 import secrets
 from typing import Any, Iterable
 
+from boundary_expr_codec import validate_expr_dag, validate_theorem_payload, validate_congruence_payload, validate_equation_payload, expr_is_constant
+
 
 # Keep these values synchronized with the public constants in
 # ExplicitLean/SimpEngine/Boundary/Apply.lean.
 ARTIFACT_KIND = "simp_engine_boundary_artifact"
-ARTIFACT_SCHEMA = 1
+ARTIFACT_SCHEMA = 2
 SEMANTIC_CONTRACT = "boundary-observable-v1"
 SELECTOR_SCHEMA = 1
 
@@ -35,10 +37,10 @@ TERMINALS = {
 # These strings are part of the artifact wire format. The encoding describes
 # how the materializer interprets a field, not a printer or implementation
 # module version.
-TERM_ENCODING = "lean_source_v1"
+TERM_ENCODING = "lean_expr_dag_v1"
 LOCAL_REFERENCE_ENCODING = "local_decl_index_v1"
-UNIVERSE_ENCODING = "inferred_at_application"
-INSTANCE_ENCODING = "inferred_at_application"
+UNIVERSE_ENCODING = "explicit_levels_v1"
+INSTANCE_ENCODING = "explicit_terms_v1"
 ENCODING = {
     "terms": TERM_ENCODING,
     "locals": LOCAL_REFERENCE_ENCODING,
@@ -90,7 +92,7 @@ FAILURE_REPORT_FIELDS = frozenset(
 LOCAL_FIELDS = frozenset({"reference", "userName", "transformation"})
 LOCAL_REFERENCE_FIELDS = frozenset({"kind", "index"})
 TRANSFORMATION_FIELDS = frozenset({"input", "result", "proof"})
-ENVIRONMENT_ACTION_KINDS = {"realize_reserved_name"}
+ENVIRONMENT_ACTION_KINDS = {"declare_congruence", "declare_equation"}
 
 # These are successful per-occurrence outcomes.  They must not be confused
 # with abort categories: an abort stops the run and publishes no successful
@@ -237,19 +239,7 @@ def validate_artifact_protocol(
 
 
 def validate_rendered_term(value: object, label: str) -> str:
-    if not isinstance(value, str):
-        raise RuntimeError(f"{label} must be a string: {value!r}")
-    for sentinel in ("⋯", "✝"):
-        if sentinel in value:
-            raise RuntimeError(f"{label} contains unstable printer output {sentinel!r}")
-    invalid_source = re.search(r"@fun(?=\s|\{|\()|@\(let", value)
-    if invalid_source:
-        raise RuntimeError(
-            f"{label} contains invalid explicit-printer source "
-            f"{invalid_source.group(0)!r}"
-        )
-    if UNSTABLE_RENDER_RE.search(value):
-        raise RuntimeError(f"{label} contains an internal metavariable name: {value!r}")
+    validate_expr_dag(value, label)
     return value
 
 
@@ -269,8 +259,9 @@ def validate_environment_actions(value: object, label: str) -> list[dict[str, ob
         raise RuntimeError(f"{label} must be an array: {value!r}")
     result: list[dict[str, object]] = []
     previous_name: str | None = None
+    seen_names: set[str] = set()
     for action in value:
-        if not isinstance(action, dict) or set(action) != {"kind", "name"}:
+        if not isinstance(action, dict) or set(action) != {"kind", "name", "nameParts", "declaration"}:
             raise RuntimeError(f"{label} contains an invalid action: {action!r}")
         if (
             not isinstance(action["kind"], str)
@@ -282,6 +273,13 @@ def validate_environment_actions(value: object, label: str) -> list[dict[str, ob
             raise RuntimeError(
                 f"{label} reserved names must be strictly sorted and unique: {value!r}"
             )
+        validator = (validate_congruence_payload if action["kind"] == "declare_congruence"
+                     else validate_equation_payload)
+        validator(action["declaration"], action["nameParts"], label)
+        exact_name = json.dumps(action["nameParts"], separators=(",", ":"))
+        if exact_name in seen_names:
+            raise RuntimeError(f"{label} reserved names must be strictly sorted and unique")
+        seen_names.add(exact_name)
         previous_name = name
         result.append(action)
     return result
@@ -416,11 +414,11 @@ def validate_report(
     elif not locals_value:
         raise RuntimeError(f"artifact has neither locals nor target: {report!r}")
     local_closed_false = any(
-        local["transformation"]["result"].strip() == "False"
+        expr_is_constant(local["transformation"]["result"], "False")
         for local in locals_value
     )
     target_closed_true = (
-        target is not None and target["result"].strip() == "True"
+        target is not None and expr_is_constant(target["result"], "True")
     )
     if terminal == "closed_from_local_false":
         if not local_closed_false or target is not None:
@@ -457,6 +455,26 @@ def _walk_strings(value: object) -> Iterable[str]:
 def reject_forbidden_generated_text(value: object, label: str) -> None:
     """Reject proof-hole axioms and hole tokens in generated protocol data."""
     for text in _walk_strings(value):
+        # A literal string inside a closed expression is data, not Lean source.
+        # Inspect the DAG's constant nodes rather than searching its JSON text.
+        if text.startswith("["):
+            try:
+                encoded = json.loads(text)
+            except (ValueError, RecursionError):
+                encoded = None
+            if isinstance(encoded, list) and encoded:
+                if encoded[0] == "expr_dag_v1":
+                    validate_expr_dag(text, label)
+                    continue
+                if encoded[0] == "boundary_equation_v1":
+                    validate_equation_payload(text, None, label)
+                    continue
+                if encoded[0] == "boundary_congruence_v1":
+                    validate_congruence_payload(text, None, label)
+                    continue
+                if encoded[0] == "boundary_theorem_dag_v1":
+                    validate_theorem_payload(text, encoded[1] if len(encoded) > 1 else None, label)
+                    continue
         if FORBIDDEN_AXIOM in text:
             raise RuntimeError(f"{label} contains forbidden {FORBIDDEN_AXIOM}")
         match = FORBIDDEN_TOKEN_RE.search(text)

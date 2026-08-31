@@ -332,19 +332,21 @@ def assert_grouping_rejections(
     expected_module: str,
 ) -> None:
     assert_protocol_mutations(report_list, expected_ids)
+    def declaration_action(name: str) -> dict[str, object]:
+        parts = [["s", name], ["s", "congr_simp"]]
+        term = json.dumps(["expr_dag_v1", [["c", [["s", "True"]], []]], 0])
+        payload = json.dumps(["boundary_theorem_dag_v1", parts, [parts], [], term, term])
+        payload = json.dumps(["boundary_congruence_v1", parts[:-1], payload, []])
+        return {"kind": "declare_congruence", "name": name, "nameParts": parts,
+                "declaration": payload}
+
     validate_environment_actions(
-        [{"kind": "realize_reserved_name", "name": "«foo-bar».αfun.congr_simp"}],
+        [declaration_action("«foo-bar».αfun.congr_simp")],
         "quoted/unicode environment action",
     )
     for actions in (
-        [
-            {"kind": "realize_reserved_name", "name": "z"},
-            {"kind": "realize_reserved_name", "name": "a"},
-        ],
-        [
-            {"kind": "realize_reserved_name", "name": "same"},
-            {"kind": "realize_reserved_name", "name": "same"},
-        ],
+        [declaration_action("z"), declaration_action("a")],
+        [declaration_action("same"), declaration_action("same")],
     ):
         try:
             validate_environment_actions(actions, "environment action mutation")
@@ -490,7 +492,9 @@ def format_variant_outcome(
         if not actions:
             return "apply_encoded"
         encoded_actions = ", ".join(
-            "realize_reserved_name " + lean_string(str(action["name"]))
+            str(action["kind"]) + " "
+            + lean_string(json.dumps(action["nameParts"], separators=(",", ":"), ensure_ascii=False))
+            + " " + lean_string(str(action["declaration"]))
             for action in actions
         )
         return f"apply_encoded_with_actions [{encoded_actions}]"
@@ -746,6 +750,14 @@ def main() -> None:
             label="boundary artifact",
         )
         reject_forbidden_generated_text(report_list, "boundary artifact reports")
+        if not any(
+            isinstance(report, dict) and any(
+                action.get("kind") == "declare_equation"
+                for action in report.get("environmentActions", [])
+            )
+            for report in report_list
+        ):
+            raise RuntimeError("source fixture did not exercise captured equation replay")
         expected_ids = [str(entry["id"]) for entry in entries]
         unobserved_ids = {
             str(entry["id"])

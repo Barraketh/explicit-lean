@@ -15,6 +15,7 @@ import check_simp_engine_boundary_scope as scope
 import boundary_materialize_shard as materialize
 from boundary_protocol import (
     artifact_protocol,
+    ARTIFACT_SCHEMA,
     RECORDING_ABORT_MARKER,
     make_occurrence_result,
     occurrence_classification_counts,
@@ -35,6 +36,10 @@ MODULES = (
     "Mathlib/Data/Fintype/List.lean",
     "Mathlib/Analysis/CStarAlgebra/SpecialFunctions/PosPart.lean",
 )
+
+
+def encoded_constant(name: str) -> str:
+    return json.dumps(["expr_dag_v1", [["c", [["s", part] for part in name.split(".")], []]], 0])
 
 
 def expect_join_rejection(
@@ -459,9 +464,9 @@ def validate_occurrence_protocol() -> None:
         target_result: str | None,
     ) -> dict[str, object]:
         transformation = lambda result: {
-            "input": "P",
-            "result": result,
-            "proof": "Eq.refl P",
+            "input": encoded_constant("P"),
+            "result": encoded_constant(result),
+            "proof": encoded_constant("Test.proof"),
         }
         locals_value = [] if local_result is None else [
             {
@@ -472,7 +477,7 @@ def validate_occurrence_protocol() -> None:
         ]
         return {
             "kind": "simp_engine_boundary_artifact",
-            "schema": 1,
+            "schema": ARTIFACT_SCHEMA,
             "semanticContract": "boundary-observable-v1",
             "occurrence": "terminal-test",
             "selector": {
@@ -491,10 +496,10 @@ def validate_occurrence_protocol() -> None:
             "status": "success",
             "terminal": terminal,
             "encoding": {
-                "terms": "lean_source_v1",
+                "terms": "lean_expr_dag_v1",
                 "locals": "local_decl_index_v1",
-                "universes": "inferred_at_application",
-                "instances": "inferred_at_application",
+                "universes": "explicit_levels_v1",
+                "instances": "explicit_terms_v1",
             },
             "stateDeltas": [],
             "environmentActions": [],
@@ -1015,7 +1020,7 @@ def validate_shard_report_protocol() -> None:
         )
         artifact = {
             "kind": "simp_engine_boundary_artifact",
-            "schema": 1,
+            "schema": ARTIFACT_SCHEMA,
             "semanticContract": "boundary-observable-v1",
             "occurrence": occurrence_id,
             "selector": {
@@ -1037,7 +1042,8 @@ def validate_shard_report_protocol() -> None:
             "stateDeltas": [],
             "environmentActions": [],
             "locals": [],
-            "target": {"input": "P", "result": "P", "proof": "Eq.refl P"},
+            "target": {"input": encoded_constant("P"), "result": encoded_constant("P"),
+                       "proof": encoded_constant("Test.proof")},
         }
         variants = {occurrence_id: [artifact]}
         module_root = debug_root / "Test"
