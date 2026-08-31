@@ -41,7 +41,7 @@
       "id": "occurrence-index",
       "owner": "/root/occurrence_index",
       "status": "in_progress",
-      "description": "SQLite index, cached module/results identities, incremental queries"
+      "description": "SQLite history and incremental queue pass focused checks; exact Lean header extraction is being added."
     },
     {
       "id": "fast-lean-tools",
@@ -72,6 +72,24 @@
       "owner": "coordinator (Sol bounded implementation)",
       "status": "completed",
       "description": "Own POSIX process groups and stop compiler descendants on timeout"
+    },
+    {
+      "id": "closed-expression-encoding",
+      "owner": "coordinator",
+      "status": "in_progress",
+      "description": "Standalone Expr DAG codec committed at 113d9b3; production schema migration waits for captured theorem support."
+    },
+    {
+      "id": "captured-theorem-declarations",
+      "owner": "/root/review_fixes",
+      "status": "in_progress",
+      "description": "Replace reserved-name callbacks with captured, kernel-checked theorem declarations."
+    },
+    {
+      "id": "inventory-checkpoints",
+      "owner": "/root/inventory_checkpoints",
+      "status": "in_progress",
+      "description": "Optional atomic checkpoints and progress logs for completed syntax/scope batches."
     }
   ],
   "blockers": [
@@ -181,6 +199,10 @@
     {
       "at": "2026-08-31T09:32:42.867871+00:00",
       "summary": "The raw Expr DAG prototype passed the 17-call source fixture (including one explicitly unobserved occurrence) and the three-call PosPart gate with its semantic oracle. PosPart artifacts shrank from 6,602,372 to 186,517 bytes. The main, not-yet-integrated codec now rejects implicit reserved-constant generation and ambiguous local indices; its build and focused fixture passed. The Python wire validator accepted all 14 real PosPart terms. Eight index tests passed; a full header audit found 21 valid import-all forms unsupported by the Python lexer, so exact Lean header extraction is being added."
+    },
+    {
+      "at": "2026-08-31T09:37:08.782231+00:00",
+      "summary": "Committed standalone closed Expr DAG codec and focused Lean/Python checks at 113d9b3. No production artifact schema change yet. The full frozen inventory finished syntax and scope batches and is now compiling execution-evidence probes for unresolved cases. Weekly usage remains 3%."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -200,7 +222,8 @@
     "2105937",
     "188e649",
     "0c4e537",
-    "2e73bcf"
+    "2e73bcf",
+    "113d9b3"
   ],
   "experiments": [
     {
