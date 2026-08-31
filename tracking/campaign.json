@@ -52,13 +52,13 @@
     {
       "id": "original-comments",
       "owner": "coordinator",
-      "status": "in_progress",
+      "status": "completed",
       "description": "Preserve each original replaced call as a comment"
     },
     {
       "id": "corpus-translation",
       "owner": "coordinator",
-      "status": "pending",
+      "status": "in_progress",
       "description": "Fresh inventory, broad shards, reusable code, full translated tree"
     },
     {
@@ -66,6 +66,12 @@
       "owner": null,
       "status": "pending",
       "description": "After explicit closure, mine and normalize common replacement patterns"
+    },
+    {
+      "id": "process-lifetimes",
+      "owner": "coordinator (Sol bounded implementation)",
+      "status": "completed",
+      "description": "Own POSIX process groups and stop compiler descendants on timeout"
     }
   ],
   "blockers": [
@@ -81,12 +87,12 @@
     }
   ],
   "nextActions": [
-    "Collect index corrections (analysis versioning, verified-success queue semantics, batch identity memo) and launcher hardening/integration from Luna",
-    "Poll prototype five-module gate session 83453; AddConstMap and EqToHom oracle reports currently exist, not a completed five-module claim",
-    "Review independent Luna audit of search-free evidence; choose rigorous production guard/encoding migration before broad translation",
-    "Commit integrated implementation, create frozen local run snapshot with APFS clone of own build cache and shared pinned stock packages",
-    "Generate fresh full corpus occurrence/classification inventory, retain all unresolved cases in the backlog, then execute incremental verified shards",
-    "Resolve reusable tactic source/execution ownership and validate the entire translated dependency tree before readability work"
+    "Poll frozen corpus inventory session79919; preserve unresolved backlog and import diagnostic results to durable index",
+    "Poll focused PosPart prototype rerun; pp.instances=true and pp.coercions=false",
+    "Collect index followup fixes: immediate queue semantics, diagnostic intake, robust imports",
+    "Collect independent Luna searchfree audit; decide production contract and validation before broad translation",
+    "Review and commit snapshot helper; assemble incremental scheduler using immutable runs and verified result cache",
+    "Resolve reusable tactic ownership/execution identities and verify entire translated dependency tree before readability"
   ],
   "checkpoints": [
     {
@@ -151,22 +157,44 @@
         "native oracle integration: AddConstMap success",
         "check_weekly_review_fixes.py passed, including symlink-parent regression"
       ]
+    },
+    {
+      "at": "2026-08-31T09:13:29.831750+00:00",
+      "summary": "Committed native tool integration at188e649 and subprocess process-group cleanup at0c4e537. Full diagnostic corpus inventory running in clean detached corpus-bootstrap snapshot. Prototype five-module gate passed first4 modules/63 calls but rejected PosPart coercion search; pp.coercions=true hides concrete functions, corrected tofalse in prototype only. Focused PosPart rerun in progress. Current weekly usage3%.",
+      "checks": [
+        "Coordinator check_process_runner.py passed; real child/grandchild cleanup with live and exited launcher",
+        "Coordinator check_translation_index.py six tests passed; additional queue and diagnostic intake review fixes requested",
+        "Prototype first4 module declaration oracles passed; sourcefixture17 passed; full searchfree contract not yet established"
+      ]
+    },
+    {
+      "summary": "Snapshot isolation and scope timeout propagation reviewed and fixed; helper documents shared package caches require coordinator no-writes lease. Current full syntax scan8264modules finished; scope stage running. Independent audit confirms trace alone misses tactic/default-instance search. Closed shared Expr DAG prototype compiles; roundtrip edge-case test under review."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
   "activeChecks": [
     {
-      "command": "python3 Experiment/check_simp_engine_boundary_mathlib.py",
+      "command": "python3 Experiment/simp_engine_boundary_corpus.py manifest --output .lake/campaign-inventory.json --allow-unresolved --timeout 3600",
+      "directory": ".lake/search-free-mathlib/snapshots/corpus-bootstrap",
+      "commit": "188e649",
+      "log": ".lake/campaign-inventory.log",
+      "sessionId": 79919,
+      "status": "running"
+    },
+    {
+      "command": "Focused pp.instances=true/pp.coercions=false PosPart gate",
       "directory": ".lake/search-free-mathlib/evidence-prototype",
-      "log": ".lake/prototype-five-modules.log",
-      "sessionId": 83453,
+      "log": ".lake/prototype-pospart-fixed.log",
+      "sessionId": 95741,
       "status": "running"
     }
   ],
   "latestCommits": [
     "a17ef7f",
     "fae96be",
-    "2105937"
+    "2105937",
+    "188e649",
+    "0c4e537"
   ],
   "experiments": [
     {
@@ -182,14 +210,25 @@
     "branchBase": "fae96be",
     "completeSourceFixture": 17,
     "completeMathlibModules": [
-      "Mathlib.Algebra.AddConstMap.Basic"
+      "Mathlib.Algebra.AddConstMap.Basic",
+      "Mathlib.CategoryTheory.EqToHom",
+      "Mathlib.Data.Fintype.List",
+      "Mathlib.Algebra.Algebra.NonUnitalHom"
     ],
-    "materializedMathlibOccurrences": 17,
+    "materializedMathlibOccurrences": 63,
     "instanceSearchAudit": "fresh evidence passed; 14 old replacements rejected by positive control",
     "fullSearchFreeContract": "not yet established; independent audit in progress",
     "partialFiveModuleGate": [
-      "AddConstMap oracle success",
-      "EqToHom oracle success"
+      "First4 modules passed63 calls",
+      "PosPart3 rejected instance-search coercion notation; focused rerun after correcting printer setting"
     ]
+  },
+  "packageWriteLease": {
+    "owner": "coordinator",
+    "status": "active",
+    "paths": [
+      ".lake/packages"
+    ],
+    "constraint": "No source or build-artifact writes in shared pinned packages while frozen/prototype runs are active. Project-only builds allowed when dependencies are already current. For package changes use a separate private copy after existing runs finish."
   }
 }

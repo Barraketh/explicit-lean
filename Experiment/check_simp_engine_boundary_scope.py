@@ -162,6 +162,7 @@ def load_records_with_fallbacks(
     specs: Sequence[ModuleSpec] | None = None,
     *,
     batch_size: int = 128,
+    timeout: int = 600,
 ) -> tuple[
     dict[str, list[dict[str, object]]],
     dict[str, list[dict[str, object]]],
@@ -173,7 +174,8 @@ def load_records_with_fallbacks(
     checker behavior.  Corpus callers pass an explicit sequence so a single
     large command line is never constructed.  A module belongs to exactly
     one batch; seeing records for a module more than once is rejected instead
-    of silently merging duplicate observations.
+    of silently merging duplicate observations. The timeout applies separately
+    to the prerequisite build and each batch.
     """
     if batch_size <= 0:
         raise ValueError("scope batch size must be positive")
@@ -187,7 +189,8 @@ def load_records_with_fallbacks(
             "ExplicitLean",
             "ExplicitLean.SimpEngine.Boundary.ScopeFixture",
             "ExplicitLean.SimpEngine.Boundary.ScopeProbe",
-        ]
+        ],
+        timeout=timeout,
     )
     occurrences: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
     declarations: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
@@ -211,7 +214,7 @@ def load_records_with_fallbacks(
             batch_modules.add(spec.module)
             command.extend([spec.module, str(spec.source)])
         requested_modules.update(batch_modules)
-        output = run(command)
+        output = run(command, timeout=timeout)
         batch_occurrences: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
         batch_declarations: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
         batch_fallbacks: set[str] = set()
@@ -261,10 +264,11 @@ def load_records(
     specs: Sequence[ModuleSpec] | None = None,
     *,
     batch_size: int = 128,
+    timeout: int = 600,
 ) -> tuple[dict[str, list[dict[str, object]]], dict[str, list[dict[str, object]]]]:
     """Load scope records while preserving the original two-result API."""
     occurrences, declarations, _fallbacks = load_records_with_fallbacks(
-        specs, batch_size=batch_size
+        specs, batch_size=batch_size, timeout=timeout
     )
     return occurrences, declarations
 

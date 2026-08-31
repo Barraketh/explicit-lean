@@ -546,7 +546,7 @@ def build_manifest(
     if specs:
         scope_occurrences, scope_declarations, scope_fallbacks = (
             scope.load_records_with_fallbacks(
-                specs, batch_size=scope_batch_size
+                specs, batch_size=scope_batch_size, timeout=timeout
             )
         )
     else:
