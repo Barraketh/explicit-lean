@@ -34,7 +34,7 @@
     {
       "id": "review-fixes",
       "owner": "/root/review_fixes",
-      "status": "in_progress",
+      "status": "completed",
       "description": "Protect input manifests and correct antiquotation classification"
     },
     {
@@ -81,9 +81,12 @@
     }
   ],
   "nextActions": [
-    "Finish source/comment regression and integrate reviewed Luna infrastructure",
-    "Commit toolchain changes, generate fresh current-contract canary manifests",
-    "Expand translation shards and resolve reusable source/execution ownership"
+    "Collect and review the three Luna infrastructure results; no agent commits without coordinator review",
+    "Finish nested gate (session 27930) and record outcome; original-comments work stays in_progress until complete",
+    "Integrate fixes and index/native launcher; commit clean implementation before fresh corpus manifest",
+    "Run broad jobs from a frozen clean implementation checkout (or design an equally strict hash-based provenance policy): existing corpus gates require whole-repository cleanliness and cannot coexist with ongoing tracker/code edits in this shared checkout",
+    "Generate current-contract inventory, preserving unresolved cases as explicit backlog; start bounded verified shards",
+    "Resolve implicit-instance elaboration and reusable tactic ownership before declaring search-free closure"
   ],
   "checkpoints": [
     {
@@ -114,7 +117,46 @@
         "All four pure corpus protocol validators passed",
         "AST parse of 43 coordinator/stable Python files passed"
       ]
+    },
+    {
+      "at": "2026-08-31T08:47:17.227328+00:00",
+      "summary": "Nested fixture passed (7 roots, 9 covered calls, semantic oracle, zero remaining). Mathlib Action phase is still running. Created isolated evidence-prototype worktree at fae96be with APFS cloned build cache (1.6GB in 0.23s); testing pp.instances/pp.coercions explicit output and an instance-search trace audit there."
+    },
+    {
+      "summary": "The combined nested gate stopped in Mathlib manifest generation because the shared shard runner changed during the run; nested fixture itself passed. This verifies the need for frozen runs. Positive audit control in the isolated prototype rejected old AddConstMap artifacts and detected instance search in 14 of 17 replacements."
+    },
+    {
+      "at": "2026-08-31T08:55:59.726405+00:00",
+      "summary": "Integrated Luna review fixes: input manifests protected from cleanup and antiquotations no longer silently retained as syntax data.",
+      "checks": [
+        "Agent: check_weekly_review_fixes.py passed",
+        "Agent: existing check_simp_engine_boundary_scope.py passed",
+        "Coordinator: cleanup preflight, diff and source review passed"
+      ]
     }
   ],
-  "automationId": "complete-search-free-mathlib-by-sep-8"
+  "automationId": "complete-search-free-mathlib-by-sep-8",
+  "activeChecks": [
+    {
+      "command": "prototype check_simp_engine_boundary_source.py",
+      "directory": ".lake/search-free-mathlib/evidence-prototype",
+      "log": ".lake/prototype-source.log",
+      "sessionId": 10591,
+      "status": "running"
+    }
+  ],
+  "latestCommits": [
+    "a17ef7f",
+    "fae96be"
+  ],
+  "experiments": [
+    {
+      "id": "explicit-instance-evidence",
+      "path": ".lake/search-free-mathlib/evidence-prototype",
+      "baseCommit": "fae96be8a63378bcd6660295b1ad28b7e3c70858",
+      "owner": "coordinator",
+      "status": "in_progress",
+      "note": "Prototype only; protocol not migrated and trace audit not yet accepted as production validation."
+    }
+  ]
 }

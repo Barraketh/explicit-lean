@@ -297,6 +297,42 @@ def containing_declarations(
     )
 
 
+def _is_antiquotation_kind(kind: str) -> bool:
+    """Return whether a syntax ancestry entry enters an antiquotation.
+
+    The parser uses both a namespaced ``term.pseudo.antiquot`` node and the
+    unnamespaced ``antiquotNestedExpr`` node for the expression that fills a
+    quotation hole.  Keep this test centralized so classification and
+    execution-evidence joining use the same boundary rules.
+    """
+    lowered = kind.lower()
+    return "antiquot" in lowered
+
+
+def _quotation_context(ancestors: list[str]) -> str:
+    """Classify the innermost quotation boundary containing an occurrence.
+
+    A quotation node makes descendants syntax data until an antiquotation
+    opens an ordinary term expression.  Nested quotations and antiquotations
+    are handled by comparing their innermost boundary positions.  ``unknown``
+    is deliberately conservative when an antiquotation marker appears
+    without a quotation marker; callers must then obtain execution evidence.
+    """
+    quotation_positions = [
+        index for index, kind in enumerate(ancestors) if kind.endswith(".quot")
+    ]
+    antiquotation_positions = [
+        index for index, kind in enumerate(ancestors) if _is_antiquotation_kind(kind)
+    ]
+    if not quotation_positions:
+        return "unknown" if antiquotation_positions else "none"
+    quotation_position = max(quotation_positions)
+    antiquotation_position = max(antiquotation_positions, default=-1)
+    if antiquotation_position > quotation_position:
+        return "antiquotation"
+    return "quotation"
+
+
 def classify(
     occurrence: dict[str, object], declarations: list[dict[str, object]]
 ) -> dict[str, object]:
@@ -314,7 +350,8 @@ def classify(
     ):
         raise RuntimeError(f"scope occurrence has invalid ancestry: {occurrence!r}")
     command_kind = occurrence.get("commandKind")
-    quoted = any(kind.endswith(".quot") for kind in ancestors)
+    quotation_context = _quotation_context(ancestors)
+    quoted = quotation_context == "quotation"
     reusable = quoted and any(
         kind
         in {
@@ -327,9 +364,9 @@ def classify(
     )
     candidates = containing_declarations(occurrence, declarations)
 
-    # #check consumes the quotation as Syntax data.  This must be checked
-    # before declaration ancestry because the quoted tactic is not executed by
-    # the surrounding command at all.
+    # #check consumes a quotation as Syntax data.  An antiquotation is an
+    # ordinary term expression nested in that quotation and therefore executes
+    # while the #check term is elaborated; it must reach the evidence path.
     if quoted and command_kind == "Lean.Parser.Command.check":
         execution_role = "retained_syntax_data"
         declaration_kind = "not_applicable"
@@ -918,9 +955,9 @@ def apply_execution_evidence(
         status = observed["status"]
         occurrence = _result_occurrence(result)
         ancestors = occurrence.get("ancestors")
-        quoted = isinstance(ancestors, list) and any(
-            isinstance(kind, str) and kind.endswith(".quot") for kind in ancestors
-        )
+        quoted = isinstance(ancestors, list) and all(
+            isinstance(kind, str) for kind in ancestors
+        ) and _quotation_context(ancestors) == "quotation"
         declarations = result.get("declarations")
         generated = quoted and isinstance(declarations, list) and not declarations
         if status == "complete_proof_declaration":

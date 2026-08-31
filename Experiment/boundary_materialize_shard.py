@@ -248,6 +248,52 @@ def invalidate_output(output_path: Path) -> None:
     output_path.with_name(output_path.name + ".tmp").unlink(missing_ok=True)
 
 
+def _paths_overlap(first: Path, second: Path) -> bool:
+    """Return whether either path is an ancestor of the other."""
+    # ``Path.absolute`` preserves ``..`` components.  Normalize those lexical
+    # components without resolving symlinks, since a symlink at the manifest
+    # location is itself vulnerable to run-subtree cleanup.
+    first = Path(os.path.abspath(first))
+    second = Path(os.path.abspath(second))
+    return (
+        first == second
+        or first.is_relative_to(second)
+        or second.is_relative_to(first)
+    )
+
+
+def validate_cleanup_targets(
+    manifest_path: Path,
+    output_path: Path,
+    debug_root: Path,
+    *,
+    manifest_location: Path | None = None,
+) -> None:
+    """Reject an input manifest that any pre-run cleanup could remove.
+
+    ``clear_debug_root`` recursively removes the run subtree, while
+    ``invalidate_output`` removes both the report and its atomic-write
+    temporary sibling.  Check the lexical input location as well as its
+    resolved target so a manifest symlink inside a cleanup target is protected
+    before either cleanup operation starts.
+    """
+    input_paths = [Path(os.path.abspath(manifest_path))]
+    if manifest_location is not None:
+        input_paths.append(Path(os.path.abspath(manifest_location)))
+    cleanup_targets = (
+        Path(os.path.abspath(output_path)),
+        Path(os.path.abspath(output_path.with_name(output_path.name + ".tmp"))),
+        Path(os.path.abspath(debug_root)),
+    )
+    for input_path in input_paths:
+        for cleanup_target in cleanup_targets:
+            if _paths_overlap(input_path, cleanup_target):
+                raise RuntimeError(
+                    "input manifest overlaps a cleanup target: "
+                    f"{input_path} and {cleanup_target}"
+                )
+
+
 def verify_environment(manifest: dict[str, Any], timeout: int) -> dict[str, Any]:
     expected_repository = _require_string(
         manifest.get("repositoryCommit"), "manifest repositoryCommit"
@@ -2162,16 +2208,23 @@ def verify_shard_evidence(
 
 
 def run_shard(args: argparse.Namespace) -> dict[str, Any]:
-    manifest_path = Path(args.manifest)
-    if not manifest_path.is_absolute():
-        manifest_path = ROOT / manifest_path
-    manifest_path = manifest_path.resolve()
-    # Invalidate the exact requested destination before any validation or
-    # compiler work.  A failed rerun must not leave a previous success that a
-    # consumer could mistake for the current run.
+    manifest_location = Path(args.manifest)
+    if not manifest_location.is_absolute():
+        manifest_location = ROOT / manifest_location
+    manifest_location = Path(os.path.abspath(manifest_location))
+    manifest_path = manifest_location.resolve()
+    # Invalidate the exact requested destination after cleanup safety checks,
+    # before manifest validation or compiler work.  A failed rerun must not
+    # leave a previous success that a consumer could mistake for the current run.
     output_path = resolve_output_path(args.output, manifest_path)
-    invalidate_output(output_path)
     debug_root = debug_root_for(output_path)
+    validate_cleanup_targets(
+        manifest_path,
+        output_path,
+        debug_root,
+        manifest_location=manifest_location,
+    )
+    invalidate_output(output_path)
     clear_debug_root(debug_root)
     if not manifest_path.is_file():
         raise RuntimeError(f"manifest does not exist: {manifest_path}")
