@@ -2025,6 +2025,10 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
   let matcherActions := actions.filterMap fun action => match action with
     | .declareMatcher name source => some (name, source)
     | _ => none
+  if equations.size == actions.size && helpers.isEmpty && matcherActions.isEmpty then
+    if let some (anchor, payload) ← encodeBoundaryLocalEquationSequence?
+        basis.environment stockEnvironment basis.checkedDeclarationNames equations then
+      return #[.realizeGroups anchor payload]
   if equations.size + matcherActions.size == actions.size then
     if let some (anchor, payload) ← encodeBoundaryRealizationSequence?
         basis.environment stockEnvironment basis.checkedDeclarationNames

@@ -929,7 +929,7 @@ private def encodeLocalCachedBatch? (before stock : Environment) (checkedBefore 
 /-- Activate only an authenticated completed local cache entry. The callback
     cannot produce declarations; each caller must also guard its full state. -/
 private def executeLocalCachedRoot (owner key : Name) (witness descriptor : Json)
-    (equationSource : String) (auxiliary := false) : MetaM Unit := do
+    (equationSource : String) (auxiliary := false) (canonicalModuleDocs := false) : MetaM Unit := do
   let before ← getEnv
   unless !isPrivateName key && key.getPrefix == owner && !before.containsOnBranch key do
     throwError "boundary_local_cached_identity"
@@ -938,10 +938,10 @@ private def executeLocalCachedRoot (owner key : Name) (witness descriptor : Json
   unless equationOwner == owner do throwError "boundary_local_cached_equation_owner"
   validateEquationAnchor owner key
   unless (← localOwnerWitness before owner) == witness do throwError "boundary_local_cached_owner_conflict"
-  unless (← localCachedDescriptor before owner key auxiliary) == descriptor do
+  unless (← localCachedDescriptor before owner key auxiliary canonicalModuleDocs) == descriptor do
     throwError "boundary_local_cached_descriptor_conflict"
   realizeBoundaryConst owner key (throwError "boundary_local_cached_forbidden_callback")
-  unless (← localCachedDescriptor (← getEnv) owner key auxiliary) == descriptor do
+  unless (← localCachedDescriptor (← getEnv) owner key auxiliary canonicalModuleDocs) == descriptor do
     throwError "boundary_local_cached_descriptor_after"
   executeBoundaryTheorem key theoremSource
   unless defeqAttr.hasTag (← getEnv) key == defeqTag && backwardDefeqAttr.hasTag (← getEnv) key == backwardTag do
@@ -958,9 +958,10 @@ private def executeLocalCachedBatch (anchor : Name) (source : String) : MetaM Un
       .arr #[ownerJson, keyJson, witness, descriptor, .str equationSource]] ← ofExcept (Json.parse source)
     | throwError "boundary_local_cached_invalid_payload"
   unless tag == "boundary_local_cached_v1" || tag == "boundary_local_cached_aux_v1" ||
-      tag == "boundary_local_cached_congruence_v1" || tag == "boundary_local_cached_congruence_v2" do
+      tag == "boundary_local_cached_congruence_v1" || tag == "boundary_local_cached_congruence_v2" ||
+      tag == "boundary_local_cached_equation_v2" do
     throwError "boundary_local_cached_invalid_version"
-  let auxiliary := tag == "boundary_local_cached_aux_v1"
+  let auxiliary := tag == "boundary_local_cached_aux_v1" || tag == "boundary_local_cached_equation_v2"
   let owner ← ofExcept (decodeBoundaryName ownerJson)
   let key ← ofExcept (decodeBoundaryName keyJson)
   let before ← getEnv
@@ -973,7 +974,7 @@ private def executeLocalCachedBatch (anchor : Name) (source : String) : MetaM Un
   if tag == "boundary_local_cached_congruence_v1" || tag == "boundary_local_cached_congruence_v2" then
     executeLocalCachedCongruenceRoot owner key witness descriptor equationSource (tag == "boundary_local_cached_congruence_v2")
   else
-    executeLocalCachedRoot owner key witness descriptor equationSource auxiliary
+    executeLocalCachedRoot owner key witness descriptor equationSource auxiliary (tag == "boundary_local_cached_equation_v2")
   let after ← getEnv
   unless (← branchDelta before after) == #[key] && (← branchDelta before after true) == #[key] &&
       boundaryMatchStateJson (Match.matchEqnsExt.getState after) == matchAfter &&
@@ -1139,7 +1140,8 @@ def executeBoundaryRealizationBatch (expectedAnchor : Name) (source : String) : 
     if values[0]? == some (.str "boundary_local_cached_v1") ||
         values[0]? == some (.str "boundary_local_cached_aux_v1") ||
         values[0]? == some (.str "boundary_local_cached_congruence_v1") ||
-        values[0]? == some (.str "boundary_local_cached_congruence_v2") then
+        values[0]? == some (.str "boundary_local_cached_congruence_v2") ||
+        values[0]? == some (.str "boundary_local_cached_equation_v2") then
       executeLocalCachedBatch expectedAnchor source
     else if values[0]? == some (.str "boundary_realization_batch_v2") then
       executeBoundaryRealizationBatchV2 expectedAnchor source
@@ -1157,6 +1159,8 @@ def boundaryRealizationBatchMembers (source : String) : MetaM (Bool × Array Nam
     | .arr #[.str "boundary_local_cached_congruence_v1", .bool true, privateNames, publicNames,
         _, _, _, _, _, _, _]
     | .arr #[.str "boundary_local_cached_congruence_v2", .bool true, privateNames, publicNames,
+        _, _, _, _, _, _, _]
+    | .arr #[.str "boundary_local_cached_equation_v2", .bool true, privateNames, publicNames,
         _, _, _, _, _, _, _] => pure (true, privateNames, publicNames)
     | .arr #[.str "boundary_realization_batch_v1", .bool cached, privateNames, publicNames,
         _, _, _, _, _, _, _] => pure (cached, privateNames, publicNames)

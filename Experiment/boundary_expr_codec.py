@@ -794,6 +794,47 @@ def validate_realization_payload(source: object, expected_anchor: object,
         value = json.loads(source)
     except (ValueError, RecursionError) as error:
         raise RuntimeError(f"{label}: invalid JSON") from error
+    if isinstance(value, list) and value and value[0] == "boundary_local_equation_sequence_v1":
+        if not (len(value) == 11 and all(isinstance(value[i], str) for i in (2, 5, 6))):
+            reject("invalid local equation sequence header")
+        fresh = value[1]
+        key(fresh); key(expected_anchor)
+        if fresh != expected_anchor or _private_name(fresh):
+            reject("invalid local equation sequence anchor")
+        equation = validate_equation_payload(value[2], fresh, label)
+        try:
+            initial = json.loads(value[5]); final = json.loads(value[6])
+        except (ValueError, TypeError):
+            reject("invalid local equation sequence payload")
+        if not (isinstance(initial, list) and len(initial) == 11
+                and initial[0] == "boundary_local_cached_equation_v2"
+                and isinstance(initial[10], list) and len(initial[10]) == 5
+                and isinstance(final, list) and len(final) == 11
+                and isinstance(final[10], list) and len(final[10]) == 5):
+            reject("invalid local equation sequence root")
+        owner, root = initial[10][:2]
+        if fresh == root or equation[1] == owner:
+            reject("duplicate local equation sequence owner or member")
+        validate_realization_payload(value[5], root, label)
+        validate_realization_payload(value[6], root, label)
+        adjusted = initial.copy(); root_fields = initial[10].copy()
+        root_fields[3] = final[10][3]; adjusted[10] = root_fields
+        if adjusted != final:
+            reject("local equation sequence changed root identity")
+        for state in value[7:11]:
+            if not isinstance(state, list) or len(state) != 3:
+                reject("invalid local equation sequence state")
+            match_state(state[0]); equation_state(state[1]); sparse_state(state[2])
+        if value[8] != [initial[4], initial[6], initial[8]] or value[9] != [initial[5], initial[7], initial[9]]:
+            reject("local equation sequence caller state disagreement")
+        # Reuse the full owner/DAG/auxiliary proof validator for the fresh
+        # producer's authenticated outcome; freshness is enforced at runtime.
+        projected = ["boundary_local_cached_equation_v2", True, [fresh], [fresh],
+                     value[8][0], value[8][0], value[8][1], value[8][1],
+                     value[8][2], value[8][2],
+                     [equation[1], fresh, value[3], value[4], value[2]]]
+        validate_realization_payload(json.dumps(projected), fresh, label)
+        return value
     if isinstance(value, list) and value and value[0] in ("boundary_cached_congruence_sequence_v1", "boundary_cached_congruence_sequence_v2"):
         if not (len(value) == 7 and all(isinstance(value[i], str) for i in (2, 3, 4))):
             reject("invalid cached congruence sequence header")
@@ -828,8 +869,8 @@ def validate_realization_payload(source: object, expected_anchor: object,
         if value[5] != [initial[4], initial[6], initial[8]] or value[5] != [initial[5], initial[7], initial[9]]:
             reject("cached congruence sequence caller states differ")
         return value
-    if isinstance(value, list) and value and value[0] in ("boundary_local_cached_v1", "boundary_local_cached_aux_v1", "boundary_local_cached_congruence_v1", "boundary_local_cached_congruence_v2"):
-        auxiliary = value[0] in ("boundary_local_cached_aux_v1", "boundary_local_cached_congruence_v1", "boundary_local_cached_congruence_v2")
+    if isinstance(value, list) and value and value[0] in ("boundary_local_cached_v1", "boundary_local_cached_aux_v1", "boundary_local_cached_congruence_v1", "boundary_local_cached_congruence_v2", "boundary_local_cached_equation_v2"):
+        auxiliary = value[0] in ("boundary_local_cached_aux_v1", "boundary_local_cached_congruence_v1", "boundary_local_cached_congruence_v2", "boundary_local_cached_equation_v2")
         if not (len(value) == 11 and value[1] is True and isinstance(value[10], list)
                 and len(value[10]) == 5):
             reject("invalid local cached header")
@@ -884,7 +925,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
         full_constant(witness)
         if witness[0] != "definition" or witness[1] != owner or witness[6] != "safe":
             reject("invalid local owner witness")
-        if not (isinstance(graph, list) and len(graph) == (7 if auxiliary else 6) and graph[0] == ("completed_local_cached_aux_docs_v1" if value[0] == "boundary_local_cached_congruence_v2" else "completed_local_cached_aux_v1" if auxiliary else "completed_local_cached_v1")
+        if not (isinstance(graph, list) and len(graph) == (7 if auxiliary else 6) and graph[0] == ("completed_local_cached_aux_docs_v1" if value[0] in ("boundary_local_cached_congruence_v2", "boundary_local_cached_equation_v2") else "completed_local_cached_aux_v1" if auxiliary else "completed_local_cached_v1")
                 and graph[1] == owner and graph[2] == root and isinstance(graph[3], list)
                 and 0 < len(graph[3]) <= 2048 and all(_nat(n) and n < len(graph[3]) for n in graph[4:6])):
             reject("invalid local cached graph")

@@ -539,10 +539,13 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
                 if encoded[0] == "boundary_local_theorems_bundle_v1":
                     validate_local_theorems_payload(text, encoded[1] if len(encoded) > 1 else None, label)
                     continue
+                if encoded[0] == "boundary_local_equation_sequence_v1":
+                    validate_realization_payload(text, encoded[1] if len(encoded) == 11 else None, label)
+                    continue
                 if encoded[0] in ("boundary_cached_congruence_sequence_v1", "boundary_cached_congruence_sequence_v2"):
                     validate_realization_payload(text, encoded[1] if len(encoded) == 7 else None, label)
                     continue
-                if encoded[0] in ("boundary_local_cached_v1", "boundary_local_cached_aux_v1", "boundary_local_cached_congruence_v1", "boundary_local_cached_congruence_v2"):
+                if encoded[0] in ("boundary_local_cached_v1", "boundary_local_cached_aux_v1", "boundary_local_cached_congruence_v1", "boundary_local_cached_congruence_v2", "boundary_local_cached_equation_v2"):
                     anchor = encoded[10][1] if (len(encoded) == 11 and isinstance(encoded[10], list)
                                                 and len(encoded[10]) == 5) else None
                     validate_realization_payload(text, anchor, label)

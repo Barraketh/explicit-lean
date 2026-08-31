@@ -284,8 +284,8 @@
     {
       "id": "observational-metadata-and-frontend-isolation",
       "owner": "coordinator with Sol diagnosis",
-      "status": "in_progress",
-      "description": "Lookmap standalone and applied-only succeed while audit-enabled stock/applied pair fails symbolFrequency descriptor. CommandAudit.declarations and boundary metadata readers invoke mkModuleData export hooks that cache an early/global frequency map. Investigate and remove observational side effects; independently establish fresh compiler-output metadata equivalence without resets or descriptor exemptions."
+      "status": "completed",
+      "description": "Pure typed module-data observation integrated and independently verified on Lookmap10, Control.Basic16, ModifyLast5. No metadata resets or proof exemptions. Later replay failures are tracked separately."
     },
     {
       "id": "audit-without-export-hooks",
@@ -297,13 +297,13 @@
       "id": "local-owner-equation-realizations",
       "owner": "Sol bounded repair after Luna prototype review",
       "status": "in_progress",
-      "description": "Authenticated local-cached-only primitive integrated. ExtraDegeneracy closed80-entry auxiliary cache witness under separate versioned fix-review. Fresh local production and sequence composition remain unsupported; do not infer pre-stock memo presence from shared cache refs."
+      "description": "Standalone authentic local cached owner and auxiliary descriptors integrated; fresh-local then cached-local ordered equation sequence now passes Cubic20/29variants in frozen private tests. Main build passed32jobs; fresh production run pending. Broader owner combinations fail closed."
     },
     {
       "id": "preexisting-expression-metavariable-references",
       "owner": "Sol private implementation after root-reviewed diagnosis",
-      "status": "in_progress",
-      "description": "Private bounded expr_dag_v3/artifact5/report11: context-owned reference graph, exact raw snapshots and observational scope comparison. New unconditional pending-synthesis barrier covers encoded evidence, application and selector observation; natural class-hole control passes. Centralizer full source passes; QuasiCompact getter path-compression repair and source/mutation matrix in progress. Not integrated."
+      "status": "completed",
+      "description": "Integrated f231289; bounded context-owned Expr references and unconditional NoSynthesis controls independently verified. Whole-tree acceptance remains separate."
     },
     {
       "id": "bounded-library-suggestions-observation",
@@ -384,13 +384,12 @@
     }
   ],
   "nextActions": [
-    "Finish fresh BigOperators150-call probes and Cubic ordered local-equation prototype, then use current evidence to prioritize remaining failure families.",
-    "Integrate verified two-line scope import decoupling; implement content-bound analysis checkpoint identity so replay changes do not force repeated full scope analysis. Never rebind old provenance hashes.",
-    "Implement bounded ordered fresh-local-equation then cached-local-equation realization for Cubic aa693119975056ee; preserve complete owner/descriptor/state/generator checks.",
-    "Freeze current runtime and generate fresh complete manifest with reusable analysis checkpoints, then resume bounded indexed production workers; old schema10 worker ended and old reports remain provisional.",
-    "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and complete source/execution ownership.",
-    "Assemble translated dependency tree and cold-certify outputs; invoke optional certificate storage only before publication after complete validation.",
-    "After complete explicit coverage and translated-tree acceptance, mine readable normal forms and other common tactics if time remains."
+    "Finish analysis checkpoint review and integrate content-bound analysis-only identity; live replay-edit two-run reuse passes. Scope decoupling already integrated6e4c76f.",
+    "Freeze current runtime; run fresh production Cubic20 and create fresh complete manifest with reusable analysis checkpoints; resume bounded indexed production workers under disk/budget guard.",
+    "Trace Finprod emptydelta generator consumption and reproduce ToAdditive private proof metadata mismatch in NEW isolated snapshot; keep strict guards.",
+    "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and full source/execution ownership.",
+    "Assemble translated dependency tree and cold-certify outputs; optional lossless storage only before publication after complete validation.",
+    "After full explicit coverage and translated-tree acceptance, improve readable normal forms and extend other tactics if time remains."
   ],
   "checkpoints": [
     {
@@ -1279,7 +1278,7 @@
     },
     {
       "id": "schema12-bigoperators150",
-      "status": "running",
+      "status": "completed_one_pass_two_failures",
       "sessionId": 31932,
       "snapshot": ".lake/search-free-mathlib/snapshots/schema12-congruence-campaign",
       "commit": "3ecc925",
@@ -1287,7 +1286,11 @@
       "expectedOccurrences": 150,
       "log": ".lake/schema12-bigoperators.log",
       "resultRoot": ".lake/schema12-bigoperators-yuxn215i",
-      "note": "Fresh closed manifest and current production12 applied recording. Single module at a time,12GiB diskreserve; inputs immutable and no masterindex lease."
+      "note": "Finset.Basic54/57variants passes strict production12. Finprod45 fails generator; List.Basic51 records/replays but fulloracle fails ToAdditive translations. Exact guarded inputs restored and both production consumers reverified after isolated diagnostic workflow error; see snapshot-write-incident.json. No masterindex lease or acceptance claim.",
+      "succeededModules": 1,
+      "failedModules": 2,
+      "verifiedCalls": 54,
+      "rootVerification": ".lake/week-2026-08-31/schema12-bigoperators-root-verification.json"
     }
   ],
   "latestCommits": [
@@ -1437,21 +1440,41 @@
     },
     {
       "id": "cached-local-congruence-activation",
-      "status": "ordered_full_descriptor_sequence_in_private_implementation",
+      "status": "bounded_fix_integrated_production_verified",
       "snapshot": ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype",
       "witnessManifestSha256": "34aff3098527adc556b9613596181f505cd9c0692e44a73ee46e1b2cbd917b9c",
       "finding": "Unitization1734864b48394331 stock/capture realize StarAlgHom.codRestrict.congr_simp plus prechecked/offbranch NonUnitalStarSubalgebra.unitization.congr_simp; replay onlyfirst. Pre/stock/appliedgeneratorindices1/3/2. No generatorpatch proposed; missingcheckedactivation needs exactauthenticcachewitness. Balancefocusedcurrentcheckmatchesgenerator3; Bilinearfails earlieractivation_nonempty_aux_cache.",
       "acceptedCampaignCoverage": false,
       "failedCandidateManifest": ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype/.lake/cached-congruence-failure-frozen-a6243ck4/manifest.json",
       "failedCandidateManifestSha256": "7a6a40f2d5dabe5283d5ed3df33c4781ad4f5ced5c3f070b4beb1ccd77137d98",
-      "descriptorFinding": "115nodes exact proof/signature/auxiliary data;80metadata leaves change in sineQueNon/symbolFrequency after fresh StarAlgHom congruence creation. Preserve initial and post-fresh full descriptors and authentic activation order; do not filter metadata or patch generator."
+      "descriptorFinding": "115nodes exact proof/signature/auxiliary data;80metadata leaves change in sineQueNon/symbolFrequency after fresh StarAlgHom congruence creation. Preserve initial and post-fresh full descriptors and authentic activation order; do not filter metadata or patch generator.",
+      "rootVerification": ".lake/week-2026-08-31/schema12-unitization-root-verification.json"
     },
     {
       "id": "cubic-mixed-local-equations",
-      "status": "fresh_rejection_diagnosed",
+      "status": "bounded_fix_integrated_production_pending",
       "snapshot": ".lake/search-free-mathlib/snapshots/cubic-mixed-cover-diagnosis",
-      "rootVerification": ".lake/week-2026-08-31/cubic-local-equation-diagnosis-root-verification.json",
+      "rootVerification": ".lake/week-2026-08-31/local-equation-sequence-root-verification.json",
       "finding": "aa693119975056ee needs fresh Cubic.map.eq_1 followed by completed cached Cubic.toPoly.eq_1, both local owners, no helper. Imported-only sequence cover excludes both; new narrow ordered equation sequence pending.",
+      "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "finprod-empty-delta-generator",
+      "status": "diagnostic_verified_consumer_trace_in_progress",
+      "rootVerification": ".lake/week-2026-08-31/finprod-generator-root-verification.json",
+      "occurrences": [
+        "054f57be19797140",
+        "a3bb7cb79374a720"
+      ],
+      "finding": "No environmentActions or added declarations; stock advances DeclNameGenerator idx1to2 with sameprefix/parents while applied stays1. Trace actual stock operation; no raw counter adjustment.",
+      "owner": "local_cached_sequence",
+      "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "toadditive-translations-diagnostic",
+      "status": "provisional_wrong_snapshot_quarantined",
+      "incidentReport": ".lake/week-2026-08-31/snapshot-write-incident.json",
+      "finding": "Diagnostic suggests two stock-only private List.prod_set proof translation entries. No new prelaunch receipt/complete registered-identity guard; needs fresh isolated reproduction. Existing production snapshot source/native restored exactly from prelaunch archives, unbound diagnostic build outputs quarantined; both full production consumers reverified.",
       "acceptedCampaignCoverage": false
     }
   ],
@@ -1535,6 +1558,19 @@
       "mainNativeMatchesVerifiedPrototype": true,
       "earlierStaleBuild": "rejected; prototype originally shared main build symlink; corrected private native rebuild and comparisons frozen separately",
       "checkpointIdentityWork": "new conservative analysis-only identity under development; no old manifest rebinding"
+    },
+    "reusableMasterVerification": {
+      "path": ".lake/week-2026-08-31/reusable-master-root-verification.json",
+      "calls": 66,
+      "ownerGroups": 52,
+      "extraOverClosedSubset": {
+        "module": "Mathlib/Tactic/Zify.lean",
+        "id": "b3360f1193c3c8b2",
+        "sourceHash": "f0ce5e1e74c0a884b5bce026651e0efc15723caaae87cbac0e6c1f3a54a84da3",
+        "startByte": 2404,
+        "endByte": 2471
+      },
+      "scope": "Allsourcehashes/ranges/exacttext verified; dynamic exported behavior remains unresolved, no finitecaller equivalence claim."
     }
   },
   "database": {
@@ -1868,6 +1904,22 @@
         "acceptedCampaignCoverage": false,
         "rootVerification": ".lake/week-2026-08-31/schema12-unitization-root-verification.json"
       }
+    },
+    "localEquationSequence": {
+      "status": "integrated_main_build_passed_production_pending",
+      "handoffRootVerification": ".lake/week-2026-08-31/local-equation-sequence-root-verification.json",
+      "handoffManifestSha256": "2aef0a19c3c700812d0bc10a1cc305c7aa8ba68690c43515b89062e3bbae71e8",
+      "module": "Mathlib/Algebra/CubicDiscriminant.lean",
+      "sourceCalls": 20,
+      "variants": 29,
+      "oracleDeclarations": 147,
+      "oraclePublicDeclarations": 131,
+      "oracleExtensions": 39,
+      "runtimeNegatives": 16,
+      "wireCases": 13,
+      "mainBuildJobs": 32,
+      "acceptedCampaignCoverage": false,
+      "scope": "Exactly fresh safe-local equation followed by authentic completed cached equation from distinct local owner; full owner/DAG/proof/state/snapshot/generator checks. EquationV2 explicitly opts into existing typed document-range policy; old contracts unchanged."
     }
   },
   "failureTriage": {
@@ -1891,8 +1943,8 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 36274622464,
-    "checkedAt": "2026-08-31T19:10:03.310598+00:00",
+    "lastFreeBytes": 28012150784,
+    "checkedAt": "2026-08-31T20:43:20.488248+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)",
     "losslessCertificateStorage": {
       "command": "python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json",
@@ -1902,7 +1954,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T20:22:04.289222+00:00",
+  "updatedAt": "2026-08-31T20:43:20.488248+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

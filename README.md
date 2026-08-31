@@ -59,6 +59,12 @@ are normalized to match the declaration oracle’s existing policy. The nine-cal
 Unitization module passes the production report-12 pipeline, fresh replay,
 and the full oracle. Whole-tree acceptance remains separate.
 
+A separate bounded sequence handles a fresh local equation followed by an
+authentic cached equation from another local owner. CubicDiscriminant’s 20
+calls and 29 variants pass the private recording/replay pipeline and full
+oracle, including proof, owner, registration and snapshot mutation controls.
+The main build passes; a fresh production run is still required.
+
 The repository retains schema-27 operational recording and replay as legacy
 evidence. In particular, the existing
 `simp_engine_apply` parser in `ExplicitLean/SimpEngine/Source.lean` still accepts

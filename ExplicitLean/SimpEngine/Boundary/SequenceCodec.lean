@@ -5,6 +5,7 @@ public import Init.Prelude
 public meta import ExplicitLean.SimpEngine.Boundary.RealizationCodec
 public meta import ExplicitLean.SimpEngine.Boundary.LocalTheoremCodec
 public meta import ExplicitLean.SimpEngine.Boundary.CongruenceSequenceCodec
+public meta import ExplicitLean.SimpEngine.Boundary.LocalEquationSequenceCodec
 public meta import ExplicitLean.SimpEngine.Boundary.LocalSequenceCodec
 meta import all ExplicitLean.SimpEngine.Boundary.RealizationCodec
 meta import all ExplicitLean.SimpEngine.Boundary.EquationCodec
@@ -86,7 +87,7 @@ private def sequenceJson (sequence : RealizationSequence) : Json :=
     .arr (sequence.steps.map sequenceStepJson)]
 
 def isBoundaryRealizationSequence (source : String) : Bool :=
-  isBoundaryCongruenceSequence source || isBoundaryLocalSequence source || match (Json.parse source).toOption with
+  isBoundaryLocalEquationSequence source || isBoundaryCongruenceSequence source || isBoundaryLocalSequence source || match (Json.parse source).toOption with
   | some (.arr values) => values[0]? == some (.str "boundary_realization_sequence_v1")
   | _ => false
 
@@ -440,7 +441,8 @@ private def executeSequence (anchor : Name) (source : String) : MetaM Unit := do
     throwError "boundary_sequence_caller_after:sparse"
 
 def executeBoundaryRealizationEffects (anchor : Name) (source : String) : MetaM Unit := do
-  if isBoundaryCongruenceSequence source then executeBoundaryCongruenceSequence anchor source
+  if isBoundaryLocalEquationSequence source then executeBoundaryLocalEquationSequence anchor source
+  else if isBoundaryCongruenceSequence source then executeBoundaryCongruenceSequence anchor source
   else if isBoundaryLocalSequence source then executeBoundaryLocalSequence anchor source
   else if isBoundaryRealizationSequence source then executeSequence anchor source
   else executeBoundaryRealizationBatch anchor source
@@ -449,6 +451,7 @@ def executeBoundaryRealizationEffects (anchor : Name) (source : String) : MetaM 
     payloads are distinct. Boundary must retain all helper-specific checks. -/
 def boundaryRealizationSequenceMembers (anchor : Name) (source : String) :
     MetaM (Array Name × Array Name × Array (Name × String)) := do
+  if isBoundaryLocalEquationSequence source then return ← boundaryLocalEquationSequenceMembers anchor source
   if isBoundaryCongruenceSequence source then return ← boundaryCongruenceSequenceMembers anchor source
   if isBoundaryLocalSequence source then return ← boundaryLocalSequenceMembers anchor source
   let sequence ← parseSequence anchor source
