@@ -301,9 +301,18 @@ def run_worker(
             dependency_map=dependency_map,
         )
         retryable: list[str] = []
+        # Keep one identity/source memo for this preflight pass.  A cache key
+        # walks the imported dependency graph, so adjacent selected modules
+        # commonly revisit the same dependency identities.  This memo is
+        # deliberately pass-scoped: a memo hit does not re-read its source;
+        # each selected root is still checked by `_module_row`, and the
+        # independent `plan_work` pass creates fresh memos.
+        identity_memo: dict[str, str] = {}
+        source_memo: dict[str, str] = {}
         for module in selected:
             key, _ = cache_key(
                 connection, module, implementation, toolchain, dependency_digests,
+                identity_memo=identity_memo, source_memo=source_memo,
             )
             prior = connection.execute(
                 "SELECT status,translation_status FROM result_cache WHERE cache_key=?", (key,)

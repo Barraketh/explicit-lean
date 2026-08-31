@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 import campaign_worker as worker
-from translation_index import claim_work, connect, import_manifest, plan_work, status
+from translation_index import cache_key, claim_work, connect, import_manifest, plan_work, status
 
 
 class CampaignWorkerTests(unittest.TestCase):
@@ -60,11 +60,14 @@ class CampaignWorkerTests(unittest.TestCase):
         result.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
         return result
 
-    def manifest_many(self, names: list[str]) -> Path:
+    def manifest_many(self, names: list[str], dependencies: dict[str, list[str]] | None = None) -> Path:
+        dependencies = dependencies or {}
         modules = []
         for name in names:
             module = f"Mathlib/{name}.lean"
-            source = f"theorem {name.lower()} : True := by simp\n"
+            imports = dependencies.get(name, [])
+            source = "".join(f"import {item}\n" for item in imports)
+            source += f"theorem {name.lower()} : True := by simp\n"
             path = self.root / module
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(source, encoding="utf-8")
@@ -72,6 +75,7 @@ class CampaignWorkerTests(unittest.TestCase):
             modules.append({
                 "module": module, "compiledModule": module[:-5].replace("/", "."),
                 "moduleHash": "fixture-module", "sourceHash": hashlib.sha256(source.encode()).hexdigest(),
+                "imports": imports,
                 "occurrences": [{
                     "id": hashlib.sha256(f"{module}:{start}:{start + 4}".encode()).hexdigest()[:16],
                     "kind": "simp", "source": "simp", "startByte": start, "endByte": start + 4,
@@ -133,6 +137,61 @@ class CampaignWorkerTests(unittest.TestCase):
         connection = connect(self.db)
         try:
             self.assertEqual(status(connection)["translated"], 1)
+        finally:
+            connection.close()
+
+    def test_preflight_memoizes_dependency_walk_without_changing_keys(self) -> None:
+        manifest = self.manifest_many(["A", "B", "Shared"], dependencies={
+            "A": ["Mathlib.Shared"], "B": ["Mathlib.Shared"],
+        })
+        calls: list[tuple[str, str, object, object, dict[str, str], dict[str, str]]] = []
+        real_cache_key = worker.cache_key
+
+        def capture(*args, **kwargs):
+            key, dependencies = real_cache_key(*args, **kwargs)
+            calls.append((args[1], key, args[2], args[3], kwargs["identity_memo"], kwargs["source_memo"]))
+            return key, dependencies
+
+        def invoke(path, output, module, timeout):
+            output.write_text(json.dumps(self.fake_report(manifest, module)), encoding="utf-8")
+            return 0, "ok"
+
+        with mock.patch.object(worker, "cache_key", side_effect=capture):
+            result = self.run_fixture(manifest, invoke)
+        self.assertEqual(result["succeeded"], 3)
+        self.assertEqual([call[0] for call in calls], ["Mathlib/A.lean", "Mathlib/B.lean", "Mathlib/Shared.lean"])
+        self.assertIs(calls[0][4], calls[1][4])
+        self.assertIs(calls[0][5], calls[1][5])
+
+        connection = connect(self.db)
+        try:
+            for module, memoized_key, implementation, toolchain, _, _ in calls:
+                plain_key, _ = real_cache_key(connection, module, implementation, toolchain)
+                fresh_memo_key, _ = real_cache_key(
+                    connection, module, implementation, toolchain,
+                    identity_memo={}, source_memo={},
+                )
+                self.assertEqual(memoized_key, plain_key)
+                self.assertEqual(memoized_key, fresh_memo_key)
+        finally:
+            connection.close()
+
+    def test_fresh_pass_rejects_changed_dependency_source(self) -> None:
+        manifest = self.manifest_many(["A", "B"], dependencies={"A": ["Mathlib.B"]})
+        connection = connect(self.db)
+        try:
+            import_manifest(connection, manifest, source_root=self.root)
+            source = self.root / "Mathlib/B.lean"
+            original = source.read_text(encoding="utf-8")
+            try:
+                source.write_text(original + "-- changed after import\n", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "source changed after import"):
+                    cache_key(
+                        connection, "Mathlib/A.lean", "impl", "tool",
+                        identity_memo={}, source_memo={},
+                    )
+            finally:
+                source.write_text(original, encoding="utf-8")
         finally:
             connection.close()
 

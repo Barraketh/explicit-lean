@@ -243,6 +243,12 @@
       "owner": "coordinator with independent Sol review and integration",
       "status": "in_progress",
       "description": "Six corrected fixtures and five error/empty/quotation controls pass. A read-only module-linter callback collects the complete parsed commands without changing normal compiler options; the snapshot walk alone loses syntax in command-line mode. Integration now adds scoped registration and nonce-framed output to the same frontend runs used by the declaration oracle."
+    },
+    {
+      "id": "worker-preflight-memo",
+      "owner": "Luna implementation with coordinator review",
+      "status": "completed",
+      "description": "Reuse dependency identity/source memos within one preflight pass, retaining fresh selected-root checks and a fresh planning pass. Root shared-dependency fixture and source-change rejection checks pass. Independent96-module benchmark:4.61s\u21920.113s, identical keys (about41x for this preflight sample). Active frozen workers are unchanged; apply on next dispatch."
     }
   ],
   "blockers": [
@@ -731,6 +737,14 @@
         "control-generator-independent-verification.json:24 archives,637 stable input entries,6 fresh processes",
         "Budget at15:49UTC:24% used in current authorized window"
       ]
+    },
+    {
+      "at": "2026-08-31T16:07:16.094977+00:00",
+      "summary": "Worker preflight memo optimization reviewed;12 worker and10 index tests pass. Root benchmark independently reproduces about41x speedup over96 modules with identical keys. Fresh raw compiled-output prototype accepts the correct two-declaration artifact and rejects a changed computational body; extension/IR/general constructor binding remains unfinished.",
+      "evidence": [
+        ".lake/week-2026-08-31/campaign-worker-memo/root-verification.json",
+        ".lake/week-2026-08-31/compiled-output-prototype-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -906,11 +920,16 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
       "commit": "1f6f12c",
       "status": "running",
-      "phase": "first_priority_worker",
-      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-first-worker.log",
+      "phase": "expansion_worker",
+      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-expansion-worker.log",
       "modules": 201,
       "note": "Fresh201-module manifest then first23 priorityworker then full131-root priorityworker. Disjoint from full worker. Per-mode logs preserve each stage; expansion summary is current diagnostic only.",
-      "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py"
+      "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py",
+      "firstWorkerResult": {
+        "processed": 23,
+        "succeeded": 13,
+        "failures": 10
+      }
     },
     {
       "id": "schema10-full",
@@ -918,7 +937,7 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
       "commit": "1f6f12c",
       "status": "running",
-      "phase": "preflight_dependency_identity_scan",
+      "phase": "bulk_worker",
       "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-full-worker.log",
       "modules": 8260,
       "note": "Fresh8260-module manifest then bounded500-module bulkworker excluding all131priorityroots. Fourmodules/11calls remain separately required, not exempted.",
@@ -1160,5 +1179,5 @@
     "checkedAt": "2026-08-31T15:30:34.486345+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T15:55:59.118229+00:00"
+  "updatedAt": "2026-08-31T16:07:16.094977+00:00"
 }
