@@ -30,3 +30,8 @@ supportInterpreter = true
 name = "simpEngineDeclarationOracle"
 root = "Experiment.SimpEngineDeclarationOracle"
 supportInterpreter = true
+
+[[lean_exe]]
+name = "simpEngineCommandAudit"
+root = "Experiment.SimpEngineCommandAudit"
+supportInterpreter = true

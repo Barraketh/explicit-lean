@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 53,
+    "verifiedTranslatedOccurrences": 234,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
@@ -28,9 +28,9 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 12,
-    "provisionalCachedOccurrences": 617,
-    "provisionalCachedModules": 54,
+    "verifiedTranslatedModules": 26,
+    "provisionalCachedOccurrences": 0,
+    "provisionalCachedModules": 0,
     "minimumAcceptedReportSchema": 10
   },
   "work": [
@@ -236,13 +236,13 @@
       "id": "ordered-recursive-realizations",
       "owner": "coordinator with assigned agent",
       "status": "in_progress",
-      "description": "Private Sol implementation for ModifyLast: authenticated matcher member order and recursive overlapping equation groups. Two original fresh/cached processes establish9branch members,gen1to5,unique projected cover;347archivehashes independently checked. No replay acceptance yet."
+      "description": "Private implementation passes12recursive fresh/cached/mutation controls,10legacy groups,17multiple-matchers and15ordered/metadata controls; handoff/integration pending. Full ModifyLast5 still rejects fourth mixed cached/fresh case."
     },
     {
       "id": "complete-command-context-audit",
       "owner": "coordinator with independent Sol review and integration",
-      "status": "in_progress",
-      "description": "Six corrected fixtures and five error/empty/quotation controls pass. A read-only module-linter callback collects the complete parsed commands without changing normal compiler options; the snapshot walk alone loses syntax in command-line mode. Integration now adds scoped registration and nonce-framed output to the same frontend runs used by the declaration oracle."
+      "status": "completed",
+      "description": "Integrated scoped read-only frontend command collector and nonce/source-bound parser. Main36process+10wire controls verified; fresh39-module cone source-pair audits under strict translated imports emit78records, original2calls/applied0, matching prior oracle results. No whole-corpus or existing-output semantic binding claim."
     },
     {
       "id": "worker-preflight-memo",
@@ -285,7 +285,7 @@
     {
       "id": "final-grammar-coverage-audit",
       "status": "open",
-      "detail": "Corrected module-linter collector passes six normal fixtures and five negative/empty/quotation controls, preserving actual module name, header mode and compiler options. Independent review complete; scoped, nonce-framed acceptance infrastructure is being integrated. No full-corpus audit yet."
+      "detail": "Production same-frontend observer integrated and39-module translated cone audit passes78records with0remaining executable/unresolved calls. Full corpus audit remains pending."
     },
     {
       "id": "fresh-replay-cache-grouping",
@@ -295,8 +295,8 @@
   ],
   "nextActions": [
     "Monitor schema10-campaign pipelines: sessions38300priority/72713full, fresh manifests first then automatic disjoint worker dispatch. Reuse only matching identities; oldreports remain provisional. Do not duplicate live jobs or replan live leases.",
-    "Continue private ordered matcher/recursive realization support for ModifyLast; investigate new Control.Basic naming effect from exact stock observations.",
-    "Integrate the actual-command-context audit and run translated-output semantic oracles against a fully isolated translated dependency tree.",
+    "Integrate reviewed ordered matcher/recursive realization handoff, preserving artifact4/report10 guards; then support mixed cached activation and fresh helper/equation segments.",
+    "Prototype raw checked-domain oracle validation without self replay, then same-frontend output serialization with quarantined artifact promotion. Fresh certified translated cone required; old artifacts remain provisional for output binding.",
     "Resolve reusable executable66calls and5unresolved quotations, preserving original comments and source/execution ownership; no unqualified finite-caller-table equivalence claims.",
     "After complete explicit coverage and full-tree validation, improve readability and extend to other common tactics if time remains."
   ],
@@ -745,6 +745,16 @@
         ".lake/week-2026-08-31/campaign-worker-memo/root-verification.json",
         ".lake/week-2026-08-31/compiled-output-prototype-verification.json"
       ]
+    },
+    {
+      "at": "2026-08-31T16:15:56.704281+00:00",
+      "summary": "Actual command audit infrastructure ready:36process+10wire controls, root142hash checks/36logs. New39-module translated-import audit passes78source records,2originalcalls/0remaining, with identical declaration oracle results; root527hash checks. Read-only review identifies self-replay synchronization as an obligation before binding ordinary frontend outputs to oracle checks. Bulk campaign continues unchanged.",
+      "evidence": [
+        ".lake/week-2026-08-31/command-audit-production-root-verification.json",
+        ".lake/week-2026-08-31/schema10-cone-audit-verification.json",
+        ".lake/week-2026-08-31/certified-output-design-review/manifest.json",
+        ".lake/week-2026-08-31/certificate-revalidation-design.md"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1153,7 +1163,17 @@
     "currentSelectorSchema": 2,
     "minimumReportSchema": 10,
     "integratedEngineCommit": "e3af2f2",
-    "focusedEvidenceManifest": ".lake/week-2026-08-31/schema10-focused-verification.json"
+    "focusedEvidenceManifest": ".lake/week-2026-08-31/schema10-focused-verification.json",
+    "commandAudit": {
+      "handoffManifest": ".lake/week-2026-08-31/command-audit-production/handoff-manifest.json",
+      "handoffSha256": "0d693f40dfa66663fd9f04b221a6171179d86016277ab00e1a5e7bfca71050c8",
+      "processChecks": 36,
+      "wireMutations": 10,
+      "rootVerification": ".lake/week-2026-08-31/command-audit-production-root-verification.json",
+      "translatedConeAudit": ".lake/week-2026-08-31/schema10-cone-audit-verification.json",
+      "translatedConeAuditReportSha256": "608b7fc619c7bcb9cccf8b2f4f1b52bd8e1269a7de980f919fd6dd881c07d2f4",
+      "wholeMathlib": false
+    }
   },
   "failureTriage": {
     "command": "python3 Experiment/campaign_failures.py",
@@ -1179,5 +1199,5 @@
     "checkedAt": "2026-08-31T15:30:34.486345+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T16:07:16.094977+00:00"
+  "updatedAt": "2026-08-31T16:15:56.704281+00:00"
 }

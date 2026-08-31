@@ -7,6 +7,7 @@ import Lean.Compiler.LCNF.PhaseExt
 import Lean.DocString.Extension
 import Lean.Util.CollectAxioms
 import Lean.ExtraModUses
+import ExplicitLean.SimpEngine.CommandAudit
 
 open Lean
 
@@ -441,7 +442,7 @@ private structure OracleCounts where
 private structure OracleResult where
   counts : OracleCounts
 
-private unsafe def elaborateSource (moduleName : Name)
+private unsafe def elaborateSource (moduleName : Name) (auditLabel : String)
     (path : System.FilePath) : IO Environment := do
   Lean.enableInitializersExecution
   let source ← IO.FS.readFile path
@@ -453,6 +454,17 @@ private unsafe def elaborateSource (moduleName : Name)
     |>.set `weak.linter.unusedSimpArgs false
     |>.set `weak.linter.unreachableTactic false
     |>.set `maxHeartbeats (0 : Nat)
+  if (← IO.getEnv CommandAudit.enabledVariable) == some "1" then
+    let nonce ← CommandAudit.runNonce
+    let captured ← try
+      CommandAudit.capture source options path.toString moduleName
+    catch error =>
+      if error.toString == "command_audit_frontend_failed" then
+        oracleFailure "unresolved_or_sorry" s!"frontend returned no environment for {path}"
+      else
+        throw error
+    CommandAudit.emit captured auditLabel nonce
+    return captured.environment
   let some environment ← Elab.runFrontend source options path.toString moduleName
     | oracleFailure "unresolved_or_sorry" s!"frontend returned no environment for {path}"
   return environment
@@ -836,9 +848,9 @@ private unsafe def runOracle (moduleName : Name) (stockPath appliedPath : System
     IO OracleResult := do
   runExtensionNameSelfTest
   runLCNFComparatorSelfTest
-  let stock ← elaborateSource moduleName stockPath
+  let stock ← elaborateSource moduleName "stock" stockPath
   let stock ← synchronizeEnvironment stock
-  let applied ← elaborateSource moduleName appliedPath
+  let applied ← elaborateSource moduleName "applied" appliedPath
   let applied ← synchronizeEnvironment applied
   let stockDeclarations ← sortedCurrentDeclarations stock
   let appliedDeclarations ← sortedCurrentDeclarations applied
