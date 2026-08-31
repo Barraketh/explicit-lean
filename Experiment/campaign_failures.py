@@ -33,7 +33,9 @@ def classify(text: str) -> str:
     ):
         if needle in text:
             return family
-    codes = re.findall(r"\b(boundary_[a-z_]+|declaration_[a-z_]+|environment_delta_mismatch):", text)
+    # Some errors end at the category; others append colon-separated details.
+    # Requiring the colon hides unsupported cases as "unclassified".
+    codes = re.findall(r"\b(boundary_[a-z_]+|declaration_[a-z_]+|environment_delta_mismatch)\b", text)
     return codes[-1] if codes else "unclassified"
 
 
