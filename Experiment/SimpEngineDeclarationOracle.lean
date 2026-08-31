@@ -477,6 +477,21 @@ private def uniqueNames (names : Array Name) : Array Name := Id.run do
       result := result.push name
   return result
 
+private def boundedNameList (names : Array Name) : String :=
+  let limit := 32
+  let shown := names.extract 0 (min limit names.size)
+  let rendered := String.intercalate "," (shown.toList.map Name.toString)
+  if names.size > limit then s!"[{rendered},...](truncated)" else s!"[{rendered}]"
+
+private def declarationNameSetMismatchDetail
+    (stockPublicNames appliedPublicNames : Array Name) : String :=
+  let stockOnly := stockPublicNames.filter (fun name => !appliedPublicNames.contains name)
+  let appliedOnly := appliedPublicNames.filter (fun name => !stockPublicNames.contains name)
+  s!"non-private declaration name set differs; stockCount={stockPublicNames.size}; " ++
+    s!"appliedCount={appliedPublicNames.size}; stockOnlyCount={stockOnly.size}; " ++
+    s!"appliedOnlyCount={appliedOnly.size}; stockOnly={boundedNameList stockOnly}; " ++
+    s!"appliedOnly={boundedNameList appliedOnly}"
+
 -- A generated-looking suffix does not establish private provenance: users can
 -- legally export names such as `proof_1`. Keep every such public declaration.
 private def privateDeclarationName (name : Name) : Bool :=
@@ -598,7 +613,8 @@ private unsafe def checkDeclarationSets (stockEnvironment appliedEnvironment : E
   let stockPublicNames := stockPublic.map (·.name)
   let appliedPublicNames := appliedPublic.map (·.name)
   unless stockPublicNames == appliedPublicNames do
-    oracleFailure "declaration_set_mismatch" "non-private declaration name set differs"
+    oracleFailure "declaration_set_mismatch"
+      (declarationNameSetMismatchDetail stockPublicNames appliedPublicNames)
   let mut result := { counts with commonPublicDeclarations := stockPublic.size }
   for stockInfo in stockDeclarations do
     if let some appliedInfo := appliedMap.find? stockInfo.name then
