@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 37,
+    "verifiedTranslatedOccurrences": 98,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle, plus local matcher and auxiliary-cache state comparison (report schema 8). Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
@@ -28,9 +28,9 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 11,
-    "provisionalCachedOccurrences": 294,
-    "provisionalCachedModules": 27,
+    "verifiedTranslatedModules": 15,
+    "provisionalCachedOccurrences": 341,
+    "provisionalCachedModules": 33,
     "minimumAcceptedReportSchema": 8
   },
   "work": [
@@ -170,7 +170,7 @@
       "id": "captured-local-helper-bundle",
       "owner": "/root/unresolved_probe_finish",
       "status": "in_progress",
-      "description": "Exact ordinary public/private helper bodies, typed cache/tag effects, and trial isolation. Synthetic original/record/replay next-name agreement now passes; real Prod/matcher controls pending. Report minimum9 planned for generator comparison."
+      "description": "Exact ordinary public/private helper bodies, typed cache/tag/export effects and isolated recording trials. Actual Prod module oracle and original/record/replay next-name agreement pass. Selector2 now binds generator state with caught-error negative; final controls pending. Report minimum9 planned."
     },
     {
       "id": "pre-boundary-universe-references",
@@ -182,7 +182,7 @@
       "id": "sparse-matcher-helper",
       "owner": "coordinator",
       "status": "in_progress",
-      "description": "Investigating List.modifyLast matcher sparseCasesOn helper closure and exact typed local/async cache guard in isolated prototype. No production support or acceptance claim."
+      "description": "Root isolated prototype now replays exact sparse helper definition/metadata/cache and matcher bundle v2. Standalone fresh/cached positive passes; negative matrix finishing. No production partition/wire integration yet. Guard falseacceptance independently verified; Luna review queued."
     },
     {
       "id": "translated-schema8-forest",
@@ -524,6 +524,20 @@
         ".lake/search-free-mathlib/snapshots/sparse-matcher-prototype/.lake/sparse-probe/fixture-5.log",
         ".lake/week-2026-08-31/failure-families.json"
       ]
+    },
+    {
+      "at": "2026-08-31T13:09:49.327324+00:00",
+      "summary": "Schema8 frontier completed15passed/6failed modules,98sourcecalls accepted against stock imports. Sparse guard5paired controls independently verify3old-runtime falseacceptances; standalone sparse helper9controls pass and fresh/cached matcher v2 replay passes. Sol helper production prototype passes actual Prod oracle and selector2 generator routing control. All prototypes remain unintegrated. Weeklyusage14%.",
+      "evidence": [
+        ".lake/week-2026-08-31/sparse-cache-guard-verification.json",
+        ".lake/search-free-mathlib/snapshots/schema8-frontier/.lake/schema8-frontier-worker.log",
+        ".lake/search-free-mathlib/snapshots/sparse-matcher-prototype/.lake/sparse-probe/codec-3hxj4d6q/report.json"
+      ],
+      "limitations": [
+        "Sparse standalone report predates added matcher API; rerun in progress; no campaign coverage claimed.",
+        "Generator/sparse report9 integration will make existing schema8 results provisional.",
+        "Full translated Mathlib tree not yet built."
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -642,13 +656,16 @@
       "id": "schema8-frontier",
       "snapshot": ".lake/search-free-mathlib/snapshots/schema8-frontier",
       "commit": "7839c0f",
-      "status": "running",
+      "status": "completed",
       "log": ".lake/schema8-frontier-worker.log",
       "inventoriedModules": 91,
       "modules": 21,
       "expectedOccurrences": 146,
-      "note": "Fresh closed manifest: 91 modules, 146 calls. Function.Defs (2 calls) and Nat.Init (5 calls) passed; 19 remaining frontier roots running. Strict translated forest validation follows source reports.",
-      "sessionId": 51150
+      "note": "Frozen schema8 per-module results against stock imports:15modules98calls.21roots processed,6failed. Strict forest assembly separate; upcoming schema9 generator/sparse checks will require revalidation.",
+      "sessionId": 51150,
+      "succeededModules": 15,
+      "failedModules": 6,
+      "verifiedCalls": 98
     }
   ],
   "latestCommits": [
@@ -762,7 +779,7 @@
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 37,
+    "verifiedTranslations": 98,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
