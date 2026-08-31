@@ -286,6 +286,12 @@
       "owner": "coordinator with Sol diagnosis",
       "status": "in_progress",
       "description": "Lookmap standalone and applied-only succeed while audit-enabled stock/applied pair fails symbolFrequency descriptor. CommandAudit.declarations and boundary metadata readers invoke mkModuleData export hooks that cache an early/global frequency map. Investigate and remove observational side effects; independently establish fresh compiler-output metadata equivalence without resets or descriptor exemptions."
+    },
+    {
+      "id": "audit-without-export-hooks",
+      "owner": "coordinator with Sol diagnosis",
+      "status": "completed",
+      "description": "CommandAudit enumerates private checked declarations using pinned mkModuleData fold order directly, without invoking persistent export hooks. Root57jobbuild and29process/10wire checks pass;174diagnosis hashes and main inputs/logs independently verified. Broader boundary metadata observation and frontend-isolation acceptance hold remain."
     }
   ],
   "blockers": [
@@ -802,6 +808,14 @@
         ".lake/week-2026-08-31/ordered-recursive-main-verification.json",
         ".lake/week-2026-08-31/mixed-segment-design/manifest.json"
       ]
+    },
+    {
+      "at": "2026-08-31T17:07:10.768401+00:00",
+      "summary": "Removed audit-triggered export side effects after causal empty/warm/stock/applied controls. Cold serialized20vs10symbolFrequency difference confirms broader issue; provisional coverage retained and acceptance hold remains. Boundary metadata reader repair assigned independently.",
+      "evidence": [
+        ".lake/week-2026-08-31/audit-export-observation-handoff-root-verification.json",
+        ".lake/week-2026-08-31/audit-export-observation-main-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1266,7 +1280,12 @@
       "diagnosisSnapshot": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis",
       "knownCause": "CommandAudit.declarations -> mkModuleData -> symbolFrequency export -> localSymbolFrequencyMapRef; Boundary/RealizationCodec and Boundary metadata comparison also invoke mkModuleData mid-elaboration.",
       "scope": "Current source-pair oracle results and first certified cone remain provisional for complete fresh-compilation metadata semantics. Byte hashes, audit identities and passing proof compilation evidence remain valid.",
-      "status": "investigating"
+      "status": "audit-repaired-boundary-export-reader-in-progress",
+      "diagnosisManifest": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis/.lake/lookmap-diagnosis/handoff-tljlgnu9/manifest.json",
+      "diagnosisManifestSha256": "5f39e8eb73ee682d3284d6daa7b4d21b898467ceb91d9861eaf3dc5f06a84aba",
+      "diagnosisVerification": ".lake/week-2026-08-31/audit-export-observation-handoff-root-verification.json",
+      "auditRepairVerification": ".lake/week-2026-08-31/audit-export-observation-main-verification.json",
+      "independentColdOutputs": "Ordinary stock/applied fresh processes write equal declaration counts but different symbolFrequency maps20vs10 in all3olean views; do not infer metadata equivalence from same-process oracle."
     }
   },
   "failureTriage": {
@@ -1293,5 +1312,5 @@
     "checkedAt": "2026-08-31T16:48:11.809480+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T16:54:25.241669+00:00"
+  "updatedAt": "2026-08-31T17:07:10.768401+00:00"
 }

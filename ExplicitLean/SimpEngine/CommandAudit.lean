@@ -123,9 +123,11 @@ private partial def collect (module : String) (fileMap : FileMap)
 
 private unsafe def declarations (env : Environment) (source : String) : IO (Array Json) := do
   let mut result := #[]
-  let data ← mkModuleData env
+  -- Match mkModuleData's private checked declaration order without running
+  -- persistent export hooks, which may mutate process-global caches.
+  let constants := env.toKernelEnv.constants.foldStage2 (fun cs _ info => cs.push info) #[]
   let fileMap := FileMap.ofString source
-  for info in data.constants do
+  for info in constants do
     if env.isImportedConst info.name then continue
     let some ranges := declRangeExt.find? (level := .exported) env info.name <|>
         declRangeExt.find? (level := .server) env info.name | continue
