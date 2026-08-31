@@ -174,6 +174,12 @@ private def mkPreBoundaryBasis : TacticM PreBoundaryBasis := do
     fvarIds := fvarIds ++ decl.lctx.getFVarIds
   for (_, decl) in mctx.decls.toList do
     fvarIds := fvarIds ++ decl.lctx.getFVarIds
+  -- Assignments retained by Lean can refer to locals no longer present in any
+  -- metavariable declaration's context (for example, after `use`). These IDs
+  -- already existed at the boundary and must be compared by exact identity;
+  -- treating them as fresh would reject even an unchanged assignment.
+  for (_, expression) in mctx.eAssignment.toList do
+    fvarIds := fvarIds ++ (collectFVars {} expression).fvarIds
   let metaState ← getThe Meta.State
   for entry in metaState.postponed do
     if let some context := entry.ctx? then
@@ -809,12 +815,13 @@ private def mapBoundaryLevel (mapping : BoundaryIdMap) : Level → MetaM Level
       | some mapped => pure (.mvar mapped)
       | none => throwError "boundary_comparison_unpaired_fresh_universe_mvar"
 
-private def mapBoundaryExpr (mapping : BoundaryIdMap) (expression : Expr) : MetaM Expr :=
+private def mapBoundaryExpr (mapping : BoundaryIdMap) (label : String)
+    (expression : Expr) : MetaM Expr :=
   Core.transform expression (pre := fun subexpression => do
     match subexpression with
     | .fvar id =>
         let some mapped := findPairByApplied? mapping.fvars id
-          | throwError "boundary_comparison_unpaired_fresh_fvar"
+          | throwError s!"boundary_comparison_unpaired_fresh_fvar:{label}:id={id.name}"
         return .done (.fvar mapped)
     | .mvar id =>
         let some mapped := findPairByApplied? mapping.mvars id
@@ -829,7 +836,7 @@ private def mapBoundaryExpr (mapping : BoundaryIdMap) (expression : Expr) : Meta
 private def compareBoundaryExpr (mapping : BoundaryIdMap) (label : String)
     (lctx : LocalContext) (localInstances : LocalInstances)
     (stock applied : Expr) : TacticM Unit := do
-  let applied ← mapBoundaryExpr mapping applied
+  let applied ← mapBoundaryExpr mapping label applied
   let equal ← withRestoredBoundaryFullMetaState do
     withLCtx lctx localInstances do
       withNewMCtxDepth <| isDefEqGuarded stock applied
@@ -857,7 +864,7 @@ private def compareBoundaryLocalContext (mapping : BoundaryIdMap)
     let stockDecl := stockDecls[ordinal]
     let appliedDecl := appliedDecls[ordinal]!
     let some mappedFVar := findPairByApplied? mapping.fvars appliedDecl.fvarId
-      | throwError "boundary_comparison_unpaired_fresh_fvar"
+      | throwError s!"boundary_comparison_unpaired_fresh_fvar:{label}[{ordinal}]:id={appliedDecl.fvarId.name}"
     unless mappedFVar == stockDecl.fvarId do
       boundaryComparisonMismatch s!"{label}[{ordinal}].fvar"
     compareBoundaryLocalDeclShape s!"{label}[{ordinal}]" stockDecl appliedDecl
@@ -1166,7 +1173,7 @@ private def compareBoundaryZeta (mapping : BoundaryIdMap)
   let mut appliedMapped : Array FVarId := #[]
   for id in applied do
     let some mapped := findPairByApplied? mapping.fvars id
-      | throwError "boundary_comparison_unpaired_fresh_fvar"
+      | throwError s!"boundary_comparison_unpaired_fresh_fvar:zetaDeltaFVarIds:id={id.name}"
     unless appliedMapped.contains mapped do
       appliedMapped := appliedMapped.push mapped
   for id in stock do
@@ -1318,6 +1325,34 @@ private def runBoundaryComparatorSelfTest : TacticM Unit := do
         return (← mkFreshExprSyntheticOpaqueMVar target).mvarId!
     let proofDependency ← mkTestGoal (mkConst ``True)
     let testBaseState ← Tactic.saveState
+    -- Model a cached assignment to a local whose context has already ended.
+    -- Such assignments occur before the simp boundary in Mathlib's Action.End.
+    -- The unchanged cache must compare equal, but a new escaped ID must fail.
+    let cachedMVar ← mkTestGoal (mkConst ``Nat)
+    let cachedFVar ← mkFreshFVarId
+    modifyMCtx fun mctx =>
+      { mctx with eAssignment := mctx.eAssignment.insert cachedMVar (.fvar cachedFVar) }
+    let cachedBasis ← mkPreBoundaryBasis
+    unless cachedBasis.fvarIds.contains cachedFVar do
+      throwError "boundary_comparator_self_test_cached_fvar_missing"
+    let cachedStock ← boundarySnapshot cachedBasis
+    let cachedStockState ← Tactic.saveState
+    compareBoundaryStates cachedBasis cachedStockState cachedStockState cachedStock cachedStock
+    let changedCachedFVar ← mkFreshFVarId
+    modifyMCtx fun mctx =>
+      { mctx with eAssignment := mctx.eAssignment.insert cachedMVar (.fvar changedCachedFVar) }
+    let cachedApplied ← boundarySnapshot cachedBasis
+    let cachedAppliedState ← Tactic.saveState
+    let cachedRejected ← try
+      compareBoundaryStates cachedBasis cachedStockState cachedAppliedState cachedStock cachedApplied
+      pure false
+    catch error =>
+      unless (← error.toMessageData.toString).contains "boundary_comparison_unpaired_fresh_fvar:" do
+        throw error
+      pure true
+    unless cachedRejected do
+      throwError "boundary_comparator_self_test_changed_cached_fvar_accepted"
+    testBaseState.restore
     let basis ← mkPreBoundaryBasis
     let stockGoal ← mkTestGoal (mkConst ``True)
     setGoals [stockGoal]
