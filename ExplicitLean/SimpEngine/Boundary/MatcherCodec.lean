@@ -495,7 +495,7 @@ def executeBoundaryMatcher (expectedAnchor : Name) (source : String) : MetaM Uni
   checkState "caller-before" (matchEqnsExt.getState (← getEnv)) bundle.localState
   checkEquationState "caller-before" (eqnsExt.getState (← getEnv)) bundle.localEquationBefore
   checkSparseState "caller-before" (boundarySparseCacheJson (← getEnv)) bundle.localSparseState
-  realizeConst bundle.anchor bundle.eqns.splitterName (realizeCapturedMatcher bundle)
+  realizeBoundaryConst bundle.anchor bundle.eqns.splitterName (realizeCapturedMatcher bundle)
   if let some order := bundle.declarationOrder then
     unless (← matcherCompletedOrder (← getEnv) bundle.anchor bundle.eqns.splitterName) == order do
       throwError "boundary_matcher_realized_order_conflict"

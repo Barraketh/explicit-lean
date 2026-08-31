@@ -439,9 +439,9 @@ private def executeBoundaryRealizationBatchV1 (expectedAnchor : Name) (source : 
         if cached then checkDescriptor childOwner childKey childDescriptor
         else discard <| completedCacheResult (← getEnv) childOwner childKey
     if cached || existing.isSome then
-      realizeConst owner key (throwError "boundary_realization_forbidden_callback")
+      realizeBoundaryConst owner key (throwError "boundary_realization_forbidden_callback")
     else
-      realizeConst owner key (executeCapturedRoot children key equationSource)
+      realizeBoundaryConst owner key (executeCapturedRoot children key equationSource)
     -- Presence, exact descriptor and nested metadata are required after either
     -- cache reuse or closed production. No cache entry is forged or coalesced.
     checkDescriptor owner key descriptor
@@ -789,7 +789,7 @@ private def executeLocalCachedBatch (anchor : Name) (source : String) : MetaM Un
   unless (← localOwnerWitness before owner) == witness do throwError "boundary_local_cached_owner_conflict"
   unless (← localCachedDescriptor before owner key) == descriptor do
     throwError "boundary_local_cached_descriptor_conflict"
-  realizeConst owner key (throwError "boundary_local_cached_forbidden_callback")
+  realizeBoundaryConst owner key (throwError "boundary_local_cached_forbidden_callback")
   unless (← localCachedDescriptor (← getEnv) owner key) == descriptor do
     throwError "boundary_local_cached_descriptor_after"
   executeBoundaryTheorem key theoremSource
@@ -881,7 +881,7 @@ private partial def executeRealizationNode (nodes : Array RealizationNode) (cach
   if cached || existing.isSome then preflightNodeCaches nodes cached index
   if node.kind == "matcher" then
     if cached || existing.isSome then
-      realizeConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
+      realizeBoundaryConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
     else
       let .str source := node.source | throwError "boundary_realization_v2_missing_matcher"
       executeBoundaryMatcher node.owner source
@@ -894,9 +894,9 @@ private partial def executeRealizationNode (nodes : Array RealizationNode) (cach
     let .str source := node.source | throwError "boundary_realization_v2_missing_equation"
     let (_, theoremSource, defeqTag, backwardTag, registration) ← ofExcept (parseEquationPayload source)
     if cached || existing.isSome then
-      realizeConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
+      realizeBoundaryConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
     else
-      realizeConst node.owner node.key do
+      realizeBoundaryConst node.owner node.key do
         unless boundaryMatchStateJson (Match.matchEqnsExt.getState (← getEnv)) == .arr #[.arr #[], .arr #[]] &&
             equationStateJson (eqnsExt.getState (← getEnv)) == .arr #[] &&
             boundarySparseCacheJson (← getEnv) == .arr #[] &&

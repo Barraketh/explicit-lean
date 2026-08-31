@@ -17,7 +17,7 @@ import secrets
 from typing import Any, Iterable
 
 from boundary_expr_codec import (
-    validate_boundary_expr_dag, boundary_expr_is_constant, validate_expr_dag, validate_struct_expr_dag,
+    validate_boundary_expr_dag, validate_reference_expr_dag, reference_expr_is_constant, validate_expr_dag, validate_struct_expr_dag,
     validate_theorem_payload, validate_congruence_payload, validate_equation_payload,
     validate_matcher_payload, validate_local_theorems_payload, validate_realization_payload,
     expr_is_constant,
@@ -27,7 +27,7 @@ from boundary_expr_codec import (
 # Keep these values synchronized with the public constants in
 # ExplicitLean/SimpEngine/Boundary/Apply.lean.
 ARTIFACT_KIND = "simp_engine_boundary_artifact"
-ARTIFACT_SCHEMA = 4
+ARTIFACT_SCHEMA = 5
 SEMANTIC_CONTRACT = "boundary-observable-v1"
 SELECTOR_SCHEMA = 2
 
@@ -42,7 +42,7 @@ TERMINALS = {
 # These strings are part of the artifact wire format. The encoding describes
 # how the materializer interprets a field, not a printer or implementation
 # module version.
-TERM_ENCODING = "lean_expr_dag_v2"
+TERM_ENCODING = "lean_expr_dag_v3"
 LOCAL_REFERENCE_ENCODING = "local_decl_index_v1"
 UNIVERSE_ENCODING = "pre_boundary_universe_reference_v1"
 INSTANCE_ENCODING = "explicit_terms_v1"
@@ -50,6 +50,7 @@ ENCODING = {
     "terms": TERM_ENCODING,
     "locals": LOCAL_REFERENCE_ENCODING,
     "universes": UNIVERSE_ENCODING,
+    "expressionReferences": "pre_boundary_expression_reference_v1",
     "instances": INSTANCE_ENCODING,
 }
 
@@ -286,7 +287,7 @@ def validate_artifact_protocol(
 
 
 def validate_rendered_term(value: object, label: str) -> str:
-    validate_boundary_expr_dag(value, label)
+    validate_reference_expr_dag(value, label)
     return value
 
 
@@ -465,11 +466,11 @@ def validate_report(
     elif not locals_value:
         raise RuntimeError(f"artifact has neither locals nor target: {report!r}")
     local_closed_false = any(
-        boundary_expr_is_constant(local["transformation"]["result"], "False")
+        reference_expr_is_constant(local["transformation"]["result"], "False")
         for local in locals_value
     )
     target_closed_true = (
-        target is not None and boundary_expr_is_constant(target["result"], "True")
+        target is not None and reference_expr_is_constant(target["result"], "True")
     )
     if terminal == "closed_from_local_false":
         if not local_closed_false or target is not None:
@@ -514,6 +515,9 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
             except (ValueError, RecursionError):
                 encoded = None
             if isinstance(encoded, list) and encoded:
+                if encoded[0] == "expr_dag_v3":
+                    validate_reference_expr_dag(text, label)
+                    continue
                 if encoded[0] == "expr_dag_v2":
                     validate_boundary_expr_dag(text, label)
                     continue

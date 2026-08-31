@@ -182,7 +182,7 @@ private def elaborateEvidence (stx : Syntax) : TacticM TargetArtifact := do
     elabTermEnsuringType proofSyntax (some expectedProofType)
   return { input, result, proof? }
 
-private def elaborateEncodedEvidence (references : Array LMVarId) (stx : Syntax) : TacticM TargetArtifact := do
+private def elaborateEncodedEvidence (references : BoundaryExpressionReferences) (stx : Syntax) : TacticM TargetArtifact := do
   let (inputSource, resultSource, proofSource?) ←
     match stx with
     | `(boundaryEncodedEvidence| ($input:str ==> $result:str)) =>
@@ -190,20 +190,28 @@ private def elaborateEncodedEvidence (references : Array LMVarId) (stx : Syntax)
     | `(boundaryEncodedEvidence| ($input:str ==> $result:str using $proof:str)) =>
         pure (input.getString, result.getString, some proof.getString)
     | _ => throwError "invalid encoded boundary evidence"
-  let input ← decodeBoundaryExprWithUniverses inputSource references
-  let result ← decodeBoundaryExprWithUniverses resultSource references
-  check input
-  check result
-  unless (← whnf (← inferType input)).isSort && (← whnf (← inferType result)).isSort do
-    throwError "boundary_expr_expected_types"
-  let expectedProofType ← mkEq input result
-  let proof? ← proofSource?.mapM fun proofSource => do
-    let proof ← decodeBoundaryExprWithUniverses proofSource references
-    check proof
-    unless ← isDefEq (← inferType proof) expectedProofType do
-      throwError "boundary_expr_proof_type_mismatch"
-    return proof
+  let input ← decodeBoundaryExprWithReferences inputSource references
+  let result ← decodeBoundaryExprWithReferences resultSource references
+  let proof? ← proofSource?.mapM fun proofSource =>
+    decodeBoundaryExprWithReferences proofSource references
   return { input, result, proof? }
+
+private def validateEncodedArtifact (artifact : GoalArtifact) (use : BoundaryReferenceUse) : TacticM Unit := do
+  let goal ← getMainGoal
+  use.checkAt goal artifact.expressions
+  withBoundaryReferenceValidation use do
+    for transformation in artifact.locals.map (·.transformation) ++ artifact.target?.toArray do
+      check transformation.input
+      check transformation.result
+      unless (← whnf (← inferType transformation.input)).isSort &&
+          (← whnf (← inferType transformation.result)).isSort do
+        throwError "boundary_expr_expected_types"
+      let expectedProofType ← mkEq transformation.input transformation.result
+      if let some proof := transformation.proof? then
+        check proof
+        unless ← isDefEq (← inferType proof) expectedProofType do
+          throwError "boundary_expr_proof_type_mismatch"
+  use.checkUnchanged
 
 private def runExplicitApply (inputSyntax resultSyntax : Syntax)
     (proofSyntax? : Option Syntax) : TacticM Unit := withMainContext do
@@ -306,23 +314,24 @@ private def parseEncodedEnvironmentActions
   return result
 
 private def runExplicitEncodedApply (actions : Array Syntax) (evidence : Syntax) : TacticM Unit :=
-  withMainContext do
+  withoutBoundaryPendingSynthesis <| withMainContext do
     withBoundaryEncodedSourceContext do
-      let references ← boundaryUniverseReferences (← getGoals) (← getThe Term.State)
+      let references ← boundaryExpressionReferenceContext (← getGoals) (← getThe Term.State)
       let environmentActions ← parseEncodedEnvironmentActions actions
       executeEnvironmentActions environmentActions
-      let artifact ← elaborateEncodedEvidence references evidence
+      let target ← elaborateEncodedEvidence references evidence
+      let artifact : GoalArtifact := {target? := some target}
+      let use ← protectBoundaryReferences references artifact.expressions
+      validateEncodedArtifact artifact use
       let goals ← getGoals
-      let (next, _) ← applyGoalArtifact goals.head! goals.tail {
-        target? := some artifact
-      }
+      let (next, _) ← applyGoalArtifact goals.head! goals.tail {artifact with referenceUse? := some use}
       setGoals next
 
 private def runExplicitEncodedLocationApply (actions : Array Syntax)
     (localSyntax : Array Syntax) (targetSyntax? : Option Syntax) : TacticM Unit :=
-  withMainContext do
+  withoutBoundaryPendingSynthesis <| withMainContext do
   withBoundaryEncodedSourceContext do
-    let references ← boundaryUniverseReferences (← getGoals) (← getThe Term.State)
+    let references ← boundaryExpressionReferenceContext (← getGoals) (← getThe Term.State)
     let environmentActions ← parseEncodedEnvironmentActions actions
     executeEnvironmentActions environmentActions
     let lctx ← getLCtx
@@ -344,11 +353,11 @@ private def runExplicitEncodedLocationApply (actions : Array Syntax)
       | `(boundaryEncodedTargetEvidence| ⊢ $evidence:boundaryEncodedEvidence) =>
           elaborateEncodedEvidence references evidence
       | _ => throwError "invalid encoded target boundary evidence"
+    let artifact : GoalArtifact := {locals, target?}
+    let use ← protectBoundaryReferences references artifact.expressions
+    validateEncodedArtifact artifact use
     let goals ← getGoals
-    let (next, _) ← applyGoalArtifact goals.head! goals.tail {
-      locals
-      target?
-    }
+    let (next, _) ← applyGoalArtifact goals.head! goals.tail {artifact with referenceUse? := some use}
     setGoals next
 
 private def runBoundaryGuard (targetFingerprint localContextFingerprint
@@ -514,7 +523,7 @@ private def runBoundaryVariantOutcome (outcome : Syntax) : TacticM Unit := do
 
 private def runBoundarySelect (kind : String) (schema selectorSchema : Nat)
     (contract occId moduleName : String) (variants : Array Syntax) :
-    TacticM (Syntax × Option DeclNameGenerator) := do
+    TacticM (Syntax × Option DeclNameGenerator) := withoutBoundaryPendingSynthesis do
   validateArtifactHeader kind schema selectorSchema contract occId moduleName
   -- A malformed sibling is a protocol error even if another variant would
   -- otherwise select, so validate the complete serialized set first.

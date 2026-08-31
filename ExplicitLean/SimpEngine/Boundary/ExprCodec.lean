@@ -1,6 +1,7 @@
 module
 prelude
 
+public meta import ExplicitLean.SimpEngine.Boundary.ExpressionReferences
 public meta import Lean.Meta.Basic
 public meta import Lean.Data.Json.FromToJson
 
@@ -74,6 +75,7 @@ private def decodeBinderInfo (json : Json) : Except String BinderInfo := do
 
 private structure EncodeState where
   references : Array LMVarId := #[]
+  expressionReferences? : Option BoundaryExpressionReferences := none
   nodes : Array Json := #[]
   memo : Std.HashMap Expr Nat := {}
   structural : Bool := false
@@ -123,7 +125,13 @@ private partial def encodeExpr (expr : Expr) : EncodeM Nat := do
         let some decl := (← getLCtx).find? id
           | throwError "boundary_expr_unknown_local"
         pure <| .arr #[.str "f", toJson decl.index]
-    | .mvar _ => throwError "boundary_expr_unresolved_metavariable"
+    | .mvar id => do
+        let some refs := (← get).expressionReferences?
+          | throwError "boundary_expr_unresolved_metavariable"
+        let some index := refs.mvars.findIdx? (· == id)
+          | throwError "boundary_reference_not_preexisting"
+        discard <| refs.resolve index
+        pure <| .arr #[.str "v", toJson index]
     | .sort level => do pure <| .arr #[.str "s", ← encodeLevel references level]
     | .const name levels => do pure <| .arr #[.str "c", encodeBoundaryName name, toJson (← levels.mapM (fun level => encodeLevel references level))]
     | .app fn arg => do pure <| .arr #[.str "a", toJson (← encodeExpr fn), toJson (← encodeExpr arg)]
@@ -174,6 +182,16 @@ def encodeBoundaryExprWithUniverses (expr : Expr) (references : Array LMVarId) :
   return (Json.arr #[.str "expr_dag_v2", toJson references.size,
     .arr state.nodes, toJson root]).compress
 
+/-- Version three refers only to authenticated, already existing expression
+metavariables. Legacy and closed codecs retain their rejection behavior. -/
+def encodeBoundaryExprWithReferences (expr : Expr) (refs : BoundaryExpressionReferences) : MetaM String := do
+  validateUniverseReferences refs.universes
+  let expr ← instantiateMVars expr
+  let (root, state) ← (encodeExpr expr).run {
+    references := refs.universes, expressionReferences? := some refs }
+  return (Json.arr #[.str "expr_dag_v3", toJson refs.universes.size, toJson refs.mvars.size,
+    .arr state.nodes, toJson root]).compress
+
 private def childAt (nodes : Array Expr) (json : Json) : Except String Expr := do
   let index ← json.getNat?
   let some expr := nodes[index]? | throw "expression reference is not an earlier node"
@@ -188,8 +206,12 @@ private def requireConstant (env : Environment) (name : Name) : Except String Un
     throw s!"expression constant is unavailable without generation: {name}"
 
 private def decodeNode (env : Environment) (locals : Std.HashMap Nat FVarId)
-    (references : Array LMVarId) (nodes : Array Expr) (json : Json) : Except String Expr := do
+    (references : Array LMVarId) (nodes : Array Expr) (json : Json)
+    (mvars : Array MVarId := #[]) : Except String Expr := do
   match json with
+  | .arr #[.str "v", index] =>
+      let some id := mvars[(← index.getNat?)]? | throw "boundary expression reference unavailable"
+      return mkMVar id
   | .arr #[.str "b", index] => return mkBVar (← index.getNat?)
   | .arr #[.str "f", index] =>
       let index ← index.getNat?
@@ -218,9 +240,17 @@ private def decodeNode (env : Environment) (locals : Std.HashMap Nat FVarId)
   | _ => throw "invalid expression node"
 
 private def decodeBoundaryExprCore (source : String)
-    (references? : Option (Array LMVarId)) : MetaM Expr := do
+    (references? : Option (Array LMVarId))
+    (expressionReferences? : Option BoundaryExpressionReferences := none) : MetaM Expr := do
   if source.utf8ByteSize > 64 * 1024 * 1024 then
     throwError "boundary_expr_decode_error: expression source size limit exceeded"
+  if let some refs := expressionReferences? then
+    let .ok (.arr #[.str "expr_dag_v3", _, _, .arr rawNodes, _]) := Json.parse source
+      | throwError "boundary_expr_decode_error: invalid expression encoding"
+    for node in rawNodes do
+      if let .arr #[.str "v", index] := node then
+        let .ok index := index.getNat? | throwError "boundary_reference_index"
+        discard <| refs.resolve index
   let lctx ← getLCtx
   let env ← getEnv
   let result : Except String Expr := do
@@ -230,18 +260,23 @@ private def decodeBoundaryExprCore (source : String)
         throw "ambiguous expression local declaration index"
       locals := locals.insert decl.index decl.fvarId
     let json ← Json.parse source
-    let (rawNodes, root) ← match references?, json with
-      | none, .arr #[.str "expr_dag_v1", .arr rawNodes, root] => pure (rawNodes, root)
-      | some refs, .arr #[.str "expr_dag_v2", count, .arr rawNodes, root] => do
+    let (rawNodes, root) ← match references?, expressionReferences?, json with
+      | none, none, .arr #[.str "expr_dag_v1", .arr rawNodes, root] => pure (rawNodes, root)
+      | some refs, none, .arr #[.str "expr_dag_v2", count, .arr rawNodes, root] => do
           unless (← count.getNat?) == refs.size do
             throw "boundary universe reference count mismatch"
           pure (rawNodes, root)
-      | _, _ => throw "invalid expression encoding"
+      | some universes, some refs, .arr #[.str "expr_dag_v3", universeCount, count, .arr rawNodes, root] => do
+          unless (← universeCount.getNat?) == universes.size && (← count.getNat?) == refs.mvars.size do
+            throw "boundary expression reference count mismatch"
+          pure (rawNodes, root)
+      | _, _, _ => throw "invalid expression encoding"
     if rawNodes.size > 2000000 then
       throw "expression node count limit exceeded"
     let mut nodes := #[]
     for node in rawNodes do
-      nodes := nodes.push (← decodeNode env locals (references?.getD #[]) nodes node)
+      nodes := nodes.push (← decodeNode env locals (references?.getD #[]) nodes node
+        (expressionReferences?.map (·.mvars) |>.getD #[]))
     childAt nodes root
   match result with
   | .ok expr => return expr
@@ -254,6 +289,10 @@ def decodeBoundaryExprWithUniverses (source : String) (references : Array LMVarI
     MetaM Expr := do
   validateUniverseReferences references
   decodeBoundaryExprCore source (some references)
+
+def decodeBoundaryExprWithReferences (source : String) (refs : BoundaryExpressionReferences) : MetaM Expr := do
+  validateUniverseReferences refs.universes
+  decodeBoundaryExprCore source (some refs.universes) (some refs)
 
 /-- Exact closed syntax, including binder names/info and ordered scalar MData.
     ExprStructMap uses Expr.equal, not alpha equivalence or definitional equality.

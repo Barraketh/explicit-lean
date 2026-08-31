@@ -361,7 +361,7 @@ private partial def executeSequenceNode (sequence : RealizationSequence) (index 
   let reuse := sequence.cached[index]! || existing.isSome
   if reuse then preflightSequenceNode sequence.nodes index
   if node.kind == "matcher" then
-    if reuse then realizeConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
+    if reuse then realizeBoundaryConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
     else
       let .str source := node.source | throwError "boundary_sequence_missing_matcher"
       executeBoundaryMatcher node.owner source
@@ -372,9 +372,9 @@ private partial def executeSequenceNode (sequence : RealizationSequence) (index 
   else
     let .str source := node.source | throwError "boundary_sequence_missing_equation"
     let (_, theoremSource, defeqTag, backwardTag, registration) ← ofExcept (parseEquationPayload source)
-    if reuse then realizeConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
+    if reuse then realizeBoundaryConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
     else
-      realizeConst node.owner node.key do
+      realizeBoundaryConst node.owner node.key do
         unless boundaryMatchStateJson (Match.matchEqnsExt.getState (← getEnv)) == .arr #[.arr #[], .arr #[]] &&
             equationStateJson (eqnsExt.getState (← getEnv)) == .arr #[] &&
             boundarySparseCacheJson (← getEnv) == .arr #[] && (auxLemmasExt.getState (← getEnv)).lemmas.isEmpty do

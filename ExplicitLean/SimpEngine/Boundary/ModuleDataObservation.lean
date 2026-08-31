@@ -14,6 +14,7 @@ module
 prelude
 
 public meta import Lean.Meta.Basic
+public meta import ExplicitLean.SimpEngine.Boundary.NoSynthesis
 meta import all Lean.Environment
 meta import all Lean.LibrarySuggestions.SymbolFrequency
 meta import all Lean.LibrarySuggestions.SineQuaNon
@@ -23,7 +24,7 @@ open Lean Meta
 namespace ExplicitLean.SimpEngine.Boundary
 
 private def runExportMeta (env : Environment) (action : MetaM α) : IO α :=
-  ((withoutExporting action).run' {} {}).toIO'
+  ((withoutBoundaryPendingSynthesis (withoutExporting action)).run' {} {}).toIO'
     { fileName := "symbolFrequency", fileMap := default, maxHeartbeats := 0 } { env }
 
 private def importedFrequency (env : Environment) : IO (NameMap Nat) := do

@@ -49,7 +49,7 @@ def _level(value: Any, reference_count: int | None = None) -> bool:
 
 
 def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool,
-                       structural: bool = False) -> list[Any]:
+                       structural: bool = False, expression_references: bool = False) -> list[Any]:
     if not isinstance(source, str):
         raise RuntimeError(f"{label} must be a string")
     if len(source.encode("utf-8")) > 64 * 1024 * 1024:
@@ -59,7 +59,13 @@ def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool,
     except (ValueError, RecursionError) as error:
         raise RuntimeError(f"{label} is not an expression DAG: {error}") from error
     reference_count = None
-    if boundary_universes:
+    expression_count = None
+    if expression_references:
+        if not (isinstance(value, list) and len(value) == 5
+                and value[0] == "expr_dag_v3" and _nat(value[1]) and _nat(value[2])):
+            raise RuntimeError(f"{label} has an invalid expression-reference DAG header")
+        _, reference_count, expression_count, nodes, root = value
+    elif boundary_universes:
         if not (isinstance(value, list) and len(value) == 4
                 and value[0] == "expr_dag_v2" and _nat(value[1])):
             raise RuntimeError(f"{label} has an invalid boundary expression DAG header")
@@ -79,7 +85,10 @@ def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool,
         tag = node[0]
         references = []
         valid = False
-        if tag in ("b", "f", "n"):
+        if tag == "v":
+            valid = (expression_count is not None and len(node) == 2
+                     and _nat(node[1]) and node[1] < expression_count)
+        elif tag in ("b", "f", "n"):
             valid = len(node) == 2 and _nat(node[1])
             if structural and tag == "f":
                 valid = False
@@ -138,6 +147,16 @@ def validate_struct_expr_dag(source: object, label: str = "structural expression
 def validate_boundary_expr_dag(source: object, label: str = "boundary expression") -> list[Any]:
     """Validate v2 reference bounds; Lean authenticates the pre-boundary reference table."""
     return _validate_expr_dag(source, label, boundary_universes=True)
+
+
+def validate_reference_expr_dag(source: object, label: str = "boundary expression") -> list[Any]:
+    """Validate v3 bounds only; Lean authenticates identity, scope and dependencies."""
+    return _validate_expr_dag(source, label, boundary_universes=True, expression_references=True)
+
+
+def reference_expr_is_constant(source: str, name: str) -> bool:
+    *_, nodes, root = validate_reference_expr_dag(source)
+    return nodes[root] == ["c", [["s", name]], []]
 
 
 def validate_theorem_payload(source: object, expected_name: object,

@@ -1,20 +1,20 @@
 # Search-free Mathlib campaign
 
-Updated 2026-08-31T18:08:49.824432+00:00
+Updated 2026-08-31T18:33:02.055161+00:00
 
 - Indexed: 83,425 calls in 8,264 modules.
 - Accepted per-module verification: 0 translated calls in 0 modules.
-- Provisional cache awaiting current semantic checks: 1,191 calls in 123 modules.
+- Provisional cache awaiting current semantic checks: 1,323 calls in 137 modules.
 - Unresolved source classifications: 5.
 - Missing cached report files: 0.
 
-Acceptance on hold: Cold serialized comparator and independent compilation consumer are integrated, but translated dependency-tree revalidation remains pending. A newly discovered pending typeclass-synthesis route in encoded replay also requires the unconditional search barrier and fresh schema11 validation. Existing generated candidates and proof checks are preserved as provisional. Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.
+Acceptance on hold: The cold serialized comparator, independent compilation consumer, and unconditional pending-synthesis barrier are integrated and bounded schema11 controls passed. Complete translated dependency-tree certification remains pending; previous candidates and proof checks stay provisional. Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 11 (implemented producer: 11), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.
 
-Queue: failed=72, queued=442, running=1, succeeded=123, unplanned=7626
+Queue: failed=74, queued=426, running=1, succeeded=137, unplanned=7626
 
 ## Active modules
 
-- `Mathlib/Algebra/Category/Grp/Colimits.lean` (schema10-full)
+- `Mathlib/Algebra/Category/ModuleCat/FilteredColimits.lean` (schema10-full)
 
 ## Failures and partial results
 
@@ -37,6 +37,8 @@ Queue: failed=72, queued=442, running=1, succeeded=123, unplanned=7626
 - `Mathlib/Algebra/BigOperators/Group/List/Basic.lean`: materializer exit 1
 - `Mathlib/Algebra/BigOperators/Group/List/Lemmas.lean`: materializer exit 1
 - `Mathlib/Algebra/BigOperators/Intervals.lean`: materializer exit 1
+- `Mathlib/Algebra/Category/Grp/EpiMono.lean`: materializer exit 1
+- `Mathlib/Algebra/Category/ModuleCat/Differentials/Basic.lean`: materializer exit 1
 - `Mathlib/Algebra/CubicDiscriminant.lean`: materializer exit 1
 - `Mathlib/Algebra/Homology/HomotopyCategory/KInjective.lean`: materializer exit 1
 - `Mathlib/AlgebraicGeometry/Cover/Open.lean`: materializer exit 1
@@ -46,7 +48,5 @@ Queue: failed=72, queued=442, running=1, succeeded=123, unplanned=7626
 - `Mathlib/AlgebraicTopology/DoldKan/Faces.lean`: materializer exit 1
 - `Mathlib/AlgebraicTopology/ExtraDegeneracy.lean`: materializer exit 1
 - `Mathlib/AlgebraicTopology/ModelCategory/BifibrantObjectHomotopy.lean`: materializer exit 1
-- `Mathlib/Analysis/AperiodicOrder/Delone/Basic.lean`: materializer exit 1
-- `Mathlib/Analysis/BoxIntegral/Box/SubboxInduction.lean`: materializer exit 1
 
 Regenerate with `python3 Experiment/campaign_status.py --markdown`.

@@ -163,9 +163,9 @@ def lean_matrix(work: Path, dylib: str) -> None:
     witnessed_failure = valid_select.split("\n", 1)[0] + "\n" + witnessed_failure_branch
     missing = copy.deepcopy(success)
     missing["selector"]["preState"]["targetFingerprint"] = "unrecorded-target"
-    encoded_true = json.dumps(["expr_dag_v2", 0, [["c", [["s", "True"]], []]], 0])
-    encoded_false = json.dumps(["expr_dag_v2", 0, [["c", [["s", "False"]], []]], 0])
-    encoded_nat_zero = json.dumps(["expr_dag_v2", 0, [["c", [["s", "Nat"], ["s", "zero"]], []]], 0])
+    encoded_true = json.dumps(["expr_dag_v3", 0, 1, [["c", [["s", "True"]], []]], 0])
+    encoded_false = json.dumps(["expr_dag_v3", 0, 1, [["c", [["s", "False"]], []]], 0])
+    encoded_nat_zero = json.dumps(["expr_dag_v3", 0, 1, [["c", [["s", "Nat"], ["s", "zero"]], []]], 0])
     q = source.lean_string
     same = f"({q(encoded_true)} ==> {q(encoded_true)})"
     cases = [

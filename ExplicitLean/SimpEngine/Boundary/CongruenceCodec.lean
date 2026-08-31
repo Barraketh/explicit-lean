@@ -78,7 +78,7 @@ def executeBoundaryCongruence (expectedName : Name) (source : String) : MetaM Un
     | .ok payload => pure payload
     | .error error => throwError s!"boundary_congruence_decode_error:{error}"
   validateCongruenceAnchor forConst expectedName
-  realizeConst forConst expectedName <|
+  realizeBoundaryConst forConst expectedName <|
     realizeCapturedCongruence expectedName theoremSource kinds
   -- realizeConst can skip its closure for a declaration already present on
   -- this branch or in a shared realization cache. Validate both cases, without

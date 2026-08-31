@@ -599,6 +599,14 @@ def boundaryUniverseReferences (goals : List MVarId)
   let goals ← goals.filterM fun goal => return !(← goal.isAssigned)
   return (← rawSelectorState goals (some termState)).2.lmvarOrder
 
+/-- The expression and universe reference tables share exactly the selector's
+canonical encounter order. Observe this before actions or evidence decoding. -/
+def boundaryCanonicalReferenceTables (goals : List MVarId)
+    (termState : Lean.Elab.Term.State) : MetaM (Array MVarId × Array LMVarId) := observingMetaState do
+  let goals ← goals.filterM fun goal => return !(← goal.isAssigned)
+  let ids := (← rawSelectorState goals (some termState)).2
+  return (ids.mvarOrder, ids.lmvarOrder)
+
 private structure CanonicalState where
   exprMVars : Std.HashMap MVarId Nat := {}
   levelMVars : Std.HashMap LMVarId Nat := {}

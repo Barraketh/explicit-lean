@@ -23,11 +23,12 @@ namespace ExplicitLean.SimpEngine.Boundary
    schema. Generated source validates that schema before it elaborates any
    evidence or executes an environment action. -/
 def boundaryArtifactKind : String := "simp_engine_boundary_artifact"
-def boundaryArtifactSchema : Nat := 4
+def boundaryArtifactSchema : Nat := 5
 def boundarySelectorSchema : Nat := 2
 def boundarySemanticContract : String := "boundary-observable-v1"
-def boundaryArtifactTermEncoding : String := "lean_expr_dag_v2"
+def boundaryArtifactTermEncoding : String := "lean_expr_dag_v3"
 def boundaryArtifactLocalReferenceEncoding : String := "local_decl_index_v1"
+def boundaryArtifactExpressionReferenceEncoding : String := "pre_boundary_expression_reference_v1"
 def boundaryArtifactUniverseEncoding : String := "pre_boundary_universe_reference_v1"
 def boundaryArtifactInstanceEncoding : String := "explicit_terms_v1"
 
@@ -86,6 +87,26 @@ structure GoalArtifact where
   locals : Array LocalArtifact := #[]
   target? : Option TargetArtifact := none
   environmentActions : Array EnvironmentAction := #[]
+  referenceUse? : Option BoundaryReferenceUse := none
+
+def TargetArtifact.expressions (artifact : TargetArtifact) : Array Expr :=
+  #[artifact.input, artifact.result] ++ artifact.proof?.toArray
+
+def GoalArtifact.expressions (artifact : GoalArtifact) : Array Expr :=
+  artifact.locals.foldl (fun result entry => result ++ entry.transformation.expressions) #[] ++
+    (artifact.target?.map (·.expressions) |>.getD #[])
+
+private def guardReferenceUse (use? : Option BoundaryReferenceUse) (goal : MVarId)
+    (expressions : Array Expr) : MetaM Unit := do
+  if let some use := use? then use.checkAt goal expressions
+
+private def checkReferenceState (use? : Option BoundaryReferenceUse) : MetaM Unit := do
+  if let some use := use? then use.checkUnchanged
+
+private def observingReferenceCheck (use? : Option BoundaryReferenceUse) (action : MetaM α) : MetaM α := do
+  match use? with
+  | none => action
+  | some use => withBoundaryReferenceValidation use action
 
 inductive TargetTerminal where
   | transported
@@ -102,16 +123,23 @@ inductive GoalTerminal where
     a module whose import closure contains no simplifier implementation,
     theorem registry, simproc registry, or tactic-context construction. -/
 def applyTargetArtifact (goal : MVarId) (tail : List MVarId)
-    (artifact : TargetArtifact) : MetaM (List MVarId × TargetTerminal) :=
+    (artifact : TargetArtifact) (referenceUse? : Option BoundaryReferenceUse := none) : MetaM (List MVarId × TargetTerminal) :=
   goal.withContext do
+    guardReferenceUse referenceUse? goal artifact.expressions
     goal.checkNotAssigned `simp_engine_boundary_apply
     let target ← instantiateMVars (← goal.getType)
-    unless ← isDefEq target artifact.input do
+    unless ← observingReferenceCheck referenceUse? <| isDefEq target artifact.input do
       throwError "boundary_target_input_mismatch"
     if artifact.result.isTrue then
       match artifact.proof? with
-      | some proof => goal.assign (← mkOfEqTrue proof)
+      | some proof =>
+          -- Preserve pinned builder state effects. Its fixed of_eq_true
+          -- telescope has no instance binder; never assign protected opaque
+          -- references while matching its fresh ordinary template parameter.
+          let value ← withConfig (fun c => {c with assignSyntheticOpaque := false}) <| mkOfEqTrue proof
+          goal.assign value
       | none => goal.assign (mkConst ``True.intro)
+      checkReferenceState referenceUse?
       return (tail, .closedTrue)
     let next ← match artifact.proof? with
       | some proof => goal.replaceTargetEq artifact.result proof
@@ -120,6 +148,7 @@ def applyTargetArtifact (goal : MVarId) (tail : List MVarId)
             goal.replaceTargetDefEq artifact.result
           else
             pure goal
+    checkReferenceState referenceUse?
     return (next :: tail, .transported)
 
 private def equalityTransport (input result proof value : Expr) : MetaM Expr := do
@@ -131,23 +160,27 @@ private def equalityTransport (input result proof value : Expr) : MetaM Expr := 
     changes are asserted after the optional target transformation, and the old
     proof-bearing declarations are then cleared. -/
 def applyGoalArtifact (goal : MVarId) (tail : List MVarId)
-    (artifact : GoalArtifact) : MetaM (List MVarId × GoalTerminal) := do
+    (artifact : GoalArtifact) : MetaM (List MVarId × GoalTerminal) := withoutBoundaryPendingSynthesis do
   executeEnvironmentActions artifact.environmentActions
+  let use? := artifact.referenceUse?
+  guardReferenceUse use? goal artifact.expressions
   let mut current := goal
   let mut pending : Array Hypothesis := #[]
   let mut toClear : Array FVarId := #[]
   for entry in artifact.locals do
     let transformation := entry.transformation
     let (outcome, pending?) ← current.withContext do
+      guardReferenceUse use? current transformation.expressions
       current.checkNotAssigned `simp_engine_boundary_apply
       let decl ← entry.fvarId.getDecl
       let input ← instantiateMVars decl.type
-      unless ← isDefEq input transformation.input do
+      unless ← observingReferenceCheck use? <| isDefEq input transformation.input do
         throwError "boundary_local_input_mismatch:{decl.userName}"
       match transformation.proof? with
       | none =>
           let next ← current.replaceLocalDeclDefEq entry.fvarId transformation.result
           if transformation.result.isFalse then
+            guardReferenceUse use? next #[transformation.result, ← next.getType]
             next.assign (← mkFalseElim (← next.getType) (mkFVar entry.fvarId))
             pure (none, none)
           else
@@ -164,6 +197,7 @@ def applyGoalArtifact (goal : MVarId) (tail : List MVarId)
               type := transformation.result
               value
             })
+    checkReferenceState use?
     match outcome with
     | none => return (tail, .closedFromLocalFalse)
     | some next =>
@@ -173,13 +207,16 @@ def applyGoalArtifact (goal : MVarId) (tail : List MVarId)
           toClear := toClear.push entry.fvarId
 
   if let some target := artifact.target? then
-    let (goals, terminal) ← applyTargetArtifact current tail target
+    let (goals, terminal) ← applyTargetArtifact current tail target use?
     match terminal with
     | .closedTrue => return (goals, .closedFromTargetTrue)
     | .transported => current := goals.head!
 
+  guardReferenceUse use? current (pending.flatMap fun h => #[h.type, h.value])
   let (_, next) ← current.assertHypotheses pending
+  guardReferenceUse use? next #[]
   current := ← next.tryClearMany toClear
+  checkReferenceState use?
   return (current :: tail, .open)
 
 end ExplicitLean.SimpEngine.Boundary

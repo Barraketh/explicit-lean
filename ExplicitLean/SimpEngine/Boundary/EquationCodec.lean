@@ -79,7 +79,7 @@ def executeBoundaryEquation (expectedName : Name) (source : String) : MetaM Unit
     | .error error => throwError s!"boundary_equation_decode_error:{error}"
   validateEquationAnchor forConst expectedName
   -- Use the anchor's original realization context, never enable a later one.
-  realizeConst forConst expectedName <|
+  realizeBoundaryConst forConst expectedName <|
     realizeCapturedEquation expectedName theoremSource defeqTag backwardTag
   unless (← getEnv).containsOnBranch expectedName do
     throwError "boundary_equation_missing_realized_theorem"

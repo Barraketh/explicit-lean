@@ -22,17 +22,17 @@
     "currentCorpusTotal": 83425,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
+    "note": "Frozen per-module candidates against stock imports are provisional. Current producer is report11/artifact5, with unconditional pending-synthesis restrictions and bounded pre-boundary expression references. Acceptance additionally requires source/comment provenance, cold serialized output certification, and the complete translated dependency tree.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 1158,
-    "provisionalCachedModules": 118,
-    "minimumAcceptedReportSchema": 10,
-    "validationHold": "Cold serialized comparator and independent compilation consumer are integrated, but translated dependency-tree revalidation remains pending. A newly discovered pending typeclass-synthesis route in encoded replay also requires the unconditional search barrier and fresh schema11 validation. Existing generated candidates and proof checks are preserved as provisional."
+    "provisionalCachedOccurrences": 1323,
+    "provisionalCachedModules": 137,
+    "minimumAcceptedReportSchema": 11,
+    "validationHold": "The cold serialized comparator, independent compilation consumer, and unconditional pending-synthesis barrier are integrated and bounded schema11 controls passed. Complete translated dependency-tree certification remains pending; previous candidates and proof checks stay provisional."
   },
   "work": [
     {
@@ -322,6 +322,12 @@
       "owner": "coordinator with Sol implementation after Luna review",
       "status": "completed",
       "description": "Separate cached-only local equation action authenticates current safe owner and full bounded AsyncConst DAG. No fresh fallback or saved-context equivalence claim. Main59-job build/20compiler+15wire+8kind/13field controls pass; root source/comment regenerated and inputs archived. Frozen imported10process/5wire regression passed. Cubic target passes; fullCubic and Extra80-entryauxcache remain separate."
+    },
+    {
+      "id": "expression-reference-search-barrier",
+      "owner": "coordinator with Sol implementation and Luna independent search-path review",
+      "status": "completed",
+      "description": "Integrated artifact5/report11 bounded pre-boundary expression references with exact raw dependency/scope/cycle guards and unconditional pending-synthesis barrier across encoded selection/application, realization callbacks and export Meta runners. Frozen3138hash/75nonce verification; main66jobbuild,39guard/8wire controls,3real-source pipelines,20localcache/15wire regression,17replayabort matrix and4pure corpus protocol validators all passed. Root regenerated actual replacements/comments and archived runtime inputs. Luna found no concrete generated-path bypass; handwritten elaboration API explicitly excluded. Complete translated-tree acceptance remains pending."
     }
   ],
   "blockers": [
@@ -372,9 +378,9 @@
     }
   ],
   "nextActions": [
-    "Integrate reviewed expression reference/no-pending-synthesis barrier with fresh real-source and adversarial controls; require new artifact5/report11 and keep old reports provisional.",
+    "Commit/freeze the reviewed artifact5/report11 runtime and plan broad generation from authenticated existing source inventory; never relabel old report10 results.",
     "Use the integrated cold serialized consumer in a fresh translated dependency cone. Publish only ordinary-applied output after five fresh processes and six complete family checks; freeze all runtime/dependency inputs.",
-    "Finish local-cached-only owner authentication and independently test multiple ordinary helper sequences, then compose under unchanged complete boundary guards.",
+    "Authenticate nonempty local auxiliary-proof cache under a separate exact witness, independently test multiple ordinary helper sequences, then compose under unchanged complete boundary guards.",
     "Let frozen schema10 workers finish bounded queues without editing runtimes or live leases. Reuse diagnostic evidence only; advance broad generation under new frozen runtime once ready.",
     "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and complete source/execution ownership.",
     "After complete explicit coverage and translated-tree acceptance, mine readable normal forms and other common tactics if time remains."
@@ -896,6 +902,16 @@
         ".lake/week-2026-08-31/local-cached-handoff-root-verification.json",
         ".lake/week-2026-08-31/local-cached-main-root-verification.json"
       ]
+    },
+    {
+      "at": "2026-08-31T18:33:01.889463+00:00",
+      "summary": "Integrated bounded expression references and unconditional pending-synthesis barrier after frozen and main fix-review cycles. Main39controls/3sourcepipelines/local20/replay17 passed; root archived runtime and regenerated source/comments. New cold39-module cone started. Artifact5/report11 supersedes prior generated evidence; accepted coverage remains0. Removed stale duplicate root status counts in favor of canonical tracker.",
+      "evidence": [
+        ".lake/week-2026-08-31/expression-reference-root-verification.json",
+        ".lake/week-2026-08-31/expression-reference-main-root-verification.json",
+        ".lake/week-2026-08-31/local-cached-schema11-root-verification.json",
+        ".lake/week-2026-08-31/replay-schema11-root-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1114,6 +1130,18 @@
       "runner": ".lake/week-2026-08-31/run_schema10_translated_forest.py",
       "verification": ".lake/week-2026-08-31/schema10-first-cone-verification.json",
       "scope": "Fresh compilation of all companions plus source-pair oracles under translated dependencies. Full command audit and direct compiled-output semantic binding remain required."
+    },
+    {
+      "id": "schema11-cold-first-cone",
+      "sessionId": 81381,
+      "status": "running",
+      "root": "Mathlib.Logic.Function.Defs",
+      "modules": 39,
+      "freshSourceReport": ".lake/observational-data/Mathlib-Logic-Function-Defs-9sy6wegl/report.json",
+      "runner": ".lake/week-2026-08-31/run_cold_certified_cone.py",
+      "work": ".lake/week-2026-08-31/cold-certified-first-cone-tmf6awe3",
+      "log": ".lake/week-2026-08-31/cold-certified-schema11-cone-r3.log",
+      "scope": "Fresh artifact5 source/comment provenance;39-module strict translated dependency cone, five independent compiler processes and six complete output families per module. No accepted whole-Mathlib coverage."
     }
   ],
   "latestCommits": [
@@ -1184,6 +1212,27 @@
       "downstreamComputed": 14,
       "rootHashChecks": 114,
       "wholeMathlib": false
+    },
+    {
+      "id": "expression-reference-handoff",
+      "status": "integrated_main_verified",
+      "manifest": ".lake/search-free-mathlib/snapshots/expression-reference-prototype/.lake/expression-reference/final-evidence/manifest.json",
+      "manifestSha256": "1f9570a8a22cad69291813021832aa543d26b398e93e924007585e3620420562",
+      "rootVerification": ".lake/week-2026-08-31/expression-reference-root-verification.json",
+      "artifactSchema": 5,
+      "reportSchema": 11,
+      "finalControls": 39,
+      "independentReviewControls": 5,
+      "distinctWireNegatives": 8,
+      "sourcePipelines": 3,
+      "acceptedCoverage": false,
+      "mainRootVerification": ".lake/week-2026-08-31/expression-reference-main-root-verification.json",
+      "mainControls": ".lake/expression-reference/controls-j60fypkj/report.json",
+      "mainSources": ".lake/expression-reference/source-3_7tebqq/report.json",
+      "mainHashAssertions": 922,
+      "localCacheRegression": ".lake/week-2026-08-31/local-cached-schema11-root-verification.json",
+      "replayRegression": ".lake/week-2026-08-31/replay-schema11-root-verification.json",
+      "independentReview": ".lake/schema11-search-review/findings.md"
     }
   ],
   "prototypeCoverage": {
@@ -1269,7 +1318,7 @@
   },
   "productionValidation": {
     "commit": "5f02c0c",
-    "searchFreeEncoding": "lean_expr_dag_v2 (boundary proofs with existing universe references); closed lean_expr_dag_v1 declaration bodies",
+    "searchFreeEncoding": "Artifact5: lean_expr_dag_v3 with bounded pre-boundary universe/opaque expression references; closed lean_expr_dag_v1 declaration bodies. Generated encoded replay blocks pending typeclass synthesis; legacy handwritten elaboration APIs excluded.",
     "representativeMathlibModules": 5,
     "representativeMathlibOccurrences": 66,
     "nestedMathlibOccurrences": 10,
@@ -1503,7 +1552,7 @@
     "checkedAt": "2026-08-31T17:36:47.331238+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T18:21:40.512389+00:00",
+  "updatedAt": "2026-08-31T18:33:01.889463+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

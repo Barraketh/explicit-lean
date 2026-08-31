@@ -278,11 +278,15 @@ yet the complete pinned-corpus acceptance gate.
 The August 31–September 8 campaign is tracked in `WEEKLY.md` and
 `tracking/campaign.json`. A fresh diagnostic inventory accounts for 83,425 calls
 across 8,264 modules, including 66 reusable executable calls and five unresolved
-quotations. It is not translated coverage. Current artifact schema 4 uses raw expression
-DAGs and captured, kernel-checked declarations with exact replay state checks.
+quotations. It is not translated coverage. Current artifact schema 5 uses raw expression
+DAGs, bounded references to existing opaque metavariables, and captured, kernel-checked
+declarations with exact replay state checks. Generated replay blocks pending typeclass
+synthesis, including inside fresh realization callbacks.
+The older handwritten term-elaboration API is outside this contract and is never
+emitted by the materializer.
 The cold certificate validator compares normal serialized compiler outputs and
 requires matching independent, audited, and paired compilations before an
-output can be published. Acceptance remains on hold pending translated-tree
-validation and a newly identified pending typeclass-synthesis guard in replay.
+output can be published. Acceptance remains on hold pending fresh report-schema-11
+validation and certification of the translated dependency tree.
 See `tracking/STATUS.md` for current provisional counts; readability follows
 complete explicit coverage.

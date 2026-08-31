@@ -40,7 +40,7 @@ MODULES = (
 
 
 def encoded_constant(name: str) -> str:
-    return json.dumps(["expr_dag_v2", 0, [["c", [["s", part] for part in name.split(".")], []]], 0])
+    return json.dumps(["expr_dag_v3", 0, 0, [["c", [["s", part] for part in name.split(".")], []]], 0])
 
 
 def expect_join_rejection(
@@ -497,12 +497,7 @@ def validate_occurrence_protocol() -> None:
             "status": "success",
             "stockGenerator": {"namePrefix": [], "idx": 0, "parentIdxs": []},
             "terminal": terminal,
-            "encoding": {
-                "terms": "lean_expr_dag_v2",
-                "locals": "local_decl_index_v1",
-                "universes": "pre_boundary_universe_reference_v1",
-                "instances": "explicit_terms_v1",
-            },
+            "encoding": artifact_protocol()["encoding"],
             "stateDeltas": [],
             "environmentActions": [],
             "locals": locals_value,

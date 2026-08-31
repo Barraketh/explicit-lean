@@ -45,7 +45,7 @@ private structure PreBoundaryBasis where
   checkedDeclarationNames : NameSet
   exprMVars : Array ExprMVarBasis
   levelMVars : Array LevelMVarBasis
-  universeReferences : Array LMVarId
+  expressionReferences : BoundaryExpressionReferences
   fvarIds : Array FVarId
   syntheticMVars : Array (MVarId × Term.SyntheticMVarDecl)
   letRecsToLift : List Term.LetRecToLift
@@ -176,7 +176,7 @@ private def mkPreBoundaryBasis : TacticM PreBoundaryBasis := do
   let mctx ← getMCtx
   let term ← getThe Term.State
   let goals ← getGoals
-  let universeReferences ← boundaryUniverseReferences goals term
+  let expressionReferences ← boundaryExpressionReferenceContext goals term
   let exprMVars := mctx.decls.toList.toArray
     |>.qsort (fun lhs rhs => lhs.2.index < rhs.2.index)
     |>.map fun (id, decl) => { id, decl }
@@ -219,7 +219,7 @@ private def mkPreBoundaryBasis : TacticM PreBoundaryBasis := do
     checkedDeclarationNames
     exprMVars
     levelMVars
-    universeReferences
+    expressionReferences
     fvarIds := allFVarIds
     syntheticMVars
     letRecsToLift := term.letRecsToLift
@@ -2332,10 +2332,10 @@ private def captureGoalArtifact (basis : PreBoundaryBasis) (simpStx : Syntax)
 
 /-- Encode the captured kernel expression directly. No source parser, term
     elaborator, instance search, or universe inference runs during decoding. -/
-private def renderArtifactExpr (references : Array LMVarId) (expression : Expr) : MetaM String :=
-  encodeBoundaryExprWithUniverses expression references
+private def renderArtifactExpr (references : BoundaryExpressionReferences) (expression : Expr) : MetaM String :=
+  encodeBoundaryExprWithReferences expression references
 
-private def transformationJson (references : Array LMVarId) (transformation : TargetArtifact) : TacticM Json := do
+private def transformationJson (references : BoundaryExpressionReferences) (transformation : TargetArtifact) : TacticM Json := do
   let proofJson ← match transformation.proof? with
     | none => pure Json.null
     | some proof => pure (Json.str (← renderArtifactExpr references proof))
@@ -2363,6 +2363,7 @@ private def artifactEncodingJson : Json := Json.mkObj [
   ("terms", Json.str boundaryArtifactTermEncoding),
   ("locals", Json.str boundaryArtifactLocalReferenceEncoding),
   ("universes", Json.str boundaryArtifactUniverseEncoding),
+  ("expressionReferences", Json.str boundaryArtifactExpressionReferenceEncoding),
   ("instances", Json.str boundaryArtifactInstanceEncoding)
 ]
 
@@ -2394,9 +2395,9 @@ private def artifactReportJson (basis : PreBoundaryBasis) (occId : String) (sele
         ("kind", Json.str "local_decl_index"),
         ("index", toJson decl.index)
       ]),
-      ("transformation", ← transformationJson basis.universeReferences localArtifact.transformation)
+      ("transformation", ← transformationJson basis.expressionReferences localArtifact.transformation)
     ]
-  let targetJson ← artifact.target?.mapM (transformationJson basis.universeReferences)
+  let targetJson ← artifact.target?.mapM (transformationJson basis.expressionReferences)
   return Json.mkObj [
     ("kind", Json.str boundaryArtifactKind),
     ("schema", toJson boundaryArtifactSchema),
@@ -2488,6 +2489,7 @@ private def runBoundaryProbe (simpStx : Syntax)
   let stockState ← Tactic.saveState
   let stockGenerator ← getDeclNGen
   let stockEnvironment ← getEnv
+  let stockMCtx ← getMCtx
   let restoreTrialInput : TacticM Unit := do
     pre.restore
     setDeclNGen preGenerator
@@ -2496,7 +2498,10 @@ private def runBoundaryProbe (simpStx : Syntax)
     let environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
     restoreTrialInput
     let artifact ← captureGoalArtifact basis simpStx selection
-    let artifact := { artifact with environmentActions }
+    let use ← protectBoundaryReferences basis.expressionReferences artifact.expressions
+    use.checkContext stockMCtx
+    use.checkUnchanged
+    let artifact := { artifact with environmentActions, referenceUse? := some use }
     let terminal := artifactTerminal artifact
     -- Rendering must happen in the original local context. Proof-bearing local
     -- transformations clear their old declarations during apply, after which a
