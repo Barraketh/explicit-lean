@@ -115,6 +115,8 @@ private def childAt (nodes : Array Expr) (json : Json) : Except String Expr := d
   return expr
 
 private def requireConstant (env : Environment) (name : Name) : Except String Unit := do
+  if name == ``sorryAx then
+    throw "expression contains forbidden sorryAx"
   -- A normal getConstVal/find? can execute a registered ReservedNameAction.
   -- Such generators are arbitrary metaprograms, so never realize them here.
   unless (env.find? name (skipRealize := true)).isSome do

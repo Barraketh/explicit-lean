@@ -39,6 +39,7 @@ run_meta do
   for source in ["[\"expr_dag_v1\",[[\"a\",0,0]],0]",
       "[\"expr_dag_v1\",[[\"f\",999999]],0]",
       "[\"expr_dag_v1\",[[\"tactic\",\"simp\"]],0]",
+      "[\"expr_dag_v1\",[[\"c\",[[\"s\",\"sorryAx\"]],[]]],0]",
       "[\"expr_dag_v1\",[[\"s\",[\"mvar\",0]]],0]"] do
     let rejected ← try
       discard <| decodeBoundaryExpr source
