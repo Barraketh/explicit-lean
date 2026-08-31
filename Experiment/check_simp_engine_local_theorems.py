@@ -134,8 +134,9 @@ def main():
     compile_case('unsupported-computation', text, recording=True,
                  abort='boundary_comparison_unsupported_environment_delta')
 
-    # No declaration accounts for this stock naming effect: strict comparator
-    # must reject it rather than resetting a counter to make replay succeed.
+    # No declaration accounts for this stock naming effect. The integrated
+    # declaration-reservation path must reject the non-aesop source before it
+    # can synthesize a reservation or reset a counter.
     start = TEMPLATE.index('  let first ←')
     end = TEMPLATE.index('\nelab "inspect_helpers"')
     text = TEMPLATE[:start] + '''  let gen ← getDeclNGen
@@ -144,7 +145,8 @@ def main():
 ''' + TEMPLATE[end:]
     text = text[:text.index('elab "inspect_helpers"')] + TEMPLATE[TEMPLATE.index('public theorem sample'):]
     text = text.replace('CALL', CALL).replace('  inspect_helpers\n', '')
-    compile_case('uncaptured-counter-effect', text, recording=True, abort='core.auxDeclNGen')
+    compile_case('uncaptured-counter-effect', text, recording=True,
+                 abort='boundary_reservation_source_not_single_plain_aesop')
     failed = text.replace('evalTactic (← `(tactic| assumption))', 'throwError "deliberate discharge failure"')
     failed = failed.replace('(disch := make_helpers)', '+failIfUnchanged (disch := make_helpers)')
     compile_case('failed-stock-counter-effect', failed, recording=True,
