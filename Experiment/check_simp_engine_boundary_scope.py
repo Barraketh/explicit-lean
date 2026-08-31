@@ -190,7 +190,6 @@ def load_records_with_fallbacks(
         [
             "lake",
             "build",
-            "ExplicitLean",
             "ExplicitLean.SimpEngine.Boundary.ScopeFixture",
             "ExplicitLean.SimpEngine.Boundary.ScopeProbe",
         ],

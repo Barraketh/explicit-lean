@@ -1001,6 +1001,13 @@
       "status": "bounded_verified",
       "verification": ".lake/week-2026-08-31/congruence-doc-policy-root-verification.json",
       "note": "Main31-job Lean build, six schema12 tests and four full Python validators pass. Unitization9-call private pipeline and45unique invocation receipts verified; fresh main production rerun pending. Separate production12 two-module26-call smoke fully revalidated. Whole-corpus acceptance unchanged."
+    },
+    {
+      "at": "2026-08-31T20:16:42.222863+00:00",
+      "id": "scope-analysis-decoupled",
+      "status": "verified",
+      "note": "Removed full ExplicitLean import/build prerequisite from scope tool;205module byte comparisons and fresh two-process fixture pass; main native bytes equal corrected verified prototype; source timeout and checkpoint controls pass.",
+      "verification": ".lake/week-2026-08-31/scope-decoupling-main-verification.json"
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1498,6 +1505,17 @@
       ],
       "separatelyRequiredCalls": 11,
       "note": "Fresh frozen10 manifest; excluded source modules remain required and separately tracked, not translation acceptance."
+    },
+    "analysisDecoupling": {
+      "status": "integrated",
+      "verification": ".lake/week-2026-08-31/scope-decoupling-main-verification.json",
+      "frozenManifestSha256": "6b9eaf4e20cc57c0fd0f659d9271631c1bd30abd2e27bc8a0dbe83086f8ecb3c",
+      "comparedModules": 205,
+      "fixtureOccurrences": 13,
+      "fixtureDeclarations": 18,
+      "mainNativeMatchesVerifiedPrototype": true,
+      "earlierStaleBuild": "rejected; prototype originally shared main build symlink; corrected private native rebuild and comparisons frozen separately",
+      "checkpointIdentityWork": "new conservative analysis-only identity under development; no old manifest rebinding"
     }
   },
   "database": {
@@ -1854,7 +1872,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T20:13:45.734595+00:00",
+  "updatedAt": "2026-08-31T20:16:42.222863+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

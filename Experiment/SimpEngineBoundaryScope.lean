@@ -1,4 +1,3 @@
-import ExplicitLean
 import Mathlib
 import Lean.DeclarationRange
 import Lean.Elab.Frontend
