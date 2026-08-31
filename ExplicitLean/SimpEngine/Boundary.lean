@@ -39,6 +39,7 @@ private structure LevelMVarBasis where
 
 private structure PreBoundaryBasis where
   environment : Environment
+  checkedDeclarationNames : NameSet
   exprMVars : Array ExprMVarBasis
   levelMVars : Array LevelMVarBasis
   fvarIds : Array FVarId
@@ -160,6 +161,12 @@ private def boundaryLocalDecls (lctx : LocalContext) : Array LocalDecl :=
   lctx.foldl (fun decls decl => decls.push decl) #[]
 
 private def mkPreBoundaryBasis : TacticM PreBoundaryBasis := do
+  let environment ← getEnv
+  -- Environment.constants is the checked view, including declarations from
+  -- prior async branches. Snapshot that same domain before stock execution;
+  -- Environment.contains defaults to skipping other branches' realizations.
+  let checkedDeclarationNames := environment.constants.foldStage2
+    (fun names name _ => names.insert name) ({} : NameSet)
   let mctx ← getMCtx
   let term ← getThe Term.State
   let goals ← getGoals
@@ -193,7 +200,8 @@ private def mkPreBoundaryBasis : TacticM PreBoundaryBasis := do
   let syntheticMVars := term.syntheticMVars.toList.toArray
     |>.qsort (fun lhs rhs => toString lhs.1.name < toString rhs.1.name)
   return {
-    environment := ← getEnv
+    environment
+    checkedDeclarationNames
     exprMVars
     levelMVars
     fvarIds := allFVarIds
@@ -1646,7 +1654,7 @@ private def boundaryEnvironmentDeclarations (environment : Environment) :
 private def boundaryEnvironmentDelta (basis : PreBoundaryBasis)
     (environment : Environment) : Array ConstantInfo :=
   (boundaryEnvironmentDeclarations environment).filter fun info =>
-    !basis.environment.contains info.name
+    !basis.checkedDeclarationNames.contains info.name
 
 private def boundaryEnvironmentPrivateName (_basis : PreBoundaryBasis) (name : Name) : Bool :=
   -- Authored public names such as `sample.proof_1` may look generated.

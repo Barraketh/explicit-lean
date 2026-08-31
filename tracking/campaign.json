@@ -135,6 +135,12 @@
       "owner": "coordinator with Luna review and controls",
       "status": "completed",
       "description": "Schema7 compares typed local MatchEqns state and all completed async declaration snapshots.16mutation unit checks, direct-local/equation-set-only negative controls, real Prop async negative and cached positives passed. Earlier schema5/6 cache remains provisional."
+    },
+    {
+      "id": "coherent-declaration-delta",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Snapshot pre-boundary checked declaration names and subtract in the same checked domain. Avoid attributing earlier async realizations to an unrelated simp call. No generator reset or public-name exemption."
     }
   ],
   "blockers": [
@@ -165,7 +171,7 @@
     }
   ],
   "nextActions": [
-    "Finish schema7 local matcher-state guard review; freeze and run the direct and diverse batches. Prior results remain provisional.",
+    "Freeze combined schema7 and run151module/1473call manifest with separate13module direct and100module diverse workers; revalidate39module translated cone.",
     "Keep full diagnostic source inventory and unresolved backlog; defer another full manifest run until the diverse batch stabilizes the implementation.",
     "Resolve reusable source/execution ownership and metaprogram equivalence rather than bypassing the shard rejection; collect positive unresolved caller evidence.",
     "Revalidate the first39module translated dependency cone under schema7, then expand translated dependency closure with strict import isolation.",
@@ -374,6 +380,22 @@
         "No accepted schema7 module reports yet.",
         "No full translated Mathlib tree."
       ]
+    },
+    {
+      "at": "2026-08-31T11:56:04.247916+00:00",
+      "summary": "Committed7b4c71c local matcher-state guard. Identical direct-local and equation-set mutation fixtures falsely accepted by old6287642 and rejected by current guard. Coherent checked-name delta fix now passes combined main38jobbuild, full17sourcegate, default-local and real async controls. Promoted5process tiny delta regression passed: pre-existing off-branch helper excluded, fresh equation replay retained, fresh private computation rejected. Actual Set single-target replay preserves idx1/public _proof_1. All44archived Sol evidence hashes and10nonce-framed logs verified independently. Matcher and public-theorem replay prototypes remain unintegrated. Weeklyusage10%.",
+      "checks": [
+        "coherent-delta-build.log:38jobs passed",
+        "coherent-delta-source.log:17calls materialized including1explicit unobserved; compiled and zero remaining",
+        "coherent-delta-match-state.log and coherent-delta-async-state.log: passed",
+        "checked-delta-promoted.log: all5compiler controls passed",
+        "matcher-codec-prototype/.lake/aux-state/checked-delta-evidence.json SHA2565e482f4564ae876145c50c78c98b88fd0e780e110c0cc778fea6d1b426eb6b3c verified"
+      ],
+      "limitations": [
+        "No accepted schema7 module reports yet; next fresh batch pending.",
+        "Actual Set regression replaces only1of15calls, not full-module coverage.",
+        "Branch activation and checked declaration appearance are distinct effects; no universal generator-state equivalence claim."
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -492,7 +514,8 @@
     "13373ad",
     "5819eda",
     "38492ab",
-    "6287642"
+    "6287642",
+    "7b4c71c"
   ],
   "experiments": [
     {
