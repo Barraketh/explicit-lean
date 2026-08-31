@@ -346,6 +346,12 @@
       "owner": "coordinator",
       "status": "completed_fresh_production_pending",
       "description": "Instrumentation now supplies exact sorted outer-tactic replacement lengths to existing independent linear byte-gap validator. Authored bytes/import/expected-render checks unchanged; no diff fallback. Unicode/head-antiquotation/nested/stock-applied and corrupted-context controls pass. Actual45call Finprod olddiff timesout6s with captured difflib stack; linear guard passes0.002s. Six schema12 tests pass."
+    },
+    {
+      "id": "declaration-branch-reservation",
+      "owner": "coordinator with Luna fix-review and Sol integration",
+      "status": "completed_bounded",
+      "description": "Integrated6b97bfd. Replays exactly one computed mkChild plus optional authenticated absent-key registration of an active imported equation theorem; exact pre/final checked/branch/matcher/equation/sparse/aux states and parsed original source. No Aesop/search/raw counter/state assignment. Failure catches restore authentic pre-generator. Private Finprod45/45 fresh replay+oracle352/315/34 pass;21runtime+3wire controls,83unique receipts/2510frozenfiles independently verified. Main71job build, Python/schema12/source-gap checks pass."
     }
   ],
   "blockers": [
@@ -393,12 +399,17 @@
       "id": "pending-typeclass-synthesis-during-replay",
       "status": "resolved_bounded_revalidation_pending",
       "detail": "Unconditional maxSynthPendingDepth barrier integrated f231289 across generated replay and callbacks. Fresh bounded tests pass. Earlier artifact4 reports remain historical; whole translated tree acceptance still pending."
+    },
+    {
+      "id": "inline-first-selector-rendering",
+      "status": "open_bounded_reproduction",
+      "detail": "Generated multiline simp_engine_boundary_select is ambiguous inside inline `first | simp ... | exact ...`; frozen failure in declaration-branch handoff. No waiver. Fix renderer before final corpus closure."
     }
   ],
   "nextActions": [
-    "Finish current8260module analysis/cache publication; integrate imminent Finprod fix and linear source guard, freeze current runtime, reuseanalysischeckpoints for freshfullmanifest and bounded500moduleworker. Avoid starting known-stale worker during finalfixreview.",
-    "Complete Finprod deterministic branch reservation plus authenticated active imported equation registration, rollback controls and full45call production replay/oracle.",
-    "Preserve exact ToAdditive metadata for List.Basic51; typed fresh diagnostic identified two missing private proof translations. Keep strict oracle while investigating checked-declaration replay.",
+    "Complete strict fresh-helper reference preservation for List.Basic51, requiring exact second-capture local-theorem actions and full75/75 ToAdditive map; integrate only after focused negatives/full oracle.",
+    "Finish typed unsupported-root diagnostic for Unitization/Expect/NonUnitalSubalgebra; add only grounded deterministic realization shapes, never relax imported-owner/root guards from old logs.",
+    "After imminent strict fixes freeze latest runtime, publish a fresh provenance manifest from content-bound analysis checkpoints, and start bounded500module indexed production worker under disk/budget guards.",
     "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and full source/execution ownership.",
     "Assemble translated dependency tree and cold-certify outputs; optional lossless storage only before publication after complete validation.",
     "After full explicit coverage and translated-tree acceptance, improve readable normal forms and extend other tactics if time remains."
@@ -1038,6 +1049,10 @@
     {
       "at": "2026-08-31T21:18:40.236954+00:00",
       "summary": "Fresh current closed-subset manifest independently verified:8260modules/83414materialize calls/91nested,83349direct+65reusable,0unresolved in subset; four separately required modules contain11calls. All sourcebytes/ranges/IDs/role/action counts and implementation inputs verified. Broad worker held because replay runtime is advancing. ToAdditive strict cause isolated: replayed helper declarations exist but their root references are inlined, preventing normal traversal; exact helper-reference preservation prototype started, no metadata exemption."
+    },
+    {
+      "at": "2026-08-31T21:26:34.168800+00:00",
+      "summary": "Declaration-branch reservation integrated6b97bfd after independent2510file/10livebinding/83nonce verification. Final runtime focus2+Finprod45/45 pass, oracle352decl315public34extensions0omissions;21runtime+3wire+19source/protocol/legacy/failure controls pass. Main71jobbuild,6schema12,source-gap/pycompile pass. Deterministic active-equation insertion precedes computed mkChild; both infrastructure and recording-failure generator rollback repaired. Inline-first renderer issue retainedopen."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1302,7 +1317,7 @@
     },
     {
       "id": "schema12-bigoperators150",
-      "status": "completed_one_pass_two_failures",
+      "status": "completed_two_pass_one_failure_after_bounded_fix",
       "sessionId": 31932,
       "snapshot": ".lake/search-free-mathlib/snapshots/schema12-congruence-campaign",
       "commit": "3ecc925",
@@ -1310,7 +1325,7 @@
       "expectedOccurrences": 150,
       "log": ".lake/schema12-bigoperators.log",
       "resultRoot": ".lake/schema12-bigoperators-yuxn215i",
-      "note": "Finset.Basic54/57variants passes strict production12. Finprod45 fails generator; List.Basic51 records/replays but fulloracle fails ToAdditive translations. Exact guarded inputs restored and both production consumers reverified after isolated diagnostic workflow error; see snapshot-write-incident.json. No masterindex lease or acceptance claim.",
+      "note": "Finset.Basic54/57 and fresh final-runtime Finprod45/45 pass strict replay/oracles. List.Basic51 records/replays but strict ToAdditive map remains until helper-reference repair. Finprod evidence is a separate current private pipeline, not a rebinding of the historical BigOperators run. Whole-tree coverage unchanged.",
       "succeededModules": 1,
       "failedModules": 2,
       "verifiedCalls": 54,
@@ -1508,8 +1523,8 @@
     },
     {
       "id": "finprod-empty-delta-generator",
-      "status": "consumer_verified_narrow_effect_replay_in_progress",
-      "rootVerification": ".lake/week-2026-08-31/finprod-generator-root-verification.json",
+      "status": "bounded_fix_integrated_main_verified",
+      "rootVerification": ".lake/week-2026-08-31/declaration-branch-reservation-root-verification.json",
       "occurrences": [
         "054f57be19797140",
         "a3bb7cb79374a720"
@@ -1517,7 +1532,12 @@
       "finding": "Pinned Aesop root preprocessing reserves one child declaration namespace via mkChild. Fresh full-source controls independently verified. Reservation prototype additionally exposed exact imported HasFiniteSupport.eq_1 mapInv registration; capture/replay must authenticate this insertion and retain all other state checks. Infrastructure rollback prototype exposed Core.SavedState omission of generator; minimal explicit catch restoration under validation.",
       "owner": "local_cached_sequence",
       "acceptedCampaignCoverage": false,
-      "consumerRootVerification": ".lake/week-2026-08-31/finprod-consumer-root-verification.json"
+      "consumerRootVerification": ".lake/week-2026-08-31/finprod-consumer-root-verification.json",
+      "commit": "6b97bfd",
+      "handoffManifest": ".lake/search-free-mathlib/snapshots/declaration-branch-reservation-prototype/.lake/declaration-branch-reservation-handoff/manifest.json",
+      "handoffSha256": "f5717509d0260a3f8d48198ceb0aef669d271355e4b7b5fc24abac8248140267",
+      "fullModuleCalls": 45,
+      "oracle": "352decl/315public/34extensions/0privateproofomissions"
     },
     {
       "id": "toadditive-translations-diagnostic",
@@ -2055,7 +2075,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T21:18:40.236954+00:00",
+  "updatedAt": "2026-08-31T21:26:34.168800+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

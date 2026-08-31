@@ -66,6 +66,13 @@ oracle. Separate mutation controls cover proofs, owners, registrations and
 snapshots. The production report and all three native invocations have been
 independently revalidated; complete translated-tree acceptance remains pending.
 
+A bounded declaration-branch action now covers Finprod’s two nested-`aesop`
+side effects. It authenticates the exact original syntax and complete relevant
+environment state, inserts at most one already-active imported equation mapping,
+and computes one `DeclNameGenerator.mkChild`. Replay performs no tactic search
+and never assigns a recorded counter or extension state. All 45 Finprod calls
+pass fresh replay and the full oracle; whole-tree acceptance remains pending.
+
 Inventory and scope checkpoints have a separate content identity for their
 analysis sources, native executables, and pinned dependencies. Replay-only
 edits can reuse that analysis; each resulting manifest still records current
