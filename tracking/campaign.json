@@ -20,17 +20,17 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 0,
+    "verifiedTranslatedOccurrences": 66,
     "completeTranslatedTreeBuilt": false,
-    "note": "Only reports from schema7 or newer can count toward acceptance; prior schema5/6 results remain provisional. Full translated Mathlib closure remains pending.",
+    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle, plus local matcher-state comparison (report schema 7). Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 67,
-    "provisionalCachedModules": 9,
+    "verifiedTranslatedModules": 8,
+    "provisionalCachedOccurrences": 0,
+    "provisionalCachedModules": 0,
     "minimumAcceptedReportSchema": 7
   },
   "work": [
@@ -171,10 +171,10 @@
     }
   ],
   "nextActions": [
-    "Freeze combined schema7 and run151module/1473call manifest with separate13module direct and100module diverse workers; revalidate39module translated cone.",
+    "Finish frozen schema7 direct/diverse workers; review failures and expand current translated dependency closure.",
     "Keep full diagnostic source inventory and unresolved backlog; defer another full manifest run until the diverse batch stabilizes the implementation.",
     "Resolve reusable source/execution ownership and metaprogram equivalence rather than bypassing the shard rejection; collect positive unresolved caller evidence.",
-    "Revalidate the first39module translated dependency cone under schema7, then expand translated dependency closure with strict import isolation.",
+    "39module/2call translated cone passed schema7; expand strict translated import closure after more source modules pass.",
     "After full explicit coverage and full-tree validation, improve readability and then other tactics if time remains."
   ],
   "checkpoints": [
@@ -396,6 +396,31 @@
         "Actual Set regression replaces only1of15calls, not full-module coverage.",
         "Branch activation and checked declaration appearance are distinct effects; no universal generator-state equivalence claim."
       ]
+    },
+    {
+      "at": "2026-08-31T12:02:01.189531+00:00",
+      "summary": "Fresh frozen560bbab manifest completed151modules/1473calls (syntax26.85s,scope38.79s). Separate direct13module and diverse100module workers started with master SQLite leases. Strict schema7 results can count toward per-module acceptance; full translated-tree closure still separate. Public theorem prototype passed initial6process checks; independent review led to stricter singleton groups/canonical cached bodies, expanded fixture pending. Matcher integration is running only in isolated prototype. Weeklyusage10%.",
+      "pending": [
+        "Wait for Function.Defs schema7 report, then rerun39module strict translated cone.",
+        "Review/integrate matcher capability after fresh source and actual Nat.Init checks.",
+        "Finish public theorem/captured auxiliary cache fixture review before integration."
+      ]
+    },
+    {
+      "at": "2026-08-31T12:07:48.864663+00:00",
+      "summary": "Schema7 translated dependency cone passed39modules/2calls with stockMathlib roots excluded. Independently rehashed stock/translated sources, compiled/dependency oleans, manifest/report, and rescanned39nonce-framed logs. Current per-module index counts66calls/8modules, against stock imports; full Mathlib closure remains pending. Matcher mixed-delta integration and public theorem codec fixtures remain isolated. Luna improving exact missing/extra oracle diagnostics. Weeklyusage11%.",
+      "evidence": {
+        "report": ".lake/search-free-mathlib/snapshots/schema7-broad/.lake/translated-first-cone-schema7/report.json",
+        "sha256": "598669c5068374b5e4da7be4a423e681dd840a997fa27c45632e4403cfeccebc",
+        "verifiedModules": 39,
+        "replacedCalls": 2,
+        "scope": "bounded translated dependency cone; not whole Mathlib",
+        "checks": "stock/translated sources, compiled/dependency oleans, 39 authenticated output rescans, manifest/report hashes"
+      },
+      "limitations": [
+        "39module cone contains only2replacedcalls; other37modules have no source simp sites.",
+        "New schema7 workers remain active; counts are timestamped, not final."
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -485,6 +510,26 @@
       "succeededModules": 9,
       "failedModules": 4,
       "provisionalCalls": 67
+    },
+    {
+      "id": "schema7-direct",
+      "sessionId": 39676,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema7-broad",
+      "commit": "560bbab",
+      "log": ".lake/schema7-direct.log",
+      "status": "running",
+      "modules": 13,
+      "expectedOccurrences": 150
+    },
+    {
+      "id": "schema7-diverse",
+      "sessionId": 83129,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema7-broad",
+      "commit": "560bbab",
+      "log": ".lake/schema7-diverse.log",
+      "status": "running",
+      "modules": 100,
+      "expectedOccurrences": 1323
     }
   ],
   "latestCommits": [
@@ -515,7 +560,8 @@
     "5819eda",
     "38492ab",
     "6287642",
-    "7b4c71c"
+    "7b4c71c",
+    "560bbab"
   ],
   "experiments": [
     {
@@ -590,7 +636,7 @@
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 0,
+    "verifiedTranslations": 66,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
@@ -612,6 +658,17 @@
         "report": ".lake/search-free-mathlib/snapshots/schema6-direct-gates/.lake/translated-first-cone-options/report.json",
         "reportSha256": "d7f6f8501d54fb53c8f987b32cd45151153e76f2f851a3d11f03e071e3567d56",
         "status": "compiled_provisional_pending_schema7"
+      },
+      {
+        "commit": "560bbab",
+        "root": "Mathlib.Logic.Function.Defs",
+        "modules": 39,
+        "replacedCalls": 2,
+        "report": ".lake/search-free-mathlib/snapshots/schema7-broad/.lake/translated-first-cone-schema7/report.json",
+        "reportSha256": "598669c5068374b5e4da7be4a423e681dd840a997fa27c45632e4403cfeccebc",
+        "status": "passed_schema7_bounded_cone",
+        "wholeMathlib": false,
+        "independentVerification": ".lake/week-2026-08-31/schema7-cone-verification.json"
       }
     ]
   }
