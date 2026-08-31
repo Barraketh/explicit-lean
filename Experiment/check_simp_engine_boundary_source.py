@@ -85,19 +85,29 @@ def replace_occurrence(source: bytes, start: int, end: int, replacement: str) ->
     return source[:start] + replacement.encode("utf-8") + source[end:]
 
 
-def replace_all_occurrences(
+def preserve_original_call(replacement: str, original: str, indent: str) -> str:
+    """Keep original source as inert line comments after the tactic header.
+
+    Keep the first tactic token at its original column: moving an inline `by`
+    tactic to the following line can change Lean's offside rule. Line comments
+    also safely retain comment delimiters occurring inside original strings.
+    For a selector, provenance sits between its header and variant branches.
+    A terminal-only replacement gets a final newline/indent so an authored
+    suffix (a semicolon, comma, or closing delimiter) is never commented out.
+    """
+    first, separator, rest = replacement.partition("\n")
+    comments = [indent + "-- Original simp:"]
+    comments.extend(indent + "-- " + line for line in original.split("\n"))
+    suffix = rest if separator else indent[:-2]
+    return first + "\n" + "\n".join(comments) + "\n" + suffix
+
+
+def materialization_edits(
     source: bytes,
     entries: list[dict[str, object]],
     reports: dict[str, list[dict[str, object]]],
-) -> bytes:
-    """Replace complete occurrences and indent from their actual final columns.
-
-    Multiple occurrences may share one source line. First installing one-line
-    placeholders preserves stable original ranges; expanding those placeholders
-    from left to right then accounts for newlines introduced by every earlier
-    artifact on the line. Contained occurrences are consumed with their outer
-    root, which is the only place an artifact is emitted.
-    """
+) -> list[tuple[int, int, bytes]]:
+    """Render disjoint edits from left to right, using actual output columns."""
     entries, _covered = replacement_plan(source, entries, "materialized source")
     for entry in entries:
         occurrence = str(entry["id"])
@@ -105,31 +115,42 @@ def replace_all_occurrences(
             raise RuntimeError(f"missing artifact report for {occurrence}")
     if set(reports) != {str(entry["id"]) for entry in entries}:
         raise RuntimeError("artifact reports must belong exactly to replacement roots")
-    placeholders: dict[str, bytes] = {
-        str(entry["id"]): f"__simpBoundaryPlaceholder_{entry['id']}__".encode("ascii")
-        for entry in entries
-    }
-    for entry in sorted(entries, key=lambda item: int(item["startByte"]), reverse=True):
+    edits = []
+    cursor = 0
+    column = 0
+    for entry in entries:
         occurrence = str(entry["id"])
-        source = replace_occurrence(
-            source,
-            int(entry["startByte"]),
-            int(entry["endByte"]),
-            placeholders[occurrence].decode("ascii"),
-        )
-    for entry in sorted(entries, key=lambda item: int(item["startByte"])):
-        occurrence = str(entry["id"])
-        placeholder = placeholders[occurrence]
-        if source.count(placeholder) != 1:
-            raise RuntimeError(f"materialization placeholder is not unique: {occurrence}")
-        start = source.index(placeholder)
-        replacement = format_report_variants(
-            reports[occurrence], source_continuation_indent(source, start)
-        )
-        source = replace_occurrence(
-            source, start, start + len(placeholder), replacement
-        )
-    return source
+        start, end = int(entry["startByte"]), int(entry["endByte"])
+        gap = source[cursor:start].decode("utf-8")
+        column = len((" " * column + gap).rsplit("\n", 1)[-1].expandtabs(8))
+        indent = " " * (column + 2)
+        replacement = format_report_variants(reports[occurrence], indent)
+        original = source[start:end].decode("utf-8")
+        replacement = preserve_original_call(replacement, original, indent)
+        edits.append((start, end, replacement.encode("utf-8")))
+        column = len((" " * column + replacement).rsplit("\n", 1)[-1].expandtabs(8))
+        cursor = end
+    return edits
+
+
+def materialization_replacement_lengths(source, entries, reports) -> list[int]:
+    return [len(replacement) for _start, _end, replacement in
+            materialization_edits(source, entries, reports)]
+
+
+def replace_all_occurrences(
+    source: bytes,
+    entries: list[dict[str, object]],
+    reports: dict[str, list[dict[str, object]]],
+) -> bytes:
+    """Splice generated roots without modifying any authored context gap."""
+    chunks = []
+    cursor = 0
+    for start, end, replacement in materialization_edits(source, entries, reports):
+        chunks.extend((source[cursor:start], replacement))
+        cursor = end
+    chunks.append(source[cursor:])
+    return b"".join(chunks)
 
 
 def expect_validation_error(
@@ -756,6 +777,7 @@ def main() -> None:
             imported="ExplicitLean.SimpEngine.Boundary.Tactic",
             label="materialized source Experiment.SimpEngineBoundarySourceInput",
             expected_without_import=materialized_without_import,
+            replacement_lengths=materialization_replacement_lengths(original, entries, reports),
         )
         materialized_path = work / "materialized" / "Experiment" / SOURCE.name
         materialized_path.parent.mkdir(parents=True, exist_ok=True)

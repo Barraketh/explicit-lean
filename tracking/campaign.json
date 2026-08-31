@@ -68,7 +68,18 @@
       "description": "After explicit closure, mine and normalize common replacement patterns"
     }
   ],
-  "blockers": [],
+  "blockers": [
+    {
+      "id": "implicit-evidence-elaboration",
+      "status": "open",
+      "detail": "Boundary artifact schema 1 encodes instance and universe arguments as inferred_at_application. Full search-free acceptance requires explicit reconstruction / a search-free elaboration audit, not just absence of simp replay."
+    },
+    {
+      "id": "reusable-tactic-ownership",
+      "status": "open",
+      "detail": "Reusable tactic source ownership and execution-module identity plus transformed metaprogram equivalence remain to be resolved for corpus closure."
+    }
+  ],
   "nextActions": [
     "Finish source/comment regression and integrate reviewed Luna infrastructure",
     "Commit toolchain changes, generate fresh current-contract canary manifests",
@@ -93,6 +104,15 @@
       ],
       "pending": [
         "Full 17-occurrence source gate running; three Luna infrastructure reviews pending"
+      ]
+    },
+    {
+      "at": "2026-08-31T08:42:13.786888+00:00",
+      "summary": "Full 17-occurrence source fixture passed with original-call comments and zero remaining syntax occurrences. Linear source-gap check reviewed and tested. Nested fixture plus Mathlib Action oracle gate in progress.",
+      "checks": [
+        "Experiment/check_simp_engine_boundary_source.py passed; log .lake/week-2026-08-31/source-comments-gate.log",
+        "All four pure corpus protocol validators passed",
+        "AST parse of 43 coordinator/stable Python files passed"
       ]
     }
   ],

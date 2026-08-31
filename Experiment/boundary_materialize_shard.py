@@ -43,7 +43,10 @@ from boundary_protocol import (
     validate_artifact_protocol,
     validate_occurrence_summary,
 )
-from check_simp_engine_boundary_source import replace_all_occurrences
+from check_simp_engine_boundary_source import (
+    materialization_replacement_lengths,
+    replace_all_occurrences,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -782,6 +785,7 @@ def _assert_context_gaps(
     imported: str,
     label: str,
     expected_without_import: bytes,
+    replacement_lengths: list[int] | None = None,
 ) -> None:
     assert_exact_source_preservation(
         original,
@@ -790,6 +794,7 @@ def _assert_context_gaps(
         imported=imported,
         label=label,
         expected_without_import=expected_without_import,
+        replacement_lengths=replacement_lengths,
     )
 
 
@@ -1129,6 +1134,9 @@ def _module_result(
             selected.source,
             list(selected.materialize),
             report_variants,
+        ),
+        replacement_lengths=materialization_replacement_lengths(
+            selected.source, list(selected.materialize), report_variants,
         ),
     )
     materialized_code, materialized_output, materialized_elapsed = _compile_copy(

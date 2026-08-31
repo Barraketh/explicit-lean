@@ -652,6 +652,35 @@ def _assert_changes_within_ranges(
             )
 
 
+def _assert_exact_context_gaps(
+    original: bytes, generated: bytes, ranges: list[tuple[int, int]],
+    lengths: list[int], label: str,
+) -> None:
+    """Verify unchanged gaps in linear time using declared replacement lengths.
+
+    Replacement lengths delimit generated regions, not permitted source ranges.
+    Every byte outside the independently validated source ranges must match.
+    This avoids ambiguous/quadratic diff alignment when originals also appear
+    in provenance comments or the generated proofs contain repetitive terms.
+    """
+    if len(lengths) != len(ranges):
+        raise RuntimeError(f"{label} replacement length count differs from root ranges")
+    for length in lengths:
+        _require_int(length, f"{label} replacement length", nonnegative=True)
+    expected_size = len(original) + sum(lengths) - sum(end - start for start, end in ranges)
+    if len(generated) != expected_size:
+        raise RuntimeError(f"{label} generated size disagrees with replacement lengths")
+    old_cursor = new_cursor = 0
+    for (start, end), length in zip(ranges, lengths):
+        gap = original[old_cursor:start]
+        if generated[new_cursor:new_cursor + len(gap)] != gap:
+            raise RuntimeError(f"{label} changes authored bytes outside selected ranges")
+        new_cursor += len(gap) + length
+        old_cursor = end
+    if generated[new_cursor:] != original[old_cursor:]:
+        raise RuntimeError(f"{label} changes authored bytes outside selected ranges")
+
+
 def assert_exact_source_preservation(
     original: bytes,
     generated: bytes,
@@ -660,21 +689,25 @@ def assert_exact_source_preservation(
     imported: str,
     label: str,
     expected_without_import: bytes,
+    replacement_lengths: list[int] | None = None,
 ) -> None:
     """Prove that only the known transformation and import changed source.
 
-    The diff-based check independently proves that every deletion, corruption,
-    replacement, or insertion is confined to a selected original range.  The
-    exact pre-import comparison is retained as a second check that the selected
-    replacements themselves equal the recorded transformation.
+    Explicit replacement lengths allow a linear check of every unchanged gap;
+    callers without lengths use a diff check. Both independently confine edits
+    to validated source ranges. The exact pre-import comparison also checks
+    that the replacements themselves equal the recorded transformation.
     """
     ranges = _selected_ranges(original, entries, label)
     errors: list[str] = []
     for generated_without_import in _without_import_candidates(generated, imported):
         try:
-            _assert_changes_within_ranges(
-                original, generated_without_import, ranges, label
-            )
+            if replacement_lengths is None:
+                _assert_changes_within_ranges(original, generated_without_import, ranges, label)
+            else:
+                _assert_exact_context_gaps(
+                    original, generated_without_import, ranges, replacement_lengths, label
+                )
             if generated_without_import != expected_without_import:
                 raise RuntimeError(
                     f"{label} does not match its recorded transformation"

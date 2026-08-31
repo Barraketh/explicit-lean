@@ -90,8 +90,9 @@ It instruments them, captures artifacts, replaces the whole tactic, compiles
 the continuations, and requires a syntax-aware zero remaining count. Generated
 machine-oriented evidence refers to locals by deterministic declaration-index
 aliases and parses its fully explicit term strings only after variant selection;
-this survives macro hygiene and declaration-parameter alpha-renaming. A two-phase
-placeholder rewrite preserves source ranges and final indentation.
+this survives macro hygiene and declaration-parameter alpha-renaming. A left-to-right
+splice preserves source ranges and final indentation; adjacent line comments
+retain each original call, including nested calls consumed by an outer root.
 
 The in-memory comparator has nineteen focused executions. In addition to the
 source cases, it explicitly preserves pre-existing pending synthetic

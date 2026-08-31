@@ -28,7 +28,10 @@ from boundary_protocol import (
     group_report_variants,
     reject_forbidden_generated_text,
 )
-from check_simp_engine_boundary_source import replace_all_occurrences
+from check_simp_engine_boundary_source import (
+    materialization_replacement_lengths,
+    replace_all_occurrences,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -362,6 +365,7 @@ def check_module(
         imported="ExplicitLean.SimpEngine.Boundary.Tactic",
         label=f"materialized source {spec.module}",
         expected_without_import=materialized_without_import,
+        replacement_lengths=materialization_replacement_lengths(original, materialize, reports),
     )
     materialized_path = copy_at_module_root(
         work / "materialized", spec.module, materialized_bytes
