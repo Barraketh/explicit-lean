@@ -869,6 +869,32 @@ private def encodeLocalCachedBatch? (before stock : Environment) (checkedBefore 
     .arr #[encodeBoundaryName group.owner, encodeBoundaryName group.key,
       ownerWitness, descriptor, .str source]]).compress)
 
+/-- Activate only an authenticated completed local cache entry. The callback
+    cannot produce declarations; each caller must also guard its full state. -/
+private def executeLocalCachedRoot (owner key : Name) (witness descriptor : Json)
+    (equationSource : String) (auxiliary := false) : MetaM Unit := do
+  let before ← getEnv
+  unless !isPrivateName key && key.getPrefix == owner && !before.containsOnBranch key do
+    throwError "boundary_local_cached_identity"
+  let (equationOwner, theoremSource, defeqTag, backwardTag, registration) ←
+    ofExcept (parseEquationPayload equationSource)
+  unless equationOwner == owner do throwError "boundary_local_cached_equation_owner"
+  validateEquationAnchor owner key
+  unless (← localOwnerWitness before owner) == witness do throwError "boundary_local_cached_owner_conflict"
+  unless (← localCachedDescriptor before owner key auxiliary) == descriptor do
+    throwError "boundary_local_cached_descriptor_conflict"
+  realizeBoundaryConst owner key (throwError "boundary_local_cached_forbidden_callback")
+  unless (← localCachedDescriptor (← getEnv) owner key auxiliary) == descriptor do
+    throwError "boundary_local_cached_descriptor_after"
+  executeBoundaryTheorem key theoremSource
+  unless defeqAttr.hasTag (← getEnv) key == defeqTag && backwardDefeqAttr.hasTag (← getEnv) key == backwardTag do
+    throwError "boundary_local_cached_tags"
+  registerCapturedEquation owner key registration
+  let after ← getEnv
+  unless (← branchDelta before after) == #[key] && (← branchDelta before after true) == #[key] do
+    throwError "boundary_local_cached_root_delta"
+  unless (← localOwnerWitness after owner) == witness do throwError "boundary_local_cached_owner_after"
+
 private def executeLocalCachedBatch (anchor : Name) (source : String) : MetaM Unit := do
   let .arr #[.str tag, .bool true, privateNames, publicNames,
       matchBefore, matchAfter, eqnsBefore, eqnsAfter, sparseBefore, sparseAfter,
@@ -883,23 +909,10 @@ private def executeLocalCachedBatch (anchor : Name) (source : String) : MetaM Un
   unless key == anchor && !isPrivateName key && key.getPrefix == owner &&
       (← namesFromJson privateNames) == #[key] && (← namesFromJson publicNames) == #[key] &&
       !before.containsOnBranch key do throwError "boundary_local_cached_identity"
-  let (equationOwner, theoremSource, defeqTag, backwardTag, registration) ←
-    ofExcept (parseEquationPayload equationSource)
-  unless equationOwner == owner do throwError "boundary_local_cached_equation_owner"
-  validateEquationAnchor owner key
   unless boundaryMatchStateJson (Match.matchEqnsExt.getState before) == matchBefore &&
       equationStateJson (eqnsExt.getState before) == eqnsBefore && boundarySparseCacheJson before == sparseBefore do
     throwError "boundary_local_cached_before"
-  unless (← localOwnerWitness before owner) == witness do throwError "boundary_local_cached_owner_conflict"
-  unless (← localCachedDescriptor before owner key auxiliary) == descriptor do
-    throwError "boundary_local_cached_descriptor_conflict"
-  realizeBoundaryConst owner key (throwError "boundary_local_cached_forbidden_callback")
-  unless (← localCachedDescriptor (← getEnv) owner key auxiliary) == descriptor do
-    throwError "boundary_local_cached_descriptor_after"
-  executeBoundaryTheorem key theoremSource
-  unless defeqAttr.hasTag (← getEnv) key == defeqTag && backwardDefeqAttr.hasTag (← getEnv) key == backwardTag do
-    throwError "boundary_local_cached_tags"
-  registerCapturedEquation owner key registration
+  executeLocalCachedRoot owner key witness descriptor equationSource auxiliary
   let after ← getEnv
   unless (← branchDelta before after) == #[key] && (← branchDelta before after true) == #[key] &&
       boundaryMatchStateJson (Match.matchEqnsExt.getState after) == matchAfter &&

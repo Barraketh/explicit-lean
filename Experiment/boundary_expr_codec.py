@@ -935,6 +935,51 @@ def validate_realization_payload(source: object, expected_anchor: object,
         if payload[1] != owner:
             reject("local equation owner mismatch")
         return value
+    if isinstance(value, list) and value and value[0] == "boundary_local_cached_sequence_v1":
+        if not (len(value) == 8 and isinstance(value[6], list) and len(value[6]) == 5
+                and isinstance(value[7], list) and value[7]):
+            reject("invalid local sequence header")
+        key(expected_anchor); names(value[1]); names(value[2]); names(value[3])
+        def sequence_state(state):
+            if not isinstance(state, list) or len(state) != 3:
+                reject("invalid local sequence state")
+            match_state(state[0]); equation_state(state[1]); sparse_state(state[2])
+        sequence_state(value[4]); sequence_state(value[5])
+        owner, root, witness, graph, equation = value[6]
+        key(owner); key(root)
+        if (not value[1] or value[1][0] != expected_anchor or not value[3]
+                or len(value[3]) + 1 != len(value[1])
+                or [n for n in value[1] if n != root] != value[3] or root not in value[2]):
+            reject("invalid local sequence partition")
+        # Only a validation projection: the unchanged standalone local validator
+        # authenticates every structural field; no runtime environment is forged.
+        projection = ["boundary_local_cached_v1", True, [root], [root],
+                      value[4][0], value[5][0], value[4][1], value[5][1],
+                      value[4][2], value[5][2], value[6]]
+        validate_realization_payload(json.dumps(projection, separators=(",", ":")), root, label)
+        seen, public = [], []
+        for step in value[7]:
+            if not isinstance(step, list) or not step:
+                reject("invalid local sequence step")
+            if step[0] == "root" and len(step) == 2:
+                name, exported, state = root, True, step[1]
+            elif step[0] == "helper" and len(step) == 5 and type(step[3]) is bool:
+                name, payload, exported, state = step[1:]
+                key(name)
+                bundle = validate_local_theorems_payload(payload, name, label)
+                if name not in value[3] or len(bundle[2]) != 1 or bundle[2][0][0] != name:
+                    reject("invalid local sequence helper")
+            else:
+                reject("invalid local sequence step")
+            sequence_state(state)
+            if name in seen:
+                reject("duplicate local sequence member")
+            seen.append(name)
+            if exported:
+                public.append(name)
+        if seen != value[1] or public != value[2]:
+            reject("local sequence order mismatch")
+        return value
     if isinstance(value, list) and value and value[0] == "boundary_realization_sequence_v1":
         if not (len(value) == 13 and isinstance(value[10], list) and value[10]
                 and isinstance(value[11], list) and len(value[11]) == len(value[10])

@@ -284,6 +284,8 @@ declarations with exact replay state checks. Generated replay blocks pending typ
 synthesis, including inside fresh realization callbacks.
 Completed local cached realizations can also carry a bounded table of exact checked
 auxiliary proofs; sharing changes storage only and retains structural authentication.
+A separate sequence contract composes a completed local cached root with explicit
+helper theorems, preserving their order and checking each state transition.
 The older handwritten term-elaboration API is outside this contract and is never
 emitted by the materializer.
 The cold certificate validator compares normal serialized compiler outputs and

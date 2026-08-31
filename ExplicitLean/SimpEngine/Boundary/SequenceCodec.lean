@@ -4,6 +4,7 @@ prelude
 public import Init.Prelude
 public meta import ExplicitLean.SimpEngine.Boundary.RealizationCodec
 public meta import ExplicitLean.SimpEngine.Boundary.LocalTheoremCodec
+public meta import ExplicitLean.SimpEngine.Boundary.LocalSequenceCodec
 meta import all ExplicitLean.SimpEngine.Boundary.RealizationCodec
 meta import all ExplicitLean.SimpEngine.Boundary.EquationCodec
 meta import all ExplicitLean.SimpEngine.Boundary.MatcherCodec
@@ -84,7 +85,7 @@ private def sequenceJson (sequence : RealizationSequence) : Json :=
     .arr (sequence.steps.map sequenceStepJson)]
 
 def isBoundaryRealizationSequence (source : String) : Bool :=
-  match (Json.parse source).toOption with
+  isBoundaryLocalSequence source || match (Json.parse source).toOption with
   | some (.arr values) => values[0]? == some (.str "boundary_realization_sequence_v1")
   | _ => false
 
@@ -131,6 +132,8 @@ private def executeActiveRegistration (name : Name) (source : String) : MetaM Un
 def encodeBoundaryRealizationSequence? (before stock : Environment) (checkedBefore : NameSet)
     (declarations : Array Name) (equations matchers : Array (Name × String))
     (helpers : Array TheoremVal) : MetaM (Option (Name × String)) := withEnv stock do
+  if let some sequence ← encodeBoundaryLocalSequence? before stock checkedBefore declarations equations matchers helpers then
+    return some sequence
   let added ← branchDelta before stock
   if !(added.any checkedBefore.contains && added.any (!checkedBefore.contains ·)) then return none
   if helpers.size > 1 then throwError "boundary_sequence_multiple_helpers_unsupported"
@@ -436,13 +439,15 @@ private def executeSequence (anchor : Name) (source : String) : MetaM Unit := do
     throwError "boundary_sequence_caller_after:sparse"
 
 def executeBoundaryRealizationEffects (anchor : Name) (source : String) : MetaM Unit := do
-  if isBoundaryRealizationSequence source then executeSequence anchor source
+  if isBoundaryLocalSequence source then executeBoundaryLocalSequence anchor source
+  else if isBoundaryRealizationSequence source then executeSequence anchor source
   else executeBoundaryRealizationBatch anchor source
 
 /-- Required members, freshly declared public group members, and exact helper
     payloads are distinct. Boundary must retain all helper-specific checks. -/
 def boundaryRealizationSequenceMembers (anchor : Name) (source : String) :
     MetaM (Array Name × Array Name × Array (Name × String)) := do
+  if isBoundaryLocalSequence source then return ← boundaryLocalSequenceMembers anchor source
   let sequence ← parseSequence anchor source
   let helpers := sequence.steps.filterMap fun step => match step with
     | .helper name payload _ _ => some (name, payload)

@@ -558,6 +558,10 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
                             anchor = node[2]
                     validate_realization_payload(text, anchor, label)
                     continue
+                if encoded[0] == "boundary_local_cached_sequence_v1":
+                    anchor = encoded[1][0] if len(encoded) == 8 and isinstance(encoded[1], list) and encoded[1] else None
+                    validate_realization_payload(text, anchor, label)
+                    continue
                 if encoded[0] == "boundary_realization_sequence_v1":
                     anchor = None
                     if (len(encoded) == 13 and isinstance(encoded[10], list)

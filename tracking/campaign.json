@@ -379,7 +379,7 @@
   ],
   "nextActions": [
     "Finish fresh schema11 inventory in background and independently validate its source counts/hashes against full master index, then dispatch reviewed bounded workers after old live leases end. Preserve66reusable5unresolved obligations.",
-    "Integrate reviewed localcached-root plus ordinary-helper sequence; diagnose and repair translated-prefix proof drift without weakening descriptor/semantic checks. Keep full Extra/Cubic failures as unresolved.",
+    "Finish exact serialized/decoded forward recording prototype and freshwholeExtra replay/oracle without weakening state or cache guards. Integrate optional lossless certificate storage helper with actualreceipt validation.",
     "Resolve reusable66calls and unresolved5quotations with positive source dataflow evidence and explicit API scope; preserve source/execution identities.",
     "Let frozen schema10 workers finish bounded queues without editing runtimes or live leases. Reuse diagnostic evidence only; advance broad generation under new frozen runtime once ready.",
     "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and complete source/execution ownership.",
@@ -931,6 +931,17 @@
         ".lake/week-2026-08-31/local-aux-legacy-root-verification.json",
         ".lake/week-2026-08-31/local-sequence-root-verification.json"
       ]
+    },
+    {
+      "at": "2026-08-31T19:07:07.725678+00:00",
+      "summary": "Integrated ordered localcached/ordinary-helper sequence with NoSynthesis and auxflag merge reviewed. MainExistsUnique8calls passed54declaration41public30extension oracle plus21mutation runs/13wire,2explicitnonce negativeoracles,16aux/12wire and20v1/15wire regressions. Rootarchived1621+678+155hashcheckedinputs and regeneratedcomments. Genuine storagefixture passed cold5stagecertificate,24paths->8inodes unchangedbytes/receipt; optionalhelperpromotion pending. Fresh8260module83414callinventory complete awaitingrootvalidation; oldschema10worker remainslive. Forwardrawcontinuation experiment insufficient; sharedencodeddecoder prototype inprogress.",
+      "evidence": [
+        ".lake/week-2026-08-31/local-sequence-main-root-verification.json",
+        ".lake/week-2026-08-31/local-sequence-aux-root-verification.json",
+        ".lake/week-2026-08-31/local-sequence-v1-root-verification.json",
+        ".lake/week-2026-08-31/certificate-storage-root-verification.json",
+        ".lake/week-2026-08-31/translated-prefix-diagnosis-root-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1173,7 +1184,7 @@
     },
     {
       "id": "schema11-full-inventory",
-      "status": "running",
+      "status": "completed_pending_root_validation",
       "sessionId": 29489,
       "snapshot": ".lake/search-free-mathlib/snapshots/schema11-campaign",
       "commit": "f231289",
@@ -1182,10 +1193,12 @@
       "log": ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-full-manifest-r2.log",
       "modules": 8260,
       "expectedOccurrences": 83414,
-      "scope": "Fresh source/scope inventory only, no DB/queue writes and no translated coverage. Fourmodules11calls/fiveunresolved remain in master8264 inventory. Avoid unsupported source-provenance rebinding; bulk dispatch must wait for conflicting old worker/leases to end."
+      "scope": "Fresh source/scope inventory only, no DB/queue writes and no translated coverage. Fourmodules11calls/fiveunresolved remain in master8264 inventory. Avoid unsupported source-provenance rebinding; bulk dispatch must wait for conflicting old worker/leases to end.",
+      "manifest": ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-full-manifest.json"
     }
   ],
   "latestCommits": [
+    "55f49fb",
     "f231289",
     "a17ef7f",
     "fae96be",
@@ -1280,13 +1293,14 @@
     },
     {
       "id": "local-cached-sequence-handoff",
-      "status": "frozen_reviewed_awaiting_main_integration",
+      "status": "integrated_main_verified",
       "handoffManifestSha256": "3504e562ae7beea99efd72afce482fb6201fe4e865e8e4be2c57a8a63f75af1e",
       "rootVerification": ".lake/week-2026-08-31/local-sequence-root-verification.json",
       "independentReview": ".lake/local-sequence-independent-review.md",
       "sourceCalls": 8,
       "module": "Mathlib/Logic/ExistsUnique.lean",
-      "wholeMathlib": false
+      "wholeMathlib": false,
+      "mainRootVerification": ".lake/week-2026-08-31/local-sequence-main-root-verification.json"
     },
     {
       "id": "local-aux-full-source-probes",
@@ -1297,6 +1311,29 @@
       "cubicReport": ".lake/observational-data/Mathlib-Algebra-CubicDiscriminant-5_8u_5u6/report.json",
       "cubicFailure": "aa693119975056ee boundary_sequence_ambiguous_or_missing_cover during recording; no wholemodule success claim.",
       "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "translated-prefix-diagnosis",
+      "status": "verified_forward_decoded_mode_in_progress",
+      "manifestSha256": "8910e9b8f40063a57cf4eab1a7c61bd431f744d5126f4dffb1b2368f74967a3a",
+      "rootVerification": ".lake/week-2026-08-31/translated-prefix-diagnosis-root-verification.json",
+      "finding": "Earlier singlecall6687f846adec5f98 changes laterofIso._proof_3 from646to720DAGnodes, matched in232node descriptor and80proof table. Directrawapplyforward leavesstockbody unchanged; must use exactsharedserializedruntime decoder thenfullstate/environmentchecks beforecommit. No guard loosened.",
+      "implementationOwner": "local_cached_sequence",
+      "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "certificate-storage-prototype",
+      "status": "genuine_fixture_verified_pending_main_promotion",
+      "rootVerification": ".lake/week-2026-08-31/certificate-storage-root-verification.json",
+      "helper": ".lake/certificate-storage-prototype/dedup.py",
+      "focusedTests": 5,
+      "genuineCertificateStages": 5,
+      "artifactPaths": 24,
+      "uniqueInodes": 8,
+      "duplicatePathsReplaced": 16,
+      "repeatReplacements": 0,
+      "receiptAndAllBytesPreserved": true,
+      "wholeMathlib": false
     }
   ],
   "prototypeCoverage": {
@@ -1620,6 +1657,23 @@
       "guard": "Exact checked proof table, owner and async DAG; cached-only failure callback retains unconditional pending-synthesis barrier. Old v1 remains empty auxiliary contract.",
       "wholeModule": false,
       "wholeMathlib": false
+    },
+    "localCachedSequence": {
+      "status": "integrated_main_verified",
+      "handoffRootVerification": ".lake/week-2026-08-31/local-sequence-root-verification.json",
+      "mainRootVerification": ".lake/week-2026-08-31/local-sequence-main-root-verification.json",
+      "auxRegressionVerification": ".lake/week-2026-08-31/local-sequence-aux-root-verification.json",
+      "v1RegressionVerification": ".lake/week-2026-08-31/local-sequence-v1-root-verification.json",
+      "independentReview": ".lake/local-sequence-independent-review.md",
+      "module": "Mathlib/Logic/ExistsUnique.lean",
+      "sourceCalls": 8,
+      "oracleDeclarations": 54,
+      "oraclePublicDeclarations": 41,
+      "oracleExtensions": 30,
+      "wireNegatives": 40,
+      "scope": "Separate local cached root with ordered fresh ordinary helpers; oldemptyauxdescriptor used bysequence, auxiliary flag explicitly threaded only for standalone auxbatch. NoSynthesis retained.",
+      "wholeMathlib": false,
+      "acceptedCampaignCoverage": false
     }
   },
   "failureTriage": {
@@ -1647,7 +1701,7 @@
     "checkedAt": "2026-08-31T17:36:47.331238+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T18:57:08.422647+00:00",
+  "updatedAt": "2026-08-31T19:07:07.725678+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
