@@ -288,7 +288,7 @@
     }
   ],
   "nextActions": [
-    "Freeze committedartifact4/report10 engine, validate its project cache, generate fresh priority/full manifests, then start disjoint incremental workers. Do not relabel old reports or analysis identities.",
+    "Monitor schema10-campaign pipelines: sessions38300priority/72713full, fresh manifests first then automatic disjoint worker dispatch. Reuse only matching identities; oldreports remain provisional. Do not duplicate live jobs or replan live leases.",
     "Continue private ordered matcher/recursive realization support for ModifyLast; investigate new Control.Basic naming effect from exact stock observations.",
     "Integrate the actual-command-context audit and run translated-output semantic oracles against a fully isolated translated dependency tree.",
     "Resolve reusable executable66calls and5unresolved quotations, preserving original comments and source/execution ownership; no unqualified finite-caller-table equivalence claims.",
@@ -710,6 +710,11 @@
       "at": "2026-08-31T15:30:34.486345+00:00",
       "summary": "Committedexactgroupreplay9b35bf6 andfreshpostgeneratorguarde3af2f2. Current4/10focusedchecks pass;fullLookmap10passes,Control.Basic failsclosedatnewjoinM_map_joinM site. Allold691calls/66modules remainprovisionalpendingfresh10workers. Budget23%; noactiveDBleases. Nextfreeze/dispatch. Knownlegacyauxfixture expects a later cache error but aborts earlier at boundary_local_theorem_multiple_cache_keys; no production guard relaxed.",
       "evidence": ".lake/week-2026-08-31/schema10-focused-verification.json"
+    },
+    {
+      "at": "2026-08-31T15:34:02.773764+00:00",
+      "summary": "Frozen1f6f12c campaign withenginee3af2f2. Cloned projectcache validated(all17351Lakejobs current/successful). Fresh priority201-module/131-root andfull8260-module pipelines launched, sessions38300/72713. Runnerf539d8f5 checks freshbudget/storage and live selectedleases; module reports remain immutable, overall summaries diagnostic. Fullworkerbounded500attempts/4hours. Sharedpackage no-write lease remainsactive.",
+      "evidence": ".lake/week-2026-08-31/schema10-dispatch.json"
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -878,6 +883,30 @@
       "processed": 23,
       "succeededModules": 12,
       "failedModules": 11
+    },
+    {
+      "id": "schema10-priority",
+      "sessionId": 38300,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
+      "commit": "1f6f12c",
+      "status": "running",
+      "phase": "manifest_then_workers",
+      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-expansion-manifest.log",
+      "modules": 201,
+      "note": "Fresh201-module manifest then first23 priorityworker then full131-root priorityworker. Disjoint from full worker. Per-mode logs preserve each stage; expansion summary is current diagnostic only.",
+      "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py"
+    },
+    {
+      "id": "schema10-full",
+      "sessionId": 72713,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
+      "commit": "1f6f12c",
+      "status": "running",
+      "phase": "manifest_then_workers",
+      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-full-manifest.log",
+      "modules": 8260,
+      "note": "Fresh8260-module manifest then bounded500-module bulkworker excluding all131priorityroots. Fourmodules/11calls remain separately required, not exempted.",
+      "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py"
     }
   ],
   "latestCommits": [
@@ -924,7 +953,8 @@
     "617c69d",
     "db59a3e",
     "9b35bf6",
-    "e3af2f2"
+    "e3af2f2",
+    "1f6f12c"
   ],
   "experiments": [
     {
@@ -1089,5 +1119,5 @@
     "checkedAt": "2026-08-31T15:30:34.486345+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T15:30:34.486345+00:00"
+  "updatedAt": "2026-08-31T15:34:02.773764+00:00"
 }
