@@ -209,12 +209,76 @@ def test_production_adapters(root: Path) -> None:
     assert "Experiment/process_runner.py" in corpus.implementation_hashes()
 
 
+def test_nested_runner_timeout(root: Path) -> None:
+    """Worker -> materializer -> compiler wrappers each own another group."""
+    root.mkdir()
+    script = root / "nested.py"
+    script.write_text('''
+import json, os, signal, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from process_runner import run_process
+root = Path(sys.argv[2])
+depth = int(sys.argv[3])
+(root / f"pid-{depth}.json").write_text(json.dumps({"pid": os.getpid(), "group": os.getpgrp()}))
+if depth:
+    run_process([sys.executable, __file__, sys.argv[1], str(root), str(depth - 1)], timeout=30)
+else:
+    # Native work may ignore cooperative cancellation; its owner must kill it.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    with (root / "heartbeat").open("ab", buffering=0) as stream:
+        until = time.monotonic() + 30
+        while time.monotonic() < until:
+            stream.write(b".")
+            time.sleep(0.02)
+''')
+    try:
+        try:
+            run_process(
+                [sys.executable, str(script), str(Path(__file__).resolve().parent), str(root), "2"],
+                timeout=1, capture_output=True, text=True,
+            )
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            raise AssertionError("nested process chain did not time out")
+        records = [json.loads(path.read_text()) for path in sorted(root.glob("pid-*.json"))]
+        assert len(records) == 3
+        assert len({record["group"] for record in records}) == 3
+        pids = ",".join(str(record["pid"]) for record in records)
+        deadline = time.monotonic() + 2
+        while True:
+            states = subprocess.run(
+                ["ps", "-o", "pid=,stat=", "-p", pids],
+                capture_output=True, text=True, timeout=5,
+            )
+            alive = [line for line in states.stdout.splitlines() if not line.split()[1].startswith("Z")]
+            if not alive or time.monotonic() >= deadline:
+                break
+            time.sleep(0.02)
+        assert not alive, f"nested runner left live compiler work: {alive}"
+        heartbeat = (root / "heartbeat").read_bytes()
+        assert heartbeat
+        time.sleep(0.1)
+        assert (root / "heartbeat").read_bytes() == heartbeat
+    finally:
+        for path in root.glob("pid-*.json"):
+            group = json.loads(path.read_text())["group"]
+            if group != os.getpgrp():
+                try:
+                    os.killpg(group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="process-runner-") as raw:
         root = Path(raw).resolve()
         test_completed_process_contract(root)
         test_descendant_timeout(root / "live-launcher", exit_root=False)
         test_descendant_timeout(root / "exited-launcher", exit_root=True)
+        test_nested_runner_timeout(root / "nested-runner")
         test_production_adapters(root)
     print("process runner: compatibility, adapters, and child/grandchild timeout checks passed")
 

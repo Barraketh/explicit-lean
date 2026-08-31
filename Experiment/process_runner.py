@@ -18,10 +18,12 @@ def run_process(
 ) -> subprocess.CompletedProcess[Any]:
     """Run like ``subprocess.run``, owning a fresh POSIX session.
 
-    On timeout or interrupted communication, kill the whole process group and
-    reap the immediate child before raising. Descendants inherit the group;
-    deliberately detached sessions/groups are outside this contract. Orphaned
-    descendants are reaped by the OS, since they are not this process's children.
+    On timeout or interrupted communication, interrupt the process group first
+    so a Python launcher using this runner can clean up its own child group.
+    After a short grace period, unconditionally kill the group and reap the
+    immediate child before raising. Descendants normally inherit the group;
+    detached processes that do not cooperate with interruption are outside this
+    contract. Orphaned descendants are reaped by the OS.
     Preserve POSIX TimeoutExpired's partial byte output, even in text mode.
 
     Session/group options are reserved so callers cannot accidentally target
@@ -45,13 +47,28 @@ def run_process(
         try:
             stdout, stderr = process.communicate(input, timeout=timeout)
         except BaseException:
-            # Kill even if the launcher exited: descendants can still be alive
-            # and holding its output pipes open. Do not gate this on poll().
+            # Nested users own separate groups. SIGKILL alone would kill their
+            # Python wrapper before its exception handler can stop its compiler.
+            # SIGINT raises KeyboardInterrupt in those wrappers, unwinding the
+            # same cleanup path recursively. The hard-kill fallback still bounds
+            # non-cooperative commands in the group we own.
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
+                try:
+                    os.killpg(process.pid, signal.SIGINT)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+            finally:
+                # Kill even if the launcher exited: descendants can still hold
+                # its output pipes. A second interrupt must not skip this step.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
             raise
         returncode = process.poll()
         if check and returncode:
