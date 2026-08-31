@@ -46,6 +46,10 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def run(command: list[str], *, env: dict[str, str] | None = None) -> str:
     result = run_process(
         command,
@@ -62,21 +66,22 @@ def run(command: list[str], *, env: dict[str, str] | None = None) -> str:
     return result.stdout
 
 
+def compiler_command(dylib: str, source: Path) -> list[str]:
+    return [
+        "lake",
+        "env",
+        "lean",
+        f"--load-dynlib={dylib}",
+        "-R",
+        str(source.parent.parent),
+        str(source),
+    ]
+
+
 def compile_source(
     dylib: str, source: Path, *, env: dict[str, str] | None = None
 ) -> str:
-    return run(
-        [
-            "lake",
-            "env",
-            "lean",
-            f"--load-dynlib={dylib}",
-            "-R",
-            str(source.parent.parent),
-            str(source),
-        ],
-        env=env,
-    )
+    return run(compiler_command(dylib, source), env=env)
 
 
 def query_dylib() -> str:
@@ -115,7 +120,7 @@ def compile_expected_failure(dylib: str, source: Path, env: dict[str, str]) -> s
 
 
 def main() -> None:
-    build = run(["lake", "build", "ExplicitLean:shared"])
+    _ = run(["lake", "build", "ExplicitLean:shared"])
     dylib = query_dylib()
     runtime_hash = sha256(Path(dylib))
 
@@ -151,8 +156,8 @@ def main() -> None:
             raise RuntimeError(f"fresh stock failure changed shape: {reports}")
         fresh_report = reports[0]
 
-        # This is the exact frozen inline-first source layout, with only the
-        # selector evidence refreshed from a new recording nonce.
+        # This is the minimal authored inline-first reproduction, with selector
+        # evidence refreshed from a new recording nonce.
         rendered = render_into_frozen_source([fresh_report], frozen_replay)
         replay_source.write_text(rendered, encoding="utf-8")
         replay_env, replay_nonce = replay_subprocess_environment()
@@ -236,10 +241,13 @@ def main() -> None:
                     "replayNonce": replay_nonce,
                     "recordSourceSha256": sha256(record_source),
                     "replaySourceSha256": sha256(replay_source),
+                    "recordTemplateSha256": text_sha256(FROZEN_RECORD_SOURCE),
+                    "replayTemplateSha256": text_sha256(FROZEN_REPLAY_SOURCE),
                     "runtimeSha256": runtime_hash,
                     "recordLogSha256": sha256(record_log),
                     "replayLogSha256": sha256(replay_log),
-                    "command": ["lake", "env", "lean", f"--load-dynlib={dylib}"],
+                    "recordCommand": compiler_command(dylib, record_source),
+                    "replayCommand": compiler_command(dylib, replay_source),
                 },
                 sort_keys=True,
             ),
