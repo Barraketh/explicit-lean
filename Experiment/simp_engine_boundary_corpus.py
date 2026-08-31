@@ -10,10 +10,12 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Any, Sequence
 
 import check_simp_engine_boundary_scope as scope
 import check_simp_engine_pin as pin
+from inventory_checkpoint import CheckpointStore
 import simp_engine_inventory as inventory
 from process_runner import run_process
 
@@ -101,6 +103,8 @@ IMPLEMENTATION_SOURCE_PATTERNS = (
     "Experiment/check_simp_engine_pin.py",
     "Experiment/simp_engine_inventory.py",
     "Experiment/simp_engine_boundary_corpus.py",
+    "Experiment/inventory_checkpoint.py",
+    "Experiment/boundary_expr_codec.py",
 )
 
 
@@ -154,6 +158,27 @@ def pinned_mathlib_commit() -> str:
     if len(matches) != 1 or not isinstance(matches[0].get("rev"), str):
         raise RuntimeError("lake manifest has no unique pinned Mathlib revision")
     return str(matches[0]["rev"])
+
+
+def pinned_package_identity() -> dict[str, Any]:
+    """Return the complete locked package identity used by checkpoint keys."""
+    manifest_path = ROOT / "lake-manifest.json"
+    raw = manifest_path.read_bytes()
+    manifest = json.loads(raw)
+    packages = manifest.get("packages")
+    if not isinstance(packages, list):
+        raise RuntimeError("lake manifest has no package list")
+    locked: list[dict[str, object]] = []
+    for package in packages:
+        if not isinstance(package, dict):
+            raise RuntimeError("lake manifest contains an invalid package")
+        name, package_type, revision = (
+            package.get("name"), package.get("type"), package.get("rev")
+        )
+        if not all(isinstance(value, str) and value for value in (name, package_type, revision)):
+            raise RuntimeError("lake manifest package identity is incomplete")
+        locked.append({"name": name, "type": package_type, "rev": revision})
+    return {"manifestSha256": sha256(raw), "packages": locked}
 
 
 def verify_environment() -> tuple[str, dict[str, str]]:
@@ -249,41 +274,115 @@ def compiled_module_name(module: str) -> str:
     return module[: -len(".lean")].replace("/", ".")
 
 
-def inventory_batch(
-    paths: Sequence[Path], timeout: int
+def _decode_inventory_output(
+    payload: object,
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    if not isinstance(payload, dict) or set(payload) != {"stdout"}:
+        raise RuntimeError("inventory checkpoint payload fields are invalid")
+    output = payload.get("stdout")
+    if not isinstance(output, str):
+        raise RuntimeError("inventory checkpoint stdout is not a string")
+    entries: list[dict[str, Any]] = []
+    fallbacks: list[str] = []
+    for line in output.splitlines():
+        if line.startswith("{"):
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise RuntimeError("syntax inventory output record is not an object")
+            entries.append(value)
+        elif line.startswith("SIMP_ENGINE_INVENTORY_FULL_FALLBACK file="):
+            fallbacks.append(line.split("=", 1)[1])
+    return entries, fallbacks
+
+
+def _inventory_batch_result(
+    paths: Sequence[Path],
+    timeout: int,
+    checkpoint: CheckpointStore | None = None,
+    freshness: Any = None,
+) -> tuple[list[dict[str, Any]], list[str], bool]:
     command = [
         sys.executable,
         str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
         "inventory",
         *(str(path.resolve()) for path in paths),
     ]
-    completed = run_process(
-        command,
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-        check=False,
-    )
-    if completed.returncode:
-        diagnostics = "\n".join(completed.stderr.splitlines()[-200:])
-        raise RuntimeError(
-            f"syntax inventory batch failed ({completed.returncode}):\n{diagnostics}"
+    def produce() -> dict[str, str]:
+        completed = run_process(
+            command,
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
         )
-    entries: list[dict[str, Any]] = []
-    fallbacks: list[str] = []
-    for line in completed.stdout.splitlines():
-        if line.startswith("{"):
-            entries.append(json.loads(line))
-        elif line.startswith("SIMP_ENGINE_INVENTORY_FULL_FALLBACK file="):
-            fallbacks.append(line.split("=", 1)[1])
+        if completed.returncode:
+            diagnostics = "\n".join(completed.stderr.splitlines()[-200:])
+            raise RuntimeError(
+                f"syntax inventory batch failed ({completed.returncode}):\n{diagnostics}"
+            )
+        return {"stdout": completed.stdout}
+
+    if checkpoint is None:
+        payload = produce()
+        hit = False
+    else:
+        modules = [module_path(path) for path in paths]
+        source_hashes = [sha256(path.read_bytes()) for path in paths]
+
+        def batch_freshness() -> None:
+            current_hashes = [sha256(path.read_bytes()) for path in paths]
+            if current_hashes != source_hashes:
+                raise RuntimeError("inventory source changed during checkpointed batch")
+            if freshness is not None:
+                if not callable(freshness):
+                    raise RuntimeError("inventory checkpoint freshness is not callable")
+                freshness()
+
+        def validate_payload(value: object) -> object:
+            entries, _fallbacks = _decode_inventory_output(value)
+            expected_files = {str(path.resolve()) for path in paths}
+            for entry in entries:
+                required = {
+                    "file", "kind", "startByte", "endByte", "line", "column",
+                    "syntaxKind", "source",
+                }
+                if not required <= set(entry):
+                    raise RuntimeError("syntax inventory output record is incomplete")
+                if str(entry["file"]) not in expected_files:
+                    raise RuntimeError("syntax inventory output file is not in this batch")
+            return value
+
+        result = checkpoint.get_or_compute(
+            "inventory",
+            modules,
+            source_hashes,
+            produce,
+            parameters={"timeout": timeout},
+            validator=validate_payload,
+            freshness=batch_freshness,
+        )
+        payload = result.payload
+        hit = result.hit
+    entries, fallbacks = _decode_inventory_output(payload)
+    return entries, fallbacks, hit
+
+
+def inventory_batch(
+    paths: Sequence[Path], timeout: int, checkpoint: CheckpointStore | None = None
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Run one inventory batch, retaining the historical two-result API."""
+    entries, fallbacks, _hit = _inventory_batch_result(paths, timeout, checkpoint)
     return entries, fallbacks
 
 
 def inventory_paths(
-    paths: Sequence[Path], batch_size: int, timeout: int
+    paths: Sequence[Path],
+    batch_size: int,
+    timeout: int,
+    checkpoint: CheckpointStore | None = None,
+    freshness: Any = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     if batch_size <= 0:
         raise ValueError("inventory batch size must be positive")
@@ -292,8 +391,25 @@ def inventory_paths(
         raise RuntimeError("manifest module list contains duplicate paths")
     by_module: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
     fallback_modules: set[str] = set()
-    for start in range(0, len(paths), batch_size):
-        entries, fallbacks = inventory_batch(paths[start : start + batch_size], timeout)
+    batch_count = (len(paths) + batch_size - 1) // batch_size
+    for batch_index, start in enumerate(range(0, len(paths), batch_size), start=1):
+        batch_paths = paths[start : start + batch_size]
+        started = time.monotonic()
+        if checkpoint is None:
+            entries, fallbacks = inventory_batch(batch_paths, timeout)
+            hit = False
+        else:
+            entries, fallbacks, hit = _inventory_batch_result(
+                batch_paths, timeout, checkpoint, freshness
+            )
+        elapsed = time.monotonic() - started
+        if checkpoint is not None:
+            print(
+                f"inventory batch {batch_index}/{batch_count}: "
+                f"{'hit' if hit else 'completed'} modules={len(batch_paths)} "
+                f"seconds={elapsed:.2f}",
+                file=sys.stderr,
+            )
         for fallback in fallbacks:
             fallback_path = Path(fallback)
             if not fallback_path.is_absolute():
@@ -503,6 +619,7 @@ def build_manifest(
     inventory_batch_size: int = 2048,
     scope_batch_size: int = 128,
     timeout: int = 3600,
+    checkpoint_root: Path | None = None,
 ) -> dict[str, Any]:
     selected = sorted((Path(path).resolve() for path in paths), key=module_path)
     if not selected:
@@ -510,8 +627,41 @@ def build_manifest(
     repository_commit = assert_repository(expected_commit, allow_dirty)
     mathlib_commit, lean = verify_environment()
     initial_implementation_hashes = implementation_hashes()
+    checkpoint = None
+    implementation_freshness = None
+    if checkpoint_root is not None:
+        checkpoint_path = Path(checkpoint_root).resolve()
+        package_root = (ROOT / ".lake/packages").resolve()
+        try:
+            checkpoint_path.relative_to(package_root)
+        except ValueError:
+            pass
+        else:
+            raise RuntimeError(
+                "checkpoint root must be outside the shared .lake/packages tree"
+            )
+        checkpoint = CheckpointStore(
+            checkpoint_path,
+            identity={
+                "repositoryCommit": repository_commit,
+                "mathlibCommit": mathlib_commit,
+                "lean": lean,
+                "python": sys.version,
+                "implementationHashes": initial_implementation_hashes,
+                "pinnedPackages": pinned_package_identity(),
+            },
+        )
+        implementation_freshness = lambda: require_unchanged_hashes(
+            "implementation", initial_implementation_hashes, implementation_hashes()
+        )
     sources = {module_path(path): path.read_bytes() for path in selected}
-    by_module, fallbacks = inventory_paths(selected, inventory_batch_size, timeout)
+    by_module, fallbacks = inventory_paths(
+        selected,
+        inventory_batch_size,
+        timeout,
+        checkpoint=checkpoint,
+        freshness=implementation_freshness,
+    )
 
     inventories: dict[str, list[dict[str, Any]]] = {}
     nested_count = 0
@@ -546,7 +696,17 @@ def build_manifest(
     if specs:
         scope_occurrences, scope_declarations, scope_fallbacks = (
             scope.load_records_with_fallbacks(
-                specs, batch_size=scope_batch_size, timeout=timeout
+                specs,
+                batch_size=scope_batch_size,
+                timeout=timeout,
+                **(
+                    {
+                        "checkpoint": checkpoint,
+                        "freshness": implementation_freshness,
+                    }
+                    if checkpoint is not None
+                    else {}
+                ),
             )
         )
     else:
@@ -1155,6 +1315,7 @@ def build_manifest_command(args: argparse.Namespace) -> None:
         inventory_batch_size=args.inventory_batch_size,
         scope_batch_size=args.scope_batch_size,
         timeout=args.timeout,
+        checkpoint_root=Path(args.checkpoint_root) if args.checkpoint_root else None,
     )
     output = Path(args.output)
     publish_manifest(output, manifest)
@@ -1179,6 +1340,10 @@ def parser() -> argparse.ArgumentParser:
     manifest.add_argument("--timeout", type=int, default=3600)
     manifest.add_argument("--allow-dirty", action="store_true")
     manifest.add_argument("--allow-unresolved", action="store_true")
+    manifest.add_argument(
+        "--checkpoint-root",
+        help="opt in to durable inventory/scope batch checkpoints at this path",
+    )
     manifest.set_defaults(function=build_manifest_command)
     return result
 

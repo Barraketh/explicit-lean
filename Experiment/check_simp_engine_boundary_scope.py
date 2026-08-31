@@ -11,8 +11,10 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Sequence
 
+from inventory_checkpoint import CheckpointStore
 import simp_engine_inventory as inventory
 from process_runner import run_process
 
@@ -163,6 +165,8 @@ def load_records_with_fallbacks(
     *,
     batch_size: int = 128,
     timeout: int = 600,
+    checkpoint: CheckpointStore | None = None,
+    freshness: object = None,
 ) -> tuple[
     dict[str, list[dict[str, object]]],
     dict[str, list[dict[str, object]]],
@@ -196,7 +200,8 @@ def load_records_with_fallbacks(
     declarations: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
     fallback_modules: set[str] = set()
     requested_modules: set[str] = set()
-    for start in range(0, len(selected), batch_size):
+    batch_count = (len(selected) + batch_size - 1) // batch_size
+    for batch_index, start in enumerate(range(0, len(selected), batch_size), start=1):
         batch = selected[start : start + batch_size]
         batch_modules: set[str] = set()
         command = [
@@ -214,23 +219,128 @@ def load_records_with_fallbacks(
             batch_modules.add(spec.module)
             command.extend([spec.module, str(spec.source)])
         requested_modules.update(batch_modules)
-        output = run(command, timeout=timeout)
-        batch_occurrences: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
-        batch_declarations: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
-        batch_fallbacks: set[str] = set()
-        for line in output.splitlines():
-            if OCCURRENCE_MARKER in line:
-                value = json.loads(line.split(OCCURRENCE_MARKER, 1)[1])
-                batch_occurrences[str(value["module"])].append(value)
-            elif DECLARATION_MARKER in line:
-                value = json.loads(line.split(DECLARATION_MARKER, 1)[1])
-                batch_declarations[str(value["module"])].append(value)
-            elif FALLBACK_MARKER in line:
-                detail = line.split(FALLBACK_MARKER, 1)[1]
-                module, separator, _path = detail.partition(" file=")
-                if not separator or not module:
-                    raise RuntimeError(f"invalid scope fallback marker: {line}")
-                batch_fallbacks.add(module)
+
+        def decode(payload: object, *, strict: bool = False) -> tuple[
+            defaultdict[str, list[dict[str, object]]],
+            defaultdict[str, list[dict[str, object]]],
+            set[str],
+        ]:
+            if not isinstance(payload, dict) or set(payload) != {"stdout"}:
+                raise RuntimeError("scope checkpoint payload fields are invalid")
+            output = payload.get("stdout")
+            if not isinstance(output, str):
+                raise RuntimeError("scope checkpoint stdout is not a string")
+            parsed_occurrences: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
+            parsed_declarations: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
+            parsed_fallbacks: set[str] = set()
+            for line in output.splitlines():
+                if OCCURRENCE_MARKER in line:
+                    value = json.loads(line.split(OCCURRENCE_MARKER, 1)[1])
+                    if not isinstance(value, dict) or "module" not in value:
+                        raise RuntimeError("scope occurrence output record is invalid")
+                    parsed_occurrences[str(value["module"])].append(value)
+                elif DECLARATION_MARKER in line:
+                    value = json.loads(line.split(DECLARATION_MARKER, 1)[1])
+                    if not isinstance(value, dict) or "module" not in value:
+                        raise RuntimeError("scope declaration output record is invalid")
+                    parsed_declarations[str(value["module"])].append(value)
+                elif FALLBACK_MARKER in line:
+                    detail = line.split(FALLBACK_MARKER, 1)[1]
+                    module, separator, _path = detail.partition(" file=")
+                    if not separator or not module:
+                        raise RuntimeError(f"invalid scope fallback marker: {line}")
+                    parsed_fallbacks.add(module)
+            if strict:
+                # The full-parser fallback still runs collectOccurrences, so
+                # it is expected to emit the same count.  If a future fallback
+                # legitimately omits records, this fails closed and leaves no
+                # checkpoint for that batch rather than treating omission as
+                # valid zero coverage.
+                expected_counts = {
+                    spec.module: spec.expected_occurrences for spec in batch
+                }
+                for module, expected_count in expected_counts.items():
+                    actual_count = len(parsed_occurrences.get(module, []))
+                    if actual_count != expected_count:
+                        raise RuntimeError(
+                            "scope output occurrence count mismatch for "
+                            f"{module}: expected {expected_count}, found {actual_count}"
+                        )
+                occurrence_fields = {"module", "startByte", "endByte", "kind", "source"}
+                declaration_fields = {"module", "startByte", "endByte", "name", "isProof"}
+                for values in parsed_occurrences.values():
+                    if any(not occurrence_fields <= set(value) for value in values):
+                        raise RuntimeError("scope occurrence output record is incomplete")
+                for values in parsed_declarations.values():
+                    if any(not declaration_fields <= set(value) for value in values):
+                        raise RuntimeError("scope declaration output record is incomplete")
+            return parsed_occurrences, parsed_declarations, parsed_fallbacks
+
+        def validate_payload(payload: object) -> object:
+            parsed_occurrences, parsed_declarations, parsed_fallbacks = decode(
+                payload, strict=True
+            )
+            returned_modules = set(parsed_occurrences) | set(parsed_declarations)
+            unexpected = returned_modules - batch_modules
+            if unexpected:
+                raise RuntimeError(
+                    "scope classifier returned unrequested modules: "
+                    f"{sorted(unexpected)}"
+                )
+            unexpected_fallbacks = parsed_fallbacks - batch_modules
+            if unexpected_fallbacks:
+                raise RuntimeError(
+                    "scope classifier reported fallbacks for unrequested modules: "
+                    f"{sorted(unexpected_fallbacks)}"
+                )
+            return payload
+
+        def produce() -> dict[str, str]:
+            return {"stdout": run(command, timeout=timeout)}
+
+        started = time.monotonic()
+        if checkpoint is None:
+            payload = produce()
+            hit = False
+        else:
+            source_hashes = [
+                hashlib.sha256(spec.source.read_bytes()).hexdigest() for spec in batch
+            ]
+
+            def batch_freshness() -> None:
+                current_hashes = [
+                    hashlib.sha256(spec.source.read_bytes()).hexdigest()
+                    for spec in batch
+                ]
+                if current_hashes != source_hashes:
+                    raise RuntimeError(
+                        "scope source changed during checkpointed batch"
+                    )
+                if freshness is not None:
+                    if not callable(freshness):
+                        raise RuntimeError("scope checkpoint freshness is not callable")
+                    freshness()
+
+            result = checkpoint.get_or_compute(
+                "scope",
+                [spec.module for spec in batch],
+                source_hashes,
+                produce,
+                parameters={"timeout": timeout},
+                validator=validate_payload,
+                freshness=batch_freshness,
+            )
+            payload = result.payload
+            hit = result.hit
+        elapsed = time.monotonic() - started
+        batch_occurrences, batch_declarations, batch_fallbacks = decode(payload)
+        if checkpoint is not None:
+            print(
+                f"scope batch {batch_index}/{batch_count}: "
+                f"{'hit' if hit else 'completed'} modules={len(batch)} "
+                f"seconds={elapsed:.2f}",
+                file=sys.stderr,
+            )
         returned_modules = set(batch_occurrences) | set(batch_declarations)
         unexpected = returned_modules - batch_modules
         if unexpected:
@@ -265,10 +375,11 @@ def load_records(
     *,
     batch_size: int = 128,
     timeout: int = 600,
+    checkpoint: CheckpointStore | None = None,
 ) -> tuple[dict[str, list[dict[str, object]]], dict[str, list[dict[str, object]]]]:
     """Load scope records while preserving the original two-result API."""
     occurrences, declarations, _fallbacks = load_records_with_fallbacks(
-        specs, batch_size=batch_size, timeout=timeout
+        specs, batch_size=batch_size, timeout=timeout, checkpoint=checkpoint
     )
     return occurrences, declarations
 
