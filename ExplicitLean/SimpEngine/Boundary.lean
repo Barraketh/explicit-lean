@@ -223,15 +223,21 @@ private def mkPreBoundaryBasis : TacticM PreBoundaryBasis := do
   }
 
 /-- Simp-argument elaboration may create private helper declarations. A closed
-    boundary artifact cannot retain references to declarations introduced after
-    the saved pre-state, so inline every such definition/theorem transitively. -/
-private def closeFreshConstants (basis : PreBoundaryBasis) (expression : Expr) : MetaM Expr := do
+    boundary artifact may retain only fresh theorem references named by the
+    exact captured local-theorem actions; all other post-boundary constants are
+    transitively inlined. -/
+private def closeFreshConstants (basis : PreBoundaryBasis) (expression : Expr)
+    (preservedFreshTheorems : NameSet := {}) : MetaM Expr := do
   let current ← getEnv
   Core.transform expression (pre := fun subexpression => do
     match subexpression with
     | .const name levels =>
         if basis.environment.contains name then
           return .done subexpression
+        if preservedFreshTheorems.contains name then
+          match current.find? name with
+          | some (.thmInfo _) => return .done subexpression
+          | _ => throwError "boundary_artifact_preserved_constant_not_theorem:{name}"
         let some info := current.find? name
           | throwError "boundary_artifact_fresh_constant_missing:{name}"
         let some value := info.value? (allowOpaque := true)
@@ -249,19 +255,21 @@ private def instantiateBoundaryLevels (expression : Expr) : MetaM Expr :=
         return .done (.const name levels)
     | _ => return .continue)
 
-private def captureBoundaryExpr (basis : PreBoundaryBasis) (expression : Expr) : MetaM Expr :=
+private def captureBoundaryExpr (basis : PreBoundaryBasis) (expression : Expr)
+    (preservedFreshTheorems : NameSet := {}) : MetaM Expr :=
   withRestoredBoundaryFullMetaState do
     let expression ← instantiateMVars expression
-    let expression ← closeFreshConstants basis expression
+    let expression ← closeFreshConstants basis expression preservedFreshTheorems
     let expression ← instantiateMVars expression
     instantiateBoundaryLevels expression
 
 private def validateBoundaryRawExprConstants
-    (basis : PreBoundaryBasis) (expression : Expr) : MetaM Unit := do
+    (basis : PreBoundaryBasis) (expression : Expr)
+    (preservedFreshTheorems : NameSet := {}) : MetaM Unit := do
   let _ ← Core.transform expression (pre := fun subexpression => do
     match subexpression with
     | .const name _ =>
-        unless basis.environment.contains name do
+        unless basis.environment.contains name || preservedFreshTheorems.contains name do
           throwError "boundary_comparison_unpaired_fresh_constant"
         return .done subexpression
     | _ => return .continue)
@@ -1716,7 +1724,14 @@ private def executeStockLocation (simpStx : Syntax)
       return false
 
 private def validateArtifactExpr (basis : PreBoundaryBasis) (label : String)
-    (expression : Expr) : MetaM Unit := do
+    (expression : Expr) (preservedFreshTheorems : NameSet := {}) : MetaM Unit := do
+  let _ ← Core.transform expression (pre := fun subexpression => do
+    match subexpression with
+    | .const name _ =>
+        unless basis.environment.contains name || preservedFreshTheorems.contains name do
+          throwError "boundary_artifact_unpaired_fresh_constant:{label}:{name}"
+        return .done subexpression
+    | _ => return .continue)
   for id in ← getMVars expression do
     unless basis.exprMVars.any (fun entry => entry.id == id) do
       throwError "boundary_artifact_fresh_expression_mvar:{label}:{id.name}"
@@ -2059,6 +2074,15 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
   return actions.qsort fun lhs rhs =>
     (boundaryEnvironmentActionName lhs).toString < (boundaryEnvironmentActionName rhs).toString
 
+private def preservedFreshTheoremNames
+    (actions : Array EnvironmentAction) : TacticM NameSet := do
+  let mut names : NameSet := {}
+  for action in actions do
+    if let .declareLocalTheorems anchor payload := action then
+      for name in ← boundaryLocalTheoremNames anchor payload do
+        names := names.insert name
+  return names
+
 private def boundaryConstantMetadataEq
     (stock applied : ConstantInfo) : Bool :=
   match stock, applied with
@@ -2301,21 +2325,22 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
         throwError s!"boundary_comparison_unsupported_environment_delta:{appliedInfo.name}"
 private def captureTransformation (basis : PreBoundaryBasis) (label : String)
     (input : Expr) (ctx : Simp.Context) (simprocs : Simp.SimprocsArray)
-    (discharge? : Option Simp.Discharge) (stats : Simp.Stats) :
+    (discharge? : Option Simp.Discharge) (stats : Simp.Stats)
+    (preservedFreshTheorems : NameSet := {}) :
     MetaM (TargetArtifact × Simp.Stats) := do
-  let input ← closeFreshConstants basis (← instantiateMVars input)
+  let input ← closeFreshConstants basis (← instantiateMVars input) preservedFreshTheorems
   let (result, stats) ← Meta.simp input ctx simprocs discharge? stats
-  let output ← closeFreshConstants basis (← instantiateMVars result.expr)
+  let output ← closeFreshConstants basis (← instantiateMVars result.expr) preservedFreshTheorems
   let proof? ← result.proof?.mapM fun proof => do
-    closeFreshConstants basis (← instantiateMVars proof)
-  validateArtifactExpr basis s!"{label}:input" input
-  validateArtifactExpr basis s!"{label}:result" output
+    closeFreshConstants basis (← instantiateMVars proof) preservedFreshTheorems
+  validateArtifactExpr basis s!"{label}:input" input preservedFreshTheorems
+  validateArtifactExpr basis s!"{label}:result" output preservedFreshTheorems
   if let some proof := proof? then
-    validateArtifactExpr basis s!"{label}:proof" proof
+    validateArtifactExpr basis s!"{label}:proof" proof preservedFreshTheorems
   return ({ input, result := output, proof? }, stats)
 
 private def captureGoalArtifact (basis : PreBoundaryBasis) (simpStx : Syntax)
-    (selection : SelectedLocation) : TacticM GoalArtifact := do
+    (selection : SelectedLocation) (preservedFreshTheorems : NameSet := {}) : TacticM GoalArtifact := do
   let goal ← getMainGoal
   let r@{ ctx, simprocs, dischargeWrapper, .. } ←
     mkSimpContext simpStx (eraseLocal := false)
@@ -2332,7 +2357,7 @@ private def captureGoalArtifact (basis : PreBoundaryBasis) (simpStx : Syntax)
           let localCtx := ctx.setSimpTheorems <|
             ctx.simpTheorems.eraseTheorem (.fvar decl.fvarId)
           captureTransformation basis s!"local:{decl.userName}" decl.type localCtx
-            simprocs discharge? stats
+            simprocs discharge? stats preservedFreshTheorems
         stats := nextStats
         locals := locals.push { fvarId, transformation }
         if transformation.result.isFalse then
@@ -2343,7 +2368,7 @@ private def captureGoalArtifact (basis : PreBoundaryBasis) (simpStx : Syntax)
       if selection.simplifyTarget then
         let (targetArtifact, _) ← current.withContext do
           captureTransformation basis "target" (← current.getType) ctx simprocs
-            discharge? stats
+            discharge? stats preservedFreshTheorems
         return { locals, target? := some targetArtifact }
       return { locals }
 
@@ -2516,7 +2541,9 @@ private def runBoundaryProbe (simpStx : Syntax)
     setDeclNGen preGenerator
   let postStockAction : TacticM (GoalArtifact × String × Tactic.SavedState × DeclNameGenerator) := do
     let stock ← boundarySnapshot basis
-    let mut environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
+    let capturedEnvironmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
+    let preservedFreshTheorems ← preservedFreshTheoremNames capturedEnvironmentActions
+    let mut environmentActions := capturedEnvironmentActions
     if reportRequest?.isSome && environmentActions.isEmpty && (preGenerator.namePrefix != stockGenerator.namePrefix ||
         preGenerator.idx != stockGenerator.idx || preGenerator.parentIdxs != stockGenerator.parentIdxs) then
       compareBoundaryEnvironment basis basis.environment stockEnvironment #[]
@@ -2530,7 +2557,10 @@ private def runBoundaryProbe (simpStx : Syntax)
         preGenerator stockGenerator original
       environmentActions := #[.reserveDeclarationBranch preGenerator.namePrefix payload]
     restoreTrialInput
-    let artifact ← captureGoalArtifact basis simpStx selection
+    let artifact ← captureGoalArtifact basis simpStx selection preservedFreshTheorems
+    let replayEnvironmentActions ← captureBoundaryEnvironmentActions basis (← getEnv)
+    unless replayEnvironmentActions == capturedEnvironmentActions do
+      throwError "boundary_environment_actions_changed_during_capture"
     let use ← protectBoundaryReferences basis.expressionReferences artifact.expressions
     use.checkContext stockMCtx
     use.checkUnchanged
