@@ -1,20 +1,20 @@
 # Search-free Mathlib campaign
 
-Updated 2026-08-31T15:34:03.400952+00:00
+Updated 2026-08-31T15:38:09.949292+00:00
 
 - Indexed: 83,425 calls in 8,264 modules.
-- Accepted per-module verification: 0 translated calls in 0 modules.
-- Provisional cache awaiting current semantic checks: 691 calls in 66 modules.
+- Accepted per-module verification: 7 translated calls in 1 modules.
+- Provisional cache awaiting current semantic checks: 617 calls in 54 modules.
 - Unresolved source classifications: 5.
 - Missing cached report files: 0.
 
 Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.
 
-Queue: failed=72, succeeded=66, unplanned=8126
+Queue: failed=63, queued=19, running=1, succeeded=55, unplanned=8126
 
 ## Active modules
 
-No active module lease.
+- `Mathlib/AlgebraicTopology/ExtraDegeneracy.lean` (schema10-expansion)
 
 ## Failures and partial results
 
@@ -27,7 +27,6 @@ No active module lease.
 - `Mathlib/AlgebraicGeometry/Morphisms/QuasiCompact.lean`: materializer exit 1
 - `Mathlib/AlgebraicTopology/AlternatingFaceMapComplex.lean`: materializer exit 1
 - `Mathlib/AlgebraicTopology/DoldKan/Faces.lean`: materializer exit 1
-- `Mathlib/AlgebraicTopology/ExtraDegeneracy.lean`: materializer exit 1
 - `Mathlib/AlgebraicTopology/SimplicialSet/ProdStdSimplexOne.lean`: materializer exit 1
 - `Mathlib/Analysis/AperiodicOrder/Delone/Basic.lean`: materializer exit 1
 - `Mathlib/Analysis/BoxIntegral/Box/SubboxInduction.lean`: materializer exit 1
@@ -48,5 +47,6 @@ No active module lease.
 - `Mathlib/Condensed/Discrete/Module.lean`: materializer exit 1
 - `Mathlib/Control/Basic.lean`: materializer exit 1
 - `Mathlib/Control/Bitraversable/Instances.lean`: materializer exit 1
+- `Mathlib/Control/Fold.lean`: materializer exit 1
 
 Regenerate with `python3 Experiment/campaign_status.py --markdown`.

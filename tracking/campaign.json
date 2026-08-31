@@ -242,7 +242,7 @@
       "id": "complete-command-context-audit",
       "owner": "coordinator with assigned agent",
       "status": "in_progress",
-      "description": "Luna prototype uses actual Language.Lean.process command snapshots; baseline and localsyntax controls pass, remaining small fixtures and immutable handoff pending."
+      "description": "Luna revising full Language.Lean.process snapshot prototype after review: preserve actual module/header mode/options; distinguish reusable macro quotation from inert data. Initial API feasibility only, not acceptance."
     }
   ],
   "blockers": [
@@ -279,7 +279,7 @@
     {
       "id": "final-grammar-coverage-audit",
       "status": "open",
-      "detail": "Actual-header inventory integrated; new full-command-context prototype uses actual Language.Lean.process snapshots. Baseline/localsyntax fixtures pass; quoted-data/actual-header controls and integration remain pending. No complete-corpus audit claim."
+      "detail": "Actual-command snapshot API prototype compiles, but review found forcedisModule=true for nonmodule sources, hardcodedFinalCommandAudit identity, and a reusable macroRHS simp mislabeled inert data. Revised private prototype requested; do not integrate initialreport or count it as correct classifier/header fidelity."
     },
     {
       "id": "fresh-replay-cache-grouping",
@@ -715,6 +715,11 @@
       "at": "2026-08-31T15:34:02.773764+00:00",
       "summary": "Frozen1f6f12c campaign withenginee3af2f2. Cloned projectcache validated(all17351Lakejobs current/successful). Fresh priority201-module/131-root andfull8260-module pipelines launched, sessions38300/72713. Runnerf539d8f5 checks freshbudget/storage and live selectedleases; module reports remain immutable, overall summaries diagnostic. Fullworkerbounded500attempts/4hours. Sharedpackage no-write lease remainsactive.",
       "evidence": ".lake/week-2026-08-31/schema10-dispatch.json"
+    },
+    {
+      "at": "2026-08-31T15:38:09.704577+00:00",
+      "summary": "Fresh schema10priority manifest verified201modules/1604calls, SHA3b483892. First worker has verified Int.Init7calls, then continues boundedfrontier; fullanalysis still running. Actual-command-audit review rejected initial classification/header/module claims; corrected private prototype assigned. No production dependency on this prototype.",
+      "evidence": ".lake/week-2026-08-31/schema10-priority-manifest-verification.json"
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -890,8 +895,8 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
       "commit": "1f6f12c",
       "status": "running",
-      "phase": "manifest_then_workers",
-      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-expansion-manifest.log",
+      "phase": "first_priority_worker",
+      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-first-worker.log",
       "modules": 201,
       "note": "Fresh201-module manifest then first23 priorityworker then full131-root priorityworker. Disjoint from full worker. Per-mode logs preserve each stage; expansion summary is current diagnostic only.",
       "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py"
@@ -1119,5 +1124,5 @@
     "checkedAt": "2026-08-31T15:30:34.486345+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T15:34:02.773764+00:00"
+  "updatedAt": "2026-08-31T15:38:09.704577+00:00"
 }
