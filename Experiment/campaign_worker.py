@@ -307,6 +307,7 @@ def run_worker(
             dependency_map=dependency_map,
         )
         retryable: list[str] = []
+        current_cache_keys: dict[str, str] = {}
         # Keep one identity/source memo for this preflight pass.  A cache key
         # walks the imported dependency graph, so adjacent selected modules
         # commonly revisit the same dependency identities.  This memo is
@@ -323,6 +324,7 @@ def run_worker(
             prior = connection.execute(
                 "SELECT status,translation_status FROM result_cache WHERE cache_key=?", (key,)
             ).fetchone()
+            current_cache_keys[module] = key
             if prior is not None and not retry_failed:
                 if prior[0] in {"failure", "partial"} or (
                     prior[0] == "success" and prior[1] != "verified_translated"
@@ -334,7 +336,10 @@ def run_worker(
             else:
                 retryable.append(module)
         if retry_failed:
-            retryable = order_retryable(connection, retryable, manifest_order=manifest_order)
+            retryable = order_retryable(
+                connection, retryable, manifest_order=manifest_order,
+                cache_keys=current_cache_keys,
+            )
         if max_modules is not None:
             retryable = retryable[:max_modules]
         planned = plan_work(

@@ -20,6 +20,7 @@ from translation_index import (
     import_manifest,
     occurrence_id,
     plan_work,
+    order_retryable,
     record_result,
     status,
     _imports,
@@ -37,6 +38,33 @@ class TranslationIndexTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close()
         self.temp.cleanup()
+
+    def test_retry_ordering_chunks_large_module_sets(self) -> None:
+        modules = [f"Mathlib/M{i}.lean" for i in range(1001)]
+        self.connection.executemany(
+            "INSERT INTO work_queue(module,cache_key,state,updated_at) VALUES (?, ?, 'queued', 0)",
+            [(module, f"key-{module}") for module in modules],
+        )
+        ordered = order_retryable(
+            self.connection, modules, cache_keys={module: f"key-{module}" for module in modules},
+        )
+        self.assertEqual(ordered, modules)
+
+    def test_retry_ordering_ignores_attempts_from_old_cache_key(self) -> None:
+        modules = ["Mathlib/Changed.lean", "Mathlib/Retried.lean"]
+        self.connection.executemany(
+            "INSERT INTO work_queue(module,cache_key,state,updated_at) VALUES (?, ?, 'queued', 0)",
+            [(modules[0], "new-key"), (modules[1], "same-key")],
+        )
+        self.connection.executemany(
+            "INSERT INTO attempts(module,cache_key,worker,status,started_at) VALUES (?, ?, 'fixture', 'failure', ?)",
+            [(modules[0], "old-key", 1), (modules[1], "same-key", 2)],
+        )
+        ordered = order_retryable(
+            self.connection, modules,
+            cache_keys={modules[0]: "new-key", modules[1]: "same-key"},
+        )
+        self.assertEqual(ordered, modules)
 
     def write_manifest(self, sources: dict[str, str], *, manifest_name: str = "manifest.json", unresolved: bool = False) -> Path:
         modules = []

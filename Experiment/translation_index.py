@@ -910,10 +910,11 @@ def plan_work(
 def order_retryable(
     connection: sqlite3.Connection, modules: Sequence[str],
     *, manifest_order: Mapping[str, int] | None = None,
+    cache_keys: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Order bounded retry work so repeated failures cannot starve fresh work.
 
-    Modules with no recorded attempt are placed first.  Previously attempted
+    Modules with no recorded attempt for their current cache key are placed first.  Previously attempted
     modules are then ordered by their attempt count and oldest attempt, with
     manifest order (when supplied) as the final stable tie-breaker.  Keeping
     module names out of the tie-breaker makes ordering independent of naming.
@@ -923,17 +924,34 @@ def order_retryable(
         raise IndexError("retry ordering modules must be unique")
     if not indexed:
         return []
-    placeholders = ",".join("?" for _ in modules)
-    rows = connection.execute(
-        "SELECT q.module, q.attempt_count, MIN(a.started_at) AS oldest_attempt "
-        "FROM work_queue q LEFT JOIN attempts a ON a.module=q.module "
-        f"WHERE q.module IN ({placeholders}) GROUP BY q.module",
-        tuple(modules),
-    ).fetchall()
-    details = {
-        row["module"]: (int(row["attempt_count"]), row["oldest_attempt"])
-        for row in rows
-    }
+    if cache_keys is None or any(module not in cache_keys for module in modules):
+        raise IndexError("retry ordering requires current cache keys for every module")
+    # Keep each query comfortably below SQLite's parameter limit.  Attempts
+    # are filtered in Python because each module has a different current key.
+    details: dict[str, tuple[int, float | None]] = {}
+    for offset in range(0, len(modules), 800):
+        chunk = list(modules[offset:offset + 800])
+        placeholders = ",".join("?" for _ in chunk)
+        queue_rows = connection.execute(
+            f"SELECT module FROM work_queue WHERE module IN ({placeholders})",
+            tuple(chunk),
+        ).fetchall()
+        for row in queue_rows:
+            details[row["module"]] = (0, None)
+        attempt_rows = connection.execute(
+            f"SELECT module,cache_key,started_at FROM attempts WHERE module IN ({placeholders})",
+            tuple(chunk),
+        ).fetchall()
+        counts: dict[str, int] = {}
+        oldest: dict[str, float] = {}
+        for row in attempt_rows:
+            module = row["module"]
+            if row["cache_key"] != cache_keys[module]:
+                continue
+            counts[module] = counts.get(module, 0) + 1
+            oldest[module] = min(oldest.get(module, row["started_at"]), row["started_at"])
+        for module, count in counts.items():
+            details[module] = (count, oldest[module])
     return sorted(
         modules,
         key=lambda module: (
