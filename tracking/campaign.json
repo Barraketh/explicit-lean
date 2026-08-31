@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 7,
+    "verifiedTranslatedOccurrences": 37,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle, plus local matcher and auxiliary-cache state comparison (report schema 8). Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
@@ -28,9 +28,9 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 2,
-    "provisionalCachedOccurrences": 254,
-    "provisionalCachedModules": 22,
+    "verifiedTranslatedModules": 11,
+    "provisionalCachedOccurrences": 294,
+    "provisionalCachedModules": 27,
     "minimumAcceptedReportSchema": 8
   },
   "work": [
@@ -165,6 +165,30 @@
       "status": "completed",
       "owner": "coordinator with Sol implementation",
       "description": "7839c0f: typed inline/matcher metadata owners resolved in checked constants view. Main4controls passed: identical asyncmatcher/privatecomputation accepted; changedinline/bodyrejected. No privatecomputation exemption."
+    },
+    {
+      "id": "captured-local-helper-bundle",
+      "owner": "/root/unresolved_probe_finish",
+      "status": "in_progress",
+      "description": "Exact ordinary public/private helper bodies, typed cache/tag effects, and trial isolation. Synthetic original/record/replay next-name agreement now passes; real Prod/matcher controls pending. Report minimum9 planned for generator comparison."
+    },
+    {
+      "id": "pre-boundary-universe-references",
+      "owner": "/root/splitter_failure",
+      "status": "in_progress",
+      "description": "Root prototype supports selector-reachable existing universe variables through expr_dag_v2/artifact3; nine codec processes and six structural negatives passed. Single ExtraDegeneracy call (two executions) passed168-declaration oracle; Ore singlecall records/replays but helper naming still fails. Luna review/promotion in progress."
+    },
+    {
+      "id": "sparse-matcher-helper",
+      "owner": "coordinator",
+      "status": "in_progress",
+      "description": "Investigating List.modifyLast matcher sparseCasesOn helper closure and exact typed local/async cache guard in isolated prototype. No production support or acceptance claim."
+    },
+    {
+      "id": "translated-schema8-forest",
+      "owner": "/root/tree_build_plan",
+      "status": "in_progress",
+      "description": "General strict forest runner consumes successful frozen schema8 reports plus fresh zero-call closure, validates imports without stock Mathlib fallback and checks incremental evidence reuse. Fix-review in progress."
     }
   ],
   "blockers": [
@@ -490,6 +514,16 @@
         "Standalone public theorem codec not yet integrated into production actions.",
         "Generator state is not yet an independently validated boundary effect."
       ]
+    },
+    {
+      "at": "2026-08-31T12:55:39.667344+00:00",
+      "summary": "Read-only failure triage committede765695. Universe-reference prototype passes nine compiler controls plus six wire negatives; ExtraDegeneracy one source call/two executions passes full168decl comparison. OreLocalization singlecall now compiles but exposes helper naming mismatch. Sol helper replay+isolated trials now matches original next public name in three fresh production paths; real module checks pending. Sparse helper probe identifies exact checked private definition, reducer/sparse tags, typed metadata and local cache. No new prototype acceptance credited. Budget13%.",
+      "evidence": [
+        ".lake/search-free-mathlib/snapshots/boundary-level-reference-prototype/.lake/level-reference-diagnostics/fixture-s4zy1wun/report.json",
+        ".lake/search-free-mathlib/snapshots/boundary-level-reference-prototype/.lake/level-reference-diagnostics/source-lfe0t432/report.json",
+        ".lake/search-free-mathlib/snapshots/sparse-matcher-prototype/.lake/sparse-probe/fixture-5.log",
+        ".lake/week-2026-08-31/failure-families.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -652,7 +686,8 @@
     "f629783",
     "6b99b9a",
     "7839c0f",
-    "9a74d7f"
+    "9a74d7f",
+    "e765695"
   ],
   "experiments": [
     {
@@ -727,7 +762,7 @@
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 7,
+    "verifiedTranslations": 37,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
@@ -762,5 +797,10 @@
         "independentVerification": ".lake/week-2026-08-31/schema7-cone-verification.json"
       }
     ]
+  },
+  "failureTriage": {
+    "command": "python3 Experiment/campaign_failures.py",
+    "latestReport": ".lake/week-2026-08-31/failure-families.json",
+    "scope": "Diagnostic family grouping only; preserves implementation identities and log hashes, not proof of common root cause."
   }
 }
