@@ -17,9 +17,10 @@ import subprocess
 import sys
 import tempfile
 
+from process_runner import run_process
+
 
 ROOT = Path(__file__).resolve().parents[1]
-ORACLE = "Experiment/SimpEngineDeclarationOracle.lean"
 MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
 KIND = "simp_engine_declaration_oracle"
 SCHEMA = 1
@@ -37,11 +38,37 @@ class Case:
     detail_contains: str | None = None
 
 
-def source(body: str) -> str:
-    return "module\n\nimport Mathlib\n\npublic section\n\n" + body + "\n"
+def source(body: str, *, mathlib: bool = False) -> str:
+    dependency = "Mathlib" if mathlib else "Lean"
+    return f"module\n\nimport {dependency}\n\npublic section\n\n" + body + "\n"
+
+
+EARLY_IMPORT_SOURCE = (
+    "import Lean.Elab.Command\n"
+    "run_cmd do\n"
+    "  if (← Lean.getOptionDecls).contains `linter.style.header then\n"
+    "    throwError \"oracle preloaded an unrelated Mathlib option registry\"\n"
+    "theorem oracleSample : True := True.intro\n"
+)
+
+
+def matcher_order_source(entries: str) -> str:
+    return source(
+        "def match_a : Nat := 0\n"
+        "def match_b : Nat := 0\n"
+        "def match_c : Nat := 0\n"
+        "run_cmd do\n"
+        "  let info1 : Lean.Meta.MatcherInfo := {\n"
+        "    numParams := 1, numDiscrs := 1, altInfos := #[],\n"
+        "    uElimPos? := none, discrInfos := #[], overlaps := {} }\n"
+        "  let info2 : Lean.Meta.MatcherInfo := { info1 with numParams := 2 }\n"
+        f"  for (name, info) in #[{entries}] do\n"
+        "    Lean.Meta.Match.addMatcherInfo name info"
+    )
 
 
 CASES = (
+    Case("early-import-option-registry", EARLY_IMPORT_SOURCE, EARLY_IMPORT_SOURCE, True),
     Case(
         "proof-body-difference",
         source("theorem oracleSample : True := by trivial"),
@@ -51,7 +78,7 @@ CASES = (
     Case(
         "module-doc-range-shift",
         source("/-! Oracle module documentation. -/\n\ntheorem oracleSample : True := True.intro"),
-        "module\n\nimport Mathlib\n"
+        "module\n\nimport Lean\n"
         "import ExplicitLean.SimpEngine.Boundary.Tactic\n\n"
         "public section\n\n/-! Oracle module documentation. -/\n\n"
         "theorem oracleSample : True := True.intro\n",
@@ -68,17 +95,17 @@ CASES = (
         "derived-module-use-subset",
         source(
             "run_cmd Lean.recordExtraModUse `Mathlib.Data.Int.Cast.Basic false\n"
-            "theorem oracleSample : True := True.intro"
+            "theorem oracleSample : True := True.intro", mathlib=True
         ),
-        source("theorem oracleSample : True := True.intro"),
+        source("theorem oracleSample : True := True.intro", mathlib=True),
         True,
     ),
     Case(
         "added-module-use",
-        source("theorem oracleSample : True := True.intro"),
+        source("theorem oracleSample : True := True.intro", mathlib=True),
         source(
             "run_cmd Lean.recordExtraModUse `Mathlib.Data.Int.Cast.Basic false\n"
-            "theorem oracleSample : True := True.intro"
+            "theorem oracleSample : True := True.intro", mathlib=True
         ),
         False,
         "environment_delta_mismatch",
@@ -142,6 +169,37 @@ CASES = (
         "environment_delta_mismatch",
     ),
     Case(
+        "public-internal-looking-name-type-mismatch",
+        source("theorem oracleWarmup : True ∧ True := ⟨True.intro, True.intro⟩\n"
+               "theorem proof_1 : True := True.intro"),
+        source("theorem oracleWarmup : True ∧ True := ⟨True.intro, True.intro⟩\n"
+               "theorem proof_1 : True ∧ True := ⟨True.intro, True.intro⟩"),
+        False,
+        "declaration_type_mismatch",
+    ),
+    Case(
+        "public-internal-looking-name-omission",
+        source("theorem proof_1 : True := True.intro"),
+        source(""),
+        False,
+        "declaration_set_mismatch",
+    ),
+    Case(
+        "public-internal-looking-name-axiom-mismatch",
+        source("theorem proof_1 : True := True.intro"),
+        source("theorem proof_1 : True := Classical.choice ⟨True.intro⟩"),
+        False,
+        "axiom_subset_mismatch",
+    ),
+    Case(
+        "public-matcher-duplicate-entry-order",
+        matcher_order_source("(`match_c, info1), (`match_a, info2), (`match_b, info1), (`match_a, info1)"),
+        matcher_order_source("(`match_c, info1), (`match_b, info1), (`match_a, info1), (`match_a, info2)"),
+        False,
+        "environment_delta_mismatch",
+        detail_contains="Lean.Meta.Match.Extension.extension",
+    ),
+    Case(
         "private-proof-helper-omission",
         source(
             "private theorem oraclePrivateHelper : True := True.intro\n"
@@ -162,6 +220,67 @@ CASES = (
         ),
         True,
         private_proof_counts=(0, 0, 2),
+    ),
+    Case(
+        "private-proof-inline-helper-renamed",
+        source(
+            "@[inline] private def stockProofHelper : True := True.intro\n"
+            "theorem oracleSample : True := stockProofHelper"
+        ),
+        source(
+            "@[inline] private def appliedProofHelper : True := True.intro\n"
+            "theorem oracleSample : True := appliedProofHelper"
+        ),
+        True,
+    ),
+    Case(
+        "private-proof-inline-helper-omitted",
+        source(
+            "@[inline] private def stockProofHelper : True := True.intro\n"
+            "theorem oracleSample : True := stockProofHelper"
+        ),
+        source("theorem oracleSample : True := True.intro"),
+        True,
+    ),
+    Case(
+        "public-inline-attribute-mismatch",
+        source("def oracleSample (n : Nat) : Nat := n\n"
+               "run_cmd do\n"
+               "  let env ← Lean.ofExcept <| Lean.Compiler.setInlineAttribute (← Lean.getEnv) ``oracleSample .inline\n"
+               "  Lean.setEnv env"),
+        source("def oracleSample (n : Nat) : Nat := n\n"
+               "run_cmd do\n"
+               "  let env ← Lean.ofExcept <| Lean.Compiler.setInlineAttribute (← Lean.getEnv) ``oracleSample .noinline\n"
+               "  Lean.setEnv env"),
+        False,
+        "environment_delta_mismatch",
+        detail_contains="observable inline attributes differ",
+    ),
+    Case(
+        "private-computational-inline-attribute-mismatch",
+        source(
+            "@[inline] private def oraclePrivateHelper (n : Nat) : Nat := n\n"
+            "def oracleSample (n : Nat) : Nat := oraclePrivateHelper n"
+        ),
+        source(
+            "@[noinline] private def oraclePrivateHelper (n : Nat) : Nat := n\n"
+            "def oracleSample (n : Nat) : Nat := oraclePrivateHelper n"
+        ),
+        False,
+        "environment_delta_mismatch",
+    ),
+    Case(
+        "public-matcher-metadata-mismatch",
+        source("def oracleSample (n : Nat) : Nat := n"),
+        source(
+            "def oracleSample (n : Nat) : Nat := n\n"
+            "run_cmd Lean.Meta.Match.addMatcherInfo ``oracleSample {\n"
+            "  numParams := 0, numDiscrs := 1, altInfos := #[],\n"
+            "  uElimPos? := none, discrInfos := #[], overlaps := {} }"
+        ),
+        False,
+        "environment_delta_mismatch",
+        detail_contains="Lean.Meta.Match.Extension.extension",
     ),
     Case(
         "private-proof-helper-type-difference",
@@ -218,34 +337,6 @@ CASES = (
 )
 
 
-def run(command: list[str], timeout: int = TIMEOUT) -> str:
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=timeout,
-        check=False,
-    )
-    if completed.returncode:
-        raise RuntimeError(f"command failed ({completed.returncode}): {command}\n{completed.stdout}")
-    return completed.stdout
-
-
-def build_library() -> str:
-    run(["lake", "build", "ExplicitLean:shared"])
-    output = run(["lake", "query", "ExplicitLean:shared", "--json"])
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
-    try:
-        path = json.loads(lines[-1])
-    except (IndexError, json.JSONDecodeError) as error:
-        raise RuntimeError("lake query ExplicitLean:shared returned invalid JSON") from error
-    if not isinstance(path, str) or not path:
-        raise RuntimeError(f"lake query ExplicitLean:shared returned invalid path: {path!r}")
-    return path
-
-
 def parse_report(output: str) -> dict[str, object]:
     reports = [
         json.loads(line.split(MARKER, 1)[1].strip())
@@ -260,7 +351,7 @@ def parse_report(output: str) -> dict[str, object]:
     return report
 
 
-def check_case(case: Case, dylib: str, root: Path, ordinal: int) -> None:
+def check_case(case: Case, root: Path, ordinal: int) -> None:
     stock_dir = root / f"{ordinal:02d}-stock"
     applied_dir = root / f"{ordinal:02d}-applied"
     stock_dir.mkdir()
@@ -271,17 +362,14 @@ def check_case(case: Case, dylib: str, root: Path, ordinal: int) -> None:
     applied_path.write_text(case.applied, encoding="utf-8")
     module = "Experiment.SimpEngine.DeclarationOracleFixture"
     command = [
-        "lake",
-        "env",
-        "lean",
-        f"--load-dynlib={dylib}",
-        "--run",
-        ORACLE,
+        sys.executable,
+        str(ROOT / "Experiment/lean_toolchain_cache.py"),
+        "oracle",
         module,
         str(stock_path),
         str(applied_path),
     ]
-    completed = subprocess.run(
+    completed = run_process(
         command,
         cwd=ROOT,
         text=True,
@@ -328,11 +416,10 @@ def check_case(case: Case, dylib: str, root: Path, ordinal: int) -> None:
 
 
 def main() -> None:
-    dylib = build_library()
     with tempfile.TemporaryDirectory(prefix="declaration-oracle-", dir=ROOT / ".lake") as raw:
         root = Path(raw)
         for ordinal, case in enumerate(CASES):
-            check_case(case, dylib, root, ordinal)
+            check_case(case, root, ordinal)
     print(
         "declaration oracle: "
         f"{sum(case.accepted for case in CASES)} accepted-equivalence and "

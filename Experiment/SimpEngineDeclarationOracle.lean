@@ -1,5 +1,7 @@
 import ExplicitLean
-import Mathlib
+-- Option declarations are process-global. Preloading all of Mathlib here
+-- would activate weak linter options that an early module's own imports do
+-- not register, changing its selector state relative to a standalone build.
 import Lean.Elab.Frontend
 import Lean.Compiler.LCNF.PhaseExt
 import Lean.DocString.Extension
@@ -475,8 +477,10 @@ private def uniqueNames (names : Array Name) : Array Name := Id.run do
       result := result.push name
   return result
 
-private def privateLikeName (environment : Environment) (name : Name) : Bool :=
-  isPrivateName name || (name.isInternalDetail && !isReservedName environment name)
+-- A generated-looking suffix does not establish private provenance: users can
+-- legally export names such as `proof_1`. Keep every such public declaration.
+private def privateDeclarationName (name : Name) : Bool :=
+  isPrivateName name
 
 private unsafe def runMetaInEnvironment (environment : Environment) (action : MetaM α) : IO α :=
   PPContext.runMetaM { env := environment } action
@@ -575,7 +579,7 @@ private unsafe def compareDeclaration (stockEnvironment appliedEnvironment : Env
 
 private unsafe def privateProofDeclaration (environment : Environment)
     (info : ConstantInfo) : IO Bool := do
-  if !privateLikeName environment info.name then
+  if !privateDeclarationName info.name then
     return false
   match info with
   | .thmInfo _ => pure true
@@ -588,9 +592,9 @@ private unsafe def checkDeclarationSets (stockEnvironment appliedEnvironment : E
   let stockMap := declarationMap stockDeclarations
   let appliedMap := declarationMap appliedDeclarations
   let stockPublic := stockDeclarations.filter
-    (fun info => !privateLikeName stockEnvironment info.name)
+    (fun info => !privateDeclarationName info.name)
   let appliedPublic := appliedDeclarations.filter
-    (fun info => !privateLikeName appliedEnvironment info.name)
+    (fun info => !privateDeclarationName info.name)
   let stockPublicNames := stockPublic.map (·.name)
   let appliedPublicNames := appliedPublic.map (·.name)
   unless stockPublicNames == appliedPublicNames do
@@ -638,7 +642,7 @@ private unsafe def checkAxiomSubset (stockEnvironment appliedEnvironment : Envir
     (stockDeclarations appliedDeclarations : Array ConstantInfo) : IO Unit := do
   let stockMap := declarationMap stockDeclarations
   for appliedInfo in appliedDeclarations do
-    if !privateLikeName stockEnvironment appliedInfo.name then
+    if !privateDeclarationName appliedInfo.name then
       let some _ := stockMap.find? appliedInfo.name
         | oracleFailure "declaration_set_mismatch" s!"missing stock declaration {appliedInfo.name}"
       let stockAxioms ← collectAxiomsInEnvironment stockEnvironment appliedInfo.name
@@ -691,7 +695,38 @@ private unsafe def compareModuleDocs (stockData appliedData : ModuleData) : IO U
       oracleFailure "environment_delta_mismatch"
         s!"module-document text differs at index {index}"
 
-private unsafe def compareExtensions (stockData appliedData : ModuleData) : IO Unit := do
+/- Inlining entries belong to named declarations. Replacing a proof may rename
+   private proof-valued matchers, which the declaration comparison already
+   permits. Ignore only entries whose declaration satisfies that same policy;
+   retain exact names and kinds for every public or computational declaration.
+   The cast is specific to Lean.Compiler.inlineAttrs' pinned entry type. -/
+private unsafe def observableInlineAttributes (environment : Environment)
+    (entries : Array EnvExtensionEntry) : IO (Array (Name × Compiler.InlineAttributeKind)) := do
+  let entries : Array (Name × Compiler.InlineAttributeKind) := unsafeCast entries
+  let mut result := #[]
+  for (name, kind) in entries do
+    let some info := environment.find? name (skipRealize := true)
+      | oracleFailure "environment_delta_mismatch" s!"inline attribute has no declaration: {name}"
+    unless ← privateProofDeclaration environment info do
+      result := result.push (name, kind)
+  return result.qsort (fun lhs rhs => Name.quickLt lhs.1 rhs.1)
+
+private unsafe def observableMatcherEntries (environment : Environment)
+    (entries : Array EnvExtensionEntry) : IO (Array EnvExtensionEntry) := do
+  let entries : Array Meta.Match.Extension.Entry := unsafeCast entries
+  let mut result := #[]
+  for entry in entries do
+    let some info := environment.find? entry.name (skipRealize := true)
+      | oracleFailure "environment_delta_mismatch"
+          s!"matcher metadata has no declaration: {entry.name}"
+    unless ← privateProofDeclaration environment info do
+      result := result.push entry
+  -- This is an ordered entry log: repeated names overwrite earlier metadata.
+  -- Preserve order as well as every field after filtering private proofs.
+  return unsafeCast result
+
+private unsafe def compareExtensions (stockEnvironment appliedEnvironment : Environment)
+    (stockData appliedData : ModuleData) : IO Unit := do
   let stockEntries := extensionMap stockData
   let appliedEntries := extensionMap appliedData
   let stockMap : NameMap (Array EnvExtensionEntry) :=
@@ -706,6 +741,18 @@ private unsafe def compareExtensions (stockData appliedData : ModuleData) : IO U
     if isModuleDocExtensionName name then
       continue
     if allowlistedExtension name then
+      continue
+    if name == `Lean.Compiler.inlineAttrs then
+      let stock ← observableInlineAttributes stockEnvironment ((stockMap.find? name).getD #[])
+      let applied ← observableInlineAttributes appliedEnvironment ((appliedMap.find? name).getD #[])
+      unless stock == applied do
+        oracleFailure "environment_delta_mismatch" "observable inline attributes differ"
+      continue
+    if name == `Lean.Meta.Match.Extension.extension then
+      let stock ← observableMatcherEntries stockEnvironment ((stockMap.find? name).getD #[])
+      let applied ← observableMatcherEntries appliedEnvironment ((appliedMap.find? name).getD #[])
+      unless (← extensionBytes stockData name stock) == (← extensionBytes appliedData name applied) do
+        oracleFailure "environment_delta_mismatch" s!"extension state differs for {name}"
       continue
     let some stockValues := stockMap.find? name
       | oracleFailure "environment_delta_mismatch" s!"stock is missing extension {name}"
@@ -763,7 +810,7 @@ private unsafe def compareEnvironment (stock applied : Environment)
   compareDirectImports stock applied
   compareLCNFExtensions stock applied
   compareModuleDocs stockData appliedData
-  compareExtensions stockData appliedData
+  compareExtensions stock applied stockData appliedData
   compareExtraModUses stockData appliedData
 
 private unsafe def runOracle (moduleName : Name) (stockPath appliedPath : System.FilePath) :
