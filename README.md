@@ -282,6 +282,8 @@ quotations. It is not translated coverage. Current artifact schema 5 uses raw ex
 DAGs, bounded references to existing opaque metavariables, and captured, kernel-checked
 declarations with exact replay state checks. Generated replay blocks pending typeclass
 synthesis, including inside fresh realization callbacks.
+Completed local cached realizations can also carry a bounded table of exact checked
+auxiliary proofs; sharing changes storage only and retains structural authentication.
 The older handwritten term-elaboration API is outside this contract and is never
 emitted by the materializer.
 The cold certificate validator compares normal serialized compiler outputs and

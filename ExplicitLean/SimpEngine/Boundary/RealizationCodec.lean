@@ -119,11 +119,12 @@ private def memberEnvironment (env : Environment) (member : AsyncConst) : IO Env
       «private» := { env.base.private with extensions }
       «public» := { env.base.public with extensions } } }
 
-private def memberMetadata (env : Environment) (member : AsyncConst) : MetaM Json := do
+private def memberMetadata (env : Environment) (member : AsyncConst)
+    (requireEmptyAux := true) : MetaM Json := do
   let view ← memberEnvironment env member
   let aux := auxLemmasExt.getState view
   -- The first bounded group contract admits no auxiliary proof cache effects.
-  unless aux.lemmas.isEmpty do throwError "activation_nonempty_aux_cache"
+  unless !requireEmptyAux || aux.lemmas.isEmpty do throwError "activation_nonempty_aux_cache"
   let matchState := boundaryMatchStateJson (Match.matchEqnsExt.getState view)
   let eqnState := equationStateJson (eqnsExt.getState view)
   let data ← observePrivateModuleData view
@@ -630,18 +631,83 @@ private def localConstantJson (info : ConstantInfo) : MetaM Json := do
       #[names v.all, toJson v.numParams, toJson v.numIndices, toJson v.numMotives,
         toJson v.numMinors, .arr rules, .bool v.k, .bool v.isUnsafe])
 
+private def localCachedRootHasAux (env : Environment) (owner key : Name) : MetaM Bool := do
+  let result ← completedCacheResult env owner key
+  for member in result.newConsts.private ++ result.newConsts.public do
+    let view ← memberEnvironment env member
+    if !(auxLemmasExt.getState view).lemmas.isEmpty then return true
+  return false
+
 private structure LocalDagState where
+  -- One immutable completed checked environment for every proof-table binding.
+  checked : Kernel.Environment
+  auxProofs : Array (TheoremVal × Json) := #[]
+  auxProofIndex : NameMap Nat := {}
   nodes : Array Json := #[]
   -- Retaining objects makes the pointer memo safe from address reuse. Pointer
   -- identity is only an optimization: output deduplication uses exact JSON.
   memo : Array (AsyncConst × Nat) := #[]
+  memoIndex : Std.HashMap USize Nat := {}
   visiting : Array AsyncConst := #[]
+
+/-- Observational witness only: no auxiliary-cache entries are installed, erased,
+    inferred or normalized. The checked proof binding is structural and complete. -/
+private def localAuxCacheJson (env : Environment) (member : AsyncConst) :
+    StateT LocalDagState MetaM Json := do
+  let view ← memberEnvironment env member
+  let checked := (← get).checked
+  let cache := (auxLemmasExt.getState view).lemmas
+  let entries ← cache.toArray.mapM fun (key, name, levels) => do
+    if key.type.hasFVar || key.type.hasMVar || key.type.hasLevelMVar || key.type.hasLooseBVars then
+      throwError "boundary_local_aux_open_key"
+    let some (.thmInfo proof) := checked.find? name
+      | throwError "boundary_local_aux_missing_checked_proof:{name}"
+    if proof.value.hasFVar || proof.value.hasMVar || proof.value.hasLevelMVar || proof.value.hasLooseBVars then
+      throwError "boundary_local_aux_open_proof"
+    unless Expr.equal key.type proof.type do throwError "boundary_local_aux_type_conflict:{name}"
+    unless levels == proof.levelParams do throwError "boundary_local_aux_levels_conflict:{name}"
+    if isPrivateName name && !key.isPrivate then throwError "boundary_local_aux_privacy_conflict:{name}"
+    if key.defeq && !defeqAttr.hasTag view name then throwError "boundary_local_aux_defeq_conflict:{name}"
+    unless cache.find? key == some (name, levels) do throwError "boundary_local_aux_lookup_conflict"
+    let index ← if let some index := (← get).auxProofIndex.find? name then do
+        let some (previous, _) := (← get).auxProofs[index]?
+          | throwError "boundary_local_aux_proof_index"
+        unless previous.name == proof.name && previous.levelParams == proof.levelParams &&
+            previous.all == proof.all && Expr.equal previous.type proof.type &&
+            Expr.equal previous.value proof.value do
+          throwError "boundary_local_aux_checked_proof_changed"
+        pure index
+      else do
+        let state ← get
+        if state.auxProofs.size >= 4096 then throwError "boundary_local_aux_proof_table_limit"
+        let index := state.auxProofs.size
+        let entry ← localConstantJson (.thmInfo proof)
+        set { state with
+          auxProofs := state.auxProofs.push (proof, entry)
+          auxProofIndex := state.auxProofIndex.insert name index }
+        pure index
+    let some (_, .arr proofFields) := (← get).auxProofs[index]?
+      | throwError "boundary_local_aux_proof_shape"
+    -- Expr.equal above proves this is the exact canonical closed key encoding.
+    let some keyType := proofFields[3]? | throwError "boundary_local_aux_proof_type"
+    return Json.arr #[keyType, .bool key.isPrivate, .bool key.defeq,
+      encodeBoundaryName name, nameArrayJson levels.toArray, toJson index]
+  -- Hash-map representation/iteration order is not observable lookup semantics.
+  -- Preserve each exact key/value and order the witness by its canonical bytes.
+  let keyed := entries.map fun entry => (entry.compress, entry)
+  return .arr ((keyed.qsort fun a b => a.1 < b.1).map (·.2))
+
 
 private def sameAsyncObject (a b : AsyncConst) : Bool := unsafe ptrEq a b
 
-private partial def localDagNode (env : Environment) (member : AsyncConst) :
+private def asyncAddress (a : AsyncConst) : USize := unsafe ptrAddrUnsafe a
+
+private partial def localDagNode (env : Environment) (member : AsyncConst) (auxiliary := false) :
     StateT LocalDagState MetaM Nat := do
-  if let some (_, index) := (← get).memo.find? (fun (other, _) => sameAsyncObject member other) then
+  if let some position := (← get).memoIndex[asyncAddress member]? then
+    let some (other, index) := (← get).memo[position]?
+      | throwError "boundary_local_cached_memo_index"
+    unless sameAsyncObject member other do throwError "boundary_local_cached_memo_identity"
     return index
   let state ← get
   if state.visiting.size >= 512 || state.memo.size >= 4096 || state.nodes.size >= 2048 then
@@ -660,7 +726,10 @@ private partial def localDagNode (env : Environment) (member : AsyncConst) :
     | none => pure Json.null
     | some task => do
       unless ← IO.hasFinished task do throwError "boundary_local_cached_pending_extensions"
-      memberMetadata env member
+      let .arr metadata ← memberMetadata env member (requireEmptyAux := !auxiliary)
+        | throwError "boundary_local_aux_metadata_shape"
+      if auxiliary then pure <| Json.arr (metadata.push (← localAuxCacheJson env member))
+      else pure <| Json.arr metadata
   let some children := member.aconstsImpl.get.get? AsyncConsts
     | throwError "boundary_local_cached_graph_type"
   let entries := children.revList.toArray.reverse
@@ -677,18 +746,25 @@ private partial def localDagNode (env : Environment) (member : AsyncConst) :
       throwError "boundary_local_cached_graph_duplicate"
     seen := seen.insert name
     normalizedSeen := normalizedSeen.insert normalizedName
-    let childId ← localDagNode env child
+    let childId ← localDagNode env child auxiliary
     let some mapped := children.map.find? name | throwError "boundary_local_cached_graph_map"
     let some normalized := children.normalizedTrie.find? normalizedName
       | throwError "boundary_local_cached_graph_trie"
-    unless (← localDagNode env mapped) == childId && (← localDagNode env normalized) == childId do
+    unless (← localDagNode env mapped auxiliary) == childId && (← localDagNode env normalized auxiliary) == childId do
       throwError "boundary_local_cached_graph_lookup_conflict"
     refs := refs.push childId
   let node := Json.arr #[signature, .bool member.isRealized, metadata, toJson refs]
   let state ← get
   let index := (state.nodes.findIdx? (· == node)).getD state.nodes.size
   let nodes := if index == state.nodes.size then state.nodes.push node else state.nodes
-  set ({ nodes, memo := state.memo.push (member, index), visiting := state.visiting.pop } : LocalDagState)
+  set ({
+    checked := state.checked
+    auxProofs := state.auxProofs
+    auxProofIndex := state.auxProofIndex
+    nodes := nodes
+    memo := state.memo.push (member, index)
+    memoIndex := state.memoIndex.insert (asyncAddress member) state.memo.size
+    visiting := state.visiting.pop } : LocalDagState)
   return index
 
 private def localOwnerWitness (env : Environment) (owner : Name) : MetaM Json := do
@@ -707,7 +783,8 @@ private def localOwnerWitness (env : Environment) (owner : Name) : MetaM Json :=
     Every ConstantInfo field (including proof bodies) and async nested lookup is
     represented. Persistent metadata retains the existing three diagnostic
     exclusions; this introduces no new extension or descriptor exemption. -/
-private def localCachedDescriptor (env : Environment) (owner key : Name) : MetaM Json := do
+private def localCachedDescriptor (env : Environment) (owner key : Name)
+    (auxiliary := false) : MetaM Json := do
   discard <| localOwnerWitness env owner
   let result ← completedCacheResult env owner key
   let [member] := result.newConsts.private | throwError "boundary_local_cached_group_shape"
@@ -726,11 +803,34 @@ private def localCachedDescriptor (env : Environment) (owner key : Name) : MetaM
       publicInfo.levelParams == info.levelParams && Expr.equal publicInfo.type info.type do
     throwError "boundary_local_cached_public_interface"
   let (roots, state) ← (do
-    let privateRoot ← localDagNode env member
-    let publicRoot ← localDagNode env publicMember
-    pure (privateRoot, publicRoot)).run {}
-  return .arr #[.str "completed_local_cached_v1", encodeBoundaryName owner,
-    encodeBoundaryName key, .arr state.nodes, toJson roots.1, toJson roots.2]
+    let privateRoot ← localDagNode env member auxiliary
+    let publicRoot ← localDagNode env publicMember auxiliary
+    pure (privateRoot, publicRoot)).run { checked := ← IO.wait env.checked }
+  if !auxiliary then
+    return .arr #[.str "completed_local_cached_v1", encodeBoundaryName owner,
+      encodeBoundaryName key, .arr state.nodes, toJson roots.1, toJson roots.2]
+  -- Canonical name order is independent of hash-map traversal and sharing.
+  let order := (List.range state.auxProofs.size).toArray.qsort fun a b =>
+    Name.quickLt state.auxProofs[a]!.1.name state.auxProofs[b]!.1.name
+  let mut references := Array.replicate order.size 0
+  for index in [:order.size] do references := references.set! order[index]! index
+  let nodes : Array Json ← state.nodes.mapM fun (node : Json) => do
+    let fields : Array Json ← ofExcept node.getArr?
+    let rawMetadata : Json ← fields[2]?.getDM (throwError "boundary_local_aux_node_metadata")
+    if rawMetadata == Json.null then return node
+    let metadata : Array Json ← ofExcept rawMetadata.getArr?
+    let rawEntries : Json ← metadata[4]?.getDM (throwError "boundary_local_aux_node_entries")
+    let entries : Array Json ← ofExcept rawEntries.getArr?
+    let entries ← entries.mapM fun entry => do
+      let .arr fields := entry | throwError "boundary_local_aux_entry_shape"
+      let some raw := fields[5]? | throwError "boundary_local_aux_entry_reference"
+      let oldIndex ← Lean.ofExcept raw.getNat?
+      let some index := references[oldIndex]? | throwError "boundary_local_aux_entry_bounds"
+      return Json.arr (fields.set! 5 (toJson index))
+    return Json.arr (fields.set! 2 (.arr (metadata.set! 4 (.arr entries))))
+  return .arr #[.str "completed_local_cached_aux_v1", encodeBoundaryName owner,
+    encodeBoundaryName key, .arr nodes, toJson roots.1, toJson roots.2,
+    .arr (order.map fun index => state.auxProofs[index]!.2)]
 
 private def encodeLocalCachedBatch? (before stock : Environment) (checkedBefore : NameSet)
     (equations matchers : Array (Name × String)) : MetaM (Option (Name × String)) := do
@@ -750,8 +850,9 @@ private def encodeLocalCachedBatch? (before stock : Environment) (checkedBefore 
   -- reference is shared and mutable, so this is not historical proof of a
   -- pre-stock memo hit. Replay independently requires its own completed hit;
   -- standalone source replay remains necessary even after recorder trials.
-  let descriptor ← withEnv before <| localCachedDescriptor before group.owner group.key
-  unless descriptor == (← withEnv stock <| localCachedDescriptor stock group.owner group.key) do
+  let auxiliary ← localCachedRootHasAux before group.owner group.key
+  let descriptor ← withEnv before <| localCachedDescriptor before group.owner group.key auxiliary
+  unless descriptor == (← withEnv stock <| localCachedDescriptor stock group.owner group.key auxiliary) do
     throwError "boundary_local_cached_descriptor_changed"
   let some (.thmInfo thm) := stock.checked.get.find? group.key
     | throwError "boundary_local_cached_root_kind"
@@ -759,7 +860,7 @@ private def encodeLocalCachedBatch? (before stock : Environment) (checkedBefore 
   unless mapping.isNone || mapping == some group.owner do throwError "boundary_local_cached_root_mapping"
   let source ← withEnv stock <| encodeBoundaryEquation group.owner thm
     (defeqAttr.hasTag stock group.key) (backwardDefeqAttr.hasTag stock group.key) mapping.isSome
-  return some (group.key, (Json.arr #[.str "boundary_local_cached_v1", .bool true,
+  return some (group.key, (Json.arr #[.str (if auxiliary then "boundary_local_cached_aux_v1" else "boundary_local_cached_v1"), .bool true,
     nameArrayJson added, nameArrayJson added,
     boundaryMatchStateJson (Match.matchEqnsExt.getState before),
     boundaryMatchStateJson (Match.matchEqnsExt.getState stock),
@@ -769,10 +870,13 @@ private def encodeLocalCachedBatch? (before stock : Environment) (checkedBefore 
       ownerWitness, descriptor, .str source]]).compress)
 
 private def executeLocalCachedBatch (anchor : Name) (source : String) : MetaM Unit := do
-  let .arr #[.str "boundary_local_cached_v1", .bool true, privateNames, publicNames,
+  let .arr #[.str tag, .bool true, privateNames, publicNames,
       matchBefore, matchAfter, eqnsBefore, eqnsAfter, sparseBefore, sparseAfter,
       .arr #[ownerJson, keyJson, witness, descriptor, .str equationSource]] ← ofExcept (Json.parse source)
     | throwError "boundary_local_cached_invalid_payload"
+  unless tag == "boundary_local_cached_v1" || tag == "boundary_local_cached_aux_v1" do
+    throwError "boundary_local_cached_invalid_version"
+  let auxiliary := tag == "boundary_local_cached_aux_v1"
   let owner ← ofExcept (decodeBoundaryName ownerJson)
   let key ← ofExcept (decodeBoundaryName keyJson)
   let before ← getEnv
@@ -787,10 +891,10 @@ private def executeLocalCachedBatch (anchor : Name) (source : String) : MetaM Un
       equationStateJson (eqnsExt.getState before) == eqnsBefore && boundarySparseCacheJson before == sparseBefore do
     throwError "boundary_local_cached_before"
   unless (← localOwnerWitness before owner) == witness do throwError "boundary_local_cached_owner_conflict"
-  unless (← localCachedDescriptor before owner key) == descriptor do
+  unless (← localCachedDescriptor before owner key auxiliary) == descriptor do
     throwError "boundary_local_cached_descriptor_conflict"
   realizeBoundaryConst owner key (throwError "boundary_local_cached_forbidden_callback")
-  unless (← localCachedDescriptor (← getEnv) owner key) == descriptor do
+  unless (← localCachedDescriptor (← getEnv) owner key auxiliary) == descriptor do
     throwError "boundary_local_cached_descriptor_after"
   executeBoundaryTheorem key theoremSource
   unless defeqAttr.hasTag (← getEnv) key == defeqTag && backwardDefeqAttr.hasTag (← getEnv) key == backwardTag do
@@ -958,7 +1062,8 @@ def executeBoundaryRealizationBatch (expectedAnchor : Name) (source : String) : 
   let json ← ofExcept (Json.parse source)
   match json with
   | .arr values =>
-    if values[0]? == some (.str "boundary_local_cached_v1") then
+    if values[0]? == some (.str "boundary_local_cached_v1") ||
+        values[0]? == some (.str "boundary_local_cached_aux_v1") then
       executeLocalCachedBatch expectedAnchor source
     else if values[0]? == some (.str "boundary_realization_batch_v2") then
       executeBoundaryRealizationBatchV2 expectedAnchor source
@@ -970,6 +1075,8 @@ def executeBoundaryRealizationBatch (expectedAnchor : Name) (source : String) : 
 def boundaryRealizationBatchMembers (source : String) : MetaM (Bool × Array Name × Array Name) := do
   let (cached, privateNames, publicNames) ← match ← ofExcept (Json.parse source) with
     | .arr #[.str "boundary_local_cached_v1", .bool true, privateNames, publicNames,
+        _, _, _, _, _, _, _]
+    | .arr #[.str "boundary_local_cached_aux_v1", .bool true, privateNames, publicNames,
         _, _, _, _, _, _, _] => pure (true, privateNames, publicNames)
     | .arr #[.str "boundary_realization_batch_v1", .bool cached, privateNames, publicNames,
         _, _, _, _, _, _, _] => pure (cached, privateNames, publicNames)

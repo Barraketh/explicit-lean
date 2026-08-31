@@ -794,7 +794,8 @@ def validate_realization_payload(source: object, expected_anchor: object,
         value = json.loads(source)
     except (ValueError, RecursionError) as error:
         raise RuntimeError(f"{label}: invalid JSON") from error
-    if isinstance(value, list) and value and value[0] == "boundary_local_cached_v1":
+    if isinstance(value, list) and value and value[0] in ("boundary_local_cached_v1", "boundary_local_cached_aux_v1"):
+        auxiliary = value[0] == "boundary_local_cached_aux_v1"
         if not (len(value) == 11 and value[1] is True and isinstance(value[10], list)
                 and len(value[10]) == 5):
             reject("invalid local cached header")
@@ -849,11 +850,21 @@ def validate_realization_payload(source: object, expected_anchor: object,
         full_constant(witness)
         if witness[0] != "definition" or witness[1] != owner or witness[6] != "safe":
             reject("invalid local owner witness")
-        if not (isinstance(graph, list) and len(graph) == 6 and graph[0] == "completed_local_cached_v1"
+        if not (isinstance(graph, list) and len(graph) == (7 if auxiliary else 6) and graph[0] == ("completed_local_cached_aux_v1" if auxiliary else "completed_local_cached_v1")
                 and graph[1] == owner and graph[2] == root and isinstance(graph[3], list)
-                and 0 < len(graph[3]) <= 2048 and all(_nat(n) and n < len(graph[3]) for n in graph[4:])):
+                and 0 < len(graph[3]) <= 2048 and all(_nat(n) and n < len(graph[3]) for n in graph[4:6])):
             reject("invalid local cached graph")
         nodes = graph[3]
+        proofs = graph[6] if auxiliary else []
+        if not isinstance(proofs, list) or len(proofs) > 4096:
+            reject("invalid local checked proof table")
+        proof_names = set()
+        for proof in proofs:
+            full_constant(proof)
+            if proof[0] != "theorem" or key(proof[1]) in proof_names:
+                reject("invalid or duplicate checked proof")
+            proof_names.add(key(proof[1]))
+        used_proofs = set()
         encoded_nodes = set()
         depths = []
         for index, node in enumerate(nodes):
@@ -872,7 +883,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
             encoded_nodes.add(encoded)
             meta = node[2]
             if meta is not None:
-                if not (isinstance(meta, list) and len(meta) == 4 and isinstance(meta[3], list)):
+                if not (isinstance(meta, list) and len(meta) == (5 if auxiliary else 4) and isinstance(meta[3], list)):
                     reject("invalid local cached metadata")
                 match_state(meta[0]); equation_state(meta[1]); sparse_state(meta[2])
                 seen = set()
@@ -884,12 +895,37 @@ def validate_realization_payload(source: object, expected_anchor: object,
                     if k in seen:
                         reject("duplicate local persistent extension")
                     seen.add(k)
-        private, public = (nodes[i] for i in graph[4:])
+                if auxiliary:
+                    if not isinstance(meta[4], list):
+                        reject("invalid local auxiliary cache")
+                    keys = set()
+                    for entry in meta[4]:
+                        if not (isinstance(entry, list) and len(entry) == 6 and type(entry[1]) is bool
+                                and type(entry[2]) is bool):
+                            reject("invalid local auxiliary entry")
+                        validate_struct_expr_dag(entry[0], label)
+                        key(entry[3]); names(entry[4])
+                        if not _nat(entry[5]) or entry[5] >= len(proofs):
+                            reject("invalid checked proof reference")
+                        used_proofs.add(entry[5])
+                        proof = proofs[entry[5]]
+                        if not (proof[0] == "theorem" and proof[1] == entry[3]
+                                and proof[2] == entry[4] and proof[3] == entry[0]):
+                            reject("local auxiliary checked proof binding")
+                        if _private_name(entry[3]) and not entry[1]:
+                            reject("local auxiliary privacy")
+                        cache_key = (entry[0], entry[1], entry[2])
+                        if cache_key in keys:
+                            reject("duplicate local auxiliary key")
+                        keys.add(cache_key)
+        if len(used_proofs) != len(proofs):
+            reject("unused checked proof table entry")
+        private, public = (nodes[i] for i in graph[4:6])
         if not (private[1] is True and public[1] is True and private[2] is not None and public[2] is not None
                 and private[0][0] == "theorem" and public[0][0] == "axiom"
                 and private[0][1] == root and public[0][1:4] == private[0][1:4] and public[0][4] is False):
             reject("invalid local root interface")
-        reachable = set(graph[4:])
+        reachable = set(graph[4:6])
         for index in reversed(range(len(nodes))):
             if index in reachable:
                 reachable.update(nodes[index][3])

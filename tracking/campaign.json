@@ -378,8 +378,8 @@
     }
   ],
   "nextActions": [
-    "Use immutable schema11 snapshot f231289 for fresh bulk generation and cold translated-tree certification. Existing full inventory/source facts may guide selections, but reuse requires explicit provenance and unchanged analysis inputs.",
-    "Integrate frozen nonempty auxiliary-cache witness after independent source/proof-table/mutation review; continue separate localcached-root plus ordinary-helper sequence for actual ExistsUnique.",
+    "Finish fresh schema11 inventory in background and independently validate its source counts/hashes against full master index, then dispatch reviewed bounded workers after old live leases end. Preserve66reusable5unresolved obligations.",
+    "Integrate reviewed localcached-root plus ordinary-helper sequence; diagnose and repair translated-prefix proof drift without weakening descriptor/semantic checks. Keep full Extra/Cubic failures as unresolved.",
     "Resolve reusable66calls and unresolved5quotations with positive source dataflow evidence and explicit API scope; preserve source/execution identities.",
     "Let frozen schema10 workers finish bounded queues without editing runtimes or live leases. Reuse diagnostic evidence only; advance broad generation under new frozen runtime once ready.",
     "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and complete source/execution ownership.",
@@ -921,6 +921,16 @@
         ".lake/week-2026-08-31/schema11-snapshot-preparation.json",
         ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-runtime-build.log"
       ]
+    },
+    {
+      "at": "2026-08-31T18:57:08.422647+00:00",
+      "summary": "Integrated separate nonempty auxiliary-cache witness after root648+206frozen hash checks/51nonce logs/exact80proof table expansion. Main16new+20legacy controls/27wire negatives passed; root source/comments and archivedruntime verified. Whole Extra24probe correctly rejected earlier-translated-proof descriptor drift; Cubic20probe rejected separate missingsequencecover. Local sequence8call prototype passed independent review/frozen verification; integrate next. Storageprototype revised after root caught cross-source equality and path-validation errors; realcertificate validation still pending.",
+      "evidence": [
+        ".lake/week-2026-08-31/local-aux-root-verification.json",
+        ".lake/week-2026-08-31/local-aux-main-root-verification.json",
+        ".lake/week-2026-08-31/local-aux-legacy-root-verification.json",
+        ".lake/week-2026-08-31/local-sequence-root-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1160,6 +1170,19 @@
       "commandAuditFrames": 156,
       "replacedCalls": 2,
       "recordedVariants": 3
+    },
+    {
+      "id": "schema11-full-inventory",
+      "status": "running",
+      "sessionId": 29489,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema11-campaign",
+      "commit": "f231289",
+      "runner": ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/run_schema11_campaign.py",
+      "runnerSha256": "997c9ff8ea2578007e12f6a18fc667114737d917f39897a9205490d50bf5b917",
+      "log": ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-full-manifest-r2.log",
+      "modules": 8260,
+      "expectedOccurrences": 83414,
+      "scope": "Fresh source/scope inventory only, no DB/queue writes and no translated coverage. Fourmodules11calls/fiveunresolved remain in master8264 inventory. Avoid unsupported source-provenance rebinding; bulk dispatch must wait for conflicting old worker/leases to end."
     }
   ],
   "latestCommits": [
@@ -1254,6 +1277,26 @@
       "localCacheRegression": ".lake/week-2026-08-31/local-cached-schema11-root-verification.json",
       "replayRegression": ".lake/week-2026-08-31/replay-schema11-root-verification.json",
       "independentReview": ".lake/schema11-search-review/findings.md"
+    },
+    {
+      "id": "local-cached-sequence-handoff",
+      "status": "frozen_reviewed_awaiting_main_integration",
+      "handoffManifestSha256": "3504e562ae7beea99efd72afce482fb6201fe4e865e8e4be2c57a8a63f75af1e",
+      "rootVerification": ".lake/week-2026-08-31/local-sequence-root-verification.json",
+      "independentReview": ".lake/local-sequence-independent-review.md",
+      "sourceCalls": 8,
+      "module": "Mathlib/Logic/ExistsUnique.lean",
+      "wholeMathlib": false
+    },
+    {
+      "id": "local-aux-full-source-probes",
+      "status": "failed_strict_checks_retained",
+      "extraReport": ".lake/observational-data/Mathlib-AlgebraicTopology-ExtraDegeneracy-q7fj5m0f/report.json",
+      "extraReportSha256": "8bf34bf3fce6e02eba4a5f174007d821c9ddf10a554278439f228c3bfc72a9ad",
+      "extraFailure": "All24 calls record; whole replay rejects c0b5b3940818fb9f descriptor. Read-only diagnosis isolates earlier proof-node changes after translation; original-prefix-only controls pass. Need translated-prefix-aware recording, no relaxed equality.",
+      "cubicReport": ".lake/observational-data/Mathlib-Algebra-CubicDiscriminant-5_8u_5u6/report.json",
+      "cubicFailure": "aa693119975056ee boundary_sequence_ambiguous_or_missing_cover during recording; no wholemodule success claim.",
+      "acceptedCampaignCoverage": false
     }
   ],
   "prototypeCoverage": {
@@ -1559,6 +1602,24 @@
       "constantFieldMutations": 13,
       "scope": "single authentic completed local cached equation root; full structural owner and nested async DAG; no fresh production or nonempty auxiliary-proof cache",
       "wholeMathlib": false
+    },
+    "localCachedAux": {
+      "status": "integrated_bounded_controls_passed",
+      "handoffRootVerification": ".lake/week-2026-08-31/local-aux-root-verification.json",
+      "mainRootVerification": ".lake/week-2026-08-31/local-aux-main-root-verification.json",
+      "legacyRootVerification": ".lake/week-2026-08-31/local-aux-legacy-root-verification.json",
+      "compilerProcesses": 36,
+      "wireNegatives": 27,
+      "proofTableReconstruction": {
+        "proofs": 80,
+        "nodes": 232,
+        "expandedIdentical": true,
+        "oldBytes": 24497278,
+        "newBytes": 10968930
+      },
+      "guard": "Exact checked proof table, owner and async DAG; cached-only failure callback retains unconditional pending-synthesis barrier. Old v1 remains empty auxiliary contract.",
+      "wholeModule": false,
+      "wholeMathlib": false
     }
   },
   "failureTriage": {
@@ -1586,7 +1647,7 @@
     "checkedAt": "2026-08-31T17:36:47.331238+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T18:38:19.120261+00:00",
+  "updatedAt": "2026-08-31T18:57:08.422647+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

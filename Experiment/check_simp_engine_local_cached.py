@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Focused cached-only local realization controls; no builds or package writes.
 
-Fresh local production and nonempty auxiliary-proof member caches intentionally
-remain unsupported. This fixture does not certify complete source modules.
+Fresh local production remains unsupported. The original v1 descriptor requires
+empty auxiliary-proof caches; the separately versioned aux contract is tested by
+check_simp_engine_local_cached_aux.py. This does not certify complete modules.
 """
 from __future__ import annotations
 import copy
@@ -300,11 +301,26 @@ def main() -> None:
 
     extra = extra_path.read_text().split("@[reassoc (attr := simp)]\ntheorem ExtraDegeneracy.s_comp_base", 1)[0]
     extra += "end AugmentedCechNerve\nend Arrow\nend CategoryTheory\n"
-    extra = extra.replace("module\n", "module\npublic meta import ExplicitLean.SimpEngine.Boundary\n", 1)
-    offset = extra.rindex("simp [ExtraDegeneracy.s]")
-    extra = extra[:offset] + extra[offset:].replace("simp", 'simp_engine_boundary_record "local-extra"', 1)
-    compile_case("extra-unsupported-aux", "Mathlib.AlgebraicTopology.ExtraDegeneracy", extra,
-                 recording=True, expected_abort="activation_nonempty_aux_cache")
+    extra = extra.replace("module\n", "module\n" + imports, 1)
+    # Exercise the original v1 descriptor explicitly: automatic capture now
+    # selects the separately versioned aux contract for this authentic cache.
+    extra += r"""
+meta section
+open Lean Meta Elab Command ExplicitLean.SimpEngine.Boundary
+run_cmd liftTermElabM do
+  let owner := `CategoryTheory.Arrow.AugmentedCechNerve.ExtraDegeneracy.s
+  let mut rejected := false
+  try
+    discard <| localCachedDescriptor (← getEnv) owner (owner ++ `eq_1)
+  catch error =>
+    let message ← error.toMessageData.toString
+    unless message == "activation_nonempty_aux_cache" do throw error
+    rejected := true
+  unless rejected do throwError "v1 accepted nonempty auxiliary cache"
+  IO.println "LOCAL_V1_AUX_REJECTION_OK"
+"""
+    compile_case("extra-v1-unsupported-aux", "Mathlib.AlgebraicTopology.ExtraDegeneracy", extra,
+                 success_marker="LOCAL_V1_AUX_REJECTION_OK")
 
     payload = json.loads((work / "cached.payload.json").read_text())
     mutations = [
@@ -340,7 +356,7 @@ def main() -> None:
     report = dict(kind="local_cached_realization_controls", schema=1, records=records,
                   constantKinds=8, constantMutations=13, wireRejections=wire, inputsBefore=before,
                   inputsAfter=after, hashes={str(p): sha(p) for p in files},
-                  limitations=["fresh local production unsupported", "ExtraDegeneracy auxiliary member cache unsupported",
+                  limitations=["fresh local production unsupported", "v1 descriptor requires empty auxiliary member cache",
                                "not whole-module coverage", "not general export-hook purity"])
     (work / "report.json").write_text(json.dumps(report, indent=2))
     print(f"passed {len(records)} processes, {len(wire)} wire rejections; {work / 'report.json'}", flush=True)
