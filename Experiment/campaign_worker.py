@@ -15,6 +15,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -38,6 +39,18 @@ from translation_index import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MATHLIB = materializer.MATHLIB
+DEFAULT_MINIMUM_FREE_BYTES = 12 * 1024**3
+
+
+def storage_status(path: Path, minimum_free_bytes: int) -> dict[str, Any]:
+    """Fail closed on unavailable space telemetry; never remove old evidence."""
+    try:
+        free = shutil.disk_usage(path).free
+    except OSError as error:
+        return {"canDispatch": False, "freeBytes": None,
+                "minimumFreeBytes": minimum_free_bytes, "error": str(error)}
+    return {"canDispatch": free >= minimum_free_bytes, "freeBytes": free,
+            "minimumFreeBytes": minimum_free_bytes}
 
 
 def _sha256(data: bytes) -> str:
@@ -231,6 +244,7 @@ def run_worker(
     dependency_map: Mapping[str, object] | None = None,
     dependency_digests: Mapping[str, str] | None = None,
     budget_guard: Callable[[], Mapping[str, Any]] = campaign_budget.check,
+    minimum_free_bytes: int = DEFAULT_MINIMUM_FREE_BYTES,
 ) -> dict[str, Any]:
     if not worker:
         raise TranslationIndexError("worker must be nonempty")
@@ -238,6 +252,8 @@ def run_worker(
         raise TranslationIndexError("module timeout and max modules must be positive")
     if max_seconds is not None and max_seconds <= 0:
         raise TranslationIndexError("max seconds must be positive")
+    if type(minimum_free_bytes) is not int or minimum_free_bytes <= 0:
+        raise TranslationIndexError("minimum free bytes must be a positive integer")
     manifest_path, manifest_bytes, manifest_value, manifest_hash = _read_manifest(manifest)
     materializer.verify_implementation_hashes(manifest_value)
     selected, skipped_empty = _selected_modules(manifest_value, modules)
@@ -259,13 +275,17 @@ def run_worker(
         preflight_budget = budget_guard()
     except Exception:
         preflight_budget = {"canDispatch": False}
-    if not isinstance(preflight_budget, Mapping) or preflight_budget.get("canDispatch") is not True:
+    preflight_denied = (not isinstance(preflight_budget, Mapping)
+                        or preflight_budget.get("canDispatch") is not True)
+    storage = storage_status(output, minimum_free_bytes)
+    if preflight_denied or not storage["canDispatch"]:
         return {
             "manifestHash": manifest_hash, "selected": len(selected), "candidates": 0,
             "processed": 0, "succeeded": 0, "candidateReports": 0, "failures": 0,
             "skippedFailed": 0, "skippedVerified": 0,
             "skippedEmpty": skipped_empty if modules is None else 0,
-            "budgetDenied": True, "timedOut": False,
+            "budgetDenied": preflight_denied, "timedOut": False,
+            "storageDenied": not storage["canDispatch"], "storage": storage,
         }
     materializer.corpus.assert_repository(
         str(manifest_value["repositoryCommit"]), False,
@@ -274,7 +294,7 @@ def run_worker(
     connection = connect(database)
     started = time.monotonic()
     processed = succeeded = candidates = failures = skipped_failed = candidate_reports = skipped_verified = 0
-    budget_denied = timed_out = False
+    budget_denied = timed_out = storage_denied = False
     try:
         import_manifest(
             connection, manifest_path, source_root=MATHLIB,
@@ -317,6 +337,11 @@ def run_worker(
                 budget = {"canDispatch": False}
             if not isinstance(budget, Mapping) or budget.get("canDispatch") is not True:
                 budget_denied = True
+                break
+            storage = storage_status(output, minimum_free_bytes)
+            if not storage["canDispatch"]:
+                storage_denied = True
+                print(json.dumps({"event": "storage_stop", **storage}, sort_keys=True), flush=True)
                 break
             leases = claim_work(
                 connection, worker, limit=1,
@@ -393,6 +418,8 @@ def run_worker(
         "skippedEmpty": skipped_empty if modules is None else 0,
         "budgetDenied": budget_denied,
         "timedOut": timed_out,
+        "storageDenied": storage_denied,
+        "storage": storage,
     }
 
 
@@ -421,6 +448,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--dependency-map")
     parser.add_argument("--dependency-digests")
+    parser.add_argument("--minimum-free-bytes", type=int, default=DEFAULT_MINIMUM_FREE_BYTES,
+                        help="Pause before claiming another module below this free-space reserve (default: 12 GiB).")
     args = parser.parse_args(argv)
     try:
         result = run_worker(
@@ -430,6 +459,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             retry_failed=args.retry_failed,
             dependency_map=_read_dependency_map(args.dependency_map),
             dependency_digests=_json_map(args.dependency_digests),
+            minimum_free_bytes=args.minimum_free_bytes,
         )
     except (TranslationIndexError, RuntimeError, OSError, ValueError) as error:
         print(f"campaign-worker: {error}", file=sys.stderr)

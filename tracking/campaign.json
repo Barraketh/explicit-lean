@@ -29,8 +29,8 @@
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 624,
-    "provisionalCachedModules": 55,
+    "provisionalCachedOccurrences": 660,
+    "provisionalCachedModules": 65,
     "minimumAcceptedReportSchema": 10
   },
   "work": [
@@ -182,7 +182,7 @@
       "id": "sparse-matcher-helper",
       "owner": "coordinator",
       "status": "in_progress",
-      "description": "Isolated exact sparse helper/matcher-v2 codec has16fresh Lean controls and21wire controls. Guard integrated in main with paired old/current5case matrix; sparse action classification/wire integration remains separate pending work."
+      "description": "Main uncommitted v2 codec/classifier build passes;17multiple+12existingcontrols pass. Independent old standalone16controls rechecked110hashes. FullModifyLast5calls now reaches generator mismatch stock5/applied4 on firstcall; no coverage claim. Portable fresh driver cleanup pending."
     },
     {
       "id": "translated-schema8-forest",
@@ -222,9 +222,15 @@
     },
     {
       "id": "cached-realization-activation",
+      "owner": "/root/unresolved_probe_finish",
+      "status": "in_progress",
+      "description": "Fresh truncated default-async Lookmap exposes stock7-memberoutergroup/gen1\u21925 vs flatreplay1-member/gen1\u21927. Root archived22inputs and independently checked4nonce logs plus state drift. Scratch nested outer-group replay fixes grouping/counter; strict descriptor and cached-only activation production codecs pending."
+    },
+    {
+      "id": "fresh-post-generator-guard",
       "owner": "/root/tree_build_plan",
       "status": "in_progress",
-      "description": "Diagnose generator mismatches with empty checked-declaration delta. Sol observed10existing members activated on caller branch in4groups at later Lookmap sites; Luna comparing Control.Basic fish_pipe. No counter setter or weakened comparator."
+      "description": "Capture exact original successful stock auxiliary generator and assert it after fresh decoded replay. Artifact4/report10 planned; no setter or counter-offset action."
     }
   ],
   "blockers": [
@@ -261,7 +267,7 @@
     {
       "id": "final-grammar-coverage-audit",
       "status": "open",
-      "detail": "Actual header imports fix the observed silent replay-grammar omission. Before whole-tree acceptance, audit source-local syntax/macro declarations too; fast incremental parser currently elaborates notation/context commands only. A conservative token coverage cross-check or exact full command-context audit may be needed. No known omitted source-local case is being exempted."
+      "detail": "Actual-header fix is integrated. Read-only local syntax/macro controls compile and force full frontend fallback, capturing nested simp; no source-local omission reproduced. 246sourcefiles contain grammar-extension markers (risk population only). Silent wrong parse without fallback is not ruled out; full command-context audit still required before closure. Evidence: .lake/week-2026-08-31/source-local-grammar-audit.md."
     },
     {
       "id": "fresh-replay-cache-grouping",
@@ -270,8 +276,8 @@
     }
   ],
   "nextActions": [
-    "Finish frozen schema9 first23root diagnostic batch and full8260discovery manifest; keep results provisional. Before bulk dispatch, integrate captured fresh post-generator assertion (artifact4/report10), freeze, and reuse identical valid syntax/scope checkpoints where their keys match. No fresh guard field or comparison may be bypassed.",
-    "Old schema7-diverse batch is diagnostic/provisional. Avoid replanning its unfinished module leases; first schema9 priority roots already completed by old workers.",
+    "Frozen9 first23root diagnostic run and8260module inventory are complete. Before bulk dispatch, integrate exact fresh post-generator assertion (artifact4/report10) and strict realization groups, freeze the engine, and run new validation. Reuse analysis only under a verified matching analysis identity; do not relabel old reports.",
+    "Both old schema7-diverse and schema9 first23workers finished. Start new-schema priority/full workers only after the fresh guard and exact group replay are integrated; preserve old failures as diagnostics.",
     "Integrate sparse matcher-v2 and disjoint multiple-bundle support after their bounded reviews. Address explicit activation of completed cached realizations without arbitrary generator changes.",
     "Use actual source-header imports for all single-file remaining-call audits and final translated-tree audits. Full translated-output semantic comparison remains required.",
     "Resolve reusable executable66calls and5unresolvedquotations, preserve all originals and source/execution ownership; no finite caller-table equivalence claims.",
@@ -635,6 +641,40 @@
         ".lake/search-free-mathlib/snapshots/cached-activation-prototype/.lake/cached-activation/design.md",
         ".lake/search-free-mathlib/snapshots/cached-activation-prototype/.lake/cached-activation/producer-evidence.json"
       ]
+    },
+    {
+      "at": "2026-08-31T14:28:04.642073+00:00",
+      "summary": "Old100module diagnostic batch finished45success/55fail. Main sparse-v2 build and17multiple+12existing controls pass; fullModifyLast still rejected on generator stock5/applied4. Full8260manifest scope scan progressing (20/50lastcheck). Independently archived22cache-producer inputs, rescanned4nonce logs and verified actual7vs1member /5vs7counter mismatch.",
+      "pending": [
+        "Portable sparse fresh-process/wire drivers",
+        "Artifact4/report10 fresh post-generator guard",
+        "Strict outer/nested realization group codec and later cached activation",
+        "Final grammar coverage audit and full translated-output validation"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:40:54.923130+00:00",
+      "summary": "Fresh frozen9 full inventory completed50scopebatches:8260modules83414calls; all per-module counts and source hashes match prior inventory. Four modules11calls still required/separately tracked. Main sparse-cache5pairedcontrols passed against latest v2 runtime; portable standalone drivers and fresh post-generator guard pending. No report9translation accepted under campaign minimum10.",
+      "evidence": [
+        ".lake/week-2026-08-31/schema9-full-inventory-verification.json",
+        ".lake/week-2026-08-31/sparse-main-intermediate-evidence.json",
+        ".lake/week-2026-08-31/cached-producer-evidence/manifest.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:44:36.013375+00:00",
+      "summary": "Frozen9 first23worker finished12success/11failure, no timeout/budget denial; all provisional under minimum10. Portable sparse-driver cleanup and exact fresh generator guard remain active Luna work; Sol strict group replay passes truncated/defaultasync production case but full Lookmap still fails conservatively on nonquiet snapshot. Source-local grammar controls completed without reproduced omission; final audit remains open. Usage20%.",
+      "evidence": [
+        ".lake/search-free-mathlib/snapshots/schema9-expansion/.lake/schema9-expansion-first-worker.log",
+        ".lake/week-2026-08-31/source-local-grammar-audit.md"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:49:52.169924+00:00",
+      "summary": "Worker storage preflight now pauses below12GiB or on telemetry failure before claiming another module, without deleting evidence.10worker tests and10index tests passed, including loss of space after one completed result with next module left queued. Current disk about64GiB free.",
+      "evidence": [
+        ".lake/week-2026-08-31/worker-storage-controls.log"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -745,9 +785,12 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/schema7-broad",
       "commit": "560bbab",
       "log": ".lake/schema7-diverse.log",
-      "status": "running",
+      "status": "completed_provisional",
       "modules": 100,
-      "expectedOccurrences": 1323
+      "expectedOccurrences": 1323,
+      "processed": 100,
+      "succeededModules": 45,
+      "failedModules": 55
     },
     {
       "id": "schema8-frontier",
@@ -780,20 +823,26 @@
       "id": "schema9-full-inventory",
       "snapshot": ".lake/search-free-mathlib/snapshots/schema9-expansion",
       "commit": "f3db7d4",
-      "status": "running",
+      "status": "completed",
       "sessionId": 65043,
       "log": ".lake/schema9-full-manifest.log",
       "inventoriedModules": 8260,
-      "scope": "Fresh discovery/closure manifest; not translated coverage."
+      "scope": "Fresh discovery/closure manifest; not translated coverage.",
+      "occurrences": 83414,
+      "manifestSha256": "2557b23930394e58057d6ee196e28f785a0bf3961b37f9506818c4b87704c342",
+      "verification": ".lake/week-2026-08-31/schema9-full-inventory-verification.json"
     },
     {
       "id": "schema9-expansion-first",
       "snapshot": ".lake/search-free-mathlib/snapshots/schema9-expansion",
       "commit": "f3db7d4",
-      "status": "running",
+      "status": "completed_provisional",
       "sessionId": 39890,
       "log": ".lake/schema9-expansion-first-worker.log",
-      "note": "First23priority/frontier roots, disjoint from old unfinished queue. Int.Init7 first current-schema success; remaining108expansion roots dispatch after this worker and old batch finish."
+      "note": "Diagnostic run finished without timeout or budget denial. All12successful reports remain provisional pending fresh post-generator report10 validation. No live module leases from this run.",
+      "processed": 23,
+      "succeededModules": 12,
+      "failedModules": 11
     }
   ],
   "latestCommits": [
@@ -834,7 +883,9 @@
     "9a74d7f",
     "e765695",
     "4e1142c",
-    "f3db7d4"
+    "f3db7d4",
+    "2ae2609",
+    "af21f51"
   ],
   "experiments": [
     {
@@ -900,7 +951,22 @@
     "allowUnresolved": true,
     "unresolvedDetails": ".lake/week-2026-08-31/corpus-unresolved.json",
     "moduleCount": 8264,
-    "occurrenceCount": 83425
+    "occurrenceCount": 83425,
+    "latestClosedManifest": {
+      "path": ".lake/search-free-mathlib/snapshots/schema9-expansion/.lake/schema9-full-manifest.json",
+      "sha256": "2557b23930394e58057d6ee196e28f785a0bf3961b37f9506818c4b87704c342",
+      "commit": "f3db7d4",
+      "modules": 8260,
+      "occurrences": 83414,
+      "separatelyRequiredModules": [
+        "Mathlib/Tactic/DeriveEncodable.lean",
+        "Mathlib/Tactic/Lift.lean",
+        "Mathlib/Tactic/Nontriviality/Core.lean",
+        "Mathlib/Tactic/Zify.lean"
+      ],
+      "separatelyRequiredCalls": 11,
+      "note": "Fresh closed analysis subset, not translation acceptance. Five unresolved quotations within the four modules remain under separate semantic treatment."
+    }
   },
   "database": {
     "path": ".lake/search-free-mathlib/translation-index.sqlite3",
@@ -970,11 +1036,18 @@
     "scope": "six failed roots from schema8 frontier; diagnostic grouping only",
     "modules": {
       "Mathlib/Order/Interval/Set/Defs.lean": "declaration oracle name mismatch; retest helper+generator fix",
-      "Mathlib/Data/List/ModifyLast.lean": "sparse helper; standalone codec passes16controls, production integration pending",
+      "Mathlib/Data/List/ModifyLast.lean": "Sparse helper supported in uncommitted main; full5-site recording now rejects8c5e9b6d6a02734e generatorstock5/applied4. Investigate realization-group effect; no accepted translation.",
       "Mathlib/Data/String/Lemmas.lean": "matcher equation capture-complete-local state mismatch",
       "Mathlib/Data/Int/Init.lean": "Main bounded7-site/148-declaration pipeline passes; strict actual-import remaining scan0. Await fresh closed schema9 report.",
-      "Mathlib/Data/List/Lookmap.lean": "multiple matcher bundles currently unsupported",
+      "Mathlib/Data/List/Lookmap.lean": "Multiple bundles integrated2ae2609; fresh process uncovers nested-realization grouping mismatch. Exact group codec and fresh post-generator guard under implementation.",
       "Mathlib/Control/Basic.lean": "Reserved failure keyword fixed; current full pipeline rejects fish_pipe auxiliary generator stock2/applied1, cached branch activation under investigation."
     }
+  },
+  "storage": {
+    "minimumFreeBytes": 12884901888,
+    "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
+    "lastFreeBytes": 68862906368,
+    "checkedAt": "2026-08-31T14:49:52.169752+00:00",
+    "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   }
 }

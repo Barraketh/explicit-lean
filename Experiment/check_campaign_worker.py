@@ -21,6 +21,9 @@ class CampaignWorkerTests(unittest.TestCase):
         (self.root / "Mathlib").mkdir()
         self.db = self.root / "index.sqlite3"
         self.boundary = self.root / "boundary-materialization"
+        storage = mock.patch.object(worker.shutil, "disk_usage", return_value=mock.Mock(free=64 * 1024**3))
+        storage.start()
+        self.addCleanup(storage.stop)
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -228,6 +231,50 @@ class CampaignWorkerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "moving_ref"):
                 worker.run_worker(self.db, manifest, self.boundary, "test", budget_guard=lambda: {"canDispatch": True})
         self.assertFalse(self.db.exists(), "preflight failure created or changed the index")
+
+    def test_low_storage_stops_before_index_or_lease_mutation(self) -> None:
+        manifest = self.manifest()
+        reserve = worker.DEFAULT_MINIMUM_FREE_BYTES
+        with mock.patch.object(worker.shutil, "disk_usage", return_value=mock.Mock(free=reserve - 1)):
+            result = self.run_fixture(manifest, lambda *args: self.fail("materializer started"))
+        self.assertTrue(result["storageDenied"])
+        self.assertFalse(result["budgetDenied"])
+        self.assertEqual(result["processed"], 0)
+        self.assertFalse(self.db.exists(), "storage denial created the index")
+        self.assertEqual(result["storage"]["freeBytes"], reserve - 1)
+
+    def test_storage_loss_preserves_completed_result_and_unclaimed_queue(self) -> None:
+        manifest = self.manifest_many(["A", "B"])
+        reserve = worker.DEFAULT_MINIMUM_FREE_BYTES
+        calls = []
+        def invoke(path, output, module, timeout):
+            calls.append(module)
+            output.write_text(json.dumps(self.fake_report(manifest, module)), encoding="utf-8")
+            return 0, "ok"
+        # Enough room at preflight and A's claim, then no room to start B.
+        with mock.patch.object(worker.shutil, "disk_usage", side_effect=[
+            mock.Mock(free=reserve), mock.Mock(free=reserve), mock.Mock(free=reserve - 1)
+        ]):
+            result = self.run_fixture(manifest, invoke)
+        self.assertEqual(calls, ["Mathlib/A.lean"])
+        self.assertEqual(result["succeeded"], 1)
+        self.assertTrue(result["storageDenied"])
+        connection = connect(self.db)
+        try:
+            states = dict(connection.execute("SELECT module,state FROM work_queue"))
+            self.assertEqual(states, {"Mathlib/A.lean": "succeeded", "Mathlib/B.lean": "queued"})
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM attempts").fetchone()[0], 1)
+        finally:
+            connection.close()
+
+    def test_unknown_storage_stops_and_reports_error(self) -> None:
+        manifest = self.manifest()
+        with mock.patch.object(worker.shutil, "disk_usage", side_effect=OSError("volume unavailable")):
+            result = self.run_fixture(manifest, lambda *args: self.fail("materializer started"))
+        self.assertTrue(result["storageDenied"])
+        self.assertIsNone(result["storage"]["freeBytes"])
+        self.assertIn("volume unavailable", result["storage"]["error"])
+        self.assertFalse(self.db.exists())
 
 
 if __name__ == "__main__":
