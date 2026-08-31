@@ -22,7 +22,7 @@
     "currentCorpusTotal": 83425,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Frozen per-module candidates against stock imports are provisional. Current producer is report11/artifact5, with unconditional pending-synthesis restrictions and bounded pre-boundary expression references. Acceptance additionally requires source/comment provenance, cold serialized output certification, and the complete translated dependency tree.",
+    "note": "Frozen per-module candidates against stock imports are provisional. Current producer is report12/artifact5, with applied recording, exact prelaunch native invocation and log bindings, unconditional pending-synthesis restrictions and bounded pre-boundary expression references. Acceptance additionally requires source/comment provenance, cold serialized output certification, and the complete translated dependency tree.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
@@ -31,7 +31,7 @@
     "verifiedTranslatedModules": 0,
     "provisionalCachedOccurrences": 1456,
     "provisionalCachedModules": 165,
-    "minimumAcceptedReportSchema": 11,
+    "minimumAcceptedReportSchema": 12,
     "validationHold": "The cold serialized comparator, independent compilation consumer, and unconditional pending-synthesis barrier are integrated and bounded schema11 controls passed. Complete translated dependency-tree certification remains pending; previous candidates and proof checks stay provisional."
   },
   "work": [
@@ -990,6 +990,10 @@
         ".lake/week-2026-08-31/cubic-forward-root-verification.json",
         ".lake/week-2026-08-31/cubic-local-equation-diagnosis-root-verification.json"
       ]
+    },
+    {
+      "at": "2026-08-31T20:02:00.989443+00:00",
+      "summary": "Report12 integrated Python, default applied recording, exact canonical actualnative runtime/command/source/cwd/nonces/log bindings for all3processes. Oracle builds before receipt and invokes actualbinary directly. Main6puretests incl producerorder and4existingvalidators/23fullconsumertamperingcontrols pass; actualfreshschema12nativepipeline pending. Corpusacceptedcoverage unchanged0. Actualrebuiltanalysis201outputs nowequal06f07b...; explicit4excludedcontrols stillrunning. Unitization18docmetadata leaves typeddecoded only+20line range shifts with exacttext; opt-in normalizer approved consistent with existing fulloracle moduleDoc policy, inprivate Solfix-review."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1580,9 +1584,9 @@
         "limitations": "Two replaced source calls/three variants; no inference of complete corpus coverage. Original receipt Python input paths are main checkout; archived immutable copies preserve historical evidence, while later production runs use frozen snapshot paths."
       }
     ],
-    "currentArtifactSchema": 4,
+    "currentArtifactSchema": 5,
     "currentSelectorSchema": 2,
-    "minimumReportSchema": 10,
+    "minimumReportSchema": 12,
     "integratedEngineCommit": "e3af2f2",
     "focusedEvidenceManifest": ".lake/week-2026-08-31/schema10-focused-verification.json",
     "commandAudit": {
@@ -1770,7 +1774,18 @@
       "declarations": 168,
       "publicDeclarations": 120,
       "extensions": 44,
-      "productionReport12Pending": true,
+      "productionReport12Pending": false,
+      "acceptedCampaignCoverage": false
+    },
+    "schema12Invocations": {
+      "status": "integrated_pure_controls_passed_fresh_native_pipeline_pending",
+      "producerDefault": "applied",
+      "historicalReports": "Use frozen consumer; no11/12compatibilitypath",
+      "newPureTests": 6,
+      "existingPureValidators": 4,
+      "fullConsumerTamperingControls": 23,
+      "sourceFileBindings": ".lake/week-2026-08-31/schema12-integration-files.json",
+      "wholeMathlib": false,
       "acceptedCampaignCoverage": false
     }
   },
@@ -1806,7 +1821,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T19:51:59.048886+00:00",
+  "updatedAt": "2026-08-31T20:02:00.989443+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

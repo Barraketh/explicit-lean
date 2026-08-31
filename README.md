@@ -46,9 +46,11 @@ The recorder also supports `simp_engine_boundary_record_applied`: after checking
 the explicit replacement against the stock result, it continues elaboration from
 the validated applied state. Its dispatcher shares the generated tactic's module
 identity; the generated selector never calls the recording hook. The ordinary
-`simp_engine_boundary_record` remains a stock-continuation diagnostic. Production
-report integration for applied recording is still pending. These bounded checks
-do not establish complete translated Mathlib coverage.
+`simp_engine_boundary_record` remains a stock-continuation diagnostic. The shard
+producer defaults to applied recording. Report schema 12 binds all three native
+invocations to their exact sources, commands, runtime hashes, nonces and logs;
+historical reports require their frozen consumers. Complete translated Mathlib
+coverage and cold certification remain pending.
 
 The repository retains schema-27 operational recording and replay as legacy
 evidence. In particular, the existing

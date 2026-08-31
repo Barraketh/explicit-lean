@@ -28,9 +28,11 @@ from typing import Any, Iterable
 import check_simp_engine_boundary_scope as scope
 import simp_engine_boundary_corpus as corpus
 import simp_engine_inventory as inventory
+import lean_toolchain_cache as tool_cache
 from process_runner import run_process
 from boundary_protocol import (
     ABORT_CATEGORIES,
+    RUN_NONCE_ENV,
     OCCURRENCE_CLASSIFICATIONS,
     artifact_protocol,
     assert_exact_source_preservation,
@@ -60,7 +62,7 @@ MATHLIB = corpus.MATHLIB
 MANIFEST_KIND = "simp_engine_boundary_manifest"
 MANIFEST_SCHEMA = 2
 REPORT_KIND = "simp_engine_boundary_materialization_shard"
-REPORT_SCHEMA = 11
+REPORT_SCHEMA = 12
 ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 DECLARATION_ORACLE_MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
 DECLARATION_ORACLE_KIND = "simp_engine_declaration_oracle"
@@ -852,13 +854,20 @@ def _assert_context_gaps(
     )
 
 
+def _recording_tactic(recording_mode: str) -> str:
+    if recording_mode not in {"stock", "applied"}:
+        raise ValueError(f"unsupported boundary recording mode: {recording_mode!r}")
+    return "simp_engine_boundary_record_applied" if recording_mode == "applied" else "simp_engine_boundary_record"
+
+
 def instrumented_source(
-    source: bytes, materialize: list[dict[str, Any]]
+    source: bytes, materialize: list[dict[str, Any]], *, recording_mode: str = "stock"
 ) -> bytes:
+    tactic = _recording_tactic(recording_mode)
     rewritten = inventory.rewrite_simp_heads(
         source,
         materialize,
-        lambda entry: f'simp_engine_boundary_record "{entry["id"]}"',
+        lambda entry: f'{tactic} "{entry["id"]}"',
     )
     return _inject_import(rewritten, "ExplicitLean.SimpEngine.Boundary")
 
@@ -883,10 +892,44 @@ def _compile_copy(
     timeout: int,
     *,
     env: dict[str, str] | None = None,
+    invocation_path: Path | None = None,
+    module: str | None = None,
+    recording_mode: str | None = None,
 ) -> tuple[int, str, float]:
-    command = inventory.lean_command(path)
-    command.insert(3, f"--load-dynlib={dylib}")
+    dylib = str(Path(dylib).resolve())
+    command = _compiler_command(path, dylib)
+    if invocation_path is not None:
+        nonce = (env or {}).get(RUN_NONCE_ENV)
+        if not nonce or not module:
+            raise ValueError("compiler invocation receipt requires module and explicit nonce")
+        _atomic_write_json(invocation_path, {
+            "kind": "boundary_compiler_invocation_v1", "module": module,
+            "source": str(path.resolve()), "sourceSha256": sha256(path.read_bytes()),
+            "command": command, "cwd": str(ROOT), "nonce": nonce,
+            "timeoutSeconds": timeout, "recordingMode": recording_mode,
+            "runtime": str(Path(dylib).resolve()), "runtimeSha256": sha256(Path(dylib).read_bytes()),
+        })
     return _run_command(command, timeout, env=env)
+
+
+def _shared_runtime_path() -> Path:
+    suffix = "dylib" if sys.platform == "darwin" else "so"
+    return (ROOT / ".lake" / "build" / "lib" / f"libexplicitLean_ExplicitLean.{suffix}").resolve()
+
+
+def _oracle_runtime_path() -> Path:
+    return (ROOT / ".lake" / "build" / "bin" / "simpEngineDeclarationOracle").resolve()
+
+
+def _compiler_command(path: Path, dylib: str) -> list[str]:
+    command = inventory.lean_command(path.resolve())
+    command.insert(3, f"--load-dynlib={dylib}")
+    return command
+
+
+def _oracle_command(module: str, original: Path, materialized: Path) -> list[str]:
+    return ["lake", "env", str(_oracle_runtime_path()), module,
+            str(original.resolve()), str(materialized.resolve())]
 
 
 DECLARATION_ORACLE_COUNT_FIELDS = {
@@ -1006,15 +1049,21 @@ def run_declaration_oracle(
     report_path = module_root / "declaration-oracle-report.json"
     # A failed rerun must not leave a previous successful oracle report.
     report_path.unlink(missing_ok=True)
-    command = [
-        sys.executable,
-        str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
-        "oracle",
-        compiled_module,
-        str(original_path),
-        str(materialized_path),
-    ]
+    # Build before recording its identity, then invoke that exact executable.
+    # Running the cache launcher after writing the receipt could rebuild it.
+    oracle_binary = _oracle_runtime_path()
+    target, _relative_binary = tool_cache.TOOLS["oracle"]
+    tool_cache._build("oracle", target, oracle_binary)
+    command = _oracle_command(compiled_module, original_path, materialized_path)
     environment, nonce = replay_subprocess_environment()
+    _atomic_write_json(module_root / "oracle-invocation.json", {
+        "kind": "boundary_oracle_invocation_v1", "module": compiled_module,
+        "stockSource": str(original_path.resolve()), "stockSourceSha256": sha256(original_path.read_bytes()),
+        "appliedSource": str(materialized_path.resolve()), "appliedSourceSha256": sha256(materialized_path.read_bytes()),
+        "command": command, "cwd": str(ROOT), "nonce": nonce, "timeoutSeconds": timeout,
+        "runtime": str(oracle_binary), "runtimeSha256": sha256(oracle_binary.read_bytes()),
+        "recordingMode": None,
+    })
     code, output, elapsed = _run_command(command, timeout, env=environment)
     _write_text(log_path, output)
     try:
@@ -1089,7 +1138,9 @@ def _query_dynamic_library(timeout: int, debug_root: Path) -> str:
         ) from error
     if not isinstance(value, str) or not value:
         raise RuntimeError(f"lake query ExplicitLean:shared returned invalid path: {value!r}")
-    return value
+    if Path(value).resolve() != _shared_runtime_path():
+        raise RuntimeError(f"unexpected ExplicitLean shared runtime: {value!r}")
+    return str(_shared_runtime_path())
 
 
 def _module_result(
@@ -1097,13 +1148,16 @@ def _module_result(
     debug_root: Path,
     dylib: str,
     timeout: int,
+    *,
+    recording_mode: str = "applied",
 ) -> dict[str, Any]:
+    tactic = _recording_tactic(recording_mode)
     module_slug = _sanitize_stem(selected.module.removeprefix("Mathlib/").removesuffix(".lean"))
     module_root = debug_root / module_slug
     original_path = _copy_at_module_root(module_root / "original", selected.module, selected.source)
     roots = selected.replacement_roots
     covered_by = selected.covered_by
-    instrumented = instrumented_source(selected.source, roots)
+    instrumented = instrumented_source(selected.source, roots, recording_mode=recording_mode)
     instrumented_path = _copy_at_module_root(module_root / "instrumented", selected.module, instrumented)
     _assert_context_gaps(
         selected.source,
@@ -1114,13 +1168,15 @@ def _module_result(
         expected_without_import=inventory.rewrite_simp_heads(
             selected.source,
             roots,
-            lambda entry: f'simp_engine_boundary_record "{entry["id"]}"',
+            lambda entry: f'{tactic} "{entry["id"]}"',
         ),
     )
 
     recording_environment, recording_nonce = recording_subprocess_environment()
     instrumented_code, instrumented_output, instrumented_elapsed = _compile_copy(
-        instrumented_path, dylib, timeout, env=recording_environment
+        instrumented_path, dylib, timeout, env=recording_environment,
+        invocation_path=module_root / "recording-invocation.json",
+        module=selected.compiled_module, recording_mode=recording_mode,
     )
     _write_text(module_root / "instrumented.log", instrumented_output)
     check_recording_abort_markers(
@@ -1216,7 +1272,8 @@ def _module_result(
     )
     replay_environment, replay_nonce = replay_subprocess_environment()
     materialized_code, materialized_output, materialized_elapsed = _compile_copy(
-        materialized_path, dylib, timeout, env=replay_environment
+        materialized_path, dylib, timeout, env=replay_environment,
+        invocation_path=module_root / "replay-invocation.json", module=selected.compiled_module,
     )
     materialized_log = module_root / "materialized.log"
     _write_text(materialized_log, materialized_output)
@@ -1293,6 +1350,17 @@ def _module_result(
         ),
     }
     return {
+        "recordingMode": recording_mode,
+        "runtime": str(Path(dylib).resolve()),
+        "runtimeSha256": sha256(Path(dylib).read_bytes()),
+        "recordingInvocation": {"path": str((module_root / "recording-invocation.json").resolve()),
+                                 "sha256": sha256((module_root / "recording-invocation.json").read_bytes())},
+        "recordingLog": {"path": str((module_root / "instrumented.log").resolve()),
+                          "sha256": sha256((module_root / "instrumented.log").read_bytes())},
+        "replayInvocation": {"path": str((module_root / "replay-invocation.json").resolve()),
+                              "sha256": sha256((module_root / "replay-invocation.json").read_bytes())},
+        "oracleInvocation": {"path": str((module_root / "oracle-invocation.json").resolve()),
+                              "sha256": sha256((module_root / "oracle-invocation.json").read_bytes())},
         "module": selected.module,
         "compiledModule": selected.compiled_module,
         "sourcePath": str(selected.source_path),
@@ -1399,6 +1467,13 @@ SHARD_REPORT_FIELDS = frozenset(
 MODULE_REPORT_FIELDS = frozenset(
     {
         "module",
+        "recordingMode",
+        "runtime",
+        "runtimeSha256",
+        "recordingInvocation",
+        "recordingLog",
+        "replayInvocation",
+        "oracleInvocation",
         "compiledModule",
         "sourcePath",
         "originalPath",
@@ -1549,6 +1624,120 @@ def _validate_hash_ref(value: object, label: str) -> dict[str, Any]:
     return result
 
 
+def _validate_invocation_ref(
+    ref: object, label: str, expected_path: Path, expected_module: str,
+    expected_mode: str | None, source_fields: dict[str, str], *,
+    expected_kind: str, expected_command: list[str], expected_runtime: str,
+    expected_timeout: int,
+) -> str:
+    """Authenticate a prelaunch receipt against independently reconstructed inputs."""
+    value = _validate_hash_ref(ref, label)
+    if value["path"] != str(expected_path.resolve()):
+        raise RuntimeError(f"{label}.path is not the expected durable sidecar")
+    data = _read_evidence_file(value["path"], expected_path, label)
+    _validate_evidence_hash(data, value["sha256"], label)
+    try:
+        sidecar = json.loads(data)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError(f"{label} is not valid JSON") from error
+    fields = {"kind", "module", "command", "cwd", "nonce", "timeoutSeconds",
+              "runtime", "runtimeSha256", "recordingMode"}
+    if expected_kind == "boundary_oracle_invocation_v1":
+        fields.update({"stockSource", "stockSourceSha256", "appliedSource", "appliedSourceSha256"})
+    elif expected_kind == "boundary_compiler_invocation_v1":
+        fields.update({"source", "sourceSha256"})
+    else:
+        raise ValueError(f"unknown invocation kind: {expected_kind}")
+    sidecar = _exact_fields(sidecar, frozenset(fields), label)
+    if sidecar["kind"] != expected_kind:
+        raise RuntimeError(f"{label}.kind is invalid")
+    if sidecar["module"] != expected_module or sidecar["recordingMode"] != expected_mode:
+        raise RuntimeError(f"{label} module or recording mode disagrees")
+    for field, expected in source_fields.items():
+        if sidecar[field] != expected:
+            raise RuntimeError(f"{label}.{field} disagrees with durable source")
+    if sidecar["command"] != expected_command:
+        raise RuntimeError(f"{label}.command disagrees with reconstructed command")
+    runtime_data = _read_evidence_file(sidecar["runtime"], Path(expected_runtime), f"{label} runtime")
+    if sidecar["runtime"] != expected_runtime or sidecar["cwd"] != str(ROOT):
+        raise RuntimeError(f"{label} runtime or cwd identity mismatch")
+    _validate_evidence_hash(runtime_data, sidecar["runtimeSha256"], f"{label} runtime")
+    nonce = sidecar["nonce"]
+    if not isinstance(nonce, str) or re.fullmatch(r"[A-Za-z0-9_-]{43}", nonce) is None:
+        raise RuntimeError(f"{label}.nonce is not a production compiler nonce")
+    if (type(expected_timeout) is not int or expected_timeout <= 0 or
+            type(sidecar["timeoutSeconds"]) is not int or sidecar["timeoutSeconds"] != expected_timeout):
+        raise RuntimeError(f"{label}.timeoutSeconds disagrees")
+    return nonce
+
+
+def _validate_module_invocations(
+    module_report: dict[str, Any], item: SelectedModule, module_root: Path,
+    timeout: int, reports: list[object],
+) -> dict[str, str]:
+    """Join exact prelaunch identities to durable logs and their parsed artifacts."""
+    shared_runtime = str(_shared_runtime_path())
+    if module_report["runtime"] != shared_runtime:
+        raise RuntimeError(f"{item.module} runtime path mismatch")
+    _validate_evidence_hash(_shared_runtime_path().read_bytes(), module_report["runtimeSha256"],
+                            f"{item.module} shared runtime")
+    paths = {label: (module_root / label / item.module).resolve()
+             for label in ("original", "instrumented", "materialized")}
+    source_hashes = {}
+    for label in paths:
+        data = _read_evidence_file(str(paths[label]), paths[label], f"{item.module} {label}")
+        digest = module_report[label + "Hash"]
+        _validate_evidence_hash(data, digest, f"{item.module} {label}")
+        source_hashes[label] = digest
+    mode = module_report["recordingMode"]
+    if mode not in {"stock", "applied"}:
+        raise RuntimeError(f"{item.module} recording mode is invalid")
+    compiler = "boundary_compiler_invocation_v1"
+    expected = {
+        "recording": (compiler, mode, shared_runtime,
+            _compiler_command(paths["instrumented"], shared_runtime),
+            {"source": str(paths["instrumented"]), "sourceSha256": source_hashes["instrumented"]}),
+        "replay": (compiler, None, shared_runtime,
+            _compiler_command(paths["materialized"], shared_runtime),
+            {"source": str(paths["materialized"]), "sourceSha256": source_hashes["materialized"]}),
+        "oracle": ("boundary_oracle_invocation_v1", None, str(_oracle_runtime_path()),
+            _oracle_command(item.compiled_module, paths["original"], paths["materialized"]),
+            {"stockSource": str(paths["original"]), "stockSourceSha256": source_hashes["original"],
+             "appliedSource": str(paths["materialized"]), "appliedSourceSha256": source_hashes["materialized"]}),
+    }
+    nonces = {}
+    for label, (kind, recording_mode, runtime, command, sources) in expected.items():
+        nonces[label] = _validate_invocation_ref(
+            module_report[label + "Invocation"], f"{item.module} {label}Invocation",
+            module_root / (label + "-invocation.json"), item.compiled_module,
+            recording_mode, sources, expected_kind=kind, expected_command=command,
+            expected_runtime=runtime, expected_timeout=timeout,
+        )
+    if len(set(nonces.values())) != 3:
+        raise RuntimeError(f"{item.module} invocation nonces are not unique")
+    if nonces["replay"] != module_report["replayGuard"]["nonce"]:
+        raise RuntimeError(f"{item.module} replay invocation nonce differs from log guard")
+    if nonces["oracle"] != module_report["declarationOracle"]["replayGuard"]["nonce"]:
+        raise RuntimeError(f"{item.module} oracle invocation nonce differs from log guard")
+    logs = {
+        "recording": (module_report["recordingLog"], "instrumented.log"),
+        "replay": (module_report["replayGuard"], "materialized.log"),
+        "oracle": (module_report["declarationOracle"], "declaration-oracle.log"),
+    }
+    for label, (ref, filename) in logs.items():
+        data = _read_evidence_file(ref["path"], module_root / filename, f"{item.module} {label} log")
+        _validate_evidence_hash(data, ref["sha256"], f"{item.module} {label} log")
+        text = data.decode("utf-8")
+        check_recording_abort_markers(text, expected_nonce=nonces[label], expected_module=item.compiled_module)
+        check_replay_abort_markers(text, expected_nonce=nonces[label], expected_module=item.compiled_module)
+        if label == "recording" and parse_framed_json_lines(
+            text, marker=ARTIFACT_MARKER, expected_nonce=nonces[label],
+            label=f"{item.module} recording artifacts",
+        ) != reports:
+            raise RuntimeError(f"{item.module} recording log artifacts differ from durable report")
+    return nonces
+
+
 def _validate_compiled_artifact(value: object, label: str) -> dict[str, Any]:
     result = _exact_fields(value, COMPILED_ARTIFACT_FIELDS, label)
     _require_string(result["path"], f"{label}.path")
@@ -1640,6 +1829,13 @@ def _validate_module_report(value: object, index: int) -> dict[str, Any]:
             f"{label}.compiledModule mismatch: {module['compiledModule']!r} != "
             f"{expected_compiled!r}"
         )
+    recording_mode = _require_string(module["recordingMode"], f"{label}.recordingMode")
+    if recording_mode not in {"stock", "applied"}:
+        raise RuntimeError(f"{label}.recordingMode is invalid: {recording_mode!r}")
+    _require_string(module["runtime"], f"{label}.runtime")
+    _require_string(module["runtimeSha256"], f"{label}.runtimeSha256")
+    for field in ("recordingInvocation", "replayInvocation", "oracleInvocation", "recordingLog"):
+        _validate_hash_ref(module[field], f"{label}.{field}")
     for field in (
         "sourcePath",
         "originalPath",
@@ -2029,7 +2225,7 @@ def verify_shard_evidence(
     debug_root: Path,
     timeout: int,
 ) -> dict[str, object]:
-    """Bind a valid schema-7 shape to selected manifest and durable files."""
+    """Bind the current report schema to selected manifest and durable files."""
     report = validate_shard_shape(report)
     resolved_manifest = manifest_path.resolve()
     if report["manifestPath"] != str(resolved_manifest):
@@ -2094,6 +2290,9 @@ def verify_shard_evidence(
             "artifactReport": module_root / "artifact-reports.jsonl",
             "oracleLog": module_root / "declaration-oracle.log",
             "oracleReport": module_root / "declaration-oracle-report.json",
+            "recordingInvocation": module_root / "recording-invocation.json",
+            "replayInvocation": module_root / "replay-invocation.json",
+            "oracleInvocation": module_root / "oracle-invocation.json",
         }
         source_data = _read_evidence_file(
             module_report["sourcePath"], item.source_path, f"{item.module} source"
@@ -2122,7 +2321,12 @@ def verify_shard_evidence(
             module_report["instrumented"]["sha256"],
             f"{item.module} instrumented",
         )
-        if instrumented_data != instrumented_source(item.source, item.replacement_roots):
+        recording_mode = module_report["recordingMode"]
+        if recording_mode not in {"stock", "applied"}:
+            raise RuntimeError(f"{item.module} has invalid recording mode")
+        if instrumented_data != instrumented_source(
+            item.source, item.replacement_roots, recording_mode=recording_mode
+        ):
             raise RuntimeError(f"{item.module} instrumented evidence is not reproducible")
 
         artifact_data = _read_evidence_file(
@@ -2136,6 +2340,7 @@ def verify_shard_evidence(
             f"{item.module} artifact report",
         )
         reports = _parse_jsonl_evidence(artifact_data, f"{item.module} artifact report")
+        _validate_module_invocations(module_report, item, module_root, timeout, reports)
         for artifact in reports:
             reject_forbidden_generated_text(artifact, f"artifact report for {item.module}")
         materialize_ids = [str(entry["id"]) for entry in item.materialize]

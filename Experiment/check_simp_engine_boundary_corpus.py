@@ -626,7 +626,7 @@ def validate_occurrence_protocol() -> None:
 
 
 def shard_report_fixture() -> dict[str, object]:
-    """Return a complete tiny schema-5 report for validator mutation tests."""
+    """Return a tiny current-schema shape for validator mutation tests."""
     occurrence = make_occurrence_result(
         "occurrence", "materialize", 1, [{"status": "success"}]
     )
@@ -651,6 +651,13 @@ def shard_report_fixture() -> dict[str, object]:
     }
     module = {
         "module": "Mathlib/Test.lean",
+        "recordingMode": "applied",
+        "runtime": "/tmp/libexplicitLean_ExplicitLean.dylib",
+        "runtimeSha256": "runtime-hash",
+        "recordingInvocation": {"path": "/tmp/recording-invocation.json", "sha256": "recording-invocation-hash"},
+        "replayInvocation": {"path": "/tmp/replay-invocation.json", "sha256": "replay-invocation-hash"},
+        "oracleInvocation": {"path": "/tmp/oracle-invocation.json", "sha256": "oracle-invocation-hash"},
+        "recordingLog": {"path": "/tmp/instrumented.log", "sha256": "recording-log-hash"},
         "compiledModule": "Mathlib.Test",
         "sourcePath": "/tmp/source.lean",
         "originalPath": "/tmp/original.lean",
@@ -1095,7 +1102,7 @@ def validate_shard_report_protocol() -> None:
         for path in paths.values():
             path.parent.mkdir(parents=True, exist_ok=True)
         paths["original"].write_bytes(source)
-        instrumented = materialize.instrumented_source(source, [occurrence_entry])
+        instrumented = materialize.instrumented_source(source, [occurrence_entry], recording_mode="applied")
         paths["instrumented"].write_bytes(instrumented)
         materialized_source = materialize._inject_import(
             materialize.replace_all_occurrences(source, [occurrence_entry], variants),
@@ -1243,7 +1250,42 @@ def validate_shard_report_protocol() -> None:
             "remainingRetainedCount": 0,
         }
 
+        # File-backed invocation evidence exercises the full consumer without
+        # compiling Lean. Only the expected native-runtime locations are mocked.
+        shared_runtime = work / "libexplicitLean_ExplicitLean.dylib"
+        oracle_runtime = work / "simpEngineDeclarationOracle"
+        shared_runtime.write_bytes(b"fixture shared runtime")
+        oracle_runtime.write_bytes(b"fixture oracle runtime")
+        module_report["runtime"] = str(shared_runtime.resolve())
+        module_report["runtimeSha256"] = materialize.sha256(shared_runtime.read_bytes())
+        recording_log = module_root / "instrumented.log"
+        recording_log.write_text(materialize.ARTIFACT_MARKER + "c" * 43 + " " + materialize._canonical_json_line(artifact) + "\n")
+        module_report["recordingLog"] = {"path": str(recording_log.resolve()), "sha256": materialize.sha256(recording_log.read_bytes())}
+        for label, nonce, runtime in (("recording", "c" * 43, shared_runtime),
+                                      ("replay", "a" * 43, shared_runtime),
+                                      ("oracle", "b" * 43, oracle_runtime)):
+            receipt = {"kind": "boundary_oracle_invocation_v1" if label == "oracle" else "boundary_compiler_invocation_v1",
+                       "module": compiled_module, "cwd": str(materialize.ROOT), "nonce": nonce,
+                       "timeoutSeconds": 1, "recordingMode": "applied" if label == "recording" else None,
+                       "runtime": str(runtime.resolve()), "runtimeSha256": materialize.sha256(runtime.read_bytes())}
+            if label == "oracle":
+                receipt.update(stockSource=str(paths["original"].resolve()), stockSourceSha256=module_report["originalHash"],
+                               appliedSource=str(paths["materialized"].resolve()), appliedSourceSha256=module_report["materializedHash"],
+                               command=["lake", "env", str(oracle_runtime.resolve()), compiled_module,
+                                        str(paths["original"].resolve()), str(paths["materialized"].resolve())])
+            else:
+                stage = "instrumented" if label == "recording" else "materialized"
+                receipt.update(source=str(paths[stage].resolve()), sourceSha256=module_report[stage + "Hash"],
+                               command=materialize._compiler_command(paths[stage], str(shared_runtime.resolve())))
+            receipt_path = module_root / (label + "-invocation.json")
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+            module_report[label + "Invocation"] = {"path": str(receipt_path.resolve()),
+                                                    "sha256": materialize.sha256(receipt_path.read_bytes())}
         original_inventory = materialize.inventory.syntax_inventory_file
+        original_shared = materialize._shared_runtime_path
+        original_oracle = materialize._oracle_runtime_path
+        materialize._shared_runtime_path = lambda: shared_runtime.resolve()
+        materialize._oracle_runtime_path = lambda: oracle_runtime.resolve()
         materialize.inventory.syntax_inventory_file = lambda *_args, **_kwargs: []
         try:
             materialize.verify_shard_evidence(
@@ -1255,6 +1297,89 @@ def validate_shard_report_protocol() -> None:
                 debug_root=debug_root,
                 timeout=1,
             )
+            # Rehashing a changed receipt cannot substitute a different launch,
+            # executable, source, or nonce into an otherwise valid report.
+            receipt_mutations = [
+                ("recording", "mode", lambda r: r.update(recordingMode="stock")),
+                ("recording", "module", lambda r: r.update(module="Mathlib.Other")),
+                ("recording", "kind", lambda r: r.update(kind="boundary_oracle_invocation_v1")),
+                ("recording", "source", lambda r: r.update(source=str(paths["materialized"].resolve()))),
+                ("recording", "source-hash", lambda r: r.update(sourceSha256="0" * 64)),
+                ("recording", "cwd", lambda r: r.update(cwd=str(work))),
+                ("recording", "dropped-option", lambda r: r["command"].pop(4)),
+                ("replay", "extra-option", lambda r: r["command"].append("--different")),
+                ("oracle", "wrong-program", lambda r: r["command"].__setitem__(2, str(shared_runtime))),
+                ("recording", "runtime", lambda r: r.update(runtime=str(oracle_runtime), runtimeSha256=materialize.sha256(oracle_runtime.read_bytes()))),
+                ("oracle", "runtime", lambda r: r.update(runtime=str(shared_runtime), runtimeSha256=materialize.sha256(shared_runtime.read_bytes()))),
+                ("recording", "wrong-nonce", lambda r: r.update(nonce="d" * 43)),
+                ("replay", "wrong-nonce", lambda r: r.update(nonce="d" * 43)),
+                ("oracle", "wrong-nonce", lambda r: r.update(nonce="d" * 43)),
+                ("recording", "reused-nonce", lambda r: r.update(nonce="a" * 43)),
+                ("oracle", "reused-nonce", lambda r: r.update(nonce="a" * 43)),
+                ("recording", "timeout", lambda r: r.update(timeoutSeconds=2)),
+                ("recording", "boolean-timeout", lambda r: r.update(timeoutSeconds=True)),
+            ]
+            for stage, label, mutate in receipt_mutations:
+                changed = copy.deepcopy(report)
+                ref = changed["modules"][0][stage + "Invocation"]
+                receipt_path = Path(ref["path"])
+                original_receipt = receipt_path.read_bytes()
+                receipt = json.loads(original_receipt)
+                mutate(receipt)
+                receipt_path.write_text(json.dumps(receipt) + "\n")
+                ref["sha256"] = materialize.sha256(receipt_path.read_bytes())
+                try:
+                    try:
+                        materialize.verify_shard_evidence(changed, manifest=manifest,
+                            manifest_path=manifest_path, manifest_bytes=manifest_bytes,
+                            selected=[selected], debug_root=debug_root, timeout=1)
+                    except RuntimeError:
+                        pass
+                    else:
+                        raise AssertionError(f"forged {stage} {label} receipt accepted")
+                finally:
+                    receipt_path.write_bytes(original_receipt)
+            for label in ("missing-reference", "swapped-reference", "missing-file", "recording-log-artifact", "coherent-runtime-substitution"):
+                changed = copy.deepcopy(report)
+                receipt_path = Path(module_report["recordingInvocation"]["path"])
+                original_receipt = receipt_path.read_bytes()
+                original_recording_log = recording_log.read_bytes()
+                replay_receipt_path = Path(module_report["replayInvocation"]["path"])
+                original_replay_receipt = replay_receipt_path.read_bytes()
+                try:
+                    if label == "missing-reference":
+                        del changed["modules"][0]["recordingInvocation"]
+                    elif label == "swapped-reference":
+                        changed["modules"][0]["recordingInvocation"] = changed["modules"][0]["replayInvocation"]
+                    elif label == "missing-file":
+                        receipt_path.unlink()
+                    elif label == "coherent-runtime-substitution":
+                        changed_module = changed["modules"][0]
+                        changed_module["runtime"] = str(oracle_runtime.resolve())
+                        changed_module["runtimeSha256"] = materialize.sha256(oracle_runtime.read_bytes())
+                        for stage in ("recording", "replay"):
+                            ref = changed_module[stage + "Invocation"]
+                            path = Path(ref["path"])
+                            receipt = json.loads(path.read_bytes())
+                            receipt.update(runtime=changed_module["runtime"], runtimeSha256=changed_module["runtimeSha256"])
+                            receipt["command"][3] = "--load-dynlib=" + changed_module["runtime"]
+                            path.write_text(json.dumps(receipt) + "\n")
+                            ref["sha256"] = materialize.sha256(path.read_bytes())
+                    else:
+                        recording_log.write_text(materialize.ARTIFACT_MARKER + "c" * 43 + ' {"forged":true}\n')
+                        changed["modules"][0]["recordingLog"]["sha256"] = materialize.sha256(recording_log.read_bytes())
+                    try:
+                        materialize.verify_shard_evidence(changed, manifest=manifest,
+                            manifest_path=manifest_path, manifest_bytes=manifest_bytes,
+                            selected=[selected], debug_root=debug_root, timeout=1)
+                    except RuntimeError:
+                        pass
+                    else:
+                        raise AssertionError(f"forged {label} evidence accepted")
+                finally:
+                    receipt_path.write_bytes(original_receipt)
+                    replay_receipt_path.write_bytes(original_replay_receipt)
+                    recording_log.write_bytes(original_recording_log)
             # Rehashing an abort-bearing log must not turn a caught replay
             # failure into acceptable durable evidence in either process.
             for oracle_process in (False, True):
@@ -1371,6 +1496,8 @@ def validate_shard_report_protocol() -> None:
                 raise RuntimeError("forged retained inventory evidence was accepted")
         finally:
             materialize.inventory.syntax_inventory_file = original_inventory
+            materialize._shared_runtime_path = original_shared
+            materialize._oracle_runtime_path = original_oracle
 
 
 def validate_manifest(manifest: dict[str, object]) -> None:
