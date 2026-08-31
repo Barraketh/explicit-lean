@@ -127,10 +127,11 @@
     }
   ],
   "nextActions": [
-    "Finish the frozen schema2 representative Mathlib gate and fresh closed 8260-module subset manifest; excluded unresolved sites stay in the full diagnostic master index.",
-    "Integrate the reviewed resumable worker with honest frozen-runner provenance; import the new closed manifest and run bounded verified module batches.",
-    "Use positive caller probes to resolve four executable quotations, and audit Zify configuration syntax separately from its downstream meta simplifier.",
-    "Validate nested cases, resolve reusable caller ownership, assemble and verify the translated dependency tree, then improve readability."
+    "Finish worker fix-review, commit, freeze a new checkout and generate the selected20-module231-call manifest; run bounded workers against the master index.",
+    "Keep full diagnostic source inventory and unresolved backlog; defer another full manifest run until the diverse batch stabilizes the implementation.",
+    "Resolve reusable source/execution ownership and metaprogram equivalence rather than bypassing the shard rejection; collect positive unresolved caller evidence.",
+    "Finish direct Lean import-path isolation with an absent-translated-dependency negative control; then assemble and validate translated dependencies.",
+    "After full explicit coverage and full-tree validation, improve readability and then other tactics if time remains."
   ],
   "checkpoints": [
     {
@@ -253,6 +254,14 @@
         "Strengthened source fixture17 passed with1 explicitly unobserved",
         "Four pure protocol validators and codec wire validators passed"
       ]
+    },
+    {
+      "at": "2026-08-31T10:25:57.152819+00:00",
+      "summary": "Frozen production schema2 five-module Mathlib gate passed all66calls with compilation, zero remaining executable syntax and declaration/environment oracle. Frozen nested fixture and Mathlib Action gate also passed9fixturecalls and10Mathlibcalls. Selected a diverse first worker batch20modules/231calls including reusable metaprograms. Root review reproduced an outer worker-timeout orphaning nested compiler groups; cooperative interrupt plus unconditional hard cleanup passes regression, final rerun in progress."
+    },
+    {
+      "at": "2026-08-31T10:32:39.198384+00:00",
+      "summary": "Nested process timeout fix committeda2173da after old-code positive control and real three-group regression. Fresh closed subset inventory stopped on legitimate duplicate parser paths in Types.Basic; fixed count validation to count unique source identities while preserving all paths and unchanged semantic join (0804eaf). Focused real8-call/9-record regression passed and second run hit checkpoint in0.00s. No new closed full manifest published. First worker batch will use a small freshly generated manifest at its final committed revision."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -263,7 +272,9 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/schema2-gates",
       "commit": "5f02c0c",
       "log": ".lake/representative-gate.log",
-      "status": "running"
+      "status": "passed",
+      "modules": 5,
+      "occurrences": 66
     },
     {
       "id": "schema2-closed-subset-inventory",
@@ -271,10 +282,30 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/schema2-corpus",
       "commit": "5f02c0c",
       "log": ".lake/campaign-closed-inventory.log",
-      "status": "running",
+      "status": "failed",
       "modules": 8260,
       "expectedOccurrences": 83414,
-      "note": "Four modules with five unresolved sites remain in master diagnostic index; this subset is not full corpus closure."
+      "note": "Four modules with five unresolved sites remain in master diagnostic index; this subset is not full corpus closure.",
+      "failure": "Scope checkpoint counted raw parser paths: Types.Basic has8unique source calls and9scope records; no manifest published."
+    },
+    {
+      "id": "schema2-nested",
+      "sessionId": 59749,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-gates",
+      "commit": "5f02c0c",
+      "log": ".lake/nested-gate.log",
+      "status": "passed",
+      "fixtureCalls": 9,
+      "mathlibActionCalls": 10
+    },
+    {
+      "id": "schema2-fin-exploration",
+      "sessionId": 30262,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-gates",
+      "commit": "5f02c0c",
+      "log": ".lake/fin-probe.log",
+      "status": "failed_expected_unsupported",
+      "detail": "Fresh26-call manifest succeeded; shard selection rejects1reusable executable call before recording."
     }
   ],
   "latestCommits": [
@@ -290,7 +321,11 @@
     "d73b4c2",
     "b2ea843",
     "1d5b550",
-    "5f02c0c"
+    "5f02c0c",
+    "531a3ad",
+    "a8fea49",
+    "a2173da",
+    "0804eaf"
   ],
   "experiments": [
     {
@@ -367,5 +402,16 @@
     "unresolved": 5,
     "verifiedTranslations": 0,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
+  },
+  "productionValidation": {
+    "commit": "5f02c0c",
+    "searchFreeEncoding": "lean_expr_dag_v1",
+    "representativeMathlibModules": 5,
+    "representativeMathlibOccurrences": 66,
+    "nestedMathlibOccurrences": 10,
+    "sourceFixtureOccurrences": 17,
+    "sourceFixtureUnobservedOccurrences": 1,
+    "completeTreeBuilt": false,
+    "note": "Bounded fixture/module validation; durable campaign worker closure accounting remains separate."
   }
 }
