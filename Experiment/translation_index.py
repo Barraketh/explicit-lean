@@ -923,6 +923,7 @@ def claim_work(
     limit: int = 1,
     lease_seconds: float = 900,
     now: float | None = None,
+    modules: Sequence[str] | None = None,
 ) -> list[Lease]:
     if not worker:
         raise IndexError("worker must be nonempty")
@@ -944,10 +945,27 @@ def claim_work(
                 "UPDATE work_queue SET state='queued',worker=NULL,lease_expires_at=NULL,updated_at=? WHERE module=?",
                 (current, row[0]),
             )
-        rows = connection.execute(
-            "SELECT module,cache_key FROM work_queue WHERE state='queued' ORDER BY priority DESC,module LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if modules is None:
+            rows = connection.execute(
+                "SELECT module,cache_key FROM work_queue WHERE state='queued' "
+                "ORDER BY priority DESC,module LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            requested = list(modules)
+            if any(not isinstance(module, str) or not module for module in requested):
+                raise IndexError("claim module filters must be nonempty strings")
+            if len(set(requested)) != len(requested):
+                raise IndexError("claim module filters must be unique")
+            if not requested:
+                rows = []
+            else:
+                placeholders = ",".join("?" for _ in requested)
+                rows = connection.execute(
+                    "SELECT module,cache_key FROM work_queue WHERE state='queued' "
+                    f"AND module IN ({placeholders}) ORDER BY priority DESC,module LIMIT ?",
+                    (*requested, limit),
+                ).fetchall()
         for row in rows:
             expires = current + lease_seconds
             cursor = connection.execute(
