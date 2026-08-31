@@ -67,7 +67,59 @@ def matcher_order_source(entries: str) -> str:
     )
 
 
+def async_matcher_source() -> str:
+    return source(
+        "open Lean Meta Elab Tactic\n"
+        "@[expose] def oracleChoice (n : Nat) : Nat :=\n"
+        "  match n with | 0 => 7 | n + 1 => n\n"
+        "theorem oracleSample : True := by\n"
+        "  run_tac do\n"
+        "    let eqns ← Match.getEquationsFor `oracleChoice.match_1\n"
+        "    unless isPrivateName eqns.splitterName do\n"
+        "      throwError \"fixture expected a private splitter\"\n"
+        "  trivial\n"
+        "run_cmd do\n"
+        "  let env ← getEnv\n"
+        "  let name := mkPrivateName env `oracleChoice.match_1 ++ `splitter\n"
+        "  unless env.constants.contains name && !env.containsOnBranch name do\n"
+        "    throwError \"fixture did not reach checked-only async declaration\""
+    )
+
+
+def async_private_body_source(value: int, inline: str = "inline") -> str:
+    return source(
+        "open Lean Meta Elab Tactic\n"
+        "def oracleAnchor : Nat := 0\n"
+        "theorem oracleSample : True := by\n"
+        "  run_tac do\n"
+        "    let name := mkPrivateName (← getEnv) `oracleAnchor ++ `computation\n"
+        "    realizeConst `oracleAnchor name do\n"
+        "      let decl := Declaration.defnDecl {\n"
+        "        name, levelParams := [], type := mkConst ``Nat,\n"
+        f"        value := mkNatLit {value}, hints := .abbrev, safety := .safe }}\n"
+        "      addDecl decl\n"
+        "      compileDecl decl\n"
+        "      let env ← Lean.ofExcept <| Lean.Compiler.setInlineAttribute "
+        f"(← Lean.getEnv) name .{inline}\n"
+        "      Lean.setEnv env\n"
+        "  trivial\n"
+        "run_cmd do\n"
+        "  let env ← getEnv\n"
+        "  let name := mkPrivateName env `oracleAnchor ++ `computation\n"
+        "  unless env.constants.contains name && !env.containsOnBranch name do\n"
+        "    throwError \"fixture did not reach checked-only async declaration\""
+    )
+
+
 CASES = (
+    Case("async-matcher-checked-declarations", async_matcher_source(), async_matcher_source(), True),
+    Case("async-private-computational-equivalence", async_private_body_source(1),
+         async_private_body_source(1), True),
+    Case("async-private-computational-inline-mismatch", async_private_body_source(1),
+         async_private_body_source(1, "noinline"), False, "environment_delta_mismatch",
+         detail_contains="observable inline attributes differ"),
+    Case("async-private-computational-value-mismatch", async_private_body_source(1),
+         async_private_body_source(2), False, "declaration_value_mismatch"),
     Case("early-import-option-registry", EARLY_IMPORT_SOURCE, EARLY_IMPORT_SOURCE, True),
     Case(
         "proof-body-difference",

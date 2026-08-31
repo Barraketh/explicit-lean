@@ -715,13 +715,16 @@ private unsafe def compareModuleDocs (stockData appliedData : ModuleData) : IO U
    private proof-valued matchers, which the declaration comparison already
    permits. Ignore only entries whose declaration satisfies that same policy;
    retain exact names and kinds for every public or computational declaration.
+   ModuleData also contains checked async realization declarations that need
+   not be visible on the final elaboration branch. Resolve metadata owners in
+   that same checked declaration domain, without triggering realizations.
    The cast is specific to Lean.Compiler.inlineAttrs' pinned entry type. -/
 private unsafe def observableInlineAttributes (environment : Environment)
     (entries : Array EnvExtensionEntry) : IO (Array (Name × Compiler.InlineAttributeKind)) := do
   let entries : Array (Name × Compiler.InlineAttributeKind) := unsafeCast entries
   let mut result := #[]
   for (name, kind) in entries do
-    let some info := environment.find? name (skipRealize := true)
+    let some info := environment.constants.find? name
       | oracleFailure "environment_delta_mismatch" s!"inline attribute has no declaration: {name}"
     unless ← privateProofDeclaration environment info do
       result := result.push (name, kind)
@@ -732,7 +735,7 @@ private unsafe def observableMatcherEntries (environment : Environment)
   let entries : Array Meta.Match.Extension.Entry := unsafeCast entries
   let mut result := #[]
   for entry in entries do
-    let some info := environment.find? entry.name (skipRealize := true)
+    let some info := environment.constants.find? entry.name
       | oracleFailure "environment_delta_mismatch"
           s!"matcher metadata has no declaration: {entry.name}"
     unless ← privateProofDeclaration environment info do
