@@ -1,0 +1,464 @@
+module
+prelude
+
+public meta import ExplicitLean.SimpEngine.Boundary.EquationCodec
+public meta import ExplicitLean.SimpEngine.Boundary.MatcherCodec
+public meta import Lean.Meta.Tactic.AuxLemma
+public meta import ExplicitLean.SimpEngine.Boundary.SparseCasesCodec
+meta import all Lean.Environment
+meta import all Lean.Meta.Basic
+meta import all ExplicitLean.SimpEngine.Boundary.EquationCodec
+meta import all ExplicitLean.SimpEngine.Boundary.MatcherCodec
+
+public meta section
+open Lean Meta
+namespace ExplicitLean.SimpEngine.Boundary
+
+private partial def snapshotQuietFinished (snap : Language.SnapshotTree) : IO Bool := do
+  if !snap.element.diagnostics.msgLog.toArray.isEmpty ||
+      !snap.element.traces.traces.isEmpty || snap.element.infoTree?.isSome || snap.element.isFatal then
+    return false
+  for child in snap.children do
+    unless ← IO.hasFinished child.task do return false
+    unless ← snapshotQuietFinished child.task.get do return false
+  return true
+
+
+
+private unsafe def lookupCacheTaskImpl (env : Environment) (owner key : Name) : IO (Option (Task Dynamic)) := do
+  let ctx ← if env.isImportedConst owner then
+      env.importRealizationCtx?.getDM (throw <| IO.userError "activation_missing_import_context")
+    else (env.localRealizationCtxMap.find? owner).getDM (throw <| IO.userError "activation_missing_local_context")
+  let values ← ctx.realizeMapRef.get
+  let some raw := values.find? (TypeName.typeName Environment.RealizeConstKey) | return none
+  -- Exactly the heterogeneous map/type key used by pinned Environment.realizeValue.
+  let values := unsafeCast (β := PHashMap Environment.RealizeConstKey (Task Dynamic)) raw
+  return values.find? { constName := key }
+
+@[implemented_by lookupCacheTaskImpl]
+private opaque lookupCacheTask (env : Environment) (owner key : Name) : IO (Option (Task Dynamic))
+
+private def completedCacheResult (env : Environment) (owner key : Name) : IO Environment.RealizeConstResult := do
+  let some task ← lookupCacheTask env owner key
+    | throw <| IO.userError "activation_cache_absent"
+  unless ← IO.hasFinished task do throw <| IO.userError "activation_cache_pending"
+  let some result := task.get.get? Environment.RealizeConstResult
+    | throw <| IO.userError "activation_cache_type"
+  let some status := result.dyn.get? Lean.Meta.RealizeConstantResult
+    | throw <| IO.userError "activation_result_type"
+  unless status.error?.isNone do throw <| IO.userError "activation_cached_error"
+  if let some snapshot := status.snap? then
+    unless ← snapshotQuietFinished snapshot do
+      throw <| IO.userError s!"activation_nonquiet_snapshot:messages={snapshot.element.diagnostics.msgLog.toArray.size}:traces={snapshot.element.traces.traces.size}:info={snapshot.element.infoTree?.isSome}:fatal={snapshot.element.isFatal}:children={snapshot.children.size}:finished={(← snapshot.children.mapM fun child => IO.hasFinished child.task)}"
+  unless result.newConsts.private.any (·.constInfo.name == key) do
+    throw <| IO.userError "activation_key_not_member"
+  let mut seen : NameSet := {}
+  for member in result.newConsts.private do
+    if seen.contains member.constInfo.name then throw <| IO.userError "activation_duplicate_member"
+    seen := seen.insert member.constInfo.name
+    unless member.isRealized do throw <| IO.userError "activation_unrealized_member"
+    unless ← IO.hasFinished member.constInfo.constInfo do throw <| IO.userError "activation_pending_declaration"
+    unless ← IO.hasFinished member.aconstsImpl do throw <| IO.userError "activation_pending_branch"
+    let some exts := member.exts? | throw <| IO.userError "activation_missing_extensions"
+    unless ← IO.hasFinished exts do throw <| IO.userError "activation_pending_extensions"
+  for member in result.newConsts.public do
+    unless seen.contains member.constInfo.name do throw <| IO.userError "activation_foreign_public_member"
+    unless ← IO.hasFinished member.constInfo.constInfo do throw <| IO.userError "activation_pending_public_declaration"
+    unless ← IO.hasFinished member.aconstsImpl do throw <| IO.userError "activation_pending_public_branch"
+    let some exts := member.exts? | throw <| IO.userError "activation_missing_public_extensions"
+    unless ← IO.hasFinished exts do throw <| IO.userError "activation_pending_public_extensions"
+  return result
+
+private def nameArrayJson (names : Array Name) : Json := .arr (names.map encodeBoundaryName)
+
+private def constantSignature (info : ConstantInfo) (publicProofView := false) : MetaM Json := do
+  let common := #[encodeBoundaryName info.name, nameArrayJson info.levelParams.toArray,
+    .str (← encodeBoundaryExpr info.type)]
+  match info with
+  | .thmInfo info => return .arr (#[.str "theorem"] ++ common ++ #[nameArrayJson info.all.toArray])
+  | .defnInfo info =>
+    let hints := match info.hints with
+      | .opaque => Json.arr #[.str "opaque"]
+      | .abbrev => Json.arr #[.str "abbrev"]
+      | .regular h => Json.arr #[.str "regular", toJson h.toNat]
+    unless info.safety == .safe do throwError "activation_unsafe_definition"
+    return .arr (#[.str "definition"] ++ common ++ #[nameArrayJson info.all.toArray,
+      hints, .str (← encodeBoundaryExpr info.value)])
+  | .axiomInfo info =>
+    unless publicProofView && !info.isUnsafe do throwError "activation_unexpected_axiom"
+    return .arr (#[.str "public-proof-interface"] ++ common)
+  | _ => throwError "activation_unsupported_declaration_kind:{info.name}:axiom={info.isAxiom}"
+
+private unsafe def serializeGroupDataImpl (data : ModuleData) : IO ByteArray := do
+  IO.FS.withTempFile fun _ path => do
+    let compactor ← CompactedRegion.save path `_boundary_realization_extension data #[] none
+    Runtime.forget compactor
+    IO.FS.readBinFile path
+
+@[implemented_by serializeGroupDataImpl]
+private opaque serializeGroupData (data : ModuleData) : IO ByteArray
+
+private def bytesHex (bytes : ByteArray) : String := Id.run do
+  let digits := "0123456789abcdef".toList.toArray
+  let mut result := ""
+  for byte in bytes.data do
+    result := result.push digits[byte.toNat / 16]!
+    result := result.push digits[byte.toNat % 16]!
+  return result
+
+private def memberEnvironment (env : Environment) (member : AsyncConst) : IO Environment := do
+  let some exts := member.exts? | throw <| IO.userError "activation_missing_extensions"
+  let extensions := exts.get
+  let checked := { env.checked.get with extensions }
+  return { env with
+    checked := .pure checked
+    base := {
+      «private» := { env.base.private with extensions }
+      «public» := { env.base.public with extensions } } }
+
+private def memberMetadata (env : Environment) (member : AsyncConst) : MetaM Json := do
+  let view ← memberEnvironment env member
+  let aux := auxLemmasExt.getState view
+  -- The first bounded group contract admits no auxiliary proof cache effects.
+  unless aux.lemmas.isEmpty do throwError "activation_nonempty_aux_cache"
+  let matchState := boundaryMatchStateJson (Match.matchEqnsExt.getState view)
+  let eqnState := equationStateJson (eqnsExt.getState view)
+  let data ← Lean.mkModuleData view .private
+  let mut entries := #[]
+  for (name, values) in data.entries.qsort (fun a b => Name.quickLt a.1 b.1) do
+    -- The same three diagnostic/private-proof bookkeeping exceptions used by
+    -- Boundary's persistent-state comparator; no matcher/computation exemption.
+    if name == `Lean.declRangeExt ||
+        name == "_private.Lean.Util.CollectAxioms.0.Lean.exportedAxiomsExt".toName ||
+        name == "_private.Lean.OriginalConstKind.0.Lean.privateConstKindsExt".toName then continue
+    let normalized : ModuleData := {
+      isModule := true
+      imports := #[]
+      constNames := #[]
+      constants := #[]
+      extraConstNames := #[]
+      entries := #[(name, values)] }
+    let first ← serializeGroupData normalized
+    unless first == (← serializeGroupData normalized) do
+      throwError "activation_nondeterministic_extension_serialization"
+    entries := entries.push (.arr #[encodeBoundaryName name, .str (bytesHex first)])
+  return .arr #[matchState, eqnState, boundarySparseCacheJson view, .arr entries]
+
+private partial def nestedMemberJson (fuel : Nat) (env : Environment)
+    (allowed : Array Name) (member : AsyncConst) (publicView : Bool) : MetaM Json := do
+  if fuel == 0 then throwError "activation_nested_branch_depth"
+  unless (← IO.hasFinished member.constInfo.constInfo) &&
+      (← IO.hasFinished member.constInfo.sig) && (← IO.hasFinished member.aconstsImpl) do
+    throwError "activation_nested_branch_pending"
+  let info := member.constInfo.constInfo.get
+  let sig := member.constInfo.sig.get
+  unless member.constInfo.name == info.name && member.constInfo.kind == ConstantKind.ofConstantInfo info &&
+      sig.name == info.name && sig.levelParams == info.levelParams && sig.type == info.type do
+    throwError "activation_async_signature_conflict"
+  let signature ← constantSignature info publicView
+  let metadata ← match member.exts? with
+    | none => pure Json.null
+    | some task => do
+      unless ← IO.hasFinished task do throwError "activation_nested_extensions_pending"
+      memberMetadata env member
+  let some children := member.aconstsImpl.get.get? AsyncConsts
+    | throwError "activation_nested_branch_type"
+  let entries := children.revList.toArray.reverse
+  let names := entries.map (·.constInfo.name)
+  unless entries.size == children.size && children.map.toArray.size == entries.size &&
+      children.normalizedTrie.toArray.size == entries.size && names.all allowed.contains do
+    throwError "activation_nested_branch_members"
+  let mut seen : NameSet := {}
+  let mut nested := #[]
+  for child in entries do
+    if seen.contains child.constInfo.name then throwError "activation_nested_branch_duplicate"
+    seen := seen.insert child.constInfo.name
+    let prior := allowed.takeWhile (· != child.constInfo.name)
+    let expected ← nestedMemberJson (fuel - 1) env prior child publicView
+    let some mapped := children.map.find? child.constInfo.name
+      | throwError "activation_nested_branch_map"
+    let some normalized := children.normalizedTrie.find? (privateToUserName child.constInfo.name)
+      | throwError "activation_nested_branch_trie"
+    unless (← nestedMemberJson (fuel - 1) env prior mapped publicView) == expected &&
+        (← nestedMemberJson (fuel - 1) env prior normalized publicView) == expected do
+      throwError "activation_nested_branch_lookup_conflict"
+    nested := nested.push expected
+  return .arr #[signature, .bool member.isRealized, metadata, .arr nested]
+
+private def completedCacheDescriptor (env : Environment) (owner key : Name) : MetaM Json := do
+  let checked ← IO.wait env.checked
+  let result ← completedCacheResult env owner key
+  let mut privateMembers := #[]
+  let mut priorNames := #[]
+  for member in result.newConsts.private do
+    let info := member.constInfo.constInfo.get
+    let some checked := checked.find? info.name
+      | throwError "activation_unchecked_member:{info.name}"
+    let signature ← constantSignature info
+    unless (← constantSignature checked) == signature do
+      throwError "activation_checked_member_conflict:{info.name}"
+    let tree ← nestedMemberJson (result.newConsts.private.length + 1) env priorNames member false
+    privateMembers := privateMembers.push (.arr #[signature, ← memberMetadata env member, tree])
+    priorNames := priorNames.push info.name
+  let mut publicMembers := #[]
+  priorNames := #[]
+  for member in result.newConsts.public do
+    let info := member.constInfo.constInfo.get
+    let some privateMember := result.newConsts.private.find? (·.constInfo.name == info.name)
+      | throwError "activation_foreign_public_member"
+    let privateInfo := privateMember.constInfo.constInfo.get
+    unless privateInfo.isTheorem && privateInfo.levelParams == info.levelParams &&
+        privateInfo.type == info.type do throwError "activation_public_view_conflict"
+    let tree ← nestedMemberJson (result.newConsts.public.length + 1) env priorNames member true
+    publicMembers := publicMembers.push (.arr #[← constantSignature info true,
+      ← memberMetadata env member, tree])
+    priorNames := priorNames.push info.name
+  return .arr #[.str "completed_realization_v1", .bool (env.isImportedConst owner),
+    encodeBoundaryName owner, encodeBoundaryName key, .arr privateMembers, .arr publicMembers]
+
+/- A group descriptor is a validation witness, never a constructor for Lean's
+   internal realization cache. Only the pinned realizeConst API writes it. -/
+private structure CachedGroup where
+  owner : Name
+  key : Name
+  members : Array Name
+  publicMembers : Array Name
+  deriving Inhabited
+
+private unsafe def candidateGroupsImpl (env : Environment) : IO (Array CachedGroup) := do
+  let mut contexts := env.localRealizationCtxMap.toArray.map fun (owner, ctx) => (some owner, ctx)
+  if let some ctx := env.importRealizationCtx? then contexts := contexts.push (none, ctx)
+  let mut groups := #[]
+  for (owner?, ctx) in contexts do
+    let values ← ctx.realizeMapRef.get
+    let some raw := values.find? (TypeName.typeName Environment.RealizeConstKey) | continue
+    let values := unsafeCast (β := PHashMap Environment.RealizeConstKey (Task Dynamic)) raw
+    for (key, task) in values.toArray do
+      unless ← IO.hasFinished task do continue
+      let some result := task.get.get? Environment.RealizeConstResult | continue
+      let owner := owner?.getD (privateToUserName key.constName |>.getPrefix)
+      if owner?.isNone && !env.isImportedConst owner then continue
+      groups := groups.push {
+        owner, key := key.constName
+        members := result.newConsts.private.toArray.map (·.constInfo.name)
+        publicMembers := result.newConsts.public.toArray.map (·.constInfo.name) }
+  return groups
+
+@[implemented_by candidateGroupsImpl]
+private opaque candidateGroups (env : Environment) : IO (Array CachedGroup)
+
+private def branchNames (env : Environment) (publicView := false) : Array Name :=
+  let branch := if publicView then env.asyncConstsMap.public else env.asyncConstsMap.private
+  branch.revList.toArray.reverse.map (·.constInfo.name)
+
+private def branchDelta (before after : Environment) (publicView := false) : MetaM (Array Name) := do
+  let old := branchNames before publicView
+  let new := branchNames after publicView
+  unless new.extract 0 old.size == old do throwError "boundary_realization_branch_prefix_changed"
+  return new.extract old.size new.size
+
+private partial def groupCovers (groups : Array CachedGroup) (names : Array Name)
+    (offset : Nat := 0) : Array (Array CachedGroup) := Id.run do
+  if offset == names.size then return #[#[]]
+  let mut solutions := #[]
+  for group in groups do
+    if group.members.isEmpty || group.members.size + offset > names.size then continue
+    unless names.extract offset (offset + group.members.size) == group.members do continue
+    for suffix in groupCovers groups names (offset + group.members.size) do
+      solutions := solutions.push (#[group] ++ suffix)
+      if solutions.size > 1 then return solutions
+  return solutions
+
+private def namesFromJson (json : Json) : MetaM (Array Name) := do
+  let values ← ofExcept json.getArr?
+  let result ← values.mapM (Lean.ofExcept ∘ decodeBoundaryName)
+  let mut seen : NameSet := {}
+  for name in result do
+    if name.isAnonymous || seen.contains name then throwError "boundary_realization_invalid_names"
+    seen := seen.insert name
+  return result
+
+private def checkDescriptor (owner key : Name) (expected : Json) : MetaM Unit := do
+  let actual ← completedCacheDescriptor (← getEnv) owner key
+  unless actual == expected do throwError "boundary_realization_cached_descriptor_conflict:{key}"
+
+private def nestedMatcherPayload (source : String) : MetaM String := do
+  let bundle ← ofExcept (parseMatcher source)
+  unless bundle.equations.all (·.localRegistration.isNone) &&
+      boundaryMatchStateJson bundle.localState == .arr #[.arr #[], .arr #[]] do
+    throwError "boundary_realization_nonempty_nested_caller"
+  -- A nested matcher runs in the imported equation callback, not in the
+  -- original theorem caller. The producer below requires this exact empty
+  -- callback context; the batch separately authenticates the outer caller.
+  let bundle := { bundle with
+    localEquationBefore := .arr #[]
+    localEquationAfter := .arr #[]
+    localSparseState := .arr #[] }
+  return (matcherJson bundle).compress
+
+/-- Capture only a unique ordered cover of actual completed realization groups.
+    Fresh production initially supports an equation root with zero or more
+    independently closed matcher children in the empty imported callback state.
+    Every other closure stays unsupported. -/
+def encodeBoundaryRealizationBatch? (before stock : Environment) (checkedBefore : NameSet)
+    (equations matchers : Array (Name × String)) : MetaM (Option (Name × String)) := do
+  let added ← branchDelta before stock
+  if added.isEmpty then return none
+  let candidates ← candidateGroups stock
+  let eligible := candidates.filter fun group => !group.members.isEmpty &&
+    group.members.all added.contains && group.members.all (!before.containsOnBranch ·)
+  let covers := groupCovers eligible added
+  unless covers.size == 1 do throwError "boundary_realization_ambiguous_or_missing_group_cover"
+  let groups := covers[0]!
+  let cached := added.all checkedBefore.contains
+  unless cached || added.all (!checkedBefore.contains ·) do
+    throwError "boundary_realization_mixed_checked_closure"
+  -- Preserve the old narrow action paths unless this boundary needs grouped
+  -- production or activation without a checked-declaration delta.
+  unless cached || groups.any (fun group => group.members.size > 1 && !isPrivateName group.key) do
+    return none
+  let mut roots := #[]
+  let mut claimedMatchers : Array Name := #[]
+  let mut claimedEquations : Array Name := #[]
+  for group in groups do
+    unless group.key.getPrefix == group.owner && !isPrivateName group.key &&
+        stock.isImportedConst group.owner && group.members.back? == some group.key do
+      throwError "boundary_realization_unsupported_root"
+    let source ← if cached then withEnv stock do
+        let some (.thmInfo thm) := stock.checked.get.find? group.key
+          | throwError "boundary_realization_root_not_theorem"
+        let mapping := (eqnsExt.getState stock).mapInv.find? group.key
+        unless mapping.isNone || mapping == some group.owner do
+          throwError "boundary_realization_root_mapping"
+        encodeBoundaryEquation group.owner thm (defeqAttr.hasTag stock group.key)
+          (backwardDefeqAttr.hasTag stock group.key) mapping.isSome
+      else
+        let some (_, source) := equations.find? (·.1 == group.key)
+          | throwError "boundary_realization_missing_captured_root"
+        claimedEquations := claimedEquations.push group.key
+        pure source
+    let childNames := group.members.pop
+    let childCandidates := candidates.filter fun child => child.members.size < group.members.size &&
+      !child.members.isEmpty && child.members.all childNames.contains
+    let childCovers := groupCovers childCandidates childNames
+    unless childCovers.size == 1 do throwError "boundary_realization_ambiguous_nested_cover"
+    let mut children := #[]
+    for child in childCovers[0]! do
+      let matcherSource ← if cached then pure Json.null else do
+        let some (_, source) := matchers.find? (·.1 == child.owner)
+          | throwError "boundary_realization_missing_captured_matcher"
+        let names ← withEnv stock <| boundaryMatcherDeclarationNames child.owner source
+        unless names == child.members && names.back? == some child.key do
+          throwError "boundary_realization_matcher_members_conflict"
+        claimedMatchers := claimedMatchers.push child.owner
+        pure (.str (← nestedMatcherPayload source))
+      children := children.push (.arr #[encodeBoundaryName child.owner,
+        encodeBoundaryName child.key, matcherSource,
+        ← withEnv stock <| completedCacheDescriptor stock child.owner child.key])
+    roots := roots.push (.arr #[encodeBoundaryName group.owner, encodeBoundaryName group.key,
+      .str source, .arr children, ← withEnv stock <| completedCacheDescriptor stock group.owner group.key])
+  unless cached || (claimedEquations.qsort Name.quickLt == (equations.map (·.1)).qsort Name.quickLt &&
+      claimedMatchers.qsort Name.quickLt == (matchers.map (·.1)).qsort Name.quickLt) do
+    throwError "boundary_realization_unclaimed_actions"
+  let publicAdded ← branchDelta before stock true
+  unless publicAdded == groups.flatMap (·.publicMembers) do
+    throwError "boundary_realization_public_branch_order"
+  let payload := Json.arr #[.str "boundary_realization_batch_v1", .bool cached,
+    nameArrayJson added, nameArrayJson publicAdded,
+    boundaryMatchStateJson (Match.matchEqnsExt.getState before),
+    boundaryMatchStateJson (Match.matchEqnsExt.getState stock),
+    equationStateJson (eqnsExt.getState before), equationStateJson (eqnsExt.getState stock),
+    boundarySparseCacheJson before, boundarySparseCacheJson stock, .arr roots]
+  return some (groups[0]!.key, payload.compress)
+
+private def executeCapturedRoot (children : Array Json) (root : Name)
+    (source : String) : MetaM Unit := do
+  unless boundaryMatchStateJson (Match.matchEqnsExt.getState (← getEnv)) == .arr #[.arr #[], .arr #[]] &&
+      equationStateJson (eqnsExt.getState (← getEnv)) == .arr #[] &&
+      boundarySparseCacheJson (← getEnv) == .arr #[] &&
+      (auxLemmasExt.getState (← getEnv)).lemmas.isEmpty do
+    throwError "boundary_realization_nonempty_producer_context"
+  for child in children do
+    let .arr #[anchor, _, .str payload, _] := child
+      | throwError "boundary_realization_missing_child_producer"
+    executeBoundaryMatcher (← ofExcept <| decodeBoundaryName anchor) payload
+  let (_, theoremSource, defeqTag, backwardTag, _) ← ofExcept (parseEquationPayload source)
+  realizeCapturedEquation root theoremSource defeqTag backwardTag
+
+/-- No generator is invoked. Cached mode preflights completed tasks and uses a
+    failure-only callback; producer mode runs only the captured closed closure. -/
+def executeBoundaryRealizationBatch (expectedAnchor : Name) (source : String) : MetaM Unit := do
+  let .arr #[.str "boundary_realization_batch_v1", .bool cached, privateNames, publicNames,
+      matchBefore, matchAfter, eqnsBefore, eqnsAfter, sparseBefore, sparseAfter, .arr roots] ← ofExcept (Json.parse source)
+    | throwError "boundary_realization_invalid_payload"
+  unless !roots.isEmpty do throwError "boundary_realization_empty_batch"
+  let added ← namesFromJson privateNames
+  let publicAdded ← namesFromJson publicNames
+  let before ← getEnv
+  unless added.all (!before.containsOnBranch ·) do throwError "boundary_realization_members_already_active"
+  unless boundaryMatchStateJson (Match.matchEqnsExt.getState before) == matchBefore &&
+      equationStateJson (eqnsExt.getState before) == eqnsBefore &&
+      boundarySparseCacheJson before == sparseBefore do
+    throwError "boundary_realization_caller_before_conflict"
+  let mut index := 0
+  for item in roots do
+    let .arr #[ownerJson, keyJson, .str equationSource, .arr children, descriptor] := item
+      | throwError "boundary_realization_invalid_root"
+    let owner ← ofExcept (decodeBoundaryName ownerJson)
+    let key ← ofExcept (decodeBoundaryName keyJson)
+    if index == 0 && key != expectedAnchor then throwError "boundary_realization_foreign_anchor"
+    index := index + 1
+    let (equationOwner, theoremSource, defeqTag, backwardTag, registerEqn) ←
+      ofExcept (parseEquationPayload equationSource)
+    unless owner == equationOwner && before.isImportedConst owner do
+      throwError "boundary_realization_foreign_owner"
+    validateEquationAnchor owner key
+    let existing ← lookupCacheTask (← getEnv) owner key
+    if cached || existing.isSome then
+      -- A fresh producer's recorder trial sees the stock memo before its
+      -- declarations are checked on the restored caller branch. Preflight
+      -- completion without forcing generation, activate through Lean's checked
+      -- path, then require the full descriptor before any continuation.
+      if cached then checkDescriptor owner key descriptor
+      else discard <| completedCacheResult (← getEnv) owner key
+      for child in children do
+        let .arr #[childOwner, childKey, _, childDescriptor] := child
+          | throwError "boundary_realization_invalid_child"
+        let childOwner ← ofExcept <| decodeBoundaryName childOwner
+        let childKey ← ofExcept <| decodeBoundaryName childKey
+        if cached then checkDescriptor childOwner childKey childDescriptor
+        else discard <| completedCacheResult (← getEnv) childOwner childKey
+    if cached || existing.isSome then
+      realizeConst owner key (throwError "boundary_realization_forbidden_callback")
+    else
+      realizeConst owner key (executeCapturedRoot children key equationSource)
+    -- Presence, exact descriptor and nested metadata are required after either
+    -- cache reuse or closed production. No cache entry is forged or coalesced.
+    checkDescriptor owner key descriptor
+    for child in children do
+      let .arr #[childOwner, childKey, _, childDescriptor] := child
+        | throwError "boundary_realization_invalid_child"
+      checkDescriptor (← ofExcept <| decodeBoundaryName childOwner)
+        (← ofExcept <| decodeBoundaryName childKey) childDescriptor
+    executeBoundaryTheorem key theoremSource
+    unless defeqAttr.hasTag (← getEnv) key == defeqTag &&
+        backwardDefeqAttr.hasTag (← getEnv) key == backwardTag do
+      throwError "boundary_realization_root_tags"
+    registerCapturedEquation owner key registerEqn
+  let after ← getEnv
+  unless (← branchDelta before after) == added && (← branchDelta before after true) == publicAdded do
+    throwError "boundary_realization_branch_transition_conflict"
+  unless boundaryMatchStateJson (Match.matchEqnsExt.getState after) == matchAfter &&
+      equationStateJson (eqnsExt.getState after) == eqnsAfter &&
+      boundarySparseCacheJson after == sparseAfter do
+    throwError "boundary_realization_caller_after_conflict"
+
+/-- Every listed member remains independently required by Boundary's checker.
+    Cached activations add no checked declarations. -/
+def boundaryRealizationBatchMembers (source : String) : MetaM (Bool × Array Name × Array Name) := do
+  let .arr #[.str "boundary_realization_batch_v1", .bool cached, privateNames, publicNames,
+      _, _, _, _, _, _, _] ← ofExcept (Json.parse source)
+    | throwError "boundary_realization_invalid_payload"
+  return (cached, ← namesFromJson privateNames, ← namesFromJson publicNames)
+
+end ExplicitLean.SimpEngine.Boundary

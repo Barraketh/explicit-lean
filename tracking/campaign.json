@@ -29,8 +29,8 @@
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 660,
-    "provisionalCachedModules": 65,
+    "provisionalCachedOccurrences": 691,
+    "provisionalCachedModules": 66,
     "minimumAcceptedReportSchema": 10
   },
   "work": [
@@ -223,8 +223,8 @@
     {
       "id": "cached-realization-activation",
       "owner": "coordinator",
-      "status": "reviewed_pending_integration",
-      "description": "Frozen strict groupcodec independently verified660hashes/34nonce logs/471unchangedinputs. FullLookmap10calls33declarations, actualheader remaining0; truncateddefaultasync7members/gen1to5. Mainmerge staged, including sparse-v2 Python member accounting; mainartifact4/report10 tests pending."
+      "status": "completed",
+      "description": "Integrated exact completed realization groups after independent frozen660hash/34nonce review. Main48jobbuild,10fresh/cached/rejection compiler cases and5wire negatives pass; v2 nested sparse expectation rebased to checked empty imported callback while outer/member caches stay exact. Full combined artifact4/report10 module revalidation still pending; no accepted coverage."
     },
     {
       "id": "fresh-post-generator-guard",
@@ -905,7 +905,8 @@
     "f3db7d4",
     "2ae2609",
     "af21f51",
-    "617c69d"
+    "617c69d",
+    "db59a3e"
   ],
   "experiments": [
     {
@@ -1056,7 +1057,7 @@
     "scope": "six failed roots from schema8 frontier; diagnostic grouping only",
     "modules": {
       "Mathlib/Order/Interval/Set/Defs.lean": "declaration oracle name mismatch; retest helper+generator fix",
-      "Mathlib/Data/List/ModifyLast.lean": "Sparse helper supported in uncommitted main; full5-site recording now rejects8c5e9b6d6a02734e generatorstock5/applied4. Investigate realization-group effect; no accepted translation.",
+      "Mathlib/Data/List/ModifyLast.lean": "Sparse helper committeddb59a3e. Prior5-site recording rejected8c5e9b6d6a02734e generatorstock5/applied4; exact groups integrated but single-matcher capture gate remains under review. No accepted translation.",
       "Mathlib/Data/String/Lemmas.lean": "matcher equation capture-complete-local state mismatch",
       "Mathlib/Data/Int/Init.lean": "Main bounded7-site/148-declaration pipeline passes; strict actual-import remaining scan0. Await fresh closed schema9 report.",
       "Mathlib/Data/List/Lookmap.lean": "Multiple bundles integrated2ae2609; fresh process uncovers nested-realization grouping mismatch. Exact group codec and fresh post-generator guard under implementation.",
@@ -1069,5 +1070,6 @@
     "lastFreeBytes": 68862906368,
     "checkedAt": "2026-08-31T14:49:52.169752+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
-  }
+  },
+  "updatedAt": "2026-08-31T15:13:17.258772+00:00"
 }

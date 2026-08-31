@@ -421,6 +421,7 @@ private def boundaryEnvironmentActionName : EnvironmentAction → Name
   | EnvironmentAction.declareEquation name _ => name
   | EnvironmentAction.declareMatcher anchor _ => anchor
   | EnvironmentAction.declareLocalTheorems anchor _ => anchor
+  | EnvironmentAction.realizeGroups anchor _ => anchor
 
 private def boundaryEnvironmentActionJson (action : EnvironmentAction) : Json :=
   match action with
@@ -444,6 +445,12 @@ private def boundaryEnvironmentActionJson (action : EnvironmentAction) : Json :=
     ]
   | EnvironmentAction.declareLocalTheorems anchor payload => Json.mkObj [
       ("kind", Json.str "declare_local_theorems"),
+      ("name", Json.str anchor.toString),
+      ("nameParts", encodeBoundaryName anchor),
+      ("declaration", Json.str payload)
+    ]
+  | EnvironmentAction.realizeGroups anchor payload => Json.mkObj [
+      ("kind", Json.str "realize_groups"),
       ("name", Json.str anchor.toString),
       ("nameParts", encodeBoundaryName anchor),
       ("declaration", Json.str payload)
@@ -2010,6 +2017,17 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
     let (anchor, payload) ← withEnv stockEnvironment <|
       encodeBoundaryLocalTheorems basis.environment helpers
     actions := actions.push (.declareLocalTheorems anchor payload)
+  if helpers.isEmpty && (declarations.isEmpty || matchers.size > 1) then
+    let equations := actions.filterMap fun action => match action with
+      | .declareEquation name source => some (name, source)
+      | _ => none
+    let matcherActions := actions.filterMap fun action => match action with
+      | .declareMatcher name source => some (name, source)
+      | _ => none
+    if equations.size + matcherActions.size == actions.size then
+      if let some (anchor, payload) ← encodeBoundaryRealizationBatch?
+          basis.environment stockEnvironment basis.checkedDeclarationNames equations matcherActions then
+        return #[.realizeGroups anchor payload]
   return actions.qsort fun lhs rhs =>
     (boundaryEnvironmentActionName lhs).toString < (boundaryEnvironmentActionName rhs).toString
 
@@ -2183,9 +2201,20 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
   unless stockPublicNames == appliedPublicNames do
     throwError "boundary_comparison_unsupported_environment_delta"
   let actionNames := actions.filterMap fun action => match action with
-    | .declareMatcher _ _ | .declareLocalTheorems _ _ => none
+    | .declareMatcher _ _ | .declareLocalTheorems _ _ | .realizeGroups _ _ => none
     | _ => some (boundaryEnvironmentActionName action)
-  let actionNames := (actionNames ++ helperNames.filter (!boundaryEnvironmentPrivateName basis ·)).qsort
+  let mut groupPublicNames := #[]
+  for action in actions do
+    if let .realizeGroups _ payload := action then
+      let (cached, members, publicMembers) ← boundaryRealizationBatchMembers payload
+      unless cached do groupPublicNames := groupPublicNames ++ publicMembers
+      for name in members do
+        let some stockInfo := stockEnvironment.checked.get.find? name
+          | throwError "boundary_realization_missing_stock_member:{name}"
+        let some appliedInfo := appliedEnvironment.checked.get.find? name
+          | throwError "boundary_realization_missing_applied_member:{name}"
+        compareBoundaryDeclaration stockEnvironment stockInfo appliedInfo
+  let actionNames := (actionNames ++ groupPublicNames ++ helperNames.filter (!boundaryEnvironmentPrivateName basis ·)).qsort
     (fun a b => a.toString < b.toString)
   unless actionNames == stockPublicNames do
     throwError "boundary_comparison_unsupported_environment_delta"

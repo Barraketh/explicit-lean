@@ -43,6 +43,7 @@ declare_syntax_cat boundaryEncodedEnvironmentAction
 syntax "declare_congruence" str str : boundaryEncodedEnvironmentAction
 syntax "declare_equation" str str : boundaryEncodedEnvironmentAction
 syntax "declare_matcher" str str : boundaryEncodedEnvironmentAction
+syntax "realize_groups" str str : boundaryEncodedEnvironmentAction
 syntax "declare_local_theorems" str str : boundaryEncodedEnvironmentAction
 
 declare_syntax_cat boundaryEncodedActions
@@ -280,6 +281,16 @@ private def parseEncodedEnvironmentActions
         if name.isAnonymous then
           throwError "invalid encoded matcher anchor"
         result := result.push (.declareMatcher name payload.getString)
+    | `(boundaryEncodedEnvironmentAction| realize_groups $name:str $payload:str) =>
+        let nameJson ← match Json.parse name.getString with
+          | .ok json => pure json
+          | .error error => throwError "invalid encoded matcher anchor: {error}"
+        let name ← match decodeBoundaryName nameJson with
+          | .ok name => pure name
+          | .error error => throwError "invalid encoded matcher anchor: {error}"
+        if name.isAnonymous then
+          throwError "invalid encoded matcher anchor"
+        result := result.push (.realizeGroups name payload.getString)
     | `(boundaryEncodedEnvironmentAction| declare_local_theorems $name:str $payload:str) =>
         let nameJson ← match Json.parse name.getString with
           | .ok json => pure json

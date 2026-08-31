@@ -19,7 +19,8 @@ from typing import Any, Iterable
 from boundary_expr_codec import (
     validate_boundary_expr_dag, boundary_expr_is_constant, validate_expr_dag,
     validate_theorem_payload, validate_congruence_payload, validate_equation_payload,
-    validate_matcher_payload, validate_local_theorems_payload, expr_is_constant,
+    validate_matcher_payload, validate_local_theorems_payload, validate_realization_payload,
+    expr_is_constant,
 )
 
 
@@ -96,7 +97,7 @@ FAILURE_REPORT_FIELDS = frozenset(
 LOCAL_FIELDS = frozenset({"reference", "userName", "transformation"})
 LOCAL_REFERENCE_FIELDS = frozenset({"kind", "index"})
 TRANSFORMATION_FIELDS = frozenset({"input", "result", "proof"})
-ENVIRONMENT_ACTION_KINDS = {"declare_congruence", "declare_equation", "declare_matcher", "declare_local_theorems"}
+ENVIRONMENT_ACTION_KINDS = {"declare_congruence", "declare_equation", "declare_matcher", "declare_local_theorems", "realize_groups"}
 
 # These are successful per-occurrence outcomes.  They must not be confused
 # with abort categories: an abort stops the run and publishes no successful
@@ -290,7 +291,8 @@ def validate_environment_actions(value: object, label: str) -> list[dict[str, ob
         validator = {"declare_congruence": validate_congruence_payload,
                      "declare_equation": validate_equation_payload,
                      "declare_matcher": validate_matcher_payload,
-                     "declare_local_theorems": validate_local_theorems_payload}[action["kind"]]
+                     "declare_local_theorems": validate_local_theorems_payload,
+                     "realize_groups": validate_realization_payload}[action["kind"]]
         validator(action["declaration"], action["nameParts"], label)
         exact_name = json.dumps(action["nameParts"], separators=(",", ":"))
         if exact_name in seen_names:
@@ -496,6 +498,9 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
                     continue
                 if encoded[0] == "boundary_local_theorems_bundle_v1":
                     validate_local_theorems_payload(text, encoded[1] if len(encoded) > 1 else None, label)
+                    continue
+                if encoded[0] == "boundary_realization_batch_v1":
+                    validate_realization_payload(text, encoded[10][0][1] if len(encoded) == 11 and encoded[10] else None, label)
                     continue
                 if encoded[0] in {"boundary_matcher_bundle_v1", "boundary_matcher_bundle_v2"}:
                     validate_matcher_payload(text, encoded[1] if len(encoded) > 1 else None, label)

@@ -552,3 +552,214 @@ def validate_matcher_payload(source: object, expected_anchor: object,
         if isinstance(header, list) and header and header[0] == "boundary_matcher_bundle_v2":
             return validate_matcher_payload_v2(source, expected_anchor, label)
     return _validate_matcher_payload_v1(source, expected_anchor, label)
+
+
+def validate_realization_payload(source: object, expected_anchor: object,
+                                 label: str = "boundary realizations") -> list[Any]:
+    """Validate fixed captured groups, never infer a runtime group or declaration."""
+    def reject(message: str) -> None:
+        raise RuntimeError(f"{label}: {message}")
+
+    def key(value: object) -> str:
+        if not _name(value) or not value:
+            reject("invalid name")
+        return json.dumps(value, separators=(",", ":"))
+
+    def names(value: object) -> list:
+        if not isinstance(value, list) or len({key(n) for n in value}) != len(value):
+            reject("invalid or duplicate names")
+        return value
+
+    def equation_state(value: object) -> None:
+        if not isinstance(value, list):
+            reject("invalid equation map")
+        seen = set()
+        for entry in value:
+            if not isinstance(entry, list) or len(entry) != 2:
+                reject("invalid equation map entry")
+            k = key(entry[0]); key(entry[1])
+            if k in seen:
+                reject("duplicate equation map key")
+            seen.add(k)
+
+    def match_state(value: object) -> None:
+        if not (isinstance(value, list) and len(value) == 2 and isinstance(value[0], list)):
+            reject("invalid matcher state")
+        names(value[1]); seen = set()
+        for entry in value[0]:
+            if not isinstance(entry, list) or len(entry) != 2:
+                reject("invalid matcher map entry")
+            k = key(entry[0])
+            if k in seen:
+                reject("duplicate matcher map key")
+            seen.add(k)
+            eqns = entry[1]
+            if not isinstance(eqns, list) or len(eqns) != 3:
+                reject("invalid match equations")
+            names(eqns[0]); key(eqns[1]); info = eqns[2]
+            if not (isinstance(info, list) and len(info) == 6 and _nat(info[0]) and _nat(info[1])
+                    and isinstance(info[2], list) and (info[3] is None or _nat(info[3]))
+                    and isinstance(info[4], list) and len(info[4]) == info[1]
+                    and isinstance(info[5], list) and len(info[2]) == len(eqns[0])
+                    and eqns[1] not in eqns[0]):
+                reject("invalid matcher info")
+            for alt in info[2]:
+                if not (isinstance(alt, list) and len(alt) == 3 and _nat(alt[0]) and _nat(alt[1])
+                        and type(alt[2]) is bool):
+                    reject("invalid alternative")
+            for n in info[4]:
+                if n is not None:
+                    key(n)
+            overlap_keys = set()
+            for overlap in info[5]:
+                if not (isinstance(overlap, list) and len(overlap) == 2 and _nat(overlap[0])
+                        and overlap[0] < len(info[2]) and overlap[0] not in overlap_keys
+                        and isinstance(overlap[1], list)
+                        and all(_nat(n) and n < len(info[2]) for n in overlap[1])
+                        and len(set(overlap[1])) == len(overlap[1])):
+                    reject("invalid overlap")
+                overlap_keys.add(overlap[0])
+
+    def sparse_state(value: object) -> None:
+        if not isinstance(value, list):
+            reject("invalid sparse cache")
+        seen = set()
+        for entry in value:
+            if not (isinstance(entry, list) and len(entry) == 2
+                    and isinstance(entry[0], list) and len(entry[0]) == 3
+                    and type(entry[0][2]) is bool):
+                reject("invalid sparse entry")
+            key(entry[0][0]); names(entry[0][1]); key(entry[1])
+            encoded = json.dumps(entry[0], separators=(",", ":"))
+            if encoded in seen:
+                reject("duplicate sparse key")
+            seen.add(encoded)
+
+    def descriptor(value: object, owner: object, root: object) -> tuple[list, list]:
+        if not (isinstance(value, list) and len(value) == 6 and value[0] == "completed_realization_v1"
+                and value[1] is True and value[2] == owner and value[3] == root
+                and isinstance(value[4], list) and value[4] and isinstance(value[5], list)):
+            reject("invalid completed group descriptor")
+        key(owner); key(root)
+        def members(entries: list, public: bool) -> list:
+            result = []
+            signatures = {}
+            def tree_check(tree: object, allowed: list, depth: int = 0) -> None:
+                if not (isinstance(tree, list) and len(tree) == 4 and type(tree[1]) is bool
+                        and isinstance(tree[3], list) and depth <= len(entries) + 1
+                        and isinstance(tree[0], list) and len(tree[0]) >= 2):
+                    reject("invalid nested branch tree")
+                name = tree[0][1]
+                if key(name) not in signatures or tree[0] != signatures[key(name)]:
+                    reject("nested branch signature mismatch")
+                if tree[2] is not None:
+                    meta = tree[2]
+                    if not (isinstance(meta, list) and len(meta) == 4 and isinstance(meta[3], list)):
+                        reject("invalid nested metadata")
+                    match_state(meta[0]); equation_state(meta[1]); sparse_state(meta[2]); seen_exts = set()
+                    for ext in meta[3]:
+                        if not (isinstance(ext, list) and len(ext) == 2 and isinstance(ext[1], str)
+                                and len(ext[1]) % 2 == 0 and re.fullmatch(r"[0-9a-f]+", ext[1])):
+                            reject("invalid nested persistent bytes")
+                        k = key(ext[0])
+                        if k in seen_exts:
+                            reject("duplicate nested extension")
+                        seen_exts.add(k)
+                child_names = []
+                for child in tree[3]:
+                    if not (isinstance(child, list) and child and isinstance(child[0], list)
+                            and len(child[0]) >= 2 and child[0][1] in allowed):
+                        reject("nested branch not a prior member")
+                    n = child[0][1]
+                    child_names.append(n)
+                    tree_check(child, allowed[:allowed.index(n)], depth + 1)
+                names(child_names)
+            for entry in entries:
+                if not (isinstance(entry, list) and len(entry) == 3 and isinstance(entry[0], list)):
+                    reject("invalid group member")
+                sig, meta, tree = entry
+                if not sig or sig[0] not in {"theorem", "definition", "public-proof-interface"}:
+                    reject("unsupported declaration signature")
+                expected_size = {"theorem": 5, "definition": 7, "public-proof-interface": 4}[sig[0]]
+                if len(sig) != expected_size or (public != (sig[0] == "public-proof-interface")):
+                    reject("invalid declaration signature shape")
+                key(sig[1]); names(sig[2]); validate_expr_dag(sig[3], label)
+                if not public:
+                    names(sig[4])
+                if sig[0] == "definition":
+                    hints = sig[5]
+                    if not (hints in (["opaque"], ["abbrev"]) or
+                            isinstance(hints, list) and len(hints) == 2 and hints[0] == "regular"
+                            and _nat(hints[1]) and hints[1] <= 4294967295):
+                        reject("invalid definition hints")
+                    validate_expr_dag(sig[6], label)
+                if not (isinstance(meta, list) and len(meta) == 4 and isinstance(meta[3], list)):
+                    reject("invalid member metadata")
+                match_state(meta[0]); equation_state(meta[1]); sparse_state(meta[2]); seen_exts = set()
+                for ext in meta[3]:
+                    if not (isinstance(ext, list) and len(ext) == 2 and isinstance(ext[1], str)
+                            and len(ext[1]) % 2 == 0 and re.fullmatch(r"[0-9a-f]+", ext[1])):
+                        reject("invalid persistent metadata bytes")
+                    k = key(ext[0])
+                    if k in seen_exts:
+                        reject("duplicate persistent metadata")
+                    seen_exts.add(k)
+                signatures[key(sig[1])] = sig
+                if not (isinstance(tree, list) and len(tree) == 4 and tree[0] == sig
+                        and tree[1] is True and tree[2] == meta):
+                    reject("root async member mismatch")
+                tree_check(tree, result)
+                result.append(sig[1])
+            return names(result)
+        private = members(value[4], False); public = members(value[5], True)
+        if private[-1] != root or any(n not in private for n in public):
+            reject("invalid group root or public members")
+        return private, public
+
+    if not isinstance(source, str) or len(source.encode()) > 128 * 1024 * 1024:
+        reject("invalid payload string")
+    try:
+        value = json.loads(source)
+    except (ValueError, RecursionError) as error:
+        raise RuntimeError(f"{label}: invalid JSON") from error
+    if not (isinstance(value, list) and len(value) == 11 and value[0] == "boundary_realization_batch_v1"
+            and type(value[1]) is bool and isinstance(value[10], list) and value[10]):
+        reject("invalid batch header")
+    key(expected_anchor); names(value[2]); names(value[3])
+    match_state(value[4]); match_state(value[5]); equation_state(value[6]); equation_state(value[7])
+    sparse_state(value[8]); sparse_state(value[9])
+    all_private, all_public = [], []
+    for root in value[10]:
+        if not (isinstance(root, list) and len(root) == 5 and isinstance(root[3], list)):
+            reject("invalid root")
+        owner, root_name, equation, children, captured = root
+        key(owner); key(root_name)
+        if root_name[:-1] != owner:
+            reject("foreign root owner")
+        validate_equation_payload(equation, root_name, label)
+        private, public = descriptor(captured, owner, root_name)
+        child_names = []
+        for child in children:
+            if not isinstance(child, list) or len(child) != 4:
+                reject("invalid child")
+            anchor, child_root, payload, child_capture = child
+            child_private, child_public = descriptor(child_capture, anchor, child_root)
+            if child_public:
+                reject("unsupported public child")
+            if value[1]:
+                if payload is not None:
+                    reject("cached activation carries producer")
+            else:
+                matcher = validate_matcher_payload(payload, anchor, label)
+                sparse_names = ([entry[0] for entry in matcher[15]]
+                                if matcher[0] == "boundary_matcher_bundle_v2" else [])
+                if sparse_names + matcher[3][0] + [matcher[3][1]] != child_private:
+                    reject("nested matcher member mismatch")
+            child_names.extend(child_private)
+        if child_names + [root_name] != private:
+            reject("nested group closure mismatch")
+        all_private.extend(private); all_public.extend(public)
+    names(all_private); names(all_public)
+    if all_private != value[2] or all_public != value[3] or value[10][0][1] != expected_anchor:
+        reject("batch member order or anchor mismatch")
+    return value
