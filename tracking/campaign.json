@@ -378,11 +378,12 @@
     }
   ],
   "nextActions": [
-    "Finish fresh schema11 inventory in background and independently validate its source counts/hashes against full master index, then dispatch reviewed bounded workers after old live leases end. Preserve66reusable5unresolved obligations.",
-    "Finish exact serialized/decoded forward recording prototype and freshwholeExtra replay/oracle without weakening state or cache guards. Integrate optional lossless certificate storage helper with actualreceipt validation.",
-    "Resolve reusable66calls and unresolved5quotations with positive source dataflow evidence and explicit API scope; preserve source/execution identities.",
-    "Let frozen schema10 workers finish bounded queues without editing runtimes or live leases. Reuse diagnostic evidence only; advance broad generation under new frozen runtime once ready.",
+    "Finish forward-applied recorder diagnosis: preserve exact state/generator checks and identify remaining ExtraModUses dependency deltas before integrating any mode/report contract changes.",
+    "Decouple scope analysis from replay-engine imports and builds in an isolated prototype, compare fresh representative201-module scope results before designing stable analysis cache identity. Never rebind old provenance hashes.",
+    "Fresh schema11 inventory is independently verified (8260modules83414calls); preserve separately tracked4modules11calls/66totalreusable5unresolved obligations. Prepare new frozen bounded workers only after old live leases end and runtime/manifest identities agree.",
+    "Use current failure/throughput review to select high-yield families; obtain fresh witnesses for auxiliary-name generator effect and Cubic missing-cover family. Keep strict guards.",
     "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and complete source/execution ownership.",
+    "Invoke optional certificate storage only after complete frozen-runtime cold certification and before publication; it does not itself establish source-comment provenance.",
     "After complete explicit coverage and translated-tree acceptance, mine readable normal forms and other common tactics if time remains."
   ],
   "checkpoints": [
@@ -950,6 +951,14 @@
         ".lake/week-2026-08-31/certificate-storage-root-verification.json",
         ".lake/week-2026-08-31/certificate-storage-main-genuine-repeat.json"
       ]
+    },
+    {
+      "at": "2026-08-31T19:16:08.141328+00:00",
+      "summary": "Fresh schema11 inventory independently verified against all8264 master source/occurrence identities:8260modules83414calls plus4modules11calls separately tracked. Optional storage committed7bd0092. Forward-applied8focused controls pass after explicit returned state fixes Leanfinally capture; fullExtra stillfails strict metadata comparison, now isolated to20ExtraModUses leaves with all232node proofs/signatures and80auxproof bodies equal. Private scope-analysis decoupling and read-only throughput review underway. Fresh weeklyusage41%; old schema10 worker remains live; noDBwrites or acceptedcoverage increment.",
+      "evidence": [
+        ".lake/week-2026-08-31/schema11-inventory-root-verification.json",
+        ".lake/forward-recording-independent-review.md"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1192,7 +1201,7 @@
     },
     {
       "id": "schema11-full-inventory",
-      "status": "completed_pending_root_validation",
+      "status": "verified_complete",
       "sessionId": 29489,
       "snapshot": ".lake/search-free-mathlib/snapshots/schema11-campaign",
       "commit": "f231289",
@@ -1202,10 +1211,15 @@
       "modules": 8260,
       "expectedOccurrences": 83414,
       "scope": "Fresh source/scope inventory only, no DB/queue writes and no translated coverage. Fourmodules11calls/fiveunresolved remain in master8264 inventory. Avoid unsupported source-provenance rebinding; bulk dispatch must wait for conflicting old worker/leases to end.",
-      "manifest": ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-full-manifest.json"
+      "manifest": ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-full-manifest.json",
+      "manifestSha256": "575459858fe808b02b86f79911847058d6d1532986a85fbc6f69950502c46c60",
+      "rootVerification": ".lake/week-2026-08-31/schema11-inventory-root-verification.json",
+      "reusableOccurrences": 65,
+      "nestedOccurrences": 91
     }
   ],
   "latestCommits": [
+    "7bd0092",
     "8afe18c",
     "55f49fb",
     "f231289",
@@ -1323,12 +1337,13 @@
     },
     {
       "id": "translated-prefix-diagnosis",
-      "status": "verified_forward_decoded_mode_in_progress",
+      "status": "verified_forward_applied_mode_in_progress",
       "manifestSha256": "8910e9b8f40063a57cf4eab1a7c61bd431f744d5126f4dffb1b2368f74967a3a",
       "rootVerification": ".lake/week-2026-08-31/translated-prefix-diagnosis-root-verification.json",
-      "finding": "Earlier singlecall6687f846adec5f98 changes laterofIso._proof_3 from646to720DAGnodes, matched in232node descriptor and80proof table. Directrawapplyforward leavesstockbody unchanged; must use exactsharedserializedruntime decoder thenfullstate/environmentchecks beforecommit. No guard loosened.",
+      "finding": "Earlier call6687f846adec5f98 changes laterofIso._proof_3 from646to720DAGnodes. The apparent raw/decoded difference was caused by Lean finally capturing pre-try mutable values. Returning validated applied state and observed generator outside try/finally fixes focused raw-forward versus fresh serialized replay equality; no shared-decoder refactor is required. All8 focused processes pass. WholeExtra fresh replay still rejects c0b5b3940818fb9f; paired prefix diagnosis now finds all232 node signatures/proof bodies and80proof table equal, but20 ExtraModUses metadata leaves differ. Exact dependency delta remains under investigation; no guard loosened.",
       "implementationOwner": "local_cached_sequence",
-      "acceptedCampaignCoverage": false
+      "acceptedCampaignCoverage": false,
+      "independentReview": ".lake/forward-recording-independent-review.md"
     },
     {
       "id": "certificate-storage-prototype",
@@ -1345,7 +1360,8 @@
       "wholeMathlib": false,
       "mainHelper": "Experiment/certificate_storage.py",
       "mainTests": "Experiment/check_certificate_storage.py",
-      "mainGenuineRepeat": ".lake/week-2026-08-31/certificate-storage-main-genuine-repeat.json"
+      "mainGenuineRepeat": ".lake/week-2026-08-31/certificate-storage-main-genuine-repeat.json",
+      "commit": "7bd0092"
     }
   ],
   "prototypeCoverage": {
@@ -1720,7 +1736,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T19:10:03.310598+00:00",
+  "updatedAt": "2026-08-31T19:16:08.141328+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
