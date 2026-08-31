@@ -135,8 +135,14 @@ def materialization_edits(
         gap = source[cursor:start].decode("utf-8")
         column = len((" " * column + gap).rsplit("\n", 1)[-1].expandtabs(8))
         indent = " " * (column + 2)
-        replacement = format_report_variants(reports[occurrence], indent)
         original = source[start:end].decode("utf-8")
+        for variant in reports[occurrence]:
+            for action in variant.get("environmentActions", []):
+                if action.get("kind") == "reserve_declaration_branch":
+                    payload = json.loads(action["declaration"])
+                    if not isinstance(payload, list) or len(payload) != 10 or payload[5] != original:
+                        raise RuntimeError(f"reservation original source mismatch: {occurrence}")
+        replacement = format_report_variants(reports[occurrence], indent)
         replacement = preserve_original_call(replacement, original, indent)
         edits.append((start, end, replacement.encode("utf-8")))
         column = len((" " * column + replacement).rsplit("\n", 1)[-1].expandtabs(8))

@@ -20,7 +20,7 @@ from boundary_expr_codec import (
     validate_boundary_expr_dag, validate_reference_expr_dag, reference_expr_is_constant, validate_expr_dag, validate_struct_expr_dag,
     validate_theorem_payload, validate_congruence_payload, validate_equation_payload,
     validate_matcher_payload, validate_local_theorems_payload, validate_realization_payload,
-    expr_is_constant,
+    expr_is_constant, validate_declaration_branch_payload,
 )
 
 
@@ -130,7 +130,7 @@ FAILURE_REPORT_FIELDS = frozenset(
 LOCAL_FIELDS = frozenset({"reference", "userName", "transformation"})
 LOCAL_REFERENCE_FIELDS = frozenset({"kind", "index"})
 TRANSFORMATION_FIELDS = frozenset({"input", "result", "proof"})
-ENVIRONMENT_ACTION_KINDS = {"declare_congruence", "declare_equation", "declare_matcher", "declare_local_theorems", "realize_groups"}
+ENVIRONMENT_ACTION_KINDS = {"reserve_declaration_branch", "declare_congruence", "declare_equation", "declare_matcher", "declare_local_theorems", "realize_groups"}
 
 # These are successful per-occurrence outcomes.  They must not be confused
 # with abort categories: an abort stops the run and publishes no successful
@@ -321,7 +321,10 @@ def validate_environment_actions(value: object, label: str) -> list[dict[str, ob
             raise RuntimeError(
                 f"{label} reserved names must be strictly sorted and unique: {value!r}"
             )
-        validator = {"declare_congruence": validate_congruence_payload,
+        if action["kind"] == "reserve_declaration_branch" and len(value) != 1:
+            raise RuntimeError(f"{label}: reservation must be the sole action")
+        validator = {"reserve_declaration_branch": validate_declaration_branch_payload,
+                     "declare_congruence": validate_congruence_payload,
                      "declare_equation": validate_equation_payload,
                      "declare_matcher": validate_matcher_payload,
                      "declare_local_theorems": validate_local_theorems_payload,
@@ -515,6 +518,9 @@ def reject_forbidden_generated_text(value: object, label: str) -> None:
             except (ValueError, RecursionError):
                 encoded = None
             if isinstance(encoded, list) and encoded:
+                if encoded[0] == "boundary_declaration_branch_v1":
+                    validate_declaration_branch_payload(text, None, label)
+                    continue
                 if encoded[0] == "expr_dag_v3":
                     validate_reference_expr_dag(text, label)
                     continue

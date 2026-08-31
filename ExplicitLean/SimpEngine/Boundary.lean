@@ -419,9 +419,16 @@ private def boundaryEnvironmentActionName : EnvironmentAction → Name
   | EnvironmentAction.declareMatcher anchor _ => anchor
   | EnvironmentAction.declareLocalTheorems anchor _ => anchor
   | EnvironmentAction.realizeGroups anchor _ => anchor
+  | EnvironmentAction.reserveDeclarationBranch anchor _ => anchor
 
 private def boundaryEnvironmentActionJson (action : EnvironmentAction) : Json :=
   match action with
+  | EnvironmentAction.reserveDeclarationBranch anchor payload => Json.mkObj [
+      ("kind", Json.str "reserve_declaration_branch"),
+      ("name", Json.str anchor.toString),
+      ("nameParts", encodeBoundaryName anchor),
+      ("declaration", Json.str payload)
+    ]
   | EnvironmentAction.declareCongruence name payload => Json.mkObj [
       ("kind", Json.str "declare_congruence"),
       ("name", Json.str name.toString),
@@ -2226,7 +2233,7 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
   unless stockPublicNames == appliedPublicNames do
     throwError "boundary_comparison_unsupported_environment_delta"
   let actionNames := actions.filterMap fun action => match action with
-    | .declareMatcher _ _ | .declareLocalTheorems _ _ | .realizeGroups _ _ => none
+    | .declareMatcher _ _ | .declareLocalTheorems _ _ | .realizeGroups _ _ | .reserveDeclarationBranch _ _ => none
     | _ => some (boundaryEnvironmentActionName action)
   let mut groupPublicNames := #[]
   for action in actions do
@@ -2475,6 +2482,7 @@ private def runBoundaryProbe (simpStx : Syntax)
     resolveLocation simpStx
   catch error =>
     pre.restore
+    setDeclNGen preGenerator
     if let some (occId, selector) := reportRequest? then
       emitFailureReport occId selector
     throw error
@@ -2483,6 +2491,7 @@ private def runBoundaryProbe (simpStx : Syntax)
   catch error =>
     let failureGenerator ← getDeclNGen
     pre.restore
+    setDeclNGen preGenerator
     if failureGenerator.namePrefix != preGenerator.namePrefix ||
         failureGenerator.idx != preGenerator.idx ||
         failureGenerator.parentIdxs != preGenerator.parentIdxs then
@@ -2507,7 +2516,19 @@ private def runBoundaryProbe (simpStx : Syntax)
     setDeclNGen preGenerator
   let postStockAction : TacticM (GoalArtifact × String × Tactic.SavedState × DeclNameGenerator) := do
     let stock ← boundarySnapshot basis
-    let environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
+    let mut environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
+    if reportRequest?.isSome && environmentActions.isEmpty && (preGenerator.namePrefix != stockGenerator.namePrefix ||
+        preGenerator.idx != stockGenerator.idx || preGenerator.parentIdxs != stockGenerator.parentIdxs) then
+      compareBoundaryEnvironment basis basis.environment stockEnvironment #[]
+      let ref ← getRef
+      let some endOccurrence := ref[1].getTailPos? | throwError "boundary_reservation_source_range"
+      let some endCall := ref.getTailPos? | throwError "boundary_reservation_source_range"
+      let original := "simp" ++ String.Pos.Raw.extract (← getFileMap).source endOccurrence endCall
+      unless (← boundaryReservationSource basis.environment original) == boundaryReservationSyntaxJson simpStx do
+        throwError "boundary_reservation_capture_source_ast"
+      let payload ← encodeBoundaryDeclarationBranch basis.environment stockEnvironment
+        preGenerator stockGenerator original
+      environmentActions := #[.reserveDeclarationBranch preGenerator.namePrefix payload]
     restoreTrialInput
     let artifact ← captureGoalArtifact basis simpStx selection
     let use ← protectBoundaryReferences basis.expressionReferences artifact.expressions

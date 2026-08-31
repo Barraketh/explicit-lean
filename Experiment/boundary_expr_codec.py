@@ -931,14 +931,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
             reject("invalid local cached graph")
         nodes = graph[3]
         proofs = graph[6] if auxiliary else []
-        if not isinstance(proofs, list) or len(proofs) > 4096:
-            reject("invalid local checked proof table")
-        proof_names = set()
-        for proof in proofs:
-            full_constant(proof)
-            if proof[0] != "theorem" or key(proof[1]) in proof_names:
-                reject("invalid or duplicate checked proof")
-            proof_names.add(key(proof[1]))
+        validate_auxiliary = _checked_auxiliary_validator(proofs, label)
         used_proofs = set()
         encoded_nodes = set()
         depths = []
@@ -971,28 +964,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
                         reject("duplicate local persistent extension")
                     seen.add(k)
                 if auxiliary:
-                    if not isinstance(meta[4], list):
-                        reject("invalid local auxiliary cache")
-                    keys = set()
-                    for entry in meta[4]:
-                        if not (isinstance(entry, list) and len(entry) == 6 and type(entry[1]) is bool
-                                and type(entry[2]) is bool):
-                            reject("invalid local auxiliary entry")
-                        validate_struct_expr_dag(entry[0], label)
-                        key(entry[3]); names(entry[4])
-                        if not _nat(entry[5]) or entry[5] >= len(proofs):
-                            reject("invalid checked proof reference")
-                        used_proofs.add(entry[5])
-                        proof = proofs[entry[5]]
-                        if not (proof[0] == "theorem" and proof[1] == entry[3]
-                                and proof[2] == entry[4] and proof[3] == entry[0]):
-                            reject("local auxiliary checked proof binding")
-                        if _private_name(entry[3]) and not entry[1]:
-                            reject("local auxiliary privacy")
-                        cache_key = (entry[0], entry[1], entry[2])
-                        if cache_key in keys:
-                            reject("duplicate local auxiliary key")
-                        keys.add(cache_key)
+                    used_proofs.update(validate_auxiliary(meta[4]))
         if len(used_proofs) != len(proofs):
             reject("unused checked proof table entry")
         private, public = (nodes[i] for i in graph[4:6])
@@ -1283,3 +1255,227 @@ def validate_realization_payload(source: object, expected_anchor: object,
     if all_private != value[2] or all_public != value[3] or value[10][0][1] != expected_anchor:
         reject("batch member order or anchor mismatch")
     return value
+
+
+def _checked_auxiliary_validator(proofs: object, label: str):
+    """Shared exact checked theorem table and cache-key binding validation."""
+    def reject(detail):
+        raise RuntimeError(f"{label}: {detail}")
+    def key(name):
+        if not _name(name) or not name:
+            reject("invalid auxiliary name")
+        return json.dumps(name, separators=(",", ":"))
+    def names(values):
+        if not isinstance(values, list) or len({key(n) for n in values}) != len(values):
+            reject("invalid auxiliary names")
+    if not isinstance(proofs, list) or len(proofs) > 4096:
+        reject("invalid local checked proof table")
+    proof_names = set()
+    for proof in proofs:
+        if not (isinstance(proof, list) and len(proof) == 6 and proof[0] == "theorem"):
+            reject("invalid checked theorem")
+        if key(proof[1]) in proof_names:
+            reject("invalid or duplicate checked proof")
+        proof_names.add(key(proof[1])); names(proof[2]); names(proof[5])
+        validate_struct_expr_dag(proof[3], label); validate_struct_expr_dag(proof[4], label)
+    def validate(entries):
+        if not isinstance(entries, list):
+            reject("invalid local auxiliary cache")
+        keys, used = set(), set()
+        for entry in entries:
+            if not (isinstance(entry, list) and len(entry) == 6 and type(entry[1]) is bool
+                    and type(entry[2]) is bool and _nat(entry[5]) and entry[5] < len(proofs)):
+                reject("invalid local auxiliary entry")
+            validate_struct_expr_dag(entry[0], label); key(entry[3]); names(entry[4])
+            proof = proofs[entry[5]]; used.add(entry[5])
+            if proof[1:4] != [entry[3], entry[4], entry[0]]:
+                reject("local auxiliary checked proof binding")
+            if _private_name(entry[3]) and not entry[1]:
+                reject("local auxiliary privacy")
+            cache_key = (entry[0], entry[1], entry[2])
+            if cache_key in keys:
+                reject("duplicate local auxiliary key")
+            keys.add(cache_key)
+        return used
+    return validate
+
+
+def validate_declaration_branch_payload(text: object, anchor: object, label: str) -> list:
+    """Additive closed action tag under artifact 5; older decoders reject it."""
+    def reject(detail):
+        raise RuntimeError(f"{label}: declaration branch reservation {detail}")
+    if not isinstance(text, str):
+        reject("payload is not a string")
+    try:
+        payload = json.loads(text)
+    except (ValueError, RecursionError):
+        reject("invalid JSON")
+    def key(value: object) -> str:
+        if not _name(value) or not value:
+            reject("invalid name")
+        return json.dumps(value, separators=(",", ":"))
+
+    def names(value: object) -> list:
+        if not isinstance(value, list) or len({key(n) for n in value}) != len(value):
+            reject("invalid or duplicate names")
+        return value
+
+    def equation_state(value: object) -> None:
+        if not isinstance(value, list):
+            reject("invalid equation map")
+        seen = set()
+        for entry in value:
+            if not isinstance(entry, list) or len(entry) != 2:
+                reject("invalid equation map entry")
+            k = key(entry[0]); key(entry[1])
+            if k in seen:
+                reject("duplicate equation map key")
+            seen.add(k)
+
+    def match_state(value: object) -> None:
+        if not (isinstance(value, list) and len(value) == 2 and isinstance(value[0], list)):
+            reject("invalid matcher state")
+        names(value[1]); seen = set()
+        for entry in value[0]:
+            if not isinstance(entry, list) or len(entry) != 2:
+                reject("invalid matcher map entry")
+            k = key(entry[0])
+            if k in seen:
+                reject("duplicate matcher map key")
+            seen.add(k)
+            eqns = entry[1]
+            if not isinstance(eqns, list) or len(eqns) != 3:
+                reject("invalid match equations")
+            names(eqns[0]); key(eqns[1]); info = eqns[2]
+            if not (isinstance(info, list) and len(info) == 6 and _nat(info[0]) and _nat(info[1])
+                    and isinstance(info[2], list) and (info[3] is None or _nat(info[3]))
+                    and isinstance(info[4], list) and len(info[4]) == info[1]
+                    and isinstance(info[5], list) and len(info[2]) == len(eqns[0])
+                    and eqns[1] not in eqns[0]):
+                reject("invalid matcher info")
+            for alt in info[2]:
+                if not (isinstance(alt, list) and len(alt) == 3 and _nat(alt[0]) and _nat(alt[1])
+                        and type(alt[2]) is bool):
+                    reject("invalid alternative")
+            for n in info[4]:
+                if n is not None:
+                    key(n)
+            overlap_keys = set()
+            for overlap in info[5]:
+                if not (isinstance(overlap, list) and len(overlap) == 2 and _nat(overlap[0])
+                        and overlap[0] < len(info[2]) and overlap[0] not in overlap_keys
+                        and isinstance(overlap[1], list)
+                        and all(_nat(n) and n < len(info[2]) for n in overlap[1])
+                        and len(set(overlap[1])) == len(overlap[1])):
+                    reject("invalid overlap")
+                overlap_keys.add(overlap[0])
+
+    def sparse_state(value: object) -> None:
+        if not isinstance(value, list):
+            reject("invalid sparse cache")
+        seen = set()
+        for entry in value:
+            if not (isinstance(entry, list) and len(entry) == 2
+                    and isinstance(entry[0], list) and len(entry[0]) == 3
+                    and type(entry[0][2]) is bool):
+                reject("invalid sparse entry")
+            key(entry[0][0]); names(entry[0][1]); key(entry[1])
+            encoded = json.dumps(entry[0], separators=(",", ":"))
+            if encoded in seen:
+                reject("duplicate sparse key")
+            seen.add(encoded)
+
+
+    if not (isinstance(payload, list) and len(payload) == 10
+            and payload[0] == "boundary_declaration_branch_v1"):
+        reject("invalid shape")
+    key(payload[1])
+    if anchor is not None and payload[1] != anchor:
+        reject("anchor mismatch")
+    for gen in payload[2:5]:
+        if not (isinstance(gen, list) and len(gen) == 3 and _name(gen[0])
+                and _nat(gen[1]) and isinstance(gen[2], list) and all(_nat(i) for i in gen[2])):
+            reject("invalid generator")
+    pre, child, parent = payload[2:5]
+    if (pre[0] != payload[1] or child != [pre[0], 1, [pre[1]] + pre[2]]
+            or parent != [pre[0], pre[1] + 1, pre[2]]):
+        reject("invalid child split")
+    if not isinstance(payload[5], str) or not payload[5]:
+        reject("missing original source")
+    counts = {"by": 0, "aesop": 0}
+    def kind(name):
+        return [["s", part] for part in name.split(".")]
+    def ast(node, depth=0):
+        if depth > 512 or not isinstance(node, list) or not node:
+            reject("invalid source AST")
+        tag = node[0]
+        if tag == "missing" and len(node) == 1:
+            return []
+        if tag == "atom" and len(node) == 2 and isinstance(node[1], str):
+            return [node[1]]
+        if tag == "ident" and len(node) == 3 and isinstance(node[1], str) and _name(node[2]):
+            return [node[1]]
+        if tag != "node" or len(node) != 3 or not _name(node[1]) or not isinstance(node[2], list):
+            reject("invalid source AST node")
+        if node[1][-1:] == [["s", "quot"]] or node[1] == kind("Lean.Parser.Term.dynamicQuot"):
+            reject("quotation source unsupported")
+        tokens = [token for child in node[2] for token in ast(child, depth + 1)]
+        if node[1] == kind("Lean.Parser.Term.byTactic"):
+            counts["by"] += 1
+            if tokens != ["by", "aesop"]:
+                reject("nested source is not plain by aesop")
+        if node[1] == kind("Aesop.Frontend.Parser.aesopTactic"):
+            counts["aesop"] += 1
+            if tokens != ["aesop"] or len(node[2]) != 2 or node[2][0] != ["atom", "aesop"] or node[2][1] != ["node", [["s", "null"]], []]:
+                reject("aesop clauses unsupported")
+        if node[1] == kind("Aesop.Frontend.Parser.aesopTactic?"):
+            reject("aesop query unsupported")
+        return tokens
+    ast(payload[6])
+    if payload[6][:2] != ["node", kind("Lean.Parser.Tactic.simp")] or counts != {"by": 1, "aesop": 1}:
+        reject("source is not single nested by aesop simp")
+    for state in payload[7:9]:
+        if not isinstance(state, list) or len(state) != 8:
+            reject("invalid state witness")
+        for ns in state[:3]:
+            names(ns)
+        match_state(state[3]); equation_state(state[4]); sparse_state(state[5])
+        auxiliary, proofs = state[6:8]
+        used = _checked_auxiliary_validator(proofs, label)(auxiliary)
+        if len(used) != len(proofs):
+            reject("unused auxiliary proof")
+    initial, final, registration = payload[7:10]
+    projected = list(initial)
+    if registration is not None:
+        if not (isinstance(registration, list) and len(registration) == 2 and isinstance(registration[1], str)):
+            reject("invalid registration")
+        key(registration[0])
+        try:
+            reg = json.loads(registration[1])
+        except (ValueError, RecursionError):
+            reject("invalid registration JSON")
+        if not (isinstance(reg, list) and len(reg) == 6 and reg[0] == "boundary_active_equation_registration_v1"
+                and reg[2] == registration[0] and type(reg[4]) is bool and type(reg[5]) is bool):
+            reject("invalid registration fields")
+        owner, name, sig = reg[1:4]; key(owner); key(name)
+        if _private_name(owner) or _private_name(name) or name[:-1] != owner or name[-1][0] != "s":
+            reject("invalid registration identity")
+        if name[-1][1] not in {"eq_def", "eq_unfold"} and not re.fullmatch(r"eq_[0-9]+(?:_[0-9]+)*", name[-1][1]):
+            reject("invalid registration suffix")
+        if not (isinstance(sig, list) and len(sig) in {4, 5} and sig[0] in {"theorem", "public-proof-interface"}
+                and len(sig) == (5 if sig[0] == "theorem" else 4) and sig[1] == name):
+            reject("invalid registration signature")
+        names(sig[2]); validate_struct_expr_dag(sig[3], label)
+        if sig[0] == "theorem":
+            names(sig[4])
+        if any(entry[0] == name for entry in initial[4]):
+            reject("registration collision")
+        # Ordering is authenticated by Lean's exact canonical state; Python
+        # checks the complete map by key, without depending on Name.quickLt.
+        expected = {key(k): v for k, v in initial[4]}; expected[key(name)] = owner
+        if {key(k): v for k, v in final[4]} != expected:
+            reject("registration final map")
+        projected[4] = final[4]
+    if projected != final:
+        reject("unexpected final state")
+    return payload

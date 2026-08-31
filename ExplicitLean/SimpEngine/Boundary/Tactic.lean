@@ -47,6 +47,7 @@ syntax boundaryEncodedLocalEvidence+ (boundaryEncodedTargetEvidence)? :
   boundaryEncodedLocationEvidence
 
 declare_syntax_cat boundaryEncodedEnvironmentAction
+syntax "reserve_declaration_branch" str str : boundaryEncodedEnvironmentAction
 syntax "declare_congruence" str str : boundaryEncodedEnvironmentAction
 syntax "declare_equation" str str : boundaryEncodedEnvironmentAction
 syntax "declare_matcher" str str : boundaryEncodedEnvironmentAction
@@ -152,6 +153,7 @@ elab_rules : tactic
     A selected recorded stock failure never enters this wrapper. -/
 private def withReplayAbort (occId stage : String) (action : TacticM α) : TacticM α := do
   let saved ← Tactic.saveState
+  let savedGenerator ← getDeclNGen
   try
     action
   catch error =>
@@ -174,6 +176,9 @@ private def withReplayAbort (occId stage : String) (action : TacticM α) : Tacti
     -- frame on its own line so such output cannot hide an abort from scanners.
     IO.println s!"\nSIMP_ENGINE_BOUNDARY_REPLAY_ABORT {nonce} {payload.compress}"
     saved.restore
+    -- Core.SavedState.restore deliberately omits this generator. An aborted
+    -- successful-artifact replay must also roll back its namespace effects.
+    setDeclNGen savedGenerator
     throw error
 
 /-- Return an authored local name when it resolves uniquely; otherwise use a
@@ -308,6 +313,16 @@ private def parseEncodedEnvironmentActions
   let mut result : Array EnvironmentAction := #[]
   for action in actions do
     match action with
+    | `(boundaryEncodedEnvironmentAction| reserve_declaration_branch $name:str $payload:str) =>
+        let nameJson ← match Json.parse name.getString with
+          | .ok json => pure json
+          | .error error => throwError "invalid encoded declaration name: {error}"
+        let name ← match decodeBoundaryName nameJson with
+          | .ok name => pure name
+          | .error error => throwError "invalid encoded declaration name: {error}"
+        if name.isAnonymous then
+          throwError "invalid encoded declaration name"
+        result := result.push (.reserveDeclarationBranch name payload.getString)
     | `(boundaryEncodedEnvironmentAction| declare_congruence $name:str $payload:str) =>
         let nameJson ← match Json.parse name.getString with
           | .ok json => pure json

@@ -6,6 +6,7 @@ public meta import ExplicitLean.SimpEngine.Boundary.CongruenceCodec
 public meta import ExplicitLean.SimpEngine.Boundary.EquationCodec
 public meta import ExplicitLean.SimpEngine.Boundary.MatcherCodec
 public meta import ExplicitLean.SimpEngine.Boundary.LocalTheoremCodec
+public meta import ExplicitLean.SimpEngine.Boundary.DeclarationBranchCodec
 public meta import ExplicitLean.SimpEngine.Boundary.SequenceCodec
 public meta import Lean.Meta.Tactic.Replace
 public meta import Lean.Meta.Tactic.Util
@@ -51,7 +52,8 @@ def boundaryUnauthenticatedRunNonce : String := "unauthenticated"
 /-
   Captured congruence declarations and their argument metadata are reconstructed
   and kernel checked in Lean's declaration branch. Application never invokes
-  reserved-name generators or proof-search callbacks.
+  reserved declaration producers or proof-search callbacks. A separately tagged
+  child-namespace reservation computes only DeclNameGenerator.mkChild.
 -/
 inductive EnvironmentAction where
   | declareCongruence (name : Name) (payload : String)
@@ -59,6 +61,7 @@ inductive EnvironmentAction where
   | declareMatcher (anchor : Name) (payload : String)
   | declareLocalTheorems (anchor : Name) (payload : String)
   | realizeGroups (anchor : Name) (payload : String)
+  | reserveDeclarationBranch (anchor : Name) (payload : String)
   deriving Inhabited, BEq
 
 private def executeEnvironmentAction : EnvironmentAction → MetaM Unit
@@ -67,8 +70,11 @@ private def executeEnvironmentAction : EnvironmentAction → MetaM Unit
   | .declareMatcher anchor payload => executeBoundaryMatcher anchor payload
   | .declareLocalTheorems anchor payload => executeBoundaryLocalTheorems anchor payload
   | .realizeGroups anchor payload => executeBoundaryRealizationEffects anchor payload
+  | .reserveDeclarationBranch anchor payload => executeBoundaryDeclarationBranch anchor payload
 
 def executeEnvironmentActions (actions : Array EnvironmentAction) : MetaM Unit := do
+  if actions.any (fun | .reserveDeclarationBranch _ _ => true | _ => false) && actions.size != 1 then
+    throwError "boundary_reservation_mixed_actions"
   for action in actions do
     executeEnvironmentAction action
 

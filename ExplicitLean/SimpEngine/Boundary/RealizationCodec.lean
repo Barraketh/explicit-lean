@@ -654,9 +654,8 @@ private structure LocalDagState where
 
 /-- Observational witness only: no auxiliary-cache entries are installed, erased,
     inferred or normalized. The checked proof binding is structural and complete. -/
-private def localAuxCacheJson (env : Environment) (member : AsyncConst) :
+private def localAuxCacheViewJson (view : Environment) :
     StateT LocalDagState MetaM Json := do
-  let view ← memberEnvironment env member
   let checked := (← get).checked
   let cache := (auxLemmasExt.getState view).lemmas
   let entries ← cache.toArray.mapM fun (key, name, levels) => do
@@ -698,6 +697,11 @@ private def localAuxCacheJson (env : Environment) (member : AsyncConst) :
   -- Preserve each exact key/value and order the witness by its canonical bytes.
   let keyed := entries.map fun entry => (entry.compress, entry)
   return .arr ((keyed.qsort fun a b => a.1 < b.1).map (·.2))
+
+
+private def localAuxCacheJson (env : Environment) (member : AsyncConst) :
+    StateT LocalDagState MetaM Json := do
+  localAuxCacheViewJson (← memberEnvironment env member)
 
 
 private def sameAsyncObject (a b : AsyncConst) : Bool := unsafe ptrEq a b
