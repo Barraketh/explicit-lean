@@ -1647,8 +1647,10 @@ private def boundaryEnvironmentDelta (basis : PreBoundaryBasis)
   (boundaryEnvironmentDeclarations environment).filter fun info =>
     !basis.environment.contains info.name
 
-private def boundaryEnvironmentPrivateName (basis : PreBoundaryBasis) (name : Name) : Bool :=
-  isPrivateName name || (name.isInternalDetail && !isReservedName basis.environment name)
+private def boundaryEnvironmentPrivateName (_basis : PreBoundaryBasis) (name : Name) : Bool :=
+  -- Authored public names such as `sample.proof_1` may look generated.
+  -- Only Lean's private-name encoding justifies the private-proof exception.
+  isPrivateName name
 
 /-
   `ModuleData.entries` is the serialized view of persistent environment
