@@ -20,17 +20,17 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 0,
+    "verifiedTranslatedOccurrences": 53,
     "completeTranslatedTreeBuilt": false,
-    "note": "Fresh post-replay auxiliary generator assertion is now required after discovery of a cache-priming false positive. Report9 is provisional pending artifact4/report10 implementation and revalidation; per-module checks still do not establish translated-tree closure.",
+    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 691,
-    "provisionalCachedModules": 66,
+    "verifiedTranslatedModules": 12,
+    "provisionalCachedOccurrences": 617,
+    "provisionalCachedModules": 54,
     "minimumAcceptedReportSchema": 10
   },
   "work": [
@@ -224,7 +224,7 @@
       "id": "cached-realization-activation",
       "owner": "coordinator",
       "status": "completed",
-      "description": "Integrated exact completed realization groups after independent frozen660hash/34nonce review. Main48jobbuild,10fresh/cached/rejection compiler cases and5wire negatives pass; v2 nested sparse expectation rebased to checked empty imported callback while outer/member caches stay exact. Full combined artifact4/report10 module revalidation still pending; no accepted coverage."
+      "description": "Exact completed realization groups integrated at9b35bf6. Combined artifact4/report10 Lookmap passes10 calls,33 declarations and0 remaining calls. Frozen workers are revalidating the index. Mixed cached activation plus ordinary helper remains a separate unsupported case."
     },
     {
       "id": "fresh-post-generator-guard",
@@ -240,9 +240,9 @@
     },
     {
       "id": "complete-command-context-audit",
-      "owner": "coordinator with assigned agent",
+      "owner": "coordinator with independent Sol review and integration",
       "status": "in_progress",
-      "description": "Luna revising full Language.Lean.process snapshot prototype after review: preserve actual module/header mode/options; distinguish reusable macro quotation from inert data. Initial API feasibility only, not acceptance."
+      "description": "Six corrected fixtures and five error/empty/quotation controls pass. A read-only module-linter callback collects the complete parsed commands without changing normal compiler options; the snapshot walk alone loses syntax in command-line mode. Integration now adds scoped registration and nonce-framed output to the same frontend runs used by the declaration oracle."
     }
   ],
   "blockers": [
@@ -279,7 +279,7 @@
     {
       "id": "final-grammar-coverage-audit",
       "status": "open",
-      "detail": "Actual-command snapshot API prototype compiles, but review found forcedisModule=true for nonmodule sources, hardcodedFinalCommandAudit identity, and a reusable macroRHS simp mislabeled inert data. Revised private prototype requested; do not integrate initialreport or count it as correct classifier/header fidelity."
+      "detail": "Corrected module-linter collector passes six normal fixtures and five negative/empty/quotation controls, preserving actual module name, header mode and compiler options. Independent review complete; scoped, nonce-framed acceptance infrastructure is being integrated. No full-corpus audit yet."
     },
     {
       "id": "fresh-replay-cache-grouping",
@@ -720,6 +720,17 @@
       "at": "2026-08-31T15:38:09.704577+00:00",
       "summary": "Fresh schema10priority manifest verified201modules/1604calls, SHA3b483892. First worker has verified Int.Init7calls, then continues boundedfrontier; fullanalysis still running. Actual-command-audit review rejected initial classification/header/module claims; corrected private prototype assigned. No production dependency on this prototype.",
       "evidence": ".lake/week-2026-08-31/schema10-priority-manifest-verification.json"
+    },
+    {
+      "at": "2026-08-31T15:55:59.118229+00:00",
+      "summary": "Frozen report10 now verifies12 modules/53 calls against stock imports. A fresh39-module Function.Defs cone compiled all156 artifact files and passed39 source-pair oracles under translated-only imports. Control.Basic mixed-activation failure diagnosed. Corrected command audit passed independent review; production integration in progress.",
+      "checks": [
+        "schema10-first-cone-verification.json:1071 hash checks,204 archived inputs,78 nonce logs; no prior compile reuse or stock fallback",
+        "translated-oracle-verification.json:639 hash checks,208 unchanged inputs,5 nonce logs; changed computation/caught replay/missing dependency rejected",
+        "final-command-audit-v2-verification.json plus command-audit-v2-review/verification.json:6 fixtures and5 additional controls",
+        "control-generator-independent-verification.json:24 archives,637 stable input entries,6 fresh processes",
+        "Budget at15:49UTC:24% used in current authorized window"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -907,11 +918,25 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
       "commit": "1f6f12c",
       "status": "running",
-      "phase": "manifest_then_workers",
-      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-full-manifest.log",
+      "phase": "preflight_dependency_identity_scan",
+      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-full-worker.log",
       "modules": 8260,
       "note": "Fresh8260-module manifest then bounded500-module bulkworker excluding all131priorityroots. Fourmodules/11calls remain separately required, not exempted.",
-      "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py"
+      "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py",
+      "manifestVerification": ".lake/week-2026-08-31/schema10-full-inventory-verification.json"
+    },
+    {
+      "id": "schema10-first-translated-cone",
+      "sessionId": 17662,
+      "status": "completed_bounded",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
+      "commit": "1f6f12c",
+      "root": "Mathlib.Logic.Function.Defs",
+      "modules": 39,
+      "log": ".lake/week-2026-08-31/translated-schema10-first-cone.log",
+      "runner": ".lake/week-2026-08-31/run_schema10_translated_forest.py",
+      "verification": ".lake/week-2026-08-31/schema10-first-cone-verification.json",
+      "scope": "Fresh compilation of all companions plus source-pair oracles under translated dependencies. Full command audit and direct compiled-output semantic binding remain required."
     }
   ],
   "latestCommits": [
@@ -1027,9 +1052,9 @@
     "moduleCount": 8264,
     "occurrenceCount": 83425,
     "latestClosedManifest": {
-      "path": ".lake/search-free-mathlib/snapshots/schema9-expansion/.lake/schema9-full-manifest.json",
-      "sha256": "2557b23930394e58057d6ee196e28f785a0bf3961b37f9506818c4b87704c342",
-      "commit": "f3db7d4",
+      "path": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-full-manifest.json",
+      "sha256": "a964a7a5687c349884333825ac6ae715557afd1ba23aac89c6abadfea13c266d",
+      "commit": "1f6f12c",
       "modules": 8260,
       "occurrences": 83414,
       "separatelyRequiredModules": [
@@ -1039,7 +1064,7 @@
         "Mathlib/Tactic/Zify.lean"
       ],
       "separatelyRequiredCalls": 11,
-      "note": "Fresh closed analysis subset, not translation acceptance. Five unresolved quotations within the four modules remain under separate semantic treatment."
+      "note": "Fresh frozen10 manifest; excluded source modules remain required and separately tracked, not translation acceptance."
     }
   },
   "database": {
@@ -1049,7 +1074,7 @@
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 0,
+    "verifiedTranslations": 53,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
@@ -1092,6 +1117,17 @@
         "status": "compiled_provisional_pending_schema9_and_translated_output_oracles",
         "wholeMathlib": false,
         "independentVerification": ".lake/week-2026-08-31/schema8-forest-verification.json"
+      },
+      {
+        "commit": "1f6f12c",
+        "modules": 39,
+        "replacedCalls": 2,
+        "report": ".lake/week-2026-08-31/translated-schema10-first-cone/report.json",
+        "reportSha256": "112bc8a6b1deded08159db9ac12d05deab68dc75461a9bfd71b672d20ba2e572",
+        "status": "compiled_and_source_pair_oracles_under_translated_dependencies",
+        "wholeMathlib": false,
+        "independentVerification": ".lake/week-2026-08-31/schema10-first-cone-verification.json",
+        "limitations": "Command audit and direct compiled-output semantic binding remain separate acceptance requirements."
       }
     ],
     "currentArtifactSchema": 4,
@@ -1114,7 +1150,7 @@
       "Mathlib/Data/String/Lemmas.lean": "matcher equation capture-complete-local state mismatch",
       "Mathlib/Data/Int/Init.lean": "Main bounded7-site/148-declaration pipeline passes; strict actual-import remaining scan0. Await fresh closed schema9 report.",
       "Mathlib/Data/List/Lookmap.lean": "Combinedartifact4/report10 boundedpipelinepasses10calls,33declarations20public22extensionstates,remaining0. Evidence .lake/boundary-materialization/integrated-groups-_ze7z1e2. Requires frozen manifest/worker rerun for indexed acceptance.",
-      "Mathlib/Control/Basic.lean": "Current4/10 gets past fish_pipe but rejects05514633fc5cec8c joinM_map_joinM stockgen3/applied2. Bounded Luna raw-stock shape investigation assigned; no acceptance."
+      "Mathlib/Control/Basic.lean": "Confirmed missing cached joinM.eq_1 activation before a fresh ordinary helper. Six fresh processes isolate generator1\u21922 for activation, then2\u21923 for the helper. Requires authenticated ordered composition, not counter changes. Evidence: .lake/week-2026-08-31/control-generator-diagnosis/diagnosis.md; independently reverified."
     }
   },
   "storage": {
@@ -1124,5 +1160,5 @@
     "checkedAt": "2026-08-31T15:30:34.486345+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T15:38:09.704577+00:00"
+  "updatedAt": "2026-08-31T15:55:59.118229+00:00"
 }
