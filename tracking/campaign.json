@@ -22,17 +22,23 @@
     "currentCorpusTotal": 83425,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Frozen per-module candidates against stock imports are provisional. Current producer is report12/artifact5, with applied recording, exact prelaunch native invocation and log bindings, unconditional pending-synthesis restrictions and bounded pre-boundary expression references. Acceptance additionally requires source/comment provenance, cold serialized output certification, and the complete translated dependency tree.",
+    "note": "The independently verified fresh analysis covers 83,414 executable calls in 8,260 modules (83,349 direct and 65 reusable); four modules containing 11 additional calls remain separately required, not exempted. Frozen per-module candidates against stock imports remain provisional. Current producer is report12/artifact5 with applied recording, exact native invocation/log bindings, pending-synthesis restrictions and bounded expression references. Acceptance additionally requires source/comment provenance, cold serialized output certification, and the complete translated tree.",
     "inventoriedModules": 8264,
-    "materializationCandidates": 83420,
+    "materializationCandidates": 83414,
     "unresolvedOccurrences": 5,
-    "reusableExecutableOccurrences": 66,
+    "reusableExecutableOccurrences": 65,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
     "provisionalCachedOccurrences": 1456,
     "provisionalCachedModules": 165,
     "minimumAcceptedReportSchema": 12,
-    "validationHold": "The cold serialized comparator, independent compilation consumer, and unconditional pending-synthesis barrier are integrated and bounded schema11 controls passed. Complete translated dependency-tree certification remains pending; previous candidates and proof checks stay provisional."
+    "validationHold": "The cold serialized comparator, independent compilation consumer, unconditional pending-synthesis barrier and report12 producer are integrated. Complete translated dependency-tree certification remains pending; every bounded production result remains provisional.",
+    "freshAnalyzedModules": 8260,
+    "freshAnalyzedOccurrences": 83414,
+    "freshDirectExecutableOccurrences": 83349,
+    "separatelyRequiredModules": 4,
+    "separatelyRequiredOccurrences": 11,
+    "freshAnalyzedUnresolvedOccurrences": 0
   },
   "work": [
     {
@@ -352,6 +358,24 @@
       "owner": "coordinator with Luna fix-review and Sol integration",
       "status": "completed_bounded",
       "description": "Integrated6b97bfd. Replays exactly one computed mkChild plus optional authenticated absent-key registration of an active imported equation theorem; exact pre/final checked/branch/matcher/equation/sparse/aux states and parsed original source. No Aesop/search/raw counter/state assignment. Failure catches restore authentic pre-generator. Private Finprod45/45 fresh replay+oracle352/315/34 pass;21runtime+3wire controls,83unique receipts/2510frozenfiles independently verified. Main71job build, Python/schema12/source-gap checks pass."
+    },
+    {
+      "id": "fresh-schema12-corpus-analysis",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Commit 11cfcfd analysis independently verified 8,260 modules/83,414 calls: 83,349 direct, 65 reusable, 91 nested, zero unresolved. Four excluded modules/11 calls remain separately required. Manifest b2899816... is analysis evidence only; replay provenance must be refreshed."
+    },
+    {
+      "id": "fresh-helper-reference-closure",
+      "owner": "coordinator with Luna implementation and fix-review",
+      "status": "completed_bounded",
+      "description": "Integrated at 2b5b9ed. Exact first-capture local-theorem names may remain as fresh theorem references; all other fresh constants close or reject, and exact second capture must match. Fresh List.Basic 51/51, 57 variants, oracle 166/166 declarations and 22/22 extensions; typed ToAdditive 75/75. Integrated Finprod regression 45/45, oracle 352/352 and 34/34. Runtime corruption controls fail closed. Whole-tree coverage unchanged."
+    },
+    {
+      "id": "inline-first-selector-rendering",
+      "owner": "coordinator with Luna implementation and fix-review",
+      "status": "completed",
+      "description": "Commits 2a7db88/237d539 group each generated selector as one tactic. Self-contained fresh record/replay regression covers inline first siblings, nested try/first, single/multiple variants, recorded failure, UTF-8, indentation and adjacent original comments."
     }
   ],
   "blockers": [
@@ -407,11 +431,11 @@
     }
   ],
   "nextActions": [
-    "Complete strict fresh-helper reference preservation for List.Basic51, requiring exact second-capture local-theorem actions and full75/75 ToAdditive map; integrate only after focused negatives/full oracle.",
-    "Finish typed unsupported-root diagnostic for Unitization/Expect/NonUnitalSubalgebra; add only grounded deterministic realization shapes, never relax imported-owner/root guards from old logs.",
-    "After imminent strict fixes freeze latest runtime, publish a fresh provenance manifest from content-bound analysis checkpoints, and start bounded500module indexed production worker under disk/budget guards.",
-    "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and full source/execution ownership.",
-    "Assemble translated dependency tree and cold-certify outputs; optional lossless storage only before publication after complete validation.",
+    "Freeze the latest integrated runtime, publish a fresh provenance manifest from the content-bound analysis checkpoints, and start a bounded indexed production worker under disk and budget guards.",
+    "Finish the bounded Unitization descriptor-size guard without regressing the authenticated 11,015,063-byte ExtraDegeneracy auxiliary certificate; then diagnose a compact deterministic encoding for the 73,341,536-byte Unitization descriptor.",
+    "Process the four separately required modules/11 calls and the 65 reusable executable calls without finite-caller equivalence shortcuts; retain adjacent originals and full source/execution ownership.",
+    "Expand report12 production across the indexed corpus, triage exact failure families, and keep bounded successes provisional until translated-tree certification.",
+    "Assemble the translated dependency tree and cold-certify outputs; optional lossless storage only before publication after complete validation.",
     "After full explicit coverage and translated-tree acceptance, improve readable normal forms and extend other tactics if time remains."
   ],
   "checkpoints": [
@@ -1404,7 +1428,11 @@
     "db59a3e",
     "9b35bf6",
     "e3af2f2",
-    "1f6f12c"
+    "1f6f12c",
+    "2b5b9ed",
+    "2a7db88",
+    "237d539",
+    "8b662c1"
   ],
   "experiments": [
     {
@@ -1697,7 +1725,7 @@
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
-    "commit": "5f02c0c",
+    "commit": "8b662c1",
     "searchFreeEncoding": "Artifact5: lean_expr_dag_v3 with bounded pre-boundary universe/opaque expression references; closed lean_expr_dag_v1 declaration bodies. Generated encoded replay blocks pending typeclass synthesis; legacy handwritten elaboration APIs excluded.",
     "representativeMathlibModules": 5,
     "representativeMathlibOccurrences": 66,
@@ -1780,7 +1808,7 @@
     "currentArtifactSchema": 5,
     "currentSelectorSchema": 2,
     "minimumReportSchema": 12,
-    "integratedEngineCommit": "e3af2f2",
+    "integratedEngineCommit": "2b5b9ed",
     "focusedEvidenceManifest": ".lake/week-2026-08-31/schema10-focused-verification.json",
     "commandAudit": {
       "handoffManifest": ".lake/week-2026-08-31/command-audit-production/handoff-manifest.json",
@@ -2041,6 +2069,47 @@
         "nativeInvocations": 3,
         "hashAssertions": 1103
       }
+    },
+    "freshHelperReferences": {
+      "status": "integrated_bounded_production_independently_verified",
+      "commit": "2b5b9ed1cab94e7e5ed17b919847e715a3b4d813",
+      "module": "Mathlib/Algebra/BigOperators/Group/List/Basic.lean",
+      "calls": 51,
+      "variants": 57,
+      "declarations": 166,
+      "extensions": 22,
+      "typedToAdditiveEntries": 75,
+      "report": ".lake/boundary-materialization/integrated-helper-list-v1/report.json",
+      "reportSha256": "8df0d8942303b91a97de51597b50c3a8f76fda460e5b54dba614412d6e09c89d",
+      "manifestSha256": "21f97075f969f795d0c36ea9a8fa9388a37159aa8d16b8018ec8f66706a147c5",
+      "rootVerification": ".lake/week-2026-08-31/integrated-helper-list-root-verification.json",
+      "negativeControls": 19,
+      "limitation": "No separate synthetic whitelisted definition/opaque fixture; production metadata branch accepts theorem info only.",
+      "acceptedCampaignCoverage": false
+    },
+    "integratedFinprodRegression": {
+      "status": "post_helper_merge_independently_verified",
+      "commit": "2b5b9ed1cab94e7e5ed17b919847e715a3b4d813",
+      "module": "Mathlib/Algebra/BigOperators/Finprod.lean",
+      "calls": 45,
+      "variants": 45,
+      "declarations": 352,
+      "extensions": 34,
+      "report": ".lake/boundary-materialization/integrated-finprod-v1/report.json",
+      "reportSha256": "5098a575798a916fdf458ff00a3dfa616fa617d4dbd656eedb08fb6c3e087343",
+      "manifestSha256": "c86ed1f8b2440bc6d93f28b22e4a6baac2e082553349f4be7909e11f8e3912d6",
+      "rootVerification": ".lake/week-2026-08-31/integrated-finprod-root-verification.json",
+      "acceptedCampaignCoverage": false
+    },
+    "inlineFirstRenderer": {
+      "status": "integrated_self_contained_regression_passed",
+      "commits": [
+        "2a7db88",
+        "237d539"
+      ],
+      "checker": "Experiment/check_inline_first_renderer.py",
+      "scope": "Grouped selector tactic under inline and nested first/try; single/multiple variants, failure, UTF-8 and original comments.",
+      "acceptedCampaignCoverage": false
     }
   },
   "failureTriage": {
@@ -2075,7 +2144,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T21:26:34.168800+00:00",
+  "updatedAt": "2026-08-31T22:15:16.321751+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

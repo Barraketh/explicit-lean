@@ -73,6 +73,18 @@ and computes one `DeclNameGenerator.mkChild`. Replay performs no tactic search
 and never assigns a recorded counter or extension state. All 45 Finprod calls
 pass fresh replay and the full oracle; whole-tree acceptance remains pending.
 
+Fresh theorem references created while elaborating a call are retained only
+when their exact names occur in the first authenticated local-theorem action
+and the current environment resolves them as theorems. Every other fresh
+constant is still closed by the existing inlining rule or rejected. This makes
+List.Basic's two private `ToAdditive` helper proofs available to the recorded
+artifact without admitting arbitrary fresh definitions. All 51 List.Basic
+calls and 57 variants pass fresh applied recording and replay; the strict oracle
+matches 166 declarations and 22 extension states on each side, and an additional
+typed `ToAdditive` comparison matches all 75 entries. The integrated Finprod
+45-call replay was repeated after this change. These remain bounded production
+results rather than translated-tree acceptance.
+
 Inventory and scope checkpoints have a separate content identity for their
 analysis sources, native executables, and pinned dependencies. Replay-only
 edits can reuse that analysis; each resulting manifest still records current
@@ -103,6 +115,10 @@ declaration/environment oracle; the oracle accounts for 141, 134, 10, 165, and
 rules. The last module records four distinct executions of
 one occurrence and exercises a large `Matrix.cons_val` result; the focused
 quotation executes both a successful and a failed variant.
+Generated selector blocks are grouped as a single tactic, so a surrounding
+inline `first | ... | ...` or nested `try` cannot consume selector branches. A
+self-contained fresh record/replay regression covers single and multiple
+variants, a recorded failure, nested layout, UTF-8 and original-call comments.
 The apply module has a checked import closure with no simplifier implementation.
 `Mathlib/Algebra/Algebra/NonUnitalHom.lean` guards parser compatibility with
 Mathlib commands whose grammar uses the identifier `apply`. These results are
