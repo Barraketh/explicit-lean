@@ -1039,6 +1039,44 @@ def claim_work(
     return leases
 
 
+def abandon_lease(
+    connection: sqlite3.Connection,
+    attempt_id: int,
+    worker: str,
+    failure: str,
+    *,
+    now: float | None = None,
+) -> None:
+    """Abandon one active lease and requeue it without changing result cache."""
+    if attempt_id <= 0 or not worker or not isinstance(failure, str) or not failure.strip():
+        raise IndexError("attempt, worker, and failure are required")
+    current = time.time() if now is None else now
+    with transaction(connection, immediate=True):
+        attempt = connection.execute(
+            "SELECT module FROM attempts WHERE attempt_id=? AND worker=? AND status='running'",
+            (attempt_id, worker),
+        ).fetchone()
+        if attempt is None:
+            raise IndexError("attempt is missing, completed, or owned by another worker")
+        queue = connection.execute(
+            "SELECT state,worker,last_attempt_id FROM work_queue WHERE module=?",
+            (attempt["module"],),
+        ).fetchone()
+        if (queue is None or queue["state"] != "running" or queue["worker"] != worker
+                or queue["last_attempt_id"] != attempt_id):
+            raise IndexError("lease queue identity is missing or no longer active")
+        connection.execute(
+            "UPDATE attempts SET status='abandoned',failure=?,finished_at=? "
+            "WHERE attempt_id=? AND status='running'",
+            (failure.strip(), current, attempt_id),
+        )
+        connection.execute(
+            "UPDATE work_queue SET state='queued',worker=NULL,lease_expires_at=NULL,updated_at=? "
+            "WHERE module=? AND state='running' AND worker=? AND last_attempt_id=?",
+            (current, attempt["module"], worker, attempt_id),
+        )
+
+
 def renew_lease(
     connection: sqlite3.Connection,
     attempt_id: int,

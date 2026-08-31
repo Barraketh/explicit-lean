@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 from translation_index import (
+    abandon_lease,
     claim_work,
     connect,
     import_manifest,
@@ -214,6 +215,19 @@ class TranslationIndexTests(unittest.TestCase):
             "abandoned",
         )
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM attempts").fetchone()[0], 2)
+
+    def test_abandon_lease_requeues_without_result_cache_and_checks_owner(self) -> None:
+        self.import_sources({"Mathlib/A.lean": "theorem a : True := by simp\n"})
+        plan = plan_work(self.connection, "impl", "tool")
+        lease = claim_work(self.connection, "worker-1", now=100)[0]
+        with self.assertRaisesRegex(RuntimeError, "owned by another worker"):
+            abandon_lease(self.connection, lease.attempt_id, "worker-2", "interrupt", now=101)
+        abandon_lease(self.connection, lease.attempt_id, "worker-1", "interrupt", now=101)
+        attempt = self.connection.execute("SELECT status,failure,finished_at FROM attempts").fetchone()
+        self.assertEqual(tuple(attempt), ("abandoned", "interrupt", 101))
+        queue = self.connection.execute("SELECT state,worker,last_attempt_id FROM work_queue").fetchone()
+        self.assertEqual(tuple(queue), ("queued", None, lease.attempt_id))
+        self.assertIsNone(self.connection.execute("SELECT * FROM result_cache").fetchone())
 
     def test_source_edit_requires_a_refreshed_manifest(self) -> None:
         self.import_sources({"Mathlib/A.lean": "theorem a : True := by simp\n"})

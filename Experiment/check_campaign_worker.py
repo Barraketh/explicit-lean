@@ -248,6 +248,24 @@ class CampaignWorkerTests(unittest.TestCase):
             worker.run_worker(self.db, manifest, self.boundary / "runs", "worker-test", retry_failed=True, budget_guard=lambda: {"canDispatch": True})
         self.assertEqual(calls, 2)
 
+    def test_keyboard_interrupt_abandons_claimed_lease(self) -> None:
+        manifest = self.manifest()
+
+        def interrupt(path, output, module, timeout):
+            raise KeyboardInterrupt()
+
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_fixture(manifest, interrupt)
+        connection = connect(self.db)
+        try:
+            attempt = connection.execute("SELECT status,failure FROM attempts").fetchone()
+            self.assertEqual(attempt["status"], "abandoned")
+            self.assertIn("KeyboardInterrupt", attempt["failure"])
+            self.assertEqual(connection.execute("SELECT state FROM work_queue").fetchone()[0], "queued")
+            self.assertIsNone(connection.execute("SELECT * FROM result_cache").fetchone())
+        finally:
+            connection.close()
+
     def test_limit_advances_past_verified_and_partial_prefix(self) -> None:
         manifest = self.manifest_many(["A", "B", "C"])
         calls: list[str] = []

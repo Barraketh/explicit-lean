@@ -31,6 +31,7 @@ from translation_index import (
     cache_key,
     claim_work,
     connect,
+    abandon_lease,
     import_manifest,
     order_retryable,
     plan_work,
@@ -301,6 +302,7 @@ def run_worker(
     started = time.monotonic()
     processed = succeeded = candidates = failures = skipped_failed = candidate_reports = skipped_verified = 0
     budget_denied = timed_out = storage_denied = False
+    active_lease = None
     try:
         import_manifest(
             connection, manifest_path, source_root=MATHLIB,
@@ -373,6 +375,7 @@ def run_worker(
             if not leases:
                 continue
             lease = leases[0]
+            active_lease = lease
             print(json.dumps({
                 "event": "module_start", "module": lease.module,
                 "attemptId": lease.attempt_id,
@@ -396,6 +399,7 @@ def run_worker(
                 )
                 print(json.dumps({"event": "module_failure", "module": lease.module,
                                   "exitCode": code, "log": str(log_path)}, sort_keys=True), flush=True)
+                active_lease = None
                 continue
             try:
                 report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -411,6 +415,7 @@ def run_worker(
                 )
                 print(json.dumps({"event": "module_invalid_report", "module": lease.module,
                                   "detail": str(error), "log": str(log_path)}, sort_keys=True), flush=True)
+                active_lease = None
                 continue
             record_result(
                 connection, lease.module, implementation, toolchain,
@@ -425,6 +430,17 @@ def run_worker(
                 candidate_reports += 1
             print(json.dumps({"event": "module_result", "module": lease.module,
                               "verified": verified, "report": str(report_path)}, sort_keys=True), flush=True)
+            active_lease = None
+    except BaseException as error:
+        if active_lease is not None:
+            try:
+                abandon_lease(
+                    connection, active_lease.attempt_id, worker,
+                    f"worker interrupted: {type(error).__name__}: {error}",
+                )
+            except BaseException:
+                pass
+        raise
     finally:
         connection.close()
     return {
