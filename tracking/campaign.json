@@ -328,6 +328,12 @@
       "owner": "coordinator with Sol implementation and Luna independent search-path review",
       "status": "completed",
       "description": "Integrated artifact5/report11 bounded pre-boundary expression references with exact raw dependency/scope/cycle guards and unconditional pending-synthesis barrier across encoded selection/application, realization callbacks and export Meta runners. Frozen3138hash/75nonce verification; main66jobbuild,39guard/8wire controls,3real-source pipelines,20localcache/15wire regression,17replayabort matrix and4pure corpus protocol validators all passed. Root regenerated actual replacements/comments and archived runtime inputs. Luna found no concrete generated-path bypass; handwritten elaboration API explicitly excluded. Complete translated-tree acceptance remains pending."
+    },
+    {
+      "id": "applied-recording-shared-dispatcher",
+      "owner": "coordinator with Sol implementation and Luna review",
+      "status": "completed",
+      "description": "Shared Tactic dispatcher and fully validated applied continuation integrated; stock diagnostic unchanged. Main65-job build,12fresh controls and2038root hash assertions pass. Frozen fullExtra24calls(23roots+1nested)/168declarations/120public/44extensions passes;6562root hash assertions15independent invocation receipts. Production report12 integration remains pending; no accepted corpus increment."
     }
   ],
   "blockers": [
@@ -373,8 +379,8 @@
     },
     {
       "id": "pending-typeclass-synthesis-during-replay",
-      "status": "open",
-      "detail": "Pinned Meta.isDefEq can call synthPending despite greater metavariable depth. Unconditional maxSynthPendingDepth barrier under private fix-review; old closed encoded reports do not imply the new search-free guarantee. Revalidate fresh artifact5/report11 outputs."
+      "status": "resolved_bounded_revalidation_pending",
+      "detail": "Unconditional maxSynthPendingDepth barrier integrated f231289 across generated replay and callbacks. Fresh bounded tests pass. Earlier artifact4 reports remain historical; whole translated tree acceptance still pending."
     }
   ],
   "nextActions": [
@@ -968,6 +974,14 @@
         ".lake/week-2026-08-31/dispatcher-concurrent-write/restoration.json",
         ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype/.lake/aux-generator-diagnosis-frozen-ngaviqxn/manifest.json"
       ]
+    },
+    {
+      "at": "2026-08-31T19:43:15.608368+00:00",
+      "summary": "Shared dispatcher frozen rerun independently verified:12controls,24Extra source calls/168declarations with exact input guards. Main65-job build and12controls pass;2038hash assertions/12prelaunch invocation receipts. Separate report12 private implementation active. Analysis decoupling201module outputs reported equal, pending root handoff and excluded-module controls. Old schema10 worker finished with130attempts104success26failure this batch; no current worker lease. Currentbudget43%; acceptedcoverage remains0.",
+      "evidence": [
+        ".lake/week-2026-08-31/forward-dispatcher-root-verification.json",
+        ".lake/week-2026-08-31/forward-dispatcher-main-root-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1166,13 +1180,17 @@
       "sessionId": 72713,
       "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
       "commit": "1f6f12c",
-      "status": "running",
+      "status": "completed_bounded_budget_guard_stop",
       "phase": "bulk_worker",
       "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-full-worker.log",
       "modules": 8260,
       "note": "Fresh8260-module manifest then bounded500-module bulkworker excluding all131priorityroots. Fourmodules/11calls remain separately required, not exempted.",
       "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py",
-      "manifestVerification": ".lake/week-2026-08-31/schema10-full-inventory-verification.json"
+      "manifestVerification": ".lake/week-2026-08-31/schema10-full-inventory-verification.json",
+      "processedThisBatch": 130,
+      "succeededThisBatch": 104,
+      "failuresThisBatch": 26,
+      "leaseActive": false
     },
     {
       "id": "schema10-first-translated-cone",
@@ -1374,11 +1392,14 @@
     },
     {
       "id": "cached-local-congruence-activation",
-      "status": "strict_descriptor_difference_under_diagnosis",
+      "status": "ordered_full_descriptor_sequence_in_private_implementation",
       "snapshot": ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype",
       "witnessManifestSha256": "34aff3098527adc556b9613596181f505cd9c0692e44a73ee46e1b2cbd917b9c",
       "finding": "Unitization1734864b48394331 stock/capture realize StarAlgHom.codRestrict.congr_simp plus prechecked/offbranch NonUnitalStarSubalgebra.unitization.congr_simp; replay onlyfirst. Pre/stock/appliedgeneratorindices1/3/2. No generatorpatch proposed; missingcheckedactivation needs exactauthenticcachewitness. Balancefocusedcurrentcheckmatchesgenerator3; Bilinearfails earlieractivation_nonempty_aux_cache.",
-      "acceptedCampaignCoverage": false
+      "acceptedCampaignCoverage": false,
+      "failedCandidateManifest": ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype/.lake/cached-congruence-failure-frozen-a6243ck4/manifest.json",
+      "failedCandidateManifestSha256": "7a6a40f2d5dabe5283d5ed3df33c4781ad4f5ced5c3f070b4beb1ccd77137d98",
+      "descriptorFinding": "115nodes exact proof/signature/auxiliary data;80metadata leaves change in sineQueNon/symbolFrequency after fresh StarAlgHom congruence creation. Preserve initial and post-fresh full descriptors and authentic activation order; do not filter metadata or patch generator."
     }
   ],
   "prototypeCoverage": {
@@ -1719,6 +1740,22 @@
       "scope": "Separate local cached root with ordered fresh ordinary helpers; oldemptyauxdescriptor used bysequence, auxiliary flag explicitly threaded only for standalone auxbatch. NoSynthesis retained.",
       "wholeMathlib": false,
       "acceptedCampaignCoverage": false
+    },
+    "appliedRecordingDispatcher": {
+      "status": "integrated_bounded_controls_verified",
+      "mainRootVerification": ".lake/week-2026-08-31/forward-dispatcher-main-root-verification.json",
+      "handoffRootVerification": ".lake/week-2026-08-31/forward-dispatcher-root-verification.json",
+      "independentReview": ".lake/forward-dispatcher-independent-review.md",
+      "controls": 12,
+      "inputCheckpoints": 25,
+      "guardedInputs": 649,
+      "fullModule": "Mathlib/AlgebraicTopology/ExtraDegeneracy.lean",
+      "sourceCalls": 24,
+      "declarations": 168,
+      "publicDeclarations": 120,
+      "extensions": 44,
+      "productionReport12Pending": true,
+      "acceptedCampaignCoverage": false
     }
   },
   "failureTriage": {
@@ -1753,7 +1790,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T19:32:43.475436+00:00",
+  "updatedAt": "2026-08-31T19:43:15.608368+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

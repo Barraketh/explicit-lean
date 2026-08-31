@@ -12,6 +12,13 @@ open Lean Meta Elab Tactic
 
 namespace Lean.Parser.Tactic
 
+/-- Syntax shared with the recorder without importing its simplifier implementation. -/
+syntax boundarySimpArgs := optConfig (discharger)? (&" only")?
+  (" [" withoutPosition((simpStar <|> simpErase <|> simpLemma),*,?) "]")? (location)?
+
+syntax (name := simpEngineBoundaryRecordApplied)
+  "simp_engine_boundary_record_applied" str boundarySimpArgs : tactic
+
 declare_syntax_cat boundaryEvidence
 syntax "(" term "==>" term ")" : boundaryEvidence
 syntax "(" term "==>" term "using" term ")" : boundaryEvidence
@@ -98,6 +105,47 @@ syntax (name := simpEngineBoundarySelect)
 end Lean.Parser.Tactic
 
 namespace ExplicitLean.SimpEngine.Boundary
+
+/-- Recording-only callback; generated replay never reads this registry. -/
+abbrev BoundaryAppliedRecorder := String → Syntax → TacticM Unit
+
+private initialize boundaryAppliedRecorderRef : IO.Ref (Option BoundaryAppliedRecorder) ←
+  IO.mkRef none
+
+/-- The recorder module installs its typed implementation once when imported. -/
+def registerBoundaryAppliedRecorder (recorder : BoundaryAppliedRecorder) : IO Unit := do
+  if (← boundaryAppliedRecorderRef.get).isSome then
+    throw <| IO.userError "boundary_applied_recorder_already_registered"
+  boundaryAppliedRecorderRef.set (some recorder)
+
+elab_rules : tactic
+  | `(tactic| simp_engine_boundary_record_applied $occurrenceId:str $args:boundarySimpArgs) => do
+      let occId := occurrenceId.getString
+      let recorder ← try
+        -- A process-wide initializer may have run for another environment.
+        -- Require the implementation's actual import in this environment too.
+        unless (← getEnv).header.moduleNames.contains `ExplicitLean.SimpEngine.Boundary do
+          throwError "boundary_applied_recorder_unavailable"
+        let some recorder ← boundaryAppliedRecorderRef.get
+          | throwError "boundary_applied_recorder_unavailable"
+        pure recorder
+      catch error =>
+        let detail ← error.toMessageData.toString
+        let nonce := (← IO.getEnv boundaryRunNonceEnv).filter (!·.isEmpty)
+          |>.getD boundaryUnauthenticatedRunNonce
+        let payload := Json.mkObj [
+          ("kind", Json.str "simp_engine_boundary_recording_abort"),
+          ("schema", toJson (1 : Nat)),
+          ("occurrence", Json.str (if occId.isEmpty then "<invalid-occurrence>" else occId)),
+          ("module", Json.str (← getEnv).mainModule.toString),
+          ("stage", Json.str "recorder_dispatch"),
+          ("detail", Json.str detail)
+        ]
+        -- A caught infrastructure failure must not become an unobserved call.
+        IO.println s!"\nSIMP_ENGINE_BOUNDARY_RECORDING_ABORT {nonce} {payload.compress}"
+        throw error
+      -- Keep genuine stock failures and callback aborts outside this wrapper.
+      recorder occId args.raw
 
 /-- Replay protocol failures must survive surrounding tactic backtracking.
     This process diagnostic is deliberately independent of Lean's message log.

@@ -24,8 +24,10 @@ discharger.
 
 Read these documents in order:
 
-1. [PLAN.md](PLAN.md) is the authoritative goal, correctness contract, current
-   status, prototype specification, and roadmap.
+1. [WEEKLY.md](WEEKLY.md) records the current user objective, acceptance rules,
+   deadline and budget. [tracking/campaign.json](tracking/campaign.json) tracks
+   current evidence and remaining work. [PLAN.md](PLAN.md) supplies the earlier
+   prototype specification and roadmap where these remain applicable.
 2. [simprocs.md](simprocs.md) explains the few simproc-related boundary risks
    that the prototype must test.
 3. [REPORTS.md](REPORTS.md) describes durable validation-report storage.
@@ -33,12 +35,20 @@ Read these documents in order:
    the existing schema-27 operational-replay implementation. It is historical
    engineering evidence, not the active product specification.
 
-If these documents conflict, `PLAN.md` controls the boundary-state project.
+The user's current instructions and `WEEKLY.md` supersede earlier roadmap choices.
 
 ## Current state
 
 This branch is the project restart and its own engineering lineage. Do not use
 `main` as a baseline for scope, completeness, or project decisions.
+
+The recorder also supports `simp_engine_boundary_record_applied`: after checking
+the explicit replacement against the stock result, it continues elaboration from
+the validated applied state. Its dispatcher shares the generated tactic's module
+identity; the generated selector never calls the recording hook. The ordinary
+`simp_engine_boundary_record` remains a stock-continuation diagnostic. Production
+report integration for applied recording is still pending. These bounded checks
+do not establish complete translated Mathlib coverage.
 
 The repository retains schema-27 operational recording and replay as legacy
 evidence. In particular, the existing

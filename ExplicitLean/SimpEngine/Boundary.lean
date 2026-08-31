@@ -16,9 +16,6 @@ open Lean Meta Elab Tactic
 
 namespace Lean.Parser.Tactic
 
-syntax boundarySimpArgs := optConfig (discharger)? (&" only")?
-  (" [" withoutPosition((simpStar <|> simpErase <|> simpLemma),*,?) "]")? (location)?
-
 syntax (name := simpEngineBoundaryProbe)
   "simp_engine_boundary_probe" boundarySimpArgs : tactic
 
@@ -2456,7 +2453,8 @@ private def emitRecordingAbort (occId stage : String) (error : Exception) : Tact
     (recordingAbortJson occId moduleName stage detail)
 
 private def runBoundaryProbe (simpStx : Syntax)
-    (reportRequest? : Option (String × Json) := none) : TacticM GoalArtifact := do
+    (reportRequest? : Option (String × Json) := none)
+    (continueApplied := false) : TacticM GoalArtifact := do
   let pre ← Tactic.saveState
   let preGenerator ← getDeclNGen
   let basis ← mkPreBoundaryBasis
@@ -2485,7 +2483,8 @@ private def runBoundaryProbe (simpStx : Syntax)
     throw error
   -- Core.SavedState.restore deliberately retains name-generator advancement.
   -- Snapshot the original result before diagnostics/trials; reset generators
-  -- only for isolated trial input and return the original stock continuation.
+  -- only for isolated trial input. The default diagnostic mode returns stock;
+  -- explicit forward recording selects a fully validated applied continuation.
   let stockState ← Tactic.saveState
   let stockGenerator ← getDeclNGen
   let stockEnvironment ← getEnv
@@ -2493,7 +2492,7 @@ private def runBoundaryProbe (simpStx : Syntax)
   let restoreTrialInput : TacticM Unit := do
     pre.restore
     setDeclNGen preGenerator
-  let postStockAction : TacticM (GoalArtifact × String) := do
+  let postStockAction : TacticM (GoalArtifact × String × Tactic.SavedState × DeclNameGenerator) := do
     let stock ← boundarySnapshot basis
     let environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
     restoreTrialInput
@@ -2518,6 +2517,12 @@ private def runBoundaryProbe (simpStx : Syntax)
     setGoals applyGoals
     let applied ← boundarySnapshot basis
     let appliedState ← Tactic.saveState
+    let appliedGenerator ← getDeclNGen
+    if continueApplied then
+      unless appliedGenerator.namePrefix == stockGenerator.namePrefix &&
+          appliedGenerator.idx == stockGenerator.idx &&
+          appliedGenerator.parentIdxs == stockGenerator.parentIdxs do
+        throwError "boundary_forward_post_generator_mismatch"
     compareBoundaryStates basis stockState appliedState stock applied
     compareBoundaryEnvironment basis stockEnvironment (← getEnv) environmentActions
     let applyClosed := applyTerminal != .open
@@ -2537,8 +2542,8 @@ private def runBoundaryProbe (simpStx : Syntax)
     let message := s!"SIMP_ENGINE_BOUNDARY_PROBE outcome={outcome} evidence={evidence} equivalent=true"
     if let some report := report? then
       emitBoundaryJsonMarker "SIMP_ENGINE_BOUNDARY_ARTIFACT " report
-    return (artifact, message)
-  let (artifact, message) ← try
+    return (artifact, message, appliedState, appliedGenerator)
+  let (artifact, message, appliedState, appliedGenerator) ← try
     postStockAction
   catch error =>
     if let some (occId, _) := reportRequest? then
@@ -2547,7 +2552,12 @@ private def runBoundaryProbe (simpStx : Syntax)
   finally
     stockState.restore
     setDeclNGen stockGenerator
-  -- Preserve the diagnostic without preserving any trial elaboration state.
+  if continueApplied then
+    -- Commit only the state returned after every comparison succeeded.
+    -- Keep the success value outside the finally closure's variable scope.
+    appliedState.restore
+    setDeclNGen appliedGenerator
+  -- Preserve the diagnostic without retaining comparison/observer effects.
   logInfo m!"{message}"
   return artifact
 
@@ -2582,5 +2592,33 @@ elab_rules : tactic
         let inner := mkNode ``Lean.Parser.Tactic.simp #[
           mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
         discard <| runBoundaryProbe inner (some (occId, selector))
+
+/-- Explicit recording commits only the validated applied continuation. Its
+    dispatcher lives in Tactic so successful calls record replay's module use. -/
+private def recordAppliedBoundary (occId : String) (args : Syntax) : TacticM Unit :=
+  withMainContext do
+    unless !occId.isEmpty do
+      throwError "invalid_boundary_occurrence"
+    let goals ← getGoals
+    let preState ← try
+      boundaryProofStateFingerprintWithTerm goals (← getThe Term.State)
+    catch error =>
+      emitRecordingAbort occId "prestate_fingerprint" error
+      throw error
+    let caller? ← Term.getDeclName?
+    let selector := Json.mkObj [
+      ("selectorSchema", toJson boundarySelectorSchema),
+      ("occurrence", Json.str occId),
+      ("preState", toJson preState),
+      ("options", Json.str (boundaryOptionsFingerprint (← getOptions))),
+      ("module", Json.str (← getEnv).mainModule.toString),
+      ("caller", caller?.map (fun name =>
+        Json.str (boundaryCallerIdentity name)) |>.getD Json.null)
+    ]
+    let inner := mkNode ``Lean.Parser.Tactic.simp #[
+      mkAtom "simp", args[0], args[1], args[2], args[3], args[4]]
+    discard <| runBoundaryProbe inner (some (occId, selector)) (continueApplied := true)
+
+initialize registerBoundaryAppliedRecorder recordAppliedBoundary
 
 end ExplicitLean.SimpEngine.Boundary
