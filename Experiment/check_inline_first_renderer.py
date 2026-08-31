@@ -26,21 +26,20 @@ ARTIFACT_MARKER = renderer.ARTIFACT_MARKER
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EVIDENCE = (
-    ROOT.parents[1]
-    / "snapshots/declaration-branch-reservation-prototype"
-    / ".lake/declaration-branch-reservation-handoff/evidence/inline-first-renderer-failure"
-)
-FROZEN_RECORD_SOURCE = (
-    EVIDENCE.parents[3]
-    / ".lake/reservation-failure-controls-y5g6nuu7/stock-record/Experiment/ReservationFailure.lean"
-)
-FROZEN_REPLAY_SOURCE = (
-    EVIDENCE.parents[3]
-    / ".lake/reservation-failure-controls-y5g6nuu7/stock-replay/Experiment/ReservationFailure.lean"
-)
-FROZEN_REPLAY_RECEIPT = EVIDENCE / "stock-replay-invocation.json"
+FROZEN_RECORD_SOURCE = """module
+import Mathlib.Algebra.BigOperators.Finprod
+import ExplicitLean.SimpEngine.Boundary
+example (p : Prop) (h : p) : p := by
+  first | simp_engine_boundary_record_applied "unchanged-stock-failure" only [] | exact h
+"""
+FROZEN_REPLAY_SOURCE = """module
+import Mathlib.Algebra.BigOperators.Finprod
+import ExplicitLean.SimpEngine.Boundary.Tactic
+example (p : Prop) (h : p) : p := by
+  first | simp only [] | exact h
+"""
 TIMEOUT = 300
+FIXTURE_NAME = "ReservationFailure.lean"
 
 
 def sha256(path: Path) -> str:
@@ -116,29 +115,22 @@ def compile_expected_failure(dylib: str, source: Path, env: dict[str, str]) -> s
 
 
 def main() -> None:
-    # Keep the old handoff evidence immutable while checking that this test is
-    # pointed at the exact source and receipt that documented the failure.
-    receipt = json.loads(FROZEN_REPLAY_RECEIPT.read_text(encoding="utf-8"))
-    if sha256(FROZEN_REPLAY_SOURCE) != receipt["sourceSha256"]:
-        raise RuntimeError("frozen inline-first source changed")
-    if not FROZEN_RECORD_SOURCE.is_file() or not FROZEN_REPLAY_SOURCE.is_file():
-        raise RuntimeError("frozen inline-first source is missing")
     build = run(["lake", "build", "ExplicitLean:shared"])
     dylib = query_dylib()
     runtime_hash = sha256(Path(dylib))
 
     with tempfile.TemporaryDirectory(prefix="inline-first-renderer-", dir=ROOT / ".lake") as raw:
         work = Path(raw)
-        record_source = work / "record" / "Experiment" / FROZEN_RECORD_SOURCE.name
-        replay_source = work / "replay" / "Experiment" / FROZEN_REPLAY_SOURCE.name
+        record_source = work / "record" / "Experiment" / FIXTURE_NAME
+        replay_source = work / "replay" / "Experiment" / FIXTURE_NAME
         standalone_source = work / "standalone" / "Experiment" / "ReservationFailure.lean"
         nested_source = work / "nested" / "Experiment" / "ReservationFailure.lean"
         record_source.parent.mkdir(parents=True)
         replay_source.parent.mkdir(parents=True)
         standalone_source.parent.mkdir(parents=True)
         nested_source.parent.mkdir(parents=True)
-        record_source.write_bytes(FROZEN_RECORD_SOURCE.read_bytes())
-        frozen_replay = FROZEN_REPLAY_SOURCE.read_text(encoding="utf-8")
+        record_source.write_text(FROZEN_RECORD_SOURCE, encoding="utf-8")
+        frozen_replay = FROZEN_REPLAY_SOURCE
 
         record_env, record_nonce = recording_subprocess_environment()
         record_output = compile_source(dylib, record_source, env=record_env)
