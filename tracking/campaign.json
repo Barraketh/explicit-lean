@@ -29,8 +29,8 @@
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 744,
-    "provisionalCachedModules": 74,
+    "provisionalCachedOccurrences": 890,
+    "provisionalCachedModules": 90,
     "minimumAcceptedReportSchema": 10,
     "validationHold": "Metadata export hooks mutate a process-global symbol-frequency cache. Observational boundary/audit reads and equivalence to separate fresh compilations must be repaired and revalidated; existing generated candidates and proof checks are preserved."
   },
@@ -301,9 +301,15 @@
     },
     {
       "id": "preexisting-expression-metavariable-references",
-      "owner": "Sol private diagnosis",
+      "owner": "Sol private implementation after root-reviewed diagnosis",
       "status": "in_progress",
-      "description": "Three original source sites reference one unchanged pre-selector syntheticOpaque mvar in input/proof/result. Diagnose transitive occurs/type/delayed cycles before versioned support; no production codec yet."
+      "description": "Three original source diagnoses and96pure graph checks verified; all reference unchanged pre-selector ordinal1 syntheticOpaque holes. Bounded expression DAG v3 support underway with current raw graph traversal, exact snapshots, scope guards and before-assignment checks. Old closed codecs remain unchanged."
+    },
+    {
+      "id": "bounded-library-suggestions-observation",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Pinned frequency/trigger export observation avoids two cache writes without resetting caches or skipping metadata. Private8positive and1explicit callback counterexample; main fresh Lookmap10/Control16/ModifyLast5 all compile, compare and have remaining0. Root inputs,31artifacts, source/comments regeneration and scans independently checked. Acceptance hold remains for independent cold outputs."
     }
   ],
   "blockers": [
@@ -837,6 +843,15 @@
         ".lake/week-2026-08-31/mixed-sequence-main-regressions-verification.json",
         ".lake/week-2026-08-31/cold-metadata-yhpko__p/report.json"
       ]
+    },
+    {
+      "at": "2026-08-31T17:36:47.331238+00:00",
+      "summary": "Bounded metadata observation repair integrated; main fresh full Lookmap, Control and ModifyLast pass31calls with originals/comments preserved. Two pinned suggestion exporters no longer warm caches during boundary observation; arbitrary callback limitation explicit. Independent cold-output bridge catches synthetic first-export cache poisoning even when semantic source oracle succeeds. Expression-mvar diagnosis verified and bounded guarded implementation assigned.",
+      "evidence": [
+        ".lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+        ".lake/week-2026-08-31/module-data-observation-handoff-root-verification.json",
+        ".lake/week-2026-08-31/expression-mvar-diagnosis-root-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1301,7 +1316,7 @@
       "diagnosisSnapshot": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis",
       "knownCause": "CommandAudit.declarations -> mkModuleData -> symbolFrequency export -> localSymbolFrequencyMapRef; Boundary/RealizationCodec and Boundary metadata comparison also invoke mkModuleData mid-elaboration.",
       "scope": "Current source-pair oracle results and first certified cone remain provisional for complete fresh-compilation metadata semantics. Byte hashes, audit identities and passing proof compilation evidence remain valid.",
-      "status": "audit-repaired-boundary-export-reader-in-progress",
+      "status": "bounded-observer-repaired-cold-output-bridge-in-progress",
       "diagnosisManifest": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis/.lake/lookmap-diagnosis/handoff-tljlgnu9/manifest.json",
       "diagnosisManifestSha256": "5f39e8eb73ee682d3284d6daa7b4d21b898467ceb91d9861eaf3dc5f06a84aba",
       "diagnosisVerification": ".lake/week-2026-08-31/audit-export-observation-handoff-root-verification.json",
@@ -1312,7 +1327,11 @@
         "sha256": "94c67f473189bad9bb5c05520ed5fb1f90d4b4c9240fab3ad1e1b20ba11f1867",
         "result": "Two self comparisons pass; original cold stock/applied differs in symbolFrequency and sineQueNon in all3views, typedLCNF and extraConstNames equal. No root import/initialization.",
         "design": ".lake/week-2026-08-31/cold-artifact-comparison-design.md"
-      }
+      },
+      "boundaryRepairVerification": ".lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+      "boundaryRepairHandoffVerification": ".lake/week-2026-08-31/module-data-observation-handoff-root-verification.json",
+      "boundaryRepairScope": "Substitutes only pinned symbolFrequency/sineQueNon export computations without their cache writes. Other callbacks remain unchanged and can mutate caches; no generic observational purity claim.",
+      "coldBridgePrototype": "Applied-first normal compiler outputs; exact same-source family equality against independently cold ordinary and audited compilations. Synthetic global-cache exporter proves same-process success can hide different cold stock metadata; new family comparison rejects it."
     },
     "mixedRealizationSequences": {
       "mainEvidence": ".lake/week-2026-08-31/mixed-sequence-main-evidence-rtu9vyr5/manifest.json",
@@ -1321,6 +1340,46 @@
       "privateHandoffVerification": ".lake/week-2026-08-31/mixed-sequence-handoff-root-verification.json",
       "mainExtraGuard": "Lean active registration rejects private names, matching Python contract.",
       "excludedAttempt": "control-z8bwswt8 loaded stale shared library; explicit shared rebuild corrected test setup; fresh rerun controls passed.",
+      "wholeMathlib": false
+    },
+    "boundedModuleDataObservation": {
+      "mainVerification": ".lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+      "mainVerificationSha256": "dc40a2a541c370b799e82a68470bfe9636070d333b273b6df0c541bd4c874ff8",
+      "modules": [
+        {
+          "module": "Mathlib/Data/List/Lookmap.lean",
+          "calls": 10,
+          "report": "/Users/ptsier/projects/explicit-lean/.lake/observational-data/lookmap-r9diq3hd/report.json",
+          "sha256": "fd03994c851a6b84c84f86f0dbd89d1d6b8c7636aa037c2812e5eaca173d00b2",
+          "declarations": 33,
+          "publicDeclarations": 20,
+          "extensionStates": 22,
+          "remainingCalls": 0
+        },
+        {
+          "module": "Mathlib/Control/Basic.lean",
+          "calls": 16,
+          "report": "/Users/ptsier/projects/explicit-lean/.lake/observational-data/Mathlib-Control-Basic-sabzb0u3/report.json",
+          "sha256": "4afd5e9ad0f187320cdde09c55a7afbc5a28869ad0bbafe468aa7971e8a6f7e7",
+          "declarations": 62,
+          "publicDeclarations": 56,
+          "extensionStates": 39,
+          "remainingCalls": 0
+        },
+        {
+          "module": "Mathlib/Data/List/ModifyLast.lean",
+          "calls": 5,
+          "report": "/Users/ptsier/projects/explicit-lean/.lake/observational-data/Mathlib-Data-List-ModifyLast-cvna1hf0/report.json",
+          "sha256": "dd458c8e30a9de35bd19dd4bba2558be4a472e61c4aed3e5916cb0f3bca1e43f",
+          "declarations": 16,
+          "publicDeclarations": 9,
+          "extensionStates": 19,
+          "remainingCalls": 0
+        }
+      ],
+      "privateHandoffSha256": "48c2244114648cdf0e16b77f6441ed305e5256cdae8b91ba929be708154674fa",
+      "privatePositiveCacheControls": 8,
+      "retainedCallbackCounterexample": true,
       "wholeMathlib": false
     }
   },
@@ -1334,19 +1393,19 @@
     "scope": "six failed roots from schema8 frontier; diagnostic grouping only",
     "modules": {
       "Mathlib/Order/Interval/Set/Defs.lean": "declaration oracle name mismatch; retest helper+generator fix",
-      "Mathlib/Data/List/ModifyLast.lean": "Mixed fourth boundary now supported by versioned sequence; main focused original-source checks pass. Private full5site compilation remains provisional under metadata hold; combined fresh runtime rerun pending.",
+      "Mathlib/Data/List/ModifyLast.lean": "Fresh main observer+mixed runtime: all5calls record/apply, 16declarations/9public/19extension states compare, remaining0. Source/comments regenerated; provisional under cold-output/translated-tree acceptance hold. .lake/week-2026-08-31/module-data-observation-main-root-verification.json",
       "Mathlib/Data/String/Lemmas.lean": "matcher equation capture-complete-local state mismatch",
       "Mathlib/Data/Int/Init.lean": "Main bounded7-site/148-declaration pipeline passes; strict actual-import remaining scan0. Await fresh closed schema9 report.",
-      "Mathlib/Data/List/Lookmap.lean": "Combinedartifact4/report10 boundedpipelinepasses10calls,33declarations20public22extensionstates,remaining0. Evidence .lake/boundary-materialization/integrated-groups-_ze7z1e2. Requires frozen manifest/worker rerun for indexed acceptance.",
-      "Mathlib/Control/Basic.lean": "Confirmed missing cached joinM.eq_1 activation before a fresh ordinary helper. Six fresh processes isolate generator1\u21922 for activation, then2\u21923 for the helper. Requires authenticated ordered composition, not counter changes. Evidence: .lake/week-2026-08-31/control-generator-diagnosis/diagnosis.md; independently reverified."
+      "Mathlib/Data/List/Lookmap.lean": "Fresh main observer+mixed runtime: all10calls record/apply, 33declarations/20public/22extension states compare, remaining0. Source/comments regenerated; provisional under cold-output/translated-tree acceptance hold. .lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+      "Mathlib/Control/Basic.lean": "Fresh main observer+mixed runtime: all16calls record/apply, 62declarations/56public/39extension states compare, remaining0. Source/comments regenerated; provisional under cold-output/translated-tree acceptance hold. .lake/week-2026-08-31/module-data-observation-main-root-verification.json"
     }
   },
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 51891679232,
-    "checkedAt": "2026-08-31T16:48:11.809480+00:00",
+    "lastFreeBytes": 43674427392,
+    "checkedAt": "2026-08-31T17:36:47.331238+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T17:19:59.201576+00:00"
+  "updatedAt": "2026-08-31T17:36:47.331238+00:00"
 }

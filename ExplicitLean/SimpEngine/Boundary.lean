@@ -2196,8 +2196,8 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
         (Match.matchEqnsExt.getState (asyncMode := .async .asyncEnv)
           (asyncDecl := name) appliedEnvironment) do
       throwError s!"boundary_comparison_local_match_eqns_state:{name}"
-  let stockModuleData ← Lean.mkModuleData stockEnvironment .private
-  let appliedModuleData ← Lean.mkModuleData appliedEnvironment .private
+  let stockModuleData ← observePrivateModuleData stockEnvironment
+  let appliedModuleData ← observePrivateModuleData appliedEnvironment
   compareBoundaryPersistentExtensions stockModuleData appliedModuleData
   compareBoundaryTagAttribute basis "backwardDefeqAttr" Lean.backwardDefeqAttr
     stockEnvironment appliedEnvironment stockModuleData appliedModuleData

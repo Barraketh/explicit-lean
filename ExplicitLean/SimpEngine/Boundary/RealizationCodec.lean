@@ -1,6 +1,7 @@
 module
 prelude
 
+public meta import ExplicitLean.SimpEngine.Boundary.ModuleDataObservation
 public meta import ExplicitLean.SimpEngine.Boundary.EquationCodec
 public meta import ExplicitLean.SimpEngine.Boundary.MatcherCodec
 public meta import Lean.Meta.Tactic.AuxLemma
@@ -125,7 +126,7 @@ private def memberMetadata (env : Environment) (member : AsyncConst) : MetaM Jso
   unless aux.lemmas.isEmpty do throwError "activation_nonempty_aux_cache"
   let matchState := boundaryMatchStateJson (Match.matchEqnsExt.getState view)
   let eqnState := equationStateJson (eqnsExt.getState view)
-  let data ← Lean.mkModuleData view .private
+  let data ← observePrivateModuleData view
   let mut entries := #[]
   for (name, values) in data.entries.qsort (fun a b => Name.quickLt a.1 b.1) do
     -- The same three diagnostic/private-proof bookkeeping exceptions used by
