@@ -1,5 +1,10 @@
 # Explicit Lean roadmap
 
+The August 31–September 8 delivery objective in [WEEKLY.md](WEEKLY.md) now
+governs active work: complete search-free replacement, originals preserved as
+comments, then readability. The user permits revising the implementation choices
+below. Current ownership and progress are in `tracking/campaign.json`.
+
 This document is the authoritative product and engineering contract. The
 existing schema-27 implementation is retained as legacy evidence; its frozen
 contract in [SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md) does not override

@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "campaign": "search-free-mathlib-2026-08-31",
+  "deadline": "2026-09-08T00:00:00-07:00",
+  "phase": "infrastructure",
+  "branch": "codex/search-free-mathlib-2026-08-31",
+  "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
+  "machine": "local-mac-only",
+  "budget": {
+    "resetDate": "2026-09-07",
+    "currentWindowAllowance": "all remaining",
+    "nextWindowMaximumPercent": 25,
+    "nextWindowDispatchStopPercent": 22,
+    "usageSource": "codex app-server account/rateLimits/read",
+    "unknownUsageAfterReset": "stop",
+    "paidResourcesAuthorized": false,
+    "initialWindowResetsAt": 1788764817,
+    "initialUsedPercent": 1,
+    "guardCommand": "python3 Experiment/campaign_budget.py check"
+  },
+  "coverage": {
+    "currentCorpusTotal": null,
+    "verifiedTranslatedOccurrences": 0,
+    "completeTranslatedTreeBuilt": false,
+    "note": "Historical/prototype evidence is not campaign closure."
+  },
+  "work": [
+    {
+      "id": "orchestration",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Tracking, usage guard, recurring continuation, integration"
+    },
+    {
+      "id": "review-fixes",
+      "owner": "/root/review_fixes",
+      "status": "in_progress",
+      "description": "Protect input manifests and correct antiquotation classification"
+    },
+    {
+      "id": "occurrence-index",
+      "owner": "/root/occurrence_index",
+      "status": "in_progress",
+      "description": "SQLite index, cached module/results identities, incremental queries"
+    },
+    {
+      "id": "fast-lean-tools",
+      "owner": "/root/fast_lean_tools",
+      "status": "in_progress",
+      "description": "Avoid repeated --run elaboration for inventory/scope/oracle tools"
+    },
+    {
+      "id": "original-comments",
+      "owner": "coordinator",
+      "status": "in_progress",
+      "description": "Preserve each original replaced call as a comment"
+    },
+    {
+      "id": "corpus-translation",
+      "owner": "coordinator",
+      "status": "pending",
+      "description": "Fresh inventory, broad shards, reusable code, full translated tree"
+    },
+    {
+      "id": "readability",
+      "owner": null,
+      "status": "pending",
+      "description": "After explicit closure, mine and normalize common replacement patterns"
+    }
+  ],
+  "blockers": [],
+  "nextActions": [
+    "Finish source/comment regression and integrate reviewed Luna infrastructure",
+    "Commit toolchain changes, generate fresh current-contract canary manifests",
+    "Expand translation shards and resolve reusable source/execution ownership"
+  ],
+  "checkpoints": [
+    {
+      "at": "2026-08-31T08:25:45.764090+00:00",
+      "summary": "Campaign contract, live read-only usage guard, hourly heartbeat and three Luna workstreams established. Weekly usage 1%; reset 2026-09-07T07:06:57Z.",
+      "checks": [
+        "check_campaign_budget.py passed",
+        "live campaign_budget.py check permits dispatch"
+      ]
+    },
+    {
+      "at": "2026-08-31T08:35:57.646673+00:00",
+      "summary": "Original call comments and linear source-gap verifier implemented. AddConstMap diagnostic rendered and checked 308670 bytes in 0.015s and compiled in 7.13s; uses historical artifacts, not fresh campaign closure. Weekly usage 2%.",
+      "checks": [
+        "check_original_comments.py passed",
+        "check_source_gaps.py passed (1.16MB repeated-output corruption checks in 0.007s)",
+        "check_campaign_budget.py and live budget check passed"
+      ],
+      "pending": [
+        "Full 17-occurrence source gate running; three Luna infrastructure reviews pending"
+      ]
+    }
+  ],
+  "automationId": "complete-search-free-mathlib-by-sep-8"
+}
