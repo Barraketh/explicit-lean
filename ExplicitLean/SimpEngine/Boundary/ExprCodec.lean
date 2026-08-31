@@ -31,24 +31,31 @@ def decodeBoundaryName (json : Json) : Except String Name := do
     | .arr #[.str "n", value] => return .num name (← value.getNat?)
     | _ => throw "invalid expression name"
 
-private partial def encodeLevel (level : Level) : MetaM Json := do
+private partial def encodeLevel (references : Array LMVarId) (level : Level) : MetaM Json := do
   match ← instantiateLevelMVars level with
   | .zero => return .arr #[.str "z"]
-  | .succ level => return .arr #[.str "s", ← encodeLevel level]
-  | .max lhs rhs => return .arr #[.str "max", ← encodeLevel lhs, ← encodeLevel rhs]
-  | .imax lhs rhs => return .arr #[.str "imax", ← encodeLevel lhs, ← encodeLevel rhs]
+  | .succ level => return .arr #[.str "s", ← encodeLevel references level]
+  | .max lhs rhs => return .arr #[.str "max", ← encodeLevel references lhs, ← encodeLevel references rhs]
+  | .imax lhs rhs => return .arr #[.str "imax", ← encodeLevel references lhs, ← encodeLevel references rhs]
   | .param name => return .arr #[.str "p", encodeBoundaryName name]
-  | .mvar _ => throwError "boundary_expr_unresolved_universe"
+  | .mvar id =>
+      let some index := references.findIdx? (· == id)
+        | throwError "boundary_expr_unresolved_universe"
+      return .arr #[.str "r", toJson index]
 
-private def decodeLevel : Nat → Json → Except String Level
+private def decodeLevel (references : Array LMVarId) : Nat → Json → Except String Level
   | 0, _ => throw "expression universe nesting limit exceeded"
   | _ + 1, .arr #[.str "z"] => return .zero
-  | fuel + 1, .arr #[.str "s", level] => return .succ (← decodeLevel fuel level)
+  | fuel + 1, .arr #[.str "s", level] => return .succ (← decodeLevel references fuel level)
   | fuel + 1, .arr #[.str "max", lhs, rhs] =>
-      return .max (← decodeLevel fuel lhs) (← decodeLevel fuel rhs)
+      return .max (← decodeLevel references fuel lhs) (← decodeLevel references fuel rhs)
   | fuel + 1, .arr #[.str "imax", lhs, rhs] =>
-      return .imax (← decodeLevel fuel lhs) (← decodeLevel fuel rhs)
+      return .imax (← decodeLevel references fuel lhs) (← decodeLevel references fuel rhs)
   | _ + 1, .arr #[.str "p", name] => return .param (← decodeBoundaryName name)
+  | _ + 1, .arr #[.str "r", index] => do
+      let index ← index.getNat?
+      let some id := references[index]? | throw "unknown boundary universe reference"
+      return .mvar id
   | _, _ => throw "invalid expression universe"
 
 private def encodeBinderInfo : BinderInfo → Json
@@ -66,6 +73,7 @@ private def decodeBinderInfo (json : Json) : Except String BinderInfo := do
   | _ => throw "invalid expression binder information"
 
 private structure EncodeState where
+  references : Array LMVarId := #[]
   nodes : Array Json := #[]
   memo : Std.HashMap Expr Nat := {}
 
@@ -76,6 +84,7 @@ private partial def encodeExpr (expr : Expr) : EncodeM Nat := do
     return index
   if let .mdata _ child := expr then
     return ← encodeExpr child
+  let references := (← get).references
   let node : Json ← match expr with
     | .bvar index => pure <| .arr #[.str "b", toJson index]
     | .fvar id => do
@@ -83,8 +92,8 @@ private partial def encodeExpr (expr : Expr) : EncodeM Nat := do
           | throwError "boundary_expr_unknown_local"
         pure <| .arr #[.str "f", toJson decl.index]
     | .mvar _ => throwError "boundary_expr_unresolved_metavariable"
-    | .sort level => do pure <| .arr #[.str "s", ← encodeLevel level]
-    | .const name levels => do pure <| .arr #[.str "c", encodeBoundaryName name, toJson (← levels.mapM (fun level => encodeLevel level))]
+    | .sort level => do pure <| .arr #[.str "s", ← encodeLevel references level]
+    | .const name levels => do pure <| .arr #[.str "c", encodeBoundaryName name, toJson (← levels.mapM (fun level => encodeLevel references level))]
     | .app fn arg => do pure <| .arr #[.str "a", toJson (← encodeExpr fn), toJson (← encodeExpr arg)]
     | .lam name type body info => do
         pure <| .arr #[.str "l", encodeBoundaryName name, encodeBinderInfo info,
@@ -101,13 +110,33 @@ private partial def encodeExpr (expr : Expr) : EncodeM Nat := do
         pure <| .arr #[.str "p", encodeBoundaryName name, toJson index, toJson (← encodeExpr child)]
     | .mdata .. => unreachable!
   let index := (← get).nodes.size
-  modify fun state => { nodes := state.nodes.push node, memo := state.memo.insert expr index }
+  modify fun state => { nodes := state.nodes.push node, memo := state.memo.insert expr index, references := state.references }
   return index
 
 def encodeBoundaryExpr (expr : Expr) : MetaM String := do
   let expr ← instantiateMVars expr
   let (root, state) ← (encodeExpr expr).run {}
   return (Json.arr #[.str "expr_dag_v1", .arr state.nodes, toJson root]).compress
+
+private def validateUniverseReferences (references : Array LMVarId) : MetaM Unit := do
+  let mctx ← getMCtx
+  let mut seen : Std.HashSet LMVarId := {}
+  for id in references do
+    unless mctx.lDecls.contains id do
+      throwError "boundary_expr_unknown_reference_universe"
+    if seen.contains id then
+      throwError "boundary_expr_duplicate_reference_universe"
+    seen := seen.insert id
+
+/-- Version two explicitly refers to the pre-boundary selector's reachable
+universe variables. It neither creates variables nor infers their assignments. -/
+def encodeBoundaryExprWithUniverses (expr : Expr) (references : Array LMVarId) :
+    MetaM String := do
+  validateUniverseReferences references
+  let expr ← instantiateMVars expr
+  let (root, state) ← (encodeExpr expr).run { references }
+  return (Json.arr #[.str "expr_dag_v2", toJson references.size,
+    .arr state.nodes, toJson root]).compress
 
 private def childAt (nodes : Array Expr) (json : Json) : Except String Expr := do
   let index ← json.getNat?
@@ -123,7 +152,7 @@ private def requireConstant (env : Environment) (name : Name) : Except String Un
     throw s!"expression constant is unavailable without generation: {name}"
 
 private def decodeNode (env : Environment) (locals : Std.HashMap Nat FVarId)
-    (nodes : Array Expr) (json : Json) : Except String Expr := do
+    (references : Array LMVarId) (nodes : Array Expr) (json : Json) : Except String Expr := do
   match json with
   | .arr #[.str "b", index] => return mkBVar (← index.getNat?)
   | .arr #[.str "f", index] =>
@@ -131,11 +160,11 @@ private def decodeNode (env : Environment) (locals : Std.HashMap Nat FVarId)
       let some id := locals[index]?
         | throw "expression local index is unavailable"
       return mkFVar id
-  | .arr #[.str "s", level] => return mkSort (← decodeLevel 256 level)
+  | .arr #[.str "s", level] => return mkSort (← decodeLevel references 256 level)
   | .arr #[.str "c", name, levels] =>
       let name ← decodeBoundaryName name
       requireConstant env name
-      return mkConst name (← (← levels.getArr?).toList.mapM (decodeLevel 256))
+      return mkConst name (← (← levels.getArr?).toList.mapM (decodeLevel references 256))
   | .arr #[.str "a", fn, arg] => return mkApp (← childAt nodes fn) (← childAt nodes arg)
   | .arr #[.str "l", name, info, type, body] =>
       return mkLambda (← decodeBoundaryName name) (← decodeBinderInfo info) (← childAt nodes type) (← childAt nodes body)
@@ -152,7 +181,8 @@ private def decodeNode (env : Environment) (locals : Std.HashMap Nat FVarId)
       return mkProj name (← index.getNat?) (← childAt nodes child)
   | _ => throw "invalid expression node"
 
-def decodeBoundaryExpr (source : String) : MetaM Expr := do
+private def decodeBoundaryExprCore (source : String)
+    (references? : Option (Array LMVarId)) : MetaM Expr := do
   if source.utf8ByteSize > 64 * 1024 * 1024 then
     throwError "boundary_expr_decode_error: expression source size limit exceeded"
   let lctx ← getLCtx
@@ -163,16 +193,30 @@ def decodeBoundaryExpr (source : String) : MetaM Expr := do
       if locals.contains decl.index then
         throw "ambiguous expression local declaration index"
       locals := locals.insert decl.index decl.fvarId
-    let .arr #[.str "expr_dag_v1", .arr rawNodes, root] ← Json.parse source
-      | throw "invalid expression encoding"
+    let json ← Json.parse source
+    let (rawNodes, root) ← match references?, json with
+      | none, .arr #[.str "expr_dag_v1", .arr rawNodes, root] => pure (rawNodes, root)
+      | some refs, .arr #[.str "expr_dag_v2", count, .arr rawNodes, root] => do
+          unless (← count.getNat?) == refs.size do
+            throw "boundary universe reference count mismatch"
+          pure (rawNodes, root)
+      | _, _ => throw "invalid expression encoding"
     if rawNodes.size > 2000000 then
       throw "expression node count limit exceeded"
     let mut nodes := #[]
     for node in rawNodes do
-      nodes := nodes.push (← decodeNode env locals nodes node)
+      nodes := nodes.push (← decodeNode env locals (references?.getD #[]) nodes node)
     childAt nodes root
   match result with
   | .ok expr => return expr
   | .error error => throwError "boundary_expr_decode_error: {error}"
+
+def decodeBoundaryExpr (source : String) : MetaM Expr :=
+  decodeBoundaryExprCore source none
+
+def decodeBoundaryExprWithUniverses (source : String) (references : Array LMVarId) :
+    MetaM Expr := do
+  validateUniverseReferences references
+  decodeBoundaryExprCore source (some references)
 
 end ExplicitLean.SimpEngine.Boundary

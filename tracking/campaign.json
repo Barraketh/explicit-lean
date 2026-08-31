@@ -20,18 +20,18 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 98,
+    "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle, plus local matcher and auxiliary-cache state comparison (report schema 8). Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
+    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require the current materialization report schema (9), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling. Remaining-call acceptance scans now load the actual source imports; aggregate Mathlib scanning remains a discovery optimization.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 15,
-    "provisionalCachedOccurrences": 341,
-    "provisionalCachedModules": 33,
-    "minimumAcceptedReportSchema": 8
+    "verifiedTranslatedModules": 0,
+    "provisionalCachedOccurrences": 646,
+    "provisionalCachedModules": 65,
+    "minimumAcceptedReportSchema": 9
   },
   "work": [
     {
@@ -150,9 +150,9 @@
     },
     {
       "id": "captured-public-theorems",
-      "owner": "coordinator with Luna controls",
-      "status": "in_progress",
-      "description": "Standalone checked public theorem/cache/tag codec copied to main after12prototype controls/30independently verified hashes. No production action integration yet."
+      "owner": "coordinator with reviewed agent implementation",
+      "status": "completed",
+      "description": "Superseded standalone action design by the integrated ordinary local theorem bundle, covering public and private checked helper declarations."
     },
     {
       "id": "captured-matcher-bundles",
@@ -168,27 +168,63 @@
     },
     {
       "id": "captured-local-helper-bundle",
-      "owner": "/root/unresolved_probe_finish",
-      "status": "in_progress",
-      "description": "Exact ordinary public/private helper bodies, typed cache/tag/export effects and isolated recording trials. Actual Prod module oracle and original/record/replay next-name agreement pass. Selector2 now binds generator state with caught-error negative; final controls pending. Report minimum9 planned."
+      "owner": "coordinator with reviewed agent implementation",
+      "status": "completed",
+      "description": "Integrated ordinary public/private helper actions and exact auxiliary name-generator state, with isolated recording trials. Final main19helper and4selector controls passed; immutable prototype387hashes/38nonce logs independently checked."
     },
     {
       "id": "pre-boundary-universe-references",
-      "owner": "/root/splitter_failure",
-      "status": "in_progress",
-      "description": "Root prototype supports selector-reachable existing universe variables through expr_dag_v2/artifact3; nine codec processes and six structural negatives passed. Single ExtraDegeneracy call (two executions) passed168-declaration oracle; Ore singlecall records/replays but helper naming still fails. Luna review/promotion in progress."
+      "owner": "coordinator with reviewed agent implementation",
+      "status": "completed",
+      "description": "Integrated expr_dag_v2/artifact3 references to existing selector-reachable universe variables. Main9codec controls and strict Ore57/Extra168declaration comparisons passed; declaration bodies keep closed v1 encoding."
     },
     {
       "id": "sparse-matcher-helper",
       "owner": "coordinator",
       "status": "in_progress",
-      "description": "Root isolated prototype now replays exact sparse helper definition/metadata/cache and matcher bundle v2. Standalone fresh/cached positive passes; negative matrix finishing. No production partition/wire integration yet. Guard falseacceptance independently verified; Luna review queued."
+      "description": "Isolated exact sparse helper/matcher-v2 codec has16fresh Lean controls and21wire controls. Guard integrated in main with paired old/current5case matrix; sparse action classification/wire integration remains separate pending work."
     },
     {
       "id": "translated-schema8-forest",
       "owner": "/root/tree_build_plan",
+      "status": "completed",
+      "description": "Independent verification passed:80translated modules,15source roots,98replaced calls,402hashes,80nonce logs and15full shard evidence checks. All80outputs reused; one deliberately corrupted output was rebuilt. Historical schema8 compilation evidence only; actual translated-output semantic oracles and current-schema reruns still required."
+    },
+    {
+      "id": "preexisting-pending-recursion",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "All fields of existing pending recursion must remain exact on both sides of the common pre-state; new/changed/deleted entries remain rejected. Narrow validated recursive-call diagnostic position ranks allow source relocation. Main11controls including26typed/6routing/5malformed/3full-comparator cases and Int.Init7sites/148declarations passed."
+    },
+    {
+      "id": "sparse-cache-state-guard",
+      "owner": "coordinator with Luna review",
+      "status": "completed",
+      "description": "Typed caller-local and all completed async SparseCases cache equality. Retargeted private helper fixture to avoid earlier prefix restriction; reran old coherent runtime and main runtime:2accepted/3specific cache rejections, identical5source pairs, archived inputs."
+    },
+    {
+      "id": "replay-syntax-keywords",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Replay outcome category uses symbol behavior so failure/apply_encoded words do not reserve ordinary terms or binders. Source17includes a parser regression. Control.Basic now reaches a separate generator mismatch rather than failing to parse."
+    },
+    {
+      "id": "actual-import-remaining-audit",
+      "owner": "coordinator; Sol reproduction",
+      "status": "completed",
+      "description": "Actual-header parser fix and Python default integrated. Reduced3case control passed; exact partial Lookmap scan9 and Int.Init remaining0; source17 passed under new default. Luna read-only review found no callsite omission. Aggregate counts remain diagnostic, not acceptance."
+    },
+    {
+      "id": "multiple-matcher-bundles",
+      "owner": "/root/unresolved_probe_finish",
       "status": "in_progress",
-      "description": "General strict forest runner consumes successful frozen schema8 reports plus fresh zero-call closure, validates imports without stock Mathlib fallback and checks incremental evidence reuse. Fix-review in progress."
+      "description": "Isolated disjoint multiple bundles pass fresh controls and first Lookmap site compile/oracle; full module still rejects later cached-realization generator effects."
+    },
+    {
+      "id": "cached-realization-activation",
+      "owner": "/root/tree_build_plan",
+      "status": "in_progress",
+      "description": "Diagnose generator mismatches with empty checked-declaration delta. Sol observed10existing members activated on caller branch in4groups at later Lookmap sites; Luna comparing Control.Basic fish_pipe. No counter setter or weakened comparator."
     }
   ],
   "blockers": [
@@ -221,13 +257,19 @@
       "id": "local-auxiliary-cache-state",
       "status": "resolved",
       "detail": "Typed local+async comparison plus13controls and old-runtime falseacceptance witnesses. Schema8minimum; prior module/cone reports remain provisional until current frozen reruns."
+    },
+    {
+      "id": "final-grammar-coverage-audit",
+      "status": "open",
+      "detail": "Actual header imports fix the observed silent replay-grammar omission. Before whole-tree acceptance, audit source-local syntax/macro declarations too; fast incremental parser currently elaborates notation/context commands only. A conservative token coverage cross-check or exact full command-context audit may be needed. No known omitted source-local case is being exempted."
     }
   ],
   "nextActions": [
-    "Finish schema7 diagnostic batches while integrating schema8 aux-cache guards and matcher support. Rerun acceptance under final frozen implementation.",
-    "Keep full diagnostic source inventory and unresolved backlog; defer another full manifest run until the diverse batch stabilizes the implementation.",
-    "Resolve reusable source/execution ownership and metaprogram equivalence rather than bypassing the shard rejection; collect positive unresolved caller evidence.",
-    "Build next strict translated layer from .lake/week-2026-08-31/schema8-frontier-selection.json:91modules,21source-call modules,146calls; support sources have zero simp calls.",
+    "Freeze combined artifact3/selector2/report9 after actual-import source audit passes. Launch schema9 expansion manifest201modules/131roots and full fresh manifest8260modules/83414expected calls;4modules/11calls remain separately tracked, never exempted.",
+    "Old schema7-diverse batch is diagnostic/provisional. Avoid replanning its unfinished module leases; first schema9 priority roots already completed by old workers.",
+    "Integrate sparse matcher-v2 and disjoint multiple-bundle support after their bounded reviews. Address explicit activation of completed cached realizations without arbitrary generator changes.",
+    "Use actual source-header imports for all single-file remaining-call audits and final translated-tree audits. Full translated-output semantic comparison remains required.",
+    "Resolve reusable executable66calls and5unresolvedquotations, preserve all originals and source/execution ownership; no finite caller-table equivalence claims.",
     "After full explicit coverage and full-tree validation, improve readability and then other tactics if time remains."
   ],
   "checkpoints": [
@@ -538,6 +580,20 @@
         "Generator/sparse report9 integration will make existing schema8 results provisional.",
         "Full translated Mathlib tree not yet built."
       ]
+    },
+    {
+      "at": "2026-08-31T14:01:19.436978+00:00",
+      "summary": "Combined engine tests passed for helpers, universe references, unchanged pending recursion, matcher replay, and caught errors. Int.Init7whole-source calls/148declarations passed; Control.Basic progressed from parser collision to explicit generator mismatch. Remaining-call audit bug reproduced and fixed; final strict source gate pending. Schema9invalidates older counts; no complete Mathlib claim. Final strict source17 and native cache invalidation checks passed; whole-tree parser-context audit remains explicit final work.",
+      "evidence": [
+        ".lake/week-2026-08-31/helper-integration-verification.json",
+        ".lake/week-2026-08-31/letrec-integration-verification.json",
+        ".lake/week-2026-08-31/combined-pre-letrec-evidence/manifest.json",
+        ".lake/week-2026-08-31/schema8-forest-verification.json",
+        ".lake/sparse-probe/promoted-controls/controls-rj7tcx_c/report.json",
+        ".lake/inventory-header-controls/controls-gt96p5_p/report.json",
+        ".lake/week-2026-08-31/header-inventory-source-gate-2.log",
+        ".lake/week-2026-08-31/header-inventory-int-recheck.log"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -779,12 +835,12 @@
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 98,
+    "verifiedTranslations": 0,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
     "commit": "5f02c0c",
-    "searchFreeEncoding": "lean_expr_dag_v1",
+    "searchFreeEncoding": "lean_expr_dag_v2 (boundary proofs with existing universe references); closed lean_expr_dag_v1 declaration bodies",
     "representativeMathlibModules": 5,
     "representativeMathlibOccurrences": 66,
     "nestedMathlibOccurrences": 10,
@@ -812,12 +868,37 @@
         "status": "compiled_provisional_pending_schema8_aux_cache_check",
         "wholeMathlib": false,
         "independentVerification": ".lake/week-2026-08-31/schema7-cone-verification.json"
+      },
+      {
+        "commit": "7839c0f",
+        "modules": 80,
+        "replacedCalls": 98,
+        "report": ".lake/week-2026-08-31/translated-schema8-forest-all/report.json",
+        "reportSha256": "418f796705f89e3e327472483b97a485b6052fc4b2b2963e38bf6af548bbeb74",
+        "status": "compiled_provisional_pending_schema9_and_translated_output_oracles",
+        "wholeMathlib": false,
+        "independentVerification": ".lake/week-2026-08-31/schema8-forest-verification.json"
       }
-    ]
+    ],
+    "currentArtifactSchema": 3,
+    "currentSelectorSchema": 2,
+    "minimumReportSchema": 9
   },
   "failureTriage": {
     "command": "python3 Experiment/campaign_failures.py",
     "latestReport": ".lake/week-2026-08-31/failure-families.json",
     "scope": "Diagnostic family grouping only; preserves implementation identities and log hashes, not proof of common root cause."
+  },
+  "frontierFailurePlan": {
+    "frozenImplementation": "7839c0f",
+    "scope": "six failed roots from schema8 frontier; diagnostic grouping only",
+    "modules": {
+      "Mathlib/Order/Interval/Set/Defs.lean": "declaration oracle name mismatch; retest helper+generator fix",
+      "Mathlib/Data/List/ModifyLast.lean": "sparse helper; standalone codec passes16controls, production integration pending",
+      "Mathlib/Data/String/Lemmas.lean": "matcher equation capture-complete-local state mismatch",
+      "Mathlib/Data/Int/Init.lean": "Main bounded7-site/148-declaration pipeline passes; strict actual-import remaining scan0. Await fresh closed schema9 report.",
+      "Mathlib/Data/List/Lookmap.lean": "multiple matcher bundles currently unsupported",
+      "Mathlib/Control/Basic.lean": "Reserved failure keyword fixed; current full pipeline rejects fish_pipe auxiliary generator stock2/applied1, cached branch activation under investigation."
+    }
   }
 }

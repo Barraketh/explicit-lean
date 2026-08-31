@@ -80,6 +80,15 @@ private def encodeOption (f : α → String) : Option α → String
 
 private def rawName (name : Name) : String := name.toString
 
+private def structuralName : Name → String
+  | .anonymous => encodeFields "anonymous" #[]
+  | .str parent component => encodeFields "str" #[structuralName parent, component]
+  | .num parent component => encodeFields "num" #[structuralName parent, toString component]
+
+private def declNameGeneratorPayload (generator : DeclNameGenerator) : String :=
+  encodeFields "aux-decl-name-generator-v1" #[structuralName generator.namePrefix,
+    toString generator.idx, encodeList "parents" (generator.parentIdxs.map toString)]
+
 private structure BoundaryCanonicalIds where
   fvars : Std.HashMap FVarId String := {}
   nextFreeFVar : Nat := 0
@@ -91,6 +100,9 @@ private structure BoundaryCanonicalIds where
   lmvarOrder : Array LMVarId := #[]
   missingMVars : Array MVarId := #[]
   missingLMVars : Array LMVarId := #[]
+  observeRecAppPositions : Bool := false
+  recAppPositions : Array Nat := #[]
+  recAppPositionOrder? : Option (Array Nat) := none
 
 private abbrev RawM := StateT BoundaryCanonicalIds MetaM
 
@@ -146,6 +158,34 @@ private def rawLMVarId (id : LMVarId) : RawM String := do
   return canonical
 
 private def rawBinderInfo (binderInfo : BinderInfo) : String := binderInfoTag binderInfo
+
+/-- Only pending-recursion routing quotients relocation of pinned recursive-call
+    diagnostics. All other metadata remains intact. Ranking positions preserves
+    equality, distinctness, and source order without binding byte offsets. -/
+private def rawExprMetadata (data : MData) : RawM String := do
+  unless (← get).observeRecAppPositions do return toString data
+  let syntaxEntries := data.entries.filter (·.1 == `_recApp)
+  let positionEntries := data.entries.filter (·.1 == `_recAppPos)
+  if syntaxEntries.isEmpty && positionEntries.isEmpty then return toString data
+  unless syntaxEntries.length == 1 do
+    throwError "boundary_selector_invalid_rec_app_metadata"
+  let some (.ofSyntax recSyntax) := data.find `_recApp
+    | throwError "boundary_selector_invalid_rec_app_metadata"
+  match recSyntax.getPos?, positionEntries with
+  | none, [] => return toString data
+  | some position, [(_, .ofNat offset)] =>
+      unless position.byteIdx == offset do
+        throwError "boundary_selector_invalid_rec_app_metadata"
+      match (← get).recAppPositionOrder? with
+      | none =>
+          unless (← get).recAppPositions.contains offset do
+            modify fun state => {state with recAppPositions := state.recAppPositions.push offset}
+          return toString data
+      | some positions =>
+          let some ordinal := positions.findIdx? (· == offset)
+            | throwError "boundary_selector_rec_app_position_domain_changed"
+          return encodeFields "rec-app-source-order-v1" #[toString (data.setNat `_recAppPos ordinal)]
+  | _, _ => throwError "boundary_selector_invalid_rec_app_metadata"
 
 private def rawLiteral : Literal → String
   | .natVal value => encodeFields "natVal" #[toString value]
@@ -231,7 +271,7 @@ private partial def rawExpr (input : Expr) : RawM String := do
   | .lit literal => pure <| encodeFields "lit" #[rawLiteral literal]
   | .mdata data child => do
       let child ← rawExpr child
-      pure <| encodeFields "mdata" #[toString data, child]
+      pure <| encodeFields "mdata" #[← rawExprMetadata data, child]
   | .proj name index child => do
       let child ← rawExpr child
       pure <| encodeFields "proj" #[rawName name, toString index, child]
@@ -506,8 +546,8 @@ private def rawTermRoots (state : Lean.Elab.Term.State) : RawM String := do
       digest "selector-let-recs" (encodeList "let-recs-to-lift" letRecs)]]
   pure result
 
-private def rawSelectorStatePayload (goals : List MVarId)
-    (termState? : Option (Lean.Elab.Term.State)) : MetaM String := do
+private def rawSelectorState (goals : List MVarId)
+    (termState? : Option (Lean.Elab.Term.State)) : MetaM (String × BoundaryCanonicalIds) := do
   if let some termState := termState? then
     if termStateHasOpaqueFixedTermElabs termState then
       throwError "boundary_selector_opaque_fixed_term_elabs"
@@ -533,12 +573,31 @@ private def rawSelectorStatePayload (goals : List MVarId)
       encodeFields "selector-mvars" mvarRecords,
       encodeFields "selector-lmvars" lmvarRecords]
     return result
-  let (payload, state) ← action.run {}
+  -- Nonempty pending recursion was previously rejected by the boundary guard.
+  -- Preserve existing selector bytes for every empty-list state. Only this new
+  -- domain needs a second observation pass to rank all distinct source sites.
+  let initial : BoundaryCanonicalIds := {
+    observeRecAppPositions := termState?.any (fun state => !state.letRecsToLift.isEmpty) }
+  let (payload, state) ← action.run initial
+  let (payload, state) ← if state.recAppPositions.isEmpty then pure (payload, state) else
+    action.run {initial with recAppPositionOrder? := some (state.recAppPositions.qsort (· < ·))}
   unless state.missingMVars.isEmpty do
     throwError "boundary_selector_unknown_reachable_mvar"
   unless state.missingLMVars.isEmpty do
     throwError "boundary_selector_unknown_reachable_level_mvar"
-  pure payload
+  pure (payload, state)
+
+private def rawSelectorStatePayload (goals : List MVarId)
+    (termState? : Option (Lean.Elab.Term.State)) : MetaM String := do
+  return (← rawSelectorState goals termState?).1
+
+/-- Reachable universe identities in the selector's canonical encounter order.
+The caller must take this observation before executing or decoding a boundary.
+Global allocation order and unreachable metavariables are deliberately absent. -/
+def boundaryUniverseReferences (goals : List MVarId)
+    (termState : Lean.Elab.Term.State) : MetaM (Array LMVarId) := do
+  let goals ← goals.filterM fun goal => return !(← goal.isAssigned)
+  return (← rawSelectorState goals (some termState)).2.lmvarOrder
 
 private structure CanonicalState where
   exprMVars : Std.HashMap MVarId Nat := {}
@@ -740,6 +799,7 @@ private def goalFingerprint (goal : MVarId) (state : CanonicalState) :
 private def proofStateFingerprintImpl (goals : List MVarId)
     (termState? : Option (Lean.Elab.Term.State) := none) :
     MetaM BoundaryStateFingerprint := do
+  let generator := declNameGeneratorPayload (← getDeclNGen)
   -- Lean tactic combinators define the active proof state by its unsolved
   -- goals; assigned entries can remain transiently in `Tactic.State.goals`
   -- until the surrounding evaluator prunes them.  Recorder and generated
@@ -766,9 +826,10 @@ private def proofStateFingerprintImpl (goals : List MVarId)
     targetFingerprint := digest "targets" (String.intercalate "|" targets.toList)
     localContextFingerprint := digest "goal-contexts"
       (String.intercalate "|" contexts.toList)
-    metavariableContextFingerprint := encodeFields "metavariable-context-v1" #[
+    metavariableContextFingerprint := encodeFields "metavariable-context-v2" #[
       digest "selector-visible-goals" (encodeList "goals" metavariables.toList),
-      digest "selector-complete-state" completeState]
+      digest "selector-complete-state" completeState,
+      digest "selector-aux-decl-name-generator" generator]
     goalCount := targets.size
   }
 

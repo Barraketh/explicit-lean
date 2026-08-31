@@ -5,6 +5,7 @@ public import Init.Prelude
 public meta import ExplicitLean.SimpEngine.Boundary.CongruenceCodec
 public meta import ExplicitLean.SimpEngine.Boundary.EquationCodec
 public meta import ExplicitLean.SimpEngine.Boundary.MatcherCodec
+public meta import ExplicitLean.SimpEngine.Boundary.LocalTheoremCodec
 public meta import Lean.Meta.Tactic.Replace
 public meta import Lean.Meta.Tactic.Util
 
@@ -21,12 +22,12 @@ namespace ExplicitLean.SimpEngine.Boundary
    schema. Generated source validates that schema before it elaborates any
    evidence or executes an environment action. -/
 def boundaryArtifactKind : String := "simp_engine_boundary_artifact"
-def boundaryArtifactSchema : Nat := 2
-def boundarySelectorSchema : Nat := 1
+def boundaryArtifactSchema : Nat := 3
+def boundarySelectorSchema : Nat := 2
 def boundarySemanticContract : String := "boundary-observable-v1"
-def boundaryArtifactTermEncoding : String := "lean_expr_dag_v1"
+def boundaryArtifactTermEncoding : String := "lean_expr_dag_v2"
 def boundaryArtifactLocalReferenceEncoding : String := "local_decl_index_v1"
-def boundaryArtifactUniverseEncoding : String := "explicit_levels_v1"
+def boundaryArtifactUniverseEncoding : String := "pre_boundary_universe_reference_v1"
 def boundaryArtifactInstanceEncoding : String := "explicit_terms_v1"
 
 /- Marker lines emitted by the recording tactic are authenticated against the
@@ -44,12 +45,14 @@ inductive EnvironmentAction where
   | declareCongruence (name : Name) (payload : String)
   | declareEquation (name : Name) (payload : String)
   | declareMatcher (anchor : Name) (payload : String)
+  | declareLocalTheorems (anchor : Name) (payload : String)
   deriving Inhabited, BEq
 
 private def executeEnvironmentAction : EnvironmentAction → MetaM Unit
   | .declareCongruence name payload => executeBoundaryCongruence name payload
   | .declareEquation name payload => executeBoundaryEquation name payload
   | .declareMatcher anchor payload => executeBoundaryMatcher anchor payload
+  | .declareLocalTheorems anchor payload => executeBoundaryLocalTheorems anchor payload
 
 def executeEnvironmentActions (actions : Array EnvironmentAction) : MetaM Unit := do
   for action in actions do

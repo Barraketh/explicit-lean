@@ -88,11 +88,19 @@ private unsafe def parseModuleFully (path : System.FilePath)
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
   return (moduleSyntax, state.commandState.messages)
 
-private unsafe def inventoryFile (env : Environment) (path : System.FilePath)
+private unsafe def inventoryFile (aggregateEnv? : Option Environment) (path : System.FilePath)
     (allowElaborationErrors : Bool) : IO UInt32 := do
   let source ← IO.FS.readFile path
   let fileMap := FileMap.ofString source
   try
+    -- Rewritten sources import replay syntax absent from aggregate Mathlib.
+    -- Parsing with the wrong environment can silently consume a later branch,
+    -- even without a recovery error. Remaining-call audits use actual imports.
+    let env ← match aggregateEnv? with
+      | some env => pure env
+      | none =>
+        let (header, _, _) ← Parser.parseHeader (Parser.mkInputContext source path.toString)
+        Lean.importModules (Lean.Elab.HeaderSyntax.imports header) {} (loadExts := true)
     let (fastSyntax, fastMessages) ← parseModuleIncrementally env path source
     let (stx, messages) ← if fastMessages.hasErrors then
       IO.println s!"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={path}"
@@ -116,13 +124,17 @@ private unsafe def inventoryFile (env : Environment) (path : System.FilePath)
 
 unsafe def main (args : List String) : IO UInt32 := do
   let allowElaborationErrors := args.contains "--allow-elaboration-errors"
-  let paths := args.filter (· != "--allow-elaboration-errors")
+  let headerImports := args.contains "--header-imports"
+  let paths := args.filter fun arg =>
+    arg != "--allow-elaboration-errors" && arg != "--header-imports"
   if paths.isEmpty then
-    IO.eprintln "usage: SimpEngineInventory.lean [--allow-elaboration-errors] <Lean source file>..."
+    IO.eprintln "usage: SimpEngineInventory.lean [--allow-elaboration-errors] [--header-imports] <Lean source file>..."
     return 2
   Lean.initSearchPath (← Lean.findSysroot)
   Lean.enableInitializersExecution
-  let env ← Lean.importModules #[{ module := `Mathlib }] {} (loadExts := true)
+  let env : Option Environment ← if headerImports then pure none else do
+    let aggregate ← Lean.importModules #[{ module := `Mathlib }] {} (loadExts := true)
+    pure (some aggregate)
   let mut status := 0
   for pathString in paths do
     let code ← inventoryFile env (System.FilePath.mk pathString) allowElaborationErrors

@@ -3,9 +3,12 @@ prelude
 
 public meta import ExplicitLean.SimpEngine.Boundary.Tactic
 public meta import ExplicitLean.SimpEngine.Boundary.MatchState
+public meta import ExplicitLean.SimpEngine.Boundary.LetRecState
 public meta import Lean.Elab.Tactic.Simp
 public meta import Lean.Meta.CollectMVars
 public meta import Lean.Util.CollectLevelMVars
+public meta import Lean.Meta.Constructions.SparseCasesOn
+meta import all Lean.Meta.Constructions.SparseCasesOn
 
 public meta section
 
@@ -42,8 +45,10 @@ private structure PreBoundaryBasis where
   checkedDeclarationNames : NameSet
   exprMVars : Array ExprMVarBasis
   levelMVars : Array LevelMVarBasis
+  universeReferences : Array LMVarId
   fvarIds : Array FVarId
   syntheticMVars : Array (MVarId × Term.SyntheticMVarDecl)
+  letRecsToLift : List Term.LetRecToLift
 
 private structure BoundaryLocalInstance where
   className : Name
@@ -119,6 +124,7 @@ private structure BoundarySnapshot where
   pendingSynthetic : BoundaryPendingSnapshot
   postponed : Array BoundaryPostponedSnapshot
   options : Options
+  auxDeclNGen : DeclNameGenerator
   mctxDepth : Nat
   levelAssignDepth : Nat
   zetaDeltaFVarIds : Array FVarId
@@ -170,6 +176,7 @@ private def mkPreBoundaryBasis : TacticM PreBoundaryBasis := do
   let mctx ← getMCtx
   let term ← getThe Term.State
   let goals ← getGoals
+  let universeReferences ← boundaryUniverseReferences goals term
   let exprMVars := mctx.decls.toList.toArray
     |>.qsort (fun lhs rhs => lhs.2.index < rhs.2.index)
     |>.map fun (id, decl) => { id, decl }
@@ -188,6 +195,14 @@ private def mkPreBoundaryBasis : TacticM PreBoundaryBasis := do
   -- treating them as fresh would reject even an unchanged assignment.
   for (_, expression) in mctx.eAssignment.toList do
     fvarIds := fvarIds ++ (collectFVars {} expression).fvarIds
+  -- Pending recursion may retain locals outside the current goal contexts.
+  -- These IDs already existed at entry and retain their exact identities.
+  for entry in term.letRecsToLift do
+    fvarIds := fvarIds.push entry.fvarId ++ entry.lctx.getFVarIds
+    fvarIds := fvarIds ++ (collectFVars {} entry.type).fvarIds
+    fvarIds := fvarIds ++ (collectFVars {} entry.val).fvarIds
+    for localInstance in entry.localInstances do
+      fvarIds := fvarIds ++ (collectFVars {} localInstance.fvar).fvarIds
   let metaState ← getThe Meta.State
   for entry in metaState.postponed do
     if let some context := entry.ctx? then
@@ -204,8 +219,10 @@ private def mkPreBoundaryBasis : TacticM PreBoundaryBasis := do
     checkedDeclarationNames
     exprMVars
     levelMVars
+    universeReferences
     fvarIds := allFVarIds
     syntheticMVars
+    letRecsToLift := term.letRecsToLift
   }
 
 /-- Simp-argument elaboration may create private helper declarations. A closed
@@ -359,6 +376,7 @@ private def captureBoundaryLevelErrorDeps
       return (collectLevelMVars {} expression).result
 
 private def boundarySnapshot (basis : PreBoundaryBasis) : TacticM BoundarySnapshot := do
+  let auxDeclNGen ← getDeclNGen
   let goals ← (← getGoals).toArray.mapM (captureGoalSnapshot basis)
   let mctx ← getMCtx
   let exprMVars := mctx.decls.toList.toArray
@@ -384,6 +402,7 @@ private def boundarySnapshot (basis : PreBoundaryBasis) : TacticM BoundarySnapsh
     pendingSynthetic := ← capturePendingSnapshot
     postponed
     options := ← getOptions
+    auxDeclNGen
     mctxDepth := mctx.depth
     levelAssignDepth := mctx.levelAssignDepth
     zetaDeltaFVarIds := metaState.zetaDeltaFVarIds.toList.toArray
@@ -401,6 +420,7 @@ private def boundaryEnvironmentActionName : EnvironmentAction → Name
   | EnvironmentAction.declareCongruence name _ => name
   | EnvironmentAction.declareEquation name _ => name
   | EnvironmentAction.declareMatcher anchor _ => anchor
+  | EnvironmentAction.declareLocalTheorems anchor _ => anchor
 
 private def boundaryEnvironmentActionJson (action : EnvironmentAction) : Json :=
   match action with
@@ -418,6 +438,12 @@ private def boundaryEnvironmentActionJson (action : EnvironmentAction) : Json :=
     ]
   | EnvironmentAction.declareMatcher anchor payload => Json.mkObj [
       ("kind", Json.str "declare_matcher"),
+      ("name", Json.str anchor.toString),
+      ("nameParts", encodeBoundaryName anchor),
+      ("declaration", Json.str payload)
+    ]
+  | EnvironmentAction.declareLocalTheorems anchor payload => Json.mkObj [
+      ("kind", Json.str "declare_local_theorems"),
       ("name", Json.str anchor.toString),
       ("nameParts", encodeBoundaryName anchor),
       ("declaration", Json.str payload)
@@ -1203,9 +1229,14 @@ private def compareBoundaryZeta (mapping : BoundaryIdMap)
     boundaryComparisonMismatch "zetaDeltaFVarIds.count"
 
 private def compareBoundaryLetRecs
-    (stock applied : List Term.LetRecToLift) : TacticM Unit := do
-  unless stock.isEmpty && applied.isEmpty do
-    throwError "boundary_comparison_unpaired_fresh_letrec"
+    (basis : PreBoundaryBasis) (stock applied : List Term.LetRecToLift) : TacticM Unit := do
+  -- Entries can already exist while tactics in a `where` body are pending.
+  -- Supporting these requires no new effect: both trials must retain every
+  -- field exactly from the common pre-state, including list order. Any fresh
+  -- or changed pending recursion still needs an explicit future capability.
+  unless boundaryExistingLetRecsEq basis.letRecsToLift stock &&
+      boundaryExistingLetRecsEq basis.letRecsToLift applied do
+    throwError "boundary_comparison_unsupported_letrec_state"
 
 private def compareBoundaryLevelMVarStates (mapping : BoundaryIdMap)
     (stock applied : BoundarySnapshot) : TacticM Unit := do
@@ -1228,12 +1259,16 @@ private def compareBoundaryLevelMVarStates (mapping : BoundaryIdMap)
 
 private def compareBoundarySnapshot (basis : PreBoundaryBasis)
     (mapping : BoundaryIdMap) (stock applied : BoundarySnapshot) : TacticM Unit := do
+  unless stock.auxDeclNGen.namePrefix == applied.auxDeclNGen.namePrefix &&
+      stock.auxDeclNGen.idx == applied.auxDeclNGen.idx &&
+      stock.auxDeclNGen.parentIdxs == applied.auxDeclNGen.parentIdxs do
+    boundaryComparisonMismatch s!"core.auxDeclNGen: stock={stock.auxDeclNGen.namePrefix}/{stock.auxDeclNGen.idx}/{stock.auxDeclNGen.parentIdxs}; applied={applied.auxDeclNGen.namePrefix}/{applied.auxDeclNGen.idx}/{applied.auxDeclNGen.parentIdxs}"
   unless stock.options == applied.options do boundaryComparisonMismatch "options"
   unless stock.mctxDepth == applied.mctxDepth do boundaryComparisonMismatch "mctx.depth"
   unless stock.levelAssignDepth == applied.levelAssignDepth do
     boundaryComparisonMismatch "mctx.levelAssignDepth"
   unless stock.levelNames == applied.levelNames do boundaryComparisonMismatch "term.levelNames"
-  compareBoundaryLetRecs stock.letRecsToLift applied.letRecsToLift
+  compareBoundaryLetRecs basis stock.letRecsToLift applied.letRecsToLift
   compareBoundaryZeta mapping stock.zetaDeltaFVarIds applied.zetaDeltaFVarIds
   unless stock.mctxUserNames.size == applied.mctxUserNames.size do
     boundaryComparisonMismatch "mctx.userNames.count"
@@ -1374,6 +1409,30 @@ private def runBoundaryComparatorSelfTest : TacticM Unit := do
     setGoals [stockGoal]
     let stock ← boundarySnapshot basis
     let stockState ← Tactic.saveState
+    if let some entry := basis.letRecsToLift.head? then
+      let changes := #[
+        ("deleted", []),
+        ("body", [{entry with val := .lam `n (mkConst ``Nat) (mkNatLit 123) .default}]),
+        ("fresh", {entry with declName := entry.declName.str "fresh"} :: basis.letRecsToLift)]
+      for (label, entries) in changes do
+        -- Equal mutations on both sides must still fail against the original
+        -- pre-state. This tests the actual complete comparator, not only the
+        -- exported field equality helper.
+        let changed := {stock with letRecsToLift := entries}
+        let rejected ← try
+          compareBoundaryStates basis stockState stockState changed changed
+          pure false
+        catch error =>
+          unless (← error.toMessageData.toString).contains
+              "boundary_comparison_unsupported_letrec_state" do throw error
+          pure true
+        unless rejected do
+          throwError "boundary_comparator_self_test_letrec_{label}_accepted"
+      IO.println "LETREC_COMPARATOR_CONTROLS deleted=true body=true fresh=true commonPreRequired=true"
+      -- The remaining synthetic proof-mvar scenarios assume no unrelated
+      -- pending recursive bodies. This branch tests the real retained list;
+      -- the outer finally restores the caller before returning.
+      return
     testBaseState.restore
     let positiveTarget : Expr :=
       .letE `P (mkSort .zero) (mkConst ``True) (.bvar 0) false
@@ -1857,8 +1916,8 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
   let declarations := (boundaryEnvironmentDelta basis stockEnvironment).qsort
     (fun lhs rhs => lhs.name.toString < rhs.name.toString)
   -- A generated splitter's typed async snapshot authenticates bundle ownership.
-  -- Capture accepts one complete bundle plus independently supported public
-  -- equation/congruence actions; every other added declaration fails closed.
+  -- Capture accepts one matcher bundle, closed ordinary theorem helpers, and
+  -- supported equation/congruence actions. Other declaration kinds fail closed.
   let mut matcher? : Option (Name × Match.MatchEqns) := none
   for info in declarations do
     if let .defnInfo _ := info then
@@ -1874,17 +1933,18 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
   let members := matcher?.map (fun (_, eqns) => eqns.eqnNames.push eqns.splitterName)
     |>.getD #[]
   let mut actions : Array EnvironmentAction := #[]
+  let mut helpers : Array TheoremVal := #[]
   for info in declarations do
     if members.contains info.name then
       continue
-    if boundaryEnvironmentPrivateName basis info.name then
-      if matcher?.isSome then
-        throwError s!"boundary_matcher_unsupported_extra_declaration:{info.name}"
-      unless ← boundaryPrivateProofDeclaration basis stockEnvironment info do
-        throwError s!"boundary_comparison_unsupported_environment_delta:{info.name}"
+    if boundaryEnvironmentPrivateName basis info.name ||
+        !isReservedName basis.environment info.name then
+      -- Ordinary helpers are exact closed singleton theorems. Proof-valued
+      -- definitions/opaque declarations remain unsupported instead of omitted.
+      let .thmInfo thm := info
+        | throwError s!"boundary_comparison_unsupported_environment_delta:{info.name}"
+      helpers := helpers.push thm
     else
-      unless isReservedName basis.environment info.name do
-        throwError s!"boundary_comparison_unsupported_environment_delta:{info.name}"
       let .thmInfo thm := info
         | throwError s!"boundary_comparison_unsupported_environment_delta:{info.name}"
       -- Inline all post-boundary constants, so each captured declaration
@@ -1913,7 +1973,7 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
       else
         throwError s!"boundary_comparison_unsupported_declaration_metadata:{info.name}"
   if let some (anchor, eqns) := matcher? then
-    let otherDeclarations := actions.map boundaryEnvironmentActionName
+    let otherDeclarations := actions.map boundaryEnvironmentActionName ++ helpers.map (·.name)
     let priorEquationDeclarations := actions.filterMap fun action => match action with
       | .declareEquation name _ => if name.toString < anchor.toString then some name else none
       | _ => none
@@ -1923,7 +1983,12 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
     actions := actions.push (.declareMatcher anchor payload)
     actions := actions.qsort fun lhs rhs =>
       (boundaryEnvironmentActionName lhs).toString < (boundaryEnvironmentActionName rhs).toString
-  return actions
+  unless helpers.isEmpty do
+    let (anchor, payload) ← withEnv stockEnvironment <|
+      encodeBoundaryLocalTheorems basis.environment helpers
+    actions := actions.push (.declareLocalTheorems anchor payload)
+  return actions.qsort fun lhs rhs =>
+    (boundaryEnvironmentActionName lhs).toString < (boundaryEnvironmentActionName rhs).toString
 
 private def boundaryConstantMetadataEq
     (stock applied : ConstantInfo) : Bool :=
@@ -2011,9 +2076,34 @@ private def compareBoundaryDeclaration (stockEnvironment : Environment)
     | none, none => pure ()
     | _, _ => boundaryComparisonMismatch s!"environment.declaration.value:{stock.name}"
 
+private def compareBoundarySparseCasesCache (label : String)
+    (stock applied : PHashMap SparseCasesOnKey Name) : TacticM Unit := do
+  let entries := stock.toArray
+  unless entries.size == applied.toArray.size &&
+      entries.all (fun (key, value) => applied.find? key == some value) do
+    throwError s!"boundary_comparison_local_sparse_cases_cache:{label}"
+
+private def compareBoundaryHelperCache (members : Array Name) (label : String)
+    (stock applied : AuxLemmas) : TacticM Unit := do
+  let selected := fun (state : AuxLemmas) => state.lemmas.toArray.filter
+    (fun (_, value) => members.contains value.1)
+  let expected := selected stock
+  let actual := selected applied
+  unless expected.size == actual.size && expected.all (fun (key, value) =>
+      actual.any (fun (otherKey, otherValue) => key == otherKey && value == otherValue)) do
+    throwError "boundary_local_theorems_cache_conflict:{label}"
+
 private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
     (stockEnvironment appliedEnvironment : Environment)
     (actions : Array EnvironmentAction) : TacticM Unit := do
+  compareBoundarySparseCasesCache "local" (sparseCasesOnCacheExt.getState stockEnvironment)
+    (sparseCasesOnCacheExt.getState appliedEnvironment)
+  let mut helperNames := #[]
+  for action in actions do
+    if let .declareLocalTheorems anchor payload := action then
+      helperNames := helperNames ++ (← boundaryLocalTheoremNames anchor payload)
+  compareBoundaryHelperCache helperNames "local"
+    (auxLemmasExt.getState stockEnvironment) (auxLemmasExt.getState appliedEnvironment)
   let beforeAux := auxLemmasExt.getState basis.environment
   compareBoundaryAuxLemmas basis "local" beforeAux stockEnvironment appliedEnvironment
     (auxLemmasExt.getState stockEnvironment) (auxLemmasExt.getState appliedEnvironment)
@@ -2027,6 +2117,14 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
       boundaryEnvironmentDeclarations appliedEnvironment).foldl
     (fun names info => names.insert info.name) ({} : NameSet)
   for name in names do
+    compareBoundaryHelperCache helperNames name.toString
+      (auxLemmasExt.getState (asyncMode := .async .asyncEnv) (asyncDecl := name) stockEnvironment)
+      (auxLemmasExt.getState (asyncMode := .async .asyncEnv) (asyncDecl := name) appliedEnvironment)
+    compareBoundarySparseCasesCache name.toString
+      (sparseCasesOnCacheExt.getState (asyncMode := .async .asyncEnv)
+        (asyncDecl := name) stockEnvironment)
+      (sparseCasesOnCacheExt.getState (asyncMode := .async .asyncEnv)
+        (asyncDecl := name) appliedEnvironment)
     let before := if basis.checkedDeclarationNames.contains name then
         auxLemmasExt.getState (asyncMode := .async .asyncEnv)
           (asyncDecl := name) basis.environment
@@ -2062,8 +2160,10 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
   unless stockPublicNames == appliedPublicNames do
     throwError "boundary_comparison_unsupported_environment_delta"
   let actionNames := actions.filterMap fun action => match action with
-    | .declareMatcher _ _ => none
+    | .declareMatcher _ _ | .declareLocalTheorems _ _ => none
     | _ => some (boundaryEnvironmentActionName action)
+  let actionNames := (actionNames ++ helperNames.filter (!boundaryEnvironmentPrivateName basis ·)).qsort
+    (fun a b => a.toString < b.toString)
   unless actionNames == stockPublicNames do
     throwError "boundary_comparison_unsupported_environment_delta"
   -- A matcher action names an existing anchor, while its added members are
@@ -2078,6 +2178,21 @@ private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
         let some appliedInfo := appliedDelta.find? (·.name == name)
           | throwError s!"boundary_matcher_missing_applied_member:{name}"
         compareBoundaryDeclaration stockEnvironment stockInfo appliedInfo
+  for name in helperNames do
+    let some (.thmInfo stockInfo) := stockDelta.find? (·.name == name)
+      | throwError "boundary_local_theorems_missing_stock_member:{name}"
+    let some (.thmInfo appliedInfo) := appliedDelta.find? (·.name == name)
+      | throwError "boundary_local_theorems_missing_applied_member:{name}"
+    let stockPayload ← withEnv stockEnvironment <| encodeBoundaryTheorem stockInfo
+    let appliedPayload ← withEnv appliedEnvironment <| encodeBoundaryTheorem appliedInfo
+    unless (← boundaryLocalTheoremExportKind stockEnvironment name) ==
+        (← boundaryLocalTheoremExportKind appliedEnvironment name) do
+      throwError "boundary_local_theorems_exported_kind_conflict:{name}"
+    unless stockPayload == appliedPayload do
+      throwError "boundary_local_theorems_canonical_body_conflict:{name}"
+    unless defeqAttr.hasTag stockEnvironment name == defeqAttr.hasTag appliedEnvironment name &&
+        backwardDefeqAttr.hasTag stockEnvironment name == backwardDefeqAttr.hasTag appliedEnvironment name do
+      throwError "boundary_local_theorems_tag_conflict:{name}"
   for stockInfo in stockPublic do
     let some appliedInfo := appliedDelta.find? (fun info => info.name == stockInfo.name)
       | throwError "boundary_comparison_unsupported_environment_delta"
@@ -2145,16 +2260,16 @@ private def captureGoalArtifact (basis : PreBoundaryBasis) (simpStx : Syntax)
 
 /-- Encode the captured kernel expression directly. No source parser, term
     elaborator, instance search, or universe inference runs during decoding. -/
-private def renderArtifactExpr (expression : Expr) : MetaM String :=
-  encodeBoundaryExpr expression
+private def renderArtifactExpr (references : Array LMVarId) (expression : Expr) : MetaM String :=
+  encodeBoundaryExprWithUniverses expression references
 
-private def transformationJson (transformation : TargetArtifact) : TacticM Json := do
+private def transformationJson (references : Array LMVarId) (transformation : TargetArtifact) : TacticM Json := do
   let proofJson ← match transformation.proof? with
     | none => pure Json.null
-    | some proof => pure (Json.str (← renderArtifactExpr proof))
+    | some proof => pure (Json.str (← renderArtifactExpr references proof))
   return Json.mkObj [
-    ("input", Json.str (← renderArtifactExpr transformation.input)),
-    ("result", Json.str (← renderArtifactExpr transformation.result)),
+    ("input", Json.str (← renderArtifactExpr references transformation.input)),
+    ("result", Json.str (← renderArtifactExpr references transformation.result)),
     ("proof", proofJson)
   ]
 
@@ -2194,7 +2309,7 @@ private def emitBoundaryJsonMarker (marker : String) (payload : Json) : TacticM 
   -- Stock tactics may have printed a partial line before recording failed.
   IO.println s!"\n{marker}{nonce} {payload.compress}"
 
-private def artifactReportJson (occId : String) (selector : Json)
+private def artifactReportJson (basis : PreBoundaryBasis) (occId : String) (selector : Json)
     (artifact : GoalArtifact) (terminal : String) : TacticM Json :=
   withBoundaryEncodedSourceContext do
   let mut localReports := #[]
@@ -2206,9 +2321,9 @@ private def artifactReportJson (occId : String) (selector : Json)
         ("kind", Json.str "local_decl_index"),
         ("index", toJson decl.index)
       ]),
-      ("transformation", ← transformationJson localArtifact.transformation)
+      ("transformation", ← transformationJson basis.universeReferences localArtifact.transformation)
     ]
-  let targetJson ← artifact.target?.mapM transformationJson
+  let targetJson ← artifact.target?.mapM (transformationJson basis.universeReferences)
   return Json.mkObj [
     ("kind", Json.str boundaryArtifactKind),
     ("schema", toJson boundaryArtifactSchema),
@@ -2268,6 +2383,7 @@ private def emitRecordingAbort (occId stage : String) (error : Exception) : Tact
 private def runBoundaryProbe (simpStx : Syntax)
     (reportRequest? : Option (String × Json) := none) : TacticM GoalArtifact := do
   let pre ← Tactic.saveState
+  let preGenerator ← getDeclNGen
   let basis ← mkPreBoundaryBasis
   let selection ← try
     resolveLocation simpStx
@@ -2279,16 +2395,32 @@ private def runBoundaryProbe (simpStx : Syntax)
   let stockClosed ← try
     executeStockLocation simpStx selection
   catch error =>
+    let failureGenerator ← getDeclNGen
     pre.restore
+    if failureGenerator.namePrefix != preGenerator.namePrefix ||
+        failureGenerator.idx != preGenerator.idx ||
+        failureGenerator.parentIdxs != preGenerator.parentIdxs then
+      if let some (occId, _) := reportRequest? then
+        emitBoundaryJsonMarker "SIMP_ENGINE_BOUNDARY_RECORDING_ABORT " <|
+          recordingAbortJson occId (← getEnv).mainModule.toString "stock_failure_state"
+            "boundary_stock_failure_aux_decl_name_effect_unsupported"
+      throwError "boundary_stock_failure_aux_decl_name_effect_unsupported"
     if let some (occId, selector) := reportRequest? then
       emitFailureReport occId selector
     throw error
-  let postStockAction : TacticM GoalArtifact := do
-    let stock ← boundarySnapshot basis
-    let stockEnvironment ← getEnv
-    let environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
-    let stockState ← Tactic.saveState
+  -- Core.SavedState.restore deliberately retains name-generator advancement.
+  -- Snapshot the original result before diagnostics/trials; reset generators
+  -- only for isolated trial input and return the original stock continuation.
+  let stockState ← Tactic.saveState
+  let stockGenerator ← getDeclNGen
+  let stockEnvironment ← getEnv
+  let restoreTrialInput : TacticM Unit := do
     pre.restore
+    setDeclNGen preGenerator
+  let postStockAction : TacticM (GoalArtifact × String) := do
+    let stock ← boundarySnapshot basis
+    let environmentActions ← captureBoundaryEnvironmentActions basis stockEnvironment
+    restoreTrialInput
     let artifact ← captureGoalArtifact basis simpStx selection
     let artifact := { artifact with environmentActions }
     let terminal := artifactTerminal artifact
@@ -2296,8 +2428,8 @@ private def runBoundaryProbe (simpStx : Syntax)
     -- transformations clear their old declarations during apply, after which a
     -- pretty printer can no longer recover valid source names for the artifact.
     let report? ← reportRequest?.mapM fun (occId, selector) =>
-      artifactReportJson occId selector artifact terminal
-    pre.restore
+      artifactReportJson basis occId selector artifact terminal
+    restoreTrialInput
     let initialGoals ← getGoals
     let (applyGoals, applyTerminal) ←
       applyGoalArtifact initialGoals.head! initialGoals.tail artifact
@@ -2323,17 +2455,22 @@ private def runBoundaryProbe (simpStx : Syntax)
         "unchanged"
       else
         "defeq"
-    logInfo m!"SIMP_ENGINE_BOUNDARY_PROBE outcome={outcome} evidence={evidence} equivalent=true"
+    let message := s!"SIMP_ENGINE_BOUNDARY_PROBE outcome={outcome} evidence={evidence} equivalent=true"
     if let some report := report? then
       emitBoundaryJsonMarker "SIMP_ENGINE_BOUNDARY_ARTIFACT " report
-    return artifact
-  try
+    return (artifact, message)
+  let (artifact, message) ← try
     postStockAction
   catch error =>
-    pre.restore
     if let some (occId, _) := reportRequest? then
       emitRecordingAbort occId "post_stock" error
     throw error
+  finally
+    stockState.restore
+    setDeclNGen stockGenerator
+  -- Preserve the diagnostic without preserving any trial elaboration state.
+  logInfo m!"{message}"
+  return artifact
 
 elab_rules : tactic
   | `(tactic| simp_engine_boundary_comparator_self_test) => withMainContext do

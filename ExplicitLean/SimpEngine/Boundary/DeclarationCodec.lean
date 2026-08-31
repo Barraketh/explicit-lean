@@ -161,7 +161,8 @@ def encodeBoundaryTheorem (thm : TheoremVal) : MetaM String := do
   return (Json.arr #[.str theoremPayloadTag, encodeBoundaryName thm.name, all, levels,
     .str typeSource, .str valueSource]).compress
 
-def executeBoundaryTheorem (expectedName : Name) (source : String) : MetaM Unit := do
+def executeBoundaryTheorem (expectedName : Name) (source : String)
+    (forceExpose := false) : MetaM Unit := do
   if expectedName.isAnonymous then
     throwError "boundary_theorem_anonymous_expected_name"
   let (name, all, levelParams, typeSource, valueSource) ← match parseTheoremPayload source with
@@ -197,7 +198,7 @@ def executeBoundaryTheorem (expectedName : Name) (source : String) : MetaM Unit 
   | some _ =>
       throwError "boundary_theorem_existing_declaration_conflict"
   | none =>
-      addDecl (.thmDecl thm)
+      addDecl (forceExpose := forceExpose) (.thmDecl thm)
 
 /- The matcher prototype only needs safe, nonrecursive singleton definitions.
    Keep this separate from theorem proof irrelevance: a cached definition's

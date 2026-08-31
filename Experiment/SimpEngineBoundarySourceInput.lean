@@ -144,3 +144,9 @@ theorem boundarySourceReusableFailure (P : Prop) (h : P) : P := by
 -- Materialization must still replace it with an explicit fail-closed tactic.
 macro "boundary_source_unobserved_simp" : tactic =>
   `(tactic| simp (config := { failIfUnchanged := false, zetaDelta := false }) only)
+
+-- Importing replay syntax must not reserve ordinary term or binder names.
+def boundarySourceFailureTerm : Option Nat := failure
+
+example (apply_encoded apply_encoded_with_actions : Nat) :
+    apply_encoded + apply_encoded_with_actions = apply_encoded + apply_encoded_with_actions := rfl

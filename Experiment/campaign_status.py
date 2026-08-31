@@ -9,6 +9,8 @@ from pathlib import Path
 import sqlite3
 from urllib.parse import quote
 
+from boundary_materialize_shard import REPORT_SCHEMA
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATABASE = ROOT / ".lake/search-free-mathlib/translation-index.sqlite3"
 
@@ -41,7 +43,7 @@ def snapshot(database: Path) -> dict[str, object]:
             "ORDER BY m.module"
         ).fetchall()
         present = [row for row in results if row["artifact_ref"] and Path(row["artifact_ref"]).is_file()]
-        guarded = [row for row in present if (row["report_schema"] or 0) >= 8
+        guarded = [row for row in present if row["report_schema"] == REPORT_SCHEMA
                    and row["replay_schema"] == 1 and row["oracle_replay_schema"] == 1]
         provisional = [row for row in present if row not in guarded]
         active = [dict(row) for row in connection.execute(
@@ -63,7 +65,7 @@ def snapshot(database: Path) -> dict[str, object]:
             "provisionalCachedModules": len(provisional),
             "provisionalCachedCalls": sum(int(row["calls"] or 0) for row in provisional),
             "missingVerifiedReportFiles": len(results) - len(present),
-            "verificationScope": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle, plus local matcher and auxiliary-cache state comparison (report schema 8). Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
+            "verificationScope": f"Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require the current materialization report schema ({REPORT_SCHEMA}), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
             "active": active, "failuresAndPartialResults": failures,
         }
     finally:

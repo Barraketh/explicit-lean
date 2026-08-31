@@ -60,7 +60,7 @@ MATHLIB = corpus.MATHLIB
 MANIFEST_KIND = "simp_engine_boundary_manifest"
 MANIFEST_SCHEMA = 2
 REPORT_KIND = "simp_engine_boundary_materialization_shard"
-REPORT_SCHEMA = 8
+REPORT_SCHEMA = 9
 ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 DECLARATION_ORACLE_MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
 DECLARATION_ORACLE_KIND = "simp_engine_declaration_oracle"
@@ -1243,6 +1243,7 @@ def _module_result(
             f"{selected.module}.materialized",
             timeout,
             allow_elaboration_errors=True,
+            header_imports=True,
         )
         if entry["kind"] in inventory.SUPPORTED_KINDS
     ]
@@ -2228,6 +2229,7 @@ def verify_shard_evidence(
                 f"{item.module}.materialized",
                 timeout,
                 allow_elaboration_errors=True,
+                header_imports=True,
             )
             if entry["kind"] in inventory.SUPPORTED_KINDS
         ]

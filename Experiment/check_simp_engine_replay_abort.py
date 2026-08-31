@@ -124,9 +124,9 @@ def lean_matrix(work: Path, dylib: str) -> None:
     failure = record(work, dylib, failure=True)
     missing = copy.deepcopy(success)
     missing["selector"]["preState"]["targetFingerprint"] = "unrecorded-target"
-    encoded_true = json.dumps(["expr_dag_v1", [["c", [["s", "True"]], []]], 0])
-    encoded_false = json.dumps(["expr_dag_v1", [["c", [["s", "False"]], []]], 0])
-    encoded_nat_zero = json.dumps(["expr_dag_v1", [["c", [["s", "Nat"], ["s", "zero"]], []]], 0])
+    encoded_true = json.dumps(["expr_dag_v2", 0, [["c", [["s", "True"]], []]], 0])
+    encoded_false = json.dumps(["expr_dag_v2", 0, [["c", [["s", "False"]], []]], 0])
+    encoded_nat_zero = json.dumps(["expr_dag_v2", 0, [["c", [["s", "Nat"], ["s", "zero"]], []]], 0])
     q = source.lean_string
     same = f"({q(encoded_true)} ==> {q(encoded_true)})"
     cases = [
@@ -134,7 +134,7 @@ def lean_matrix(work: Path, dylib: str) -> None:
         ("recorded-failure", select(failure), True, "first", None),
         ("missing", select(missing), False, "first", "boundary_variant_missing"),
         ("ambiguous", select(success, duplicate=True), False, "first", "ambiguous_boundary_variant"),
-        ("invalid-header", select(success).replace("artifact_schema := 2", "artifact_schema := 999"),
+        ("invalid-header", select(success).replace(f"artifact_schema := {protocol.ARTIFACT_SCHEMA}", "artifact_schema := 999"),
          False, "first", "unsupported_boundary_artifact_schema"),
         ("invalid-dag", select(success, outcome=f'apply_encoded ("not-json" ==> {q(encoded_true)})'),
          False, "first", "boundary_expr_decode_error"),

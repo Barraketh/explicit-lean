@@ -4,7 +4,7 @@ open Lean Meta Elab Tactic ExplicitLean.SimpEngine.Boundary
 
 private def quoted (value : String) : String := (Json.str value).compress
 
-private def runEncodedOutcome (outcome : String) : TacticM Unit := do
+private def runEncodedOutcome (references : Array LMVarId) (outcome : String) : TacticM Unit := do
   let state ← boundaryProofStateFingerprintWithTerm (← getGoals) (← getThe Term.State)
   let options := boundaryOptionsFingerprint (← getOptions)
   let caller := boundaryCallerIdentity? (← Term.getDeclName?)
@@ -21,10 +21,10 @@ private def runEncodedOutcome (outcome : String) : TacticM Unit := do
     | .error error => throwError "fixture syntax failed: {error}"
   evalTactic stx
 
-private def rejects (outcome expected : String) : TacticM Unit := do
+private def rejects (references : Array LMVarId) (outcome expected : String) : TacticM Unit := do
   let saved ← Tactic.saveState
   let error? ← try
-    runEncodedOutcome outcome
+    runEncodedOutcome references outcome
     pure none
   catch error =>
     pure (some (← error.toMessageData.toString))
@@ -34,21 +34,22 @@ private def rejects (outcome expected : String) : TacticM Unit := do
     throwError "expected rejection {expected}, got {error}"
 
 elab "test_encoded_boundary" : tactic => withMainContext do
-  let trueType ← encodeBoundaryExpr (mkConst ``True)
-  let wrongProof ← encodeBoundaryExpr (mkConst ``True.intro)
-  rejects s!"apply_encoded ({quoted trueType} ==> {quoted trueType} using {quoted wrongProof})"
+  let references ← boundaryUniverseReferences (← getGoals) (← getThe Term.State)
+  let trueType ← encodeBoundaryExprWithUniverses (mkConst ``True) references
+  let wrongProof ← encodeBoundaryExprWithUniverses (mkConst ``True.intro) references
+  rejects references s!"apply_encoded ({quoted trueType} ==> {quoted trueType} using {quoted wrongProof})"
     "boundary_expr_proof_type_mismatch"
-  let malformed := "[\"expr_dag_v1\",[[\"a\",0,0]],0]"
-  rejects s!"apply_encoded ({quoted malformed} ==> {quoted trueType})"
+  let malformed := "[\"expr_dag_v2\",0,[[\"a\",0,0]],0]"
+  rejects references s!"apply_encoded ({quoted malformed} ==> {quoted trueType})"
     "boundary_expr_decode_error"
-  rejects s!"apply_encoded ({quoted "by simp"} ==> {quoted trueType})"
+  rejects references s!"apply_encoded ({quoted "by simp"} ==> {quoted trueType})"
     "boundary_expr_decode_error"
-  let badType ← encodeBoundaryExpr (.lit (.natVal 3))
-  rejects s!"apply_encoded ({quoted badType} ==> {quoted trueType})"
+  let badType ← encodeBoundaryExprWithUniverses (.lit (.natVal 3)) references
+  rejects references s!"apply_encoded ({quoted badType} ==> {quoted trueType})"
     "boundary_expr_expected_types"
-  let hole := "[\"expr_dag_v1\",[[\"c\",[[\"s\",\"sorryAx\"]],[]]],0]"
-  rejects s!"apply_encoded ({quoted trueType} ==> {quoted trueType} using {quoted hole})"
+  let hole := "[\"expr_dag_v2\",0,[[\"c\",[[\"s\",\"sorryAx\"]],[]]],0]"
+  rejects references s!"apply_encoded ({quoted trueType} ==> {quoted trueType} using {quoted hole})"
     "forbidden sorryAx"
-  runEncodedOutcome s!"apply_encoded ({quoted trueType} ==> {quoted trueType})"
+  runEncodedOutcome references s!"apply_encoded ({quoted trueType} ==> {quoted trueType})"
 
 example : True := by test_encoded_boundary

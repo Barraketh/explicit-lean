@@ -16,6 +16,7 @@ import boundary_materialize_shard as materialize
 from boundary_protocol import (
     artifact_protocol,
     ARTIFACT_SCHEMA,
+    SELECTOR_SCHEMA,
     RECORDING_ABORT_MARKER,
     make_occurrence_result,
     occurrence_classification_counts,
@@ -39,7 +40,7 @@ MODULES = (
 
 
 def encoded_constant(name: str) -> str:
-    return json.dumps(["expr_dag_v1", [["c", [["s", part] for part in name.split(".")], []]], 0])
+    return json.dumps(["expr_dag_v2", 0, [["c", [["s", part] for part in name.split(".")], []]], 0])
 
 
 def expect_join_rejection(
@@ -481,7 +482,7 @@ def validate_occurrence_protocol() -> None:
             "semanticContract": "boundary-observable-v1",
             "occurrence": "terminal-test",
             "selector": {
-                "selectorSchema": 1,
+                "selectorSchema": SELECTOR_SCHEMA,
                 "occurrence": "terminal-test",
                 "preState": {
                     "targetFingerprint": "target",
@@ -496,9 +497,9 @@ def validate_occurrence_protocol() -> None:
             "status": "success",
             "terminal": terminal,
             "encoding": {
-                "terms": "lean_expr_dag_v1",
+                "terms": "lean_expr_dag_v2",
                 "locals": "local_decl_index_v1",
-                "universes": "explicit_levels_v1",
+                "universes": "pre_boundary_universe_reference_v1",
                 "instances": "explicit_terms_v1",
             },
             "stateDeltas": [],
@@ -1062,7 +1063,7 @@ def validate_shard_report_protocol() -> None:
             "semanticContract": "boundary-observable-v1",
             "occurrence": occurrence_id,
             "selector": {
-                "selectorSchema": 1,
+                "selectorSchema": SELECTOR_SCHEMA,
                 "occurrence": occurrence_id,
                 "preState": {
                     "targetFingerprint": "target",

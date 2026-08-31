@@ -43,11 +43,13 @@ declare_syntax_cat boundaryEncodedEnvironmentAction
 syntax "declare_congruence" str str : boundaryEncodedEnvironmentAction
 syntax "declare_equation" str str : boundaryEncodedEnvironmentAction
 syntax "declare_matcher" str str : boundaryEncodedEnvironmentAction
+syntax "declare_local_theorems" str str : boundaryEncodedEnvironmentAction
 
 declare_syntax_cat boundaryEncodedActions
 syntax "[" boundaryEncodedEnvironmentAction,* "]" : boundaryEncodedActions
 
-declare_syntax_cat boundaryVariantOutcome
+-- Outcome words must not reserve ordinary term names such as `failure`.
+declare_syntax_cat boundaryVariantOutcome (behavior := symbol)
 syntax "failure" : boundaryVariantOutcome
 syntax "apply_encoded" boundaryEncodedEvidence : boundaryVariantOutcome
 syntax "apply_encoded" boundaryEncodedLocationEvidence : boundaryVariantOutcome
@@ -178,7 +180,7 @@ private def elaborateEvidence (stx : Syntax) : TacticM TargetArtifact := do
     elabTermEnsuringType proofSyntax (some expectedProofType)
   return { input, result, proof? }
 
-private def elaborateEncodedEvidence (stx : Syntax) : TacticM TargetArtifact := do
+private def elaborateEncodedEvidence (references : Array LMVarId) (stx : Syntax) : TacticM TargetArtifact := do
   let (inputSource, resultSource, proofSource?) ←
     match stx with
     | `(boundaryEncodedEvidence| ($input:str ==> $result:str)) =>
@@ -186,15 +188,15 @@ private def elaborateEncodedEvidence (stx : Syntax) : TacticM TargetArtifact := 
     | `(boundaryEncodedEvidence| ($input:str ==> $result:str using $proof:str)) =>
         pure (input.getString, result.getString, some proof.getString)
     | _ => throwError "invalid encoded boundary evidence"
-  let input ← decodeBoundaryExpr inputSource
-  let result ← decodeBoundaryExpr resultSource
+  let input ← decodeBoundaryExprWithUniverses inputSource references
+  let result ← decodeBoundaryExprWithUniverses resultSource references
   check input
   check result
   unless (← whnf (← inferType input)).isSort && (← whnf (← inferType result)).isSort do
     throwError "boundary_expr_expected_types"
   let expectedProofType ← mkEq input result
   let proof? ← proofSource?.mapM fun proofSource => do
-    let proof ← decodeBoundaryExpr proofSource
+    let proof ← decodeBoundaryExprWithUniverses proofSource references
     check proof
     unless ← isDefEq (← inferType proof) expectedProofType do
       throwError "boundary_expr_proof_type_mismatch"
@@ -278,15 +280,26 @@ private def parseEncodedEnvironmentActions
         if name.isAnonymous then
           throwError "invalid encoded matcher anchor"
         result := result.push (.declareMatcher name payload.getString)
+    | `(boundaryEncodedEnvironmentAction| declare_local_theorems $name:str $payload:str) =>
+        let nameJson ← match Json.parse name.getString with
+          | .ok json => pure json
+          | .error error => throwError "invalid encoded local theorem anchor: {error}"
+        let name ← match decodeBoundaryName nameJson with
+          | .ok name => pure name
+          | .error error => throwError "invalid encoded local theorem anchor: {error}"
+        if name.isAnonymous then
+          throwError "invalid encoded local theorem anchor"
+        result := result.push (.declareLocalTheorems name payload.getString)
     | _ => throwError "invalid encoded environment action"
   return result
 
 private def runExplicitEncodedApply (actions : Array Syntax) (evidence : Syntax) : TacticM Unit :=
   withMainContext do
     withBoundaryEncodedSourceContext do
+      let references ← boundaryUniverseReferences (← getGoals) (← getThe Term.State)
       let environmentActions ← parseEncodedEnvironmentActions actions
       executeEnvironmentActions environmentActions
-      let artifact ← elaborateEncodedEvidence evidence
+      let artifact ← elaborateEncodedEvidence references evidence
       let goals ← getGoals
       let (next, _) ← applyGoalArtifact goals.head! goals.tail {
         target? := some artifact
@@ -297,6 +310,7 @@ private def runExplicitEncodedLocationApply (actions : Array Syntax)
     (localSyntax : Array Syntax) (targetSyntax? : Option Syntax) : TacticM Unit :=
   withMainContext do
   withBoundaryEncodedSourceContext do
+    let references ← boundaryUniverseReferences (← getGoals) (← getThe Term.State)
     let environmentActions ← parseEncodedEnvironmentActions actions
     executeEnvironmentActions environmentActions
     let lctx ← getLCtx
@@ -310,13 +324,13 @@ private def runExplicitEncodedLocationApply (actions : Array Syntax)
             | throwErrorAt index "unknown boundary local index '{localIndex}'"
           locals := locals.push {
             fvarId := decl.fvarId
-            transformation := ← elaborateEncodedEvidence evidence
+            transformation := ← elaborateEncodedEvidence references evidence
           }
       | _ => throwError "invalid encoded local boundary evidence"
     let target? ← targetSyntax?.mapM fun entrySyntax => do
       match entrySyntax with
       | `(boundaryEncodedTargetEvidence| ⊢ $evidence:boundaryEncodedEvidence) =>
-          elaborateEncodedEvidence evidence
+          elaborateEncodedEvidence references evidence
       | _ => throwError "invalid encoded target boundary evidence"
     let goals ← getGoals
     let (next, _) ← applyGoalArtifact goals.head! goals.tail {

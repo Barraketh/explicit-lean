@@ -237,7 +237,7 @@ def assert_protocol_mutations(report_list: list[object], expected_ids: list[str]
     mutated["selector"]["selectorSchema"] = True
     expect_validation_error(mutated, occurrence, "artifact selector schema must be an integer")
     mutated = copy_success()
-    mutated["selector"]["selectorSchema"] = 2
+    mutated["selector"]["selectorSchema"] = SELECTOR_SCHEMA + 1
     expect_validation_error(mutated, occurrence, "unsupported artifact selector schema")
     mutated = copy_success()
     mutated["selector"]["occurrence"] = "other_occurrence"
@@ -343,6 +343,8 @@ def assert_grouping_rejections(
     assert_protocol_mutations(report_list, expected_ids)
     def declaration_action(name: str) -> dict[str, object]:
         parts = [["s", name], ["s", "congr_simp"]]
+        # Declaration/congruence payloads use the separate closed v1 theorem
+        # codec; only boundary proof-state evidence carries v2 references.
         term = json.dumps(["expr_dag_v1", [["c", [["s", "True"]], []]], 0])
         payload = json.dumps(["boundary_theorem_dag_v1", parts, [parts], [], term, term])
         payload = json.dumps(["boundary_congruence_v1", parts[:-1], payload, []])

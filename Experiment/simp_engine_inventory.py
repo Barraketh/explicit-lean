@@ -50,6 +50,7 @@ def syntax_inventory_file(
     timeout: int,
     *,
     allow_elaboration_errors: bool = False,
+    header_imports: bool = True,
 ) -> list[dict[str, Any]]:
     command = [
         sys.executable,
@@ -58,6 +59,8 @@ def syntax_inventory_file(
     ]
     if allow_elaboration_errors:
         command.append("--allow-elaboration-errors")
+    if header_imports:
+        command.append("--header-imports")
     command.append(str(path.resolve()))
     code, output, _ = run(command, timeout=timeout)
     if code != 0:

@@ -167,7 +167,7 @@ def main() -> None:
   let splitter ←''')
             extra = extra.replace("\n  assert_match_cache\n", "\n")
             compile_case(label + "-extra-computation", extra, recording=True,
-                expected_abort="boundary_matcher_unsupported_extra_declaration")
+                expected_abort="boundary_comparison_unsupported_environment_delta")
             action = reports[0]["environmentActions"][0]
             original = action["declaration"]
             def corrupt_set(bundle):

@@ -25,7 +25,7 @@ def _name(value: Any) -> bool:
     )
 
 
-def _level(value: Any) -> bool:
+def _level(value: Any, reference_count: int | None = None) -> bool:
     pending = [value]
     while pending:
         node = pending.pop()
@@ -40,12 +40,15 @@ def _level(value: Any) -> bool:
             pending.extend(node[1:])
         elif tag == "p" and len(node) == 2 and _name(node[1]):
             continue
+        elif (tag == "r" and len(node) == 2 and reference_count is not None
+              and _nat(node[1]) and node[1] < reference_count):
+            continue
         else:
             return False
     return True
 
 
-def validate_expr_dag(source: object, label: str = "boundary expression") -> list[Any]:
+def _validate_expr_dag(source: object, label: str, *, boundary_universes: bool) -> list[Any]:
     if not isinstance(source, str):
         raise RuntimeError(f"{label} must be a string")
     if len(source.encode("utf-8")) > 64 * 1024 * 1024:
@@ -54,11 +57,19 @@ def validate_expr_dag(source: object, label: str = "boundary expression") -> lis
         value = json.loads(source)
     except (ValueError, RecursionError) as error:
         raise RuntimeError(f"{label} is not an expression DAG: {error}") from error
-    if not (isinstance(value, list) and len(value) == 3
-            and value[0] == EXPR_DAG_VERSION and isinstance(value[1], list)
-            and _nat(value[2]) and value[2] < len(value[1])):
-        raise RuntimeError(f"{label} has an invalid expression DAG header")
-    nodes = value[1]
+    reference_count = None
+    if boundary_universes:
+        if not (isinstance(value, list) and len(value) == 4
+                and value[0] == "expr_dag_v2" and _nat(value[1])):
+            raise RuntimeError(f"{label} has an invalid boundary expression DAG header")
+        _, reference_count, nodes, root = value
+    else:
+        if not (isinstance(value, list) and len(value) == 3
+                and value[0] == EXPR_DAG_VERSION):
+            raise RuntimeError(f"{label} has an invalid expression DAG header")
+        _, nodes, root = value
+    if not isinstance(nodes, list) or not _nat(root) or root >= len(nodes):
+        raise RuntimeError(f"{label} has an invalid expression DAG root")
     if len(nodes) > 2_000_000:
         raise RuntimeError(f"{label} exceeds the expression node count limit")
     for index, node in enumerate(nodes):
@@ -72,10 +83,10 @@ def validate_expr_dag(source: object, label: str = "boundary expression") -> lis
         elif tag == "t":
             valid = len(node) == 2 and isinstance(node[1], str)
         elif tag == "s":
-            valid = len(node) == 2 and _level(node[1])
+            valid = len(node) == 2 and _level(node[1], reference_count)
         elif tag == "c":
             valid = (len(node) == 3 and _name(node[1]) and isinstance(node[2], list)
-                     and all(_level(level) for level in node[2]))
+                     and all(_level(level, reference_count) for level in node[2]))
         elif tag == "a":
             valid = len(node) == 3
             references = node[1:]
@@ -93,6 +104,16 @@ def validate_expr_dag(source: object, label: str = "boundary expression") -> lis
         if tag in ("c", "p") and node[1] == [["s", "sorryAx"]]:
             raise RuntimeError(f"{label} contains forbidden sorryAx")
     return value
+
+
+def validate_expr_dag(source: object, label: str = "boundary expression") -> list[Any]:
+    """Validate the closed v1 expression format; boundary references are forbidden."""
+    return _validate_expr_dag(source, label, boundary_universes=False)
+
+
+def validate_boundary_expr_dag(source: object, label: str = "boundary expression") -> list[Any]:
+    """Validate v2 reference bounds; Lean authenticates the pre-boundary reference table."""
+    return _validate_expr_dag(source, label, boundary_universes=True)
 
 
 def validate_theorem_payload(source: object, expected_name: object,
@@ -122,6 +143,11 @@ def validate_theorem_payload(source: object, expected_name: object,
 def expr_is_constant(source: str, name: str) -> bool:
     """Recognize the same literal constant shape as Lean Expr.isConstOf."""
     _, nodes, root = validate_expr_dag(source)
+    return nodes[root] == ["c", [["s", name]], []]
+
+
+def boundary_expr_is_constant(source: str, name: str) -> bool:
+    _, _, nodes, root = validate_boundary_expr_dag(source)
     return nodes[root] == ["c", [["s", name]], []]
 
 
@@ -322,4 +348,61 @@ def validate_matcher_payload(source: object, expected_anchor: object,
         reject("invalid matcher snapshot transition")
     for state in value[11:15]:
         equation_state(state)
+    return value
+
+
+def validate_local_theorems_payload(source: object, expected_anchor: object,
+                                    label: str = "boundary local theorems") -> list[Any]:
+    if not isinstance(source, str):
+        raise RuntimeError(f"{label} must be a string")
+    try:
+        value = json.loads(source)
+    except (ValueError, RecursionError) as error:
+        raise RuntimeError(f"{label} is not a local theorem bundle") from error
+    def reject(message: str) -> None:
+        raise RuntimeError(f"{label}: {message}")
+    if not (isinstance(value, list) and len(value) == 3
+            and value[0] == "boundary_local_theorems_bundle_v1"
+            and _name(expected_anchor) and expected_anchor and value[1] == expected_anchor
+            and isinstance(value[2], list) and value[2]):
+        reject("invalid bundle header")
+    names = []
+    for entry in value[2]:
+        if not (isinstance(entry, list) and len(entry) == 2 and _name(entry[0]) and entry[0]
+                and isinstance(entry[1], str)):
+            reject("invalid member")
+        name, payload = entry
+        if name in names:
+            reject("duplicate member")
+        names.append(name)
+        try:
+            thm = json.loads(payload)
+        except (ValueError, RecursionError):
+            reject("invalid member payload")
+        if not (isinstance(thm, list) and len(thm) == 7
+                and thm[0] == "boundary_local_theorem_v1"
+                and type(thm[1]) is bool and thm[1] == (name[0] == ["s", "_private"])
+                and isinstance(thm[2], str) and thm[2] in {"private", "axiom", "theorem"}
+                and type(thm[4]) is bool and type(thm[5]) is bool):
+            reject("invalid theorem metadata")
+        body = validate_theorem_payload(thm[3], name, label)
+        if body[2] != [name]:
+            reject("nonsingleton theorem group")
+        cache = thm[6]
+        if cache is not None:
+            if not (isinstance(cache, list) and len(cache) == 4 and isinstance(cache[0], str)
+                    and type(cache[1]) is bool and type(cache[2]) is bool):
+                reject("invalid cache entry")
+            validate_expr_dag(cache[0], f"{label} cache type")
+            if thm[1] and not cache[1]:
+                reject("public cache key for private name")
+            old = cache[3]
+            if old is not None and not (isinstance(old, list) and len(old) == 2
+                    and _name(old[0]) and old[0] and isinstance(old[1], list)
+                    and all(_name(level) and level for level in old[1])):
+                reject("invalid previous cache value")
+    # Lean validates canonical anchor order using Name.toString; here require
+    # exact membership without approximating Lean's escaped name rendering.
+    if expected_anchor not in names:
+        reject("anchor is not a member")
     return value
