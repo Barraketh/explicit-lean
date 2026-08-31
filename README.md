@@ -269,9 +269,8 @@ yet the complete pinned-corpus acceptance gate.
   result and boundary delta.
 - **Materialization:** rewriting source occurrences to the current
   `simp_engine_boundary_select` prototype and compiling the copied module with
-  the original continuation unchanged except, when necessary, for consistent
-  declaration-parameter alpha-renaming. The production public form is intended
-  to be `simp_engine_apply`.
+  authored binders and source outside the replaced ranges preserved. The
+  original tactic is retained in an adjacent comment.
 - **Closed-world closure:** successful translation and compilation of every
   executable occurrence under the pinned corpus, toolchain, and build procedure,
   with retained syntax data preserved separately.
@@ -279,6 +278,11 @@ yet the complete pinned-corpus acceptance gate.
 The August 31–September 8 campaign is tracked in `WEEKLY.md` and
 `tracking/campaign.json`. A fresh diagnostic inventory accounts for 83,425 calls
 across 8,264 modules, including 66 reusable executable calls and five unresolved
-quotations. It is not translated coverage. Artifact schema 2 replaces printed
-Lean source with raw expression DAGs and captured, kernel-checked theorem
-declarations; full-corpus translation and readability work remain in progress.
+quotations. It is not translated coverage. Current artifact schema 4 uses raw expression
+DAGs and captured, kernel-checked declarations with exact replay state checks.
+The cold certificate validator compares normal serialized compiler outputs and
+requires matching independent, audited, and paired compilations before an
+output can be published. Acceptance remains on hold pending translated-tree
+validation and a newly identified pending typeclass-synthesis guard in replay.
+See `tracking/STATUS.md` for current provisional counts; readability follows
+complete explicit coverage.

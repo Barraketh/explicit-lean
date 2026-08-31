@@ -1056,16 +1056,23 @@
       "sessionId": 38300,
       "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
       "commit": "1f6f12c",
-      "status": "running",
+      "status": "stopped_budget_guard",
       "phase": "expansion_worker",
       "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-expansion-worker.log",
       "modules": 201,
-      "note": "Fresh201-module manifest then first23 priorityworker then full131-root priorityworker. Disjoint from full worker. Per-mode logs preserve each stage; expansion summary is current diagnostic only.",
+      "note": "Fresh201-module manifest then first23 priorityworker then full131-root priorityworker. Disjoint from full worker. Per-mode logs preserve each stage; expansion summary is current diagnostic only. Expansion ended conservatively after a budget-guard denial:84processed48success36failures; root fresh telemetry subsequently permits current-window work at35%. Do not relabel old frozen outputs or restart before choosing new runtime.",
       "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py",
       "firstWorkerResult": {
         "processed": 23,
         "succeeded": 13,
         "failures": 10
+      },
+      "expansionWorkerResult": {
+        "processed": 84,
+        "succeeded": 48,
+        "failures": 36,
+        "budgetDenied": true,
+        "timedOut": false
       }
     },
     {
@@ -1150,6 +1157,19 @@
       "owner": "coordinator",
       "status": "superseded",
       "note": "Historical bounded prototype evidence; superseded by strict production schema2 integration5f02c0c."
+    },
+    {
+      "id": "cold-publication-preparation",
+      "status": "bounded_checks_passed_full_cone_pending_replay_guard",
+      "runner": ".lake/week-2026-08-31/run_cold_certified_cone.py",
+      "publicationHelper": ".lake/week-2026-08-31/cold_certified_cone_publication.py",
+      "bytePublicationChecks": ".lake/week-2026-08-31/cold-publication-controls-mvghvl9g/report.json",
+      "actualCertificateChecks": ".lake/week-2026-08-31/cold-publication-receipts-uxypch1t/report.json",
+      "actualCertificateChecksSha256": "2f669d623145817049ed033367872f10f7c45534b01657a5ae020aa501189741",
+      "actualCertificates": 2,
+      "downstreamComputed": 14,
+      "rootHashChecks": 114,
+      "wholeMathlib": false
     }
   ],
   "prototypeCoverage": {
@@ -1457,5 +1477,11 @@
     "checkedAt": "2026-08-31T17:36:47.331238+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T18:01:24.168141+00:00"
+  "updatedAt": "2026-08-31T18:08:49.612907+00:00",
+  "scopeQuestion": {
+    "askedAt": "2026-08-31T18:08:49.612907+00:00",
+    "status": "awaiting_optional_user_steering",
+    "question": "Must exported simp-based tactics preserve unrestricted future behavior, or may their API change if the pinned Mathlib corpus is fully translated and checked?",
+    "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
+  }
 }
