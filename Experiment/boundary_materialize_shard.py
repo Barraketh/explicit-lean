@@ -713,7 +713,9 @@ def verify_selected_classifications(
             )
         )
     occurrences_by_module, declarations_by_module, _scope_fallbacks = (
-        scope.load_records_with_fallbacks(specs, batch_size=max(1, len(specs)))
+        scope.load_records_with_fallbacks(
+            specs, batch_size=max(1, len(specs)), timeout=timeout
+        )
     )
     identity_fields = (
         "id",

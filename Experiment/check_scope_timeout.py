@@ -11,6 +11,7 @@ import tempfile
 from unittest.mock import patch
 
 import check_simp_engine_boundary_scope as scope
+import boundary_materialize_shard as materializer
 import simp_engine_boundary_corpus as corpus
 
 
@@ -81,12 +82,31 @@ def test_manifest_passes_requested_timeout(root: Path) -> None:
     assert (batch_size, timeout) == (7, 1234)
 
 
+def test_shard_classification_passes_requested_timeout(root: Path) -> None:
+    from types import SimpleNamespace
+
+    path = root / "Selected.lean"
+    path.write_text("-- no simp calls\n")
+    selected = [SimpleNamespace(
+        source_path=path, module="Mathlib/Selected.lean",
+        compiled_module="Mathlib.Selected", source=path.read_bytes(), occurrences=[],
+    )]
+    with patch.object(corpus, "inventory_paths", return_value=({}, [])) as inventory_call, \
+            patch.object(corpus, "validate_module_inventory", return_value=([], 0, 0)), \
+            patch.object(corpus, "join_scope_records", return_value=([], 0)), \
+            patch.object(scope, "load_records_with_fallbacks", return_value=({}, {}, [])) as scope_call:
+        materializer.verify_selected_classifications(selected, timeout=37)
+    assert inventory_call.call_args.kwargs["timeout"] == 37
+    assert scope_call.call_args.kwargs["timeout"] == 37
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="scope-timeout-") as raw:
         root = Path(raw).resolve()
         test_scope_build_and_batches(root)
         test_manifest_passes_requested_timeout(root)
-    print("scope timeout: default and overrides reach prerequisite build, batches, and manifest adapter")
+        test_shard_classification_passes_requested_timeout(root)
+    print("scope timeout: default and overrides reach build, batches, manifest and shard adapters")
 
 
 if __name__ == "__main__":
