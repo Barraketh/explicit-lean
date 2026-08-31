@@ -279,8 +279,9 @@ private def checkCapturedMatcherConstants (before : Environment) (available : Na
     throwError "boundary_matcher_foreign_declaration_dependency:{bad}"
 
 /-- Capture one exact generated bundle. The caller must separately capture all
-    explicitly named other declarations. Bundle bodies cannot depend on those
-    declarations, so global action ordering requires no hidden resolution. -/
+    explicitly named other declarations, including disjoint matcher bundles.
+    Bundle bodies cannot depend on those declarations, so global action ordering
+    requires no hidden resolution. -/
 def encodeBoundaryMatcher (before : Environment) (checkedBefore : NameSet) (anchor : Name)
     (eqns : MatchEqns) (otherDeclarations : Array Name := #[])
     (priorEquationDeclarations : Array Name := #[]) : MetaM String := do
@@ -310,8 +311,8 @@ def encodeBoundaryMatcher (before : Environment) (checkedBefore : NameSet) (anch
     | none => state
     | some anchor => { state with mapInv := state.mapInv.insert name anchor }
   let localBefore := eqnsExt.getState before
-  -- Other supported equation actions may precede this bundle in the sorted
-  -- action list. Capture its exact invocation state, not a projected map.
+  -- Other supported equation actions and earlier bundles' equations may precede
+  -- this bundle. Capture its exact invocation state, not a projected map.
   unless priorEquationDeclarations.all otherDeclarations.contains do
     throwError "boundary_matcher_foreign_prior_equation"
   let localEquationBefore := priorEquationDeclarations.foldl addRegistration localBefore

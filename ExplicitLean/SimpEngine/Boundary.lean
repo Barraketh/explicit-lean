@@ -1916,9 +1916,11 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
   let declarations := (boundaryEnvironmentDelta basis stockEnvironment).qsort
     (fun lhs rhs => lhs.name.toString < rhs.name.toString)
   -- A generated splitter's typed async snapshot authenticates bundle ownership.
-  -- Capture accepts one matcher bundle, closed ordinary theorem helpers, and
-  -- supported equation/congruence actions. Other declaration kinds fail closed.
-  let mut matcher? : Option (Name × Match.MatchEqns) := none
+  -- Bundles have disjoint members and independently closed bodies. Capture
+  -- retains the existing deterministic action order and exact caller/async
+  -- state checks; cross-bundle body dependencies remain unsupported.
+  let mut matchers : Array (Name × Match.MatchEqns) := #[]
+  let mut members : Array Name := #[]
   for info in declarations do
     if let .defnInfo _ := info then
       let state := Match.matchEqnsExt.getState stockEnvironment
@@ -1927,11 +1929,13 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
       unless candidates.isEmpty do
         unless candidates.size == 1 do
           throwError "boundary_matcher_ambiguous_capture_provenance"
-        if matcher?.isSome then
-          throwError "boundary_matcher_multiple_bundles_unsupported"
-        matcher? := some candidates[0]!
-  let members := matcher?.map (fun (_, eqns) => eqns.eqnNames.push eqns.splitterName)
-    |>.getD #[]
+        let candidate := candidates[0]!
+        let names := candidate.2.eqnNames.push candidate.2.splitterName
+        if matchers.any (·.1 == candidate.1) || names.any members.contains then
+          throwError "boundary_matcher_overlapping_capture_provenance"
+        matchers := matchers.push candidate
+        members := members ++ names
+  matchers := matchers.qsort (fun lhs rhs => lhs.1.toString < rhs.1.toString)
   let mut actions : Array EnvironmentAction := #[]
   let mut helpers : Array TheoremVal := #[]
   for info in declarations do
@@ -1972,17 +1976,19 @@ private def captureBoundaryEnvironmentActions (basis : PreBoundaryBasis)
             mappedAnchor?.isSome))
       else
         throwError s!"boundary_comparison_unsupported_declaration_metadata:{info.name}"
-  if let some (anchor, eqns) := matcher? then
-    let otherDeclarations := actions.map boundaryEnvironmentActionName ++ helpers.map (·.name)
+  let ordinaryDeclarations := actions.map boundaryEnvironmentActionName ++ helpers.map (·.name)
+  let mut priorMatcherEquations : Array Name := #[]
+  for (anchor, eqns) in matchers do
+    let currentMembers := eqns.eqnNames.push eqns.splitterName
+    let otherDeclarations := ordinaryDeclarations ++ members.filter (!currentMembers.contains ·)
     let priorEquationDeclarations := actions.filterMap fun action => match action with
       | .declareEquation name _ => if name.toString < anchor.toString then some name else none
       | _ => none
     let payload ← withEnv stockEnvironment <| encodeBoundaryMatcher
       basis.environment basis.checkedDeclarationNames anchor eqns
-      otherDeclarations priorEquationDeclarations
+      otherDeclarations (priorEquationDeclarations ++ priorMatcherEquations)
     actions := actions.push (.declareMatcher anchor payload)
-    actions := actions.qsort fun lhs rhs =>
-      (boundaryEnvironmentActionName lhs).toString < (boundaryEnvironmentActionName rhs).toString
+    priorMatcherEquations := priorMatcherEquations ++ eqns.eqnNames
   unless helpers.isEmpty do
     let (anchor, payload) ← withEnv stockEnvironment <|
       encodeBoundaryLocalTheorems basis.environment helpers

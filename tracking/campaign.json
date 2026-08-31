@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 0,
+    "verifiedTranslatedOccurrences": 7,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require the current materialization report schema (9), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling. Remaining-call acceptance scans now load the actual source imports; aggregate Mathlib scanning remains a discovery optimization.",
     "inventoriedModules": 8264,
@@ -28,9 +28,9 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 646,
-    "provisionalCachedModules": 65,
+    "verifiedTranslatedModules": 1,
+    "provisionalCachedOccurrences": 604,
+    "provisionalCachedModules": 53,
     "minimumAcceptedReportSchema": 9
   },
   "work": [
@@ -216,9 +216,9 @@
     },
     {
       "id": "multiple-matcher-bundles",
-      "owner": "/root/unresolved_probe_finish",
-      "status": "in_progress",
-      "description": "Isolated disjoint multiple bundles pass fresh controls and first Lookmap site compile/oracle; full module still rejects later cached-realization generator effects."
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Integrated disjoint closed bundles; main17multiple+12existing matcher+17source+4protocol controls passed. Frozen821hashes/37nonce logs independently checked, main356archived inputs rehashed. FullLookmap remains blocked on cached realization activation; no full-module claim."
     },
     {
       "id": "cached-realization-activation",
@@ -265,7 +265,7 @@
     }
   ],
   "nextActions": [
-    "Freeze combined artifact3/selector2/report9 after actual-import source audit passes. Launch schema9 expansion manifest201modules/131roots and full fresh manifest8260modules/83414expected calls;4modules/11calls remain separately tracked, never exempted.",
+    "Frozen f3db7d4 schema9 expansion201 and full8260 manifests are running. After expansion closure, launch131roots (or first23while old queue finishes); after full closure, run a disjoint bulk worker. Compare fresh counts with83414expected;4modules/11calls remain required and separately tracked.",
     "Old schema7-diverse batch is diagnostic/provisional. Avoid replanning its unfinished module leases; first schema9 priority roots already completed by old workers.",
     "Integrate sparse matcher-v2 and disjoint multiple-bundle support after their bounded reviews. Address explicit activation of completed cached realizations without arbitrary generator changes.",
     "Use actual source-header imports for all single-file remaining-call audits and final translated-tree audits. Full translated-output semantic comparison remains required.",
@@ -594,6 +594,34 @@
         ".lake/week-2026-08-31/header-inventory-source-gate-2.log",
         ".lake/week-2026-08-31/header-inventory-int-recheck.log"
       ]
+    },
+    {
+      "at": "2026-08-31T14:11:20.044287+00:00",
+      "summary": "Committed combined artifact3/selector2/report9 engine and actual-import audit atf3db7d4. Clean schema9-expansion snapshot copied project cache and Lake validation passed; expansion201/full8260 manifests launched. Independently verified frozen multiple-matcher handoff821hashes/37nonce logs; integration build running. Weekly usage18%.",
+      "checks": [
+        "18final focused evidence files pinned in .lake/week-2026-08-31/schema9-final-focused-evidence.json",
+        "schema9-cache-validation.log: build completed, cached dependencies unchanged"
+      ],
+      "pending": [
+        "Broad schema9 worker dispatch after manifests close",
+        "Multiple matcher main controls and sparse matcher integration",
+        "Cached realization activation and final source-local grammar audit"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:17:00.461910+00:00",
+      "summary": "Multiple matcher integration passed main17multiple,12existingmatcher,17source and4protocol controls. Fresh expansion inventory201modules/1604calls exactly matches prior per-module counts; first23root worker active. First closed schema9 Int.Init7calls passed. Full8260syntax scan completed5batches; scope scan pending/running.",
+      "evidence": [
+        ".lake/week-2026-08-31/multiple-integration-verification.json",
+        ".lake/matcher-multiple/controls-f9x2t5t9/report.json",
+        ".lake/week-2026-08-31/multiple-main-source.log",
+        ".lake/week-2026-08-31/sparse-handoff-verification.json"
+      ],
+      "pending": [
+        "Cached activation: actual same-context producer preserves7-membergroup; narrow activation work continues",
+        "Sparse v2 production integration and portable driver cleanup",
+        "Full fresh manifest and translated-tree oracles"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -722,6 +750,37 @@
       "succeededModules": 15,
       "failedModules": 6,
       "verifiedCalls": 98
+    },
+    {
+      "id": "schema9-expansion-inventory",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema9-expansion",
+      "commit": "f3db7d4",
+      "status": "completed",
+      "sessionId": 52377,
+      "log": ".lake/schema9-expansion-manifest.log",
+      "inventoriedModules": 201,
+      "scope": "Fresh discovery/closure manifest; not translated coverage.",
+      "occurrences": 1604,
+      "manifestSha256": "6477e49f7309e01fc2dbac1cb54896adc7acbf4874a6e39e89649f83bdbad2de"
+    },
+    {
+      "id": "schema9-full-inventory",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema9-expansion",
+      "commit": "f3db7d4",
+      "status": "running",
+      "sessionId": 65043,
+      "log": ".lake/schema9-full-manifest.log",
+      "inventoriedModules": 8260,
+      "scope": "Fresh discovery/closure manifest; not translated coverage."
+    },
+    {
+      "id": "schema9-expansion-first",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema9-expansion",
+      "commit": "f3db7d4",
+      "status": "running",
+      "sessionId": 39890,
+      "log": ".lake/schema9-expansion-first-worker.log",
+      "note": "First23priority/frontier roots, disjoint from old unfinished queue. Int.Init7 first current-schema success; remaining108expansion roots dispatch after this worker and old batch finish."
     }
   ],
   "latestCommits": [
@@ -760,7 +819,9 @@
     "6b99b9a",
     "7839c0f",
     "9a74d7f",
-    "e765695"
+    "e765695",
+    "4e1142c",
+    "f3db7d4"
   ],
   "experiments": [
     {
@@ -882,7 +943,9 @@
     ],
     "currentArtifactSchema": 3,
     "currentSelectorSchema": 2,
-    "minimumReportSchema": 9
+    "minimumReportSchema": 9,
+    "integratedEngineCommit": "f3db7d4",
+    "focusedEvidenceManifest": ".lake/week-2026-08-31/schema9-final-focused-evidence.json"
   },
   "failureTriage": {
     "command": "python3 Experiment/campaign_failures.py",
