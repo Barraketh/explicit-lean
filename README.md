@@ -56,8 +56,8 @@ A bounded V2 realization sequence handles a fresh imported congruence followed
 by an authentic completed local congruence. It authenticates both descriptor
 phases and preserves exact document text, count and order; only source ranges
 are normalized to match the declaration oracle’s existing policy. The nine-call
-Unitization prototype passes fresh replay and the full oracle. Production
-rerunning and whole-tree acceptance remain separate.
+Unitization module passes the production report-12 pipeline, fresh replay,
+and the full oracle. Whole-tree acceptance remains separate.
 
 The repository retains schema-27 operational recording and replay as legacy
 evidence. In particular, the existing

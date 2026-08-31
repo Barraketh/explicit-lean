@@ -384,7 +384,7 @@
     }
   ],
   "nextActions": [
-    "Run freshly frozen production report12 Unitization shard after V2 cached-congruence integration; preserve bounded private controls and zero whole-tree acceptance.",
+    "Finish fresh BigOperators150-call probes and Cubic ordered local-equation prototype, then use current evidence to prioritize remaining failure families.",
     "Integrate verified two-line scope import decoupling; implement content-bound analysis checkpoint identity so replay changes do not force repeated full scope analysis. Never rebind old provenance hashes.",
     "Implement bounded ordered fresh-local-equation then cached-local-equation realization for Cubic aa693119975056ee; preserve complete owner/descriptor/state/generator checks.",
     "Freeze current runtime and generate fresh complete manifest with reusable analysis checkpoints, then resume bounded indexed production workers; old schema10 worker ended and old reports remain provisional.",
@@ -1008,6 +1008,13 @@
       "status": "verified",
       "note": "Removed full ExplicitLean import/build prerequisite from scope tool;205module byte comparisons and fresh two-process fixture pass; main native bytes equal corrected verified prototype; source timeout and checkpoint controls pass.",
       "verification": ".lake/week-2026-08-31/scope-decoupling-main-verification.json"
+    },
+    {
+      "at": "2026-08-31T20:22:04.289222+00:00",
+      "id": "production12-unitization9",
+      "status": "independently_verified_bounded",
+      "verification": ".lake/week-2026-08-31/schema12-unitization-root-verification.json",
+      "note": "Frozen3ecc925 runtime:9calls9variants0unobserved/remaining; three exact native receipts and fullconsumer/sourcecomments independentlyverified1082hashassertions. No whole-tree acceptance increment."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1269,6 +1276,18 @@
       "rootVerification": ".lake/week-2026-08-31/schema11-inventory-root-verification.json",
       "reusableOccurrences": 65,
       "nestedOccurrences": 91
+    },
+    {
+      "id": "schema12-bigoperators150",
+      "status": "running",
+      "sessionId": 31932,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema12-congruence-campaign",
+      "commit": "3ecc925",
+      "modules": 3,
+      "expectedOccurrences": 150,
+      "log": ".lake/schema12-bigoperators.log",
+      "resultRoot": ".lake/schema12-bigoperators-yuxn215i",
+      "note": "Fresh closed manifest and current production12 applied recording. Single module at a time,12GiB diskreserve; inputs immutable and no masterindex lease."
     }
   ],
   "latestCommits": [
@@ -1825,7 +1844,7 @@
       }
     },
     "cachedCongruenceSequence": {
-      "status": "integrated_bounded_v2_production_rerun_pending",
+      "status": "integrated_production_report12_verified",
       "handoffManifestSha256": "fc7dde4f31595835845a193fa1a6105d6dd107655860eed08897db136002cf5f",
       "rootVerification": ".lake/week-2026-08-31/congruence-doc-policy-root-verification.json",
       "mainBuild": ".lake/congruence-doc-policy-main-build.log",
@@ -1837,7 +1856,18 @@
       "legacyLocalProcesses": 20,
       "legacyWireNegatives": 15,
       "sourceRangePolicy": "V2 canonicalizes only exact registered moduleDocExt DeclarationRange; exact text/count/order retained. Existing default/raw V1 contracts unchanged.",
-      "wholeMathlib": false
+      "wholeMathlib": false,
+      "integratedCommit": "3ecc925",
+      "productionVerification": {
+        "report": "/Users/ptsier/projects/explicit-lean/.lake/search-free-mathlib/snapshots/schema12-congruence-campaign/.lake/boundary-materialization/schema12-unitization-_d5lth3_/report.json",
+        "reportSha256": "81efb82790937aa74c1bea8ec996d450e30eae6ffae19c99b63eb31e11c21cfc",
+        "modules": 1,
+        "calls": 9,
+        "variants": 9,
+        "nativeInvocations": 3,
+        "acceptedCampaignCoverage": false,
+        "rootVerification": ".lake/week-2026-08-31/schema12-unitization-root-verification.json"
+      }
     }
   },
   "failureTriage": {
@@ -1872,7 +1902,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T20:16:42.222863+00:00",
+  "updatedAt": "2026-08-31T20:22:04.289222+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
