@@ -29,8 +29,8 @@
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 1323,
-    "provisionalCachedModules": 137,
+    "provisionalCachedOccurrences": 1344,
+    "provisionalCachedModules": 140,
     "minimumAcceptedReportSchema": 11,
     "validationHold": "The cold serialized comparator, independent compilation consumer, and unconditional pending-synthesis barrier are integrated and bounded schema11 controls passed. Complete translated dependency-tree certification remains pending; previous candidates and proof checks stay provisional."
   },
@@ -378,9 +378,9 @@
     }
   ],
   "nextActions": [
-    "Commit/freeze the reviewed artifact5/report11 runtime and plan broad generation from authenticated existing source inventory; never relabel old report10 results.",
-    "Use the integrated cold serialized consumer in a fresh translated dependency cone. Publish only ordinary-applied output after five fresh processes and six complete family checks; freeze all runtime/dependency inputs.",
-    "Authenticate nonempty local auxiliary-proof cache under a separate exact witness, independently test multiple ordinary helper sequences, then compose under unchanged complete boundary guards.",
+    "Use immutable schema11 snapshot f231289 for fresh bulk generation and cold translated-tree certification. Existing full inventory/source facts may guide selections, but reuse requires explicit provenance and unchanged analysis inputs.",
+    "Integrate frozen nonempty auxiliary-cache witness after independent source/proof-table/mutation review; continue separate localcached-root plus ordinary-helper sequence for actual ExistsUnique.",
+    "Resolve reusable66calls and unresolved5quotations with positive source dataflow evidence and explicit API scope; preserve source/execution identities.",
     "Let frozen schema10 workers finish bounded queues without editing runtimes or live leases. Reuse diagnostic evidence only; advance broad generation under new frozen runtime once ready.",
     "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and complete source/execution ownership.",
     "After complete explicit coverage and translated-tree acceptance, mine readable normal forms and other common tactics if time remains."
@@ -912,6 +912,15 @@
         ".lake/week-2026-08-31/local-cached-schema11-root-verification.json",
         ".lake/week-2026-08-31/replay-schema11-root-verification.json"
       ]
+    },
+    {
+      "at": "2026-08-31T18:38:19.120261+00:00",
+      "summary": "Fresh cold39-module cone passed195compiler runs,234complete families936parts and156command audits under strict translated Mathlib imports. Root24936hash assertions/195nonces/source-comment regeneration and external11502artifacts verified. Two calls/three variants covered; acceptance remains held for complete tree. Private schema11 snapshot f231289 validates shared runtime+fourtools with only2rebuilt scope targets. Discarded Luna manifest-recipe draft as not an executable/provenance-complete reuse producer; root will resolve reuse. Localcached/ordinary-helper composition delegated to new Sol; imported synthetic2helper fixture correctly takes all-fresh fallback and remains unaccepted.",
+      "evidence": [
+        ".lake/week-2026-08-31/cold-schema11-cone-root-verification.json",
+        ".lake/week-2026-08-31/schema11-snapshot-preparation.json",
+        ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-runtime-build.log"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1134,17 +1143,27 @@
     {
       "id": "schema11-cold-first-cone",
       "sessionId": 81381,
-      "status": "running",
+      "status": "completed_bounded_cold_certified",
       "root": "Mathlib.Logic.Function.Defs",
       "modules": 39,
       "freshSourceReport": ".lake/observational-data/Mathlib-Logic-Function-Defs-9sy6wegl/report.json",
       "runner": ".lake/week-2026-08-31/run_cold_certified_cone.py",
       "work": ".lake/week-2026-08-31/cold-certified-first-cone-tmf6awe3",
       "log": ".lake/week-2026-08-31/cold-certified-schema11-cone-r3.log",
-      "scope": "Fresh artifact5 source/comment provenance;39-module strict translated dependency cone, five independent compiler processes and six complete output families per module. No accepted whole-Mathlib coverage."
+      "scope": "Bounded fresh39-module cone, not wholeMathlib acceptance. Main Python paths bound by receipts; exact source/runtime inputs archived before subsequent edits. Future production cones must run wholly from immutable snapshots.",
+      "report": ".lake/week-2026-08-31/cold-certified-first-cone-tmf6awe3/report.json",
+      "reportSha256": "0fc23ab039027041b0de2436a54a41fc05503c3710fd8087062bc6139e238398",
+      "rootVerification": ".lake/week-2026-08-31/cold-schema11-cone-root-verification.json",
+      "freshCompilerProcesses": 195,
+      "completeArtifactFamilies": 234,
+      "checkedArtifactParts": 936,
+      "commandAuditFrames": 156,
+      "replacedCalls": 2,
+      "recordedVariants": 3
     }
   ],
   "latestCommits": [
+    "f231289",
     "a17ef7f",
     "fae96be",
     "2105937",
@@ -1202,7 +1221,7 @@
     },
     {
       "id": "cold-publication-preparation",
-      "status": "bounded_checks_passed_full_cone_pending_replay_guard",
+      "status": "bounded_full_cone_passed",
       "runner": ".lake/week-2026-08-31/run_cold_certified_cone.py",
       "publicationHelper": ".lake/week-2026-08-31/cold_certified_cone_publication.py",
       "bytePublicationChecks": ".lake/week-2026-08-31/cold-publication-controls-mvghvl9g/report.json",
@@ -1211,7 +1230,9 @@
       "actualCertificates": 2,
       "downstreamComputed": 14,
       "rootHashChecks": 114,
-      "wholeMathlib": false
+      "wholeMathlib": false,
+      "coneReport": ".lake/week-2026-08-31/cold-certified-first-cone-tmf6awe3/report.json",
+      "rootVerification": ".lake/week-2026-08-31/cold-schema11-cone-root-verification.json"
     },
     {
       "id": "expression-reference-handoff",
@@ -1382,6 +1403,19 @@
         "auditFrames": 78,
         "externalArtifactHashes": 11486,
         "publicationPolicy": "Fresh private single-writer run; exact family then receipt; no resume or existing-output overwrite. External roots verified free of nested directory symlinks."
+      },
+      {
+        "commit": "f231289",
+        "root": "Mathlib.Logic.Function.Defs",
+        "modules": 39,
+        "replacedCalls": 2,
+        "status": "cold_certified_bounded_with_strict_translated_imports",
+        "report": ".lake/week-2026-08-31/cold-certified-first-cone-tmf6awe3/report.json",
+        "reportSha256": "0fc23ab039027041b0de2436a54a41fc05503c3710fd8087062bc6139e238398",
+        "independentVerification": ".lake/week-2026-08-31/cold-schema11-cone-root-verification.json",
+        "freshCompilerProcesses": 195,
+        "wholeMathlib": false,
+        "limitations": "Two replaced source calls/three variants; no inference of complete corpus coverage. Original receipt Python input paths are main checkout; archived immutable copies preserve historical evidence, while later production runs use frozen snapshot paths."
       }
     ],
     "currentArtifactSchema": 4,
@@ -1552,7 +1586,7 @@
     "checkedAt": "2026-08-31T17:36:47.331238+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T18:33:01.889463+00:00",
+  "updatedAt": "2026-08-31T18:38:19.120261+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
