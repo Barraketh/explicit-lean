@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 326,
+    "verifiedTranslatedOccurrences": 470,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
@@ -28,7 +28,7 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 34,
+    "verifiedTranslatedModules": 47,
     "provisionalCachedOccurrences": 0,
     "provisionalCachedModules": 0,
     "minimumAcceptedReportSchema": 10
@@ -261,6 +261,12 @@
       "owner": "coordinator with assigned Sol agent",
       "status": "in_progress",
       "description": "Isolated removal-only raw checked-domain oracle and optional normal frontend outputs in quarantine. Existing controls pass provisionally; final guarded regression handoff pending. Inherited checked-only private-helper false rejection remains fail-closed; historical Lookmap sources are not portable to changed runtime."
+    },
+    {
+      "id": "same-frontend-compiler-output",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Raw frontend comparison and optional normal serialization integrated; main57jobbuild and70process+17consumer/wire controls passed. Root260hashes/69nonces/90auditframes verified; frozen54process prototype independently verified. Quarantine only; certified forest publication remains separate."
     }
   ],
   "blockers": [
@@ -1203,6 +1209,15 @@
       "privateHandoffSha256": "669301b33c096a57a4b3a6d290d82cc60818792dbf5f275921cadcc6f7b70194",
       "wholeModifyLast": false,
       "performanceNote": "Two-site fresh/cached fixture is5.2MiB source and observed about24GiB peak RSS on64GiB Mac. Avoid concurrent heavy ModifyLast controls; investigate sharing-preserving storage separately without weakening descriptors."
+    },
+    "rawFrontendOutput": {
+      "mainEvidence": ".lake/week-2026-08-31/raw-oracle-main-verification.json",
+      "privateHandoffSha256": "229f6ba5f113ac06f104af4b63b2d4e8bb11397758d4a1ec9a2363651d055d43",
+      "mainProcessChecks": 70,
+      "mainConsumerAndWireMutations": 17,
+      "outputPolicy": "normal applied frontend output in quarantine; separate consumer must validate audit, semantics, identity and exact artifact family before publication",
+      "wholeMathlib": false,
+      "knownLimits": "Baseline and raw oracle both reject checked-only non-reserved private unfolding; old Lookmap candidate also fails both frontends before comparison. No exemptions or old-result relabelling."
     }
   },
   "failureTriage": {
@@ -1225,9 +1240,9 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 65024319488,
-    "checkedAt": "2026-08-31T15:30:34.486345+00:00",
+    "lastFreeBytes": 51913367552,
+    "checkedAt": "2026-08-31T16:41:43.982535+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T16:29:41.730566+00:00"
+  "updatedAt": "2026-08-31T16:41:43.982535+00:00"
 }

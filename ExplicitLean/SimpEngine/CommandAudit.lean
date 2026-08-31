@@ -54,12 +54,12 @@ private def unregisterCollector (name : Name) : IO Unit := do
     waits for linter tasks and performs its normal error handling/postprocessing.
     Calls in one process must be sequential, as with the underlying frontend. -/
 unsafe def capture (source : String) (options : Options) (file : String)
-    (moduleName : Name) : IO Captured := do
+    (moduleName : Name) (oleanFileName? : Option System.FilePath := none) : IO Captured := do
   enableInitializersExecution
   let captured ← IO.mkRef (#[] : Array (Array Syntax))
   let collector ← registerCollector file moduleName captured
   try
-    let some environment ← Elab.runFrontend source options file moduleName
+    let some environment ← Elab.runFrontend source options file moduleName (oleanFileName? := oleanFileName?)
       | throw <| IO.userError "command_audit_frontend_failed"
     unless environment.mainModule == moduleName do
       throw <| IO.userError "command_audit_module_identity_mismatch"

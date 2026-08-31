@@ -443,7 +443,7 @@ private structure OracleResult where
   counts : OracleCounts
 
 private unsafe def elaborateSource (moduleName : Name) (auditLabel : String)
-    (path : System.FilePath) : IO Environment := do
+    (path : System.FilePath) (oleanFileName? : Option System.FilePath := none) : IO Environment := do
   Lean.enableInitializersExecution
   let source ← IO.FS.readFile path
   -- Keep this in sync with `simp_engine_inventory.py`; async elaboration is
@@ -457,7 +457,7 @@ private unsafe def elaborateSource (moduleName : Name) (auditLabel : String)
   if (← IO.getEnv CommandAudit.enabledVariable) == some "1" then
     let nonce ← CommandAudit.runNonce
     let captured ← try
-      CommandAudit.capture source options path.toString moduleName
+      CommandAudit.capture source options path.toString moduleName (oleanFileName? := oleanFileName?)
     catch error =>
       if error.toString == "command_audit_frontend_failed" then
         oracleFailure "unresolved_or_sorry" s!"frontend returned no environment for {path}"
@@ -465,14 +465,14 @@ private unsafe def elaborateSource (moduleName : Name) (auditLabel : String)
         throw error
     CommandAudit.emit captured auditLabel nonce
     return captured.environment
-  let some environment ← Elab.runFrontend source options path.toString moduleName
+  let some environment ← Elab.runFrontend source options path.toString moduleName (oleanFileName? := oleanFileName?)
     | oracleFailure "unresolved_or_sorry" s!"frontend returned no environment for {path}"
   return environment
 
-private unsafe def synchronizeEnvironment (environment : Environment) : IO Environment := do
-  let some importEnvironment := environment.importEnv?
-    | oracleFailure "unresolved_or_sorry" "frontend did not retain its import environment"
-  environment.replayConsts importEnvironment environment (skipExisting := true)
+-- Keep the frontend's retained-import invariant without replaying any state.
+private def validateFrontendEnvironment (environment : Environment) : IO Unit := do
+  unless environment.importEnv?.isSome do
+    oracleFailure "unresolved_or_sorry" "frontend did not retain its import environment"
 
 private def sortedCurrentDeclarations (environment : Environment) : IO (Array ConstantInfo) := do
   let data ← Lean.mkModuleData environment
@@ -844,14 +844,18 @@ private unsafe def compareEnvironment (stock applied : Environment)
   compareExtensions stock applied stockData appliedData
   compareExtraModUses stockData appliedData
 
-private unsafe def runOracle (moduleName : Name) (stockPath appliedPath : System.FilePath) :
-    IO OracleResult := do
+private unsafe def runOracle (moduleName : Name) (stockPath appliedPath : System.FilePath)
+    (oleanFileName? : Option System.FilePath := none) : IO OracleResult := do
+  if oleanFileName?.isSome then
+    unless (← IO.getEnv CommandAudit.enabledVariable) == some "1" do
+      throw <| IO.userError "oracle_output_requires_command_audit"
+    let _ ← CommandAudit.runNonce
   runExtensionNameSelfTest
   runLCNFComparatorSelfTest
   let stock ← elaborateSource moduleName "stock" stockPath
-  let stock ← synchronizeEnvironment stock
-  let applied ← elaborateSource moduleName "applied" appliedPath
-  let applied ← synchronizeEnvironment applied
+  validateFrontendEnvironment stock
+  let applied ← elaborateSource moduleName "applied" appliedPath oleanFileName?
+  validateFrontendEnvironment applied
   let stockDeclarations ← sortedCurrentDeclarations stock
   let appliedDeclarations ← sortedCurrentDeclarations applied
   let counts : OracleCounts := {
@@ -925,13 +929,17 @@ private def failureJson (moduleName : Name) (category detail : String) : Json :=
   ]
 
 unsafe def _root_.main (args : List String) : IO UInt32 := do
-  let [moduleName, stockPath, appliedPath] := args
-    | IO.eprintln "usage: SimpEngineDeclarationOracle.lean <module> <stock.lean> <applied.lean>" *>
+  let some (moduleName, stockPath, appliedPath, oleanFileName?) := (match args with
+    | [moduleName, stockPath, appliedPath] => some (moduleName, stockPath, appliedPath, none)
+    | [moduleName, stockPath, appliedPath, "--olean", output] =>
+      some (moduleName, stockPath, appliedPath, some (System.FilePath.mk output))
+    | _ => none)
+    | IO.eprintln "usage: SimpEngineDeclarationOracle.lean <module> <stock.lean> <applied.lean> [--olean quarantine.olean]" *>
       pure 2
   Lean.initSearchPath (← Lean.findSysroot)
   Lean.enableInitializersExecution
   try
-    let result ← runOracle moduleName.toName stockPath appliedPath
+    let result ← runOracle moduleName.toName stockPath appliedPath oleanFileName?
     IO.println s!"SIMP_ENGINE_DECLARATION_ORACLE {Json.compress (resultJson moduleName.toName result)}"
     pure 0
   catch error =>
