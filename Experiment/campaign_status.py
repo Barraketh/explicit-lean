@@ -16,6 +16,8 @@ DEFAULT_DATABASE = ROOT / ".lake/search-free-mathlib/translation-index.sqlite3"
 
 
 def snapshot(database: Path) -> dict[str, object]:
+    campaign = json.loads((ROOT / "tracking/campaign.json").read_text())
+    required_schema = max(REPORT_SCHEMA, campaign["coverage"]["minimumAcceptedReportSchema"])
     path = database.resolve()
     connection = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
@@ -43,7 +45,7 @@ def snapshot(database: Path) -> dict[str, object]:
             "ORDER BY m.module"
         ).fetchall()
         present = [row for row in results if row["artifact_ref"] and Path(row["artifact_ref"]).is_file()]
-        guarded = [row for row in present if row["report_schema"] == REPORT_SCHEMA
+        guarded = [row for row in present if row["report_schema"] == required_schema
                    and row["replay_schema"] == 1 and row["oracle_replay_schema"] == 1]
         provisional = [row for row in present if row not in guarded]
         active = [dict(row) for row in connection.execute(
@@ -65,7 +67,7 @@ def snapshot(database: Path) -> dict[str, object]:
             "provisionalCachedModules": len(provisional),
             "provisionalCachedCalls": sum(int(row["calls"] or 0) for row in provisional),
             "missingVerifiedReportFiles": len(results) - len(present),
-            "verificationScope": f"Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require the current materialization report schema ({REPORT_SCHEMA}), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
+            "verificationScope": f"Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema {required_schema} (implemented producer: {REPORT_SCHEMA}), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
             "active": active, "failuresAndPartialResults": failures,
         }
     finally:

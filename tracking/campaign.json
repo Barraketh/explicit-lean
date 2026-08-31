@@ -20,18 +20,18 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 7,
+    "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require the current materialization report schema (9), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling. Remaining-call acceptance scans now load the actual source imports; aggregate Mathlib scanning remains a discovery optimization.",
+    "note": "Fresh post-replay auxiliary generator assertion is now required after discovery of a cache-priming false positive. Report9 is provisional pending artifact4/report10 implementation and revalidation; per-module checks still do not establish translated-tree closure.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 1,
-    "provisionalCachedOccurrences": 604,
-    "provisionalCachedModules": 53,
-    "minimumAcceptedReportSchema": 9
+    "verifiedTranslatedModules": 0,
+    "provisionalCachedOccurrences": 624,
+    "provisionalCachedModules": 55,
+    "minimumAcceptedReportSchema": 10
   },
   "work": [
     {
@@ -262,10 +262,15 @@
       "id": "final-grammar-coverage-audit",
       "status": "open",
       "detail": "Actual header imports fix the observed silent replay-grammar omission. Before whole-tree acceptance, audit source-local syntax/macro declarations too; fast incremental parser currently elaborates notation/context commands only. A conservative token coverage cross-check or exact full command-context audit may be needed. No known omitted source-local case is being exempted."
+    },
+    {
+      "id": "fresh-replay-cache-grouping",
+      "status": "open",
+      "detail": "Default-async truncated Lookmap source reproduces stock7-membergroup/gen1\u21925 vs fresh replay1-membergroup/gen1\u21927. Shared cache priming masked original recording trial. Sol prototyping exact nested realization group; Luna implementing fresh post-generator assertion. Report9 provisional until new guard and fresh revalidation."
     }
   ],
   "nextActions": [
-    "Frozen f3db7d4 schema9 expansion201 and full8260 manifests are running. After expansion closure, launch131roots (or first23while old queue finishes); after full closure, run a disjoint bulk worker. Compare fresh counts with83414expected;4modules/11calls remain required and separately tracked.",
+    "Finish frozen schema9 first23root diagnostic batch and full8260discovery manifest; keep results provisional. Before bulk dispatch, integrate captured fresh post-generator assertion (artifact4/report10), freeze, and reuse identical valid syntax/scope checkpoints where their keys match. No fresh guard field or comparison may be bypassed.",
     "Old schema7-diverse batch is diagnostic/provisional. Avoid replanning its unfinished module leases; first schema9 priority roots already completed by old workers.",
     "Integrate sparse matcher-v2 and disjoint multiple-bundle support after their bounded reviews. Address explicit activation of completed cached realizations without arbitrary generator changes.",
     "Use actual source-header imports for all single-file remaining-call audits and final translated-tree audits. Full translated-output semantic comparison remains required.",
@@ -621,6 +626,14 @@
         "Cached activation: actual same-context producer preserves7-membergroup; narrow activation work continues",
         "Sparse v2 production integration and portable driver cleanup",
         "Full fresh manifest and translated-tree oracles"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:20:03.190959+00:00",
+      "summary": "Independent fresh default-async truncated Lookmap test exposes realization cache priming: flat replay changes group shape and auxiliary generator. Raise campaign minimum acceptance to future report10 before producer exists; no premature schema10 claims. Existing report9 counts now provisional. Preserve diagnostic runs and implement direct fresh post-replay assertion plus exact nested group replay.",
+      "evidence": [
+        ".lake/search-free-mathlib/snapshots/cached-activation-prototype/.lake/cached-activation/design.md",
+        ".lake/search-free-mathlib/snapshots/cached-activation-prototype/.lake/cached-activation/producer-evidence.json"
       ]
     }
   ],
