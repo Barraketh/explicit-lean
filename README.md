@@ -139,15 +139,26 @@ runner intentionally rejects it. Regenerate the full manifest from the
 committed code before further corpus materialization.
 
 `Experiment/boundary_materialize_shard.py` consumes a current manifest fail
-closed. A fresh one-module repair-review canary for
+closed. The one-module canary for
 `Mathlib/Algebra/AddConstMap/Basic.lean` transforms all 17 calls under manifest
-schema 2 and publishes a schema-4 shard report. The report carries artifact
+schema 2. The current schema-5 report format carries artifact
 schema 1, selector schema 1, semantic contract
 `boundary-observable-v1`, the exact encoding policy, and one ordered
 classification result per selected occurrence. The generated report records
 the compilation, source-preservation, and declaration/environment checks. Pre-commit
 manifests and reports are disposable because the commit changes their repository
 identity. This is bounded semantic acceptance evidence, not a Mathlib-wide claim.
+
+Step 6 adds whole-outer-call replacement for nested executable ranges. Report
+schema 5 distinguishes `covered_by_ancestor` from independent replacement and
+binds each covered call to its source-backed outer root. Nested calls are left
+intact during stock recording and disappear with the outer call's arguments;
+they are not replayed. Crossing ranges, mixed executable/retained containment,
+and reusable tactic dependencies remain fail-closed. See the nested-coverage
+contract in `PLAN.md`.
+The nested gate checks 16 focused occurrences (seven roots, nine covered calls)
+and all ten occurrences in Mathlib's `GroupWithZero/Action` (nine roots, one
+covered call), with the declaration/environment oracle on both modules.
 
 ## Pinned environment and basic checks
 
@@ -162,13 +173,14 @@ lake build ExplicitLean ExplicitLeanMathlibAudit
 python3 Experiment/check_simp_engine_review.py
 python3 Experiment/check_simp_engine_boundary.py
 python3 Experiment/check_simp_engine_boundary_source.py
+python3 Experiment/check_simp_engine_boundary_nested.py
 python3 Experiment/check_simp_engine_declaration_oracle.py
 python3 Experiment/check_simp_engine_boundary_scope.py
 python3 Experiment/check_simp_engine_boundary_corpus.py
 python3 Experiment/check_simp_engine_boundary_mathlib.py
 # Bounded diagnostic over the existing pre-probe 101-unknown manifest.
 python3 Experiment/check_simp_engine_boundary_scope_unknowns.py
-# Current schema-4 canary target: materialize and semantically check all 17 occurrences.
+# Current schema-5 canary target: materialize and semantically check all 17 occurrences.
 python3 Experiment/simp_engine_boundary_corpus.py manifest \
   --output .lake/boundary-corpus-manifest/add-const-map-canary.json \
   --module-prefix Mathlib/Algebra/AddConstMap/Basic.lean \

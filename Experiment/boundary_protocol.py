@@ -46,7 +46,7 @@ ENCODING = {
     "instances": INSTANCE_ENCODING,
 }
 
-# This is the exact protocol identity embedded in schema-4 materialization
+# This is the exact protocol identity embedded in materialization
 # reports. Keep the object deliberately small: the report is identified by
 # the artifact wire format, not by a Python runner or a Mathlib shard.
 ARTIFACT_PROTOCOL = {
@@ -99,6 +99,7 @@ OCCURRENCE_CLASSIFICATIONS = {
     "materialized",
     "expected_failure",
     "unobserved_executable",
+    "covered_by_ancestor",
     "retained_syntax_data",
 }
 ABORT_CATEGORIES = {
@@ -572,13 +573,56 @@ def _selected_ranges(
                 f"{label} entry[{index}] has invalid source range [{start},{end})"
             )
         result.append((start, end))
-    result.sort()
-    for previous, current in zip(result, result[1:]):
-        if current[0] < previous[1]:
-            raise RuntimeError(
-                f"{label} has overlapping selected ranges: {previous}, {current}"
-            )
-    return result
+    # A whole outer replacement owns all of its contained source bytes. Check
+    # every interval (not just adjacent roots) so crossing descendants cannot
+    # disappear behind an otherwise valid outer range.
+    roots: list[tuple[int, int]] = []
+    stack: list[tuple[int, int]] = []
+    for current in sorted(result, key=lambda value: (value[0], -value[1])):
+        while stack and current[0] >= stack[-1][1]:
+            stack.pop()
+        if stack:
+            parent = stack[-1]
+            if current[0] == parent[0] or current[1] > parent[1]:
+                raise RuntimeError(
+                    f"{label} has duplicate-start or crossing selected ranges: "
+                    f"{parent}, {current}"
+                )
+        else:
+            roots.append(current)
+        stack.append(current)
+    return roots
+
+
+def replacement_plan(
+    original: bytes, entries: Iterable[dict[str, Any]], label: str
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Return disjoint outer replacements and nested-ID → outer-ID coverage.
+
+    Covered syntax is consumed as part of the outer tactic's recording-only
+    arguments. It gets no independent dispatcher or execution/variant claim.
+    Mixed retained/executable containment is deliberately unsupported.
+    """
+    entries = list(entries)
+    root_ranges = set(_selected_ranges(original, entries, label))
+    ids: set[str] = set()
+    roots: list[dict[str, Any]] = []
+    covered: dict[str, str] = {}
+    root: dict[str, Any] | None = None
+    for entry in sorted(entries, key=lambda value: (value["startByte"], -value["endByte"])):
+        occurrence = _require_nonempty_string(entry.get("id"), f"{label} occurrence ID")
+        if occurrence in ids:
+            raise RuntimeError(f"{label} has duplicate occurrence ID: {occurrence}")
+        ids.add(occurrence)
+        if (entry["startByte"], entry["endByte"]) in root_ranges:
+            root = entry
+            roots.append(entry)
+        else:
+            assert root is not None
+            if entry.get("action") != root.get("action"):
+                raise RuntimeError(f"{label} has mixed retained/executable containment")
+            covered[occurrence] = str(root["id"])
+    return roots, covered
 
 
 def _assert_changes_within_ranges(
@@ -735,7 +779,7 @@ def group_report_variants(
 def classify_occurrence(
     action: str, execution_count: int, variant_count: int, statuses: list[str]
 ) -> str:
-    """Classify one selected occurrence after a successful run."""
+    """Classify an independently recorded or retained occurrence."""
     _require_int(execution_count, "occurrence executionCount", nonnegative=True)
     _require_int(variant_count, "occurrence variantCount", nonnegative=True)
     if not isinstance(statuses, list):
@@ -796,6 +840,7 @@ def validate_occurrence_result(
         "variantCount",
         "successVariantCount",
         "failureVariantCount",
+        "coveredBy",
     }
     if not isinstance(value, dict) or set(value) != fields:
         raise RuntimeError(f"invalid successful occurrence result: {value!r}")
@@ -829,6 +874,16 @@ def validate_occurrence_result(
     failure_variant_count = value["failureVariantCount"]
     action = value["action"]
     classification = value["classification"]
+    covered_by = value["coveredBy"]
+    if classification == "covered_by_ancestor":
+        _require_nonempty_string(covered_by, "covered occurrence ancestor")
+        if (
+            action != "materialize" or covered_by == expected_id
+            or execution_count != 0 or variant_count != 0
+        ):
+            raise RuntimeError(f"covered occurrence has invalid result: {value!r}")
+    elif covered_by is not None:
+        raise RuntimeError(f"non-covered occurrence has an ancestor: {value!r}")
     if success_variant_count + failure_variant_count != variant_count:
         raise RuntimeError(
             f"occurrence variant status counts do not match variantCount: {value!r}"
@@ -844,7 +899,7 @@ def validate_occurrence_result(
         raise RuntimeError(
             f"materialized occurrence has retained classification: {value!r}"
         )
-    elif classification == "unobserved_executable":
+    elif classification in {"unobserved_executable", "covered_by_ancestor"}:
         if execution_count != 0 or variant_count != 0:
             raise RuntimeError(f"unobserved occurrence has observations: {value!r}")
     elif classification in {"expected_failure", "materialized"}:
@@ -876,7 +931,10 @@ def validate_occurrence_result(
                 "occurrence variant status counts disagree with variant statuses: "
                 f"{value!r}"
             )
-        expected = classify_occurrence(action, execution_count, variant_count, statuses)
+        expected = (
+            "covered_by_ancestor" if covered_by is not None
+            else classify_occurrence(action, execution_count, variant_count, statuses)
+        )
         if classification != expected:
             raise RuntimeError(
                 "occurrence classification disagrees with observed variants: "
@@ -890,6 +948,8 @@ def make_occurrence_result(
     action: str,
     execution_count: int,
     variants: list[dict[str, object]],
+    *,
+    covered_by: str | None = None,
 ) -> dict[str, object]:
     """Build and validate one successful per-occurrence summary record."""
     _require_nonempty_string(occurrence, "occurrence result occurrence")
@@ -906,13 +966,15 @@ def make_occurrence_result(
             )
         statuses.append(status)
     variant_count = len(variants)
-    classification = classify_occurrence(
-        action, execution_count, variant_count, statuses
+    classification = (
+        "covered_by_ancestor" if covered_by is not None
+        else classify_occurrence(action, execution_count, variant_count, statuses)
     )
     result = {
         "occurrence": occurrence,
         "action": action,
         "classification": classification,
+        "coveredBy": covered_by,
         "executionCount": execution_count,
         "variantCount": variant_count,
         "successVariantCount": sum(
@@ -928,7 +990,7 @@ def make_occurrence_result(
 def occurrence_classification_counts(
     results: list[dict[str, object]],
 ) -> dict[str, int]:
-    """Return a deterministic four-class count map for validated results."""
+    """Return a deterministic count map for validated results."""
     counts = {name: 0 for name in sorted(OCCURRENCE_CLASSIFICATIONS)}
     for result in results:
         classification = result.get("classification")
@@ -964,6 +1026,13 @@ def validate_occurrence_summary(
                 f"occurrence result action mismatch at {index}: "
                 f"{checked['action']!r} != {expected_action!r}"
             )
+    by_id = {result["occurrence"]: result for result in results}
+    for result in results:
+        ancestor = result["coveredBy"]
+        if ancestor is not None:
+            root = by_id.get(ancestor)
+            if root is None or root["action"] != "materialize" or root["coveredBy"] is not None:
+                raise RuntimeError("covered occurrence must reference a replacement root")
     computed = occurrence_classification_counts(results)
     if not isinstance(classification_counts, dict):
         raise RuntimeError(

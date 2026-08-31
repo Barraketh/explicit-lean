@@ -19,6 +19,7 @@ from boundary_protocol import (
     parse_framed_json_lines,
     recording_subprocess_environment,
     group_report_variants,
+    replacement_plan,
     reject_forbidden_generated_text,
     validate_report,
     validate_environment_actions,
@@ -94,12 +95,16 @@ def replace_all_occurrences(
     Multiple occurrences may share one source line. First installing one-line
     placeholders preserves stable original ranges; expanding those placeholders
     from left to right then accounts for newlines introduced by every earlier
-    artifact on the line.
+    artifact on the line. Contained occurrences are consumed with their outer
+    root, which is the only place an artifact is emitted.
     """
+    entries, _covered = replacement_plan(source, entries, "materialized source")
     for entry in entries:
         occurrence = str(entry["id"])
         if occurrence not in reports:
             raise RuntimeError(f"missing artifact report for {occurrence}")
+    if set(reports) != {str(entry["id"]) for entry in entries}:
+        raise RuntimeError("artifact reports must belong exactly to replacement roots")
     placeholders: dict[str, bytes] = {
         str(entry["id"]): f"__simpBoundaryPlaceholder_{entry['id']}__".encode("ascii")
         for entry in entries

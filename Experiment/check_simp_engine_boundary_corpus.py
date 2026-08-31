@@ -219,7 +219,7 @@ def validate_declaration_oracle_protocol() -> None:
 
 
 def validate_occurrence_protocol() -> None:
-    """Exercise schema-4 occurrence taxonomy and fail-closed validation."""
+    """Exercise schema-5 occurrence taxonomy and fail-closed validation."""
     ids = ["materialized", "expected-failure", "unobserved", "retained"]
     actions = ["materialize", "materialize", "materialize", "retain"]
     results = [
@@ -233,6 +233,7 @@ def validate_occurrence_protocol() -> None:
         "materialized",
         "expected_failure",
         "unobserved_executable",
+        "covered_by_ancestor",
         "retained_syntax_data",
     }:
         raise RuntimeError(f"occurrence taxonomy is incomplete: {counts}")
@@ -337,14 +338,14 @@ def validate_occurrence_protocol() -> None:
     }
     materialize.validate_shard_identity(shard_identity)
     bad_schema = dict(shard_identity)
-    bad_schema["reportSchema"] = 3
+    bad_schema["reportSchema"] = 4
     try:
         materialize.validate_shard_identity(bad_schema)
     except RuntimeError as error:
-        if "must be 4" not in str(error):
+        if f"must be {materialize.REPORT_SCHEMA}" not in str(error):
             raise
     else:
-        raise RuntimeError("schema-3 shard report was accepted")
+        raise RuntimeError("schema-4 shard report was accepted")
     bad_identity = dict(shard_identity)
     bad_identity["artifactProtocol"] = dict(identity)
     bad_identity["artifactProtocol"]["encoding"] = dict(identity["encoding"])
@@ -623,7 +624,7 @@ def validate_occurrence_protocol() -> None:
 
 
 def shard_report_fixture() -> dict[str, object]:
-    """Return a complete tiny schema-4 report for validator mutation tests."""
+    """Return a complete tiny schema-5 report for validator mutation tests."""
     occurrence = make_occurrence_result(
         "occurrence", "materialize", 1, [{"status": "success"}]
     )
@@ -688,6 +689,7 @@ def shard_report_fixture() -> dict[str, object]:
         "occurrenceResults": occurrence_results,
         "occurrenceClassificationCounts": classification_counts,
         "materializeIds": ["occurrence"],
+        "replacementRootIds": ["occurrence"],
         "retainIds": ["retained"],
         "observedIds": ["occurrence"],
         "unobservedIds": [],
@@ -773,7 +775,7 @@ def shard_report_fixture() -> dict[str, object]:
 def validate_shard_report_protocol() -> None:
     base = shard_report_fixture()
     if materialize.validate_shard_protocol(base) != base:
-        raise RuntimeError("valid schema-4 shard report changed during validation")
+        raise RuntimeError("valid schema-5 shard report changed during validation")
 
     missing_result = copy.deepcopy(base)
     del missing_result["modules"][0]["occurrenceResults"][0]
@@ -1096,6 +1098,7 @@ def validate_shard_report_protocol() -> None:
             occurrenceResults=[result],
             occurrenceClassificationCounts=classification_counts,
             materializeIds=[occurrence_id],
+            replacementRootIds=[occurrence_id],
             retainIds=[],
             observedIds=[occurrence_id],
             unobservedIds=[],

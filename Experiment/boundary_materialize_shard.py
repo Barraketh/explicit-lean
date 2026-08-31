@@ -2,9 +2,10 @@
 """Run a bounded, manifest-driven Boundary materialization shard.
 
 The manifest is the authority for scope classification.  This runner only
-consumes selected, source-verified modules: it records materializable tactic
-calls in a disposable module-root copy, groups the resulting Boundary
-artifacts, materializes the complete materialize ranges, and checks that
+consumes selected, source-verified modules: it records outermost materializable
+tactic calls in a disposable module-root copy, accounts for their contained
+calls, groups the resulting Boundary artifacts, replaces the complete outer
+ranges, and checks that
 retained syntax is the only supported simp syntax left in the generated copy.
 """
 
@@ -28,6 +29,7 @@ import simp_engine_boundary_corpus as corpus
 import simp_engine_inventory as inventory
 from boundary_protocol import (
     ABORT_CATEGORIES,
+    OCCURRENCE_CLASSIFICATIONS,
     artifact_protocol,
     assert_exact_source_preservation,
     check_recording_abort_markers,
@@ -36,6 +38,7 @@ from boundary_protocol import (
     occurrence_classification_counts,
     parse_framed_json_lines,
     recording_subprocess_environment,
+    replacement_plan,
     reject_forbidden_generated_text,
     validate_artifact_protocol,
     validate_occurrence_summary,
@@ -48,7 +51,7 @@ MATHLIB = corpus.MATHLIB
 MANIFEST_KIND = "simp_engine_boundary_manifest"
 MANIFEST_SCHEMA = 2
 REPORT_KIND = "simp_engine_boundary_materialization_shard"
-REPORT_SCHEMA = 4
+REPORT_SCHEMA = 5
 ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 DECLARATION_ORACLE_MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
 DECLARATION_ORACLE_KIND = "simp_engine_declaration_oracle"
@@ -310,26 +313,6 @@ def _validate_count_map(
     return result
 
 
-def _assert_nonoverlapping(entries: list[dict[str, Any]], module: str) -> None:
-    ordered = sorted(
-        entries,
-        key=lambda entry: (int(entry["startByte"]), int(entry["endByte"])),
-    )
-    previous: dict[str, Any] | None = None
-    for entry in ordered:
-        start = _require_int(entry.get("startByte"), f"{module} occurrence startByte")
-        end = _require_int(entry.get("endByte"), f"{module} occurrence endByte")
-        if previous is not None:
-            previous_end = int(previous["endByte"])
-            if start < previous_end:
-                raise RuntimeError(
-                    f"nested or overlapping occurrence ranges in {module}: "
-                    f"{previous['id']} [{previous['startByte']},{previous_end}) and "
-                    f"{entry['id']} [{start},{end})"
-                )
-        previous = entry
-
-
 @dataclass(frozen=True)
 class SelectedModule:
     module: str
@@ -339,6 +322,14 @@ class SelectedModule:
     occurrences: tuple[dict[str, Any], ...]
     materialize: tuple[dict[str, Any], ...]
     retain: tuple[dict[str, Any], ...]
+
+    @property
+    def replacement_roots(self) -> list[dict[str, Any]]:
+        return replacement_plan(self.source, self.materialize, self.module)[0]
+
+    @property
+    def covered_by(self) -> dict[str, str]:
+        return replacement_plan(self.source, self.materialize, self.module)[1]
 
 
 def _validate_occurrence(
@@ -582,7 +573,7 @@ def validate_manifest_selection(
             )
         _record, source_path, source, checked_occurrence_tuple = validated
         checked_occurrences = list(checked_occurrence_tuple)
-        _assert_nonoverlapping(checked_occurrences, module)
+        replacement_plan(source, checked_occurrences, module)
         reusable = [
             occurrence
             for occurrence in checked_occurrences
@@ -1030,7 +1021,9 @@ def _module_result(
     module_slug = _sanitize_stem(selected.module.removeprefix("Mathlib/").removesuffix(".lean"))
     module_root = debug_root / module_slug
     original_path = _copy_at_module_root(module_root / "original", selected.module, selected.source)
-    instrumented = instrumented_source(selected.source, list(selected.materialize))
+    roots = selected.replacement_roots
+    covered_by = selected.covered_by
+    instrumented = instrumented_source(selected.source, roots)
     instrumented_path = _copy_at_module_root(module_root / "instrumented", selected.module, instrumented)
     _assert_context_gaps(
         selected.source,
@@ -1040,7 +1033,7 @@ def _module_result(
         label=f"instrumented source {selected.module}",
         expected_without_import=inventory.rewrite_simp_heads(
             selected.source,
-            list(selected.materialize),
+            roots,
             lambda entry: f'simp_engine_boundary_record "{entry["id"]}"',
         ),
     )
@@ -1068,7 +1061,8 @@ def _module_result(
     )
     for report in report_list:
         reject_forbidden_generated_text(report, f"artifact report for {selected.module}")
-    expected_ids = [str(entry["id"]) for entry in selected.materialize]
+    materialize_ids = [str(entry["id"]) for entry in selected.materialize]
+    expected_ids = [str(entry["id"]) for entry in roots]
     observed_ids = {
         str(report["occurrence"])
         for report in report_list
@@ -1103,6 +1097,7 @@ def _module_result(
             action,
             execution_counts.get(occurrence_id, 0),
             report_variants.get(occurrence_id, []),
+            covered_by=covered_by.get(occurrence_id),
         )
         for occurrence_id, action in zip(occurrence_ids, occurrence_actions)
     ]
@@ -1177,8 +1172,8 @@ def _module_result(
         )
 
     variant_counts = {
-        occurrence_id: len(report_variants[occurrence_id])
-        for occurrence_id in expected_ids
+        occurrence_id: len(report_variants.get(occurrence_id, []))
+        for occurrence_id in materialize_ids
     }
     variant_status_counts: Counter[str] = Counter(
         str(report["status"])
@@ -1243,7 +1238,8 @@ def _module_result(
         "retainCount": len(selected.retain),
         "occurrenceResults": occurrence_results,
         "occurrenceClassificationCounts": occurrence_counts,
-        "materializeIds": expected_ids,
+        "materializeIds": materialize_ids,
+        "replacementRootIds": expected_ids,
         "retainIds": [str(entry["id"]) for entry in selected.retain],
         "observedIds": observed_ordered,
         "unobservedIds": unobserved_ordered,
@@ -1334,6 +1330,7 @@ MODULE_REPORT_FIELDS = frozenset(
         "occurrenceResults",
         "occurrenceClassificationCounts",
         "materializeIds",
+        "replacementRootIds",
         "retainIds",
         "observedIds",
         "unobservedIds",
@@ -1619,18 +1616,25 @@ def _validate_module_report(value: object, index: int) -> dict[str, Any]:
     if module["occurrenceClassificationCounts"] != occurrence_counts:
         raise RuntimeError(f"{label} occurrence classification counts disagree")
 
+    root_ids = _validate_string_list(module["replacementRootIds"], f"{label}.replacementRootIds")
+    if root_ids != [
+        raw["occurrence"] for raw in occurrence_results
+        if raw["action"] == "materialize" and raw["coveredBy"] is None
+    ]:
+        raise RuntimeError(f"{label}.replacementRootIds disagree with occurrence coverage")
+
     observed_ids = _validate_string_list(module["observedIds"], f"{label}.observedIds")
     unobserved_ids = _validate_string_list(module["unobservedIds"], f"{label}.unobservedIds")
     if set(observed_ids) & set(unobserved_ids):
         raise RuntimeError(f"{label} observed/unobserved IDs overlap")
-    if set(observed_ids) | set(unobserved_ids) != set(materialize_ids):
-        raise RuntimeError(f"{label} observed/unobserved IDs do not partition materialize IDs")
+    if set(observed_ids) | set(unobserved_ids) != set(root_ids):
+        raise RuntimeError(f"{label} observed/unobserved IDs do not partition replacement roots")
     by_id = {raw["occurrence"]: raw for raw in occurrence_results}
     if [id for id in materialize_ids if id in set(observed_ids)] != observed_ids:
         raise RuntimeError(f"{label}.observedIds order disagrees with materialize IDs")
     if [id for id in materialize_ids if id in set(unobserved_ids)] != unobserved_ids:
         raise RuntimeError(f"{label}.unobservedIds order disagrees with materialize IDs")
-    for occurrence_id in materialize_ids:
+    for occurrence_id in root_ids:
         result = by_id[occurrence_id]
         if (result["executionCount"] == 0) != (occurrence_id in set(unobserved_ids)):
             raise RuntimeError(f"{label} observed status disagrees for {occurrence_id}")
@@ -1712,7 +1716,7 @@ def validate_shard_identity(value: object) -> dict[str, object]:
 
 
 def validate_shard_shape(value: object) -> dict[str, object]:
-    """Validate exact schema-4 structure and internal count coherence.
+    """Validate exact schema-5 structure and internal count coherence.
 
     This deliberately does not read referenced files.  Publication additionally
     requires ``verify_shard_evidence``, which binds this shape to the selected
@@ -1835,14 +1839,7 @@ def validate_shard_shape(value: object) -> dict[str, object]:
     _validate_count_map(
         aggregate["occurrenceClassificationCounts"],
         "aggregate.occurrenceClassificationCounts",
-        frozenset(
-            {
-                "materialized",
-                "expected_failure",
-                "unobserved_executable",
-                "retained_syntax_data",
-            }
-        ),
+        frozenset(OCCURRENCE_CLASSIFICATIONS),
     )
     expected_aggregate = {
         "selectedModuleCount": len(modules),
@@ -1865,7 +1862,7 @@ def validate_shard_shape(value: object) -> dict[str, object]:
 
 
 def validate_shard_protocol(value: object) -> dict[str, object]:
-    """Backward-compatible name for schema-4 shape validation."""
+    """Compatibility alias for the current report shape validator."""
     return validate_shard_shape(value)
 
 
@@ -1919,7 +1916,7 @@ def verify_shard_evidence(
     debug_root: Path,
     timeout: int,
 ) -> dict[str, object]:
-    """Bind a valid schema-4 shape to selected manifest and durable files."""
+    """Bind a valid schema-5 shape to selected manifest and durable files."""
     report = validate_shard_shape(report)
     resolved_manifest = manifest_path.resolve()
     if report["manifestPath"] != str(resolved_manifest):
@@ -2011,7 +2008,7 @@ def verify_shard_evidence(
             module_report["instrumented"]["sha256"],
             f"{item.module} instrumented",
         )
-        if instrumented_data != instrumented_source(item.source, list(item.materialize)):
+        if instrumented_data != instrumented_source(item.source, item.replacement_roots):
             raise RuntimeError(f"{item.module} instrumented evidence is not reproducible")
 
         artifact_data = _read_evidence_file(
@@ -2028,15 +2025,19 @@ def verify_shard_evidence(
         for artifact in reports:
             reject_forbidden_generated_text(artifact, f"artifact report for {item.module}")
         materialize_ids = [str(entry["id"]) for entry in item.materialize]
+        root_ids = [str(entry["id"]) for entry in item.replacement_roots]
+        covered_by = item.covered_by
+        if module_report["replacementRootIds"] != root_ids:
+            raise RuntimeError(f"{item.module} replacement roots differ from selected ranges")
         observed = {
             str(artifact["occurrence"])
             for artifact in reports
             if isinstance(artifact, dict) and isinstance(artifact.get("occurrence"), str)
         }
-        unobserved = set(materialize_ids) - observed
+        unobserved = set(root_ids) - observed
         variants = group_report_variants(
             reports,
-            materialize_ids,
+            root_ids,
             expected_module=item.compiled_module,
             unobserved_ids=unobserved,
         )
@@ -2051,6 +2052,7 @@ def verify_shard_evidence(
                 str(entry["action"]),
                 execution_counts.get(str(entry["id"]), 0),
                 variants.get(str(entry["id"]), []),
+                covered_by=covered_by.get(str(entry["id"])),
             )
             for entry in item.occurrences
         ]

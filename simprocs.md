@@ -121,10 +121,11 @@ probe intentionally does not record simproc order, registry state, or other
 simplifier internals. The pinned
 diagnostic closes the old 101 scope unknowns, and the regenerated full diagnostic
 manifest classifies all 83,425 occurrences with zero unknowns. The schema-2
-`AddConstMap/Basic` canary uses a manifest schema 2 and publishes a schema-4
-shard report after materializing all 17 calls, compiling, and passing the
+`AddConstMap/Basic` canary uses manifest schema 2 and has materialized all 17
+calls, compiled, and passed the
 schema-1 declaration/environment oracle, including computational values,
-compiler IR, persistent extensions, and axiom subsets. The full five-module
+compiler IR, persistent extensions, and axiom subsets. The current shard report
+format is schema 5, adding explicit nested-call coverage. The full five-module
 representative gate now supplies the same semantic check for every listed
 module. The full diagnostic predates the hardened implementation fingerprint
 and must be regenerated with execution-role classification. These results do

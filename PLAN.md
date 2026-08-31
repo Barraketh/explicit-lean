@@ -211,11 +211,12 @@ current consumer correctly rejects it.
 current manifests. The schema-2 one-module
 `Mathlib/Algebra/AddConstMap/Basic.lean` canary materializes all 17 occurrences,
 observes 17 variants, compiles, and proves exact authored-source preservation
-outside the replaced ranges. Its schema-4 materialization report now includes a
+outside the replaced ranges. The current schema-5 report format requires a
 mandatory declaration/environment oracle and one ordered result record for every
-selected occurrence. Each record is one of the four successful classifications:
-`materialized`, `expected_failure`, `unobserved_executable`, or
-`retained_syntax_data`. The report also records the exact schema-1 artifact
+selected occurrence. Each record is one of the five successful classifications:
+`materialized`, `expected_failure`, `unobserved_executable`,
+`retained_syntax_data`, and `covered_by_ancestor` for nested calls consumed by
+an outer replacement. The report also records the exact schema-1 artifact
 identity and protocol encoding, while aborting without publishing a successful
 report for printer, variant, effect, declaration-value, or environment failures.
 That oracle accepts 103 common public
@@ -234,12 +235,38 @@ Once that path is accepted, the public `simp_engine_apply` syntax can move from
 schema-27 replay to boundary artifacts. Until then, code and reports must label
 the two implementations explicitly.
 
-The schema-1 artifact, schema-1 selector, and schema-4 shard report are now
-stabilized and pass the focused, corpus-smoke, and five-module semantic gates.
-The immediate next milestone is dependency-aware recording for the 66 reusable
-tactic-syntax occurrences and safe composition for the 91 nested occurrences.
-The current runner rejects reusable syntax and nested/overlapping replacement
-ranges rather than guessing.
+Step 5 stabilized the schema-1 artifact, schema-1 selector, and schema-4 shard
+report against the focused, corpus-smoke, and five-module semantic gates.
+Step 6 adds explicit nested coverage in report schema 5 without changing the
+artifact or selector. The old source inventory identifies 91 nested occurrences
+across 53 modules and 66 reusable tactic-syntax occurrences; these are planning
+counts, not current semantic closure evidence. Dependency-aware reusable
+recording remains the next implementation milestone. The runner still rejects
+reusable syntax, crossing ranges, and mixed executable/retained containment.
+
+`Experiment/check_simp_engine_boundary_nested.py` adds a 16-occurrence fixture:
+seven outer replacements cover nine contained calls. It checks proof arguments,
+sibling and deeper nesting, a nested discharger, a failed outer alternative,
+an unexecuted branch, and a computational definition. All seven public
+declarations pass the declaration/environment oracle with zero remaining calls.
+The range and report tests reject crossing ranges, false observations, invalid
+ancestor references, and changes outside the selected source ranges.
+The same gate checks all ten occurrences in
+`Mathlib/Algebra/BigOperators/GroupWithZero/Action.lean`: nine outer replacements
+and one covered call, with all 16 public declarations checked by the semantic
+oracle. The known occurrence and declaration counts are regression assertions.
+
+Before removing the reusable-syntax guard, design two missing cross-module
+boundaries. The current artifact header equates the recorded module with the
+active elaboration module; imported reusable code needs distinct source-owner
+and execution-module identities. Also, rewriting an executable tactic quotation
+changes the enclosing metaprogram's syntax-producing value and compiler IR,
+currently subject to definitional equality and compiler-IR comparison.
+Dependency-aware collection alone does not solve that: define and test the closed-world
+comparison policy for transformed reusable metaprograms without exempting
+ordinary computational declarations or retained syntax data. Until that policy
+is explicit, do not weaken either the module check or declaration oracle merely
+to admit reusable code.
 
 ## Correctness contract
 
@@ -340,8 +367,9 @@ outside the contract.
 
 ## Boundary artifact and selection
 
-One source occurrence owns a closed artifact containing zero or more boundary
-variants. A successful variant contains:
+One replacement root owns a closed artifact containing zero or more boundary
+variants. Contained source occurrences are covered by that root as specified
+below. A successful variant contains:
 
 - checked references to each authored hypothesis or target being transformed;
 - the resulting expression for each subject;
@@ -447,6 +475,33 @@ The syntax above is illustrative. The current parser uses the
 `simp_engine_boundary_select` artifact header and machine-oriented encoded
 variants described below; its durable artifact wire identity is schema 1.
 
+### Nested occurrence coverage
+
+Strictly contained executable ranges form a containment tree. Replace only its
+outermost `simp`: record that whole call with its original arguments and nested
+calls intact, then apply and compare the outer boundary. Its generated source
+contains neither those arguments nor independent dispatchers for the contained
+calls. This is sufficient because no continuation inside an eliminated argument
+survives; the outer boundary and final declaration/environment oracle still
+check every observable result, including computational values. Recording inner
+simplifier execution is not required.
+
+Report schema 5 gives every contained occurrence the classification
+`covered_by_ancestor` and a `coveredBy` reference directly to its outermost
+replacement root. Its execution and variant counts are zero: these mean not
+independently recorded, not never executed by stock Lean. All other records
+have `coveredBy: null`. `materializeCount` includes roots and covered calls;
+`replacementRootIds` names only emitted dispatchers, and observed/unobserved IDs
+partition those roots. File-backed report verification recomputes coverage from
+the selected source ranges, so a forged parent reference cannot count as evidence.
+
+Duplicate-start and crossing ranges fail closed, even inside an otherwise valid
+outer range. Mixed executable/retained-syntax containment is also unsupported:
+the runner must not silently remove retained syntax or rewrite its data value.
+Disjoint retained ranges remain subject to the existing inventory and semantic
+checks. An unobserved root still gets the explicit fail-closed dispatcher; its
+contained calls are covered, not separate unobserved replacements.
+
 ## Closed-world corpus completion
 
 The initial product claim is deliberately pinned and closed-world. A complete
@@ -456,13 +511,14 @@ run must:
    semantic-contract version, and classification version in the run manifest;
 2. inventory every parsed `simp`/`simp only` node and classify it as an executed
    call, reusable executable code, retained syntax data, or unresolved;
-3. collect every dynamic execution seen while compiling every module in the
-   frozen manifest;
+3. collect every dynamic execution of replacement roots seen while compiling
+   every module in the frozen manifest, and account for every contained call
+   through its source-backed root coverage;
 4. rewrite every executable source occurrence, independent of whether its
    enclosing declaration is proof-valued, including executable occurrences with
    no observed execution;
-5. give observed executions unambiguous boundary variants;
-6. give an unobserved occurrence an explicit fail-closed replacement that
+5. give observed root executions unambiguous boundary variants;
+6. give an unobserved root an explicit fail-closed replacement that
    raises `boundary_occurrence_unobserved` if it unexpectedly executes;
 7. compile the complete translated tree with the original continuations;
 8. compare every affected declaration value and environment delta under the
@@ -488,9 +544,10 @@ explicit environment-delta classification; there is no proof-only exception.
 
 Successful shard reports contain exactly one result for every selected
 occurrence. The only successful occurrence classifications are
-`materialized`, `expected_failure`, `unobserved_executable`, and
-`retained_syntax_data`. Their execution and deduplicated-variant counts are
-validated against the selected manifest action partition. The five abort
+`materialized`, `expected_failure`, `unobserved_executable`,
+`covered_by_ancestor`, and `retained_syntax_data`. Their execution and
+deduplicated-variant counts are validated against the selected manifest action
+partition and source-backed coverage. The five abort
 categories are `printer_failure`, `ambiguous_boundary_variant`,
 `external_effect_failure`, `declaration_value_mismatch`, and
 `environment_delta_mismatch`. An abort publishes no successful shard report;
@@ -614,8 +671,9 @@ discharger strategy, and simproc traces are not acceptance conditions.
    classifications, local references, universes, instances, and explicit
    deltas from those measurements. Maximally human-readable rendering is
    intentionally deferred to Step 8.
-6. Add dependency-aware reusable tactic handling and safe nested-range
-   composition, then run increasingly large deterministic shards.
+6. **In progress:** nested-range coverage is implemented and tested. Add
+   dependency-aware reusable tactic handling, then run increasingly large
+   deterministic shards.
 7. Require zero remaining executable calls, compile the full translated tree,
    compare declaration values/environment/axioms, and archive the closure
    report.
@@ -631,5 +689,5 @@ format, bounded smoke gate, and targeted old-unknown closure are in place. The
 old full-corpus eligible/excluded partition remains obsolete; the schema-2
 representative manifest is current. The declaration-oracle coverage milestone
 is complete for every representative module. The next milestone is
-reusable/nested handling; maximally human-readable artifact rendering remains a
-later Step-8 presentation task.
+dependency-aware reusable handling and larger shards; maximally human-readable
+artifact rendering remains a later Step-8 presentation task.
