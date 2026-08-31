@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 494,
+    "verifiedTranslatedOccurrences": 506,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
@@ -28,7 +28,7 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 50,
+    "verifiedTranslatedModules": 52,
     "provisionalCachedOccurrences": 0,
     "provisionalCachedModules": 0,
     "minimumAcceptedReportSchema": 10
@@ -273,6 +273,12 @@
       "owner": "coordinator with Sol implementation",
       "status": "completed",
       "description": "Reusable certify_module emits fresh normal compiler family in isolated quarantine; strict source/tool/dependency hashes, command audit and semantic oracle, exact module4/legacy1 family, exclusive durable receipts. Main41checks/20nativeprocesses+1mocktimeout passed; root226hashes/21logs/4positive receipts independently verified. Caller owns complete dependency graph and source/comment provenance; no promotion/DB changes."
+    },
+    {
+      "id": "same-frontend-certified-first-cone",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Fresh private39module/2call cone passed using current same-frontend semantic+command-audit certificates, exact156artifact parts and translated-only Mathlib dependencies. Original source/comment provenance rechecked with frozen report as candidate provenance only. Root independently verified39certificates/78auditframes/11486external artifact hashes and fresh downstream proof+#eval7. No old compiler outputs/certificates reused; whole Mathlib remains incomplete."
     }
   ],
   "blockers": [
@@ -1191,6 +1197,21 @@
         "wholeMathlib": false,
         "independentVerification": ".lake/week-2026-08-31/schema10-first-cone-verification.json",
         "limitations": "Command audit and direct compiled-output semantic binding remain separate acceptance requirements."
+      },
+      {
+        "commit": "5a9abd1",
+        "root": "Mathlib.Logic.Function.Defs",
+        "modules": 39,
+        "replacedCalls": 2,
+        "report": ".lake/week-2026-08-31/certified-first-cone-obcaztm0/report.json",
+        "reportSha256": "799e7fe2346451891d22cc87d563940f146362a7edda6c861261e4f357c25fe0",
+        "status": "fresh_same_frontend_certified_outputs_under_translated_dependencies",
+        "wholeMathlib": false,
+        "independentVerification": ".lake/week-2026-08-31/certified-cone-root-verification.json",
+        "artifactParts": 156,
+        "auditFrames": 78,
+        "externalArtifactHashes": 11486,
+        "publicationPolicy": "Fresh private single-writer run; exact family then receipt; no resume or existing-output overwrite. External roots verified free of nested directory symlinks."
       }
     ],
     "currentArtifactSchema": 4,
@@ -1231,7 +1252,7 @@
       "rootVerification": ".lake/week-2026-08-31/certified-module-main-root-verification.json",
       "handoffManifest": ".lake/week-2026-08-31/certified-module-helper-handoff-bkdhog2e/manifest.json",
       "handoffManifestSha256": "f86a63977c36582c8f1ac4590ce6cc0c852d5b7522eaa6759d436f7be04f666c",
-      "publication": "Separate fresh single-writer39module cone running; incomplete/interrupted outputs not accepted.",
+      "publication": "First39module/2call cone passed same-frontend output certification; root independently verified. Bounded fresh-run publication, not full corpus or resumable publication.",
       "wholeMathlib": false
     }
   },
@@ -1255,9 +1276,9 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 51913367552,
-    "checkedAt": "2026-08-31T16:41:43.982535+00:00",
+    "lastFreeBytes": 51891679232,
+    "checkedAt": "2026-08-31T16:48:11.809480+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T16:44:56.083909+00:00"
+  "updatedAt": "2026-08-31T16:48:11.809480+00:00"
 }
