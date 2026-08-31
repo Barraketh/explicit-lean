@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 470,
+    "verifiedTranslatedOccurrences": 494,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
@@ -28,7 +28,7 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 47,
+    "verifiedTranslatedModules": 50,
     "provisionalCachedOccurrences": 0,
     "provisionalCachedModules": 0,
     "minimumAcceptedReportSchema": 10
@@ -267,6 +267,12 @@
       "owner": "coordinator with Sol implementation",
       "status": "completed",
       "description": "Raw frontend comparison and optional normal serialization integrated; main57jobbuild and70process+17consumer/wire controls passed. Root260hashes/69nonces/90auditframes verified; frozen54process prototype independently verified. Quarantine only; certified forest publication remains separate."
+    },
+    {
+      "id": "quarantined-module-certificates",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Reusable certify_module emits fresh normal compiler family in isolated quarantine; strict source/tool/dependency hashes, command audit and semantic oracle, exact module4/legacy1 family, exclusive durable receipts. Main41checks/20nativeprocesses+1mocktimeout passed; root226hashes/21logs/4positive receipts independently verified. Caller owns complete dependency graph and source/comment provenance; no promotion/DB changes."
     }
   ],
   "blockers": [
@@ -1218,6 +1224,15 @@
       "outputPolicy": "normal applied frontend output in quarantine; separate consumer must validate audit, semantics, identity and exact artifact family before publication",
       "wholeMathlib": false,
       "knownLimits": "Baseline and raw oracle both reject checked-only non-reserved private unfolding; old Lookmap candidate also fails both frontends before comparison. No exemptions or old-result relabelling."
+    },
+    "quarantinedModuleCertificates": {
+      "mainReport": ".lake/certified-module-check-27pmda8s/report.json",
+      "mainReportSha256": "db351ca1f4b172ef0349eec1ed41d9230626e9d887697280ddb2a1c071778655",
+      "rootVerification": ".lake/week-2026-08-31/certified-module-main-root-verification.json",
+      "handoffManifest": ".lake/week-2026-08-31/certified-module-helper-handoff-bkdhog2e/manifest.json",
+      "handoffManifestSha256": "f86a63977c36582c8f1ac4590ce6cc0c852d5b7522eaa6759d436f7be04f666c",
+      "publication": "Separate fresh single-writer39module cone running; incomplete/interrupted outputs not accepted.",
+      "wholeMathlib": false
     }
   },
   "failureTriage": {
@@ -1244,5 +1259,5 @@
     "checkedAt": "2026-08-31T16:41:43.982535+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T16:41:43.982535+00:00"
+  "updatedAt": "2026-08-31T16:44:56.083909+00:00"
 }

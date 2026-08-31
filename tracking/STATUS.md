@@ -1,21 +1,21 @@
 # Search-free Mathlib campaign
 
-Updated 2026-08-31T16:41:43.982160+00:00
+Updated 2026-08-31T16:44:56.083509+00:00
 
 - Indexed: 83,425 calls in 8,264 modules.
-- Accepted per-module verification: 470 translated calls in 47 modules.
+- Accepted per-module verification: 494 translated calls in 50 modules.
 - Provisional cache awaiting current semantic checks: 0 calls in 0 modules.
 - Unresolved source classifications: 5.
 - Missing cached report files: 0.
 
 Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.
 
-Queue: failed=33, queued=556, running=2, succeeded=47, unplanned=7626
+Queue: failed=36, queued=550, running=2, succeeded=50, unplanned=7626
 
 ## Active modules
 
-- `Mathlib/Algebra/Algebra/Subalgebra/Prod.lean` (schema10-full)
-- `Mathlib/CategoryTheory/Limits/Constructions/Filtered.lean` (schema10-expansion)
+- `Mathlib/Algebra/Algebra/Subalgebra/Unitization.lean` (schema10-full)
+- `Mathlib/CategoryTheory/SmallObject/TransfiniteIteration.lean` (schema10-expansion)
 
 ## Failures and partial results
 
@@ -24,6 +24,7 @@ Queue: failed=33, queued=556, running=2, succeeded=47, unplanned=7626
 - `Mathlib/Algebra/Algebra/NonUnitalSubalgebra.lean`: materializer exit 1
 - `Mathlib/Algebra/Algebra/Spectrum/Quasispectrum.lean`: materializer exit 1
 - `Mathlib/Algebra/Algebra/Subalgebra/Centralizer.lean`: materializer exit 1
+- `Mathlib/Algebra/Algebra/Subalgebra/Tower.lean`: materializer exit 1
 - `Mathlib/Algebra/CubicDiscriminant.lean`: materializer exit 1
 - `Mathlib/Algebra/Homology/HomotopyCategory/KInjective.lean`: materializer exit 1
 - `Mathlib/AlgebraicGeometry/Cover/Open.lean`: materializer exit 1
@@ -38,6 +39,8 @@ Queue: failed=33, queued=556, running=2, succeeded=47, unplanned=7626
 - `Mathlib/Analysis/MellinInversion.lean`: materializer exit 1
 - `Mathlib/Analysis/Real/Pi/Bounds.lean`: materializer exit 1
 - `Mathlib/CategoryTheory/Abelian/DiagramLemmas/KernelCokernelComp.lean`: materializer exit 1
+- `Mathlib/CategoryTheory/Sites/Subcanonical.lean`: materializer exit 1
+- `Mathlib/CategoryTheory/SmallObject/Construction.lean`: materializer exit 1
 - `Mathlib/Control/Basic.lean`: materializer exit 1
 - `Mathlib/Control/Functor.lean`: materializer exit 1
 - `Mathlib/Data/Fin/Basic.lean`: materializer exit 1
@@ -46,8 +49,5 @@ Queue: failed=33, queued=556, running=2, succeeded=47, unplanned=7626
 - `Mathlib/Data/Nat/BinaryRec.lean`: materializer exit 1
 - `Mathlib/Data/Nat/Init.lean`: materializer exit 1
 - `Mathlib/Data/String/Lemmas.lean`: materializer exit 1
-- `Mathlib/Logic/ExistsUnique.lean`: materializer exit 1
-- `Mathlib/Order/Defs/LinearOrder.lean`: materializer exit 1
-- `Mathlib/RingTheory/OreLocalization/Basic.lean`: materializer exit 1
 
 Regenerate with `python3 Experiment/campaign_status.py --markdown`.
