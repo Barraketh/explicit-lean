@@ -45,7 +45,9 @@ def snapshot(database: Path) -> dict[str, object]:
             "ORDER BY m.module"
         ).fetchall()
         present = [row for row in results if row["artifact_ref"] and Path(row["artifact_ref"]).is_file()]
-        guarded = [row for row in present if row["report_schema"] == required_schema
+        validation_hold = campaign["coverage"].get("validationHold")
+        guarded = [row for row in present if not validation_hold
+                   and row["report_schema"] == required_schema
                    and row["replay_schema"] == 1 and row["oracle_replay_schema"] == 1]
         provisional = [row for row in present if row not in guarded]
         active = [dict(row) for row in connection.execute(
@@ -67,7 +69,7 @@ def snapshot(database: Path) -> dict[str, object]:
             "provisionalCachedModules": len(provisional),
             "provisionalCachedCalls": sum(int(row["calls"] or 0) for row in provisional),
             "missingVerifiedReportFiles": len(results) - len(present),
-            "verificationScope": f"Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema {required_schema} (implemented producer: {REPORT_SCHEMA}), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
+            "verificationScope": (f"Acceptance on hold: {validation_hold} " if validation_hold else "") + f"Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema {required_schema} (implemented producer: {REPORT_SCHEMA}), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
             "active": active, "failuresAndPartialResults": failures,
         }
     finally:

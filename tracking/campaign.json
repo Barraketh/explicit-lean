@@ -20,7 +20,7 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 506,
+    "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
     "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require campaign report schema 10 (implemented producer: 10), including replay-error checks, declaration comparison and boundary state guards. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
@@ -28,10 +28,11 @@
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 52,
-    "provisionalCachedOccurrences": 0,
-    "provisionalCachedModules": 0,
-    "minimumAcceptedReportSchema": 10
+    "verifiedTranslatedModules": 0,
+    "provisionalCachedOccurrences": 513,
+    "provisionalCachedModules": 55,
+    "minimumAcceptedReportSchema": 10,
+    "validationHold": "Metadata export hooks mutate a process-global symbol-frequency cache. Observational boundary/audit reads and equivalence to separate fresh compilations must be repaired and revalidated; existing generated candidates and proof checks are preserved."
   },
   "work": [
     {
@@ -279,6 +280,12 @@
       "owner": "coordinator",
       "status": "completed",
       "description": "Fresh private39module/2call cone passed using current same-frontend semantic+command-audit certificates, exact156artifact parts and translated-only Mathlib dependencies. Original source/comment provenance rechecked with frozen report as candidate provenance only. Root independently verified39certificates/78auditframes/11486external artifact hashes and fresh downstream proof+#eval7. No old compiler outputs/certificates reused; whole Mathlib remains incomplete."
+    },
+    {
+      "id": "observational-metadata-and-frontend-isolation",
+      "owner": "coordinator with Sol diagnosis",
+      "status": "in_progress",
+      "description": "Lookmap standalone and applied-only succeed while audit-enabled stock/applied pair fails symbolFrequency descriptor. CommandAudit.declarations and boundary metadata readers invoke mkModuleData export hooks that cache an early/global frequency map. Investigate and remove observational side effects; independently establish fresh compiler-output metadata equivalence without resets or descriptor exemptions."
     }
   ],
   "blockers": [
@@ -1205,7 +1212,7 @@
         "replacedCalls": 2,
         "report": ".lake/week-2026-08-31/certified-first-cone-obcaztm0/report.json",
         "reportSha256": "799e7fe2346451891d22cc87d563940f146362a7edda6c861261e4f357c25fe0",
-        "status": "fresh_same_frontend_certified_outputs_under_translated_dependencies",
+        "status": "provisional_pending_observational_metadata_and_fresh_compilation_equivalence",
         "wholeMathlib": false,
         "independentVerification": ".lake/week-2026-08-31/certified-cone-root-verification.json",
         "artifactParts": 156,
@@ -1254,6 +1261,12 @@
       "handoffManifestSha256": "f86a63977c36582c8f1ac4590ce6cc0c852d5b7522eaa6759d436f7be04f666c",
       "publication": "First39module/2call cone passed same-frontend output certification; root independently verified. Bounded fresh-run publication, not full corpus or resumable publication.",
       "wholeMathlib": false
+    },
+    "metadataObservationHold": {
+      "diagnosisSnapshot": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis",
+      "knownCause": "CommandAudit.declarations -> mkModuleData -> symbolFrequency export -> localSymbolFrequencyMapRef; Boundary/RealizationCodec and Boundary metadata comparison also invoke mkModuleData mid-elaboration.",
+      "scope": "Current source-pair oracle results and first certified cone remain provisional for complete fresh-compilation metadata semantics. Byte hashes, audit identities and passing proof compilation evidence remain valid.",
+      "status": "investigating"
     }
   },
   "failureTriage": {
@@ -1280,5 +1293,5 @@
     "checkedAt": "2026-08-31T16:48:11.809480+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T16:48:11.809480+00:00"
+  "updatedAt": "2026-08-31T16:54:25.241669+00:00"
 }
