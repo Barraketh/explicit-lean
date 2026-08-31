@@ -85,6 +85,16 @@ typed `ToAdditive` comparison matches all 75 entries. The integrated Finprod
 45-call replay was repeated after this change. These remain bounded production
 results rather than translated-tree acceptance.
 
+The post-capture safety check re-encodes environment actions only when a fresh
+theorem whitelist is actually in use, and then compares only the authenticated
+local-theorem actions. This avoids encoding an unrelated cached-realization
+certificate twice. A separate 16 MiB resource guard counts each unique cached
+DAG node's exact serialized bytes and fails closed before an oversized
+certificate can become an unbounded log line; it never truncates the artifact.
+ExtraDegeneracy's authenticated 11,015,063-byte auxiliary payload still records
+and replays. The preserved Unitization diagnostic measured 71,368,653 bytes of
+node JSON, but that over-limit module was not rerun after adding the guard.
+
 Inventory and scope checkpoints have a separate content identity for their
 analysis sources, native executables, and pinned dependencies. Replay-only
 edits can reuse that analysis; each resulting manifest still records current

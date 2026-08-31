@@ -16,7 +16,10 @@
     "paidResourcesAuthorized": false,
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
-    "guardCommand": "python3 Experiment/campaign_budget.py check"
+    "guardCommand": "python3 Experiment/campaign_budget.py check",
+    "lastCheckedAt": "2026-08-31T22:44:34.925996+00:00",
+    "lastUsedPercent": 52,
+    "lastDecision": "continue"
   },
   "coverage": {
     "currentCorpusTotal": 83425,
@@ -376,6 +379,18 @@
       "owner": "coordinator with Luna implementation and fix-review",
       "status": "completed",
       "description": "Commits 2a7db88/237d539 group each generated selector as one tactic. Self-contained fresh record/replay regression covers inline first siblings, nested try/first, single/multiple variants, recorded failure, UTF-8, indentation and adjacent original comments."
+    },
+    {
+      "id": "fresh-theorem-recapture-scope",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Commit0b13883 revalidates only declare_local_theorems actions after artifact capture and skips the second environment encoding when the authenticated theorem whitelist is empty. Main helper19 negatives and final List.Basic51 pass; ExtraDegeneracy production heartbeat regression reproduced before the fix and record/replay pass after it."
+    },
+    {
+      "id": "cached-descriptor-resource-guard",
+      "owner": "coordinator with Luna implementation/fix-review",
+      "status": "completed_bounded",
+      "description": "Commit451e457 counts exact serialized bytes only for unique cached DAG nodes and fails closed above16MiB without truncation. Main20-owner suite and16 auxiliary records pass, including ExtraDegeneracy record/replay. Known11,015,063-byte auxiliary payload remains supported; historical Unitization node JSON71,368,653 bytes grounds the limit. No fresh over-limit runtime negative or Unitization rerun."
     }
   ],
   "blockers": [
@@ -1432,7 +1447,10 @@
     "2b5b9ed",
     "2a7db88",
     "237d539",
-    "8b662c1"
+    "8b662c1",
+    "3a6ae82",
+    "0b13883",
+    "451e457"
   ],
   "experiments": [
     {
@@ -1725,7 +1743,7 @@
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
-    "commit": "8b662c1",
+    "commit": "451e457",
     "searchFreeEncoding": "Artifact5: lean_expr_dag_v3 with bounded pre-boundary universe/opaque expression references; closed lean_expr_dag_v1 declaration bodies. Generated encoded replay blocks pending typeclass synthesis; legacy handwritten elaboration APIs excluded.",
     "representativeMathlibModules": 5,
     "representativeMathlibOccurrences": 66,
@@ -1808,7 +1826,7 @@
     "currentArtifactSchema": 5,
     "currentSelectorSchema": 2,
     "minimumReportSchema": 12,
-    "integratedEngineCommit": "2b5b9ed",
+    "integratedEngineCommit": "451e457",
     "focusedEvidenceManifest": ".lake/week-2026-08-31/schema10-focused-verification.json",
     "commandAudit": {
       "handoffManifest": ".lake/week-2026-08-31/command-audit-production/handoff-manifest.json",
@@ -2085,7 +2103,17 @@
       "rootVerification": ".lake/week-2026-08-31/integrated-helper-list-root-verification.json",
       "negativeControls": 19,
       "limitation": "No separate synthetic whitelisted definition/opaque fixture; production metadata branch accepts theorem info only.",
-      "acceptedCampaignCoverage": false
+      "acceptedCampaignCoverage": false,
+      "finalIntegratedRegression": {
+        "commit": "451e4577104bdb6cf2d0924d2d92e5168cd407d7",
+        "combinedReport": ".lake/boundary-materialization/final-list-finprod-v1/report.json",
+        "combinedReportSha256": "2e8d1dcb24903df2f7e6ebe2f96fe37ee515c12889df98916217ad9d6c90c7f7",
+        "manifestSha256": "16b9f0bfff0c357944b3e7676475b1a1da25a141d5ce65782c231154f17ccbde",
+        "rootVerification": ".lake/week-2026-08-31/final-list-finprod-root-verification.json",
+        "calls": 51,
+        "variants": 57,
+        "nativeInvocations": 3
+      }
     },
     "integratedFinprodRegression": {
       "status": "post_helper_merge_independently_verified",
@@ -2099,16 +2127,43 @@
       "reportSha256": "5098a575798a916fdf458ff00a3dfa616fa617d4dbd656eedb08fb6c3e087343",
       "manifestSha256": "c86ed1f8b2440bc6d93f28b22e4a6baac2e082553349f4be7909e11f8e3912d6",
       "rootVerification": ".lake/week-2026-08-31/integrated-finprod-root-verification.json",
-      "acceptedCampaignCoverage": false
+      "acceptedCampaignCoverage": false,
+      "finalIntegratedRegression": {
+        "commit": "451e4577104bdb6cf2d0924d2d92e5168cd407d7",
+        "combinedReport": ".lake/boundary-materialization/final-list-finprod-v1/report.json",
+        "combinedReportSha256": "2e8d1dcb24903df2f7e6ebe2f96fe37ee515c12889df98916217ad9d6c90c7f7",
+        "rootVerification": ".lake/week-2026-08-31/final-list-finprod-root-verification.json",
+        "calls": 45,
+        "variants": 45,
+        "nativeInvocations": 3
+      }
     },
     "inlineFirstRenderer": {
       "status": "integrated_self_contained_regression_passed",
       "commits": [
         "2a7db88",
-        "237d539"
+        "237d539",
+        "3a6ae82"
       ],
       "checker": "Experiment/check_inline_first_renderer.py",
       "scope": "Grouped selector tactic under inline and nested first/try; single/multiple variants, failure, UTF-8 and original comments.",
+      "acceptedCampaignCoverage": false,
+      "receipt": ".lake/inline-first-renderer-handoff/run-HlEB6B7-mU33LeOYvMKyJG8Y6Lo_X1q5L5oy4L3eIT8/fresh-receipt.json",
+      "receiptSha256": "1843039c80f1952ebd20019f7753700ea6c466293366e841233c4ff62d469ec2",
+      "fullSourceGate": "17 occurrences materialized, one explicit unobserved, zero remaining"
+    },
+    "descriptorSizeGuard": {
+      "status": "integrated_known_successes_verified",
+      "commit": "451e457",
+      "limitBytes": 16777216,
+      "extraDegeneracyPayloadBytes": 11015063,
+      "unitizationHistoricalNodeJsonBytes": 71368653,
+      "mainOwnerProcesses": 20,
+      "mainAuxiliaryRecords": 16,
+      "rootVerification": ".lake/week-2026-08-31/integrated-aux-guard-root-verification.json",
+      "rootVerificationSha256": "08cd9e26dcd5587ffb9f6ad376f1f0dddc7e561c7ab9568fe2868e1b92610184",
+      "policy": "Cumulative unique serialized DAG nodes; fail closed, never truncate or project.",
+      "limitation": "No fresh over-limit runtime negative; Unitization measurement is preserved historical evidence and the module was not rerun.",
       "acceptedCampaignCoverage": false
     }
   },
@@ -2133,8 +2188,8 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 27513679872,
-    "checkedAt": "2026-08-31T21:03:12.219863+00:00",
+    "lastFreeBytes": 23693328384,
+    "checkedAt": "2026-08-31T22:44:34.925996+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)",
     "losslessCertificateStorage": {
       "command": "python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json",
@@ -2144,7 +2199,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T22:15:16.321751+00:00",
+  "updatedAt": "2026-08-31T22:44:34.925996+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
