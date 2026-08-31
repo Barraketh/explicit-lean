@@ -22,15 +22,16 @@
     "currentCorpusTotal": 83425,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
+    "note": "Only reports from schema7 or newer can count toward acceptance; prior schema5/6 results remain provisional. Full translated Mathlib closure remains pending.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 113,
-    "provisionalCachedModules": 8
+    "provisionalCachedOccurrences": 67,
+    "provisionalCachedModules": 9,
+    "minimumAcceptedReportSchema": 7
   },
   "work": [
     {
@@ -114,8 +115,8 @@
     {
       "id": "translated-import-isolation",
       "owner": "/root/tree_build_plan",
-      "status": "in_progress",
-      "description": "Direct pinned Lean invocation with explicit search path, stock Mathlib fallback excluded and negative dependency-resolution fixture."
+      "status": "completed",
+      "description": "Committed13373ad; direct pinned Lean with explicit search path, stock Mathlib fallback excluded. Positive and missing/conflicting translated dependency controls passed; first39module translated cone compiled provisionally under6287642."
     },
     {
       "id": "reusable-replay-design",
@@ -128,6 +129,12 @@
       "owner": "/root/unresolved_probe_finish",
       "status": "completed",
       "description": "Committed45c8f56 after fix-review. Schema6 scans independently nonce-framed applied/oracle logs and hashes/rescans durable evidence.14case caught-error matrix plus17source gate passed; prior113calls remain provisional until new reports."
+    },
+    {
+      "id": "local-matcher-state-guard",
+      "owner": "coordinator with Luna review and controls",
+      "status": "completed",
+      "description": "Schema7 compares typed local MatchEqns state and all completed async declaration snapshots.16mutation unit checks, direct-local/equation-set-only negative controls, real Prop async negative and cached positives passed. Earlier schema5/6 cache remains provisional."
     }
   ],
   "blockers": [
@@ -158,10 +165,10 @@
     }
   ],
   "nextActions": [
-    "Finish replay-abort guard fix-review and oracle fixes, freeze current implementation, rerun the first bounded batch under schema6 acceptance; inspect remaining genuine failures.",
+    "Finish schema7 local matcher-state guard review; freeze and run the direct and diverse batches. Prior results remain provisional.",
     "Keep full diagnostic source inventory and unresolved backlog; defer another full manifest run until the diverse batch stabilizes the implementation.",
     "Resolve reusable source/execution ownership and metaprogram equivalence rather than bypassing the shard rejection; collect positive unresolved caller evidence.",
-    "Finish direct Lean import-path isolation with an absent-translated-dependency negative control; then assemble and validate translated dependencies.",
+    "Revalidate the first39module translated dependency cone under schema7, then expand translated dependency closure with strict import isolation.",
     "After full explicit coverage and full-tree validation, improve readability and then other tactics if time remains."
   ],
   "checkpoints": [
@@ -334,6 +341,39 @@
         "No accepted schema6 corpus reports yet",
         "No full translated tree"
       ]
+    },
+    {
+      "at": "2026-08-31T11:32:40.583079+00:00",
+      "summary": "Committed13373ad import isolation,38492ab oracle fixes and6287642 genuine-private classifier. All29oracle cases passed. Frozen51module/150call schema6 diagnostic batch is running. First complete translated dependency cone passed39modules/2calls using the exact recording compiler options;39source, olean and log hashes independently verified. New schema7 local MatchEqns guard passes16mutation checks and a real Prop async negative/cached positive; independent review and default-local controls pending. Weekly usage9%.",
+      "checks": [
+        "oracle-final-regression.log:10acceptedequivalence+19failclosedpassed",
+        "translated-imports-check/coordinator-final-report.json: passed compiler/importnegativecontrols",
+        "private-declarations/fixture-qzugpjmw: privatecontrol and caughtpublicomission rejectionverified",
+        "first-cone-options.log:39moduleclosedtreebuilt",
+        "match-state-unit-2.log:16mutationsrejected",
+        "match-state-async.log: newrealizationrejectedbytypedasyncguard; cachedpositivepassed"
+      ],
+      "limitations": [
+        "All schema5/6 corpus cache results remain provisional pending schema7 local matcher-state checks.",
+        "Data.Set.Basic strict oracle rejects generated public proof-helper renaming.",
+        "Two boundary location fixtures and one trust fixture reject public helper omissions; no fixture was weakened.",
+        "No complete Mathlib tree or general reusable metaprogram solution."
+      ]
+    },
+    {
+      "at": "2026-08-31T11:45:07.991524+00:00",
+      "summary": "Schema7 local matcher-state guard passed fix-review. Luna field/state audit found no omitted fields; proposed sorting change was unnecessary because pinned NameSet is a TreeSet. Coordinator corrected fixture goal preservation, then all3 default-local controls passed;6source/log hashes and authenticated outcomes rechecked. Real Prop async and16mutation tests also passed. Schema6 batch finished9success/4failure/67provisional calls. Root reproduced a public helper naming drift and Sol identified inconsistent global/branch declaration delta views; correction is in progress before next freeze.",
+      "checks": [
+        "match-state/fixture-nqj4s3ol/report.json: unchanged accepted, map and equation-set-only mutations rejected",
+        "match-state-async.log: real Prop async mismatch rejected and cached matcher accepted",
+        "match-state-unit-2.log:16mutations rejected",
+        "Three pure corpus protocol validators and git diff --check passed"
+      ],
+      "limitations": [
+        "Old-library direct-local controls still pending.",
+        "No accepted schema7 module reports yet.",
+        "No full translated Mathlib tree."
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -409,6 +449,20 @@
       "modules": 2,
       "expectedOccurrences": 56,
       "note": "Both modules passed56calls under schema5; replayguard schema6 revalidation still required."
+    },
+    {
+      "id": "schema6-direct-gates",
+      "sessionId": 90582,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema6-direct-gates",
+      "commit": "6287642",
+      "log": ".lake/schema6-gates.log",
+      "status": "completed_provisional",
+      "modules": 13,
+      "inventoriedModules": 51,
+      "expectedOccurrences": 150,
+      "succeededModules": 9,
+      "failedModules": 4,
+      "provisionalCalls": 67
     }
   ],
   "latestCommits": [
@@ -434,7 +488,11 @@
     "a53b749",
     "f458c4d",
     "3005bcd",
-    "45c8f56"
+    "45c8f56",
+    "13373ad",
+    "5819eda",
+    "38492ab",
+    "6287642"
   ],
   "experiments": [
     {
@@ -521,6 +579,17 @@
     "sourceFixtureOccurrences": 17,
     "sourceFixtureUnobservedOccurrences": 1,
     "completeTreeBuilt": false,
-    "note": "Bounded fixture/module validation; durable campaign worker closure accounting remains separate."
+    "note": "Bounded fixture/module validation; durable campaign worker closure accounting remains separate.",
+    "closedDependencyCones": [
+      {
+        "commit": "6287642",
+        "root": "Mathlib.Logic.Function.Defs",
+        "modules": 39,
+        "replacedCalls": 2,
+        "report": ".lake/search-free-mathlib/snapshots/schema6-direct-gates/.lake/translated-first-cone-options/report.json",
+        "reportSha256": "d7f6f8501d54fb53c8f987b32cd45151153e76f2f851a3d11f03e071e3567d56",
+        "status": "compiled_provisional_pending_schema7"
+      }
+    ]
   }
 }

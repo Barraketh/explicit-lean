@@ -801,8 +801,8 @@ def validate_shard_report_protocol() -> None:
         changed = copy.deepcopy(base)
         module = changed["modules"][0]
         if mutation == "old-schema":
-            changed["reportSchema"] = 5
-            changed["reportIdentity"]["reportSchema"] = 5
+            changed["reportSchema"] = 6
+            changed["reportIdentity"]["reportSchema"] = 6
         elif mutation == "missing-apply-guard":
             del module["replayGuard"]
         elif mutation == "missing-oracle-guard":

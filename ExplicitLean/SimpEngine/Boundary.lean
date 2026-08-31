@@ -2,6 +2,7 @@ module
 prelude
 
 public meta import ExplicitLean.SimpEngine.Boundary.Tactic
+public meta import ExplicitLean.SimpEngine.Boundary.MatchState
 public meta import Lean.Elab.Tactic.Simp
 public meta import Lean.Meta.CollectMVars
 public meta import Lean.Util.CollectLevelMVars
@@ -1935,6 +1936,22 @@ private def compareBoundaryDeclaration (stockEnvironment : Environment)
 private def compareBoundaryEnvironment (basis : PreBoundaryBasis)
     (stockEnvironment appliedEnvironment : Environment)
     (actions : Array EnvironmentAction) : TacticM Unit := do
+  -- Match-equation metadata is local and absent from ModuleData. Realizations
+  -- also retain local state in their completed declaration snapshots. Check
+  -- every current-stage name, including private proofs and existing names.
+  unless boundaryMatchEqnsStateEq (Match.matchEqnsExt.getState stockEnvironment)
+      (Match.matchEqnsExt.getState appliedEnvironment) do
+    throwError "boundary_comparison_local_match_eqns_state:local"
+  let names := (boundaryEnvironmentDeclarations stockEnvironment ++
+      boundaryEnvironmentDeclarations appliedEnvironment).foldl
+    (fun names info => names.insert info.name) ({} : NameSet)
+  for name in names do
+    unless boundaryMatchEqnsStateEq
+        (Match.matchEqnsExt.getState (asyncMode := .async .asyncEnv)
+          (asyncDecl := name) stockEnvironment)
+        (Match.matchEqnsExt.getState (asyncMode := .async .asyncEnv)
+          (asyncDecl := name) appliedEnvironment) do
+      throwError s!"boundary_comparison_local_match_eqns_state:{name}"
   let stockModuleData ← Lean.mkModuleData stockEnvironment .private
   let appliedModuleData ← Lean.mkModuleData appliedEnvironment .private
   compareBoundaryPersistentExtensions stockModuleData appliedModuleData

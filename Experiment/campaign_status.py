@@ -41,7 +41,7 @@ def snapshot(database: Path) -> dict[str, object]:
             "ORDER BY m.module"
         ).fetchall()
         present = [row for row in results if row["artifact_ref"] and Path(row["artifact_ref"]).is_file()]
-        guarded = [row for row in present if (row["report_schema"] or 0) >= 6
+        guarded = [row for row in present if (row["report_schema"] or 0) >= 7
                    and row["replay_schema"] == 1 and row["oracle_replay_schema"] == 1]
         provisional = [row for row in present if row not in guarded]
         active = [dict(row) for row in connection.execute(
@@ -63,7 +63,7 @@ def snapshot(database: Path) -> dict[str, object]:
             "provisionalCachedModules": len(provisional),
             "provisionalCachedCalls": sum(int(row["calls"] or 0) for row in provisional),
             "missingVerifiedReportFiles": len(results) - len(present),
-            "verificationScope": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
+            "verificationScope": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle, plus local matcher-state comparison (report schema 7). Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
             "active": active, "failuresAndPartialResults": failures,
         }
     finally:
@@ -76,7 +76,7 @@ def markdown(status: dict[str, object]) -> str:
         f"Updated {status['updatedAt']}", "",
         f"- Indexed: {status['indexedSourceCalls']:,} calls in {status['indexedModules']:,} modules.",
         f"- Accepted per-module verification: {status['cachedVerifiedCalls']:,} translated calls in {status['cachedVerifiedModules']:,} modules.",
-        f"- Provisional cache awaiting replay-error checks: {status['provisionalCachedCalls']:,} calls in {status['provisionalCachedModules']:,} modules.",
+        f"- Provisional cache awaiting current semantic checks: {status['provisionalCachedCalls']:,} calls in {status['provisionalCachedModules']:,} modules.",
         f"- Unresolved source classifications: {status['unresolvedCalls']}.",
         f"- Missing cached report files: {status['missingVerifiedReportFiles']}.", "",
         str(status["verificationScope"]), "",

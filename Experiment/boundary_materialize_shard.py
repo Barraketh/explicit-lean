@@ -60,7 +60,7 @@ MATHLIB = corpus.MATHLIB
 MANIFEST_KIND = "simp_engine_boundary_manifest"
 MANIFEST_SCHEMA = 2
 REPORT_KIND = "simp_engine_boundary_materialization_shard"
-REPORT_SCHEMA = 6
+REPORT_SCHEMA = 7
 ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 DECLARATION_ORACLE_MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
 DECLARATION_ORACLE_KIND = "simp_engine_declaration_oracle"
@@ -2028,7 +2028,7 @@ def verify_shard_evidence(
     debug_root: Path,
     timeout: int,
 ) -> dict[str, object]:
-    """Bind a valid schema-6 shape to selected manifest and durable files."""
+    """Bind a valid schema-7 shape to selected manifest and durable files."""
     report = validate_shard_shape(report)
     resolved_manifest = manifest_path.resolve()
     if report["manifestPath"] != str(resolved_manifest):
