@@ -229,6 +229,42 @@ def test_scope_expected_zero_and_missing_counts() -> None:
             scope.run = original_scope_runner
 
 
+def test_scope_shared_source_paths_count_once() -> None:
+    with tempfile.TemporaryDirectory(prefix="inventory-checkpoint-shared-scope-") as raw:
+        root = Path(raw)
+        source = root / "Shared.lean"
+        source.write_text("example : True := by simp\n")
+        store = CheckpointStore(root / "checkpoints", identity={"toolchain": "lean"})
+        records = [
+            {"module": "Test.Shared", "startByte": 20, "endByte": 24,
+             "kind": "simp", "source": "simp", "ancestors": [parent]}
+            for parent in ("parser_choice_a", "parser_choice_b")
+        ]
+        original = scope.run
+        def run(command, timeout=600):
+            if command[:2] == ["lake", "build"]:
+                return ""
+            return "\n".join(scope.OCCURRENCE_MARKER + json.dumps(record) for record in records)
+        scope.run = run
+        try:
+            for _ in range(2):
+                occurrences, _, _ = scope.load_records_with_fallbacks(
+                    [scope.ModuleSpec("Test.Shared", source, 1)], checkpoint=store
+                )
+                assert occurrences["Test.Shared"] == records, "lost a scope path"
+            # A duplicate cannot stand in for a missing second source occurrence.
+            try:
+                scope.load_records_with_fallbacks(
+                    [scope.ModuleSpec("Test.Shared", source, 2)], checkpoint=store
+                )
+            except RuntimeError as error:
+                assert "expected 2, found 1" in str(error)
+            else:
+                raise AssertionError("duplicate path hid a missing source occurrence")
+        finally:
+            scope.run = original
+
+
 def main() -> None:
     test_hit_avoids_producer()
     test_key_changes_miss()
@@ -237,6 +273,7 @@ def main() -> None:
     test_freshness_failure_does_not_publish()
     test_inventory_and_scope_hits_skip_batch_producers()
     test_scope_expected_zero_and_missing_counts()
+    test_scope_shared_source_paths_count_once()
     print("inventory checkpoints: hits, key invalidation, corruption, and failed producers passed")
 
 

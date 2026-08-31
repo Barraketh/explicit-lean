@@ -251,21 +251,6 @@ def load_records_with_fallbacks(
                         raise RuntimeError(f"invalid scope fallback marker: {line}")
                     parsed_fallbacks.add(module)
             if strict:
-                # The full-parser fallback still runs collectOccurrences, so
-                # it is expected to emit the same count.  If a future fallback
-                # legitimately omits records, this fails closed and leaves no
-                # checkpoint for that batch rather than treating omission as
-                # valid zero coverage.
-                expected_counts = {
-                    spec.module: spec.expected_occurrences for spec in batch
-                }
-                for module, expected_count in expected_counts.items():
-                    actual_count = len(parsed_occurrences.get(module, []))
-                    if actual_count != expected_count:
-                        raise RuntimeError(
-                            "scope output occurrence count mismatch for "
-                            f"{module}: expected {expected_count}, found {actual_count}"
-                        )
                 occurrence_fields = {"module", "startByte", "endByte", "kind", "source"}
                 declaration_fields = {"module", "startByte", "endByte", "name", "isProof"}
                 for values in parsed_occurrences.values():
@@ -274,6 +259,30 @@ def load_records_with_fallbacks(
                 for values in parsed_declarations.values():
                     if any(not declaration_fields <= set(value) for value in values):
                         raise RuntimeError("scope declaration output record is incomplete")
+                # The full-parser fallback still runs collectOccurrences, so
+                # it is expected to emit the same unique source occurrences.
+                # Parser choices can visit a shared source subtree repeatedly
+                # (e.g. CategoryTheory.Types.Basic). Keep every scope path for
+                # the downstream semantic agreement check, but count source
+                # identities using the same key as the inventory/scope join.
+                # If a future fallback
+                # legitimately omits records, this fails closed and leaves no
+                # checkpoint for that batch rather than treating omission as
+                # valid zero coverage.
+                expected_counts = {
+                    spec.module: spec.expected_occurrences for spec in batch
+                }
+                for module, expected_count in expected_counts.items():
+                    actual_count = len({
+                        (int(value["startByte"]), int(value["endByte"]),
+                         str(value["kind"]), str(value["source"]))
+                        for value in parsed_occurrences.get(module, [])
+                    })
+                    if actual_count != expected_count:
+                        raise RuntimeError(
+                            "scope output occurrence count mismatch for "
+                            f"{module}: expected {expected_count}, found {actual_count}"
+                        )
             return parsed_occurrences, parsed_declarations, parsed_fallbacks
 
         def validate_payload(payload: object) -> object:
@@ -326,7 +335,10 @@ def load_records_with_fallbacks(
                 [spec.module for spec in batch],
                 source_hashes,
                 produce,
-                parameters={"timeout": timeout},
+                parameters={
+                    "timeout": timeout,
+                    "expectedOccurrences": [spec.expected_occurrences for spec in batch],
+                },
                 validator=validate_payload,
                 freshness=batch_freshness,
             )
