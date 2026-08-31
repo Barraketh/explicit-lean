@@ -1034,6 +1034,10 @@
     {
       "at": "2026-08-31T21:12:39.020278+00:00",
       "summary": "Production instrumentation still used quadratic bytewise diff, identified during fullFinprod run.20line length-witness addition preserves existing exact byte-gap validator; actual45callsource olddiff bounded6s timeout/stack vslinear0.002s, all corruption/nested/Unicode/head-annotation controls and6schema12tests pass. Finprod privatewhole45 now passes fulloracle; finallegacycontrols/freeze pending. Broadworker held for imminent finalruntime freeze."
+    },
+    {
+      "at": "2026-08-31T21:18:40.236954+00:00",
+      "summary": "Fresh current closed-subset manifest independently verified:8260modules/83414materialize calls/91nested,83349direct+65reusable,0unresolved in subset; four separately required modules contain11calls. All sourcebytes/ranges/IDs/role/action counts and implementation inputs verified. Broad worker held because replay runtime is advancing. ToAdditive strict cause isolated: replayed helper declarations exist but their root references are inlined, preventing normal traversal; exact helper-reference preservation prototype started, no metadata exemption."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1314,7 +1318,7 @@
     },
     {
       "id": "schema12-full-inventory",
-      "status": "running_scope_batches",
+      "status": "independently_verified_complete_analysis_checkpoint",
       "snapshot": ".lake/search-free-mathlib/snapshots/schema12-current-campaign",
       "commit": "11cfcfd",
       "sessionId": 19953,
@@ -1323,7 +1327,17 @@
       "expectedModules": 8260,
       "expectedOccurrences": 83414,
       "checkpointRoot": ".lake/search-free-mathlib/analysis-checkpoints-v1",
-      "note": "Actual analysis rerun with source/runtime freshness; old manifest used only for module selection. Four excluded modules remain required. Worker not started until root validates published manifest."
+      "note": "Fresh source/scope analysis at11cfcfd. Independently verified all source hashes/ranges/IDs/counts/implementation inputs. Replay implementation has since advanced; use checkpoint results for a fresh latest-provenance manifest, never rebind this manifest or start its known-stale worker.",
+      "manifest": ".lake/search-free-mathlib/snapshots/schema12-current-campaign/.lake/schema12-full-manifest.json",
+      "sha256": "b2899816cd8e6fca49878e91d05751d3a7859c214997cd1d4c985e8fb18ec021",
+      "seconds": 1564.4566501250956,
+      "rootVerification": ".lake/week-2026-08-31/schema12-full-manifest-root-verification.json",
+      "modules": 8260,
+      "occurrences": 83414,
+      "nestedOccurrences": 91,
+      "directExecutable": 83349,
+      "reusableExecutable": 65,
+      "separatelyRequiredOccurrences": 11
     }
   ],
   "latestCommits": [
@@ -1533,6 +1547,13 @@
         ".lake/instrumentation-linear-source-tests.log",
         ".lake/instrumentation-linear-schema12-tests.log"
       ]
+    },
+    {
+      "id": "toadditive-helper-reference-cause",
+      "status": "strict_repair_in_private_implementation",
+      "snapshot": ".lake/search-free-mathlib/snapshots/helper-reference-closure-prototype",
+      "finding": "Two replayed private helper theorems exist but closeFreshConstants inlines their references out of the root proof. ToAdditive findAuxDecls traverses only referenced constants, hence73vs75. No map filtering approved. Strict repair whitelists only exact fresh theorem members of captured local-theorem actions; all definitions/unknown/unlisted constants remain closed.",
+      "acceptedCampaignCoverage": false
     }
   ],
   "prototypeCoverage": {
@@ -1591,11 +1612,14 @@
     "moduleCount": 8264,
     "occurrenceCount": 83425,
     "latestClosedManifest": {
-      "path": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-full-manifest.json",
-      "sha256": "a964a7a5687c349884333825ac6ae715557afd1ba23aac89c6abadfea13c266d",
-      "commit": "1f6f12c",
+      "path": ".lake/search-free-mathlib/snapshots/schema12-current-campaign/.lake/schema12-full-manifest.json",
+      "sha256": "b2899816cd8e6fca49878e91d05751d3a7859c214997cd1d4c985e8fb18ec021",
+      "commit": "11cfcfdde4cf5a71bb090d5b469df48dcfe6ec45",
       "modules": 8260,
       "occurrences": 83414,
+      "directExecutable": 83349,
+      "reusableExecutable": 65,
+      "nestedOccurrences": 91,
       "separatelyRequiredModules": [
         "Mathlib/Tactic/DeriveEncodable.lean",
         "Mathlib/Tactic/Lift.lean",
@@ -1603,7 +1627,8 @@
         "Mathlib/Tactic/Zify.lean"
       ],
       "separatelyRequiredCalls": 11,
-      "note": "Fresh frozen10 manifest; excluded source modules remain required and separately tracked, not translation acceptance."
+      "rootVerification": ".lake/week-2026-08-31/schema12-full-manifest-root-verification.json",
+      "note": "Fresh complete closed subset analysis and source verification. Replay provenance predates current pending Finprod/helper-reference changes; no broad worker started from it."
     },
     "analysisDecoupling": {
       "status": "integrated",
@@ -2030,7 +2055,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T21:12:39.020278+00:00",
+  "updatedAt": "2026-08-31T21:18:40.236954+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
