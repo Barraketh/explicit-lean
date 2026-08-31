@@ -29,8 +29,8 @@
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 1344,
-    "provisionalCachedModules": 140,
+    "provisionalCachedOccurrences": 1456,
+    "provisionalCachedModules": 165,
     "minimumAcceptedReportSchema": 11,
     "validationHold": "The cold serialized comparator, independent compilation consumer, and unconditional pending-synthesis barrier are integrated and bounded schema11 controls passed. Complete translated dependency-tree certification remains pending; previous candidates and proof checks stay provisional."
   },
@@ -982,6 +982,14 @@
         ".lake/week-2026-08-31/forward-dispatcher-root-verification.json",
         ".lake/week-2026-08-31/forward-dispatcher-main-root-verification.json"
       ]
+    },
+    {
+      "at": "2026-08-31T19:51:59.048886+00:00",
+      "summary": "Dispatcher integrated7b543bc. Root caught stale scope executable in claimed201 decoupling run: generatedC/trace stillimportExplicitLean and binary identical oldmain. That evidence rejected; actualprivate rebuild nowpassed and comparison rerunning. Report12 initial Luna patches lacked actual runtime/command/nonce/logbindings; root nowowns materializer implementation in report-schema12-prototype, Lunaowns only focusedtests. Root canonical runtime/actualnativeoracle/prebuild+exact3receipt/log/source/nonces helper implemented, validationpending. FreshCubic mixedlocal equations diagnosed with1308hashes. Unitization focusedcandidate passes61decl22extensions butwhole9freshreplayfailsinitialdescriptor; Solisolateddiagnosis pending.",
+      "evidence": [
+        ".lake/week-2026-08-31/cubic-forward-root-verification.json",
+        ".lake/week-2026-08-31/cubic-local-equation-diagnosis-root-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1400,6 +1408,14 @@
       "failedCandidateManifest": ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype/.lake/cached-congruence-failure-frozen-a6243ck4/manifest.json",
       "failedCandidateManifestSha256": "7a6a40f2d5dabe5283d5ed3df33c4781ad4f5ced5c3f070b4beb1ccd77137d98",
       "descriptorFinding": "115nodes exact proof/signature/auxiliary data;80metadata leaves change in sineQueNon/symbolFrequency after fresh StarAlgHom congruence creation. Preserve initial and post-fresh full descriptors and authentic activation order; do not filter metadata or patch generator."
+    },
+    {
+      "id": "cubic-mixed-local-equations",
+      "status": "fresh_rejection_diagnosed",
+      "snapshot": ".lake/search-free-mathlib/snapshots/cubic-mixed-cover-diagnosis",
+      "rootVerification": ".lake/week-2026-08-31/cubic-local-equation-diagnosis-root-verification.json",
+      "finding": "aa693119975056ee needs fresh Cubic.map.eq_1 followed by completed cached Cubic.toPoly.eq_1, both local owners, no helper. Imported-only sequence cover excludes both; new narrow ordered equation sequence pending.",
+      "acceptedCampaignCoverage": false
     }
   ],
   "prototypeCoverage": {
@@ -1790,7 +1806,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T19:43:15.608368+00:00",
+  "updatedAt": "2026-08-31T19:51:59.048886+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
