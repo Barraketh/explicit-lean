@@ -29,8 +29,8 @@
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 890,
-    "provisionalCachedModules": 90,
+    "provisionalCachedOccurrences": 1036,
+    "provisionalCachedModules": 103,
     "minimumAcceptedReportSchema": 10,
     "validationHold": "Metadata export hooks mutate a process-global symbol-frequency cache. Observational boundary/audit reads and equivalence to separate fresh compilations must be repaired and revalidated; existing generated candidates and proof checks are preserved."
   },
@@ -310,6 +310,12 @@
       "owner": "coordinator with Sol implementation",
       "status": "completed",
       "description": "Pinned frequency/trigger export observation avoids two cache writes without resetting caches or skipping metadata. Private8positive and1explicit callback counterexample; main fresh Lookmap10/Control16/ModifyLast5 all compile, compare and have remaining0. Root inputs,31artifacts, source/comments regeneration and scans independently checked. Acceptance hold remains for independent cold outputs."
+    },
+    {
+      "id": "cold-serialized-certificates",
+      "owner": "coordinator consumer with Sol native comparator",
+      "status": "in_progress",
+      "description": "Private consumer runs5freshprocesses/6families; ordinary applied output is only publication candidate. V1 private34checks/76stageprocesses plus7receipt-hardening checks pass, but late exporter disproves native semantic implication. Consumer now requiresdistinctV2marker; native serialized3views+IR comparator under implementation. No main integration or acceptance."
     }
   ],
   "blockers": [
@@ -852,6 +858,15 @@
         ".lake/week-2026-08-31/module-data-observation-handoff-root-verification.json",
         ".lake/week-2026-08-31/expression-mvar-diagnosis-root-verification.json"
       ]
+    },
+    {
+      "at": "2026-08-31T17:45:13.792878+00:00",
+      "summary": "Confirmed and independently rehashed late-export counterexample: same-source cold equality plus old semantic oracle can still mask cross-source serialized metadata difference. V1 native and private certificate results preserved only as bounded diagnostics. V2 must use emitted declarations/metadata directly and no exporter callbacks during comparison; consumer now rejectsV1. Acceptance hold remains.",
+      "evidence": [
+        ".lake/week-2026-08-31/late-export-root-verification.json",
+        ".lake/week-2026-08-31/cold-bridge-v1-root-verification.json",
+        ".lake/week-2026-08-31/cold-certificate-v1-hardening-archive/manifest.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1316,7 +1331,7 @@
       "diagnosisSnapshot": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis",
       "knownCause": "CommandAudit.declarations -> mkModuleData -> symbolFrequency export -> localSymbolFrequencyMapRef; Boundary/RealizationCodec and Boundary metadata comparison also invoke mkModuleData mid-elaboration.",
       "scope": "Current source-pair oracle results and first certified cone remain provisional for complete fresh-compilation metadata semantics. Byte hashes, audit identities and passing proof compilation evidence remain valid.",
-      "status": "bounded-observer-repaired-cold-output-bridge-in-progress",
+      "status": "serialized-v2-comparison-in-progress",
       "diagnosisManifest": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis/.lake/lookmap-diagnosis/handoff-tljlgnu9/manifest.json",
       "diagnosisManifestSha256": "5f39e8eb73ee682d3284d6daa7b4d21b898467ceb91d9861eaf3dc5f06a84aba",
       "diagnosisVerification": ".lake/week-2026-08-31/audit-export-observation-handoff-root-verification.json",
@@ -1331,7 +1346,12 @@
       "boundaryRepairVerification": ".lake/week-2026-08-31/module-data-observation-main-root-verification.json",
       "boundaryRepairHandoffVerification": ".lake/week-2026-08-31/module-data-observation-handoff-root-verification.json",
       "boundaryRepairScope": "Substitutes only pinned symbolFrequency/sineQueNon export computations without their cache writes. Other callbacks remain unchanged and can mutate caches; no generic observational purity claim.",
-      "coldBridgePrototype": "Applied-first normal compiler outputs; exact same-source family equality against independently cold ordinary and audited compilations. Synthetic global-cache exporter proves same-process success can hide different cold stock metadata; new family comparison rejects it."
+      "coldBridgePrototype": "V1 same-source ordinary/audited/paired bytes are necessary but insufficient: late exporter returns real differing bytes for calls1/2, equal data during calls3-6, so old comparator passes. Frozen v1 never integrated. V2 will compare emitted serialized views and IR without rerunning exporters; exact private declaration binding to raw environments required.",
+      "lateExporterCounterexample": {
+        "manifest": ".lake/week-2026-08-31/late-export-diagnosis-0nqvan7e/manifest.json",
+        "sha256": "b08b5a4231d6e87cf8a5e54396c5672de8b8802a02a1a825ebdc52ad5f7449a6",
+        "rootVerification": ".lake/week-2026-08-31/late-export-root-verification.json"
+      }
     },
     "mixedRealizationSequences": {
       "mainEvidence": ".lake/week-2026-08-31/mixed-sequence-main-evidence-rtu9vyr5/manifest.json",
@@ -1407,5 +1427,5 @@
     "checkedAt": "2026-08-31T17:36:47.331238+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T17:36:47.331238+00:00"
+  "updatedAt": "2026-08-31T17:45:13.792878+00:00"
 }
