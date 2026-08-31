@@ -35,11 +35,15 @@ from boundary_protocol import (
     artifact_protocol,
     assert_exact_source_preservation,
     check_recording_abort_markers,
+    check_replay_abort_markers,
     group_report_variants,
     make_occurrence_result,
     occurrence_classification_counts,
     parse_framed_json_lines,
     recording_subprocess_environment,
+    replay_subprocess_environment,
+    REPLAY_GUARD_KIND,
+    REPLAY_GUARD_SCHEMA,
     replacement_plan,
     reject_forbidden_generated_text,
     validate_artifact_protocol,
@@ -56,7 +60,7 @@ MATHLIB = corpus.MATHLIB
 MANIFEST_KIND = "simp_engine_boundary_manifest"
 MANIFEST_SCHEMA = 2
 REPORT_KIND = "simp_engine_boundary_materialization_shard"
-REPORT_SCHEMA = 5
+REPORT_SCHEMA = 6
 ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 DECLARATION_ORACLE_MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
 DECLARATION_ORACLE_KIND = "simp_engine_declaration_oracle"
@@ -998,6 +1002,10 @@ def run_declaration_oracle(
     timeout: int,
 ) -> dict[str, Any]:
     compiled_module = corpus.compiled_module_name(module)
+    log_path = module_root / "declaration-oracle.log"
+    report_path = module_root / "declaration-oracle-report.json"
+    # A failed rerun must not leave a previous successful oracle report.
+    report_path.unlink(missing_ok=True)
     command = [
         sys.executable,
         str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
@@ -1006,11 +1014,11 @@ def run_declaration_oracle(
         str(original_path),
         str(materialized_path),
     ]
-    code, output, elapsed = _run_command(command, timeout)
-    log_path = module_root / "declaration-oracle.log"
-    report_path = module_root / "declaration-oracle-report.json"
+    environment, nonce = replay_subprocess_environment()
+    code, output, elapsed = _run_command(command, timeout, env=environment)
     _write_text(log_path, output)
     try:
+        replay_guard = replay_guard_evidence(output, nonce, log_path, compiled_module)
         oracle_report = _parse_declaration_oracle(output, compiled_module)
     except RuntimeError as error:
         raise RuntimeError(
@@ -1034,7 +1042,27 @@ def run_declaration_oracle(
         "seconds": elapsed,
         "status": oracle_report["status"],
         "report": oracle_report,
+        "replayGuard": replay_guard,
     }
+
+
+def replay_guard_evidence(
+    output: str, nonce: str, log_path: Path, module: str
+) -> dict[str, Any]:
+    """Scan the complete subprocess output before publishing its guard evidence."""
+    check_replay_abort_markers(output, expected_nonce=nonce, expected_module=module)
+    log_bytes = log_path.read_bytes()
+    if log_bytes.decode("utf-8") != output:
+        raise RuntimeError("replay guard log differs from scanned process output")
+    evidence = {
+        "kind": REPLAY_GUARD_KIND,
+        "schema": REPLAY_GUARD_SCHEMA,
+        "nonce": nonce,
+        "path": str(log_path.resolve()),
+        "sha256": sha256(log_bytes),
+    }
+    _validate_replay_guard(evidence, "replay guard")
+    return evidence
 
 
 def _query_dynamic_library(timeout: int, debug_root: Path) -> str:
@@ -1186,10 +1214,15 @@ def _module_result(
             selected.source, list(selected.materialize), report_variants,
         ),
     )
+    replay_environment, replay_nonce = replay_subprocess_environment()
     materialized_code, materialized_output, materialized_elapsed = _compile_copy(
-        materialized_path, dylib, timeout
+        materialized_path, dylib, timeout, env=replay_environment
     )
-    _write_text(module_root / "materialized.log", materialized_output)
+    materialized_log = module_root / "materialized.log"
+    _write_text(materialized_log, materialized_output)
+    replay_guard = replay_guard_evidence(
+        materialized_output, replay_nonce, materialized_log, selected.compiled_module
+    )
     if materialized_code != 0:
         raise RuntimeError(
             f"materialized module compilation failed for {selected.module} "
@@ -1288,6 +1321,7 @@ def _module_result(
             "sha256": report_hash,
         },
         "declarationOracle": declaration_oracle,
+        "replayGuard": replay_guard,
         "totalCount": len(selected.occurrences),
         "materializeCount": len(selected.materialize),
         "retainCount": len(selected.retain),
@@ -1379,6 +1413,7 @@ MODULE_REPORT_FIELDS = frozenset(
         "materialized",
         "artifactReport",
         "declarationOracle",
+        "replayGuard",
         "totalCount",
         "materializeCount",
         "retainCount",
@@ -1449,8 +1484,10 @@ ORACLE_WRAPPER_FIELDS = frozenset(
         "seconds",
         "status",
         "report",
+        "replayGuard",
     }
 )
+REPLAY_GUARD_FIELDS = frozenset({"kind", "schema", "nonce", "path", "sha256"})
 
 
 def _exact_fields(value: object, fields: frozenset[str], label: str) -> dict[str, Any]:
@@ -1521,6 +1558,20 @@ def _validate_compiled_artifact(value: object, label: str) -> dict[str, Any]:
     return result
 
 
+def _validate_replay_guard(value: object, label: str) -> dict[str, Any]:
+    result = _exact_fields(value, REPLAY_GUARD_FIELDS, label)
+    if result["kind"] != REPLAY_GUARD_KIND or _require_int(
+        result["schema"], f"{label}.schema"
+    ) != REPLAY_GUARD_SCHEMA:
+        raise RuntimeError(f"{label} protocol identity mismatch")
+    nonce = _require_string(result["nonce"], f"{label}.nonce")
+    if re.fullmatch(r"[A-Za-z0-9_-]{43}", nonce) is None:
+        raise RuntimeError(f"{label}.nonce is not a production compiler nonce")
+    _require_string(result["path"], f"{label}.path")
+    _require_string(result["sha256"], f"{label}.sha256")
+    return result
+
+
 def _validate_source_preservation(
     value: object, label: str, *, module: bool
 ) -> dict[str, Any]:
@@ -1566,6 +1617,9 @@ def _validate_oracle_wrapper(
     )
     if parsed != oracle:
         raise RuntimeError(f"{label}.report changed during validation")
+    guard = _validate_replay_guard(result["replayGuard"], f"{label}.replayGuard")
+    if guard["path"] != result["path"] or guard["sha256"] != result["sha256"]:
+        raise RuntimeError(f"{label}.replayGuard log reference disagrees")
     return result
 
 
@@ -1622,6 +1676,9 @@ def _validate_module_report(value: object, index: int) -> dict[str, Any]:
     _validate_oracle_wrapper(
         module["declarationOracle"], f"{label}.declarationOracle", expected_compiled
     )
+    guard = _validate_replay_guard(module["replayGuard"], f"{label}.replayGuard")
+    if guard["nonce"] == module["declarationOracle"]["replayGuard"]["nonce"]:
+        raise RuntimeError(f"{label} reused a compiler nonce for the oracle process")
     _validate_source_preservation(
         module["exactSourcePreservation"], f"{label}.exactSourcePreservation", module=True
     )
@@ -2032,6 +2089,7 @@ def verify_shard_evidence(
             "original": module_root / "original" / Path(*item.module.split("/")),
             "instrumented": module_root / "instrumented" / Path(*item.module.split("/")),
             "materialized": module_root / "materialized" / Path(*item.module.split("/")),
+            "materializedLog": module_root / "materialized.log",
             "artifactReport": module_root / "artifact-reports.jsonl",
             "oracleLog": module_root / "declaration-oracle.log",
             "oracleReport": module_root / "declaration-oracle-report.json",
@@ -2154,6 +2212,15 @@ def verify_shard_evidence(
         )
         if materialized_data != expected_materialized:
             raise RuntimeError(f"{item.module} materialized evidence is not reproducible")
+        guard = module_report["replayGuard"]
+        replay_log = _read_evidence_file(
+            guard["path"], expected_paths["materializedLog"], f"{item.module} replay log"
+        )
+        _validate_evidence_hash(replay_log, guard["sha256"], f"{item.module} replay log")
+        check_replay_abort_markers(
+            replay_log.decode("utf-8"), expected_nonce=guard["nonce"],
+            expected_module=item.compiled_module,
+        )
         remaining = [
             entry
             for entry in inventory.syntax_inventory_file(
@@ -2191,6 +2258,12 @@ def verify_shard_evidence(
             oracle["path"], expected_paths["oracleLog"], f"{item.module} oracle log"
         )
         _validate_evidence_hash(oracle_log, oracle["sha256"], f"{item.module} oracle log")
+        check_replay_abort_markers(
+            oracle_log.decode("utf-8"), expected_nonce=oracle["replayGuard"]["nonce"],
+            expected_module=item.compiled_module,
+        )
+        if _parse_declaration_oracle(oracle_log.decode("utf-8"), item.compiled_module) != oracle["report"]:
+            raise RuntimeError(f"{item.module} oracle log differs from embedded report")
         oracle_report_data = _read_evidence_file(
             oracle["reportPath"],
             expected_paths["oracleReport"],

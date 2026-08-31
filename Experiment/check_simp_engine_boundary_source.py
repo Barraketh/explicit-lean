@@ -17,8 +17,10 @@ from boundary_protocol import (
     SELECTOR_SCHEMA,
     assert_exact_source_preservation,
     check_recording_abort_markers,
+    check_replay_abort_markers,
     parse_framed_json_lines,
     recording_subprocess_environment,
+    replay_subprocess_environment,
     group_report_variants,
     replacement_plan,
     reject_forbidden_generated_text,
@@ -80,6 +82,13 @@ def compile_recording_source(dylib: str, source: Path) -> tuple[str, str]:
     """Compile one instrumented source with an authenticated recording nonce."""
     environment, nonce = recording_subprocess_environment()
     return compile_source(dylib, source, env=environment), nonce
+
+
+def compile_replay_source(dylib: str, source: Path, module: str) -> str:
+    environment, nonce = replay_subprocess_environment()
+    output = compile_source(dylib, source, env=environment)
+    check_replay_abort_markers(output, expected_nonce=nonce, expected_module=module)
+    return output
 
 
 def replace_occurrence(source: bytes, start: int, end: int, replacement: str) -> bytes:
@@ -641,13 +650,13 @@ def assert_generated_header_rejections(
 
 
 def assert_caught_recording_abort_is_fatal(dylib: str, work: Path) -> None:
-    """A caught post-stock recorder failure must not look unobserved."""
+    """A caught recorder failure stays fatal even after partial stdout."""
     fixture = work / "recording-abort" / "Experiment" / "SimpEngineBoundaryRecordingAbort.lean"
     fixture.parent.mkdir(parents=True, exist_ok=True)
     fixture.write_text(
         """module
 
-import Mathlib
+import Lean
 public meta import ExplicitLean.SimpEngine.Boundary
 
 open Lean Meta Elab Tactic
@@ -656,6 +665,7 @@ syntax "boundary_abort_mutating_discharger" : tactic
 
 elab_rules : tactic
   | `(tactic| boundary_abort_mutating_discharger) => withMainContext do
+      IO.print "recording-abort-partial-output"
       addDecl <| .axiomDecl {
         name := `boundaryRecordingAbortCaught.abortHelper
         levelParams := []
@@ -673,6 +683,8 @@ theorem boundaryRecordingAbortCaught (p q : Prop) (h : p) (hpq : p → q) : q :=
         encoding="utf-8",
     )
     output, nonce = compile_recording_source(dylib, fixture)
+    if "recording-abort-partial-output\nSIMP_ENGINE_BOUNDARY_RECORDING_ABORT " not in output:
+        raise RuntimeError("recording abort was not framed after partial output\n" + output)
     artifact_reports = parse_framed_json_lines(
         output,
         marker=ARTIFACT_MARKER,
@@ -802,7 +814,7 @@ def main() -> None:
         )
         assert_generated_header_rejections(dylib, work, success)
         assert_caught_recording_abort_is_fatal(dylib, work)
-        compile_source(dylib, materialized_path)
+        compile_replay_source(dylib, materialized_path, expected_module)
         remaining = syntax_inventory_file(
             materialized_path,
             "Experiment.SimpEngineBoundarySourceInput.materialized",

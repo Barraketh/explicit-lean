@@ -23,8 +23,10 @@ import check_simp_engine_boundary_scope as scope
 from boundary_protocol import (
     assert_exact_source_preservation,
     check_recording_abort_markers,
+    check_replay_abort_markers,
     parse_framed_json_lines,
     recording_subprocess_environment,
+    replay_subprocess_environment,
     group_report_variants,
     reject_forbidden_generated_text,
 )
@@ -370,7 +372,12 @@ def check_module(
     materialized_path = copy_at_module_root(
         work / "materialized", spec.module, materialized_bytes
     )
-    compile_copy(materialized_path, dylib)
+    replay_environment, replay_nonce = replay_subprocess_environment()
+    replay_output = compile_copy(materialized_path, dylib, env=replay_environment)
+    check_replay_abort_markers(
+        replay_output, expected_nonce=replay_nonce,
+        expected_module=compiled_module_name(spec.module),
+    )
     remaining = [
         entry
         for entry in coverage.syntax_inventory_file(

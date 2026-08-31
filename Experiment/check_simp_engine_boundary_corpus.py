@@ -589,7 +589,7 @@ def validate_occurrence_protocol() -> None:
             lambda _paths, batch_size, timeout: ({module_name: [inventory_entry]}, [])
         )
         materialize.scope.load_records_with_fallbacks = (
-            lambda _specs, batch_size: (
+            lambda _specs, batch_size, timeout: (
                 {compiled_module: [scope_occurrence]},
                 {compiled_module: [declaration]},
                 [],
@@ -678,6 +678,13 @@ def shard_report_fixture() -> dict[str, object]:
             "seconds": 0,
         },
         "artifactReport": {"path": "/tmp/artifacts.jsonl", "sha256": "report-hash"},
+        "replayGuard": {
+            "kind": materialize.REPLAY_GUARD_KIND,
+            "schema": materialize.REPLAY_GUARD_SCHEMA,
+            "nonce": "a" * 43,
+            "path": "/tmp/materialized.log",
+            "sha256": "replay-log-hash",
+        },
         "declarationOracle": {
             "path": "/tmp/oracle.log",
             "reportPath": "/tmp/oracle-report.json",
@@ -687,6 +694,13 @@ def shard_report_fixture() -> dict[str, object]:
             "seconds": 0,
             "status": "success",
             "report": oracle,
+            "replayGuard": {
+                "kind": materialize.REPLAY_GUARD_KIND,
+                "schema": materialize.REPLAY_GUARD_SCHEMA,
+                "nonce": "b" * 43,
+                "path": "/tmp/oracle.log",
+                "sha256": "oracle-hash",
+            },
         },
         "totalCount": 2,
         "materializeCount": 1,
@@ -780,7 +794,31 @@ def shard_report_fixture() -> dict[str, object]:
 def validate_shard_report_protocol() -> None:
     base = shard_report_fixture()
     if materialize.validate_shard_protocol(base) != base:
-        raise RuntimeError("valid schema-5 shard report changed during validation")
+        raise RuntimeError("valid guarded shard report changed during validation")
+
+    for mutation in ("old-schema", "missing-apply-guard", "missing-oracle-guard",
+                     "unauthenticated", "reused-nonce", "wrong-guard-schema"):
+        changed = copy.deepcopy(base)
+        module = changed["modules"][0]
+        if mutation == "old-schema":
+            changed["reportSchema"] = 5
+            changed["reportIdentity"]["reportSchema"] = 5
+        elif mutation == "missing-apply-guard":
+            del module["replayGuard"]
+        elif mutation == "missing-oracle-guard":
+            del module["declarationOracle"]["replayGuard"]
+        elif mutation == "unauthenticated":
+            module["replayGuard"]["nonce"] = "unauthenticated"
+        elif mutation == "reused-nonce":
+            module["replayGuard"]["nonce"] = module["declarationOracle"]["replayGuard"]["nonce"]
+        else:
+            module["replayGuard"]["schema"] = True
+        try:
+            materialize.validate_shard_protocol(changed)
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError(f"shard validator accepted replay guard mutation {mutation}")
 
     missing_result = copy.deepcopy(base)
     del missing_result["modules"][0]["occurrenceResults"][0]
@@ -1051,6 +1089,7 @@ def validate_shard_report_protocol() -> None:
             "original": module_root / "original" / "Mathlib" / "Test.lean",
             "instrumented": module_root / "instrumented" / "Mathlib" / "Test.lean",
             "materialized": module_root / "materialized" / "Mathlib" / "Test.lean",
+            "materializedLog": module_root / "materialized.log",
             "artifacts": module_root / "artifact-reports.jsonl",
             "oracleLog": module_root / "declaration-oracle.log",
             "oracleReport": module_root / "declaration-oracle-report.json",
@@ -1071,7 +1110,11 @@ def validate_shard_report_protocol() -> None:
         oracle_bytes = (
             json.dumps(oracle, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
         ).encode()
-        paths["oracleLog"].write_text("oracle success\n", encoding="utf-8")
+        paths["materializedLog"].write_text("", encoding="utf-8")
+        paths["oracleLog"].write_text(
+            materialize.DECLARATION_ORACLE_MARKER + json.dumps(oracle) + "\n",
+            encoding="utf-8",
+        )
         paths["oracleReport"].write_bytes(oracle_bytes)
         manifest = {
             "repositoryCommit": "repository",
@@ -1136,6 +1179,9 @@ def validate_shard_report_protocol() -> None:
             "path": str(paths["artifacts"].resolve()),
             "sha256": materialize.sha256(artifact_bytes),
         }
+        module_report["replayGuard"] = materialize.replay_guard_evidence(
+            "", "a" * 43, paths["materializedLog"], compiled_module
+        )
         module_report["declarationOracle"] = {
             "path": str(paths["oracleLog"].resolve()),
             "reportPath": str(paths["oracleReport"].resolve()),
@@ -1145,6 +1191,10 @@ def validate_shard_report_protocol() -> None:
             "seconds": 0,
             "status": "success",
             "report": oracle,
+            "replayGuard": materialize.replay_guard_evidence(
+                paths["oracleLog"].read_text(), "b" * 43,
+                paths["oracleLog"], compiled_module,
+            ),
         }
         report.update(
             manifestPath=str(manifest_path.resolve()),
@@ -1207,6 +1257,41 @@ def validate_shard_report_protocol() -> None:
                 debug_root=debug_root,
                 timeout=1,
             )
+            # Rehashing an abort-bearing log must not turn a caught replay
+            # failure into acceptable durable evidence in either process.
+            for oracle_process in (False, True):
+                changed = copy.deepcopy(report)
+                changed_module = changed["modules"][0]
+                wrapper = changed_module["declarationOracle"] if oracle_process else changed_module
+                guard = wrapper["replayGuard"]
+                path = paths["oracleLog" if oracle_process else "materializedLog"]
+                original_log = path.read_bytes()
+                payload = {
+                    "kind": "simp_engine_boundary_replay_abort", "schema": 1,
+                    "occurrence": occurrence_id, "module": compiled_module,
+                    "stage": "apply", "detail": "caught invalid evidence",
+                }
+                contaminated = original_log + (
+                    "SIMP_ENGINE_BOUNDARY_REPLAY_ABORT " + guard["nonce"] + " "
+                    + json.dumps(payload) + "\n"
+                ).encode()
+                path.write_bytes(contaminated)
+                guard["sha256"] = materialize.sha256(contaminated)
+                if oracle_process:
+                    wrapper["sha256"] = guard["sha256"]
+                try:
+                    materialize.verify_shard_evidence(
+                        changed, manifest=manifest, manifest_path=manifest_path,
+                        manifest_bytes=manifest_bytes, selected=[selected],
+                        debug_root=debug_root, timeout=1,
+                    )
+                except RuntimeError as error:
+                    if "boundary replay abort" not in str(error):
+                        raise
+                else:
+                    raise RuntimeError("rehashed replay-abort evidence was accepted")
+                finally:
+                    path.write_bytes(original_log)
             nonexistent = copy.deepcopy(report)
             missing_path = work / "missing.lean"
             nonexistent["modules"][0]["originalPath"] = str(missing_path)

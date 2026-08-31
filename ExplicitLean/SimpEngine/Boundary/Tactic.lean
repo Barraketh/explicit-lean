@@ -94,6 +94,35 @@ end Lean.Parser.Tactic
 
 namespace ExplicitLean.SimpEngine.Boundary
 
+/-- Replay protocol failures must survive surrounding tactic backtracking.
+    This process diagnostic is deliberately independent of Lean's message log.
+    A selected recorded stock failure never enters this wrapper. -/
+private def withReplayAbort (occId stage : String) (action : TacticM α) : TacticM α := do
+  let saved ← Tactic.saveState
+  try
+    action
+  catch error =>
+    let detail ← try
+      error.toMessageData.toString
+    catch _ =>
+      pure "boundary replay raised an unrenderable exception"
+    let moduleName := (← getEnv).mainModule.toString
+    let nonce := (← IO.getEnv boundaryRunNonceEnv).filter (!·.isEmpty)
+      |>.getD boundaryUnauthenticatedRunNonce
+    let payload := Json.mkObj [
+      ("kind", Json.str "simp_engine_boundary_replay_abort"),
+      ("schema", toJson (1 : Nat)),
+      ("occurrence", Json.str (if occId.isEmpty then "<invalid-occurrence>" else occId)),
+      ("module", Json.str moduleName),
+      ("stage", Json.str stage),
+      ("detail", Json.str (if detail.isEmpty then "boundary replay failed" else detail))
+    ]
+    -- A preceding tactic may have printed a partial line. Always start our
+    -- frame on its own line so such output cannot hide an abort from scanners.
+    IO.println s!"\nSIMP_ENGINE_BOUNDARY_REPLAY_ABORT {nonce} {payload.compress}"
+    saved.restore
+    throw error
+
 /-- Return an authored local name when it resolves uniquely; otherwise use a
     stable source-only alias. Generated artifacts cannot refer to inaccessible,
     macro-scoped, or shadowed names, and the surrounding source remains
@@ -363,8 +392,6 @@ private def validateArtifactHeader (kind : String) (schema selectorSchema : Nat)
 
 private def runBoundaryVariantOutcome (outcome : Syntax) : TacticM Unit := do
   match outcome with
-  | `(boundaryVariantOutcome| failure) =>
-      throwError "boundary_recorded_tactic_failure"
   | `(boundaryVariantOutcome| apply_encoded $evidence:boundaryEncodedEvidence) =>
       runExplicitEncodedApply #[] evidence
   | `(boundaryVariantOutcome| apply_encoded
@@ -385,7 +412,7 @@ private def runBoundaryVariantOutcome (outcome : Syntax) : TacticM Unit := do
   | _ => throwError "invalid boundary variant outcome"
 
 private def runBoundarySelect (kind : String) (schema selectorSchema : Nat)
-    (contract occId moduleName : String) (variants : Array Syntax) : TacticM Unit := do
+    (contract occId moduleName : String) (variants : Array Syntax) : TacticM Syntax := do
   validateArtifactHeader kind schema selectorSchema contract occId moduleName
   -- A malformed sibling is a protocol error even if another variant would
   -- otherwise select, so validate the complete serialized set first.
@@ -409,40 +436,52 @@ private def runBoundarySelect (kind : String) (schema selectorSchema : Nat)
   -- the search has completed, so an intentional recorded failure propagates
   -- to the original surrounding tactic control flow instead of backtracking
   -- into another variant.
-  runBoundaryVariantOutcome selected
+  return selected
 
 elab_rules : tactic
   | `(tactic| simp_engine_boundary_apply ($input ==> $result)) =>
-      runExplicitApply input result none
+      withReplayAbort "<legacy-apply>" "apply" <| runExplicitApply input result none
   | `(tactic| simp_engine_boundary_apply ($input ==> $result using $proof)) =>
-      runExplicitApply input result (some proof)
+      withReplayAbort "<legacy-apply>" "apply" <| runExplicitApply input result (some proof)
   | `(tactic| simp_engine_boundary_apply $location:boundaryLocationEvidence) =>
       let locals := location.raw[0].getArgs
       let targetSyntax? := if location.raw[1].isNone then none else some location.raw[1][0]
-      runExplicitLocationApply locals targetSyntax?
+      withReplayAbort "<legacy-apply>" "apply" <|
+        runExplicitLocationApply locals targetSyntax?
   | `(tactic| simp_engine_boundary_apply_failure) =>
       throwError "boundary_recorded_tactic_failure"
   | `(tactic| simp_engine_boundary_guard $targetFingerprint:str
       $localContextFingerprint:str $metavariableContextFingerprint:str
       $goalCount:num $optionsFingerprint:str $caller:str) =>
       let expectedGoalCount := goalCount.raw.isNatLit?.getD 0
-      runBoundaryGuard targetFingerprint.getString localContextFingerprint.getString
-        metavariableContextFingerprint.getString expectedGoalCount optionsFingerprint.getString
-        caller.getString
+      withReplayAbort "<legacy-guard>" "select" <|
+        runBoundaryGuard targetFingerprint.getString localContextFingerprint.getString
+          metavariableContextFingerprint.getString expectedGoalCount optionsFingerprint.getString
+          caller.getString
   | `(tactic| simp_engine_boundary_variant_missing) =>
-      runBoundaryVariantMissing
+      withReplayAbort "<variant-missing>" "select" runBoundaryVariantMissing
   | `(tactic| simp_engine_boundary_occurrence_unobserved) =>
-      throwError "boundary_occurrence_unobserved"
+      withReplayAbort "<occurrence-unobserved>" "unobserved" do
+        throwError "boundary_occurrence_unobserved"
   | `(tactic| simp_engine_boundary_select
       $header:boundaryArtifactHeader $variants:boundaryVariant*) =>
       match header with
       | `(boundaryArtifactHeader| (artifact_kind := $kind:str artifact_schema := $schema:num
           selector_schema := $selectorSchema:num semantic_contract := $contract:str
-          occurrence_id := $occId:str recorded_module := $moduleName:str)) =>
+          occurrence_id := $occId:str recorded_module := $moduleName:str)) => do
           let schema := schema.raw.isNatLit?.getD 0
           let selectorSchema := selectorSchema.raw.isNatLit?.getD 0
-          runBoundarySelect kind.getString schema selectorSchema contract.getString
-            occId.getString moduleName.getString variants
-      | _ => throwError "invalid boundary artifact header"
+          let selected ← withReplayAbort occId.getString "select" <|
+            runBoundarySelect kind.getString schema selectorSchema contract.getString
+              occId.getString moduleName.getString variants
+          -- Distinguish stock failure structurally, never by exception text:
+          -- malformed evidence may itself produce any exception message.
+          match selected with
+          | `(boundaryVariantOutcome| failure) =>
+              throwError "boundary_recorded_tactic_failure"
+          | _ => withReplayAbort occId.getString "apply" <|
+              runBoundaryVariantOutcome selected
+      | _ => withReplayAbort "<invalid-header>" "select" do
+          throwError "invalid boundary artifact header"
 
 end ExplicitLean.SimpEngine.Boundary

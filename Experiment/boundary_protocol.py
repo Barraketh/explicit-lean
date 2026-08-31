@@ -128,6 +128,11 @@ RECORDING_ABORT_SCHEMA = 1
 RECORDING_ABORT_FIELDS = frozenset(
     {"kind", "schema", "occurrence", "module", "stage", "detail"}
 )
+REPLAY_ABORT_MARKER = "SIMP_ENGINE_BOUNDARY_REPLAY_ABORT "
+REPLAY_ABORT_KIND = "simp_engine_boundary_replay_abort"
+REPLAY_ABORT_SCHEMA = 1
+REPLAY_GUARD_KIND = "simp_engine_boundary_replay_guard"
+REPLAY_GUARD_SCHEMA = 1
 
 # Marker lines cross a compiler-process boundary through combined stdout and
 # stderr.  Authored Lean diagnostics can contain the old marker text, so every
@@ -140,16 +145,21 @@ UNAUTHENTICATED_RUN_NONCE = "unauthenticated"
 
 
 def fresh_run_nonce() -> str:
-    """Return a high-entropy nonce for one recording subprocess."""
+    """Return a high-entropy nonce for one compiler subprocess."""
     return secrets.token_urlsafe(32)
 
 
 def recording_subprocess_environment() -> tuple[dict[str, str], str]:
-    """Copy the current environment and add a fresh recording nonce."""
+    """Copy the current environment and add a fresh compiler-process nonce."""
     nonce = fresh_run_nonce()
     environment = os.environ.copy()
     environment[RUN_NONCE_ENV] = nonce
     return environment, nonce
+
+
+def replay_subprocess_environment() -> tuple[dict[str, str], str]:
+    """Use the same runtime framing protocol with a fresh replay-process nonce."""
+    return recording_subprocess_environment()
 
 
 def marker_prefix(marker: str, nonce: str) -> str:
@@ -498,52 +508,82 @@ def check_recording_abort_markers(
     first.  A valid marker always raises: callers must never classify it as an
     unobserved occurrence.
     """
+    _check_abort_markers(
+        output, marker=RECORDING_ABORT_MARKER, kind=RECORDING_ABORT_KIND,
+        schema=RECORDING_ABORT_SCHEMA, label="recording",
+        expected_nonce=expected_nonce, expected_occurrence=expected_occurrence,
+        expected_module=expected_module,
+    )
+
+
+def check_replay_abort_markers(
+    output: str, *, expected_nonce: str,
+    expected_occurrence: str | None = None, expected_module: str | None = None,
+) -> None:
+    """Reject replay infrastructure errors even when Lean caught the exception.
+
+    A deliberately selected recorded stock failure emits no replay-abort marker.
+    All marker lines, including malformed or unauthenticated ones, fail closed.
+    """
+    _check_abort_markers(
+        output, marker=REPLAY_ABORT_MARKER, kind=REPLAY_ABORT_KIND,
+        schema=REPLAY_ABORT_SCHEMA, label="replay",
+        expected_nonce=expected_nonce, expected_occurrence=expected_occurrence,
+        expected_module=expected_module,
+    )
+
+
+def _check_abort_markers(
+    output: str, *, marker: str, kind: str, schema: int, label: str,
+    expected_nonce: str, expected_occurrence: str | None,
+    expected_module: str | None,
+) -> None:
     markers: list[dict[str, object]] = []
     for raw in parse_framed_json_lines(
         output,
-        marker=RECORDING_ABORT_MARKER,
+        marker=marker,
         expected_nonce=expected_nonce,
-        label="boundary recording-abort",
+        label=f"boundary {label}-abort",
     ):
         value = raw
         if not isinstance(value, dict) or set(value) != RECORDING_ABORT_FIELDS:
             raise RuntimeError(
-                f"malformed boundary recording-abort marker fields: {value!r}"
+                f"malformed boundary {label}-abort marker fields: {value!r}"
             )
-        if value["kind"] != RECORDING_ABORT_KIND:
+        if value["kind"] != kind:
             raise RuntimeError(
-                f"malformed boundary recording-abort marker kind: {value!r}"
+                f"malformed boundary {label}-abort marker kind: {value!r}"
             )
-        schema = value["schema"]
+        actual_schema = value["schema"]
         if (
-            isinstance(schema, bool)
-            or not isinstance(schema, int)
-            or schema != RECORDING_ABORT_SCHEMA
+            isinstance(actual_schema, bool)
+            or not isinstance(actual_schema, int)
+            or actual_schema != schema
         ):
             raise RuntimeError(
-                f"malformed boundary recording-abort marker schema: {value!r}"
+                f"malformed boundary {label}-abort marker schema: {value!r}"
             )
         occurrence = _require_nonempty_string(
-            value["occurrence"], "recording-abort occurrence"
+            value["occurrence"], f"{label}-abort occurrence"
         )
         if expected_occurrence is not None and occurrence != expected_occurrence:
             raise RuntimeError(
-                "boundary recording-abort occurrence mismatch: "
+                f"boundary {label}-abort occurrence mismatch: "
                 f"expected {expected_occurrence!r}, got {occurrence!r}"
             )
-        module = _require_nonempty_string(value["module"], "recording-abort module")
+        module = _require_nonempty_string(value["module"], f"{label}-abort module")
         if expected_module is not None and module != expected_module:
             raise RuntimeError(
-                "boundary recording-abort module mismatch: "
+                f"boundary {label}-abort module mismatch: "
                 f"expected {expected_module!r}, got {module!r}"
             )
-        _require_nonempty_string(value["stage"], "recording-abort stage")
-        _require_nonempty_string(value["detail"], "recording-abort detail")
+        _require_nonempty_string(value["stage"], f"{label}-abort stage")
+        _require_nonempty_string(value["detail"], f"{label}-abort detail")
         markers.append(value)
     if markers:
         first = markers[0]
         raise RuntimeError(
-            "boundary recording abort: "
+            f"boundary {label} abort: "
             f"occurrence={first['occurrence']!r}, stage={first['stage']!r}, "
             f"detail={first['detail']}"
         )

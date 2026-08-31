@@ -2068,7 +2068,8 @@ private def boundaryRecordingNonce : TacticM String := do
 
 private def emitBoundaryJsonMarker (marker : String) (payload : Json) : TacticM Unit := do
   let nonce ← boundaryRecordingNonce
-  IO.println s!"{marker}{nonce} {payload.compress}"
+  -- Stock tactics may have printed a partial line before recording failed.
+  IO.println s!"\n{marker}{nonce} {payload.compress}"
 
 private def artifactReportJson (occId : String) (selector : Json)
     (artifact : GoalArtifact) (terminal : String) : TacticM Json :=
