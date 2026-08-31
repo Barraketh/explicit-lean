@@ -2,7 +2,7 @@
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
   "deadline": "2026-09-08T00:00:00-07:00",
-  "phase": "infrastructure",
+  "phase": "explicit_encoding",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "machine": "local-mac-only",
@@ -19,10 +19,15 @@
     "guardCommand": "python3 Experiment/campaign_budget.py check"
   },
   "coverage": {
-    "currentCorpusTotal": null,
+    "currentCorpusTotal": 83425,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Historical/prototype evidence is not campaign closure."
+    "note": "Historical/prototype evidence is not campaign closure.",
+    "inventoriedModules": 8264,
+    "materializationCandidates": 83420,
+    "unresolvedOccurrences": 5,
+    "reusableExecutableOccurrences": 66,
+    "nestedOccurrences": 91
   },
   "work": [
     {
@@ -110,7 +115,7 @@
     }
   ],
   "nextActions": [
-    "Poll frozen full inventory session 79919; scope classification is active and the final manifest is not yet ready.",
+    "Import the completed 83,425-call diagnostic inventory into the index with exact Lean header dependencies, and classify the five unresolved calls.",
     "Collect exact Lean header dependency extraction and inventory/scope batch checkpoints from Luna.",
     "Integrate captured theorem declarations and strict Expr DAG artifact schema 2, then rerun the 66-call representative gate.",
     "Keep unresolved and failed cases in the index. Add canonical references to existing boundary metavariables when needed.",
@@ -203,19 +208,14 @@
     {
       "at": "2026-08-31T09:37:08.782231+00:00",
       "summary": "Committed standalone closed Expr DAG codec and focused Lean/Python checks at 113d9b3. No production artifact schema change yet. The full frozen inventory finished syntax and scope batches and is now compiling execution-evidence probes for unresolved cases. Weekly usage remains 3%."
+    },
+    {
+      "at": "2026-08-31T09:39:39.431171+00:00",
+      "summary": "Fresh frozen diagnostic inventory completed successfully: 8,264 modules; 83,425 calls; 83,420 materialization candidates; 66 reusable executable calls; 91 nested calls; five unresolved quotations in DeriveEncodable, Lift (two), Nontriviality/Core, and Zify. The unresolved records are preserved under .lake/week-2026-08-31/corpus-unresolved.json. No production translated-coverage claim is made."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
-  "activeChecks": [
-    {
-      "command": "python3 Experiment/simp_engine_boundary_corpus.py manifest --output .lake/campaign-inventory.json --allow-unresolved --timeout 3600",
-      "directory": ".lake/search-free-mathlib/snapshots/corpus-bootstrap",
-      "commit": "188e649",
-      "log": ".lake/campaign-inventory.log",
-      "sessionId": 79919,
-      "status": "running"
-    }
-  ],
+  "activeChecks": [],
   "latestCommits": [
     "a17ef7f",
     "fae96be",
@@ -280,5 +280,15 @@
       "The prototype still uses schema 1 metadata and a temporary mixed validator; strict schema 2 migration is pending.",
       "Unresolved expression and universe metavariables are rejected; existing boundary metavariables will need canonical references."
     ]
+  },
+  "inventory": {
+    "status": "complete_diagnostic",
+    "manifest": ".lake/search-free-mathlib/snapshots/corpus-bootstrap/.lake/campaign-inventory.json",
+    "commit": "188e649edf3b00c7772712b466c9a800f48db491",
+    "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c",
+    "allowUnresolved": true,
+    "unresolvedDetails": ".lake/week-2026-08-31/corpus-unresolved.json",
+    "moduleCount": 8264,
+    "occurrenceCount": 83425
   }
 }
