@@ -20,14 +20,15 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 0,
+    "verifiedTranslatedOccurrences": 57,
     "completeTranslatedTreeBuilt": false,
-    "note": "Historical/prototype evidence is not campaign closure.",
+    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
-    "nestedOccurrences": 91
+    "nestedOccurrences": 91,
+    "verifiedTranslatedModules": 6
   },
   "work": [
     {
@@ -105,14 +106,20 @@
     {
       "id": "unresolved-caller-probes",
       "owner": "/root/unresolved_probe_finish",
-      "status": "in_progress",
-      "description": "Exercise four unresolved quotations with caller fixtures against instrumented copies; evidence only, no translation claim."
+      "status": "completed",
+      "description": "Committed a53b749; four source quotations have witnessed caller execution, with Nontriviality immediate consumer diagnostics and separately recorded enclosing proof. No corpus reclassification or translation claim."
     },
     {
       "id": "translated-import-isolation",
       "owner": "/root/tree_build_plan",
       "status": "in_progress",
       "description": "Direct pinned Lean invocation with explicit search path, stock Mathlib fallback excluded and negative dependency-resolution fixture."
+    },
+    {
+      "id": "reusable-replay-design",
+      "owner": "/root/unresolved_probe_finish",
+      "status": "in_progress",
+      "description": "Read-only soundness and architecture assessment for source-owned quotations executed across imports."
     }
   ],
   "blockers": [
@@ -130,10 +137,15 @@
       "id": "reserved-theorem-generation",
       "status": "resolved",
       "detail": "Captured checked congruence/equation theorem replay uses controlled realization closures with exact captured extension metadata, without generator or attribute inference calls. Fresh-process fixtures and unchanged full boundary comparator passed."
+    },
+    {
+      "id": "unpaired-assignment-fvar",
+      "status": "open",
+      "detail": "Worker Action.End and SimpleGraph.Basic reject an unpaired free variable during state comparison. Focused Action.End diagnostics identify a mapped computational metavariable assignment; investigating identity provenance without weakening comparison."
     }
   ],
   "nextActions": [
-    "Finish worker fix-review, commit, freeze a new checkout and generate the selected20-module231-call manifest; run bounded workers against the master index.",
+    "Continue frozen20-module/231-call worker; inspect genuine failures and refresh cached per-module status. Debug unpaired fvar comparison with one-module evidence before broad retries.",
     "Keep full diagnostic source inventory and unresolved backlog; defer another full manifest run until the diverse batch stabilizes the implementation.",
     "Resolve reusable source/execution ownership and metaprogram equivalence rather than bypassing the shard rejection; collect positive unresolved caller evidence.",
     "Finish direct Lean import-path isolation with an absent-translated-dependency negative control; then assemble and validate translated dependencies.",
@@ -272,6 +284,15 @@
     {
       "at": "2026-08-31T10:35:22.250782+00:00",
       "summary": "Luna worker and unresolved-probe agents hit capacity. Coordinator finished worker integration/fix-review and committed54fcbd0;7worker+10index checks passed. Started frozen20-module/231-call worker batch in schema2-worker-one with fresh bounded manifest generation and master SQLite result index. Caller probes escalated narrowly to inherited Sol; Luna continues import-isolation helper. Current weekly usage5%."
+    },
+    {
+      "at": "2026-08-31T10:47:11.848868+00:00",
+      "summary": "Worker has 57 verified calls in 6 modules against stock imports. Read-only status command publishes honest scope and queue. Caller probes committeda53b749 after independent83-hash verification and10negative provenance checks. Current weekly usage6%. Unpairedfvar comparison failures now have labeled diagnostics in working tree; not yet fixed.",
+      "checks": [
+        "python3 Experiment/check_simp_engine_unresolved_callers.py --verify .lake/week-2026-08-31/unresolved-callers/20260831T104343Z-uy61mn56/caller-evidence.json",
+        "python3 .lake/week-2026-08-31/unresolved-callers/20260831T104343Z-uy61mn56/review-provenance.py",
+        "python3 Experiment/campaign_status.py --markdown"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -354,7 +375,8 @@
     "a2173da",
     "0804eaf",
     "585bb83",
-    "54fcbd0"
+    "54fcbd0",
+    "a53b749"
   ],
   "experiments": [
     {
@@ -424,12 +446,12 @@
   },
   "database": {
     "path": ".lake/search-free-mathlib/translation-index.sqlite3",
-    "status": "complete_diagnostic_inventory",
+    "status": "diagnostic_inventory_with_frozen_module_results",
     "modules": 8264,
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 0,
+    "verifiedTranslations": 6,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
