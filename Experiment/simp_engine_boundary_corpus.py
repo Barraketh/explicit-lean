@@ -91,6 +91,7 @@ IMPLEMENTATION_SOURCE_PATTERNS = (
     "Experiment/SimpEngineInventory.lean",
     "Experiment/SimpEngineBoundary*.lean",
     "Experiment/SimpEngineDeclarationOracle.lean",
+    "Experiment/lean_toolchain_cache.py",
     "Experiment/boundary_materialize_shard.py",
     "Experiment/check_simp_engine_boundary*.py",
     "Experiment/boundary_protocol.py",
@@ -250,11 +251,9 @@ def inventory_batch(
     paths: Sequence[Path], timeout: int
 ) -> tuple[list[dict[str, Any]], list[str]]:
     command = [
-        "lake",
-        "env",
-        "lean",
-        "--run",
-        "Experiment/SimpEngineInventory.lean",
+        sys.executable,
+        str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
+        "inventory",
         *(str(path.resolve()) for path in paths),
     ]
     completed = subprocess.run(

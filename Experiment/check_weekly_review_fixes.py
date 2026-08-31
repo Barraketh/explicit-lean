@@ -123,6 +123,23 @@ import Mathlib
     return records[0]
 
 
+def check_manifest_symlink_parent_resolution() -> None:
+    """`link/..` must follow the link before resolving its parent directory."""
+    with tempfile.TemporaryDirectory(prefix="review-fix-parent-", dir=shard.BOUNDARY_DEBUG_ROOT) as raw:
+        work = Path(raw)
+        nested = work / "real" / "nested"
+        nested.mkdir(parents=True)
+        (work / "link").symlink_to(nested, target_is_directory=True)
+        (work / "real" / "manifest.json").write_text("[]")
+        (work / "manifest.json").write_text("wrong lexical target")
+        args = argparse.Namespace(
+            manifest=str(work / "link" / ".." / "manifest.json"),
+            output=str(work / "result.json"), module=[],
+            expect_total=None, expect_materialize=None, timeout=5,
+        )
+        _expect_runtime_error(lambda: shard.run_shard(args), "manifest root must be an object")
+
+
 def check_antiquotation_scope() -> None:
     occurrence = _scope_occurrence()
     result = scope.classify(occurrence, [])
@@ -160,6 +177,7 @@ def check_antiquotation_scope() -> None:
 
 def main() -> None:
     check_manifest_cleanup_protection()
+    check_manifest_symlink_parent_resolution()
     check_antiquotation_scope()
     print("PASS: boundary review regressions")
 

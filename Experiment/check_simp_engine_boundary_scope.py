@@ -9,6 +9,7 @@ import json
 import hashlib
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 from collections.abc import Sequence
 
@@ -195,11 +196,9 @@ def load_records_with_fallbacks(
         batch = selected[start : start + batch_size]
         batch_modules: set[str] = set()
         command = [
-            "lake",
-            "env",
-            "lean",
-            "--run",
-            "Experiment/SimpEngineBoundaryScope.lean",
+            sys.executable,
+            str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
+            "scope",
         ]
         for spec in batch:
             if not isinstance(spec.module, str) or not spec.module:

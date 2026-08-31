@@ -16,6 +16,7 @@ from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -995,12 +996,9 @@ def run_declaration_oracle(
 ) -> dict[str, Any]:
     compiled_module = corpus.compiled_module_name(module)
     command = [
-        "lake",
-        "env",
-        "lean",
-        f"--load-dynlib={dylib}",
-        "--run",
-        "Experiment/SimpEngineDeclarationOracle.lean",
+        sys.executable,
+        str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
+        "oracle",
         compiled_module,
         str(original_path),
         str(materialized_path),
@@ -2211,7 +2209,9 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
     manifest_location = Path(args.manifest)
     if not manifest_location.is_absolute():
         manifest_location = ROOT / manifest_location
-    manifest_location = Path(os.path.abspath(manifest_location))
+    # Resolve the real input before lexical cleanup checks: collapsing `..`
+    # before following a directory symlink can select a different manifest.
+    manifest_location = manifest_location.absolute()
     manifest_path = manifest_location.resolve()
     # Invalidate the exact requested destination after cleanup safety checks,
     # before manifest validation or compiler work.  A failed rerun must not

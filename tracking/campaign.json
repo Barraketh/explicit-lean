@@ -45,8 +45,8 @@
     },
     {
       "id": "fast-lean-tools",
-      "owner": "/root/fast_lean_tools",
-      "status": "in_progress",
+      "owner": "coordinator (Luna implementation integrated)",
+      "status": "completed",
       "description": "Avoid repeated --run elaboration for inventory/scope/oracle tools"
     },
     {
@@ -81,12 +81,12 @@
     }
   ],
   "nextActions": [
-    "Collect and review the three Luna infrastructure results; no agent commits without coordinator review",
-    "Finish nested gate (session 27930) and record outcome; original-comments work stays in_progress until complete",
-    "Integrate fixes and index/native launcher; commit clean implementation before fresh corpus manifest",
-    "Run broad jobs from a frozen clean implementation checkout (or design an equally strict hash-based provenance policy): existing corpus gates require whole-repository cleanliness and cannot coexist with ongoing tracker/code edits in this shared checkout",
-    "Generate current-contract inventory, preserving unresolved cases as explicit backlog; start bounded verified shards",
-    "Resolve implicit-instance elaboration and reusable tactic ownership before declaring search-free closure"
+    "Collect index corrections (analysis versioning, verified-success queue semantics, batch identity memo) and launcher hardening/integration from Luna",
+    "Poll prototype five-module gate session 83453; AddConstMap and EqToHom oracle reports currently exist, not a completed five-module claim",
+    "Review independent Luna audit of search-free evidence; choose rigorous production guard/encoding migration before broad translation",
+    "Commit integrated implementation, create frozen local run snapshot with APFS clone of own build cache and shared pinned stock packages",
+    "Generate fresh full corpus occurrence/classification inventory, retain all unresolved cases in the backlog, then execute incremental verified shards",
+    "Resolve reusable tactic source/execution ownership and validate the entire translated dependency tree before readability work"
   ],
   "checkpoints": [
     {
@@ -133,21 +133,40 @@
         "Agent: existing check_simp_engine_boundary_scope.py passed",
         "Coordinator: cleanup preflight, diff and source review passed"
       ]
+    },
+    {
+      "at": "2026-08-31T08:57:41.300814+00:00",
+      "summary": "Explicit-instance prototype passed full 17-occurrence source gate plus fresh 17-call AddConstMap recording, zero-instance-search application, syntax inventory, and declaration oracle (141 checked; 103 common public). Old evidence positive control detected search in 14/17. Five-module prototype gate is running; independent Luna search-free audit requested.",
+      "checks": [
+        "prototype-source.log: passed",
+        "prototype-addconst-result.json: 17 materialized, 0 unobserved, oracle success (109.3s)"
+      ]
+    },
+    {
+      "at": "2026-08-31T09:06:51.675227+00:00",
+      "summary": "Native inventory/scope/oracle launcher hardened and integrated. Cache fingerprints now cover root aggregator and binary bytes and reject source changes during build. Fixed symlink/../manifest resolution after reproducing wrong-file selection.",
+      "checks": [
+        "check_lean_toolchain_cache.py passed",
+        "native inventory integration: 17 occurrences",
+        "native oracle integration: AddConstMap success",
+        "check_weekly_review_fixes.py passed, including symlink-parent regression"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
   "activeChecks": [
     {
-      "command": "prototype check_simp_engine_boundary_source.py",
+      "command": "python3 Experiment/check_simp_engine_boundary_mathlib.py",
       "directory": ".lake/search-free-mathlib/evidence-prototype",
-      "log": ".lake/prototype-source.log",
-      "sessionId": 10591,
+      "log": ".lake/prototype-five-modules.log",
+      "sessionId": 83453,
       "status": "running"
     }
   ],
   "latestCommits": [
     "a17ef7f",
-    "fae96be"
+    "fae96be",
+    "2105937"
   ],
   "experiments": [
     {
@@ -158,5 +177,19 @@
       "status": "in_progress",
       "note": "Prototype only; protocol not migrated and trace audit not yet accepted as production validation."
     }
-  ]
+  ],
+  "prototypeCoverage": {
+    "branchBase": "fae96be",
+    "completeSourceFixture": 17,
+    "completeMathlibModules": [
+      "Mathlib.Algebra.AddConstMap.Basic"
+    ],
+    "materializedMathlibOccurrences": 17,
+    "instanceSearchAudit": "fresh evidence passed; 14 old replacements rejected by positive control",
+    "fullSearchFreeContract": "not yet established; independent audit in progress",
+    "partialFiveModuleGate": [
+      "AddConstMap oracle success",
+      "EqToHom oracle success"
+    ]
+  }
 }

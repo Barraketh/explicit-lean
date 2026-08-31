@@ -11,3 +11,22 @@ name = "ExplicitLean"
 
 [[lean_lib]]
 name = "ExplicitLeanMathlibAudit"
+
+# Build the instrumentation entry points once so callers can use the pinned
+# Lake/Lean runtime without elaborating the tool source on every invocation.
+# These tools intentionally keep interpreter support: their existing `main`
+# functions perform the same frontend and environment work as `lean --run`.
+[[lean_exe]]
+name = "simpEngineInventory"
+root = "Experiment.SimpEngineInventory"
+supportInterpreter = true
+
+[[lean_exe]]
+name = "simpEngineBoundaryScope"
+root = "Experiment.SimpEngineBoundaryScope"
+supportInterpreter = true
+
+[[lean_exe]]
+name = "simpEngineDeclarationOracle"
+root = "Experiment.SimpEngineDeclarationOracle"
+supportInterpreter = true

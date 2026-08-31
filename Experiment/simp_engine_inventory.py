@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sys
 import time
 from typing import Any, Callable
 
@@ -49,11 +50,9 @@ def syntax_inventory_file(
     allow_elaboration_errors: bool = False,
 ) -> list[dict[str, Any]]:
     command = [
-        "lake",
-        "env",
-        "lean",
-        "--run",
-        "Experiment/SimpEngineInventory.lean",
+        sys.executable,
+        str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
+        "inventory",
     ]
     if allow_elaboration_errors:
         command.append("--allow-elaboration-errors")
