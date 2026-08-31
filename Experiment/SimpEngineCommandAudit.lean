@@ -3,8 +3,12 @@ import ExplicitLean.SimpEngine.CommandAudit
 open Lean
 
 unsafe def main (args : List String) : IO UInt32 := do
-  let [moduleName, file] := args
-    | IO.eprintln "usage: simpEngineCommandAudit <module> <source.lean>" *> pure 2
+  let some (moduleName, file, output?) := (match args with
+    | [moduleName, file] => some (moduleName, file, none)
+    | [moduleName, file, "--olean", output] =>
+      some (moduleName, file, some (System.FilePath.mk output))
+    | _ => none)
+    | IO.eprintln "usage: simpEngineCommandAudit <module> <source.lean> [--olean quarantine.olean]" *> pure 2
   try
     initSearchPath (← findSysroot)
     let nonce ← ExplicitLean.SimpEngine.CommandAudit.runNonce
@@ -18,6 +22,7 @@ unsafe def main (args : List String) : IO UInt32 := do
       |>.set `weak.linter.unreachableTactic false
       |>.set `maxHeartbeats (0 : Nat)
     let captured ← ExplicitLean.SimpEngine.CommandAudit.capture source options file moduleName.toName
+      (oleanFileName? := output?)
     ExplicitLean.SimpEngine.CommandAudit.emit captured "standalone" nonce
     return 0
   catch error =>

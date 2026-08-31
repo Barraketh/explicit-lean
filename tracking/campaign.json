@@ -29,10 +29,10 @@
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 1036,
-    "provisionalCachedModules": 103,
+    "provisionalCachedOccurrences": 1158,
+    "provisionalCachedModules": 118,
     "minimumAcceptedReportSchema": 10,
-    "validationHold": "Metadata export hooks mutate a process-global symbol-frequency cache. Observational boundary/audit reads and equivalence to separate fresh compilations must be repaired and revalidated; existing generated candidates and proof checks are preserved."
+    "validationHold": "Cold serialized comparator and independent compilation consumer are integrated, but translated dependency-tree revalidation remains pending. A newly discovered pending typeclass-synthesis route in encoded replay also requires the unconditional search barrier and fresh schema11 validation. Existing generated candidates and proof checks are preserved as provisional."
   },
   "work": [
     {
@@ -295,15 +295,15 @@
     },
     {
       "id": "local-owner-equation-realizations",
-      "owner": "Luna private prototype",
+      "owner": "Sol bounded repair after Luna prototype review",
       "status": "in_progress",
-      "description": "Versioned local checked definition owner support for Cubic.toPoly and ExtraDegeneracy.s; legacy imported-only contracts unchanged. Exact owner/context witnesses and fresh/cached controls pending fix-review."
+      "description": "Luna local-owner witness omitted actual saved context and nested async trees; not integrated. Repair now narrows to authenticated local cached-only tasks, exact current owner and bounded complete async DAG descriptor, failure-only callback/no fresh fallback. Fresh local producer remains unsupported pending saved-context authentication."
     },
     {
       "id": "preexisting-expression-metavariable-references",
       "owner": "Sol private implementation after root-reviewed diagnosis",
       "status": "in_progress",
-      "description": "Three original source diagnoses and96pure graph checks verified; all reference unchanged pre-selector ordinal1 syntheticOpaque holes. Bounded expression DAG v3 support underway with current raw graph traversal, exact snapshots, scope guards and before-assignment checks. Old closed codecs remain unchanged."
+      "description": "Private bounded expr_dag_v3/artifact5/report11: context-owned reference graph, exact raw snapshots and observational scope comparison. New unconditional pending-synthesis barrier covers encoded evidence, application and selector observation; natural class-hole control passes. Centralizer full source passes; QuasiCompact getter path-compression repair and source/mutation matrix in progress. Not integrated."
     },
     {
       "id": "bounded-library-suggestions-observation",
@@ -314,8 +314,8 @@
     {
       "id": "cold-serialized-certificates",
       "owner": "coordinator consumer with Sol native comparator",
-      "status": "in_progress",
-      "description": "Private consumer runs5freshprocesses/6families; ordinary applied output is only publication candidate. V1 private34checks/76stageprocesses plus7receipt-hardening checks pass, but late exporter disproves native semantic implication. Consumer now requiresdistinctV2marker; native serialized3views+IR comparator under implementation. No main integration or acceptance."
+      "status": "completed",
+      "description": "Integrated native V2 emitted3oleanviews+IR comparison without exporter callbacks and five-fresh-process/six-family consumer. Main and private43checks/76stageprocesses each pass; real late/first exporter counterexamples reject at separate layers. Root1446hashes/150nonces plus native1198hashes/26binding mutations independently verified. Caller still owns source/comment provenance and complete translated dependency/runtime closure; no whole-corpus acceptance."
     }
   ],
   "blockers": [
@@ -358,14 +358,20 @@
       "id": "fresh-replay-cache-grouping",
       "status": "resolved",
       "detail": "Original truncatedLookmap cache-priming defect repaired by exact group replay9b35bf6 and freshpostgenerator assertione3af2f2. Current4/10 fullLookmap10calls33declarations20public22extensions remaining0; historicalflatnegative is rejected. Olderreports9remainprovisional until fresh10 revalidation."
+    },
+    {
+      "id": "pending-typeclass-synthesis-during-replay",
+      "status": "open",
+      "detail": "Pinned Meta.isDefEq can call synthPending despite greater metavariable depth. Unconditional maxSynthPendingDepth barrier under private fix-review; old closed encoded reports do not imply the new search-free guarantee. Revalidate fresh artifact5/report11 outputs."
     }
   ],
   "nextActions": [
-    "Monitor schema10-campaign pipelines: sessions38300priority/72713full, fresh manifests first then automatic disjoint worker dispatch. Reuse only matching identities; oldreports remain provisional. Do not duplicate live jobs or replan live leases.",
-    "Finish mixed-sequence prototype for Control.Basic/ModifyLast and triage unsupported root shapes; strict generator guards stay unchanged.",
-    "Review/integrate raw-oracle output provenance prototype; build a fresh certified translated cone with source-pair checks, actual-command audits and whole-family quarantine/promotion.",
-    "Resolve reusable executable66calls and5unresolved quotations, preserving original comments and source/execution ownership; no unqualified finite-caller-table equivalence claims.",
-    "After complete explicit coverage and full-tree validation, improve readability and extend to other common tactics if time remains."
+    "Integrate reviewed expression reference/no-pending-synthesis barrier with fresh real-source and adversarial controls; require new artifact5/report11 and keep old reports provisional.",
+    "Use the integrated cold serialized consumer in a fresh translated dependency cone. Publish only ordinary-applied output after five fresh processes and six complete family checks; freeze all runtime/dependency inputs.",
+    "Finish local-cached-only owner authentication and independently test multiple ordinary helper sequences, then compose under unchanged complete boundary guards.",
+    "Let frozen schema10 workers finish bounded queues without editing runtimes or live leases. Reuse diagnostic evidence only; advance broad generation under new frozen runtime once ready.",
+    "Resolve reusable66calls and unresolved5quotations without finite-caller equivalence shortcuts; retain adjacent originals and complete source/execution ownership.",
+    "After complete explicit coverage and translated-tree acceptance, mine readable normal forms and other common tactics if time remains."
   ],
   "checkpoints": [
     {
@@ -867,6 +873,15 @@
         ".lake/week-2026-08-31/cold-bridge-v1-root-verification.json",
         ".lake/week-2026-08-31/cold-certificate-v1-hardening-archive/manifest.json"
       ]
+    },
+    {
+      "at": "2026-08-31T18:01:24.168141+00:00",
+      "summary": "Integrated serialized cold V2 native comparison and quarantined five-process consumer after fix-review, main43controls and independent evidence verification. Real late exporter rejects native comparison; first exporter passes native but fails stock cold family equality, proving both layers necessary. Current frozen index118modules1158calls remains provisional; new pending-synthesis replay barrier and full translated tree are outstanding.",
+      "evidence": [
+        ".lake/week-2026-08-31/cold-consumer-v2-root-verification.json",
+        ".lake/week-2026-08-31/cold-bridge-v2-root-verification.json",
+        ".lake/week-2026-08-31/mixed-observer-nat-basic-root-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1331,7 +1346,7 @@
       "diagnosisSnapshot": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis",
       "knownCause": "CommandAudit.declarations -> mkModuleData -> symbolFrequency export -> localSymbolFrequencyMapRef; Boundary/RealizationCodec and Boundary metadata comparison also invoke mkModuleData mid-elaboration.",
       "scope": "Current source-pair oracle results and first certified cone remain provisional for complete fresh-compilation metadata semantics. Byte hashes, audit identities and passing proof compilation evidence remain valid.",
-      "status": "serialized-v2-comparison-in-progress",
+      "status": "cold-comparator-integrated-translated-tree-revalidation-pending",
       "diagnosisManifest": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis/.lake/lookmap-diagnosis/handoff-tljlgnu9/manifest.json",
       "diagnosisManifestSha256": "5f39e8eb73ee682d3284d6daa7b4d21b898467ceb91d9861eaf3dc5f06a84aba",
       "diagnosisVerification": ".lake/week-2026-08-31/audit-export-observation-handoff-root-verification.json",
@@ -1346,7 +1361,7 @@
       "boundaryRepairVerification": ".lake/week-2026-08-31/module-data-observation-main-root-verification.json",
       "boundaryRepairHandoffVerification": ".lake/week-2026-08-31/module-data-observation-handoff-root-verification.json",
       "boundaryRepairScope": "Substitutes only pinned symbolFrequency/sineQueNon export computations without their cache writes. Other callbacks remain unchanged and can mutate caches; no generic observational purity claim.",
-      "coldBridgePrototype": "V1 same-source ordinary/audited/paired bytes are necessary but insufficient: late exporter returns real differing bytes for calls1/2, equal data during calls3-6, so old comparator passes. Frozen v1 never integrated. V2 will compare emitted serialized views and IR without rerunning exporters; exact private declaration binding to raw environments required.",
+      "coldBridgePrototype": "V1 rejected by late exporter counterexample. NativeV2 now compares normal emitted3views+IR without new exports and exactly binds private declarations to rawchecked environments. Consumer additionally requires all per-source cold ordinary/audited/paired families equal. Both real exporter controls correctly reject. Complete translated-tree revalidation remains pending.",
       "lateExporterCounterexample": {
         "manifest": ".lake/week-2026-08-31/late-export-diagnosis-0nqvan7e/manifest.json",
         "sha256": "b08b5a4231d6e87cf8a5e54396c5672de8b8802a02a1a825ebdc52ad5f7449a6",
@@ -1401,6 +1416,20 @@
       "privatePositiveCacheControls": 8,
       "retainedCallbackCounterexample": true,
       "wholeMathlib": false
+    },
+    "coldSerializedCertificates": {
+      "nativeContract": "serialized_bridge_v2",
+      "nativeHandoffManifest": ".lake/search-free-mathlib/snapshots/cold-serialized-bridge-v2-prototype/.lake/bridge-v2/handoff-brznjzkd/manifest.json",
+      "nativeHandoffSha256": "4b257628453bd4b371f1a1887af2127d2500df751013d96c0f8ed450fabbda92",
+      "nativeRootVerification": ".lake/week-2026-08-31/cold-bridge-v2-root-verification.json",
+      "consumerRootVerification": ".lake/week-2026-08-31/cold-consumer-v2-root-verification.json",
+      "mainReport": ".lake/cold-certificate-check-3u9rk0iw/report.json",
+      "mainReportSha256": "acf278a8712dafa570578ad19e18590fe16a9bee8876f48e29b09054eea2b6ab",
+      "mainChecks": 43,
+      "mainFreshStageProcesses": 76,
+      "publicationCandidate": "ordinary-applied only",
+      "sourceCommentProvenanceAccepted": false,
+      "wholeMathlib": false
     }
   },
   "failureTriage": {
@@ -1417,7 +1446,8 @@
       "Mathlib/Data/String/Lemmas.lean": "matcher equation capture-complete-local state mismatch",
       "Mathlib/Data/Int/Init.lean": "Main bounded7-site/148-declaration pipeline passes; strict actual-import remaining scan0. Await fresh closed schema9 report.",
       "Mathlib/Data/List/Lookmap.lean": "Fresh main observer+mixed runtime: all10calls record/apply, 33declarations/20public/22extension states compare, remaining0. Source/comments regenerated; provisional under cold-output/translated-tree acceptance hold. .lake/week-2026-08-31/module-data-observation-main-root-verification.json",
-      "Mathlib/Control/Basic.lean": "Fresh main observer+mixed runtime: all16calls record/apply, 62declarations/56public/39extension states compare, remaining0. Source/comments regenerated; provisional under cold-output/translated-tree acceptance hold. .lake/week-2026-08-31/module-data-observation-main-root-verification.json"
+      "Mathlib/Control/Basic.lean": "Fresh main observer+mixed runtime: all16calls record/apply, 62declarations/56public/39extension states compare, remaining0. Source/comments regenerated; provisional under cold-output/translated-tree acceptance hold. .lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+      "Mathlib/Data/Nat/Basic.lean": "Fresh observer+mixed main7calls pass;28decl24public23extensionstates,remaining0. Root610hashes/7artifacts/2nonces verified. Provisional under search-barrier/translated-tree hold; .lake/week-2026-08-31/mixed-observer-nat-basic-root-verification.json"
     }
   },
   "storage": {
@@ -1427,5 +1457,5 @@
     "checkedAt": "2026-08-31T17:36:47.331238+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)"
   },
-  "updatedAt": "2026-08-31T17:45:13.792878+00:00"
+  "updatedAt": "2026-08-31T18:01:24.168141+00:00"
 }

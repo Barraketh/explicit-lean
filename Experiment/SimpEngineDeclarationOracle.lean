@@ -844,20 +844,170 @@ private unsafe def compareEnvironment (stock applied : Environment)
   compareExtensions stock applied stockData appliedData
   compareExtraModUses stockData appliedData
 
+/- Bridge-v2 reads the normal compiler output; it must never re-run export
+   callbacks. ModuleData has exactly six fields. isModule/imports are bound to
+   the raw frontend header (ModuleHeader's two fields); constNames is derived
+   from constants with duplicate rejection; constants are checked below;
+   extraConstNames is exact across sources; entries use the existing typed or
+   serialized extension policy. The .ir ModuleData is checked independently. -/
+private structure SerializedFamily where
+  parts : Array ModuleData
+  regions : Array CompactedRegion
+  ir? : Option (ModuleData × CompactedRegion)
+
+private def exactConstantInfo (a b : ConstantInfo) : Bool :=
+  -- Expr's default BEq is alpha-equivalence. Use Expr.equal explicitly to bind
+  -- every type/body, including binder names and annotations, to serialization.
+  metadataEqual a b && a.type.equal b.type &&
+    match a, b with
+    | .defnInfo a, .defnInfo b => a.value.equal b.value
+    | .thmInfo a, .thmInfo b => a.value.equal b.value
+    | .opaqueInfo a, .opaqueInfo b => a.value.equal b.value
+    | .recInfo a, .recInfo b =>
+      (a.rules.zip b.rules).all (fun (a, b) => a.rhs.equal b.rhs)
+    | .axiomInfo _, .axiomInfo _ | .quotInfo _, .quotInfo _ |
+      .inductInfo _, .inductInfo _ | .ctorInfo _, .ctorInfo _ => true
+    | _, _ => false
+
+private def validateSerializedData (environment : Environment) (label : String)
+    (data : ModuleData) : IO Unit := do
+  unless data.isModule == environment.header.isModule && data.imports == environment.header.imports do
+    oracleFailure "environment_delta_mismatch" s!"serialized {label} header differs from frontend"
+  unless data.constNames == data.constants.map (·.name) do
+    oracleFailure "environment_delta_mismatch" s!"serialized {label} constant-name index differs"
+  unless (uniqueNames data.constNames).size == data.constNames.size do
+    oracleFailure "environment_delta_mismatch" s!"serialized {label} has duplicate constant names"
+  unless (uniqueNames (data.entries.map (·.1))).size == data.entries.size do
+    oracleFailure "environment_delta_mismatch" s!"serialized {label} has duplicate extension names"
+
+private def readSerializedFamily (environment : Environment) (path : System.FilePath) :
+    IO SerializedFamily := do
+  let names := if environment.header.isModule then
+    #[path, path.withExtension "olean.server", path.withExtension "olean.private"] else #[path]
+  let parts ← readModuleDataParts names
+  unless parts.size == names.size do
+    oracleFailure "environment_delta_mismatch" "serialized module view count differs"
+  let data := parts.map (·.1)
+  for i in [:data.size] do
+    validateSerializedData environment s!"olean view {i}" data[i]!
+  let ir? ← if environment.header.isModule then do
+      let ir ← readModuleData (path.withExtension "ir")
+      validateSerializedData environment "IR" ir.1
+      unless ir.1.constants.isEmpty && ir.1.constNames.isEmpty do
+        oracleFailure "environment_delta_mismatch" "serialized IR unexpectedly contains constants"
+      pure (some ir)
+    else pure none
+  -- Regions are kept in the result and never explicitly freed while data is in
+  -- use. Loading data does not import modules or execute their initializers.
+  return { parts := data, regions := parts.map (·.2), ir? }
+
+private def bindSerializedPrivate (environment : Environment) (data : ModuleData) :
+    IO (Array ConstantInfo) := do
+  let expected := environment.toKernelEnv.constants.foldStage2 (fun values _ info => values.push info) #[]
+    |>.qsort (fun a b => a.name.toString < b.name.toString)
+  let actual := data.constants.qsort (fun a b => a.name.toString < b.name.toString)
+  unless expected.size == actual.size do
+    oracleFailure "environment_delta_mismatch" "serialized private checked-domain count differs"
+  for (a, b) in expected.zip actual do
+    unless exactConstantInfo a b do
+      oracleFailure "environment_delta_mismatch" s!"serialized private constant differs: {a.name}"
+  return actual.filter (fun info => !environment.isImportedConst info.name)
+
+private unsafe def serializedLCNF (data : ModuleData) (name : Name) :
+    IO (Compiler.LCNF.DeclExtState .pure) := do
+  let values : Array (Compiler.LCNF.Decl .pure) := unsafeCast
+    ((data.entries.find? (·.1 == name)).map (·.2) |>.getD #[])
+  let mut result := {}
+  for value in values do
+    if result.contains value.name then
+      oracleFailure "environment_delta_mismatch" s!"duplicate serialized LCNF name: {value.name}"
+    result := result.insert value.name value
+  return result
+
+private unsafe def compareSerializedMetadata (stock applied : Environment)
+    (stockData appliedData : ModuleData) (label : String) : IO Unit := do
+  unless stockData.isModule == appliedData.isModule do
+    oracleFailure "environment_delta_mismatch" s!"serialized {label} module mode differs"
+  -- Each view's imports were bound exactly to its own raw frontend header.
+  compareDirectImports stock applied
+  unless stockData.extraConstNames == appliedData.extraConstNames do
+    oracleFailure "environment_delta_mismatch" s!"serialized {label} extraConstNames differ"
+  for name in #[`Lean.Compiler.LCNF.baseExt, `Lean.Compiler.LCNF.monoExt] do
+    compareLCNFDeclState s!"serialized {label} {name}"
+      (← serializedLCNF stockData name) (← serializedLCNF appliedData name)
+  compareModuleDocs stockData appliedData
+  compareExtensions stock applied stockData appliedData
+  compareExtraModUses stockData appliedData
+
+private unsafe def observableSerializedInterface (environment : Environment)
+    (declarations : Array ConstantInfo) : IO (Array ConstantInfo) := do
+  let mut result := #[]
+  for info in declarations do
+    let some original := environment.toKernelEnv.constants.find? info.name
+      | oracleFailure "environment_delta_mismatch" s!"serialized interface has no checked owner: {info.name}"
+    -- Exported theorem interfaces may be axioms. Only the corresponding bound
+    -- private declaration can justify the existing private-proof omission rule.
+    unless ← privateProofDeclaration environment original do
+      result := result.push info
+  return result.qsort (fun a b => a.name.toString < b.name.toString)
+
+private unsafe def compareSerializedFamilies (stock applied : Environment)
+    (stockFamily appliedFamily : SerializedFamily) : IO Unit := do
+  unless stockFamily.parts.size == appliedFamily.parts.size do
+    oracleFailure "environment_delta_mismatch" "serialized family view counts differ"
+  for i in [:stockFamily.parts.size] do
+    let stockData := stockFamily.parts[i]!
+    let appliedData := appliedFamily.parts[i]!
+    compareSerializedMetadata stock applied stockData appliedData s!"view {i}"
+    let stockInterface ← observableSerializedInterface stock stockData.constants
+    let appliedInterface ← observableSerializedInterface applied appliedData.constants
+    checkAppliedExpressions appliedInterface
+    let _ ← checkDeclarationSets stock applied stockInterface appliedInterface {}
+  match stockFamily.ir?, appliedFamily.ir? with
+  | some stockIR, some appliedIR =>
+    compareSerializedMetadata stock applied stockIR.1 appliedIR.1 "IR"
+  | none, none => pure ()
+  | _, _ => oracleFailure "environment_delta_mismatch" "serialized IR family presence differs"
+
 private unsafe def runOracle (moduleName : Name) (stockPath appliedPath : System.FilePath)
-    (oleanFileName? : Option System.FilePath := none) : IO OracleResult := do
+    (oleanFileName? : Option System.FilePath := none)
+    (stockOleanFileName? : Option System.FilePath := none) : IO OracleResult := do
+  -- This is only a lexical distinctness guard. The caller must allocate fresh,
+  -- canonical, nonoverlapping output families outside every import root.
+  if let some stockOutput := stockOleanFileName? then
+    unless oleanFileName?.isSome && oleanFileName? != some stockOutput do
+      throw <| IO.userError "oracle_bridge_requires_distinct_output_paths"
   if oleanFileName?.isSome then
     unless (← IO.getEnv CommandAudit.enabledVariable) == some "1" do
       throw <| IO.userError "oracle_output_requires_command_audit"
     let _ ← CommandAudit.runNonce
   runExtensionNameSelfTest
   runLCNFComparatorSelfTest
-  let stock ← elaborateSource moduleName "stock" stockPath
-  validateFrontendEnvironment stock
-  let applied ← elaborateSource moduleName "applied" appliedPath oleanFileName?
-  validateFrontendEnvironment applied
-  let stockDeclarations ← sortedCurrentDeclarations stock
-  let appliedDeclarations ← sortedCurrentDeclarations applied
+  let (stock, applied) ← if stockOleanFileName?.isSome then do
+      -- This separate bridge mode preserves the cold replay context: normal
+      -- stock output would otherwise warm exporter caches before replay.
+      -- Both families must independently match cold compiler outputs before
+      -- a caller can claim fresh-compilation equivalence.
+      let applied ← elaborateSource moduleName "applied" appliedPath oleanFileName?
+      validateFrontendEnvironment applied
+      let stock ← elaborateSource moduleName "stock" stockPath stockOleanFileName?
+      validateFrontendEnvironment stock
+      pure (stock, applied)
+    else do
+      let stock ← elaborateSource moduleName "stock" stockPath
+      validateFrontendEnvironment stock
+      let applied ← elaborateSource moduleName "applied" appliedPath oleanFileName?
+      validateFrontendEnvironment applied
+      pure (stock, applied)
+  let serialized? ← match stockOleanFileName?, oleanFileName? with
+    | some stockPath, some appliedPath =>
+      pure <| some (← readSerializedFamily stock stockPath, ← readSerializedFamily applied appliedPath)
+    | _, _ => pure none
+  let (stockDeclarations, appliedDeclarations) ← match serialized? with
+    | some (stockFamily, appliedFamily) => do
+      pure (← bindSerializedPrivate stock stockFamily.parts.back!,
+        ← bindSerializedPrivate applied appliedFamily.parts.back!)
+    | none => pure (← sortedCurrentDeclarations stock, ← sortedCurrentDeclarations applied)
   let counts : OracleCounts := {
     stockDeclarations := stockDeclarations.size
     appliedDeclarations := appliedDeclarations.size
@@ -865,12 +1015,18 @@ private unsafe def runOracle (moduleName : Name) (stockPath appliedPath : System
   checkAppliedExpressions appliedDeclarations
   let counts ← checkDeclarationSets stock applied stockDeclarations appliedDeclarations counts
   checkAxiomSubset stock applied stockDeclarations appliedDeclarations
-  let stockData ← Lean.mkModuleData stock
-  let appliedData ← Lean.mkModuleData applied
+  let (stockData, appliedData) ← match serialized? with
+    | some (stockFamily, appliedFamily) => do
+      compareSerializedFamilies stock applied stockFamily appliedFamily
+      pure (stockFamily.parts.back!, appliedFamily.parts.back!)
+    | none => do
+      let stockData ← Lean.mkModuleData stock
+      let appliedData ← Lean.mkModuleData applied
+      compareEnvironment stock applied stockData appliedData
+      pure (stockData, appliedData)
   let counts := { counts with
     stockExtensions := stockData.entries.size
     appliedExtensions := appliedData.entries.size }
-  compareEnvironment stock applied stockData appliedData
   return { counts }
 
 private def resultJson (moduleName : Name) (result : OracleResult) : Json :=
@@ -929,24 +1085,43 @@ private def failureJson (moduleName : Name) (category detail : String) : Json :=
   ]
 
 unsafe def _root_.main (args : List String) : IO UInt32 := do
-  let some (moduleName, stockPath, appliedPath, oleanFileName?) := (match args with
-    | [moduleName, stockPath, appliedPath] => some (moduleName, stockPath, appliedPath, none)
+  let some (moduleName, stockPath, appliedPath, oleanFileName?, stockOleanFileName?) := (match args with
+    | [moduleName, stockPath, appliedPath] => some (moduleName, stockPath, appliedPath, none, none)
     | [moduleName, stockPath, appliedPath, "--olean", output] =>
-      some (moduleName, stockPath, appliedPath, some (System.FilePath.mk output))
+      some (moduleName, stockPath, appliedPath, some (System.FilePath.mk output), none)
+    | [moduleName, stockPath, appliedPath, "--bridge-oleans", stockOutput, appliedOutput] =>
+      some (moduleName, stockPath, appliedPath, some (System.FilePath.mk appliedOutput),
+        some (System.FilePath.mk stockOutput))
     | _ => none)
-    | IO.eprintln "usage: SimpEngineDeclarationOracle.lean <module> <stock.lean> <applied.lean> [--olean quarantine.olean]" *>
+    | IO.eprintln "usage: SimpEngineDeclarationOracle.lean <module> <stock.lean> <applied.lean> [--olean applied.olean | --bridge-oleans stock.olean applied.olean]" *>
       pure 2
+  let marker := if stockOleanFileName?.isSome then "SIMP_ENGINE_COLD_BRIDGE_ORACLE_V2"
+    else "SIMP_ENGINE_DECLARATION_ORACLE"
   Lean.initSearchPath (← Lean.findSysroot)
   Lean.enableInitializersExecution
+  -- Bridge framing contract v2: serialized emitted data, no comparison exports; validated run nonce followed by the unchanged
+  -- schema-1 oracle payload. Its command-audit order is applied, then stock.
+  let bridgeNonce? ← if stockOleanFileName?.isSome then
+      try pure <| some (← CommandAudit.runNonce)
+      catch _ => pure none
+    else pure none
+  let emitResult := fun (payload : Json) => do
+    if stockOleanFileName?.isSome then
+      let some nonce := bridgeNonce?
+        | IO.eprintln "cold bridge result unavailable without a valid run nonce"
+      -- Export callbacks may have printed a partial line after the last audit.
+      IO.println s!"\n{marker} {nonce} {payload.compress}"
+    else
+      IO.println s!"{marker} {payload.compress}"
   try
-    let result ← runOracle moduleName.toName stockPath appliedPath oleanFileName?
-    IO.println s!"SIMP_ENGINE_DECLARATION_ORACLE {Json.compress (resultJson moduleName.toName result)}"
+    let result ← runOracle moduleName.toName stockPath appliedPath oleanFileName? stockOleanFileName?
+    emitResult (resultJson moduleName.toName result)
     pure 0
   catch error =>
     let message := error.toString
     let category := failureCategory message
     let detail := failureDetail message
-    IO.println s!"SIMP_ENGINE_DECLARATION_ORACLE {Json.compress (failureJson moduleName.toName category detail)}"
+    emitResult (failureJson moduleName.toName category detail)
     pure 1
 
 end ExplicitLean.SimpEngine.DeclarationOracle
