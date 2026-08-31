@@ -20,15 +20,17 @@
   },
   "coverage": {
     "currentCorpusTotal": 83425,
-    "verifiedTranslatedOccurrences": 57,
+    "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
+    "note": "Frozen per-module results against stock imports; not full translated-tree closure. Accepted counts require replay-error checks in both compilation and the declaration oracle. Earlier cached results are provisional until revalidated. Report existence is checked here; full evidence integrity is checked by acceptance tooling.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83420,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 66,
     "nestedOccurrences": 91,
-    "verifiedTranslatedModules": 6
+    "verifiedTranslatedModules": 0,
+    "provisionalCachedOccurrences": 113,
+    "provisionalCachedModules": 8
   },
   "work": [
     {
@@ -118,8 +120,14 @@
     {
       "id": "reusable-replay-design",
       "owner": "/root/unresolved_probe_finish",
+      "status": "completed",
+      "description": "Read-only note .lake/week-2026-08-31/reusable-design.md; local macro scopes first, general exported tactics need parametric deterministic rewrites rather than finite caller-table semantic claims."
+    },
+    {
+      "id": "replay-abort-guard",
+      "owner": "/root/unresolved_probe_finish",
       "status": "in_progress",
-      "description": "Read-only soundness and architecture assessment for source-owned quotations executed across imports."
+      "description": "Authenticated application/oracle abort logs survive surrounding tactic catches; intentional recorded stock failure stays ordinary. Mandatory report schema6 and integrity rescan; focused mutation matrix in progress."
     }
   ],
   "blockers": [
@@ -140,12 +148,17 @@
     },
     {
       "id": "unpaired-assignment-fvar",
+      "status": "resolved",
+      "detail": "Committed3005bcd. Pre-boundary eAssignment references can outlive local contexts; collect their existing FVarIds and require exact identity. Action.End now passes recording and full per-module schema5 gate; unchanged comparator suite plus changed-ID negative regression passed. SimpleGraph rerun pending."
+    },
+    {
+      "id": "swallowed-replay-failures",
       "status": "open",
-      "detail": "Worker Action.End and SimpleGraph.Basic reject an unpaired free variable during state comparison. Focused Action.End diagnostics identify a mapped computational metavariable assignment; investigating identity provenance without weakening comparison."
+      "detail": "Direct and reusable replay exceptions can be caught by try/first. Schema5 compilation success is provisional until mandatory nonce-framed replay abort scanning covers both applied compile and oracle; no accepted counts from old reports."
     }
   ],
   "nextActions": [
-    "Continue frozen20-module/231-call worker; inspect genuine failures and refresh cached per-module status. Debug unpaired fvar comparison with one-module evidence before broad retries.",
+    "Finish replay-abort guard fix-review and oracle fixes, freeze current implementation, rerun the first bounded batch under schema6 acceptance; inspect remaining genuine failures.",
     "Keep full diagnostic source inventory and unresolved backlog; defer another full manifest run until the diverse batch stabilizes the implementation.",
     "Resolve reusable source/execution ownership and metaprogram equivalence rather than bypassing the shard rejection; collect positive unresolved caller evidence.",
     "Finish direct Lean import-path isolation with an absent-translated-dependency negative control; then assemble and validate translated dependencies.",
@@ -293,6 +306,20 @@
         "python3 .lake/week-2026-08-31/unresolved-callers/20260831T104343Z-uy61mn56/review-provenance.py",
         "python3 Experiment/campaign_status.py --markdown"
       ]
+    },
+    {
+      "at": "2026-08-31T10:57:55.362073+00:00",
+      "summary": "First20-module batch completed6success/14failure;57calls are provisional because a new replay-error audit requirement invalidates prior acceptance counting. Committed3005bcd cached-assignment FVar identity fix after full boundary suite and targeted recording pass; frozen Action.End per-module pass1call. Agent implementing schema6 replay guard. Root fixes oracle Mathlib preloading/options and typed private-proof inline metadata comparison; focused tests running. Weekly usage7%.",
+      "checks": [
+        "cached-fvar-boundary-gate.log: passed",
+        "action-end-fix-run.log: recording passed",
+        "oracle-no-mathlib-debug.log: unchanged Logic.Function.Defs artifacts passed56checked/45public after removing aggregate tool import"
+      ],
+      "limitations": [
+        "No full translated dependency-tree build",
+        "General exported reusable tactic semantics not solved",
+        "All current worker cache results predate mandatory replay guard"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -344,7 +371,7 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/schema2-worker-one",
       "commit": "54fcbd0",
       "log": ".lake/worker-batch.log",
-      "status": "running",
+      "status": "completed_provisional",
       "modules": 20,
       "expectedOccurrences": 231,
       "database": ".lake/search-free-mathlib/translation-index.sqlite3",
@@ -353,7 +380,21 @@
         "moduleTimeoutSeconds": 900,
         "maxSeconds": 3600
       },
-      "note": "Fresh closed small manifest generated before dispatch; includes known reusable rejection cases deliberately. Coverage counted only after validated complete reports."
+      "note": "Six reports passed schema5; replay-abort audit gap found after batch. They require schema6 revalidation before acceptance counting.",
+      "succeededModules": 6,
+      "failedModules": 14,
+      "provisionalCalls": 57
+    },
+    {
+      "id": "cached-fvar-gates",
+      "sessionId": 55260,
+      "snapshot": ".lake/search-free-mathlib/snapshots/cached-fvar-gates",
+      "commit": "3005bcd",
+      "log": ".lake/cached-fvar-gates.log",
+      "status": "running",
+      "modules": 2,
+      "expectedOccurrences": 56,
+      "note": "Action.End1passed; SimpleGraph55running. Schema5 trials remain provisional pending replay guard."
     }
   ],
   "latestCommits": [
@@ -376,7 +417,9 @@
     "0804eaf",
     "585bb83",
     "54fcbd0",
-    "a53b749"
+    "a53b749",
+    "f458c4d",
+    "3005bcd"
   ],
   "experiments": [
     {
@@ -451,7 +494,7 @@
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 6,
+    "verifiedTranslations": 0,
     "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
   },
   "productionValidation": {
