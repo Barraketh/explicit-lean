@@ -81,14 +81,14 @@
     {
       "id": "closed-expression-encoding",
       "owner": "coordinator",
-      "status": "in_progress",
-      "description": "Standalone Expr DAG codec committed at 113d9b3; production schema migration waits for captured theorem support."
+      "status": "completed",
+      "description": "Production artifact schema2 committed at5f02c0c; raw Expr DAG evidence encodes names, universes, instances and local indices without term elaboration. Fresh source tests passed."
     },
     {
       "id": "captured-theorem-declarations",
       "owner": "/root/congruence_codec",
-      "status": "in_progress",
-      "description": "Generic checked theorem codec committed at d73b4c2. Controlled realization with captured congruence metadata is in progress to preserve namespace/extension semantics."
+      "status": "completed",
+      "description": "Congruence and equation declaration codecs committed atb2ea843/1d5b550 and integrated at5f02c0c; checked proof replay with exact extension metadata preserves namespace state. Fresh-process codec/source fixtures and unchanged full boundary comparator passed."
     },
     {
       "id": "inventory-checkpoints",
@@ -101,13 +101,19 @@
       "owner": "/root/occurrence_index",
       "status": "in_progress",
       "description": "Bounded worker connecting closed manifests, leases, existing verified shard runner, and durable per-module outcomes."
+    },
+    {
+      "id": "unresolved-caller-probes",
+      "owner": "/root/unresolved_callers",
+      "status": "in_progress",
+      "description": "Exercise four unresolved quotations with caller fixtures against instrumented copies; evidence only, no translation claim."
     }
   ],
   "blockers": [
     {
       "id": "implicit-evidence-elaboration",
-      "status": "open",
-      "detail": "Boundary artifact schema 1 encodes instance and universe arguments as inferred_at_application. Full search-free acceptance requires explicit reconstruction / a search-free elaboration audit, not just absence of simp replay."
+      "status": "resolved",
+      "detail": "Schema2 generated replay decodes checked raw Expr DAGs; no prettyprinted term elaboration. Representative Mathlib validation is running; unsupported metavariable forms still fail closed."
     },
     {
       "id": "reusable-tactic-ownership",
@@ -116,16 +122,15 @@
     },
     {
       "id": "reserved-theorem-generation",
-      "status": "open",
-      "detail": "Direct captured addDecl changes namespace extension state relative to reserved-name realization. Preserve realization-branch semantics using only captured checked declarations, and test in a fresh process so shared realization caches cannot hide generator replay. Full comparator remains unchanged."
+      "status": "resolved",
+      "detail": "Captured checked congruence/equation theorem replay uses controlled realization closures with exact captured extension metadata, without generator or attribute inference calls. Fresh-process fixtures and unchanged full boundary comparator passed."
     }
   ],
   "nextActions": [
-    "Integrate captured congruence theorem realization with exact argument-kind metadata, then validate in a fresh process and rerun the unchanged semantic boundary comparator.",
-    "Commit stable production schema2 and create separate frozen snapshots for representative gates and the fresh campaign manifest.",
-    "Collect the bounded campaign worker, then run closed module shards with per-module checkpoints and honest coverage.",
-    "Use .lake/week-2026-08-31/unresolved-strategy.md to exercise and replace the four unresolved executable quotations; audit Zify configuration syntax separately from its downstream meta simplifier.",
-    "Resolve reusable caller ownership, assemble and verify the translated dependency tree, then improve readability."
+    "Finish the frozen schema2 representative Mathlib gate and fresh closed 8260-module subset manifest; excluded unresolved sites stay in the full diagnostic master index.",
+    "Integrate the reviewed resumable worker with honest frozen-runner provenance; import the new closed manifest and run bounded verified module batches.",
+    "Use positive caller probes to resolve four executable quotations, and audit Zify configuration syntax separately from its downstream meta simplifier.",
+    "Validate nested cases, resolve reusable caller ownership, assemble and verify the translated dependency tree, then improve readability."
   ],
   "checkpoints": [
     {
@@ -230,10 +235,48 @@
     {
       "at": "2026-08-31T10:00:37.710413+00:00",
       "summary": "Committed exact dependency index (bab90be), validated checkpoint batches (b990bef), and generic closed theorem codec (d73b4c2). Coordinator checks: 10 index tests; checkpoint freshness/corruption/zero-count/nonzero-missing checks; process timeout and scope propagation checks; generic declaration fixture including actual reserved-name negative control and early proposition checks. New generated-selector expression fixture passed. Production schema2 remains uncommitted pending congruence realization semantics; no verified translated coverage claimed."
+    },
+    {
+      "at": "2026-08-31T10:07:43.114694+00:00",
+      "summary": "Controlled congruence declaration codec + fresh-process namespace/kind/cache tests committed at b2ea843. Root shared build and raw generated-selector fixture passed. Schema2 full source fixture now passes (17 calls including one explicitly unobserved occurrence). Unchanged semantic boundary comparator now identifies generated equation theorem boundaryAlias.eq_1 as a second declaration family requiring captured tags and caller-local equation mapping; typed equation codec in progress. No production translation coverage claimed."
+    },
+    {
+      "at": "2026-08-31T10:13:36.400855+00:00",
+      "summary": "Equation declaration codec with exact tags and caller-local map committed at 1d5b550. Coordinator reran its fresh-process fixture successfully. Production schema2 shared build, full unchanged boundary comparator, and source fixture passed. Source alias is now exposed and the source gate explicitly requires an equation action, to check real recorded equation evidence in a fresh materialized process; strengthened rerun is in progress. Current weekly usage 5%."
+    },
+    {
+      "at": "2026-08-31T10:18:16.162704+00:00",
+      "summary": "Committed production artifact schema2 at5f02c0c. Strengthened fresh-source fixture requiring a real captured equation action passed (.lake/week-2026-08-31/schema2-public-equation-source.log). Created isolated clean snapshots for five-module representative gate and new closed 8260-module/83414-call inventory. Fixed a missing module_prefix in the generated inventory launch script and restarted before any batches ran. Weekly usage5%.",
+      "checks": [
+        "Full unchanged boundary comparator passed",
+        "Fresh encoded selector, generic theorem, congruence and equation fixtures passed",
+        "Strengthened source fixture17 passed with1 explicitly unobserved",
+        "Four pure protocol validators and codec wire validators passed"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
-  "activeChecks": [],
+  "activeChecks": [
+    {
+      "id": "schema2-representative-mathlib",
+      "sessionId": 72206,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-gates",
+      "commit": "5f02c0c",
+      "log": ".lake/representative-gate.log",
+      "status": "running"
+    },
+    {
+      "id": "schema2-closed-subset-inventory",
+      "sessionId": 42560,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-corpus",
+      "commit": "5f02c0c",
+      "log": ".lake/campaign-closed-inventory.log",
+      "status": "running",
+      "modules": 8260,
+      "expectedOccurrences": 83414,
+      "note": "Four modules with five unresolved sites remain in master diagnostic index; this subset is not full corpus closure."
+    }
+  ],
   "latestCommits": [
     "a17ef7f",
     "fae96be",
@@ -244,7 +287,10 @@
     "113d9b3",
     "bab90be",
     "b990bef",
-    "d73b4c2"
+    "d73b4c2",
+    "b2ea843",
+    "1d5b550",
+    "5f02c0c"
   ],
   "experiments": [
     {
@@ -252,8 +298,8 @@
       "path": ".lake/search-free-mathlib/evidence-prototype",
       "baseCommit": "fae96be8a63378bcd6660295b1ad28b7e3c70858",
       "owner": "coordinator",
-      "status": "in_progress",
-      "note": "Prototype only; protocol not migrated and trace audit not yet accepted as production validation."
+      "status": "superseded",
+      "note": "Historical bounded prototype evidence; superseded by strict production schema2 integration5f02c0c."
     }
   ],
   "prototypeCoverage": {
@@ -284,7 +330,7 @@
   },
   "rawDagPrototype": {
     "path": ".lake/search-free-mathlib/evidence-prototype",
-    "status": "Passed bounded recording and application tests; not yet the production artifact schema.",
+    "status": "Historical prototype superseded by production schema2 at5f02c0c.",
     "sourceFixtureOccurrences": 17,
     "sourceFixtureUnobservedOccurrences": 1,
     "mathlibModules": {
