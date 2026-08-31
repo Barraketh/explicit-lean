@@ -61,9 +61,10 @@ and the full oracle. Whole-tree acceptance remains separate.
 
 A separate bounded sequence handles a fresh local equation followed by an
 authentic cached equation from another local owner. CubicDiscriminant’s 20
-calls and 29 variants pass the private recording/replay pipeline and full
-oracle, including proof, owner, registration and snapshot mutation controls.
-The main build passes; a fresh production run is still required.
+calls and 29 variants pass fresh production recording, replay and the full
+oracle. Separate mutation controls cover proofs, owners, registrations and
+snapshots. The production report and all three native invocations have been
+independently revalidated; complete translated-tree acceptance remains pending.
 
 Inventory and scope checkpoints have a separate content identity for their
 analysis sources, native executables, and pinned dependencies. Replay-only
