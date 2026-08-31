@@ -126,8 +126,8 @@
     {
       "id": "replay-abort-guard",
       "owner": "/root/unresolved_probe_finish",
-      "status": "in_progress",
-      "description": "Authenticated application/oracle abort logs survive surrounding tactic catches; intentional recorded stock failure stays ordinary. Mandatory report schema6 and integrity rescan; focused mutation matrix in progress."
+      "status": "completed",
+      "description": "Committed45c8f56 after fix-review. Schema6 scans independently nonce-framed applied/oracle logs and hashes/rescans durable evidence.14case caught-error matrix plus17source gate passed; prior113calls remain provisional until new reports."
     }
   ],
   "blockers": [
@@ -149,12 +149,12 @@
     {
       "id": "unpaired-assignment-fvar",
       "status": "resolved",
-      "detail": "Committed3005bcd. Pre-boundary eAssignment references can outlive local contexts; collect their existing FVarIds and require exact identity. Action.End now passes recording and full per-module schema5 gate; unchanged comparator suite plus changed-ID negative regression passed. SimpleGraph rerun pending."
+      "detail": "Committed3005bcd. Pre-boundary cached eAssignment fvars preserve exact existing identity. Action.End1 and SimpleGraph55 both passed schema5 gates; provisional pending schema6 rerun."
     },
     {
       "id": "swallowed-replay-failures",
-      "status": "open",
-      "detail": "Direct and reusable replay exceptions can be caught by try/first. Schema5 compilation success is provisional until mandatory nonce-framed replay abort scanning covers both applied compile and oracle; no accepted counts from old reports."
+      "status": "resolved",
+      "detail": "Committed45c8f56. Reached replay errors emit process output surviving tactic catches; intended recorded stock failure remains ordinary. Schema6 requires two fresh compiler nonces and durable log rescans."
     }
   ],
   "nextActions": [
@@ -320,6 +320,20 @@
         "General exported reusable tactic semantics not solved",
         "All current worker cache results predate mandatory replay guard"
       ]
+    },
+    {
+      "at": "2026-08-31T11:14:09.407943+00:00",
+      "summary": "Replay guard committed45c8f56 with coordinator protocol/hash verification. Real Data.Set.Basic15 oracle now passes after removing global Mathlib preloading and consistently filtering genuine private-proof helper metadata. Final oracle review exposed unordered matcher metadata sorting and public proof_1 misclassification; tightening before freeze. Prepared fresh51module/150call manifest selection with complete39module Function.Defs dependency cone. Weeklyusage7%.",
+      "checks": [
+        "14case final replay matrix28source/log hashes verified independently",
+        "Focused occurrence/oracle/shard/replay protocol mutations passed",
+        "Native oracle targeted private-inline omission, public-inline metadata, public-matcher metadata tests passed"
+      ],
+      "limitations": [
+        "New public-name policy/runtime regression in progress",
+        "No accepted schema6 corpus reports yet",
+        "No full translated tree"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -391,10 +405,10 @@
       "snapshot": ".lake/search-free-mathlib/snapshots/cached-fvar-gates",
       "commit": "3005bcd",
       "log": ".lake/cached-fvar-gates.log",
-      "status": "running",
+      "status": "completed_provisional",
       "modules": 2,
       "expectedOccurrences": 56,
-      "note": "Action.End1passed; SimpleGraph55running. Schema5 trials remain provisional pending replay guard."
+      "note": "Both modules passed56calls under schema5; replayguard schema6 revalidation still required."
     }
   ],
   "latestCommits": [
@@ -419,7 +433,8 @@
     "54fcbd0",
     "a53b749",
     "f458c4d",
-    "3005bcd"
+    "3005bcd",
+    "45c8f56"
   ],
   "experiments": [
     {

@@ -2028,7 +2028,7 @@ def verify_shard_evidence(
     debug_root: Path,
     timeout: int,
 ) -> dict[str, object]:
-    """Bind a valid schema-5 shape to selected manifest and durable files."""
+    """Bind a valid schema-6 shape to selected manifest and durable files."""
     report = validate_shard_shape(report)
     resolved_manifest = manifest_path.resolve()
     if report["manifestPath"] != str(resolved_manifest):
