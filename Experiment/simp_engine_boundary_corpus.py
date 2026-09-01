@@ -968,35 +968,7 @@ def _validate_scope_path(value: object, label: str) -> None:
 
 
 def _validate_declaration(value: object, label: str) -> None:
-    if not isinstance(value, dict):
-        raise RuntimeError(f"boundary manifest {label} must be an object")
-    _exact_fields(
-        value,
-        {
-            "module",
-            "name",
-            "startByte",
-            "endByte",
-            "selectionStartByte",
-            "selectionEndByte",
-            "isProof",
-        },
-        label,
-    )
-    _string(value.get("module"), f"{label}.module")
-    _string(value.get("name"), f"{label}.name")
-    start = _nonnegative_int(value.get("startByte"), f"{label}.startByte")
-    end = _nonnegative_int(value.get("endByte"), f"{label}.endByte")
-    selection_start = _nonnegative_int(
-        value.get("selectionStartByte"), f"{label}.selectionStartByte"
-    )
-    selection_end = _nonnegative_int(
-        value.get("selectionEndByte"), f"{label}.selectionEndByte"
-    )
-    if start > end or selection_start > selection_end:
-        raise RuntimeError(f"boundary manifest {label} has an invalid range")
-    if not isinstance(value.get("isProof"), bool):
-        raise RuntimeError(f"boundary manifest {label}.isProof must be a boolean")
+    scope.validate_declaration_record(value, f"boundary manifest {label}")
 
 
 def _validate_execution_evidence(value: object, label: str) -> None:

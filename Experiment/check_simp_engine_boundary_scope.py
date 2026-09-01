@@ -64,6 +64,17 @@ DECLARATION_KINDS_BY_ROLE = {
     "retained_syntax_data": {"not_applicable"},
     "unresolved": {"mixed", "unknown"},
 }
+DECLARATION_RECORD_FIELDS = frozenset(
+    {
+        "module",
+        "name",
+        "startByte",
+        "endByte",
+        "selectionStartByte",
+        "selectionEndByte",
+        "isProof",
+    }
+)
 
 
 def expected_action(execution_role: str, declaration_kind: str) -> str:
@@ -105,6 +116,51 @@ def validate_scope_dimensions(
             f"{execution_role}/{declaration_kind} -> {expected}, found {action}"
         )
     return execution_role, declaration_kind, action
+
+
+def validate_declaration_record(value: object, label: str = "scope declaration") -> None:
+    """Validate one authenticated declaration record from the scope frontend."""
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{label} must be an object")
+    missing = DECLARATION_RECORD_FIELDS - set(value)
+    extra = set(value) - DECLARATION_RECORD_FIELDS
+    if missing or extra:
+        raise RuntimeError(
+            f"{label} fields changed: missing={sorted(missing)}, extra={sorted(extra)}"
+        )
+    for field in ("module", "name"):
+        field_value = value.get(field)
+        if not isinstance(field_value, str) or not field_value:
+            raise RuntimeError(f"{label}.{field} must be a nonempty string")
+    byte_values: dict[str, object] = {
+        field: value.get(field)
+        for field in (
+            "startByte",
+            "endByte",
+            "selectionStartByte",
+            "selectionEndByte",
+        )
+    }
+    for field, field_value in byte_values.items():
+        if (
+            not isinstance(field_value, int)
+            or isinstance(field_value, bool)
+            or field_value < 0
+        ):
+            raise RuntimeError(f"{label}.{field} must be a nonnegative integer")
+    if byte_values["startByte"] > byte_values["endByte"]:
+        raise RuntimeError(f"{label} has an invalid declaration range")
+    if byte_values["selectionStartByte"] > byte_values["selectionEndByte"]:
+        raise RuntimeError(f"{label} has an invalid selection range")
+    if not (
+        byte_values["startByte"]
+        <= byte_values["selectionStartByte"]
+        <= byte_values["selectionEndByte"]
+        <= byte_values["endByte"]
+    ):
+        raise RuntimeError(f"{label} selection range is outside declaration range")
+    if not isinstance(value.get("isProof"), bool):
+        raise RuntimeError(f"{label}.isProof must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -989,11 +1045,12 @@ def _authenticated_nonproof_declarations(
     declarations = result.get("declarations")
     if not isinstance(declarations, list) or not declarations:
         return False
-    return all(
-        isinstance(declaration, dict)
-        and declaration.get("isProof") is False
-        for declaration in declarations
-    )
+    try:
+        for declaration in declarations:
+            validate_declaration_record(declaration)
+    except RuntimeError:
+        return False
+    return all(declaration["isProof"] is False for declaration in declarations)
 
 
 def reclassify_missing_quoted_execution(
