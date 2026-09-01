@@ -1,0 +1,47 @@
+{
+  "kind": "simp_manual_overrides",
+  "lean": {
+    "commit": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
+    "version": "4.32.2"
+  },
+  "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c",
+  "schema": 1,
+  "overrides": [
+    {
+      "endByte": 3742,
+      "module": "Mathlib/Algebra/AffineMonoid/Irreducible.lean",
+      "moduleSourceSha256": "664243cc517bfe84fcfa2881fa7e4b33cbb4a93e56372a947fb2d4d35413e37d",
+      "occurrence": "c69e7c4d41b4a057",
+      "replacement": "replace hrirred : ¬ IsUnit r → ∃ a b, r = a * b ∧ ¬ IsUnit a ∧ ¬ IsUnit b := by\n    intro hrnu\n    have hforall : ¬ ∀ a b, r = a * b → IsUnit a ∨ IsUnit b := by\n      intro h\n      apply hrirred\n      exact irreducible_iff.mpr ⟨hrnu, h⟩\n    obtain ⟨a, ha⟩ := Classical.not_forall.mp hforall\n    obtain ⟨b, hab⟩ := Classical.not_forall.mp ha\n    obtain ⟨hr, hab⟩ := Classical.not_imp.mp hab\n    obtain ⟨ha, hb⟩ := not_or.mp hab\n    exact ⟨a, b, hr, ha, hb⟩",
+      "source": "simp only [irreducible_iff, Set.mem_setOf_eq, not_and, not_forall, not_or] at hrirred",
+      "startByte": 3657
+    },
+    {
+      "endByte": 2100,
+      "module": "Mathlib/Algebra/Algebra/Bilinear.lean",
+      "moduleSourceSha256": "b5f215cf4eadac7c6f9754350b2eea8e0f5d2135c14ced3b4efe579b04b26116",
+      "occurrence": "c66d834e4df6d7e3",
+      "replacement": "change (r * x) • a = r • (x • a)\n  rw [← mul_smul, mul_comm]",
+      "source": "simp [← mul_smul, mul_comm]",
+      "startByte": 2071
+    },
+    {
+      "endByte": 18668,
+      "module": "Mathlib/Algebra/Algebra/Spectrum/Quasispectrum.lean",
+      "moduleSourceSha256": "86daaff4a1e1ed9d97d7dcf185be7df0da41c9b2ae049e4a852eeedca7f99791",
+      "occurrence": "c09f2d38b63b3c4d",
+      "replacement": "constructor\n  · rintro ⟨h⟩ a ha x hx\n    exact h a ha x (spectrum_subset_quasispectrum 𝕜 a hx)\n  · intro h\n    refine ⟨?_⟩\n    intro a ha x hx\n    rw [quasispectrum_eq_spectrum_union_zero] at hx\n    rcases hx with hx | hx\n    · exact h a ha x hx\n    · exact hx ▸ le_rfl",
+      "source": "simp [show NonnegSpectrumClass 𝕜 A ↔ _ from ⟨fun ⟨h⟩ ↦ h, (⟨·⟩)⟩,\n    quasispectrum_eq_spectrum_union_zero]",
+      "startByte": 18541
+    },
+    {
+      "endByte": 5299,
+      "module": "Mathlib/Algebra/Algebra/Subalgebra/Tower.lean",
+      "moduleSourceSha256": "c0d02b61c7d96605deba25bee136082b8cc3e08a561baffce50d9a6d61e5e1b1",
+      "occurrence": "f27035b0710b8604",
+      "replacement": "rw [Subalgebra.setRange_algebraMap, AlgHom.coe_range, IsScalarTower.coe_toAlgHom']",
+      "source": "simp",
+      "startByte": 5295
+    }
+  ]
+}

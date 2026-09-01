@@ -756,6 +756,42 @@ private unsafe def observableMatcherEntries (environment : Environment)
   -- Preserve order as well as every field after filtering private proofs.
   return unsafeCast result
 
+-- Pinned view of the first field of Mathlib's three-field TranslationInfo.
+-- Access only `translation`; retain each original opaque extension entry for
+-- serialization so the ignored field types are never read or reconstructed.
+private structure ToAdditiveTranslationView where
+  translation : Name
+  ignoredReorder : Unit
+  ignoredRelevantArg : Unit
+
+private unsafe def observableToAdditiveTranslations (environment : Environment)
+    (entries : Array EnvExtensionEntry) : IO (Array EnvExtensionEntry) := do
+  let mut result : Array EnvExtensionEntry := #[]
+  for rawEntry in entries do
+    let entry : Name × ToAdditiveTranslationView := unsafeCast rawEntry
+    let some sourceInfo := environment.constants.find? entry.1
+      | oracleFailure "environment_delta_mismatch"
+          s!"to_additive translation has no source declaration: {entry.1}"
+    let some targetInfo := environment.constants.find? entry.2.translation
+      | oracleFailure "environment_delta_mismatch"
+          s!"to_additive translation has no target declaration: {entry.2.translation}"
+    -- Repeated keys are an ordered overwrite log. Retain every such entry so
+    -- filtering cannot change the effective final map.
+    let mut sourceCount := 0
+    for rawCandidate in entries do
+      let candidate : Name × ToAdditiveTranslationView := unsafeCast rawCandidate
+      if candidate.1 == entry.1 then
+        sourceCount := sourceCount + 1
+    let repeatedSource := sourceCount > 1
+    unless !repeatedSource &&
+        (← privateProofDeclaration environment sourceInfo) &&
+        (← privateProofDeclaration environment targetInfo) do
+      result := result.push rawEntry
+  -- Translation metadata for public and computational declarations remains
+  -- byte-exact. Private proof helpers are already outside the declaration
+  -- oracle's observable domain and their generated names depend on proof shape.
+  return result
+
 private unsafe def compareExtensions (stockEnvironment appliedEnvironment : Environment)
     (stockData appliedData : ModuleData) : IO Unit := do
   let stockEntries := extensionMap stockData
@@ -784,6 +820,12 @@ private unsafe def compareExtensions (stockEnvironment appliedEnvironment : Envi
       let applied ← observableMatcherEntries appliedEnvironment ((appliedMap.find? name).getD #[])
       unless (← extensionBytes stockData name stock) == (← extensionBytes appliedData name applied) do
         oracleFailure "environment_delta_mismatch" s!"extension state differs for {name}"
+      continue
+    if name == `Mathlib.Tactic.ToAdditive.translations then
+      let stock ← observableToAdditiveTranslations stockEnvironment ((stockMap.find? name).getD #[])
+      let applied ← observableToAdditiveTranslations appliedEnvironment ((appliedMap.find? name).getD #[])
+      unless (← extensionBytes stockData name stock) == (← extensionBytes appliedData name applied) do
+        oracleFailure "environment_delta_mismatch" s!"observable translations differ for {name}"
       continue
     let some stockValues := stockMap.find? name
       | oracleFailure "environment_delta_mismatch" s!"stock is missing extension {name}"
@@ -832,9 +874,10 @@ private unsafe def compareExtraModUses (stockData appliedData : ModuleData) : IO
   let applied := normalizedExtraModUses (currentExtraModUses appliedData)
   let stockNonTooling := stock.filter (fun use => use.module != oracleToolingModule)
   let appliedNonTooling := applied.filter (fun use => use.module != oracleToolingModule)
-  unless appliedNonTooling.all stockNonTooling.contains do
+  let extra := appliedNonTooling.filter (fun use => !stockNonTooling.contains use)
+  unless extra.isEmpty do
     oracleFailure "environment_delta_mismatch"
-      "applied non-tooling extraModUses are not a stock subset"
+      s!"applied non-tooling extraModUses are not a stock subset: {repr extra}"
 
 private unsafe def compareEnvironment (stock applied : Environment)
     (stockData appliedData : ModuleData) : IO Unit := do

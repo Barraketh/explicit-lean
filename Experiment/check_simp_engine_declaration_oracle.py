@@ -111,6 +111,38 @@ def async_private_body_source(value: int, inline: str = "inline") -> str:
     )
 
 
+def private_to_additive_proof_source(stem: str) -> str:
+    return source(
+        f"@[to_additive add{stem}ProofHelper]\n"
+        f"private theorem mul{stem}ProofHelper : True := True.intro\n"
+        "theorem oracleSample : True := True.intro",
+        mathlib=True,
+    )
+
+
+def public_translation_source(target: str) -> str:
+    return source(
+        "theorem oracleSource : True := True.intro\n"
+        "theorem oracleTargetA : True := True.intro\n"
+        "theorem oracleTargetB : True := True.intro\n"
+        f"insert_to_additive_translation oracleSource {target}",
+        mathlib=True,
+    )
+
+
+def duplicate_public_translation_source(first: str, second: str) -> str:
+    return source(
+        "theorem oracleSource : True := True.intro\n"
+        "theorem oracleTargetA : True := True.intro\n"
+        "theorem oracleTargetB : True := True.intro\n"
+        f"insert_to_additive_translation oracleSource {first}\n"
+        "run_cmd do\n"
+        "  Lean.modifyEnv (Mathlib.Tactic.ToAdditive.translations.addEntry · "
+        f"(`oracleSource, {{ translation := `{second} }}))",
+        mathlib=True,
+    )
+
+
 CASES = (
     Case("async-matcher-checked-declarations", async_matcher_source(), async_matcher_source(), True),
     Case("async-private-computational-equivalence", async_private_body_source(1),
@@ -126,6 +158,43 @@ CASES = (
         source("theorem oracleSample : True := by trivial"),
         source("theorem oracleSample : True := by exact True.intro"),
         True,
+    ),
+    Case(
+        "private-to-additive-proof-translation-renamed",
+        private_to_additive_proof_source("Stock"),
+        private_to_additive_proof_source("Applied"),
+        True,
+        private_proof_counts=(2, 2, 1),
+    ),
+    Case(
+        "public-to-additive-translation-mismatch",
+        public_translation_source("oracleTargetA"),
+        public_translation_source("oracleTargetB"),
+        False,
+        "environment_delta_mismatch",
+        detail_contains="observable translations differ",
+    ),
+    Case(
+        "duplicate-to-additive-translation-order-mismatch",
+        duplicate_public_translation_source("oracleTargetA", "oracleTargetB"),
+        duplicate_public_translation_source("oracleTargetB", "oracleTargetA"),
+        False,
+        "environment_delta_mismatch",
+        detail_contains="observable translations differ",
+    ),
+    Case(
+        "to-additive-translation-missing-endpoints",
+        source(
+            "insert_to_additive_translation oracleMissingSource oracleMissingTarget",
+            mathlib=True,
+        ),
+        source(
+            "insert_to_additive_translation oracleMissingSource oracleMissingTarget",
+            mathlib=True,
+        ),
+        False,
+        "environment_delta_mismatch",
+        detail_contains="to_additive translation has no source declaration",
     ),
     Case(
         "module-doc-range-shift",
