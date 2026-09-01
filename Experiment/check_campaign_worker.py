@@ -110,6 +110,47 @@ class CampaignWorkerTests(unittest.TestCase):
         result.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
         return result
 
+    def manifest_with_roles(self, roles_by_name: dict[str, list[str]]) -> Path:
+        """Make a small closed-enough fixture with deliberate role mixtures."""
+        modules = []
+        for name, roles in roles_by_name.items():
+            module = f"Mathlib/{name}.lean"
+            source = f"theorem {name.lower()} : True := by " + " ".join("simp" for _ in roles) + "\n"
+            path = self.root / module
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(source, encoding="utf-8")
+            occurrences = []
+            cursor = source.index("simp")
+            for role in roles:
+                end = cursor + 4
+                reusable = role == "reusable_executable"
+                occurrences.append({
+                    "id": hashlib.sha256(f"{module}:{cursor}:{end}".encode()).hexdigest()[:16],
+                    "kind": "simp", "source": "simp", "startByte": cursor, "endByte": end,
+                    "syntaxKind": "Lean.Parser.Tactic.simp", "action": "materialize",
+                    "executionRole": role,
+                    "declarationKind": "caller_dependent" if reusable else "proof",
+                })
+                if cursor + 4 < len(source) and len(occurrences) < len(roles):
+                    cursor = source.index("simp", end)
+            modules.append({
+                "module": module, "compiledModule": module[:-5].replace("/", "."),
+                "moduleHash": "fixture-module", "sourceHash": hashlib.sha256(source.encode()).hexdigest(),
+                "occurrences": occurrences,
+            })
+        value = {
+            "kind": "simp_engine_boundary_manifest", "reportSchema": 2,
+            "allowDirty": False, "allowUnresolved": False,
+            "moduleFileCount": len(modules),
+            "occurrenceCount": sum(len(item["occurrences"]) for item in modules),
+            "implementationHashes": {"fixture": "fixture-hash"},
+            "repositoryCommit": "fixture-repository", "mathlibCommit": "fixture-mathlib",
+            "lean": {"version": "4.32.2", "commit": "fixture-lean"}, "modules": modules,
+        }
+        result = self.root / "roles.json"
+        result.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+        return result
+
     def fake_report(self, manifest: Path, module: str, *, unobserved: bool = False, failed_variant: bool = False) -> dict[str, object]:
         occurrence = hashlib.sha256(f"{module}:23:27".encode()).hexdigest()[:16]
         return {
@@ -265,7 +306,7 @@ class CampaignWorkerTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def test_reusable_only_selection_skips_capsule_without_global_abort(self) -> None:
+    def test_default_selection_skips_reusable_only_module(self) -> None:
         manifest = self.manifest()
         value = json.loads(manifest.read_text(encoding="utf-8"))
         value.update({
@@ -281,7 +322,61 @@ class CampaignWorkerTests(unittest.TestCase):
             return 0, "ok"
         with mock.patch.object(worker, "_write_manifest_capsule", side_effect=AssertionError("unexpected capsule")):
             result = self.run_fixture(manifest, invoke)
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(result["selected"], 0)
+        self.assertEqual(result["skippedReusable"], 1)
+
+    def test_default_selection_excludes_mixed_and_reusable_modules(self) -> None:
+        manifest = self.manifest_with_roles({
+            "Mixed": ["direct_executable", "reusable_executable"],
+            "Reusable": ["reusable_executable"],
+            "Direct": ["direct_executable"],
+        })
+        calls: list[str] = []
+
+        def invoke(path, output, module, timeout):
+            calls.append(module)
+            output.write_text(json.dumps(self.fake_report(manifest, module)), encoding="utf-8")
+            return 0, "ok"
+
+        result = self.run_fixture(manifest, invoke)
+        self.assertEqual(calls, ["Mathlib/Direct.lean"])
+        self.assertEqual(result["selected"], 1)
         self.assertEqual(result["processed"], 1)
+        self.assertEqual(result["skippedReusable"], 2)
+        self.assertEqual(result["skippedEmpty"], 0)
+
+    def test_explicit_reusable_selection_fails_with_exact_ids_before_dispatch(self) -> None:
+        manifest = self.manifest_with_roles({"Reusable": ["reusable_executable"]})
+        occurrence_id = json.loads(manifest.read_text(encoding="utf-8"))["modules"][0]["occurrences"][0]["id"]
+        invoke = mock.Mock(side_effect=AssertionError("reusable module was dispatched"))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            rf"selected module contains reusable_executable occurrences: Mathlib/Reusable\.lean: \['{occurrence_id}'\]",
+        ):
+            self.run_fixture(manifest, invoke, modules=["Mathlib/Reusable.lean"])
+        invoke.assert_not_called()
+
+    def test_malformed_occurrence_fails_closed_before_selection(self) -> None:
+        manifest = self.manifest()
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        value["modules"][0]["occurrences"] = [None]
+        with self.assertRaisesRegex(RuntimeError, "invalid manifest occurrence.*occurrence must be an object"):
+            worker._selected_modules(value, None)
+
+    def test_explicit_direct_only_selection_dispatches(self) -> None:
+        manifest = self.manifest_with_roles({"Direct": ["direct_executable"]})
+        calls: list[str] = []
+
+        def invoke(path, output, module, timeout):
+            calls.append(module)
+            output.write_text(json.dumps(self.fake_report(manifest, module)), encoding="utf-8")
+            return 0, "ok"
+
+        result = self.run_fixture(manifest, invoke, modules=["Mathlib/Direct.lean"])
+        self.assertEqual(calls, ["Mathlib/Direct.lean"])
+        self.assertEqual(result["selected"], 1)
+        self.assertEqual(result["skippedReusable"], 0)
 
     def test_fresh_pass_rejects_changed_dependency_source(self) -> None:
         manifest = self.manifest_many(["A", "B"], dependencies={"A": ["Mathlib.B"]})

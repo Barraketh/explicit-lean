@@ -83,9 +83,18 @@ def _read_manifest(path: str | Path) -> tuple[Path, bytes, dict[str, Any], str]:
 
 def _selected_modules(
     manifest: Mapping[str, Any], requested: Sequence[str] | None,
-) -> tuple[list[str], int]:
+) -> tuple[list[str], int, int]:
+    """Return dispatchable modules and counts for default exclusions.
+
+    Selection happens before any budget, index, or child-process work.  Validate
+    every occurrence while building the module table so a malformed record
+    cannot be treated as an empty/direct occurrence merely because it is being
+    filtered out of the default queue.
+    """
     records = manifest["modules"]
     by_name: dict[str, Mapping[str, Any]] = {}
+    occurrences_by_name: dict[str, tuple[dict[str, Any], ...]] = {}
+    seen_occurrence_ids: set[str] = set()
     for raw in records:
         if not isinstance(raw, dict) or not isinstance(raw.get("module"), str):
             raise TranslationIndexError("manifest contains an invalid module record")
@@ -93,24 +102,79 @@ def _selected_modules(
         if module in by_name:
             raise TranslationIndexError(f"manifest contains duplicate module: {module}")
         by_name[module] = raw
-    empty = sum(
-        not any(isinstance(occurrence, dict) and occurrence.get("action") == "materialize"
-                for occurrence in raw.get("occurrences", []))
-        for raw in by_name.values()
-    )
+        occurrences = raw.get("occurrences")
+        if not isinstance(occurrences, list):
+            raise TranslationIndexError(f"manifest occurrences must be an array for {module}")
+        checked: list[dict[str, Any]] = []
+        for index, occurrence in enumerate(occurrences):
+            try:
+                if not isinstance(occurrence, dict):
+                    raise RuntimeError("occurrence must be an object")
+                item = dict(occurrence)
+                occurrence_id = item.get("id")
+                if not isinstance(occurrence_id, str) or not occurrence_id:
+                    raise RuntimeError("occurrence id must be a nonempty string")
+                if occurrence_id in seen_occurrence_ids:
+                    raise RuntimeError(f"duplicate occurrence ID: {occurrence_id}")
+                seen_occurrence_ids.add(occurrence_id)
+                kind = item.get("kind")
+                if kind not in materializer.inventory.SUPPORTED_KINDS:
+                    raise RuntimeError(f"unsupported occurrence kind: {kind!r}")
+                if not isinstance(item.get("source"), str):
+                    raise RuntimeError("occurrence source must be a string")
+                start = item.get("startByte")
+                end = item.get("endByte")
+                if type(start) is not int or type(end) is not int or not 0 <= start < end:
+                    raise RuntimeError("occurrence range must satisfy 0 <= startByte < endByte")
+                if item.get("syntaxKind") != "Lean.Parser.Tactic.simp":
+                    raise RuntimeError("occurrence syntaxKind must be Lean.Parser.Tactic.simp")
+                materializer.scope.validate_scope_dimensions(
+                    item.get("executionRole"), item.get("declarationKind"), item.get("action")
+                )
+                if occurrence_id != materializer.inventory.occurrence_id(module, start, end):
+                    raise RuntimeError("occurrence ID does not match its module and range")
+                item["module"] = module
+                checked.append(item)
+            except (RuntimeError, TypeError, ValueError, KeyError) as error:
+                raise TranslationIndexError(
+                    f"invalid manifest occurrence for {module} at index {index}: {error}"
+                ) from error
+        occurrences_by_name[module] = tuple(checked)
+
+    materializable = {
+        module: tuple(item for item in occurrences_by_name[module]
+                     if item["action"] == "materialize")
+        for module in by_name
+    }
+    reusable_ids = {
+        module: tuple(str(item["id"]) for item in occurrences_by_name[module]
+                     if item["executionRole"] == "reusable_executable")
+        for module in by_name
+    }
+    empty = sum(not entries for entries in materializable.values())
+    skipped_reusable = sum(bool(ids) for ids in reusable_ids.values())
     if requested is None:
         return sorted(
-            module for module, raw in by_name.items()
-            if any(isinstance(occurrence, dict) and occurrence.get("action") == "materialize"
-                   for occurrence in raw.get("occurrences", []))
-        ), empty
+            module for module in by_name
+            if materializable[module] and not reusable_ids[module]
+        ), empty, skipped_reusable
     selected = list(requested)
     if not selected or len(set(selected)) != len(selected):
         raise TranslationIndexError("--module selections must be nonempty and unique")
     unknown = sorted(set(selected) - set(by_name))
     if unknown:
         raise TranslationIndexError(f"selected module is absent from manifest: {unknown}")
-    return selected, empty
+    requested_reusable = [
+        f"{module}: {list(reusable_ids[module])}"
+        for module in selected
+        if reusable_ids[module]
+    ]
+    if requested_reusable:
+        raise TranslationIndexError(
+            "selected module contains reusable_executable occurrences: "
+            + "; ".join(requested_reusable)
+        )
+    return selected, empty, 0
 
 
 def _identities(
@@ -439,7 +503,7 @@ def run_worker(
         raise TranslationIndexError("minimum free bytes must be a positive integer")
     manifest_path, manifest_bytes, manifest_value, manifest_hash = _read_manifest(manifest)
     materializer.verify_implementation_hashes(manifest_value)
-    selected, skipped_empty = _selected_modules(manifest_value, modules)
+    selected, skipped_empty, skipped_reusable = _selected_modules(manifest_value, modules)
     # A producer worker is the one place that pays for complete manifest
     # validation.  Reports below reuse these checked selections; they never
     # independently walk the 205MiB global occurrence array.
@@ -531,6 +595,7 @@ def run_worker(
             "processed": 0, "succeeded": 0, "candidateReports": 0, "failures": 0,
             "skippedFailed": 0, "skippedVerified": 0,
             "skippedEmpty": skipped_empty if modules is None else 0,
+            "skippedReusable": skipped_reusable if modules is None else 0,
             "budgetDenied": preflight_denied, "timedOut": False,
             "storageDenied": not storage["canDispatch"], "storage": storage,
         }
@@ -731,6 +796,7 @@ def run_worker(
         "skippedFailed": skipped_failed,
         "skippedVerified": skipped_verified,
         "skippedEmpty": skipped_empty if modules is None else 0,
+        "skippedReusable": skipped_reusable if modules is None else 0,
         "budgetDenied": budget_denied,
         "timedOut": timed_out,
         "storageDenied": storage_denied,
