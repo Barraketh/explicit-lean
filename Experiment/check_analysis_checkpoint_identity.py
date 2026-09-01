@@ -184,6 +184,10 @@ def test_manifest_prewarm_failure_does_not_publish() -> None:
              patch.object(corpus, "MATHLIB", root / ".lake/packages/mathlib"), \
              patch.object(corpus, "assert_repository", return_value="commit"), \
              patch.object(corpus, "verify_environment", return_value=("mathlib", {"version": "test"})), \
+             patch.object(
+                 corpus.manual_overrides, "load_database",
+                 return_value=({"mathlibCommit": "mathlib", "lean": {"version": "test"}}, []),
+             ), \
              patch.object(corpus, "implementation_hashes", return_value={}), \
              patch.object(corpus, "run_process", side_effect=failure) as build:
             try:

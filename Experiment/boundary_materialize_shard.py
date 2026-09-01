@@ -29,6 +29,8 @@ import check_simp_engine_boundary_scope as scope
 import simp_engine_boundary_corpus as corpus
 import simp_engine_inventory as inventory
 import lean_toolchain_cache as tool_cache
+import manual_overlay
+import simp_manual_overrides as manual_overrides
 from process_runner import run_process
 from boundary_protocol import (
     ABORT_CATEGORIES,
@@ -62,7 +64,7 @@ MATHLIB = corpus.MATHLIB
 MANIFEST_KIND = "simp_engine_boundary_manifest"
 MANIFEST_SCHEMA = 2
 REPORT_KIND = "simp_engine_boundary_materialization_shard"
-REPORT_SCHEMA = 12
+REPORT_SCHEMA = 13
 ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 DECLARATION_ORACLE_MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
 DECLARATION_ORACLE_KIND = "simp_engine_declaration_oracle"
@@ -387,6 +389,16 @@ class SelectedModule:
     @property
     def covered_by(self) -> dict[str, str]:
         return replacement_plan(self.source, self.materialize, self.module)[1]
+
+
+@dataclass(frozen=True)
+class OverlaySelection:
+    """Canonical manifest selection plus its freshly classified patched copy."""
+
+    canonical: SelectedModule
+    effective: SelectedModule
+    entries: tuple[dict[str, Any], ...]
+    mappings: tuple[dict[str, Any], ...]
 
 
 def _validate_occurrence(
@@ -767,6 +779,139 @@ def verify_selected_classifications(
                         f"occurrence[{index}].{field}: recorded "
                         f"{recorded.get(field)!r}, recomputed {recomputed.get(field)!r}"
                     )
+
+
+def prepare_overlay_selection(
+    canonical: SelectedModule,
+    overlay: manual_overlay.Overlay,
+    debug_root: Path,
+    timeout: int,
+) -> OverlaySelection:
+    """Apply manual splices and freshly classify every untouched occurrence."""
+    entries = tuple(overlay.entries_by_module().get(canonical.module, ()))
+    if not entries:
+        mappings = tuple(
+            {
+                "canonicalId": str(entry["id"]),
+                "effectiveId": str(entry["id"]),
+                "kind": str(entry["kind"]),
+                "source": str(entry["source"]),
+                "canonicalStartByte": int(entry["startByte"]),
+                "canonicalEndByte": int(entry["endByte"]),
+                "effectiveStartByte": int(entry["startByte"]),
+                "effectiveEndByte": int(entry["endByte"]),
+            }
+            for entry in canonical.occurrences
+        )
+        return OverlaySelection(canonical, canonical, (), mappings)
+
+    patched = overlay.apply(canonical.module, canonical.source)
+    patched_path = _copy_at_module_root(
+        debug_root / "manual-overlay-input", canonical.module, patched
+    )
+    expected = tuple(overlay.shifted_occurrences(canonical.module))
+    expected_by_position: dict[tuple[str, str, int, int], dict[str, object]] = {}
+    for record in expected:
+        key = (
+            str(record["kind"]), str(record["source"]),
+            int(record["startByte"]), int(record["endByte"]),
+        )
+        if key in expected_by_position:
+            raise RuntimeError(
+                f"manual overlay produced duplicate shifted occurrence coordinates in "
+                f"{canonical.module}: {key!r}"
+            )
+        expected_by_position[key] = record
+
+    raw_inventory = inventory.syntax_inventory_file(
+        patched_path, canonical.module, timeout,
+        allow_elaboration_errors=True, header_imports=True,
+    )
+    inventoried, _nested, _duplicates = corpus.validate_module_inventory(
+        canonical.module, patched, raw_inventory
+    )
+    actual_by_position = {
+        (str(record["kind"]), str(record["source"]),
+         int(record["startByte"]), int(record["endByte"])): record
+        for record in inventoried if record.get("kind") in inventory.SUPPORTED_KINDS
+    }
+    if set(actual_by_position) != set(expected_by_position):
+        raise RuntimeError(
+            f"manual overlay changed the untouched simp inventory in {canonical.module}: "
+            f"expected={sorted(expected_by_position)}, actual={sorted(actual_by_position)}"
+        )
+
+    compiled = canonical.compiled_module
+    scoped, declarations, _fallbacks = scope.load_records_with_fallbacks(
+        [scope.ModuleSpec(compiled, patched_path, len(inventoried))],
+        batch_size=1, timeout=timeout,
+    )
+    classified, _duplicate_scope = corpus.join_scope_records(
+        canonical.module, inventoried, scoped.get(compiled, []),
+        declarations.get(compiled, []),
+    )
+    unresolved = [entry for entry in classified if entry["action"] == "unresolved"]
+    if unresolved:
+        unresolved_ids = {str(entry["id"]) for entry in unresolved}
+        scope.apply_execution_evidence(
+            compiled, patched, unresolved,
+            entries=[entry for entry in inventoried if str(entry["id"]) in unresolved_ids],
+            timeout=timeout,
+        )
+    remaining_unresolved = [
+        str(entry["id"]) for entry in classified if entry["action"] == "unresolved"
+    ]
+    if remaining_unresolved:
+        raise RuntimeError(
+            f"manual overlay left unresolved calls in {canonical.module}: "
+            f"{remaining_unresolved}"
+        )
+
+    canonical_by_id = {str(entry["id"]): entry for entry in canonical.occurrences}
+    mappings: list[dict[str, Any]] = []
+    for record in classified:
+        key = (
+            str(record["kind"]), str(record["source"]),
+            int(record["startByte"]), int(record["endByte"]),
+        )
+        expected_record = expected_by_position.get(key)
+        if expected_record is None:
+            raise RuntimeError(
+                f"manual overlay classified an unmapped occurrence in {canonical.module}: {key!r}"
+            )
+        canonical_id = str(expected_record["canonicalId"])
+        effective_id = str(record["id"])
+        if effective_id != str(expected_record["id"]):
+            raise RuntimeError(
+                f"manual overlay effective ID mismatch in {canonical.module}: "
+                f"{effective_id} != {expected_record['id']}"
+            )
+        canonical_record = canonical_by_id[canonical_id]
+        for field in ("executionRole", "declarationKind", "action"):
+            if canonical_record.get(field) != record.get(field):
+                raise RuntimeError(
+                    f"manual overlay changed {field} for {canonical.module}:"
+                    f"{canonical_id}: {canonical_record.get(field)!r} != {record.get(field)!r}"
+                )
+        mappings.append({
+            "canonicalId": canonical_id,
+            "effectiveId": effective_id,
+            "kind": str(record["kind"]),
+            "source": str(record["source"]),
+            "canonicalStartByte": int(expected_record["canonicalStartByte"]),
+            "canonicalEndByte": int(expected_record["canonicalEndByte"]),
+            "effectiveStartByte": int(record["startByte"]),
+            "effectiveEndByte": int(record["endByte"]),
+        })
+
+    effective = SelectedModule(
+        module=canonical.module, compiled_module=compiled,
+        source_path=patched_path, source=patched,
+        occurrences=tuple(classified),
+        materialize=tuple(entry for entry in classified if entry["action"] == "materialize"),
+        retain=tuple(entry for entry in classified if entry["action"] == "retain"),
+    )
+    return OverlaySelection(canonical, effective, entries, tuple(mappings))
 
 
 def _sanitize_stem(value: str) -> str:
@@ -1424,6 +1569,9 @@ def _module_result(
             "compileSuccess": True,
             "seconds": materialized_elapsed,
         },
+        "manualOverlay": None,
+        "canonicalTotalCount": len(selected.occurrences),
+        "manualReplacementCount": 0,
         "artifactReport": {
             "path": str(reports_path.resolve()),
             "sha256": report_hash,
@@ -1452,6 +1600,118 @@ def _module_result(
         },
         "exactSourcePreservation": exact_preservation,
         "compileSuccess": True,
+    }
+
+
+def attach_manual_overlay_evidence(
+    result: dict[str, Any],
+    selection: OverlaySelection,
+    overlay: manual_overlay.Overlay,
+    debug_root: Path,
+    dylib: str,
+    timeout: int,
+) -> None:
+    """Attach the manual evidence mode without inventing recorder variants."""
+    canonical = selection.canonical
+    result["canonicalTotalCount"] = len(canonical.occurrences)
+    result["manualReplacementCount"] = len(selection.entries)
+    if not selection.entries:
+        result["manualOverlay"] = None
+        return
+
+    module_slug = _sanitize_stem(
+        canonical.module.removeprefix("Mathlib/").removesuffix(".lean")
+    )
+    module_root = debug_root / module_slug
+    canonical_path = _copy_at_module_root(
+        module_root / "canonical", canonical.module, canonical.source
+    )
+    final_path = Path(str(result["materializedPath"])).resolve()
+    final_source = final_path.read_bytes()
+    canonical_oracle = run_declaration_oracle(
+        canonical.module,
+        canonical_path,
+        final_path,
+        module_root / "canonical-oracle",
+        dylib,
+        timeout,
+    )
+
+    manual_records: list[dict[str, Any]] = []
+    cumulative_delta = 0
+    for entry in selection.entries:
+        rendered = manual_overrides.render(entry, canonical.source)
+        start, end = int(entry["startByte"]), int(entry["endByte"])
+        effective_start = start + cumulative_delta
+        effective_end = effective_start + len(rendered)
+        if selection.effective.source[effective_start:effective_end] != rendered:
+            raise RuntimeError(
+                f"manual overlay rendered bytes changed for {entry['occurrence']}"
+            )
+        if rendered not in final_source:
+            raise RuntimeError(
+                f"manual overlay final composite dropped original comments for "
+                f"{entry['occurrence']}"
+            )
+        manual_records.append({
+            "canonicalId": str(entry["occurrence"]),
+            "kind": next(
+                str(item["kind"]) for item in canonical.occurrences
+                if str(item["id"]) == str(entry["occurrence"])
+            ),
+            "source": str(entry["source"]),
+            "canonicalStartByte": start,
+            "canonicalEndByte": end,
+            "effectiveStartByte": effective_start,
+            "effectiveEndByte": effective_end,
+            "replacementSha256": sha256(str(entry["replacement"]).encode("utf-8")),
+            "renderedSha256": sha256(rendered),
+        })
+        cumulative_delta += len(rendered) - (end - start)
+
+    manual_ids = [str(item["canonicalId"]) for item in manual_records]
+    mapped_canonical = [str(item["canonicalId"]) for item in selection.mappings]
+    mapped_effective = [str(item["effectiveId"]) for item in selection.mappings]
+    canonical_ids = [str(item["id"]) for item in canonical.occurrences]
+    ordinary_result_ids = [str(item["occurrence"]) for item in result["occurrenceResults"]]
+    if len(set(manual_ids + mapped_canonical)) != len(canonical_ids) or set(
+        manual_ids + mapped_canonical
+    ) != set(canonical_ids):
+        raise RuntimeError(
+            f"manual overlay does not partition canonical occurrences in {canonical.module}"
+        )
+    if ordinary_result_ids != mapped_effective:
+        raise RuntimeError(
+            f"manual overlay effective mapping order disagrees with recorder results in "
+            f"{canonical.module}"
+        )
+    if set(manual_ids) & set(mapped_effective):
+        raise RuntimeError(
+            f"manual overlay canonical IDs leaked into recorder evidence in {canonical.module}"
+        )
+
+    result["manualOverlay"] = {
+        "identity": overlay.identity(),
+        "canonicalSource": {
+            "path": str(canonical_path.resolve()), "sha256": sha256(canonical.source)
+        },
+        "effectiveBase": {
+            "path": str(Path(str(result["originalPath"])).resolve()),
+            "sha256": str(result["originalHash"]),
+        },
+        "finalComposite": {
+            "path": str(final_path), "sha256": sha256(final_source)
+        },
+        "manualIds": manual_ids,
+        "manualReplacements": manual_records,
+        "ordinaryOccurrenceMap": list(selection.mappings),
+        "canonicalOracleInvocation": {
+            "path": str((module_root / "canonical-oracle/oracle-invocation.json").resolve()),
+            "sha256": sha256(
+                (module_root / "canonical-oracle/oracle-invocation.json").read_bytes()
+            ),
+        },
+        "canonicalDeclarationOracle": canonical_oracle,
     }
 
 
@@ -1486,6 +1746,9 @@ SHARD_REPORT_FIELDS = frozenset(
         "runner",
         "selectedModules",
         "modules",
+        "manualOverlay",
+        "canonicalTotalCount",
+        "manualReplacementCount",
         "totalCount",
         "materializeCount",
         "retainCount",
@@ -1526,6 +1789,9 @@ MODULE_REPORT_FIELDS = frozenset(
         "original",
         "instrumented",
         "materialized",
+        "manualOverlay",
+        "canonicalTotalCount",
+        "manualReplacementCount",
         "artifactReport",
         "declarationOracle",
         "replayGuard",
@@ -1553,6 +1819,8 @@ MODULE_REPORT_FIELDS = frozenset(
 AGGREGATE_FIELDS = frozenset(
     {
         "selectedModuleCount",
+        "canonicalTotalCount",
+        "manualReplacementCount",
         "totalCount",
         "materializeCount",
         "retainCount",
@@ -1600,6 +1868,44 @@ ORACLE_WRAPPER_FIELDS = frozenset(
         "status",
         "report",
         "replayGuard",
+    }
+)
+MANUAL_MODULE_FIELDS = frozenset(
+    {
+        "identity",
+        "canonicalSource",
+        "effectiveBase",
+        "finalComposite",
+        "manualIds",
+        "manualReplacements",
+        "ordinaryOccurrenceMap",
+        "canonicalOracleInvocation",
+        "canonicalDeclarationOracle",
+    }
+)
+MANUAL_REPLACEMENT_FIELDS = frozenset(
+    {
+        "canonicalId",
+        "kind",
+        "source",
+        "canonicalStartByte",
+        "canonicalEndByte",
+        "effectiveStartByte",
+        "effectiveEndByte",
+        "replacementSha256",
+        "renderedSha256",
+    }
+)
+MANUAL_MAPPING_FIELDS = frozenset(
+    {
+        "canonicalId",
+        "effectiveId",
+        "kind",
+        "source",
+        "canonicalStartByte",
+        "canonicalEndByte",
+        "effectiveStartByte",
+        "effectiveEndByte",
     }
 )
 REPLAY_GUARD_FIELDS = frozenset({"kind", "schema", "nonce", "path", "sha256"})
@@ -1853,6 +2159,107 @@ def _validate_oracle_wrapper(
     return result
 
 
+def _validate_overlay_identity(value: object, label: str) -> dict[str, object]:
+    identity = _exact_fields(
+        value, frozenset({"kind", "schema", "database", "environment", "counts"}), label
+    )
+    if identity["kind"] != "simp_manual_overlay" or identity["schema"] != 2:
+        raise RuntimeError(f"{label} has an unsupported identity")
+    database = _exact_fields(
+        identity["database"], frozenset({"sha256", "schema", "environment"}),
+        f"{label}.database"
+    )
+    digest = _require_string(database["sha256"], f"{label}.database.sha256")
+    if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+        raise RuntimeError(f"{label}.database.sha256 is invalid")
+    _require_int(database["schema"], f"{label}.database.schema", nonnegative=True)
+    environment = _exact_fields(
+        identity["environment"], frozenset({"mathlibCommit", "lean"}),
+        f"{label}.environment",
+    )
+    _require_string(environment["mathlibCommit"], f"{label}.environment.mathlibCommit")
+    lean = _exact_fields(
+        environment["lean"], frozenset({"version", "commit"}), f"{label}.environment.lean"
+    )
+    _require_string(lean["version"], f"{label}.environment.lean.version")
+    _require_string(lean["commit"], f"{label}.environment.lean.commit")
+    if database["environment"] != environment:
+        raise RuntimeError(f"{label}.database.environment disagrees")
+    counts = _exact_fields(
+        identity["counts"],
+        frozenset({"modules", "canonicalOccurrences", "manualOverrides", "untouchedOccurrences"}),
+        f"{label}.counts",
+    )
+    for field in counts:
+        _require_int(counts[field], f"{label}.counts.{field}", nonnegative=True)
+    if counts["canonicalOccurrences"] != counts["manualOverrides"] + counts["untouchedOccurrences"]:
+        raise RuntimeError(f"{label}.counts do not partition canonical occurrences")
+    return identity
+
+
+def _validate_manual_module(
+    value: object, label: str, compiled_module: str,
+    ordinary_results: list[dict[str, Any]], canonical_total: int, manual_count: int,
+) -> dict[str, object]:
+    overlay = _exact_fields(value, MANUAL_MODULE_FIELDS, label)
+    _validate_overlay_identity(overlay["identity"], f"{label}.identity")
+    canonical = _validate_hash_ref(overlay["canonicalSource"], f"{label}.canonicalSource")
+    effective = _validate_hash_ref(overlay["effectiveBase"], f"{label}.effectiveBase")
+    final = _validate_hash_ref(overlay["finalComposite"], f"{label}.finalComposite")
+    if len({canonical["path"], effective["path"], final["path"]}) != 3:
+        raise RuntimeError(f"{label} source evidence paths must be distinct")
+    manual_ids = _validate_string_list(overlay["manualIds"], f"{label}.manualIds")
+    replacements = overlay["manualReplacements"]
+    if not isinstance(replacements, list):
+        raise RuntimeError(f"{label}.manualReplacements must be an array")
+    checked_replacements = []
+    for index, raw in enumerate(replacements):
+        replacement = _exact_fields(raw, MANUAL_REPLACEMENT_FIELDS, f"{label}.manualReplacements[{index}]")
+        for field in ("canonicalId", "kind", "source", "replacementSha256", "renderedSha256"):
+            _require_string(replacement[field], f"{label}.manualReplacements[{index}].{field}")
+        for field in ("canonicalStartByte", "canonicalEndByte", "effectiveStartByte", "effectiveEndByte"):
+            _require_int(replacement[field], f"{label}.manualReplacements[{index}].{field}", nonnegative=True)
+        if replacement["canonicalEndByte"] <= replacement["canonicalStartByte"] or replacement["effectiveEndByte"] <= replacement["effectiveStartByte"]:
+            raise RuntimeError(f"{label}.manualReplacements[{index}] has an empty range")
+        checked_replacements.append(replacement)
+    if manual_ids != [str(item["canonicalId"]) for item in checked_replacements]:
+        raise RuntimeError(f"{label}.manualIds disagree with manual replacements")
+    if len(manual_ids) != len(set(manual_ids)) or len(manual_ids) != manual_count:
+        raise RuntimeError(f"{label} manual replacement identities/count disagree")
+
+    mappings = overlay["ordinaryOccurrenceMap"]
+    if not isinstance(mappings, list):
+        raise RuntimeError(f"{label}.ordinaryOccurrenceMap must be an array")
+    checked_mappings = []
+    for index, raw in enumerate(mappings):
+        mapping = _exact_fields(raw, MANUAL_MAPPING_FIELDS, f"{label}.ordinaryOccurrenceMap[{index}]")
+        for field in ("canonicalId", "effectiveId", "kind", "source"):
+            _require_string(mapping[field], f"{label}.ordinaryOccurrenceMap[{index}].{field}")
+        for field in ("canonicalStartByte", "canonicalEndByte", "effectiveStartByte", "effectiveEndByte"):
+            _require_int(mapping[field], f"{label}.ordinaryOccurrenceMap[{index}].{field}", nonnegative=True)
+        checked_mappings.append(mapping)
+    canonical_ids = manual_ids + [str(item["canonicalId"]) for item in checked_mappings]
+    if len(checked_mappings) != len(ordinary_results):
+        raise RuntimeError(f"{label} ordinary mapping count disagrees with recorder results")
+    effective_ids = [str(item["effectiveId"]) for item in checked_mappings]
+    if len(canonical_ids) != canonical_total or len(canonical_ids) != len(set(canonical_ids)):
+        raise RuntimeError(f"{label} canonical mapping is not a partition")
+    if len(effective_ids) != len(set(effective_ids)):
+        raise RuntimeError(f"{label} effective mapping contains duplicate IDs")
+    if effective_ids != [str(item["occurrence"]) for item in ordinary_results]:
+        raise RuntimeError(f"{label} effective mapping disagrees with occurrence results")
+    if set(manual_ids) & set(effective_ids):
+        raise RuntimeError(f"{label} manual IDs leaked into recorder occurrence results")
+    _validate_hash_ref(
+        overlay["canonicalOracleInvocation"], f"{label}.canonicalOracleInvocation"
+    )
+    _validate_oracle_wrapper(
+        overlay["canonicalDeclarationOracle"], f"{label}.canonicalDeclarationOracle",
+        compiled_module,
+    )
+    return overlay
+
+
 def _validate_status_map(value: object, label: str) -> dict[str, int]:
     return _validate_count_map(value, label, {"success", "failure"})
 
@@ -1922,7 +2329,22 @@ def _validate_module_report(value: object, index: int) -> dict[str, Any]:
     if not _require_bool(module["compileSuccess"], f"{label}.compileSuccess"):
         raise RuntimeError(f"{label}.compileSuccess must be true")
 
+    canonical_total_count = _require_int(
+        module["canonicalTotalCount"], f"{label}.canonicalTotalCount", nonnegative=True
+    )
+    manual_replacement_count = _require_int(
+        module["manualReplacementCount"],
+        f"{label}.manualReplacementCount",
+        nonnegative=True,
+    )
     total_count = _require_int(module["totalCount"], f"{label}.totalCount", nonnegative=True)
+    if module["manualOverlay"] is None:
+        if manual_replacement_count != 0 or canonical_total_count != total_count:
+            raise RuntimeError(f"{label} null manual overlay has inconsistent counts")
+    elif not isinstance(module["manualOverlay"], dict):
+        raise RuntimeError(f"{label}.manualOverlay must be null or an object")
+    if canonical_total_count != total_count + manual_replacement_count:
+        raise RuntimeError(f"{label} canonical/manual occurrence counts disagree")
     materialize_count = _require_int(
         module["materializeCount"], f"{label}.materializeCount", nonnegative=True
     )
@@ -1964,6 +2386,18 @@ def _validate_module_report(value: object, index: int) -> dict[str, Any]:
         raise RuntimeError(f"{label} total/action counts disagree")
     if module["occurrenceClassificationCounts"] != occurrence_counts:
         raise RuntimeError(f"{label} occurrence classification counts disagree")
+    if module["manualOverlay"] is not None:
+        checked_overlay = _validate_manual_module(
+            module["manualOverlay"], f"{label}.manualOverlay", expected_compiled,
+            occurrence_results, canonical_total_count, manual_replacement_count,
+        )
+        if checked_overlay["effectiveBase"] != module["original"]:
+            raise RuntimeError(f"{label}.manualOverlay effective base disagrees with original")
+        if checked_overlay["finalComposite"] != {
+            "path": module["materialized"]["path"],
+            "sha256": module["materialized"]["sha256"],
+        }:
+            raise RuntimeError(f"{label}.manualOverlay final composite disagrees with materialized")
 
     root_ids = _validate_string_list(module["replacementRootIds"], f"{label}.replacementRootIds")
     if root_ids != [
@@ -2065,7 +2499,7 @@ def validate_shard_identity(value: object) -> dict[str, object]:
 
 
 def validate_shard_shape(value: object) -> dict[str, object]:
-    """Validate exact schema-5 structure and internal count coherence.
+    """Validate the exact current structure and internal count coherence.
 
     This deliberately does not read referenced files.  Publication additionally
     requires ``verify_shard_evidence``, which binds this shape to the selected
@@ -2146,6 +2580,10 @@ def validate_shard_shape(value: object) -> dict[str, object]:
     if value["occurrenceClassificationCounts"] != top_occurrence_counts:
         raise RuntimeError("top-level occurrence classification counts disagree")
     totals = {
+        "canonicalTotalCount": sum(int(module["canonicalTotalCount"]) for module in modules),
+        "manualReplacementCount": sum(
+            int(module["manualReplacementCount"]) for module in modules
+        ),
         "totalCount": sum(int(module["totalCount"]) for module in modules),
         "materializeCount": sum(int(module["materializeCount"]) for module in modules),
         "retainCount": sum(int(module["retainCount"]) for module in modules),
@@ -2157,6 +2595,47 @@ def validate_shard_shape(value: object) -> dict[str, object]:
         actual = _require_int(value[field], f"materialization shard report.{field}", nonnegative=True)
         if actual != expected:
             raise RuntimeError(f"top-level {field} disagrees with module totals")
+    if value["manualOverlay"] is None:
+        if totals["manualReplacementCount"] != 0 or any(
+            module["manualOverlay"] is not None for module in modules
+        ):
+            raise RuntimeError("null top-level manual overlay disagrees with modules")
+    elif not isinstance(value["manualOverlay"], dict):
+        raise RuntimeError("materialization shard report.manualOverlay must be null or an object")
+    else:
+        top_overlay = _validate_overlay_identity(
+            value["manualOverlay"], "materialization shard report.manualOverlay"
+        )
+        if top_overlay["environment"] != {
+            "mathlibCommit": value["mathlibCommit"], "lean": value["lean"]
+        }:
+            raise RuntimeError("top-level manual overlay environment disagrees with report")
+        for module in modules:
+            module_overlay = module["manualOverlay"]
+            if module_overlay is not None and module_overlay["identity"] != top_overlay:
+                raise RuntimeError("module manual overlay identity disagrees with top-level identity")
+            selected_counts = {
+                "canonicalOccurrences": int(module["canonicalTotalCount"]),
+                "manualOverrides": int(module["manualReplacementCount"]),
+                "untouchedOccurrences": int(module["totalCount"]),
+            }
+            for field, selected_count in selected_counts.items():
+                if selected_count > int(top_overlay["counts"][field]):
+                    raise RuntimeError(
+                        f"modules[{module_names.index(module['module'])}] {field} "
+                        "exceeds global manual overlay identity"
+                    )
+        selected_counts = {
+            "modules": len(modules),
+            "canonicalOccurrences": totals["canonicalTotalCount"],
+            "manualOverrides": totals["manualReplacementCount"],
+            "untouchedOccurrences": totals["totalCount"],
+        }
+        for field, selected_count in selected_counts.items():
+            if selected_count > int(top_overlay["counts"][field]):
+                raise RuntimeError(
+                    f"selected {field} exceeds global manual overlay identity"
+                )
     expected_observed = [str(item) for module in modules for item in module["observedIds"]]
     expected_unobserved = [str(item) for module in modules for item in module["unobservedIds"]]
     if value["observedIds"] != expected_observed:
@@ -2192,6 +2671,8 @@ def validate_shard_shape(value: object) -> dict[str, object]:
     )
     expected_aggregate = {
         "selectedModuleCount": len(modules),
+        "canonicalTotalCount": totals["canonicalTotalCount"],
+        "manualReplacementCount": totals["manualReplacementCount"],
         "totalCount": totals["totalCount"],
         "materializeCount": totals["materializeCount"],
         "retainCount": totals["retainCount"],
@@ -2216,7 +2697,10 @@ def validate_shard_protocol(value: object) -> dict[str, object]:
 
 
 def _read_evidence_file(path_value: object, expected: Path, label: str) -> bytes:
-    recorded = Path(_require_string(path_value, f"{label}.path")).resolve()
+    recorded_input = Path(_require_string(path_value, f"{label}.path"))
+    if recorded_input.is_symlink():
+        raise RuntimeError(f"{label} evidence path is a symlink: {recorded_input}")
+    recorded = recorded_input.resolve()
     expected = expected.resolve()
     if recorded != expected:
         raise RuntimeError(
@@ -2234,6 +2718,147 @@ def _validate_evidence_hash(
     actual = sha256(data)
     if actual != recorded:
         raise RuntimeError(f"{label} hash mismatch: {actual} != {recorded}")
+
+
+def verify_manual_overlay_evidence(
+    module_report: dict[str, Any],
+    overlay: manual_overlay.Overlay,
+    module: str,
+    timeout: int,
+    *,
+    debug_root: Path,
+) -> None:
+    """Reproduce manual evidence from the canonical DB and durable source files."""
+    section = module_report.get("manualOverlay")
+    entries = tuple(overlay.entries_by_module().get(module, ()))
+    if not entries:
+        if section is not None or module_report.get("manualReplacementCount") != 0:
+            raise RuntimeError(f"{module} unexpectedly reports manual overlay evidence")
+        return
+    if not isinstance(section, dict) or section.get("identity") != overlay.identity():
+        raise RuntimeError(f"{module} manual overlay identity mismatch")
+    canonical_source = overlay.sources[module]
+    effective_source = overlay.apply(module, canonical_source)
+    refs = {
+        "canonical": section["canonicalSource"],
+        "effective": section["effectiveBase"],
+        "final": section["finalComposite"],
+    }
+    module_root = (
+        debug_root.resolve()
+        / _sanitize_stem(module.removeprefix("Mathlib/").removesuffix(".lean"))
+    )
+    expected_source_paths = {
+        "canonical": module_root / "canonical" / Path(*module.split("/")),
+        "effective": module_root / "original" / Path(*module.split("/")),
+        "final": module_root / "materialized" / Path(*module.split("/")),
+    }
+    data: dict[str, bytes] = {}
+    for label, ref in refs.items():
+        checked = _validate_hash_ref(ref, f"{module} manual {label}")
+        data[label] = _read_evidence_file(
+            checked["path"], expected_source_paths[label], f"{module} manual {label}"
+        )
+        _validate_evidence_hash(data[label], checked["sha256"], f"{module} manual {label}")
+    if data["canonical"] != canonical_source or data["effective"] != effective_source:
+        raise RuntimeError(f"{module} manual canonical/effective source is not reproducible")
+    if refs["effective"] != module_report["original"] or refs["final"] != {
+        "path": module_report["materialized"]["path"],
+        "sha256": module_report["materialized"]["sha256"],
+    }:
+        raise RuntimeError(f"{module} manual source references disagree with module evidence")
+
+    canonical_records = {str(item["id"]): item for item in overlay.modules[module]}
+    expected_manual = []
+    delta = 0
+    for entry in entries:
+        rendered = manual_overrides.render(entry, canonical_source)
+        start, end = int(entry["startByte"]), int(entry["endByte"])
+        effective_start = start + delta
+        expected_manual.append({
+            "canonicalId": str(entry["occurrence"]),
+            "kind": str(canonical_records[str(entry["occurrence"])]["kind"]),
+            "source": str(entry["source"]),
+            "canonicalStartByte": start,
+            "canonicalEndByte": end,
+            "effectiveStartByte": effective_start,
+            "effectiveEndByte": effective_start + len(rendered),
+            "replacementSha256": sha256(str(entry["replacement"]).encode("utf-8")),
+            "renderedSha256": sha256(rendered),
+        })
+        if rendered not in data["final"]:
+            raise RuntimeError(f"{module} final composite dropped manual original comments")
+        delta += len(rendered) - (end - start)
+    if section["manualReplacements"] != expected_manual or section["manualIds"] != [
+        str(entry["occurrence"]) for entry in entries
+    ]:
+        raise RuntimeError(f"{module} manual replacement report is not reproducible")
+
+    expected_mappings = []
+    for item in overlay.shifted_occurrences(module):
+        expected_mappings.append({
+            "canonicalId": str(item["canonicalId"]),
+            "effectiveId": str(item["id"]),
+            "kind": str(item["kind"]),
+            "source": str(item["source"]),
+            "canonicalStartByte": int(item["canonicalStartByte"]),
+            "canonicalEndByte": int(item["canonicalEndByte"]),
+            "effectiveStartByte": int(item["startByte"]),
+            "effectiveEndByte": int(item["endByte"]),
+        })
+    if section["ordinaryOccurrenceMap"] != expected_mappings:
+        raise RuntimeError(f"{module} ordinary shifted mapping is not reproducible")
+
+    oracle = section["canonicalDeclarationOracle"]
+    invocation = section["canonicalOracleInvocation"]
+    canonical_path = expected_source_paths["canonical"]
+    final_path = expected_source_paths["final"]
+    invocation_path = module_root / "canonical-oracle" / "oracle-invocation.json"
+    oracle_log_path = module_root / "canonical-oracle" / "declaration-oracle.log"
+    oracle_report_path = module_root / "canonical-oracle" / "declaration-oracle-report.json"
+    nonce = _validate_invocation_ref(
+        invocation,
+        f"{module} canonical oracle invocation",
+        invocation_path,
+        corpus.compiled_module_name(module),
+        None,
+        {
+            "stockSource": str(canonical_path),
+            "stockSourceSha256": str(refs["canonical"]["sha256"]),
+            "appliedSource": str(final_path),
+            "appliedSourceSha256": str(refs["final"]["sha256"]),
+        },
+        expected_kind="boundary_oracle_invocation_v1",
+        expected_command=_oracle_command(
+            corpus.compiled_module_name(module), canonical_path, final_path
+        ),
+        expected_runtime=str(_oracle_runtime_path()),
+        expected_timeout=timeout,
+    )
+    if nonce != oracle["replayGuard"]["nonce"]:
+        raise RuntimeError(f"{module} canonical oracle nonce disagrees with invocation")
+    log_data = _read_evidence_file(
+        oracle["path"], oracle_log_path, f"{module} canonical oracle log"
+    )
+    _validate_evidence_hash(log_data, oracle["sha256"], f"{module} canonical oracle log")
+    log_text = log_data.decode("utf-8")
+    check_replay_abort_markers(
+        log_text, expected_nonce=nonce,
+        expected_module=corpus.compiled_module_name(module),
+    )
+    parsed_log_report = _parse_declaration_oracle(
+        log_text, corpus.compiled_module_name(module)
+    )
+    if parsed_log_report != oracle["report"]:
+        raise RuntimeError(f"{module} canonical oracle log differs from embedded report")
+    report_data = _read_evidence_file(
+        oracle["reportPath"], oracle_report_path, f"{module} canonical oracle report"
+    )
+    _validate_evidence_hash(
+        report_data, oracle["reportSha256"], f"{module} canonical oracle report"
+    )
+    if json.loads(report_data) != oracle["report"]:
+        raise RuntimeError(f"{module} canonical oracle durable report disagrees")
 
 
 def _parse_jsonl_evidence(data: bytes, label: str) -> list[object]:
@@ -2264,6 +2889,7 @@ def verify_shard_evidence(
     selected: list[SelectedModule],
     debug_root: Path,
     timeout: int,
+    overlay: manual_overlay.Overlay | None = None,
 ) -> dict[str, object]:
     """Bind the current report schema to selected manifest and durable files."""
     report = validate_shard_shape(report)
@@ -2305,6 +2931,33 @@ def verify_shard_evidence(
     }:
         raise RuntimeError("report manifest policy is not closed")
 
+    # The overlay identity describes the complete manifest corpus, while this
+    # report may contain only a selected module subset.  Bind the former to the
+    # authenticated manifest and require only the selected counts below it.
+    report_overlay = report["manualOverlay"]
+    if overlay is None:
+        if report_overlay is not None:
+            raise RuntimeError("report contains manual overlay without authenticated database")
+    else:
+        manifest_binding = manifest.get("manualOverrides")
+        if not isinstance(manifest_binding, dict):
+            raise RuntimeError("manifest manualOverrides binding is invalid")
+        expected_identity = overlay.identity()
+        if manifest_binding != expected_identity["database"]:
+            raise RuntimeError("manual overlay database is not bound to manifest")
+        if report_overlay != expected_identity:
+            raise RuntimeError("report manual overlay identity is not bound to manifest")
+        global_counts = expected_identity["counts"]
+        if global_counts != {
+            "modules": manifest.get("moduleFileCount"),
+            "canonicalOccurrences": manifest.get("occurrenceCount"),
+            "manualOverrides": len(overlay.entries),
+            "untouchedOccurrences": (
+                manifest.get("occurrenceCount", -1) - len(overlay.entries)
+            ),
+        }:
+            raise RuntimeError("manual overlay counts are not bound to manifest totals")
+
     runner_path = Path(__file__).resolve()
     runner_data = _read_evidence_file(report["runner"]["path"], runner_path, "runner")
     _validate_evidence_hash(runner_data, report["runner"]["sha256"], "runner")
@@ -2315,6 +2968,19 @@ def verify_shard_evidence(
         raise RuntimeError("report selectedModules differ from manifest selection")
     if len(report["modules"]) != len(selected):
         raise RuntimeError("report module count differs from manifest selection")
+    if report_overlay is not None:
+        global_counts = report_overlay["counts"]
+        selected_counts = {
+            "modules": len(selected),
+            "canonicalOccurrences": int(report["canonicalTotalCount"]),
+            "manualOverrides": int(report["manualReplacementCount"]),
+            "untouchedOccurrences": int(report["totalCount"]),
+        }
+        for field, value in selected_counts.items():
+            if value > int(global_counts[field]):
+                raise RuntimeError(
+                    f"selected {field} exceeds global manual overlay identity"
+                )
 
     for module_report, item in zip(report["modules"], selected):
         if module_report["module"] != item.module:
@@ -2529,6 +3195,7 @@ def verify_shard_evidence(
 
 
 def run_shard(args: argparse.Namespace) -> dict[str, Any]:
+    manual_overrides_arg = getattr(args, "manual_overrides", None)
     manifest_location = Path(args.manifest)
     if not manifest_location.is_absolute():
         manifest_location = ROOT / manifest_location
@@ -2541,6 +3208,18 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
     # leave a previous success that a consumer could mistake for the current run.
     output_path = resolve_output_path(args.output, manifest_path)
     debug_root = debug_root_for(output_path)
+    if manual_overrides_arg is not None:
+        manual_location = Path(manual_overrides_arg).absolute()
+        manual_path = manual_location.resolve()
+        if (
+            manual_location == output_path
+            or manual_path == output_path
+            or manual_location.is_relative_to(debug_root)
+            or manual_path.is_relative_to(debug_root)
+        ):
+            raise RuntimeError(
+                "manual override database must be outside materializer output/cleanup paths"
+            )
     validate_cleanup_targets(
         manifest_path,
         output_path,
@@ -2567,20 +3246,41 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         False,
     )
     provenance = verify_environment(manifest, args.timeout)
-    selected = validate_manifest_selection(
+    canonical_selected = validate_manifest_selection(
         manifest,
         list(args.module),
         expect_total=args.expect_total,
         expect_materialize=args.expect_materialize,
     )
-    verify_selected_classifications(selected, args.timeout)
+    verify_selected_classifications(canonical_selected, args.timeout)
+    overlay = None
+    if manual_overrides_arg is not None:
+        overlay = manual_overlay.load_overlay(
+            manifest_path, Path(manual_overrides_arg), source_root=MATHLIB
+        )
+    selections = (
+        [
+            prepare_overlay_selection(item, overlay, debug_root, args.timeout)
+            for item in canonical_selected
+        ]
+        if overlay is not None
+        else [OverlaySelection(item, item, (), ()) for item in canonical_selected]
+    )
+    selected = [item.effective for item in selections]
     runner_path = Path(__file__).resolve()
     runner_hash = sha256(runner_path.read_bytes())
     dylib = _query_dynamic_library(args.timeout, debug_root)
 
     module_results: list[dict[str, Any]] = []
-    for item in selected:
-        module_results.append(_module_result(item, debug_root, dylib, args.timeout))
+    for selection in selections:
+        module_result = _module_result(
+            selection.effective, debug_root, dylib, args.timeout
+        )
+        if overlay is not None:
+            attach_manual_overlay_evidence(
+                module_result, selection, overlay, debug_root, dylib, args.timeout
+            )
+        module_results.append(module_result)
 
     # Recheck the immutable inputs after all compiler invocations.  A report is
     # only published if the same pinned environment and source set survived.
@@ -2590,10 +3290,16 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
     final_provenance = verify_environment(manifest, args.timeout)
     if final_provenance != provenance:
         raise RuntimeError("pinned_environment_changed_during_run")
-    for item in selected:
+    for item in canonical_selected:
         current_source = item.source_path.read_bytes()
         if current_source != item.source:
             raise RuntimeError(f"selected Mathlib source changed during run: {item.module}")
+    if overlay is not None:
+        refreshed_overlay = manual_overlay.load_overlay(
+            manifest_path, Path(manual_overrides_arg), source_root=MATHLIB
+        )
+        if refreshed_overlay.identity() != overlay.identity():
+            raise RuntimeError("manual_override_database_changed_during_run")
 
     aggregate_execution_status: Counter[str] = Counter()
     aggregate_variant_status: Counter[str] = Counter()
@@ -2613,6 +3319,12 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         unobserved_ids.extend(str(value) for value in module["unobservedIds"])
         occurrence_results.extend(module["occurrenceResults"])
     total_count = sum(int(module["totalCount"]) for module in module_results)
+    canonical_total_count = sum(
+        int(module["canonicalTotalCount"]) for module in module_results
+    )
+    manual_replacement_count = sum(
+        int(module["manualReplacementCount"]) for module in module_results
+    )
     materialize_count = sum(int(module["materializeCount"]) for module in module_results)
     retain_count = sum(int(module["retainCount"]) for module in module_results)
     expected_occurrence_ids = [
@@ -2657,8 +3369,11 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         "runnerPath": str(runner_path),
         "runnerHash": runner_hash,
         "runner": {"path": str(runner_path), "sha256": runner_hash},
-        "selectedModules": [item.module for item in selected],
+        "selectedModules": [item.module for item in canonical_selected],
         "modules": module_results,
+        "manualOverlay": overlay.identity() if overlay is not None else None,
+        "canonicalTotalCount": canonical_total_count,
+        "manualReplacementCount": manual_replacement_count,
         "totalCount": total_count,
         "materializeCount": materialize_count,
         "retainCount": retain_count,
@@ -2686,6 +3401,8 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         "compileSuccess": True,
         "aggregate": {
             "selectedModuleCount": len(module_results),
+            "canonicalTotalCount": canonical_total_count,
+            "manualReplacementCount": manual_replacement_count,
             "totalCount": total_count,
             "materializeCount": materialize_count,
             "retainCount": retain_count,
@@ -2706,7 +3423,14 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         selected=selected,
         debug_root=debug_root,
         timeout=args.timeout,
+        overlay=overlay,
     )
+    if overlay is not None:
+        for module_report in module_results:
+            verify_manual_overlay_evidence(
+                module_report, overlay, str(module_report["module"]), args.timeout,
+                debug_root=debug_root,
+            )
     corpus.assert_repository(provenance["repositoryCommit"], False)
     _atomic_write_json(output_path, report)
     return report
@@ -2723,6 +3447,10 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--module", action="append", required=True, help="Mathlib module path")
     result.add_argument("--expect-total", type=int)
     result.add_argument("--expect-materialize", type=int)
+    result.add_argument(
+        "--manual-overrides",
+        help="authenticated manual override database composed before ordinary recording",
+    )
     result.add_argument("--timeout", type=int, default=600)
     return result
 

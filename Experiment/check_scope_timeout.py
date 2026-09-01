@@ -64,6 +64,10 @@ def test_manifest_passes_requested_timeout(root: Path) -> None:
         stack.enter_context(patch.object(corpus, "MATHLIB", mathlib))
         stack.enter_context(patch.object(corpus, "assert_repository", return_value="revision"))
         stack.enter_context(patch.object(corpus, "verify_environment", return_value=("mathlib", {})))
+        stack.enter_context(patch.object(
+            corpus.manual_overrides, "load_database",
+            return_value=({"mathlibCommit": "mathlib", "lean": {}}, []),
+        ))
         stack.enter_context(patch.object(corpus, "implementation_hashes", return_value={}))
         stack.enter_context(patch.object(corpus, "inventory_paths", return_value=({}, [])))
         stack.enter_context(patch.object(

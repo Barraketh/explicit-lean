@@ -23,6 +23,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import boundary_materialize_shard as materializer
+import manual_overlay
 from boundary_protocol import artifact_protocol
 import campaign_budget
 from process_runner import run_process
@@ -111,7 +112,9 @@ def _selected_modules(
     return selected, empty
 
 
-def _identities(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _identities(
+    manifest: Mapping[str, Any], overlay_identity: Mapping[str, object] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     implementations = manifest.get("implementationHashes")
     if not isinstance(implementations, dict) or not implementations:
         raise TranslationIndexError("manifest implementationHashes must be a nonempty object")
@@ -134,6 +137,11 @@ def _identities(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, 
             for name in ("translation_index.py", "campaign_budget.py", "process_runner.py")
         },
         "artifactProtocol": protocol,
+        # The overlay is deliberately a global implementation salt.  It
+        # invalidates more modules than strictly necessary when the tiny
+        # exceptional table changes, but can never reuse a result produced by
+        # different replacement bytes.
+        "manualOverlay": dict(overlay_identity) if overlay_identity is not None else None,
     }
     toolchain = {
         "repositoryCommit": repository,
@@ -171,17 +179,105 @@ def _atomic_text(path: Path, text: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _selected_for_report_evidence(
+    manifest: dict[str, Any],
+    module: str,
+    overlay: manual_overlay.Overlay | None,
+    debug_root: Path,
+) -> list[materializer.SelectedModule]:
+    """Reconstruct a report's immutable selection without changing evidence.
+
+    The producer freshly classifies an overlaid source before recording it.
+    The consumer starts from the closed canonical manifest and applies the
+    authenticated coordinate shift.  It deliberately does not call
+    ``prepare_overlay_selection`` here because that producer helper writes the
+    effective source into the run directory before verification.
+    """
+    canonical = materializer.validate_manifest_selection(
+        manifest, [module], expect_total=None, expect_materialize=None
+    )
+    if len(canonical) != 1:
+        raise TranslationIndexError(
+            f"closed manifest did not select exactly one module: {module}"
+        )
+    selected = canonical[0]
+    if overlay is None or not overlay.entries_by_module().get(module):
+        return [selected]
+
+    effective_source = overlay.apply(module, selected.source)
+    shifted = tuple(
+        materializer._validate_occurrence(module, effective_source, dict(raw))
+        for raw in overlay.shifted_occurrences(module)
+    )
+    reusable = [
+        str(item["id"])
+        for item in shifted
+        if item["executionRole"] == "reusable_executable"
+    ]
+    if reusable:
+        raise TranslationIndexError(
+            f"overlaid report contains unsupported reusable occurrences: {module}: {reusable}"
+        )
+    unresolved = [str(item["id"]) for item in shifted if item["action"] == "unresolved"]
+    if unresolved:
+        raise TranslationIndexError(
+            f"overlaid report contains unresolved occurrences: {module}: {unresolved}"
+        )
+    effective_path = (
+        debug_root / "manual-overlay-input" / Path(*module.split("/"))
+    ).resolve()
+    return [materializer.SelectedModule(
+        module=module,
+        compiled_module=selected.compiled_module,
+        source_path=effective_path,
+        source=effective_source,
+        occurrences=shifted,
+        materialize=tuple(item for item in shifted if item["action"] == "materialize"),
+        retain=tuple(item for item in shifted if item["action"] == "retain"),
+    )]
+
+
 def _report_is_verified(
-    report: object, module: str, manifest_path: Path, manifest_hash: str,
+    report: object,
+    module: str,
+    manifest_path: Path,
+    manifest_bytes: bytes,
+    manifest: dict[str, Any],
+    report_path: Path,
+    overlay: manual_overlay.Overlay | None = None,
+    timeout: int = 600,
 ) -> bool:
-    """Validate report shape and require complete observed success evidence."""
+    """Reproduce all durable evidence, then require observed success."""
     value = materializer.validate_shard_shape(report)
+    manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
     if value.get("manifestPath") != str(manifest_path) or value.get("manifestHash") != manifest_hash:
         raise TranslationIndexError("materialization report is bound to another manifest")
     if value.get("manifestPolicy") != {"allowDirty": False, "allowUnresolved": False}:
         raise TranslationIndexError("materialization report is not from a closed manifest")
     if value.get("selectedModules") != [module] or value.get("compileSuccess") is not True:
         raise TranslationIndexError("materialization report does not select one successful module")
+    expected_overlay = overlay.identity() if overlay is not None else None
+    if value.get("manualOverlay") != expected_overlay:
+        raise TranslationIndexError("materialization report is bound to another manual overlay")
+    debug_root = materializer.debug_root_for(report_path.resolve())
+    selected = _selected_for_report_evidence(manifest, module, overlay, debug_root)
+    materializer.verify_shard_evidence(
+        value,
+        manifest=manifest,
+        manifest_path=manifest_path,
+        manifest_bytes=manifest_bytes,
+        selected=selected,
+        debug_root=debug_root,
+        timeout=timeout,
+        overlay=overlay,
+    )
+    if overlay is not None:
+        modules = value.get("modules")
+        if not isinstance(modules, list) or len(modules) != 1 or not isinstance(modules[0], dict):
+            raise TranslationIndexError("manual overlay report has invalid module evidence")
+        materializer.verify_manual_overlay_evidence(
+            modules[0], overlay, module, timeout, debug_root=debug_root
+        )
     if value.get("unobservedIds") != []:
         return False
     aggregate = value.get("aggregate")
@@ -205,6 +301,7 @@ def _report_is_verified(
 
 def invoke_materializer(
     manifest_path: Path, output_path: Path, module: str, timeout: int,
+    manual_overrides: Path | None = None,
 ) -> tuple[int, str]:
     command = [
         sys.executable,
@@ -214,6 +311,8 @@ def invoke_materializer(
         "--module", module,
         "--timeout", str(timeout),
     ]
+    if manual_overrides is not None:
+        command.extend(("--manual-overrides", str(manual_overrides)))
     try:
         completed = run_process(
             command,
@@ -245,6 +344,7 @@ def run_worker(
     retry_failed: bool = False,
     dependency_map: Mapping[str, object] | None = None,
     dependency_digests: Mapping[str, str] | None = None,
+    manual_overrides: str | Path | None = None,
     budget_guard: Callable[[], Mapping[str, Any]] = campaign_budget.check,
     minimum_free_bytes: int = DEFAULT_MINIMUM_FREE_BYTES,
 ) -> dict[str, Any]:
@@ -258,6 +358,12 @@ def run_worker(
         raise TranslationIndexError("minimum free bytes must be a positive integer")
     manifest_path, manifest_bytes, manifest_value, manifest_hash = _read_manifest(manifest)
     materializer.verify_implementation_hashes(manifest_value)
+    overlay = None
+    if manual_overrides is not None:
+        overlay = manual_overlay.load_overlay(
+            manifest_path, Path(manual_overrides), source_root=MATHLIB
+        )
+    overlay_identity = overlay.identity() if overlay is not None else None
     selected, skipped_empty = _selected_modules(manifest_value, modules)
     manifest_order = {
         raw["module"]: index
@@ -268,6 +374,13 @@ def run_worker(
     manifest_location = Path(manifest).absolute()
     if manifest_location.is_relative_to(output) or manifest_path.is_relative_to(output):
         raise TranslationIndexError("worker manifest must not be inside its materializer output root")
+    if manual_overrides is not None:
+        manual_location = Path(manual_overrides).absolute()
+        manual_path = Path(manual_overrides).resolve()
+        if manual_location.is_relative_to(output) or manual_path.is_relative_to(output):
+            raise TranslationIndexError(
+                "manual override database must not be inside its materializer output root"
+            )
     try:
         output.relative_to(materializer.BOUNDARY_DEBUG_ROOT.resolve())
     except ValueError as error:
@@ -277,7 +390,7 @@ def run_worker(
         if database_path.absolute().is_relative_to(output) or database_path.resolve().is_relative_to(output):
             raise TranslationIndexError("worker database must not be inside its materializer cleanup root")
     output.mkdir(parents=True, exist_ok=True)
-    implementation, toolchain = _identities(manifest_value)
+    implementation, toolchain = _identities(manifest_value, overlay_identity)
     try:
         preflight_budget = budget_guard()
     except Exception:
@@ -382,9 +495,18 @@ def run_worker(
             }, sort_keys=True), flush=True)
             report_path = output / f"{_slug(lease.module)}-{lease.attempt_id}.json"
             log_path = output / f"{_slug(lease.module)}-{lease.attempt_id}.log"
-            code, command_output = invoke_materializer(
-                manifest_path, report_path, lease.module, module_timeout,
-            )
+            if manual_overrides is None:
+                code, command_output = invoke_materializer(
+                    manifest_path, report_path, lease.module, module_timeout
+                )
+            else:
+                code, command_output = invoke_materializer(
+                    manifest_path,
+                    report_path,
+                    lease.module,
+                    module_timeout,
+                    Path(manual_overrides).resolve(),
+                )
             _atomic_text(log_path, command_output)
             processed += 1
             if code != 0:
@@ -403,7 +525,16 @@ def run_worker(
                 continue
             try:
                 report = json.loads(report_path.read_text(encoding="utf-8"))
-                verified = _report_is_verified(report, lease.module, manifest_path, manifest_hash)
+                verified = _report_is_verified(
+                    report,
+                    lease.module,
+                    manifest_path,
+                    manifest_bytes,
+                    manifest_value,
+                    report_path,
+                    overlay,
+                    module_timeout,
+                )
             except (OSError, json.JSONDecodeError, TranslationIndexError, RuntimeError) as error:
                 failures += 1
                 record_result(
@@ -486,6 +617,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--dependency-map")
     parser.add_argument("--dependency-digests")
+    parser.add_argument(
+        "--manual-overrides",
+        default=str(manual_overlay.DEFAULT_DATABASE),
+        help="authenticated manual override DB (pass an empty string to disable)",
+    )
     parser.add_argument("--minimum-free-bytes", type=int, default=DEFAULT_MINIMUM_FREE_BYTES,
                         help="Pause before claiming another module below this free-space reserve (default: 12 GiB).")
     args = parser.parse_args(argv)
@@ -497,6 +633,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             retry_failed=args.retry_failed,
             dependency_map=_read_dependency_map(args.dependency_map),
             dependency_digests=_json_map(args.dependency_digests),
+            manual_overrides=args.manual_overrides or None,
             minimum_free_bytes=args.minimum_free_bytes,
         )
     except (TranslationIndexError, RuntimeError, OSError, ValueError) as error:

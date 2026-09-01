@@ -18,6 +18,7 @@ import check_simp_engine_pin as pin
 from inventory_checkpoint import CheckpointStore
 import analysis_checkpoint_identity
 import simp_engine_inventory as inventory
+import simp_manual_overrides as manual_overrides
 from process_runner import run_process
 
 
@@ -54,6 +55,7 @@ MANIFEST_FIELDS = {
     "countsByDeclarationKind",
     "countsByAction",
     "implementationHashes",
+    "manualOverrides",
     "modules",
 }
 MODULE_FIELDS = {
@@ -104,6 +106,9 @@ IMPLEMENTATION_SOURCE_PATTERNS = (
     "Experiment/check_simp_engine_pin.py",
     "Experiment/simp_engine_inventory.py",
     "Experiment/simp_engine_boundary_corpus.py",
+    "Experiment/manual_overlay.py",
+    "Experiment/simp_manual_overrides.py",
+    "Experiment/simp_manual_overrides.json",
     "Experiment/inventory_checkpoint.py",
     "Experiment/analysis_checkpoint_identity.py",
     "Experiment/boundary_expr_codec.py",
@@ -628,6 +633,10 @@ def build_manifest(
         raise RuntimeError("boundary manifest requires at least one module")
     repository_commit = assert_repository(expected_commit, allow_dirty)
     mathlib_commit, lean = verify_environment()
+    manual_database_bytes = manual_overrides.DEFAULT_PATH.read_bytes()
+    manual_environment, _manual_entries = manual_overrides.load_database()
+    if manual_environment != {"mathlibCommit": mathlib_commit, "lean": lean}:
+        raise RuntimeError("manual_override_environment_mismatch")
     initial_implementation_hashes = implementation_hashes()
     checkpoint = None
     implementation_freshness = None
@@ -840,6 +849,11 @@ def build_manifest(
         "countsByDeclarationKind": dict(sorted(declaration_kind_counts.items())),
         "countsByAction": dict(sorted(action_counts.items())),
         "implementationHashes": initial_implementation_hashes,
+        "manualOverrides": {
+            "sha256": sha256(manual_database_bytes),
+            "schema": manual_overrides.SCHEMA,
+            "environment": manual_environment,
+        },
         "modules": modules,
     }
 
@@ -1141,6 +1155,21 @@ def enforce_manifest_policy(manifest: dict[str, Any]) -> None:
         for path, digest in hashes.items()
     ):
         raise RuntimeError("boundary manifest implementationHashes is invalid")
+    manual_database = manifest.get("manualOverrides")
+    if not isinstance(manual_database, dict):
+        raise RuntimeError("boundary manifest manualOverrides is invalid")
+    _exact_fields(
+        manual_database, {"sha256", "schema", "environment"}, "manualOverrides"
+    )
+    digest = _string(manual_database.get("sha256"), "manualOverrides.sha256")
+    if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+        raise RuntimeError("boundary manifest manualOverrides.sha256 is invalid")
+    if manual_database.get("schema") != manual_overrides.SCHEMA:
+        raise RuntimeError("boundary manifest manualOverrides.schema is invalid")
+    if manual_database.get("environment") != {
+        "mathlibCommit": manifest["mathlibCommit"], "lean": manifest["lean"]
+    }:
+        raise RuntimeError("boundary manifest manualOverrides.environment is invalid")
     modules = manifest.get("modules")
     if not isinstance(modules, list):
         raise RuntimeError("boundary manifest modules must be an array")

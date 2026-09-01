@@ -114,6 +114,7 @@ class CampaignWorkerTests(unittest.TestCase):
         }
 
     def run_fixture(self, manifest: Path, invoke, **options) -> dict[str, object]:
+        evidence_side_effect = options.pop("evidence_side_effect", None)
         with mock.patch.object(worker, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "BOUNDARY_DEBUG_ROOT", self.boundary), \
@@ -121,6 +122,12 @@ class CampaignWorkerTests(unittest.TestCase):
              mock.patch.object(worker.materializer, "verify_environment", return_value={"fixture": True}), \
              mock.patch.object(worker.materializer.corpus, "assert_repository"), \
              mock.patch.object(worker.materializer, "validate_shard_shape", side_effect=lambda value: value), \
+             mock.patch.object(worker, "_selected_for_report_evidence", return_value=[]), \
+             mock.patch.object(
+                 worker.materializer, "verify_shard_evidence",
+                 side_effect=evidence_side_effect,
+             ), \
+             mock.patch.object(worker.materializer, "verify_manual_overlay_evidence"), \
              mock.patch.object(worker, "invoke_materializer", side_effect=invoke):
             return worker.run_worker(
                 self.db, manifest, self.boundary / "runs", "worker-test",
@@ -137,6 +144,73 @@ class CampaignWorkerTests(unittest.TestCase):
         connection = connect(self.db)
         try:
             self.assertEqual(status(connection)["translated"], 1)
+        finally:
+            connection.close()
+
+    def test_full_evidence_failure_is_not_cached_as_translated(self) -> None:
+        manifest = self.manifest()
+
+        def invoke(path, output, module, timeout):
+            output.write_text(
+                json.dumps(self.fake_report(manifest, module)), encoding="utf-8"
+            )
+            return 0, "ok"
+
+        result = self.run_fixture(
+            manifest,
+            invoke,
+            evidence_side_effect=RuntimeError("forged durable evidence"),
+        )
+        self.assertEqual(result["succeeded"], 0)
+        self.assertEqual(result["failures"], 1)
+        connection = connect(self.db)
+        try:
+            self.assertEqual(status(connection)["translated"], 0)
+        finally:
+            connection.close()
+
+    def test_manual_overlay_identity_invalidates_cache_and_binds_report(self) -> None:
+        manifest = self.manifest()
+        overlay_path = self.root / "manual-overrides.json"
+        calls: list[dict[str, object]] = []
+
+        def identity(tag: str) -> dict[str, object]:
+            return {
+                "kind": "simp_manual_overlay", "schema": 2,
+                "database": {"sha256": tag * 64, "schema": 1, "environment": {}},
+                "environment": {},
+                "counts": {"modules": 1, "canonicalOccurrences": 1,
+                           "manualOverrides": 0, "untouchedOccurrences": 1},
+            }
+
+        current = identity("a")
+
+        def invoke(path, output, module, timeout, manual_path):
+            self.assertEqual(manual_path, overlay_path.resolve())
+            calls.append(current)
+            report = self.fake_report(manifest, module)
+            report["manualOverlay"] = current
+            report["modules"] = [{}]
+            output.write_text(json.dumps(report), encoding="utf-8")
+            return 0, "ok"
+
+        fake_overlay = mock.Mock(identity=lambda: current)
+        with mock.patch.object(worker.manual_overlay, "load_overlay", return_value=fake_overlay):
+            first = self.run_fixture(
+                manifest, invoke, manual_overrides=overlay_path
+            )
+            self.assertEqual(first["succeeded"], 1)
+            current = identity("b")
+            second = self.run_fixture(
+                manifest, invoke, manual_overrides=overlay_path
+            )
+            self.assertEqual(second["succeeded"], 1)
+        self.assertEqual(len(calls), 2)
+        connection = connect(self.db)
+        try:
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM result_cache").fetchone()[0], 2
+            )
         finally:
             connection.close()
 
@@ -329,6 +403,16 @@ class CampaignWorkerTests(unittest.TestCase):
                 worker.run_worker(self.db, manifest, self.root, "test", budget_guard=lambda: {"canDispatch": True})
             with self.assertRaisesRegex(RuntimeError, "database must not"):
                 worker.run_worker(self.boundary / "database", manifest, self.boundary, "test", budget_guard=lambda: {"canDispatch": True})
+            with mock.patch.object(
+                worker.manual_overlay, "load_overlay",
+                return_value=mock.Mock(identity=lambda: {}),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "manual override database must not"):
+                    worker.run_worker(
+                        self.db, manifest, self.boundary, "test",
+                        manual_overrides=self.boundary / "manual.json",
+                        budget_guard=lambda: {"canDispatch": True},
+                    )
             with self.assertRaisesRegex(RuntimeError, "moving_ref"):
                 worker.run_worker(self.db, manifest, self.boundary, "test", budget_guard=lambda: {"canDispatch": True})
         self.assertFalse(self.db.exists(), "preflight failure created or changed the index")
