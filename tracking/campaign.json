@@ -17,33 +17,33 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-01T05:57:08.866053+00:00",
-    "lastUsedPercent": 64,
+    "lastCheckedAt": "2026-09-01T14:39:24.031513+00:00",
+    "lastUsedPercent": 80,
     "lastDecision": "continue"
   },
   "coverage": {
-    "currentCorpusTotal": 83425,
+    "currentCorpusTotal": 83627,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Schema13 analysis covers 83,414 executable calls in 8,260 modules (83,349 direct and 65 reusable), with the authenticated eight-entry manual database bound into manifest/cache/report identities. The ordinary materializer supports 6,279 modules; 36 reusable/mixed modules containing the 65 reusable calls remain on the explicit reusable-tactic track. All six manual modules pass as 63 canonical calls = 8 manual + 55 ordinary, all 55 ordinary variants observed and zero retained. Four source-quotation/tactic modules containing 11 calls remain separately required. No bounded result counts as accepted translated-tree coverage.",
+    "note": "The current checked classifier partitions all 83,627 source occurrences in 8,264 modules as 83,556 direct and 71 reusable, with zero unresolved. Exactly five diagnostic missing-execution quotations move to reusable under authenticated nonproof declaration ownership; no other diagnostic record changes. The authenticated 16-entry manual database covers 16 exact calls across 14 modules. Production remains unaccepted until exact-HEAD remanifesting, current per-module semantic reports and cold translated-tree certification.",
     "inventoriedModules": 8264,
-    "materializationCandidates": 83414,
-    "unresolvedOccurrences": 5,
-    "reusableExecutableOccurrences": 65,
+    "materializationCandidates": 83627,
+    "unresolvedOccurrences": 0,
+    "reusableExecutableOccurrences": 71,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
     "provisionalCachedOccurrences": 894,
     "provisionalCachedModules": 83,
     "minimumAcceptedReportSchema": 13,
-    "validationHold": "Schema13 producer and independent cache consumer reconstruct all durable ordinary/manual evidence and both declaration oracles. Complete translated dependency-tree certification remains pending; every bounded production result remains provisional for whole-Mathlib acceptance.",
-    "freshAnalyzedModules": 8260,
-    "freshAnalyzedOccurrences": 83414,
-    "freshDirectExecutableOccurrences": 83349,
-    "separatelyRequiredModules": 4,
-    "separatelyRequiredOccurrences": 11,
+    "validationHold": "The classifier and bounded producer/consumer gates are integrated, but no historical module result has exact current repository, manifest, manual-overlay and worker identity. Complete translated dependency-tree certification remains pending; every bounded result is provisional for whole-Mathlib acceptance.",
+    "freshAnalyzedModules": 8264,
+    "freshAnalyzedOccurrences": 83627,
+    "freshDirectExecutableOccurrences": 83556,
+    "separatelyRequiredModules": 0,
+    "separatelyRequiredOccurrences": 0,
     "freshAnalyzedUnresolvedOccurrences": 0,
-    "directMaterializerModules": 6279,
-    "reusableOrMixedModules": 36
+    "directMaterializerModules": 6280,
+    "reusableOrMixedModules": 40
   },
   "work": [
     {
@@ -496,11 +496,11 @@
     }
   ],
   "nextActions": [
-    "Commit the capsule/oracle/tracking phase boundary, then generate and independently verify a fresh exact-HEAD schema13 manifest and dependency map without another tracked commit.",
-    "Resume bounded schema13 indexed production under disk/budget guards, triaging each exact failure family and preserving immutable per-attempt evidence.",
-    "Process the four separately required modules/11 calls and the 65 reusable executable calls without finite-caller shortcuts; retain adjacent originals and full source/execution ownership.",
-    "Assemble the translated dependency tree and cold-certify final composite outputs with strict translated dependency resolution; bounded stock-import results remain provisional.",
-    "After full explicit coverage and translated-tree acceptance, mine readable normal forms and continue with other common search tactics."
+    "Publish and strictly source-verify a clean exact-HEAD 8,264-module/83,627-call manifest with 83,556 direct, 71 reusable and zero unresolved records.",
+    "Import the closed manifest with the exact 8,264-module source-bound dependency map and rerun the eight former pilot failures under the 16-entry manual database.",
+    "Resume bounded schema13 production for exactly the 6,280 direct-only modules under allowance and 12 GiB free-space guards; reusable-containing modules must be skipped and reported.",
+    "Implement authenticated caller/configuration/state recording and fatal replay closure for all 71 reusable calls in 40 modules.",
+    "Assemble and cold-certify the translated dependency tree; then mine readable normal forms and continue with other common search tactics."
   ],
   "checkpoints": [
     {
@@ -1177,6 +1177,21 @@
         "translation index"
       ],
       "note": "The referenced manifest is exact for pre-implementation commit 38b9ce7 and becomes historical when this tracked phase boundary commits. Generate a new exact-HEAD manifest immediately after commit and make no further tracked changes before production."
+    },
+    {
+      "at": "2026-09-01T14:45:00+00:00",
+      "summary": "Closed diagnostic review found 83,627 calls in 8,264 modules. The reviewed quoted-tactic rule yields 83,556 direct and 71 reusable calls with zero unresolved; scheduling is 6,280 direct-only, 40 reusable-containing and 1,944 empty modules. Manual database now has 16 exact overrides across 14 modules. Weekly usage 80%.",
+      "checks": [
+        "exact diagnostic postprocess changes five unique IDs and no other corpus record",
+        "8,264-key dependency map exactly joins current Mathlib source hashes with no external gap",
+        "manual override cardinality guard requires 16 entries across 14 modules",
+        "live campaign budget check permits dispatch at 80% current-window usage"
+      ],
+      "pending": [
+        "clean exact-HEAD remanifest and strict source verification",
+        "direct-only production rerun and reusable caller-dependent architecture",
+        "complete cold translated-tree acceptance"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
