@@ -61,6 +61,17 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _require_closed_manifest_fields(value: Mapping[str, Any]) -> None:
+    """Reject anything other than the producer's exact closed-manifest schema."""
+    expected = materializer.corpus.MANIFEST_FIELDS
+    actual = set(value)
+    if actual != expected:
+        raise TranslationIndexError(
+            "worker requires the exact closed manifest fields: "
+            f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
+        )
+
+
 def _read_manifest(path: str | Path) -> tuple[Path, bytes, dict[str, Any], str]:
     manifest_path = Path(path).resolve()
     try:
@@ -72,6 +83,7 @@ def _read_manifest(path: str | Path) -> tuple[Path, bytes, dict[str, Any], str]:
         raise TranslationIndexError("manifest root must be an object")
     if value.get("kind") != "simp_engine_boundary_manifest" or value.get("reportSchema") != 2:
         raise TranslationIndexError("worker requires a schema-2 boundary manifest")
+    _require_closed_manifest_fields(value)
     if value.get("allowUnresolved") is not False or value.get("allowDirty") is not False:
         raise TranslationIndexError(
             "worker requires allowUnresolved=false and allowDirty=false; diagnostic manifests are rejected"
@@ -528,13 +540,24 @@ def run_worker(
                 expect_total=None, expect_materialize=None,
             )
         except RuntimeError as error:
-            if selected or not any(
-                marker in str(error)
-                for marker in (
-                    "selected module contains reusable_executable",
-                    "selected module has no materialize occurrences",
-                )
-            ):
+            detail = str(error)
+            probe = validation_names[0]
+            probe_record = next(
+                raw for raw in manifest_value["modules"]
+                if isinstance(raw, Mapping) and raw.get("module") == probe
+            )
+            probe_reusable_ids = [
+                str(item["id"])
+                for item in probe_record["occurrences"]
+                if isinstance(item, Mapping)
+                and item.get("executionRole") == "reusable_executable"
+            ]
+            terminal_selection_errors = {
+                f"selected module contains reusable_executable, which this runner does not support: "
+                f"{probe}: {probe_reusable_ids}",
+                f"selected module has no materialize occurrences: {probe}",
+            }
+            if selected or detail not in terminal_selection_errors:
                 raise
             validated = []
         validated_selection = {item.module: item for item in validated}

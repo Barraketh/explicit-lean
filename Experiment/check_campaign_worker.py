@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import nullcontext
 from pathlib import Path
 import tempfile
 import unittest
@@ -192,7 +193,7 @@ class CampaignWorkerTests(unittest.TestCase):
             "countsByDeclarationKind": {"caller_dependent": 1},
             "countsByAction": {"materialize": 1},
             "manualOverrides": {
-            "sha256": "0" * 64, "schema": 1,
+                "sha256": "0" * 64, "schema": 1,
                 "environment": {
                     "mathlibCommit": value["mathlibCommit"], "lean": value["lean"],
                 },
@@ -223,7 +224,18 @@ class CampaignWorkerTests(unittest.TestCase):
     def run_fixture(self, manifest: Path, invoke, **options) -> dict[str, object]:
         evidence_side_effect = options.pop("evidence_side_effect", None)
         budget_guard = options.pop("budget_guard", lambda: {"canDispatch": True})
-        with mock.patch.object(worker, "MATHLIB", self.root), \
+        authenticate_manifest = options.pop("authenticate_manifest", False)
+        schema_patch = (
+            nullcontext()
+            if authenticate_manifest
+            else mock.patch.object(worker, "_require_closed_manifest_fields")
+        )
+        # Most worker-behavior fixtures intentionally exercise small manifest
+        # projections.  Only tests passing authenticate_manifest=True may
+        # bypass this explicit test-only mock and exercise the production
+        # closed-manifest boundary.
+        with schema_patch, \
+             mock.patch.object(worker, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "BOUNDARY_DEBUG_ROOT", self.boundary), \
              mock.patch.object(worker.materializer, "verify_implementation_hashes"), \
@@ -430,11 +442,61 @@ class CampaignWorkerTests(unittest.TestCase):
                         self.run_fixture(
                             manifest,
                             invoke,
+                            authenticate_manifest=True,
                             budget_guard=lambda: {"canDispatch": can_dispatch},
                         )
                     errors.append(str(raised.exception))
                 invoke.assert_not_called()
             self.assertEqual(errors[0], errors[1])
+
+    def test_incomplete_manifest_rejected_before_budget_decision(self) -> None:
+        errors = []
+        for can_dispatch in (False, True):
+            manifest = self.complete_manifest()
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            value.pop("modulePrefix")
+            value["modules"][0]["moduleHash"] = "invalid-module-hash"
+            manifest.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+            invoke = mock.Mock(side_effect=AssertionError("incomplete manifest dispatched"))
+            with self.subTest(can_dispatch=can_dispatch):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"exact closed manifest fields: missing=\['modulePrefix'\]",
+                ) as raised:
+                    self.run_fixture(
+                        manifest,
+                        invoke,
+                        authenticate_manifest=True,
+                        budget_guard=lambda: {"canDispatch": can_dispatch},
+                    )
+                errors.append(str(raised.exception))
+            invoke.assert_not_called()
+        self.assertEqual(errors[0], errors[1])
+
+    def test_terminal_error_text_in_field_is_not_swallowed(self) -> None:
+        errors = []
+        for can_dispatch in (False, True):
+            manifest = self.complete_manifest()
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            module = value["modules"][0]
+            occurrence_id = module["occurrences"][0]["id"]
+            module["compiledModule"] = (
+                "selected module contains reusable_executable, which this runner does not "
+                f"support: {module['module']}: ['{occurrence_id}']"
+            )
+            manifest.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+            invoke = mock.Mock(side_effect=AssertionError("forged manifest dispatched"))
+            with self.subTest(can_dispatch=can_dispatch):
+                with self.assertRaisesRegex(RuntimeError, "compiled module mismatch") as raised:
+                    self.run_fixture(
+                        manifest,
+                        invoke,
+                        authenticate_manifest=True,
+                        budget_guard=lambda: {"canDispatch": can_dispatch},
+                    )
+                errors.append(str(raised.exception))
+            invoke.assert_not_called()
+        self.assertEqual(errors[0], errors[1])
 
     def test_explicit_direct_only_selection_dispatches(self) -> None:
         manifest = self.manifest_with_roles({"Direct": ["direct_executable"]})
@@ -515,6 +577,7 @@ class CampaignWorkerTests(unittest.TestCase):
         with mock.patch.object(worker, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "BOUNDARY_DEBUG_ROOT", self.boundary), \
+             mock.patch.object(worker, "_require_closed_manifest_fields"), \
              mock.patch.object(worker.materializer, "verify_implementation_hashes"), \
              mock.patch.object(worker.materializer, "verify_environment", return_value={"fixture": True}), \
              mock.patch.object(worker.materializer.corpus, "assert_repository"), \
@@ -585,18 +648,21 @@ class CampaignWorkerTests(unittest.TestCase):
         with mock.patch.object(worker, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "BOUNDARY_DEBUG_ROOT", self.boundary), \
+             mock.patch.object(worker, "_require_closed_manifest_fields"), \
              mock.patch.object(worker.materializer, "verify_implementation_hashes"):
             result = worker.run_worker(self.db, manifest, self.boundary / "runs", "worker-test", budget_guard=lambda: {"canDispatch": False})
         self.assertEqual(result["skippedEmpty"], 1)
         self.assertEqual(result["processed"], 0)
         with self.assertRaisesRegex(RuntimeError, "diagnostic manifests"):
-            with mock.patch.object(worker.materializer, "verify_implementation_hashes"):
+            with mock.patch.object(worker, "_require_closed_manifest_fields"), \
+                 mock.patch.object(worker.materializer, "verify_implementation_hashes"):
                 worker.run_worker(self.db, self.manifest(allow_unresolved=True), self.boundary / "runs", "worker-test", budget_guard=lambda: {"canDispatch": True})
 
 
     def test_protect_inputs_and_preflight_before_index_mutation(self) -> None:
         manifest = self.manifest()
-        with mock.patch.object(worker.materializer, "verify_implementation_hashes"), \
+        with mock.patch.object(worker, "_require_closed_manifest_fields"), \
+             mock.patch.object(worker.materializer, "verify_implementation_hashes"), \
              mock.patch.object(worker.materializer, "BOUNDARY_DEBUG_ROOT", self.root), \
              mock.patch.object(worker.materializer.corpus, "assert_repository", side_effect=RuntimeError("moving_ref")):
             with self.assertRaisesRegex(RuntimeError, "manifest must not"):
