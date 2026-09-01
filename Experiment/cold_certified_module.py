@@ -138,7 +138,8 @@ def _observe(log: str, event: dict, identities: dict) -> dict:
 def certify_module(*, module: str, stock: InputFile, applied: InputFile, is_module: bool,
                    oracle: InputFile, auditor: InputFile, imports: ImportEnvironment,
                    dependencies: Mapping[str, Mapping[str | Path, str]],
-                   work_parent: Path, timeout: float = 900) -> Certification:
+                   work_parent: Path, timeout: float = 900,
+                   plan_hash: str | None = None) -> Certification:
     """Fresh cold compilation certificate, with no reuse or publication.
 
     ``timeout`` bounds each process. Source paths must end in the exact module
@@ -226,6 +227,10 @@ def certify_module(*, module: str, stock: InputFile, applied: InputFile, is_modu
             "outputArtifactFamily": families["ordinary-applied"], "quarantine": str(quarantines["ordinary-applied"]),
             "promoted": False, "acceptedCampaignCoverage": False, "sourceCommentProvenanceAccepted": False,
             "scope": "serialized compiler semantics under caller-supplied immutable dependencies/runtime"}
+        if plan_hash is not None:
+            if not isinstance(plan_hash, str) or len(plan_hash) != 64 or any(char not in "0123456789abcdef" for char in plan_hash):
+                raise RuntimeError("invalid tree plan hash")
+            receipt["planHash"] = plan_hash
         _verify_record(receipt, work)
         if base._environment(imports) != (paths, environment_identity):
             raise RuntimeError("import environment changed during cold certification")
@@ -258,6 +263,9 @@ def _verify_record(r: dict, work: Path, *, require_target_absent: bool = True) -
     if any(r.get(field) is not False for field in ("acceptedCampaignCoverage", "sourceCommentProvenanceAccepted")) or \
             r.get("dependencyScope") != "caller_supplied_families":
         raise RuntimeError("cold certification exceeds its validation scope")
+    if "planHash" in r and (not isinstance(r["planHash"], str) or len(r["planHash"]) != 64
+                             or any(char not in "0123456789abcdef" for char in r["planHash"])):
+        raise RuntimeError("invalid cold plan hash")
     module = r["module"]; is_module = r["isModule"]
     relative = base._module_path(module)
     work = base._path(work, directory=True)

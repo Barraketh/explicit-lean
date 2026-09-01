@@ -351,11 +351,13 @@ def build_plan(
         "dependencyMap": {"path": str(dep_path), "sha256": dependency_map_hash},
         "order": list(order), "modules": {m: nodes[m].result() for m in sorted(nodes)},
         "excludedModules": list(excluded),
-        "completeCorpus": type(manifest_value.get("moduleFileCount")) is int
-        and manifest_value["moduleFileCount"] == len(manifest_rows),
+        # A manifest count is diagnostic metadata.  Whole-corpus status is
+        # granted only by run_production_tree after an independently pinned
+        # corpus identity and final publication audit are supplied.
+        "completeCorpus": False,
     }
     return TreePlan(manifest_path, manifest_hash, dep_path, dependency_map_hash, order, nodes, excluded,
-                    provisional["completeCorpus"] is True, _plan_hash(provisional))
+                    False, _plan_hash(provisional))
 
 
 def verify_plan(plan: Mapping[str, Any] | TreePlan) -> TreePlan:
@@ -498,10 +500,22 @@ def validate_checkpoint(
         raise RuntimeError(f"receipt hash mismatch for {module}")
     receipt_value = json.loads(receipt_path.read_bytes())
     cert = cold.Certification(receipt_path, receipt["sha256"], receipt_value)
-    cold_record = cold.verify_certification(cert)
+    # A published target is expected after the publication receipt has been
+    # checked and its complete family bytes have been revalidated.  Before
+    # publication, retaining the default absent-target guard catches stale
+    # output roots.
+    publication_ref = value.get("publication")
+    cold_record = cold.verify_certification(cert, require_target_absent=publication_ref is None)
     if cold_record.get("module") != dotted_module(module) or cold_record.get("isModule") is not is_module or cold_record.get("outputArtifactFamily") != family:
         raise RuntimeError(f"checkpoint certificate does not match {module}")
-    publication_ref = value.get("publication")
+    if publication_ref is not None:
+        if cold_record.get("planHash") != checked_plan.plan_hash:
+            raise RuntimeError(f"checkpoint certificate plan hash does not match {module}")
+        if (not isinstance(cold_record.get("stock"), Mapping)
+                or cold_record["stock"].get("sha256") != node.source_hash
+                or not isinstance(cold_record.get("applied"), Mapping)
+                or cold_record["applied"].get("sha256") != node.applied_hash):
+            raise RuntimeError(f"checkpoint certificate source hashes do not match {module}")
     if publication_ref is not None:
         if not isinstance(publication_ref, Mapping) or not isinstance(publication_ref.get("path"), str) or not isinstance(publication_ref.get("sha256"), str):
             raise RuntimeError(f"checkpoint publication identity is incomplete for {module}")
@@ -514,6 +528,10 @@ def validate_checkpoint(
             raise RuntimeError(f"publication receipt changed for {module}") from error
         if not isinstance(publication_value, Mapping) or publication_value.get("module") != dotted_module(module) or publication_value.get("certification") != dict(receipt):
             raise RuntimeError(f"checkpoint publication does not match {module}")
+        if type(publication_value.get("isModule")) is not bool or publication_value["isModule"] is not is_module:
+            raise RuntimeError(f"checkpoint publication mode does not match {module}")
+        if publication._family(publication_value.get("artifactFamily", {}), dotted_module(module), is_module) != dict(publication_value.get("artifactFamily", {})):
+            raise RuntimeError(f"checkpoint publication family is incomplete for {module}")
     result = dict(value)
     result["artifactFamily"] = family
     return result
@@ -637,6 +655,7 @@ def run_tree(
     report = {"kind": REPORT_KIND, "schema": REPORT_SCHEMA,
               "status": "completed" if len(completed) == len(checked_plan.order) else "partial",
               "wholeMathlib": False,
+              "planComplete": len(completed) == len(checked_plan.order),
               "planHash": checked_plan.plan_hash, "order": list(checked_plan.order),
               "completed": [{"module": module, "path": str(_checkpoint_path(root, module)),
                              "sha256": _digest(_checkpoint_path(root, module))} for module in checked_plan.order if module in completed]}
@@ -653,6 +672,31 @@ def _dependency_closure(plan: TreePlan, module: str) -> tuple[str, ...]:
         seen.add(dependency)
         pending.extend(plan.nodes[dependency].dependencies)
     return tuple(sorted(seen))
+
+
+def _validate_corpus_identity(identity: Mapping[str, Any], plan: TreePlan) -> dict[str, Any]:
+    """Validate an independently produced, pinned complete-corpus identity."""
+    if not isinstance(identity, Mapping) or not isinstance(identity.get("path"), str) or not isinstance(identity.get("sha256"), str):
+        raise RuntimeError("complete corpus identity is incomplete")
+    path = _regular(identity["path"], label="complete corpus identity")
+    if _digest(path) != identity["sha256"]:
+        raise RuntimeError("complete corpus identity hash mismatch")
+    try:
+        value = json.loads(path.read_bytes())
+    except json.JSONDecodeError as error:
+        raise RuntimeError("complete corpus identity is not valid JSON") from error
+    if not isinstance(value, Mapping) or value.get("kind") != "cold_pinned_complete_corpus" or value.get("schema") != 1 or value.get("complete") is not True:
+        raise RuntimeError("complete corpus identity is not pinned")
+    if value.get("manifestHash") != plan.manifest_hash or value.get("dependencyMapHash") != plan.dependency_map_hash:
+        raise RuntimeError("complete corpus identity does not match plan inputs")
+    modules = value.get("modules")
+    if not isinstance(modules, Mapping) or set(modules) != set(plan.nodes):
+        raise RuntimeError("complete corpus identity module join is incomplete")
+    for module, node in plan.nodes.items():
+        entry = modules.get(module)
+        if not isinstance(entry, Mapping) or entry.get("sourceHash") != node.source_hash:
+            raise RuntimeError(f"complete corpus identity source mismatch for {module}")
+    return {"path": str(path), "sha256": identity["sha256"]}
 
 
 def _read_publication_records(plan: TreePlan, receipt_root: Path,
@@ -689,6 +733,8 @@ def run_production_tree(
     staging_parent: str | Path,
     receipt_root: str | Path,
     work_parent: str | Path,
+    corpus_identity: Mapping[str, Any] | None = None,
+    resume: bool = True,
     timeout: float = 900,
     max_modules: int | None = None,
 ) -> dict[str, Any]:
@@ -700,11 +746,20 @@ def run_production_tree(
     remains only the deterministic fixture seam used by unit controls.
     """
     checked_plan = verify_plan(plan)
+    pinned_corpus = (_validate_corpus_identity(corpus_identity, checked_plan)
+                     if corpus_identity is not None else None)
     checkpoint_dir = _directory(checkpoint_root, label="checkpoint root")
     output_dir = _directory(output_root, label="output root")
     staging_dir = _directory(staging_parent, label="staging root")
     receipt_dir = _directory(receipt_root, label="receipt root")
     work_dir = _directory(work_parent, label="certificate work root")
+    if type(resume) is not bool:
+        raise RuntimeError("invalid resume policy")
+    if not resume:
+        for label, root in (("checkpoint", checkpoint_dir), ("output", output_dir),
+                            ("staging", staging_dir), ("receipt", receipt_dir), ("work", work_dir)):
+            if any(path.is_file() or path.is_symlink() for path in root.rglob("*")):
+                raise RuntimeError(f"--no-resume requires an empty {label} root")
     oracle = base._checked_file(oracle); auditor = base._checked_file(auditor)
     if not os.access(oracle.path, os.X_OK) or not os.access(auditor.path, os.X_OK):
         raise RuntimeError("certification tool is not executable")
@@ -739,12 +794,19 @@ def run_production_tree(
             dependency_families[dotted_module(dependency)] = dict(family)
         cert = cold.certify_module(
             module=dotted_module(module),
-            stock=base.InputFile(Path(node.source_path), _digest(Path(node.source_path))),
+            stock=base.InputFile(Path(node.source_path), node.source_hash),
             applied=base.InputFile(Path(node.applied_path), node.applied_hash),
             is_module=True, oracle=oracle, auditor=auditor, imports=imports,
             dependencies=dependency_families, work_parent=work_dir, timeout=timeout,
+            plan_hash=checked_plan.plan_hash,
         )
-        cold.verify_certification(cert)
+        cold_record = cold.verify_certification(cert)
+        if (cold_record.get("planHash") != checked_plan.plan_hash
+                or not isinstance(cold_record.get("stock"), Mapping)
+                or cold_record["stock"].get("sha256") != node.source_hash
+                or not isinstance(cold_record.get("applied"), Mapping)
+                or cold_record["applied"].get("sha256") != node.applied_hash):
+            raise RuntimeError(f"cold receipt identity does not match plan for {module}")
         published = publication.publish(cert, output_root=output_dir,
                                         staging_parent=staging_dir, receipt_root=receipt_dir)
         publications[module] = published
@@ -755,11 +817,15 @@ def run_production_tree(
                 "publication": {"path": published["path"], "sha256": published["sha256"]}}
 
     report = run_tree(checked_plan, checkpoint_root=checkpoint_dir, certify=certify,
-                      max_modules=max_modules)
+                      resume=resume, max_modules=max_modules)
     publication.verify_publications(records, output_dir, receipt_root=receipt_dir)
+    if pinned_corpus is not None and _validate_corpus_identity(corpus_identity, checked_plan) != pinned_corpus:
+        raise RuntimeError("complete corpus identity changed during certification")
     complete = (report["status"] == "completed" and len(publications) == len(checked_plan.order)
-                and checked_plan.complete_corpus and not checked_plan.excluded)
+                and pinned_corpus is not None and not checked_plan.excluded)
+    report["planComplete"] = report["status"] == "completed"
     report["wholeMathlib"] = complete
+    report["corpusIdentity"] = pinned_corpus
     report["publicationAudit"] = {"modules": len(publications), "artifacts": sum(len(record["artifactFamily"]) for record in records), "verified": True}
     return report
 
@@ -790,6 +856,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--work-parent", type=Path)
     parser.add_argument("--oracle", type=Path)
     parser.add_argument("--auditor", type=Path)
+    parser.add_argument("--corpus-identity", type=Path)
     parser.add_argument("--timeout", type=float, default=900)
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--max-modules", type=int)
@@ -815,6 +882,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                                      checkpoint_root=args.checkpoint_root, output_root=args.output_root,
                                      staging_parent=args.staging_parent, receipt_root=args.receipt_root,
                                      work_parent=args.work_parent, timeout=args.timeout,
+                                     corpus_identity=({"path": str(args.corpus_identity), "sha256": _digest(args.corpus_identity)}
+                                                      if args.corpus_identity is not None else None),
+                                     resume=not args.no_resume,
                                      max_modules=args.max_modules)
         print(json.dumps(report, sort_keys=True))
     elif args.plan_output is None:

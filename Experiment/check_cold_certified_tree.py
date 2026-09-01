@@ -120,7 +120,7 @@ class ColdTreeControls(unittest.TestCase):
                     "artifactFamily": family, "isModule": True}
 
         fake_records = {}
-        def fake_verify(cert):
+        def fake_verify(cert, **kwargs):
             value = json.loads(cert.receipt_path.read_text())
             module = value["synthetic"]
             family = fake_records[module]
@@ -175,7 +175,7 @@ class ColdTreeControls(unittest.TestCase):
         manifest_path = self.root / "complete-manifest.json"
         write_json(manifest_path, manifest)
         plan = tree.build_plan(manifest_path, self.depmap, source_root=self.sources)
-        self.assertTrue(plan.complete_corpus)
+        self.assertFalse(plan.complete_corpus)
         checkpoint_root = self.root / "production-checkpoints"; checkpoint_root.mkdir()
         output_root = self.root / "production-output"; output_root.mkdir()
         staging = self.root / "production-staging"; staging.mkdir()
@@ -189,13 +189,14 @@ class ColdTreeControls(unittest.TestCase):
         oracle = base.InputFile(oracle_path, base.sha256(oracle_path))
         auditor = base.InputFile(auditor_path, base.sha256(auditor_path))
         cert_records = {}
+        verify_policies = []
 
         def checked(item):
             if base.sha256(item.path) != item.sha256:
                 raise RuntimeError("hash mismatch")
             return item
 
-        def fake_certify(*, module, applied, **kwargs):
+        def fake_certify(*, module, stock, applied, **kwargs):
             folder = work_root / module.replace(".", "-"); folder.mkdir()
             family = {}
             for suffix in base.SUFFIXES:
@@ -204,12 +205,14 @@ class ColdTreeControls(unittest.TestCase):
                 family[str(artifact)] = base.sha256(artifact)
             receipt_path = folder / "receipt.json"
             write_json(receipt_path, {"synthetic": module})
-            record = {"module": module, "isModule": True, "importEnvironment": {"searchPath": [str(output_root)]},
-                      "outputArtifactFamily": family, "applied": {"sha256": applied.sha256}}
+            record = {"module": module, "isModule": True, "planHash": kwargs["plan_hash"],
+                      "importEnvironment": {"searchPath": [str(output_root)]}, "outputArtifactFamily": family,
+                      "stock": {"sha256": stock.sha256}, "applied": {"sha256": applied.sha256}}
             cert_records[str(receipt_path)] = record
             return cold.Certification(receipt_path, base.sha256(receipt_path), record)
 
         def fake_verify(cert, **kwargs):
+            verify_policies.append(kwargs)
             return cert_records[str(cert.receipt_path)]
 
         with patch.object(tree.base, "_checked_file", side_effect=checked), \
@@ -219,7 +222,8 @@ class ColdTreeControls(unittest.TestCase):
                                               checkpoint_root=checkpoint_root, output_root=output_root,
                                               staging_parent=staging, receipt_root=receipt_root,
                                               work_parent=work_root)
-        self.assertTrue(report["wholeMathlib"])
+        self.assertFalse(report["wholeMathlib"])
+        self.assertTrue(report["planComplete"])
         self.assertEqual(report["publicationAudit"]["modules"], 2)
         self.assertEqual(report["status"], "completed")
         published_artifact = next(output_root.rglob("*.olean"))
@@ -253,6 +257,14 @@ class ColdTreeControls(unittest.TestCase):
                                           staging_parent=staging, receipt_root=receipt_root,
                                           work_parent=work_root)
         (receipt_root / "stale.bin").unlink()
+        with patch.object(tree.base, "_checked_file", side_effect=checked), \
+             patch.object(tree.cold, "verify_certification", side_effect=fake_verify):
+            with self.assertRaisesRegex(RuntimeError, "no-resume"):
+                tree.run_production_tree(plan, imports=imports, oracle=oracle, auditor=auditor,
+                                          checkpoint_root=checkpoint_root, output_root=output_root,
+                                          staging_parent=staging, receipt_root=receipt_root,
+                                          work_parent=work_root, resume=False)
+        self.assertTrue(any(policy.get("require_target_absent") is False for policy in verify_policies))
 
         excluded_manifest = json.loads(manifest_path.read_text())
         excluded_manifest["modules"][1]["disposition"] = "excluded"
