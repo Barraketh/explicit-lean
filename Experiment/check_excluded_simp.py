@@ -122,10 +122,44 @@ def _apply(source: bytes, entries: list[tuple[int, int, str]]) -> bytes:
 
 
 def _imports(source: bytes) -> list[str]:
-    # Module headers contain only the import forms below.  Stop at the first
-    # non-header command so an import-looking docstring cannot be accepted.
+    # Remove comments first.  Mathlib files start with a multiline copyright
+    # comment, and treating only its first line as a comment would make this
+    # audit silently return an empty import list.
+    text = source.decode("utf-8")
+    cleaned: list[str] = []
+    index = 0
+    depth = 0
+    while index < len(text):
+        if depth:
+            if text.startswith("/-", index):
+                depth += 1
+                cleaned.extend("  ")
+                index += 2
+            elif text.startswith("-/", index):
+                depth -= 1
+                cleaned.extend("  ")
+                index += 2
+            else:
+                cleaned.append("\n" if text[index] == "\n" else " ")
+                index += 1
+        elif text.startswith("--", index):
+            while index < len(text) and text[index] != "\n":
+                cleaned.append(" ")
+                index += 1
+        elif text.startswith("/-", index):
+            depth = 1
+            cleaned.extend("  ")
+            index += 2
+        else:
+            cleaned.append(text[index])
+            index += 1
+    if depth:
+        raise RuntimeError("unterminated Lean block comment in module header")
+
+    # Module headers contain only the import forms below. Stop at the first
+    # non-header command so an import-looking declaration cannot be accepted.
     result: list[str] = []
-    header = source.decode("utf-8").splitlines()
+    header = "".join(cleaned).splitlines()
     for line in header:
         stripped = line.strip()
         if not stripped or stripped.startswith("/-") or stripped.startswith("--"):
@@ -152,6 +186,21 @@ def _check_imports(source: bytes, module: str, lean_path: list[Path]) -> None:
         raise RuntimeError(f"{module}: import is not resolvable in pinned search path: {imported}")
 
 
+def _check_import_controls(lean_path: list[Path]) -> None:
+    source = b"/- outer comment\n   /- nested comment -/\n-/\nmodule\npublic meta import Mathlib.Tactic.ScopedNS\nimport Mathlib.Data.Nat.Basic\n"
+    if _imports(source) != ["Mathlib.Tactic.ScopedNS", "Mathlib.Data.Nat.Basic"]:
+        raise RuntimeError("header parser did not recover imports after a multiline comment")
+    _check_imports(source, "import-control", lean_path)
+    bad = source.replace(b"Mathlib.Data.Nat.Basic", b"Mathlib.DoesNotExist")
+    try:
+        _check_imports(bad, "unresolved-import-control", lean_path)
+    except RuntimeError as error:
+        if "Mathlib.DoesNotExist" not in str(error):
+            raise
+    else:
+        raise RuntimeError("unresolved import was accepted by the import audit")
+
+
 def _lean_path() -> list[Path]:
     completed = subprocess.run(
         ["lake", "env", "printenv", "LEAN_PATH"],
@@ -163,7 +212,12 @@ def _lean_path() -> list[Path]:
     )
     if completed.returncode:
         raise RuntimeError(f"could not read pinned LEAN_PATH:\n{completed.stdout}")
-    values = [Path(item) for item in completed.stdout.splitlines() if item]
+    values = [
+        Path(item)
+        for line in completed.stdout.splitlines()
+        for item in line.split(os.pathsep)
+        if item
+    ]
     if not values:
         raise RuntimeError("pinned LEAN_PATH is empty")
     return values
@@ -183,13 +237,40 @@ def _compile(path: Path, lean_path: list[Path]) -> str:
     )
     if completed.returncode:
         raise RuntimeError(f"materialized module failed to compile: {path}\n{completed.stdout}")
-    if re.search(r"\b(error|declaration uses 'sorry'):\s*", completed.stdout):
+    if re.search(r"declaration uses [`]sorry[`]", completed.stdout):
         raise RuntimeError(f"compiler emitted an error/sorry diagnostic for {path}:\n{completed.stdout}")
     return completed.stdout
 
 
-def _check_dynamic_records() -> None:
-    for module, (start, end, occurrence, expected) in {**RETAINED_SYNTAX_DATA, **UNSUPPORTED_DYNAMIC}.items():
+def _check_sorry_control(lean_path: list[Path]) -> None:
+    with tempfile.TemporaryDirectory(prefix="excluded-sorry-") as temporary:
+        path = Path(temporary) / "sorry.lean"
+        path.write_text("theorem excludedSorryControl : True := by\n  sorry\n")
+        try:
+            _compile(path, lean_path)
+        except RuntimeError as error:
+            if "sorry diagnostic" not in str(error):
+                raise
+        else:
+            raise RuntimeError("compiler sorry warning was not rejected")
+
+
+def _dynamic_records() -> list[tuple[str, str, tuple[int, int, str, str]]]:
+    records: list[tuple[str, str, tuple[int, int, str, str]]] = []
+    records.extend(
+        ("retained_syntax_data", module, record)
+        for module, record in RETAINED_SYNTAX_DATA.items()
+    )
+    records.extend(
+        ("unsupported_dynamic", module, record)
+        for module, record in UNSUPPORTED_DYNAMIC.items()
+    )
+    return records
+
+
+def _check_dynamic_records() -> dict[str, int]:
+    counts = {"retained_syntax_data": 0, "unsupported_dynamic": 0}
+    for classification, module, (start, end, occurrence, expected) in _dynamic_records():
         source = _source_path(module).read_bytes()
         if sha256(source) != SOURCE_HASHES[module]:
             raise RuntimeError(f"source hash changed for {module}")
@@ -202,6 +283,8 @@ def _check_dynamic_records() -> None:
             before = source[:start]
             if b"macro_rules" not in before[-1200:] or b"`(tactic|" not in before[-500:]:
                 raise RuntimeError("Zify retained call is no longer guarded as macro syntax/data")
+        counts[classification] += 1
+    return counts
 
 
 def main() -> int:
@@ -213,7 +296,10 @@ def main() -> int:
         raise RuntimeError("pinned Mathlib checkout is dirty")
 
     lean_path = _lean_path()
+    _check_import_controls(lean_path)
+    _check_sorry_control(lean_path)
     by_module: dict[str, list[tuple[int, int, str]]] = {}
+    supported_ids: set[str] = set()
     for module, positions in MODULES.items():
         source = _source_path(module).read_bytes()
         if sha256(source) != SOURCE_HASHES[module]:
@@ -226,15 +312,21 @@ def main() -> int:
             actual = source[start:end].decode("utf-8")
             if actual != expected:
                 raise RuntimeError(f"stale source range at {module}:{start}: {actual!r} != {expected!r}")
-            if inventory.occurrence_id(module, start, end) not in {
+            occurrence = inventory.occurrence_id(module, start, end)
+            if occurrence not in {
                 "ba6410d96ffc0357", "f775b816b6c6b9de", "471aa4d60b0acdd6", "2aee64956119f34b",
                 "b2288ad41bec49c3", "d9b60e8150d86521", "6c2a52e93b5afdd3",
             }:
                 raise RuntimeError(f"unexpected supported occurrence identity at {module}:{start}")
+            supported_ids.add(occurrence)
             module_entries.append((start, end, replacement))
         by_module[module] = module_entries
+    if len(supported_ids) != 7:
+        raise RuntimeError(f"supported classification count changed: {len(supported_ids)}")
 
-    _check_dynamic_records()
+    dynamic_counts = _check_dynamic_records()
+    if dynamic_counts != {"retained_syntax_data": 1, "unsupported_dynamic": 3}:
+        raise RuntimeError(f"excluded dynamic classification counts changed: {dynamic_counts}")
     with tempfile.TemporaryDirectory(prefix="excluded-simp-") as temporary:
         root = Path(temporary)
         for module, module_entries in by_module.items():
