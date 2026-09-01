@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import inspect
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -287,7 +288,12 @@ class ManifestVerifierTests(unittest.TestCase):
 
     def test_inspection_flags_are_not_available_on_verify_command(self) -> None:
         digest = verifier.sha256(self.path.read_bytes())
-        with patch("sys.argv", ["verify_simp_boundary_manifest.py", "verify", str(self.path), "--expected-sha256", digest, "--skip-environment"]):
+        with patch("sys.argv", [
+            "verify_simp_boundary_manifest.py", "verify", str(self.path),
+            "--expected-sha256", digest, "--lake-path", str(self.root / "lake"),
+            "--expected-lake-sha256", "0" * 64, "--lean-path", str(self.root / "lean"),
+            "--expected-lean-sha256", "0" * 64, "--skip-environment",
+        ]):
             with self.assertRaises(SystemExit) as result:
                 verifier.main()
         self.assertEqual(result.exception.code, 2)
@@ -299,13 +305,16 @@ class ManifestVerifierTests(unittest.TestCase):
         with patch("sys.argv", [
             "verify_simp_boundary_manifest.py", "verify", str(self.path),
             "--expected-sha256", digest, "--repository-root", str(self.repository),
-            "--mathlib-root", str(self.mathlib),
-        ]), patch.object(verifier, "verify_manifest", return_value=summary) as structural, patch.object(
-            verifier, "recompute_source_consistency"
-        ) as recompute, patch("sys.stdout", new_callable=io.StringIO) as output:
+            "--mathlib-root", str(self.mathlib), "--lake-path", str(self.root / "lake"),
+            "--expected-lake-sha256", "a" * 64, "--lean-path", str(self.root / "lean"),
+            "--expected-lean-sha256", "b" * 64,
+        ]), patch.object(verifier, "verify_strict", return_value={
+            **summary, "kind": "simp_engine_boundary_manifest_source_verification",
+            "expectedSha256": digest, "manifestSha256": digest,
+            "sourceConsistencyVerified": True, "independentSemanticOracleVerified": False,
+        }) as strict, patch("sys.stdout", new_callable=io.StringIO) as output:
             verifier.main()
-        structural.assert_called_once()
-        recompute.assert_called_once()
+        strict.assert_called_once()
         receipt = json.loads(output.getvalue())
         self.assertEqual(receipt["kind"], "simp_engine_boundary_manifest_source_verification")
         self.assertEqual(receipt["expectedSha256"], digest)
@@ -323,11 +332,49 @@ class ManifestVerifierTests(unittest.TestCase):
         with patch("sys.argv", [
             "verify_simp_boundary_manifest.py", "verify", str(self.path),
             "--expected-sha256", "0" * 64, "--repository-root", str(self.repository),
-            "--mathlib-root", str(self.mathlib),
+            "--mathlib-root", str(self.mathlib), "--lake-path", str(self.root / "lake"),
+            "--expected-lake-sha256", "a" * 64, "--lean-path", str(self.root / "lean"),
+            "--expected-lean-sha256", "b" * 64,
         ]), patch.object(verifier, "verify_manifest") as structural:
             with self.assertRaises(SystemExit):
                 verifier.main()
         structural.assert_not_called()
+
+    def test_strict_api_has_no_diagnostic_bypass_parameters(self) -> None:
+        parameters = inspect.signature(verifier.verify_strict).parameters
+        self.assertNotIn("require_complete", parameters)
+        self.assertNotIn("check_environment", parameters)
+        with self.assertRaises(TypeError):
+            verifier.verify_strict(  # type: ignore[call-arg]
+                self.path, repository_root=self.repository, mathlib_root=self.mathlib,
+                expected_sha256="0" * 64, lake_path=self.root / "lake",
+                expected_lake_sha256="0" * 64, lean_path=self.root / "lean",
+                expected_lean_sha256="0" * 64, require_complete=False,
+            )
+
+    def test_strict_snapshot_catches_replacement_after_initial_read(self) -> None:
+        digest = verifier.sha256(self.path.read_bytes())
+        replacement = self.path.with_suffix(".replacement")
+        replacement.write_bytes(self.path.read_bytes() + b"\n")
+        parse_calls = 0
+        original_parse = verifier._parse_manifest
+        def parse(raw):
+            nonlocal parse_calls
+            parse_calls += 1
+            parsed = original_parse(raw)
+            if parse_calls == 1:
+                self.path.write_bytes(replacement.read_bytes())
+            return parsed
+        with patch.object(verifier, "_parse_manifest", side_effect=parse), patch.object(
+            verifier, "_verify_manifest", return_value={"kind": verifier.KIND}
+        ), patch.object(verifier, "recompute_source_consistency"):
+            with self.assertRaisesRegex(RuntimeError, "manifest (path identity|content) changed"):
+                verifier.verify_strict(
+                    self.path, repository_root=self.repository, mathlib_root=self.mathlib,
+                    expected_sha256=digest, lake_path=self.root / "lake",
+                    expected_lake_sha256="a" * 64, lean_path=self.root / "lean",
+                    expected_lean_sha256="b" * 64,
+                )
 
     def test_scope_recomputation_binds_to_verifier_checkout(self) -> None:
         verifier_root = Path(verifier.__file__).resolve().parents[1]
@@ -357,16 +404,22 @@ class ManifestVerifierTests(unittest.TestCase):
         shadow = self.root / "lake-shadow"
         shadow.write_text("#!/bin/sh\necho shadowed\n", encoding="utf-8")
         shadow.chmod(0o755)
-        with patch.object(verifier.shutil, "which", return_value=str(shadow)):
-            with patch("subprocess.run") as run:
-                def shadow_run(args, **kwargs):
-                    if args[0] == "git" and args[1:3] == ("rev-parse", "HEAD"):
-                        value = "b" * 40 if kwargs.get("cwd") == self.mathlib else "a" * 40
-                        return SimpleNamespace(returncode=0, stdout=value + "\n")
-                    return SimpleNamespace(returncode=0, stdout="")
-                run.side_effect = shadow_run
-                with self.assertRaisesRegex(RuntimeError, "no runnable Lean executable"):
-                    verifier._verify_environment(self.manifest, self.repository, self.mathlib, None)
+        lean = self.root / "lean"
+        lean.write_text("#!/bin/sh\necho shadowed\n", encoding="utf-8")
+        lean.chmod(0o755)
+        with patch("subprocess.run") as run:
+            def shadow_run(args, **kwargs):
+                if args[0] == "git" and args[1:3] == ("rev-parse", "HEAD"):
+                    value = "b" * 40 if kwargs.get("cwd") == self.mathlib else "a" * 40
+                    return SimpleNamespace(returncode=0, stdout=value + "\n")
+                return SimpleNamespace(returncode=0, stdout="")
+            run.side_effect = shadow_run
+            with self.assertRaisesRegex(RuntimeError, "does not contain explicit Lean"):
+                verifier._verify_environment(
+                    self.manifest, self.repository, self.mathlib, None,
+                    lake_path=shadow, expected_lake_sha256=verifier.sha256(shadow.read_bytes()),
+                    lean_path=lean, expected_lean_sha256=verifier.sha256(lean.read_bytes()),
+                )
 
     def test_pinned_lake_resolver_positive_identity_control(self) -> None:
         lake_manifest = {"packages": [{"name": "mathlib", "type": "git", "rev": "b" * 40}]}
@@ -392,8 +445,12 @@ class ManifestVerifierTests(unittest.TestCase):
             if args[0] == "git" and args[1] == "status":
                 return SimpleNamespace(returncode=0, stdout="")
             return original_run(args, **kwargs)
-        with patch.object(verifier.shutil, "which", return_value=str(lake)), patch("subprocess.run", side_effect=fake_run):
-            identity = verifier._verify_environment(self.manifest, self.repository, self.mathlib, None)
+        with patch("subprocess.run", side_effect=fake_run):
+            identity = verifier._verify_environment(
+                self.manifest, self.repository, self.mathlib, None,
+                lake_path=lake, expected_lake_sha256=verifier.sha256(lake.read_bytes()),
+                lean_path=lean, expected_lean_sha256=verifier.sha256(lean.read_bytes()),
+            )
         self.assertEqual(identity["leanPath"], str(lean.resolve()))
         self.assertEqual(identity["leanBinarySha256"], verifier.sha256(lean.read_bytes()))
 

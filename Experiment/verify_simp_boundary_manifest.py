@@ -16,11 +16,12 @@ from collections import Counter
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from typing import Any, Iterable
 
 import check_simp_engine_boundary_scope as scope
@@ -48,7 +49,7 @@ TOP_LEVEL_FIELDS = frozenset(
     }
 )
 OPTIONAL_TOP_LEVEL_FIELDS = frozenset(
-    {"selfHash", "manifestHash", "packageIdentity", "packageIdentities", "leanBinarySha256"}
+    {"selfHash", "manifestHash", "packageIdentity", "packageIdentities"}
 )
 MODULE_FIELDS = frozenset(
     {
@@ -83,17 +84,66 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def verify_raw_manifest_digest(manifest_path: str | Path, expected_sha256: str) -> str:
-    """Authenticate the exact manifest bytes before any JSON parsing."""
-    expected = _hash(expected_sha256, "expected-sha256")
+@dataclass(frozen=True)
+class ManifestSnapshot:
+    path: Path
+    raw: bytes
+    digest: str
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+
+
+def _read_manifest_snapshot(manifest_path: str | Path) -> ManifestSnapshot:
     path = Path(manifest_path).resolve()
     try:
-        actual = sha256(path.read_bytes())
+        with path.open("rb") as stream:
+            before = os.fstat(stream.fileno())
+            raw = stream.read()
+            after = os.fstat(stream.fileno())
     except OSError as exc:
-        raise _error("file", f"cannot read manifest for expected-sha256: {exc}") from exc
-    if actual != expected:
-        raise _error("expected-sha256", f"raw manifest bytes differ: {actual} != {expected}")
-    return actual
+        raise _error("file", f"cannot read manifest: {exc}") from exc
+    before_identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+    after_identity = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    if before_identity != after_identity:
+        raise _error("file", "manifest changed while it was being read")
+    return ManifestSnapshot(path, raw, sha256(raw), *after_identity)
+
+
+def _parse_manifest(raw: bytes) -> dict[str, Any]:
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise _error("file", f"cannot parse valid JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise _error("root", "must be an object")
+    return value
+
+
+def _assert_manifest_snapshot(snapshot: ManifestSnapshot) -> None:
+    try:
+        current_stat = snapshot.path.stat()
+        current_identity = (
+            current_stat.st_dev, current_stat.st_ino,
+            current_stat.st_size, current_stat.st_mtime_ns,
+        )
+        if current_identity != (snapshot.device, snapshot.inode, snapshot.size, snapshot.mtime_ns):
+            raise _error("file", "manifest path identity changed during verification")
+        current_raw = snapshot.path.read_bytes()
+    except OSError as exc:
+        raise _error("file", f"manifest disappeared during verification: {exc}") from exc
+    if current_raw != snapshot.raw:
+        raise _error("file", "manifest content changed during verification")
+
+
+def verify_raw_manifest_digest(manifest_path: str | Path, expected_sha256: str) -> str:
+    """Authenticate the exact bytes from one opened manifest read."""
+    expected = _hash(expected_sha256, "expected-sha256")
+    snapshot = _read_manifest_snapshot(manifest_path)
+    if snapshot.digest != expected:
+        raise _error("expected-sha256", f"raw manifest bytes differ: {snapshot.digest} != {expected}")
+    return snapshot.digest
 
 
 def canonical_json(value: object) -> bytes:
@@ -134,6 +184,21 @@ def _hash(value: object, label: str, pattern: re.Pattern[str] = HEX64) -> str:
     if not pattern.fullmatch(result):
         raise _error(label, "must be a lowercase hexadecimal digest")
     return result
+
+
+def _checked_binary_digest(path: Path, expected: str, label: str) -> tuple[Path, str, os.stat_result]:
+    resolved = path.resolve()
+    if not resolved.is_file() or not resolved.stat().st_mode & 0o111:
+        raise _error(label, f"explicit executable is not runnable: {resolved}")
+    expected_digest = _hash(expected, f"expected-{label}-sha256")
+    try:
+        stat = resolved.stat()
+        digest = sha256(resolved.read_bytes())
+    except OSError as exc:
+        raise _error(label, f"cannot read explicit executable: {exc}") from exc
+    if digest != expected_digest:
+        raise _error(label, f"explicit executable digest differs: {digest}")
+    return resolved, digest, stat
 
 
 def _strings(value: object, label: str, *, nonempty: bool = True) -> list[str]:
@@ -379,7 +444,8 @@ def _current_implementation_paths(repository_root: Path) -> set[str]:
 
 def _verify_environment(
     manifest: dict[str, Any], repository_root: Path, mathlib_root: Path,
-    expected_repository_commit: str | None,
+    expected_repository_commit: str | None, *, lake_path: Path,
+    expected_lake_sha256: str, lean_path: Path, expected_lean_sha256: str,
 ) -> dict[str, str]:
     repository = _string(manifest.get("repositoryCommit"), "repositoryCommit")
     if not HEX40.fullmatch(repository):
@@ -416,16 +482,12 @@ def _verify_environment(
     version, commit = _string(lean.get("version"), "lean.version"), _string(lean.get("commit"), "lean.commit")
     if not HEX40.fullmatch(commit):
         raise _error("lean.commit", "must be a 40-character lowercase commit")
-    lake_command = shutil.which("lake")
-    if lake_command is None:
-        raise _error("lean", "pinned lake executable is not available")
-    lake_path = Path(lake_command).resolve()
-    if not lake_path.is_file() or not lake_path.stat().st_mode & 0o111:
-        raise _error("lean", f"lake executable is not runnable: {lake_path}")
+    lake_path, lake_digest, _ = _checked_binary_digest(lake_path, expected_lake_sha256, "lake")
+    lean_path, lean_digest, _ = _checked_binary_digest(lean_path, expected_lean_sha256, "lean")
     prefix = Path(run(str(lake_path), "env", "lean", "--print-prefix")).resolve()
-    lean_path = prefix / "bin" / ("lean.exe" if sys.platform == "win32" else "lean")
-    if not lean_path.is_file() or not lean_path.stat().st_mode & 0o111:
-        raise _error("lean", f"lake env resolved no runnable Lean executable: {lean_path}")
+    expected_prefix = lean_path.parent.parent
+    if prefix != expected_prefix:
+        raise _error("lean", f"lake env prefix {prefix} does not contain explicit Lean {lean_path}")
     actual_lean = run(str(lake_path), "env", "lean", "--version")
     direct_lean = run(str(lean_path), "--version")
     expected_version = f"version {version}"
@@ -439,39 +501,30 @@ def _verify_environment(
     toolchain_path = repository_root / "lean-toolchain"
     if not toolchain_path.is_file() or version not in toolchain_path.read_text(encoding="utf-8").strip():
         raise _error("lean", "lean-toolchain does not identify the manifest version")
-    lean_digest = sha256(lean_path.read_bytes())
-    if "leanBinarySha256" in manifest and _hash(manifest["leanBinarySha256"], "leanBinarySha256") != lean_digest:
-        raise _error("leanBinarySha256", f"resolved executable digest differs: {lean_digest}")
     if "packageIdentity" in manifest and manifest["packageIdentity"] != lake_identity:
         raise _error("packageIdentity", "does not match pinned lake-manifest.json")
     if "packageIdentities" in manifest and manifest["packageIdentities"] != lake_identity:
         raise _error("packageIdentities", "does not match pinned lake-manifest.json")
-    return {"lakePath": str(lake_path), "leanPath": str(lean_path), "leanBinarySha256": lean_digest}
+    return {
+        "lakePath": str(lake_path), "lakeBinarySha256": lake_digest,
+        "leanPath": str(lean_path), "leanBinarySha256": lean_digest,
+    }
 
 
-def verify_manifest(
+def _verify_manifest(
     manifest_path: str | Path,
     *,
+    raw: bytes,
     repository_root: str | Path | None = None,
     mathlib_root: str | Path | None = None,
     expected_repository_commit: str | None = None,
     require_complete: bool = True,
     check_environment: bool = True,
+    lake_path: Path | None = None, expected_lake_sha256: str | None = None,
+    lean_path: Path | None = None, expected_lean_sha256: str | None = None,
 ) -> dict[str, Any]:
-    """Verify one manifest and return a compact summary.
-
-    ``check_environment=False`` is intended for fixture tests and offline
-    structural inspection.  It still reads every module source and checks every
-    digest/range.  Production verification should leave it enabled.
-    """
     path = Path(manifest_path).resolve()
-    try:
-        raw = path.read_bytes()
-        manifest = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise _error("file", f"cannot read valid JSON: {exc}") from exc
-    if not isinstance(manifest, dict):
-        raise _error("root", "must be an object")
+    manifest = _parse_manifest(raw)
     _fields(manifest, TOP_LEVEL_FIELDS, "top-level", OPTIONAL_TOP_LEVEL_FIELDS)
     if (
         not isinstance(manifest.get("reportSchema"), int)
@@ -493,7 +546,13 @@ def verify_manifest(
             _validate_package_identity_shape(manifest[field], field)
     environment_identity = None
     if check_environment:
-        environment_identity = _verify_environment(manifest, repository_root, mathlib_root, expected_repository_commit)
+        if None in (lake_path, expected_lake_sha256, lean_path, expected_lean_sha256):
+            raise _error("environment", "strict verification requires explicit Lake and Lean paths and digests")
+        environment_identity = _verify_environment(
+            manifest, repository_root, mathlib_root, expected_repository_commit,
+            lake_path=lake_path, expected_lake_sha256=expected_lake_sha256,
+            lean_path=lean_path, expected_lean_sha256=expected_lean_sha256,
+        )
     elif expected_repository_commit is not None and manifest.get("repositoryCommit") != expected_repository_commit:
         raise _error("repositoryCommit", f"expected {expected_repository_commit}, found {manifest.get('repositoryCommit')}")
 
@@ -723,7 +782,79 @@ def verify_manifest(
     return summary
 
 
-def recompute_inventory(manifest_path: str | Path, *, mathlib_root: str | Path, repository_root: str | Path, timeout: int = 3600) -> None:
+def verify_manifest(
+    manifest_path: str | Path,
+    *,
+    repository_root: str | Path | None = None,
+    mathlib_root: str | Path | None = None,
+    expected_repository_commit: str | None = None,
+    require_complete: bool = True,
+    check_environment: bool = False,
+) -> dict[str, Any]:
+    """Diagnostic structural/source verification only.
+
+    Strict verification is exposed separately as :func:`verify_strict`; this
+    API intentionally permits fixture/partial checks and must not be used as
+    a campaign acceptance decision.
+    """
+    snapshot = _read_manifest_snapshot(manifest_path)
+    return _verify_manifest(
+        snapshot.path, raw=snapshot.raw, repository_root=repository_root,
+        mathlib_root=mathlib_root, expected_repository_commit=expected_repository_commit,
+        require_complete=require_complete, check_environment=check_environment,
+    )
+
+
+def verify_strict(
+    manifest_path: str | Path, *, repository_root: str | Path, mathlib_root: str | Path,
+    expected_sha256: str, lake_path: str | Path, expected_lake_sha256: str,
+    lean_path: str | Path, expected_lean_sha256: str,
+    expected_repository_commit: str | None = None, timeout: int = 3600,
+) -> dict[str, Any]:
+    """Run non-bypassable production verification and fresh consistency checks."""
+    snapshot = _read_manifest_snapshot(manifest_path)
+    expected = _hash(expected_sha256, "expected-sha256")
+    if snapshot.digest != expected:
+        raise _error("expected-sha256", f"raw manifest bytes differ: {snapshot.digest} != {expected}")
+    manifest = _parse_manifest(snapshot.raw)
+    repository = Path(repository_root).resolve()
+    mathlib = Path(mathlib_root).resolve()
+    lake = Path(lake_path).resolve()
+    lean = Path(lean_path).resolve()
+    summary = _verify_manifest(
+        snapshot.path, raw=snapshot.raw, repository_root=repository, mathlib_root=mathlib,
+        expected_repository_commit=expected_repository_commit, require_complete=True,
+        check_environment=True, lake_path=lake, expected_lake_sha256=expected_lake_sha256,
+        lean_path=lean, expected_lean_sha256=expected_lean_sha256,
+    )
+    recompute_source_consistency(
+        snapshot.path, repository_root=repository, mathlib_root=mathlib, timeout=timeout,
+        manifest=manifest, manifest_snapshot=snapshot, lake_path=lake, lean_path=lean,
+        expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+    )
+    _assert_manifest_snapshot(snapshot)
+    _, lake_digest, _ = _checked_binary_digest(lake, expected_lake_sha256, "lake")
+    _, lean_digest, _ = _checked_binary_digest(lean, expected_lean_sha256, "lean")
+    return {
+        **summary,
+        "kind": "simp_engine_boundary_manifest_source_verification",
+        "expectedSha256": snapshot.digest,
+        "manifestSha256": snapshot.digest,
+        "lakePath": str(lake), "lakeSha256": lake_digest,
+        "leanPath": str(lean), "leanSha256": lean_digest,
+        "sourceConsistencyVerified": True,
+        "independentSemanticOracleVerified": False,
+        "recomputed": "syntax_scope_declarations",
+    }
+
+
+def recompute_inventory(
+    manifest_path: str | Path, *, mathlib_root: str | Path, repository_root: str | Path,
+    timeout: int = 3600, manifest: dict[str, Any] | None = None,
+    manifest_snapshot: ManifestSnapshot | None = None,
+    lake_path: Path | None = None, lean_path: Path | None = None,
+    expected_lake_sha256: str | None = None, expected_lean_sha256: str | None = None,
+) -> None:
     """Freshly run the syntax inventory and compare source-backed records.
 
     This pass intentionally omits scope/declaration recomputation: those are
@@ -731,9 +862,11 @@ def recompute_inventory(manifest_path: str | Path, *, mathlib_root: str | Path, 
     protocol.  It is separate from :func:`verify_manifest` because it launches
     a potentially long Lean process over the complete corpus.
     """
-    path = Path(manifest_path).resolve(); manifest = json.loads(path.read_bytes())
+    path = Path(manifest_path).resolve()
+    snapshot = manifest_snapshot or _read_manifest_snapshot(path)
+    manifest = manifest or _parse_manifest(snapshot.raw)
     mathlib = Path(mathlib_root).resolve(); repository = Path(repository_root).resolve()
-    before = _freshness_snapshot(path, manifest, repository, mathlib)
+    before = _freshness_snapshot(path, manifest, repository, mathlib, manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path, expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256)
     source_paths = [mathlib / module["module"] for module in manifest["modules"]]
     command = [sys.executable, str(repository / "Experiment" / "lean_toolchain_cache.py"), "inventory", "--header-imports", *(str(p) for p in source_paths)]
     result = subprocess.run(command, cwd=repository, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
@@ -778,11 +911,14 @@ def recompute_inventory(manifest_path: str | Path, *, mathlib_root: str | Path, 
         raise _error("recompute", f"inventory fallback set differs: {sorted(fallbacks)} != {sorted(manifest['fullFrontendFallbacks'])}")
     if deferred:
         raise _error("recompute", f"inventory left deferred fallbacks unresolved: {sorted(deferred)}")
-    _assert_fresh(before, path, manifest, repository, mathlib, "inventory subprocess")
+    _assert_fresh(before, path, manifest, repository, mathlib, "inventory subprocess", manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path, expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256)
 
 
 def _freshness_snapshot(
-    manifest_path: Path, manifest: dict[str, Any], repository_root: Path, mathlib_root: Path
+    manifest_path: Path, manifest: dict[str, Any], repository_root: Path, mathlib_root: Path,
+    *, manifest_snapshot: ManifestSnapshot | None = None,
+    lake_path: Path | None = None, lean_path: Path | None = None,
+    expected_lake_sha256: str | None = None, expected_lean_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Capture mutable inputs that must remain fixed across fresh subprocesses."""
     source_hashes = {
@@ -799,6 +935,26 @@ def _freshness_snapshot(
         input_path = repository_root / relative
         if input_path.is_file():
             environment[relative] = sha256(input_path.read_bytes())
+    binaries = {}
+    for label, executable, expected in (
+        ("lake", lake_path, expected_lake_sha256), ("lean", lean_path, expected_lean_sha256)
+    ):
+        if executable is not None:
+            try:
+                resolved = executable.resolve()
+                if expected is not None:
+                    resolved, digest, stat = _checked_binary_digest(resolved, expected, label)
+                else:
+                    stat = resolved.stat()
+                    digest = sha256(resolved.read_bytes())
+                binaries[label] = {
+                    "path": str(resolved),
+                    "sha256": digest,
+                    "device": stat.st_dev, "inode": stat.st_ino,
+                    "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
+                }
+            except OSError as exc:
+                raise _error("recompute", f"cannot snapshot {label} executable: {exc}") from exc
     def git_state(root: Path) -> tuple[str, str]:
         commit = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=root, text=True,
@@ -812,10 +968,11 @@ def _freshness_snapshot(
             raise _error("recompute", f"cannot snapshot git state under {root}")
         return commit.stdout.strip(), status.stdout
     return {
-        "manifest": sha256(manifest_path.read_bytes()),
+        "manifest": manifest_snapshot.digest if manifest_snapshot is not None else sha256(manifest_path.read_bytes()),
         "sources": source_hashes,
         "implementation": implementation,
         "environment": environment,
+        "binaries": binaries,
         "repositoryGit": git_state(repository_root),
         "mathlibGit": git_state(mathlib_root),
     }
@@ -824,8 +981,17 @@ def _freshness_snapshot(
 def _assert_fresh(
     before: dict[str, Any], manifest_path: Path, manifest: dict[str, Any],
     repository_root: Path, mathlib_root: Path, label: str,
+    *, manifest_snapshot: ManifestSnapshot | None = None,
+    lake_path: Path | None = None, lean_path: Path | None = None,
+    expected_lake_sha256: str | None = None, expected_lean_sha256: str | None = None,
 ) -> None:
-    after = _freshness_snapshot(manifest_path, manifest, repository_root, mathlib_root)
+    if manifest_snapshot is not None:
+        _assert_manifest_snapshot(manifest_snapshot)
+    after = _freshness_snapshot(
+        manifest_path, manifest, repository_root, mathlib_root,
+        manifest_snapshot=manifest_snapshot, lake_path=lake_path, lean_path=lean_path,
+        expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+    )
     if after != before:
         changed = [key for key in before if before.get(key) != after.get(key)]
         raise _error("recompute", f"{label} changed authenticated inputs: {changed}")
@@ -869,7 +1035,9 @@ def _declaration_key(value: dict[str, Any]) -> tuple[Any, ...]:
 
 def _fresh_scope_and_declarations(
     manifest_path: Path, manifest: dict[str, Any], repository_root: Path,
-    mathlib_root: Path, timeout: int,
+    mathlib_root: Path, timeout: int, *, manifest_snapshot: ManifestSnapshot | None = None,
+    lake_path: Path | None = None, lean_path: Path | None = None,
+    expected_lake_sha256: str | None = None, expected_lean_sha256: str | None = None,
 ) -> None:
     """Compare fresh Scope.lean records with every authenticated manifest fact.
 
@@ -888,11 +1056,19 @@ def _fresh_scope_and_declarations(
         )
         for module in manifest["modules"]
     ]
-    before = _freshness_snapshot(manifest_path, manifest, repository_root, mathlib_root)
+    before = _freshness_snapshot(
+        manifest_path, manifest, repository_root, mathlib_root,
+        manifest_snapshot=manifest_snapshot, lake_path=lake_path, lean_path=lean_path,
+        expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+    )
     occurrences, declarations, fallbacks = scope.load_records_with_fallbacks(
         specs, batch_size=128, timeout=timeout
     )
-    _assert_fresh(before, manifest_path, manifest, repository_root, mathlib_root, "scope subprocess")
+    _assert_fresh(
+        before, manifest_path, manifest, repository_root, mathlib_root, "scope subprocess",
+        manifest_snapshot=manifest_snapshot, lake_path=lake_path, lean_path=lean_path,
+        expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+    )
     if set(fallbacks) != set(manifest["scopeFrontendFallbacks"]):
         raise _error("recompute", f"scope fallback set differs: {fallbacks} != {manifest['scopeFrontendFallbacks']}")
 
@@ -946,7 +1122,9 @@ def _fresh_scope_and_declarations(
                 # this also authenticates every occurrence ID/caller join.
                 selected_entry = dict(manifest_occurrence)
                 evidence_before = _freshness_snapshot(
-                    manifest_path, manifest, repository_root, mathlib_root
+                    manifest_path, manifest, repository_root, mathlib_root,
+                    manifest_snapshot=manifest_snapshot, lake_path=lake_path, lean_path=lean_path,
+                    expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
                 )
                 fresh_evidence = scope.resolve_execution_evidence(
                     compiled,
@@ -957,7 +1135,9 @@ def _fresh_scope_and_declarations(
                 )[manifest_occurrence["id"]]
                 _assert_fresh(
                     evidence_before, manifest_path, manifest, repository_root,
-                    mathlib_root, "execution evidence subprocess"
+                    mathlib_root, "execution evidence subprocess",
+                    manifest_snapshot=manifest_snapshot, lake_path=lake_path, lean_path=lean_path,
+                    expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
                 )
                 if fresh_evidence != evidence:
                     raise _error("recompute", f"executionEvidence differs for {module}:{manifest_occurrence['id']}")
@@ -978,7 +1158,10 @@ def _fresh_scope_and_declarations(
 
 
 def recompute_source_consistency(
-    manifest_path: str | Path, *, repository_root: Path, mathlib_root: Path, timeout: int
+    manifest_path: str | Path, *, repository_root: Path, mathlib_root: Path, timeout: int,
+    manifest: dict[str, Any] | None = None, manifest_snapshot: ManifestSnapshot | None = None,
+    lake_path: Path | None = None, lean_path: Path | None = None,
+    expected_lake_sha256: str | None = None, expected_lean_sha256: str | None = None,
 ) -> None:
     """Run fresh parser/frontend checks for same-producer source consistency.
 
@@ -988,12 +1171,17 @@ def recompute_source_consistency(
     trust boundary.
     """
     path = Path(manifest_path).resolve()
-    manifest = json.loads(path.read_bytes())
+    snapshot = manifest_snapshot or _read_manifest_snapshot(path)
+    manifest = manifest or _parse_manifest(snapshot.raw)
     recompute_inventory(
-        path, mathlib_root=mathlib_root, repository_root=repository_root, timeout=timeout
+        path, mathlib_root=mathlib_root, repository_root=repository_root, timeout=timeout,
+        manifest=manifest, manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path,
+        expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
     )
     _fresh_scope_and_declarations(
-        path, manifest, repository_root, mathlib_root, timeout
+        path, manifest, repository_root, mathlib_root, timeout,
+        manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path,
+        expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
     )
 
 
@@ -1009,6 +1197,10 @@ def main() -> None:
         command.add_argument("--timeout", type=int, default=3600)
         if name == "verify":
             command.add_argument("--expected-sha256", required=True, help="SHA-256 of the exact manifest bytes")
+            command.add_argument("--lake-path", type=Path, required=True)
+            command.add_argument("--expected-lake-sha256", required=True)
+            command.add_argument("--lean-path", type=Path, required=True)
+            command.add_argument("--expected-lean-sha256", required=True)
         else:
             command.add_argument("--allow-partial", action="store_true", help="inspect a prefix/fixture")
             command.add_argument("--skip-environment", action="store_true", help="offline structural/source checks")
@@ -1019,32 +1211,19 @@ def main() -> None:
     mathlib = (args.mathlib_root or repository / ".lake" / "packages" / "mathlib").resolve()
     try:
         if args.command == "verify":
-            # This must precede JSON parsing so the receipt authenticates the
-            # exact bytes supplied by the caller, including whitespace/order.
-            manifest_sha256 = verify_raw_manifest_digest(manifest_path, args.expected_sha256)
-            summary = verify_manifest(
+            receipt = verify_strict(
                 manifest_path,
                 repository_root=repository,
                 mathlib_root=mathlib,
+                expected_sha256=args.expected_sha256,
+                lake_path=args.lake_path,
+                expected_lake_sha256=args.expected_lake_sha256,
+                lean_path=args.lean_path,
+                expected_lean_sha256=args.expected_lean_sha256,
                 expected_repository_commit=args.expected_repository_commit,
-                require_complete=True,
-                check_environment=True,
-            )
-            recompute_source_consistency(
-                manifest_path,
-                repository_root=repository,
-                mathlib_root=mathlib,
                 timeout=args.timeout,
             )
-            print(json.dumps({
-                **summary,
-                "kind": "simp_engine_boundary_manifest_source_verification",
-                "expectedSha256": manifest_sha256,
-                "manifestSha256": manifest_sha256,
-                "sourceConsistencyVerified": True,
-                "independentSemanticOracleVerified": False,
-                "recomputed": "syntax_scope_declarations",
-            }, sort_keys=True))
+            print(json.dumps(receipt, sort_keys=True))
         else:
             summary = verify_manifest(
                 manifest_path,
@@ -1052,7 +1231,9 @@ def main() -> None:
                 mathlib_root=mathlib,
                 expected_repository_commit=args.expected_repository_commit,
                 require_complete=not args.allow_partial,
-                check_environment=not args.skip_environment,
+                # Inspection is diagnostic-only.  Strict environment and
+                # executable authentication belong exclusively to verify.
+                check_environment=False,
             )
             if args.recompute:
                 recompute_inventory(
