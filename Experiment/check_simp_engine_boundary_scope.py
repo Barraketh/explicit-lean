@@ -975,6 +975,67 @@ def _result_occurrence(result: dict[str, object]) -> dict[str, object]:
     raise RuntimeError(f"unresolved scope result has no occurrence: {result!r}")
 
 
+def _authenticated_nonproof_declarations(
+    result: dict[str, object],
+) -> bool:
+    """Return whether a result has a nonempty checked computational owner set.
+
+    Declaration records come from the checked scope frontend.  Keep this
+    predicate deliberately narrow: every owner must be a declaration record
+    with an explicit ``isProof = false`` bit.  Missing, malformed, or mixed
+    owner evidence cannot establish that a quotation is executable and must
+    remain unresolved.
+    """
+    declarations = result.get("declarations")
+    if not isinstance(declarations, list) or not declarations:
+        return False
+    return all(
+        isinstance(declaration, dict)
+        and declaration.get("isProof") is False
+        for declaration in declarations
+    )
+
+
+def reclassify_missing_quoted_execution(
+    result: dict[str, object],
+) -> bool:
+    """Reclassify one missing quoted execution with checked computational owners.
+
+    A missing temporary execution does not prove that quoted syntax is data.
+    When the checked declaration oracle already identifies every enclosing
+    declaration as non-proof-valued, the quotation is syntax constructed for a
+    later caller-driven execution.  This is the sole missing-evidence recovery
+    path; all other shapes remain fail-closed.  Return whether a reclassification
+    was applied.
+    """
+    evidence = result.get("executionEvidence")
+    if not isinstance(evidence, dict) or evidence.get("status") != "missing_execution":
+        return False
+    occurrence = _result_occurrence(result)
+    ancestors = occurrence.get("ancestors")
+    quoted = (
+        isinstance(ancestors, list)
+        and all(isinstance(kind, str) for kind in ancestors)
+        and _quotation_context(ancestors) == "quotation"
+    )
+    if not quoted or not _authenticated_nonproof_declarations(result):
+        return False
+    result["executionRole"] = "reusable_executable"
+    result["declarationKind"] = "caller_dependent"
+    result["action"] = "materialize"
+    result["reason"] = (
+        "temporary execution was missing, but checked enclosing declarations "
+        "are all non-proof-valued; quoted syntax is reusable caller-driven "
+        "execution"
+    )
+    validate_scope_dimensions(
+        result.get("executionRole"),
+        result.get("declarationKind"),
+        result.get("action"),
+    )
+    return True
+
+
 def resolve_execution_evidence(
     module: str,
     source: bytes,
@@ -1158,6 +1219,13 @@ def apply_execution_evidence(
                 "scope action fails closed"
             )
         elif status == "missing_execution":
+            # A quoted occurrence can be executable syntax stored by a
+            # computational declaration even when the temporary source copy
+            # has no caller that expands it.  Recover only when the checked
+            # declaration records authenticate a nonempty all-nonproof owner
+            # set; otherwise preserve the unresolved fail-closed result.
+            if reclassify_missing_quoted_execution(result):
+                continue
             result["executionRole"] = "unresolved" if quoted else "direct_executable"
             result["declarationKind"] = "unknown"
             result["action"] = "unresolved"
