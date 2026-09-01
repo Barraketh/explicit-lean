@@ -1,9 +1,10 @@
-import Mathlib
+import Mathlib.Tactic.ScopedNS
 import ExplicitLean.SimpEngine.FrontendOptions
 import Lean.DeclarationRange
 import Lean.Elab.Frontend
 import Lean.Elab.Import
 import Lean.Parser.Module
+import Lean.Util.Path
 
 open Lean Parser
 
@@ -84,18 +85,18 @@ private unsafe def parseSource (env : Environment) (path : System.FilePath)
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
   return (moduleSyntax, state.commandState.messages, parserHadErrors)
 
-private unsafe def parseSourceFully (path : System.FilePath)
-    (source : String) : IO (Syntax × MessageLog) := do
+private unsafe def parseSourceFully (module : Name) (path : System.FilePath)
+    (source : String) : IO (Syntax × MessageLog × Environment) := do
   let inputCtx := Parser.mkInputContext source path.toString
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   Lean.enableInitializersExecution
   let env ← Lean.importModules (Lean.Elab.HeaderSyntax.imports header) {}
     (loadExts := true)
-  let env := env.setMainModule `ExplicitLean.SimpEngine.BoundaryScopeFallback
+  let env := env.setMainModule module
   let state ← Lean.Elab.IO.processCommands inputCtx parserState
     (Lean.Elab.Command.mkState env messages ExplicitLean.SimpEngine.mathlibParserOptions)
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
-  return (moduleSyntax, state.commandState.messages)
+  return (moduleSyntax, state.commandState.messages, state.commandState.env)
 
 private structure ScopeOccurrence where
   module : String
@@ -182,15 +183,19 @@ private def declarationByteRange (fileMap : FileMap) (range : DeclarationRange) 
 private unsafe def declarationRecords (env : Environment) (module : Name)
     (fileMap : FileMap) : IO (Array ScopeDeclaration) := do
   let mut result : Array ScopeDeclaration := #[]
-  let some moduleIndex := env.getModuleIdx? module
-    | return result
-  let serverEntries := declRangeExt.toPersistentEnvExtension.getModuleEntries env
-    moduleIndex (level := .server)
-  let entries := if serverEntries.isEmpty then
-      declRangeExt.toPersistentEnvExtension.getModuleEntries env moduleIndex
-        (level := .exported)
+  let entries := if let some moduleIndex := env.getModuleIdx? module then
+      let serverEntries := declRangeExt.toPersistentEnvExtension.getModuleEntries env
+        moduleIndex (level := .server)
+      if serverEntries.isEmpty then
+        declRangeExt.toPersistentEnvExtension.getModuleEntries env moduleIndex
+          (level := .exported)
+      else
+        serverEntries
     else
-      serverEntries
+      -- A full fallback elaborates the requested source as the current module,
+      -- so its declaration ranges live in the extension's local state rather
+      -- than in an imported module slot.
+      declRangeExt.toPersistentEnvExtension.getState (asyncMode := .local) env |>.toArray
   for (name, ranges) in entries do
     let some info := env.find? name
       | continue
@@ -214,12 +219,12 @@ private unsafe def declarationRecords (env : Environment) (module : Name)
     }
   return result
 
-private unsafe def emitFile (env : Environment) (module : Name)
+private unsafe def emitFile (env? : Option Environment) (module : Name)
     (path : System.FilePath) (deferFullFallback fullFallbackOnly : Bool) : IO UInt32 := do
   let source ← IO.FS.readFile path
   let fileMap := FileMap.ofString source
   try
-    let finish (moduleSyntax : Syntax) (messages : MessageLog) : IO UInt32 := do
+    let finish (env : Environment) (moduleSyntax : Syntax) (messages : MessageLog) : IO UInt32 := do
       if messages.hasErrors then
         IO.eprintln s!"scope classifier parser errors in {path}"
         for message in messages.toArray do
@@ -235,18 +240,20 @@ private unsafe def emitFile (env : Environment) (module : Name)
       return 0
     if fullFallbackOnly then
       IO.println s!"SIMP_ENGINE_SCOPE_FULL_FALLBACK module={module} file={path}"
-      let (moduleSyntax, messages) ← parseSourceFully path source
-      return ← finish moduleSyntax messages
+      let (moduleSyntax, messages, env) ← parseSourceFully module path source
+      return ← finish env moduleSyntax messages
+    let some env := env?
+      | throw <| IO.Error.userError "scope fast parser is missing its aggregate environment"
     let (fastSyntax, fastMessages, fastParserHadErrors) ← parseSource env path source
     if fastParserHadErrors || fastMessages.hasErrors then
       if deferFullFallback then
         IO.println s!"SIMP_ENGINE_SCOPE_DEFERRED_FALLBACK module={module} file={path}"
         return 0
       IO.println s!"SIMP_ENGINE_SCOPE_FULL_FALLBACK module={module} file={path}"
-      let (moduleSyntax, messages) ← parseSourceFully path source
-      return ← finish moduleSyntax messages
+      let (moduleSyntax, messages, fullEnv) ← parseSourceFully module path source
+      return ← finish fullEnv moduleSyntax messages
     else
-      return ← finish fastSyntax fastMessages
+      return ← finish env fastSyntax fastMessages
   catch error =>
     IO.eprintln s!"scope classifier failed for {module} ({path}): {error}"
     return 1
@@ -285,10 +292,12 @@ unsafe def scopeMain (args : List String) : IO UInt32 := do
   -- Match the syntax inventory's parser environment exactly for Mathlib
   -- sources. The controlled fixture defines a custom tactic token, so parse it
   -- in a separate environment instead of adding that grammar to Mathlib files.
-  let mathlibEnv ← Lean.importModules #[{ module := `Mathlib }] {}
-    (loadExts := true)
+  let mathlibEnv? ← if fullFallbackOnly then
+      pure none
+    else
+      some <$> Lean.importModules #[{ module := `Mathlib }] {} (loadExts := true)
   let fixtureModule := `ExplicitLean.SimpEngine.Boundary.ScopeFixture
-  let fixtureEnv? ← if pairs.any (fun pair => pair.1 == fixtureModule) then
+  let fixtureEnv? ← if !fullFallbackOnly && pairs.any (fun pair => pair.1 == fixtureModule) then
       Lean.enableInitializersExecution
       some <$> Lean.importModules #[
         { module := `Mathlib },
@@ -298,15 +307,19 @@ unsafe def scopeMain (args : List String) : IO UInt32 := do
       pure none
   let mut status := 0
   for (module, path) in pairs do
-    let env := if module == fixtureModule then
-        fixtureEnv?.getD mathlibEnv
+    let env? := if module == fixtureModule then fixtureEnv? else mathlibEnv?
+    let moduleExists ← if fullFallbackOnly then
+        try
+          let _ ← Lean.findOLean module
+          pure true
+        catch _ => pure false
       else
-        mathlibEnv
-    if (env.getModuleIdx? module).isNone then
+        pure <| env?.any fun env => (env.getModuleIdx? module).isSome
+    if !moduleExists then
       IO.eprintln s!"scope classifier module is not present in the pinned environment: {module}"
       status := 1
     else
-      let code ← emitFile env module path deferFullFallback fullFallbackOnly
+      let code ← emitFile env? module path deferFullFallback fullFallbackOnly
       if code != 0 then
         status := code
   return status

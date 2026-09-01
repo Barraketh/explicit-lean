@@ -21,6 +21,19 @@ PACKAGE_OPTIONS_SOURCE = (
 )
 PACKAGE_OPTIONS_SOURCE_SHA256 = "a02c592f5d685b6f4c3b3738de223883cc70a1b96f5c2ef0625ce2694e4d38be"
 PACKAGE_OPTIONS_OCCURRENCES = 32
+PRELOADED_RULE_MODULE = "Mathlib.Tactic.ContinuousFunctionalCalculus"
+PRELOADED_RULE_SOURCE = ROOT / ".lake/packages/mathlib/Mathlib/Tactic/ContinuousFunctionalCalculus.lean"
+PRELOADED_RULE_SOURCE_SHA256 = "af8d1f2d010194667a10f172edbacb9113ac6496ac52bf796b124bfbabf96d66"
+PRELOADED_RULE_DECLARATIONS = 7
+PRELOADED_RULE_DECLARATION_NAMES = {
+    "_aux_Mathlib_Tactic_ContinuousFunctionalCalculus___macroRules_cfcContTac_1",
+    "_aux_Mathlib_Tactic_ContinuousFunctionalCalculus___macroRules_cfcTac_1",
+    "_aux_Mathlib_Tactic_ContinuousFunctionalCalculus___macroRules_cfcZeroTac_1",
+    "_private.Mathlib.Tactic.ContinuousFunctionalCalculus.0.initFn._@.Mathlib.Tactic.ContinuousFunctionalCalculus.2038506681._hygCtx._hyg.3",
+    "cfcContTac",
+    "cfcTac",
+    "cfcZeroTac",
+}
 PACKAGE_OPTION_ARGUMENTS = [
     "-Dpp.unicode.fun=true",
     "-DautoImplicit=false",
@@ -62,6 +75,8 @@ def main() -> None:
         raise RuntimeError("package-options regression source changed")
     if sha(PACKAGE_LAKEFILE) != PACKAGE_LAKEFILE_SHA256:
         raise RuntimeError("pinned Mathlib package options changed")
+    if sha(PRELOADED_RULE_SOURCE) != PRELOADED_RULE_SOURCE_SHA256:
+        raise RuntimeError("preloaded-rule regression source changed")
     for consumer in [
         ROOT / "Experiment/SimpEngineInventory.lean",
         ROOT / "Experiment/SimpEngineBoundaryScope.lean",
@@ -84,7 +99,8 @@ def main() -> None:
               ROOT / "Experiment/SimpEngineBoundaryScope.lean",
               ROOT / ".lake/build/bin/simpEngineInventory",
               ROOT / ".lake/build/bin/simpEngineBoundaryScope",
-              PACKAGE_OPTIONS_SOURCE]
+              PACKAGE_OPTIONS_SOURCE,
+              PRELOADED_RULE_SOURCE]
     before = {str(path): sha(path) for path in inputs}
     archived = []
     for index, path in enumerate(inputs):
@@ -287,6 +303,83 @@ def main() -> None:
         })
     if package_entries["inventory"] != package_entries["scope"]:
         raise RuntimeError("package-options inventory and scope occurrences disagree")
+
+    # The analysis executables must not statically preload aggregate Mathlib
+    # extension state.  Otherwise elaborating this source in an isolated full
+    # fallback redeclares its Aesop rule set and fails before returning syntax.
+    preload_commands = [
+        (
+            "preloaded-rule-inventory",
+            [
+                sys.executable,
+                str(ROOT / "Experiment/lean_toolchain_cache.py"),
+                "inventory",
+                "--full-fallback-only",
+                str(PRELOADED_RULE_SOURCE),
+            ],
+            "SIMP_ENGINE_INVENTORY_FULL_FALLBACK file=",
+            0,
+            0,
+        ),
+        (
+            "preloaded-rule-scope",
+            [
+                sys.executable,
+                str(ROOT / "Experiment/lean_toolchain_cache.py"),
+                "scope",
+                "--full-fallback-only",
+                PRELOADED_RULE_MODULE,
+                str(PRELOADED_RULE_SOURCE),
+            ],
+            f"SIMP_ENGINE_SCOPE_FULL_FALLBACK module={PRELOADED_RULE_MODULE} file=",
+            0,
+            PRELOADED_RULE_DECLARATIONS,
+        ),
+    ]
+    for label, command, fallback_marker, expected_occurrences, expected_declarations in preload_commands:
+        code, output, _ = inventory.run(command, timeout=180)
+        log = work / f"{label}.log"
+        log.write_text(output)
+        occurrences = sum(
+            line.startswith("{") or line.startswith("SIMP_ENGINE_SCOPE_OCCURRENCE ")
+            for line in output.splitlines()
+        )
+        declaration_marker = "SIMP_ENGINE_SCOPE_DECLARATION "
+        declaration_entries = [
+            json.loads(line.removeprefix(declaration_marker))
+            for line in output.splitlines()
+            if line.startswith(declaration_marker)
+        ]
+        declarations = len(declaration_entries)
+        if (code or fallback_marker not in output or occurrences != expected_occurrences or
+                declarations != expected_declarations):
+            raise RuntimeError(f"{label}: aggregate extension state contaminated full fallback; see {log}")
+        if expected_declarations:
+            names = {entry.get("name") for entry in declaration_entries}
+            source_size = PRELOADED_RULE_SOURCE.stat().st_size
+            valid_ranges = all(
+                entry.get("module") == PRELOADED_RULE_MODULE and
+                type(entry.get("isProof")) is bool and
+                all(type(entry.get(key)) is int for key in (
+                    "startByte", "endByte", "selectionStartByte", "selectionEndByte"
+                )) and
+                0 <= entry["startByte"] <= entry["selectionStartByte"] <=
+                    entry["selectionEndByte"] <= entry["endByte"] <= source_size
+                for entry in declaration_entries
+            )
+            if names != PRELOADED_RULE_DECLARATION_NAMES or not valid_ranges:
+                raise RuntimeError(f"{label}: malformed current-module declarations; see {log}")
+        records.append({
+            "case": label,
+            "expectedOccurrences": expected_occurrences,
+            "actualOccurrences": occurrences,
+            "expectedDeclarations": expected_declarations,
+            "actualDeclarations": declarations,
+            "source": str(PRELOADED_RULE_SOURCE),
+            "sourceSha256": sha(PRELOADED_RULE_SOURCE),
+            "log": str(log),
+            "logSha256": sha(log),
+        })
     if {str(path): sha(path) for path in inputs} != before:
         raise RuntimeError("inventory inputs changed during validation")
     for item in archived:

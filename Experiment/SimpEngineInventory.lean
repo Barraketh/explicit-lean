@@ -1,4 +1,4 @@
-import Mathlib
+import Mathlib.Tactic.ScopedNS
 import ExplicitLean.SimpEngine.FrontendOptions
 import ExplicitLean.SimpEngine.Inventory
 import Lean.Elab.Frontend
