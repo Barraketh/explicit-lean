@@ -85,6 +85,40 @@ example : True := by tiny_simp <;> trivial
         if lowered.source[start:end].decode() != body or not body.startswith("simp only ["):
             raise RuntimeError("generated range does not cover exactly the fixed body")
 
+    for label, expression in {
+        "all_goals": "example : True := by all_goals tiny_simp\n",
+        "repeat": "example : True := by repeat tiny_simp\n",
+        "bullet": "example : True := by\n  · tiny_simp\n",
+    }.items():
+        nested_data, nested_records = _fixture(
+            source.decode().replace(
+                "example : True := by\n  tiny_simp\n",
+                expression,
+                1,
+            )
+        )
+        nested = overlay._module_lowering(
+            MODULE, nested_data, nested_records,
+            expected_definitions=1, expected_invocations=3,
+        )
+        if len(nested.invocations) != 3:
+            raise RuntimeError(f"{label} invocation was not discovered")
+
+    quoted_data, quoted_records = _fixture(
+        source.decode().replace(
+            "example : True := by\n  tiny_simp\n",
+            "def syntax_data := `(tactic| tiny_simp)\n"
+            "example : True := by\n  tiny_simp\n",
+            1,
+        )
+    )
+    quoted = overlay._module_lowering(
+        MODULE, quoted_data, quoted_records,
+        expected_definitions=1, expected_invocations=3,
+    )
+    if "`(tactic| tiny_simp)" not in quoted.source.decode():
+        raise RuntimeError("syntax quotation data was rewritten")
+
     argument_source, argument_records = _fixture(
         source.decode().replace("tiny_simp <;> trivial", "tiny_simp extra <;> trivial")
     )

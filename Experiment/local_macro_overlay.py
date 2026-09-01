@@ -65,7 +65,13 @@ def _error(message: str) -> RuntimeError:
 
 
 def _mask_lean(source: str) -> str:
-    """Mask comments and strings while retaining byte/character positions."""
+    """Mask comments, strings, and syntax quotations in source text.
+
+    Syntax quotations are source data until their enclosing macro runs.  A
+    target macro name inside one must therefore not be mistaken for a call to
+    the local macro being lowered.  All masked regions retain newlines and
+    character length so source positions remain usable by the caller.
+    """
     chars = list(source)
     i = 0
     while i < len(source):
@@ -90,6 +96,55 @@ def _mask_lean(source: str) -> str:
                     i += 1
             if depth:
                 raise _error(f"unterminated block comment at character {start}")
+            chars[start:i] = "".join("\n" if c == "\n" else " " for c in source[start:i])
+            continue
+        if source.startswith("`(", i):
+            start = i
+            depth = 1
+            i += 2
+            while i < len(source) and depth:
+                if source.startswith("--", i):
+                    j = source.find("\n", i)
+                    i = len(source) if j < 0 else j
+                    continue
+                if source.startswith("/-", i):
+                    nested_start = i
+                    nested_depth = 1
+                    i += 2
+                    while i < len(source) and nested_depth:
+                        if source.startswith("/-", i):
+                            nested_depth += 1
+                            i += 2
+                        elif source.startswith("-/", i):
+                            nested_depth -= 1
+                            i += 2
+                        else:
+                            i += 1
+                    if nested_depth:
+                        raise _error(
+                            f"unterminated block comment at character {nested_start}"
+                        )
+                    continue
+                if source[i] == '"':
+                    i += 1
+                    while i < len(source):
+                        if source[i] == "\\":
+                            i += 2
+                        elif source[i] == '"':
+                            i += 1
+                            break
+                        else:
+                            i += 1
+                    else:
+                        raise _error(f"unterminated string at character {start}")
+                    continue
+                if source[i] == "(":
+                    depth += 1
+                elif source[i] == ")":
+                    depth -= 1
+                i += 1
+            if depth:
+                raise _error(f"unterminated syntax quotation at character {start}")
             chars[start:i] = "".join("\n" if c == "\n" else " " for c in source[start:i])
             continue
         if source[i] == '"':
@@ -251,7 +306,15 @@ def _is_tactic_position(masked: str, start: int, end: int) -> bool:
     following = suffix[0] if suffix else None
     after_by = re.search(r"\bby[ \t]*$", prefix) is not None
     if previous is not None and previous not in ";>|({" and not after_by:
-        return False
+        # Prefix combinators whose argument is a tactic may be written
+        # directly before the token (for example ``all_goals map_simp``), and
+        # a bullet introduces a tactic without a punctuation character that
+        # appears in the accepted set above.
+        if not re.search(
+            r"(?:all_goals|any_goals|first|repeat|try|solve|focus|skip)[ \t]*$",
+            prefix,
+        ) and not re.search(r"[·•][ \t]*$", prefix):
+            return False
     if following is not None and following not in ";<|)},":
         return False
     return True
