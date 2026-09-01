@@ -27,6 +27,7 @@ from translation_index import (
     _source_root,
     _validated_modules,
     cache_key,
+    canonical,
     sha256_bytes,
 )
 
@@ -257,16 +258,20 @@ def snapshot(
         historical: list[dict[str, Any]] = []
         historical_keys: set[str] = set()
         identity_mismatches: list[str] = []
+        missing_index_modules: list[str] = []
+        cache_identity_mismatches: list[str] = []
         stale_queue: list[str] = []
         missing_reports = 0
         current_keys: dict[str, str] = {}
         identity_memo: dict[str, str] = {}
         source_memo: dict[str, str] = {}
+        indexed_modules: set[str] = set()
         for row in module_rows:
             module = row["module"]
             record = expected.get(module)
             if record is None:
                 continue
+            indexed_modules.add(module)
             if (row["source_hash"], row["module_hash"], row["analysis_identity"]) != (record["source_hash"], record["module_hash"], record["analysis_identity"]):
                 identity_mismatches.append(module)
                 continue
@@ -283,14 +288,32 @@ def snapshot(
             if queue is not None and queue["cache_key"] != key:
                 stale_queue.append(module)
             if current is not None:
-                info = _report_info(current, required_schema, manifest_hash)
-                item = {"module": module, "cacheKey": key, "dependencyIdentity": dependencies, **info}
-                item["verified"] = current["status"] == "success" and current["translation_status"] == "verified_translated"
-                item["queueCurrent"] = queue is not None and queue["cache_key"] == key and queue["state"] == "succeeded"
-                item["exactCurrent"] = True
-                exact.append(item)
-                if item["verified"] and not info["artifactPresent"]:
-                    missing_reports += 1
+                expected_cache_fields = {
+                    "module": module,
+                    "source_hash": row["source_hash"],
+                    "analysis_identity": row["analysis_identity"],
+                    "implementation_identity": canonical(implementation),
+                    "toolchain_identity": canonical(toolchain),
+                    "dependency_identity": dependencies,
+                }
+                if any(current[field] != expected_value for field, expected_value in expected_cache_fields.items()):
+                    # The cache key is an index lookup aid, not a substitute
+                    # for validating the denormalized fields it represents.
+                    # Keep this row as historical evidence, but never let a
+                    # forged key/row combination count as current coverage.
+                    cache_identity_mismatches.append(module)
+                    info = _report_info(current, required_schema)
+                    historical.append({"module": module, "cacheKey": key, **info, "verified": current["status"] == "success" and current["translation_status"] == "verified_translated"})
+                    historical_keys.add(key)
+                else:
+                    info = _report_info(current, required_schema, manifest_hash)
+                    item = {"module": module, "cacheKey": key, "dependencyIdentity": dependencies, **info}
+                    item["verified"] = current["status"] == "success" and current["translation_status"] == "verified_translated"
+                    item["queueCurrent"] = queue is not None and queue["cache_key"] == key and queue["state"] == "succeeded"
+                    item["exactCurrent"] = True
+                    exact.append(item)
+                    if item["verified"] and not info["artifactPresent"]:
+                        missing_reports += 1
             all_results = connection.execute(
                 "SELECT * FROM result_cache WHERE module=? AND cache_key<>? ORDER BY recorded_at DESC", (module, key)
             ).fetchall()
@@ -302,10 +325,12 @@ def snapshot(
         # manifest, and for rows whose indexed source identity no longer
         # matches it. Only a cache row equal to the recomputed current key is
         # eligible for exact-current coverage.
+        missing_index_modules = sorted(set(expected) - indexed_modules)
+        identity_mismatches.extend(module for module in missing_index_modules if module not in identity_mismatches)
         for old in connection.execute("SELECT * FROM result_cache ORDER BY recorded_at DESC"):
-            if old["module"] in current_keys and old["cache_key"] == current_keys[old["module"]]:
-                continue
             if old["cache_key"] in historical_keys:
+                continue
+            if old["module"] in current_keys and old["cache_key"] == current_keys[old["module"]]:
                 continue
             info = _report_info(old, required_schema)
             historical.append({"module": old["module"], "cacheKey": old["cache_key"], **info, "verified": old["status"] == "success" and old["translation_status"] == "verified_translated"})
@@ -334,6 +359,8 @@ def snapshot(
             "historicalVerifiedCalls": sum(item["calls"] for item in historical_verified),
             "staleQueueModules": len(stale_queue),
             "identityMismatchedModules": len(identity_mismatches),
+            "missingIndexedModules": missing_index_modules,
+            "cacheIdentityMismatches": sorted(set(cache_identity_mismatches)),
             "cachedVerifiedModules": len(accepted),
             "cachedVerifiedCalls": sum(item["calls"] for item in accepted),
             "provisionalCachedModules": len(exact) - len(accepted),
@@ -359,6 +386,7 @@ def markdown(status: dict[str, object]) -> str:
         f"- Unresolved source classifications: {status['unresolvedCalls']}.",
         f"- Stale queue identities: {status['staleQueueModules']}; missing exact-current reports: {status['missingVerifiedReportFiles']}.", "",
         f"Manifest: `{status['manifest']['sha256']}` ({status['manifest']['identityMatchedModules']} modules match the indexed source/analysis identity).", "",
+        f"Manifest modules absent from index: {len(status['missingIndexedModules'])}; cache identity mismatches: {len(status['cacheIdentityMismatches'])}.", "",
         str(status["verificationScope"]), "",
         "Queue: " + ", ".join(f"{key}={value}" for key, value in sorted(status["queueStates"].items())),
         f"Backlog: {status['backlog']['openUnresolvedRows']} open unresolved rows.",

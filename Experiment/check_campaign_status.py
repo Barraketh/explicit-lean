@@ -11,7 +11,7 @@ import unittest
 import campaign_status
 import campaign_worker
 from boundary_materialize_shard import REPORT_SCHEMA
-from translation_index import connect, import_manifest, occurrence_id, plan_work, record_result
+from translation_index import canonical, connect, import_manifest, occurrence_id, plan_work, record_result
 
 
 class CampaignStatusTests(unittest.TestCase):
@@ -112,6 +112,65 @@ class CampaignStatusTests(unittest.TestCase):
         bad.write_text(json.dumps(value), encoding="utf-8")
         with self.assertRaisesRegex(campaign_status.StatusError, "implementationHashes"):
             campaign_status.snapshot(self.database, bad, source_root=self.root)
+
+    def test_forged_current_cache_fields_are_excluded(self) -> None:
+        implementation, toolchain = campaign_worker._identities(self.manifest_value)
+        plan_work(self.connection, implementation, toolchain)
+        artifact = self.root / "artifact.json"
+        artifact.write_text("{}", encoding="utf-8")
+        manifest_hash = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
+        record_result(
+            self.connection, "Mathlib/A.lean", implementation, toolchain,
+            status="success", translated=True, verified=True,
+            result=self.report(3, manifest_hash), artifact_ref=str(artifact),
+        )
+        row = self.connection.execute("SELECT * FROM result_cache").fetchone()
+        expected = {
+            "module": row["module"],
+            "source_hash": row["source_hash"],
+            "analysis_identity": row["analysis_identity"],
+            "implementation_identity": row["implementation_identity"],
+            "toolchain_identity": row["toolchain_identity"],
+            "dependency_identity": row["dependency_identity"],
+        }
+        forged = {
+            "module": "Mathlib/Other.lean",
+            "source_hash": "f" * 64,
+            "analysis_identity": "forged-analysis",
+            "implementation_identity": canonical({"old": True}),
+            "toolchain_identity": canonical({"old": True}),
+            "dependency_identity": "forged-dependencies",
+        }
+        for field, value in forged.items():
+            with self.subTest(field=field):
+                self.connection.execute(
+                    f"UPDATE result_cache SET {field}=? WHERE cache_key=?",
+                    (value, row["cache_key"]),
+                )
+                self.connection.commit()
+                status = campaign_status.snapshot(
+                    self.database, self.manifest, source_root=self.root, minimum_free_bytes=0
+                )
+                self.assertEqual(status["exactCurrentVerifiedModules"], 0)
+                self.assertEqual(status["exactCurrentVerifiedCalls"], 0)
+                self.assertEqual(status["cacheIdentityMismatches"], ["Mathlib/A.lean"])
+                self.connection.execute(
+                    f"UPDATE result_cache SET {field}=? WHERE cache_key=?",
+                    (expected[field], row["cache_key"]),
+                )
+                self.connection.commit()
+
+    def test_manifest_module_missing_from_index_is_reported(self) -> None:
+        self.connection.execute("DELETE FROM work_queue WHERE module=?", ("Mathlib/A.lean",))
+        self.connection.execute("DELETE FROM modules WHERE module=?", ("Mathlib/A.lean",))
+        self.connection.commit()
+        status = campaign_status.snapshot(
+            self.database, self.manifest, source_root=self.root, minimum_free_bytes=0
+        )
+        self.assertEqual(status["manifest"]["identityMatchedModules"], 0)
+        self.assertEqual(status["manifest"]["identityMismatchedModules"], ["Mathlib/A.lean"])
+        self.assertEqual(status["missingIndexedModules"], ["Mathlib/A.lean"])
+        self.assertEqual(status["exactCurrentVerifiedModules"], 0)
 
     def test_default_manifest_is_derived_from_read_only_history(self) -> None:
         before = self.connection.execute("SELECT COUNT(*) FROM result_cache").fetchone()[0]
