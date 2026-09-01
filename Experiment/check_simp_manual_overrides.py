@@ -18,6 +18,8 @@ import simp_manual_overrides as overrides
 
 ROOT = Path(__file__).resolve().parents[1]
 TIMEOUT = 900
+EXPECTED_OVERRIDE_COUNT = 16
+EXPECTED_MODULE_COUNT = 14
 IMPLEMENTATION_PATHS = tuple(
     ROOT / "Experiment" / name
     for name in (
@@ -87,6 +89,20 @@ def supported_position_multiset(
         for record in records
         if record.get("kind") in inventory.SUPPORTED_KINDS
     )
+
+
+def assert_expected_cardinality(entries: list[dict[str, object]]) -> None:
+    if len(entries) != EXPECTED_OVERRIDE_COUNT:
+        raise RuntimeError(
+            "manual override checker expected exactly "
+            f"{EXPECTED_OVERRIDE_COUNT} entries, found {len(entries)}"
+        )
+    module_count = len({str(entry["module"]) for entry in entries})
+    if module_count != EXPECTED_MODULE_COUNT:
+        raise RuntimeError(
+            "manual override checker expected exactly "
+            f"{EXPECTED_MODULE_COUNT} modules, found {module_count}"
+        )
 
 
 def check_module(
@@ -208,6 +224,18 @@ def negative_controls(database: Path, work: Path) -> None:
     else:
         raise RuntimeError("manual override database accepted a duplicate occurrence")
 
+    missing = json.loads(json.dumps(value))
+    missing["overrides"].pop()
+    path = work / "missing.json"
+    path.write_text(json.dumps(missing), encoding="utf-8")
+    try:
+        assert_expected_cardinality(overrides.load(path))
+    except RuntimeError as error:
+        if "expected exactly 16 entries" not in str(error):
+            raise
+    else:
+        raise RuntimeError("manual override database accepted a missing entry")
+
     traversal = json.loads(json.dumps(value))
     traversal["overrides"][0]["module"] = "Mathlib/../../../../tmp/escape.lean"
     path = work / "traversal.json"
@@ -257,6 +285,7 @@ def main() -> None:
         raise RuntimeError("manual override database changed while loading")
     if not entries:
         raise RuntimeError("manual override checker requires at least one entry")
+    assert_expected_cardinality(entries)
     corpus_implementation_hashes = corpus.implementation_hashes()
     implementation_paths = sorted(
         set(IMPLEMENTATION_PATHS)
