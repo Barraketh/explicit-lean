@@ -123,6 +123,7 @@ private unsafe def inventoryFile (aggregateEnv? : Option Environment) (path : Sy
       | some env => pure env
       | none =>
         let (header, _, _) ← Parser.parseHeader (Parser.mkInputContext source path.toString)
+        Lean.enableInitializersExecution
         Lean.importModules (Lean.Elab.HeaderSyntax.imports header) {} (loadExts := true)
     let (fastSyntax, fastMessages, fastParserHadErrors) ←
       parseModuleIncrementally env path source

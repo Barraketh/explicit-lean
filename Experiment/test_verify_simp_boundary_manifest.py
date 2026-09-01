@@ -389,6 +389,20 @@ class ManifestVerifierTests(unittest.TestCase):
                     repository_root=self.repository,
                 )
 
+    def test_fresh_inventory_is_split_into_bounded_processes(self) -> None:
+        paths = [self.root / f"Module{i}.lean" for i in range(129)]
+        completed = SimpleNamespace(returncode=0, stdout="")
+        with patch("subprocess.run", return_value=completed) as run:
+            outputs = verifier._run_fresh_inventory_batches(
+                paths, repository=self.repository, timeout=60
+            )
+        self.assertEqual(outputs, ["", "", ""])
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual([len(command[4:]) for command in commands], [64, 64, 1])
+        self.assertTrue(all(
+            command[3] == "--header-imports" for command in commands
+        ))
+
     def test_freshness_guard_rejects_changed_inputs(self) -> None:
         before = {"manifest": "before", "sources": {}, "implementation": {}}
         after = {"manifest": "after", "sources": {}, "implementation": {}}

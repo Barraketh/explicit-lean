@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import copy
 import hashlib
 import json
@@ -41,6 +41,7 @@ HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
 MANUAL_OVERRIDE_SCHEMA = 1
+FRESH_INVENTORY_BATCH_SIZE = 64
 
 TOP_LEVEL_FIELDS = frozenset(
     {
@@ -908,6 +909,43 @@ def verify_strict(
     }
 
 
+def _run_fresh_inventory_batches(
+    source_paths: list[Path], *, repository: Path, timeout: int,
+    lake_path: Path | None = None, expected_lake_sha256: str | None = None,
+) -> list[str]:
+    """Run the independent header-import inventory in bounded fresh processes."""
+    command_prefix = [
+        sys.executable,
+        str(repository / "Experiment" / "lean_toolchain_cache.py"),
+        "inventory",
+        "--header-imports",
+    ]
+    if lake_path is not None and expected_lake_sha256 is not None:
+        _assert_pinned_lake(lake_path, expected_lake_sha256)
+        environment = _pinned_lake_environment(lake_path, expected_lake_sha256)
+    else:
+        environment = nullcontext()
+    outputs: list[str] = []
+    with environment:
+        for batch_index, start in enumerate(
+            range(0, len(source_paths), FRESH_INVENTORY_BATCH_SIZE), start=1
+        ):
+            batch = source_paths[start : start + FRESH_INVENTORY_BATCH_SIZE]
+            command = [*command_prefix, *(str(path) for path in batch)]
+            result = subprocess.run(
+                command, cwd=repository, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, timeout=timeout, check=False,
+            )
+            if result.returncode:
+                raise _error(
+                    "recompute",
+                    f"inventory batch {batch_index} failed with status "
+                    f"{result.returncode}:\n{result.stdout[-4000:]}",
+                )
+            outputs.append(result.stdout)
+    return outputs
+
+
 def recompute_inventory(
     manifest_path: str | Path, *, mathlib_root: str | Path, repository_root: str | Path,
     timeout: int = 3600, manifest: dict[str, Any] | None = None,
@@ -928,43 +966,42 @@ def recompute_inventory(
     mathlib = Path(mathlib_root).resolve(); repository = Path(repository_root).resolve()
     before = _freshness_snapshot(path, manifest, repository, mathlib, manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path, expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256)
     source_paths = [mathlib / module["module"] for module in manifest["modules"]]
-    command = [sys.executable, str(repository / "Experiment" / "lean_toolchain_cache.py"), "inventory", "--header-imports", *(str(p) for p in source_paths)]
-    if lake_path is not None and expected_lake_sha256 is not None:
-        _assert_pinned_lake(lake_path, expected_lake_sha256)
-        with _pinned_lake_environment(lake_path, expected_lake_sha256):
-            result = subprocess.run(command, cwd=repository, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
-    else:
-        result = subprocess.run(command, cwd=repository, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
-    if result.returncode:
-        raise _error("recompute", result.stdout[-4000:])
+    outputs = _run_fresh_inventory_batches(
+        source_paths,
+        repository=repository,
+        timeout=timeout,
+        lake_path=lake_path,
+        expected_lake_sha256=expected_lake_sha256,
+    )
     actual: dict[str, list[tuple[int, int, str, str, int, int, str]]] = {}
     fallbacks: set[str] = set()
     deferred: set[str] = set()
     by_path = {str(p.resolve()): module["module"] for p, module in zip(source_paths, manifest["modules"])}
-    for line in result.stdout.splitlines():
-        if line.startswith("SIMP_ENGINE_INVENTORY_FULL_FALLBACK file="):
-            fallback = by_path.get(str(Path(line.split("=", 1)[1]).resolve()))
-            if fallback is None:
-                raise _error("recompute", "inventory fallback named an unrequested source")
-            fallbacks.add(fallback)
-            continue
-        if line.startswith("SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file="):
-            deferred_path = line.split("=", 1)[1]
-            deferred_module = by_path.get(str(Path(deferred_path).resolve()))
-            if deferred_module is None:
-                raise _error("recompute", "inventory deferred an unrequested source")
-            deferred.add(deferred_module)
-            continue
-        if not line.startswith("{"):
-            continue
-        record = json.loads(line); module = by_path.get(str(Path(record.get("file", "")).resolve()))
-        if module is None:
-            continue
-        actual.setdefault(module, []).append((
-            int(record["line"]), int(record["column"]), record["syntaxKind"],
-            record["kind"], int(record["startByte"]), int(record["endByte"]),
-            record["source"],
-        ))
+    for output in outputs:
+        for line in output.splitlines():
+            if line.startswith("SIMP_ENGINE_INVENTORY_FULL_FALLBACK file="):
+                fallback = by_path.get(str(Path(line.split("=", 1)[1]).resolve()))
+                if fallback is None:
+                    raise _error("recompute", "inventory fallback named an unrequested source")
+                fallbacks.add(fallback)
+                continue
+            if line.startswith("SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file="):
+                deferred_path = line.split("=", 1)[1]
+                deferred_module = by_path.get(str(Path(deferred_path).resolve()))
+                if deferred_module is None:
+                    raise _error("recompute", "inventory deferred an unrequested source")
+                deferred.add(deferred_module)
+                continue
+            if not line.startswith("{"):
+                continue
+            record = json.loads(line); module = by_path.get(str(Path(record.get("file", "")).resolve()))
+            if module is None:
+                continue
+            actual.setdefault(module, []).append((
+                int(record["line"]), int(record["column"]), record["syntaxKind"],
+                record["kind"], int(record["startByte"]), int(record["endByte"]),
+                record["source"],
+            ))
     for module in manifest["modules"]:
         expected = sorted((
             o["line"], o["column"], o["syntaxKind"], o["kind"],

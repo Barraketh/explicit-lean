@@ -183,6 +183,39 @@ def main() -> None:
                         "source": str(path), "sourceSha256": sha(path),
                         "log": str(log), "logSha256": sha(log)})
 
+    # Each header import consumes Lean's initializer-execution permission.
+    # A multi-source process must re-enable it before importing the next
+    # source's actual header environment.
+    multi_header_paths = [
+        work / "actual-header-one-call.lean",
+        work / "actual-header-local-syntax.lean",
+    ]
+    multi_header_command = [
+        sys.executable,
+        str(ROOT / "Experiment/lean_toolchain_cache.py"),
+        "inventory",
+        "--header-imports",
+        *(str(path) for path in multi_header_paths),
+    ]
+    code, output, _ = inventory.run(multi_header_command, timeout=120)
+    multi_header_log = work / "actual-header-multiple-sources.log"
+    multi_header_log.write_text(output)
+    entries = [json.loads(line) for line in output.splitlines() if line.startswith("{")]
+    if code or len(entries) != 2:
+        raise RuntimeError(
+            "actual-header-multiple-sources: expected two clean inventories; "
+            f"see {multi_header_log}"
+        )
+    records.append({
+        "case": "actual-header-multiple-sources",
+        "expectedCount": 2,
+        "actualCount": len(entries),
+        "sources": [str(path) for path in multi_header_paths],
+        "sourceSha256s": [sha(path) for path in multi_header_paths],
+        "log": str(multi_header_log),
+        "logSha256": sha(multi_header_log),
+    })
+
     # This source forced the full fallback to elaborate parser-context
     # declarations.  With Lean's defaults it failed at valid `simp_rw`
     # commands; Mathlib's package options (notably autoImplicit=false) parse it
