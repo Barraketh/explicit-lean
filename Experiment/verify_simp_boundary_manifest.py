@@ -41,7 +41,7 @@ HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
 MANUAL_OVERRIDE_SCHEMA = 1
-FRESH_INVENTORY_BATCH_SIZE = 64
+FRESH_INVENTORY_BATCH_SIZE = 32
 
 TOP_LEVEL_FIELDS = frozenset(
     {

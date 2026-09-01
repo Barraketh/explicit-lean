@@ -396,9 +396,11 @@ class ManifestVerifierTests(unittest.TestCase):
             outputs = verifier._run_fresh_inventory_batches(
                 paths, repository=self.repository, timeout=60
             )
-        self.assertEqual(outputs, ["", "", ""])
+        self.assertEqual(outputs, ["", "", "", "", ""])
         commands = [call.args[0] for call in run.call_args_list]
-        self.assertEqual([len(command[4:]) for command in commands], [64, 64, 1])
+        self.assertEqual(
+            [len(command[4:]) for command in commands], [32, 32, 32, 32, 1]
+        )
         self.assertTrue(all(
             command[3] == "--header-imports" for command in commands
         ))
