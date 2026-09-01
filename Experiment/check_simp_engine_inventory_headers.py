@@ -67,8 +67,10 @@ def main() -> None:
         ROOT / "Experiment/SimpEngineBoundaryScope.lean",
     ]:
         consumer_source = consumer.read_text()
-        if consumer_source.count("ExplicitLean.SimpEngine.mathlibParserOptions") != 2:
-            raise RuntimeError(f"{consumer.name} does not use the shared options in both parser paths")
+        if consumer_source.count("ExplicitLean.SimpEngine.mathlibIncrementalParserOptions") != 1:
+            raise RuntimeError(f"{consumer.name} does not use the incremental parser options")
+        if consumer_source.count("ExplicitLean.SimpEngine.mathlibParserOptions") != 1:
+            raise RuntimeError(f"{consumer.name} does not use the full parser options")
         if "verificationFrontendOptions" in consumer_source:
             raise RuntimeError(f"{consumer.name} uses verification-only frontend options")
     inputs = [Path(__file__).resolve(), FIXTURE, ROOT / "lean-toolchain",
@@ -202,7 +204,36 @@ def main() -> None:
     package_entries = {}
     source_bytes = PACKAGE_OPTIONS_SOURCE.read_bytes()
     for label, command, fallback_marker, consumer in package_commands:
-        code, output, _ = inventory.run(command, timeout=180)
+        deferred_command = [*command[:3], "--defer-full-fallback", *command[3:]]
+        code, deferred_output, _ = inventory.run(deferred_command, timeout=180)
+        deferred_log = work / f"{label}-deferred.log"
+        deferred_log.write_text(deferred_output)
+        deferred_marker = (
+            f"SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file={PACKAGE_OPTIONS_SOURCE}"
+            if consumer == "inventory"
+            else f"SIMP_ENGINE_SCOPE_DEFERRED_FALLBACK module={PACKAGE_OPTIONS_MODULE} "
+                 f"file={PACKAGE_OPTIONS_SOURCE}"
+        )
+        leaked_records = any(
+            line.startswith("{") or line.startswith("SIMP_ENGINE_SCOPE_OCCURRENCE ")
+            for line in deferred_output.splitlines()
+        )
+        if code or deferred_marker not in deferred_output or leaked_records or "FULL_FALLBACK" in deferred_output:
+            raise RuntimeError(f"{label}: invalid deferred fallback; see {deferred_log}")
+        records.append({
+            "case": f"{label}-deferred",
+            "expectedCount": 0,
+            "actualCount": 0,
+            "expectedDeferredFallback": True,
+            "actualDeferredFallback": True,
+            "source": str(PACKAGE_OPTIONS_SOURCE),
+            "sourceSha256": sha(PACKAGE_OPTIONS_SOURCE),
+            "log": str(deferred_log),
+            "logSha256": sha(deferred_log),
+        })
+
+        full_command = [*command[:3], "--full-fallback-only", *command[3:]]
+        code, output, _ = inventory.run(full_command, timeout=180)
         log = work / f"{label}.log"
         log.write_text(output)
         if consumer == "inventory":

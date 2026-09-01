@@ -74,7 +74,7 @@ private def parseModuleIncrementally (env : Environment) (path : System.FilePath
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   let initialState : Lean.Elab.Frontend.State := {
     commandState := Lean.Elab.Command.mkState env messages
-      ExplicitLean.SimpEngine.mathlibParserOptions
+      ExplicitLean.SimpEngine.mathlibIncrementalParserOptions
     parserState
     cmdPos := parserState.pos
   }
@@ -96,10 +96,26 @@ private unsafe def parseModuleFully (path : System.FilePath)
   return (moduleSyntax, state.commandState.messages)
 
 private unsafe def inventoryFile (aggregateEnv? : Option Environment) (path : System.FilePath)
-    (allowElaborationErrors : Bool) : IO UInt32 := do
+    (allowElaborationErrors deferFullFallback fullFallbackOnly : Bool) : IO UInt32 := do
   let source ← IO.FS.readFile path
   let fileMap := FileMap.ofString source
   try
+    let finish (stx : Syntax) (messages : MessageLog) : IO UInt32 := do
+      if messages.hasErrors && !allowElaborationErrors then
+        IO.eprintln s!"simp engine inventory could not parse {path} without recovery"
+        for message in messages.toArray do
+          if message.severity == .error then
+            IO.eprintln s!"{message.pos.line}:{message.pos.column}: {← message.data.toString}"
+        return 1
+      if messages.hasErrors then
+        IO.println s!"SIMP_ENGINE_INVENTORY_ELABORATION_ERRORS_ALLOWED file={path}"
+      for entry in ExplicitLean.SimpEngine.Inventory.collect path.toString fileMap stx do
+        IO.println (toJson entry).compress
+      return 0
+    if fullFallbackOnly then
+      IO.println s!"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={path}"
+      let (stx, messages) ← parseModuleFully path source
+      return ← finish stx messages
     -- Rewritten sources import replay syntax absent from aggregate Mathlib.
     -- Parsing with the wrong environment can silently consume a later branch,
     -- even without a recovery error. Remaining-call audits use actual imports.
@@ -110,22 +126,15 @@ private unsafe def inventoryFile (aggregateEnv? : Option Environment) (path : Sy
         Lean.importModules (Lean.Elab.HeaderSyntax.imports header) {} (loadExts := true)
     let (fastSyntax, fastMessages, fastParserHadErrors) ←
       parseModuleIncrementally env path source
-    let (stx, messages) ← if fastParserHadErrors || fastMessages.hasErrors then
+    if fastParserHadErrors || fastMessages.hasErrors then
+      if deferFullFallback then
+        IO.println s!"SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file={path}"
+        return 0
       IO.println s!"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={path}"
-      parseModuleFully path source
+      let (stx, messages) ← parseModuleFully path source
+      return ← finish stx messages
     else
-      pure (fastSyntax, fastMessages)
-    if messages.hasErrors && !allowElaborationErrors then
-      IO.eprintln s!"simp engine inventory could not parse {path} without recovery"
-      for message in messages.toArray do
-        if message.severity == .error then
-          IO.eprintln s!"{message.pos.line}:{message.pos.column}: {← message.data.toString}"
-      return 1
-    if messages.hasErrors then
-      IO.println s!"SIMP_ENGINE_INVENTORY_ELABORATION_ERRORS_ALLOWED file={path}"
-    for entry in ExplicitLean.SimpEngine.Inventory.collect path.toString fileMap stx do
-      IO.println (toJson entry).compress
-    return 0
+      return ← finish fastSyntax fastMessages
   catch error =>
     IO.eprintln s!"simp engine inventory failed for {path}: {error}"
     return 1
@@ -133,19 +142,29 @@ private unsafe def inventoryFile (aggregateEnv? : Option Environment) (path : Sy
 unsafe def main (args : List String) : IO UInt32 := do
   let allowElaborationErrors := args.contains "--allow-elaboration-errors"
   let headerImports := args.contains "--header-imports"
+  let deferFullFallback := args.contains "--defer-full-fallback"
+  let fullFallbackOnly := args.contains "--full-fallback-only"
+  if deferFullFallback && fullFallbackOnly then
+    IO.eprintln "inventory fallback modes are mutually exclusive"
+    return 2
   let paths := args.filter fun arg =>
-    arg != "--allow-elaboration-errors" && arg != "--header-imports"
+    arg != "--allow-elaboration-errors" && arg != "--header-imports" &&
+      arg != "--defer-full-fallback" && arg != "--full-fallback-only"
   if paths.isEmpty then
-    IO.eprintln "usage: SimpEngineInventory.lean [--allow-elaboration-errors] [--header-imports] <Lean source file>..."
+    IO.eprintln "usage: SimpEngineInventory.lean [--allow-elaboration-errors] [--header-imports] [--defer-full-fallback | --full-fallback-only] <Lean source file>..."
+    return 2
+  if fullFallbackOnly && paths.length != 1 then
+    IO.eprintln "inventory full fallback mode requires exactly one source"
     return 2
   Lean.initSearchPath (← Lean.findSysroot)
   Lean.enableInitializersExecution
-  let env : Option Environment ← if headerImports then pure none else do
+  let env : Option Environment ← if headerImports || fullFallbackOnly then pure none else do
     let aggregate ← Lean.importModules #[{ module := `Mathlib }] {} (loadExts := true)
     pure (some aggregate)
   let mut status := 0
   for pathString in paths do
     let code ← inventoryFile env (System.FilePath.mk pathString) allowElaborationErrors
+      deferFullFallback fullFallbackOnly
     if code != 0 then
       status := code
   return status

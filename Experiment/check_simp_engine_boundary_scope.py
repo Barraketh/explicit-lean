@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OCCURRENCE_MARKER = "SIMP_ENGINE_SCOPE_OCCURRENCE "
 DECLARATION_MARKER = "SIMP_ENGINE_SCOPE_DECLARATION "
 FALLBACK_MARKER = "SIMP_ENGINE_SCOPE_FULL_FALLBACK module="
+DEFERRED_FALLBACK_MARKER = "SIMP_ENGINE_SCOPE_DEFERRED_FALLBACK module="
 EXECUTION_MARKER = "SIMP_ENGINE_SCOPE_EXECUTION "
 SCOPE_PROBE_IMPORT = "ExplicitLean.SimpEngine.Boundary.ScopeProbe"
 SCOPE_PROBE_SCHEDULING = "set_option Elab.async false"
@@ -207,6 +208,7 @@ def load_records_with_fallbacks(
             sys.executable,
             str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
             "scope",
+            "--defer-full-fallback",
         ]
         for spec in batch:
             if not isinstance(spec.module, str) or not spec.module:
@@ -304,7 +306,47 @@ def load_records_with_fallbacks(
             return payload
 
         def produce() -> dict[str, str]:
-            return {"stdout": run(command, timeout=timeout)}
+            fast_output = run(command, timeout=timeout)
+            specs_by_module = {spec.module: spec for spec in batch}
+            deferred: list[str] = []
+            for line in fast_output.splitlines():
+                if not line.startswith(DEFERRED_FALLBACK_MARKER):
+                    continue
+                detail = line.removeprefix(DEFERRED_FALLBACK_MARKER)
+                module, separator, path = detail.partition(" file=")
+                spec = specs_by_module.get(module)
+                if not separator or spec is None:
+                    raise RuntimeError(
+                        f"scope deferred an unrequested module: {line}"
+                    )
+                if Path(path).resolve() != spec.source.resolve():
+                    raise RuntimeError(
+                        f"scope deferred the wrong source for {module}: {path}"
+                    )
+                deferred.append(module)
+            if len(deferred) != len(set(deferred)):
+                raise RuntimeError("scope deferred the same module more than once")
+            outputs = [fast_output]
+            for module in deferred:
+                spec = specs_by_module[module]
+                fallback_output = run([
+                    sys.executable,
+                    str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
+                    "scope",
+                    "--full-fallback-only",
+                    module,
+                    str(spec.source),
+                ], timeout=timeout)
+                expected_marker = (
+                    f"SIMP_ENGINE_SCOPE_FULL_FALLBACK module={module} "
+                    f"file={spec.source}"
+                )
+                if expected_marker not in fallback_output:
+                    raise RuntimeError(
+                        f"isolated scope fallback omitted its marker: {module}"
+                    )
+                outputs.append(fallback_output)
+            return {"stdout": "\n".join(outputs)}
 
         started = time.monotonic()
         if checkpoint is None:
@@ -337,6 +379,7 @@ def load_records_with_fallbacks(
                 parameters={
                     "timeout": timeout,
                     "expectedOccurrences": [spec.expected_occurrences for spec in batch],
+                    "isolatedFullFallbacks": True,
                 },
                 validator=validate_payload,
                 freshness=batch_freshness,

@@ -76,7 +76,7 @@ private unsafe def parseSource (env : Environment) (path : System.FilePath)
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   let initialState : Lean.Elab.Frontend.State := {
     commandState := Lean.Elab.Command.mkState env messages
-      ExplicitLean.SimpEngine.mathlibParserOptions
+      ExplicitLean.SimpEngine.mathlibIncrementalParserOptions
     parserState
     cmdPos := parserState.pos
   }
@@ -215,29 +215,38 @@ private unsafe def declarationRecords (env : Environment) (module : Name)
   return result
 
 private unsafe def emitFile (env : Environment) (module : Name)
-    (path : System.FilePath) : IO UInt32 := do
+    (path : System.FilePath) (deferFullFallback fullFallbackOnly : Bool) : IO UInt32 := do
   let source ← IO.FS.readFile path
   let fileMap := FileMap.ofString source
   try
-    let (fastSyntax, fastMessages, fastParserHadErrors) ← parseSource env path source
-    let (moduleSyntax, messages) ← if fastParserHadErrors || fastMessages.hasErrors then
+    let finish (moduleSyntax : Syntax) (messages : MessageLog) : IO UInt32 := do
+      if messages.hasErrors then
+        IO.eprintln s!"scope classifier parser errors in {path}"
+        for message in messages.toArray do
+          if message.severity == .error then
+            IO.eprintln s!"{message.pos.line}:{message.pos.column}: {← message.data.toString}"
+        return 1
+      let occurrences := collectOccurrences path.toString module.toString fileMap moduleSyntax
+      for occurrence in occurrences do
+        IO.println s!"SIMP_ENGINE_SCOPE_OCCURRENCE {(toJson occurrence).compress}"
+      let declarations ← declarationRecords env module fileMap
+      for declaration in declarations do
+        IO.println s!"SIMP_ENGINE_SCOPE_DECLARATION {(toJson declaration).compress}"
+      return 0
+    if fullFallbackOnly then
       IO.println s!"SIMP_ENGINE_SCOPE_FULL_FALLBACK module={module} file={path}"
-      parseSourceFully path source
+      let (moduleSyntax, messages) ← parseSourceFully path source
+      return ← finish moduleSyntax messages
+    let (fastSyntax, fastMessages, fastParserHadErrors) ← parseSource env path source
+    if fastParserHadErrors || fastMessages.hasErrors then
+      if deferFullFallback then
+        IO.println s!"SIMP_ENGINE_SCOPE_DEFERRED_FALLBACK module={module} file={path}"
+        return 0
+      IO.println s!"SIMP_ENGINE_SCOPE_FULL_FALLBACK module={module} file={path}"
+      let (moduleSyntax, messages) ← parseSourceFully path source
+      return ← finish moduleSyntax messages
     else
-      pure (fastSyntax, fastMessages)
-    if messages.hasErrors then
-      IO.eprintln s!"scope classifier parser errors in {path}"
-      for message in messages.toArray do
-        if message.severity == .error then
-          IO.eprintln s!"{message.pos.line}:{message.pos.column}: {← message.data.toString}"
-      return 1
-    let occurrences := collectOccurrences path.toString module.toString fileMap moduleSyntax
-    for occurrence in occurrences do
-      IO.println s!"SIMP_ENGINE_SCOPE_OCCURRENCE {(toJson occurrence).compress}"
-    let declarations ← declarationRecords env module fileMap
-    for declaration in declarations do
-      IO.println s!"SIMP_ENGINE_SCOPE_DECLARATION {(toJson declaration).compress}"
-    return 0
+      return ← finish fastSyntax fastMessages
   catch error =>
     IO.eprintln s!"scope classifier failed for {module} ({path}): {error}"
     return 1
@@ -252,15 +261,25 @@ private def parsePairs : List String → Except String (Array (Name × System.Fi
   | _ => throw "scope classifier expects <module-name> <source-path> pairs"
 
 unsafe def scopeMain (args : List String) : IO UInt32 := do
-  let pairs ← match parsePairs args with
+  let deferFullFallback := args.contains "--defer-full-fallback"
+  let fullFallbackOnly := args.contains "--full-fallback-only"
+  if deferFullFallback && fullFallbackOnly then
+    IO.eprintln "scope fallback modes are mutually exclusive"
+    return 2
+  let pairArgs := args.filter fun arg =>
+    arg != "--defer-full-fallback" && arg != "--full-fallback-only"
+  let pairs ← match parsePairs pairArgs with
     | .ok pairs =>
       if pairs.isEmpty then
-        IO.eprintln "usage: SimpEngineBoundaryScope.lean <module-name> <source-path> ..."
+        IO.eprintln "usage: SimpEngineBoundaryScope.lean [--defer-full-fallback | --full-fallback-only] <module-name> <source-path> ..."
         return 2
       pure pairs
     | .error message =>
       IO.eprintln message
       return 2
+  if fullFallbackOnly && pairs.size != 1 then
+    IO.eprintln "scope full fallback mode requires exactly one module/source pair"
+    return 2
   Lean.initSearchPath (← Lean.findSysroot)
   Lean.enableInitializersExecution
   -- Match the syntax inventory's parser environment exactly for Mathlib
@@ -287,7 +306,7 @@ unsafe def scopeMain (args : List String) : IO UInt32 := do
       IO.eprintln s!"scope classifier module is not present in the pinned environment: {module}"
       status := 1
     else
-      let code ← emitFile env module path
+      let code ← emitFile env module path deferFullFallback fullFallbackOnly
       if code != 0 then
         status := code
   return status

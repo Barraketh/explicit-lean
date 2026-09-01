@@ -21,6 +21,12 @@ def mathlibPackageOptions : Options :=
     |>.set `weak.linter.pythonStyle true
     |>.set `weak.linter.style.longFile (1500 : Nat)
 
+/-- Package options for the incremental syntax pass.  It elaborates only
+commands that immediately change parser context, so async tasks would both be
+unusable by the next parser step and accumulate across a batched process. -/
+def mathlibIncrementalParserOptions : Options :=
+  Elab.async.set mathlibPackageOptions false
+
 /-- Mathlib's package options with the command-line frontend's async default.
 
 Lean's command-line driver also enables `internal.cmdlineSnapshots`, a metadata
@@ -34,7 +40,8 @@ def mathlibParserOptions : Options :=
 oracle and command-audit sources.  These additions deliberately enable async
 elaboration, remove the heartbeat limit, and suppress diagnostics introduced
 by source overlays.  Inventory and scope parsing must use
-`mathlibParserOptions` instead. -/
+`mathlibIncrementalParserOptions` and `mathlibParserOptions` in their respective
+paths instead. -/
 def verificationFrontendOptions : Options :=
   mathlibParserOptions
     |>.set `weak.linter.unusedVariables false

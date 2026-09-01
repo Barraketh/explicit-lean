@@ -25,6 +25,7 @@ from process_runner import run_process
 ROOT = Path(__file__).resolve().parents[1]
 MATHLIB = inventory.MATHLIB
 REPORT_SCHEMA = 2
+INVENTORY_DEFERRED_FALLBACK_MARKER = "SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file="
 
 # Re-export the shared schema vocabulary for manifest consumers.  Keeping one
 # source of truth prevents a classifier/consumer drift from silently changing
@@ -311,13 +312,19 @@ def _inventory_batch_result(
     checkpoint: CheckpointStore | None = None,
     freshness: Any = None,
 ) -> tuple[list[dict[str, Any]], list[str], bool]:
-    command = [
+    command_prefix = [
         sys.executable,
         str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
         "inventory",
-        *(str(path.resolve()) for path in paths),
     ]
-    def produce() -> dict[str, str]:
+    resolved_paths = [path.resolve() for path in paths]
+    command = [
+        *command_prefix,
+        "--defer-full-fallback",
+        *(str(path) for path in resolved_paths),
+    ]
+
+    def run_inventory(command: list[str], label: str) -> str:
         completed = run_process(
             command,
             cwd=ROOT,
@@ -328,11 +335,40 @@ def _inventory_batch_result(
             check=False,
         )
         if completed.returncode:
-            diagnostics = "\n".join(completed.stderr.splitlines()[-200:])
-            raise RuntimeError(
-                f"syntax inventory batch failed ({completed.returncode}):\n{diagnostics}"
+            diagnostics = "\n".join(
+                (completed.stdout + "\n" + completed.stderr).splitlines()[-200:]
             )
-        return {"stdout": completed.stdout}
+            raise RuntimeError(
+                f"syntax inventory {label} failed ({completed.returncode}):\n{diagnostics}"
+            )
+        return completed.stdout
+
+    def produce() -> dict[str, str]:
+        fast_output = run_inventory(command, "fast batch")
+        requested = {str(path) for path in resolved_paths}
+        deferred: list[str] = []
+        for line in fast_output.splitlines():
+            if line.startswith(INVENTORY_DEFERRED_FALLBACK_MARKER):
+                path = line.removeprefix(INVENTORY_DEFERRED_FALLBACK_MARKER)
+                if path not in requested:
+                    raise RuntimeError(
+                        f"inventory deferred an unrequested source: {path}"
+                    )
+                deferred.append(path)
+        if len(deferred) != len(set(deferred)):
+            raise RuntimeError("inventory deferred the same source more than once")
+        outputs = [fast_output]
+        for path in deferred:
+            fallback_output = run_inventory(
+                [*command_prefix, "--full-fallback-only", path],
+                f"isolated fallback for {path}",
+            )
+            if f"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={path}" not in fallback_output:
+                raise RuntimeError(
+                    f"isolated inventory fallback omitted its marker: {path}"
+                )
+            outputs.append(fallback_output)
+        return {"stdout": "\n".join(outputs)}
 
     if checkpoint is None:
         payload = produce()
@@ -369,7 +405,7 @@ def _inventory_batch_result(
             modules,
             source_hashes,
             produce,
-            parameters={"timeout": timeout},
+            parameters={"timeout": timeout, "isolatedFullFallbacks": True},
             validator=validate_payload,
             freshness=batch_freshness,
         )
