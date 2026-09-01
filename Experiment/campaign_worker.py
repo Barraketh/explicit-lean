@@ -27,7 +27,7 @@ import boundary_materialize_shard as materializer
 import manual_overlay
 from boundary_protocol import artifact_protocol
 import campaign_budget
-from process_runner import run_process
+from process_runner import ProcessResourceLimitExceeded, run_process
 from translation_index import (
     IndexError as TranslationIndexError,
     cache_key,
@@ -44,6 +44,7 @@ from translation_index import (
 ROOT = Path(__file__).resolve().parents[1]
 MATHLIB = materializer.MATHLIB
 DEFAULT_MINIMUM_FREE_BYTES = 12 * 1024**3
+DEFAULT_MINIMUM_FREE_MEMORY_BYTES = 12 * 1024**3
 
 
 def storage_status(path: Path, minimum_free_bytes: int) -> dict[str, Any]:
@@ -55,6 +56,63 @@ def storage_status(path: Path, minimum_free_bytes: int) -> dict[str, Any]:
                 "minimumFreeBytes": minimum_free_bytes, "error": str(error)}
     return {"canDispatch": free >= minimum_free_bytes, "freeBytes": free,
             "minimumFreeBytes": minimum_free_bytes}
+
+
+def available_memory_bytes() -> int:
+    """Return conservative immediately free memory for the local POSIX host.
+
+    On macOS, inactive pages are deliberately excluded: during the observed
+    Lean blowups they remained large even after free pages fell below 1 GiB.
+    Speculative pages are immediately reclaimable and are included. Linux's
+    kernel already exposes the corresponding conservative estimate directly.
+    Unknown telemetry is an error so the running materializer fails closed.
+    """
+    if sys.platform == "darwin":
+        completed = subprocess.run(
+            ["vm_stat"], text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=5, check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"vm_stat failed: {completed.stderr.strip()}")
+        lines = completed.stdout.splitlines()
+        if not lines:
+            raise RuntimeError("vm_stat returned no output")
+        match = re.search(r"page size of (\d+) bytes", lines[0])
+        if match is None:
+            raise RuntimeError("vm_stat omitted page size")
+        page_size = int(match.group(1))
+        pages: dict[str, int] = {}
+        for line in lines[1:]:
+            item = re.fullmatch(r"([^:]+):\s*(\d+)\.?", line.strip())
+            if item is not None:
+                pages[item.group(1)] = int(item.group(2))
+        try:
+            return page_size * (pages["Pages free"] + pages["Pages speculative"])
+        except KeyError as error:
+            raise RuntimeError(f"vm_stat omitted {error.args[0]}") from error
+    if sys.platform.startswith("linux"):
+        try:
+            text = Path("/proc/meminfo").read_text(encoding="utf-8")
+        except OSError as error:
+            raise RuntimeError(f"cannot read /proc/meminfo: {error}") from error
+        match = re.search(r"^MemAvailable:\s*(\d+)\s+kB$", text, re.MULTILINE)
+        if match is None:
+            raise RuntimeError("/proc/meminfo omitted MemAvailable")
+        return int(match.group(1)) * 1024
+    raise RuntimeError(f"memory telemetry is unsupported on {sys.platform}")
+
+
+def _materializer_memory_guard(_pid: int) -> str | None:
+    try:
+        available = available_memory_bytes()
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        return f"memory telemetry unavailable: {error}"
+    if available < DEFAULT_MINIMUM_FREE_MEMORY_BYTES:
+        return (
+            f"available memory {available} is below the "
+            f"{DEFAULT_MINIMUM_FREE_MEMORY_BYTES}-byte reserve"
+        )
+    return None
 
 
 def _sha256(data: bytes) -> str:
@@ -479,7 +537,13 @@ def invoke_materializer(
             stderr=subprocess.STDOUT,
             timeout=timeout,
             check=False,
+            resource_guard=_materializer_memory_guard,
         )
+    except ProcessResourceLimitExceeded as error:
+        output = error.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        return 125, output + f"\nworker: materializer stopped by memory guard: {error.detail}\n"
     except subprocess.TimeoutExpired as error:
         output = error.stdout or ""
         if isinstance(output, bytes):

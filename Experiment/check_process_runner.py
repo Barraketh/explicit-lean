@@ -17,7 +17,7 @@ import check_simp_engine_boundary_scope as scope
 import check_simp_engine_boundary_source as source
 import simp_engine_boundary_corpus as corpus
 import simp_engine_inventory as inventory
-from process_runner import run_process
+from process_runner import ProcessResourceLimitExceeded, run_process
 
 
 TREE_SCRIPT = """
@@ -156,6 +156,55 @@ def test_descendant_timeout(root: Path, *, exit_root: bool) -> None:
                     pass
 
 
+def test_resource_guard_stops_descendants(root: Path) -> None:
+    root.mkdir()
+    script = root / "tree.py"
+    script.write_text(TREE_SCRIPT)
+    command = [sys.executable, str(script), str(root), "root", "wait"]
+
+    def guard(_pid: int) -> str | None:
+        if (root / "grandchild.json").is_file():
+            return "fixture memory reserve exhausted"
+        return None
+
+    try:
+        started = time.monotonic()
+        try:
+            run_process(
+                command, timeout=10, capture_output=True, text=True,
+                resource_guard=guard, resource_poll_interval=0.02,
+            )
+        except ProcessResourceLimitExceeded as error:
+            assert error.cmd == command
+            assert error.detail == "fixture memory reserve exhausted"
+            assert isinstance(error.stdout, str)
+            records = [json.loads(line) for line in error.stdout.splitlines()]
+            assert {item["role"] for item in records} == {"root", "child", "grandchild"}
+        else:
+            raise AssertionError("resource guard did not stop descendant tree")
+        assert time.monotonic() - started < 5
+        pids = ",".join(str(item["pid"]) for item in records)
+        states = subprocess.run(
+            ["ps", "-o", "pid=,stat=", "-p", pids],
+            capture_output=True, text=True, timeout=5,
+        )
+        alive = [line for line in states.stdout.splitlines() if not line.split()[1].startswith("Z")]
+        assert not alive, f"resource guard left live descendants: {alive}"
+        heartbeat = (root / "heartbeat").read_bytes()
+        assert heartbeat
+        time.sleep(0.1)
+        assert (root / "heartbeat").read_bytes() == heartbeat
+    finally:
+        record_path = root / "root.json"
+        if record_path.exists():
+            group = json.loads(record_path.read_text())["group"]
+            if group != os.getpgrp():
+                try:
+                    os.killpg(group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
 def test_production_adapters(root: Path) -> None:
     output = "out\nerr\n"
     body = "import sys; print('out', flush=True); print('err', file=sys.stderr, flush=True)"
@@ -194,9 +243,10 @@ def test_production_adapters(root: Path) -> None:
     launcher.write_text(
         "import json,os,sys\n"
         "assert sys.argv[1] == 'inventory'\n"
+        "assert sys.argv[2] == '--defer-full-fallback'\n"
         "assert os.getpid() == os.getsid(0)\n"
         "print(json.dumps({'source': 'simp'}))\n"
-        "print('SIMP_ENGINE_INVENTORY_FULL_FALLBACK file=' + sys.argv[2])\n"
+        "print('SIMP_ENGINE_INVENTORY_FULL_FALLBACK file=' + sys.argv[3])\n"
         "print('separate diagnostic', file=sys.stderr)\n"
     )
     original_root = corpus.ROOT
@@ -278,6 +328,7 @@ def main() -> None:
         test_completed_process_contract(root)
         test_descendant_timeout(root / "live-launcher", exit_root=False)
         test_descendant_timeout(root / "exited-launcher", exit_root=True)
+        test_resource_guard_stops_descendants(root / "resource-guard")
         test_nested_runner_timeout(root / "nested-runner")
         test_production_adapters(root)
     print("process runner: compatibility, adapters, and child/grandchild timeout checks passed")

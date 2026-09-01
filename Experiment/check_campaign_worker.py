@@ -44,6 +44,45 @@ class CampaignWorkerTests(unittest.TestCase):
         self.assertFalse(stale.exists())
         self.assertTrue(live.exists())
 
+    def test_macos_memory_telemetry_is_conservative(self) -> None:
+        vm_stat = (
+            "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
+            "Pages free: 100.\n"
+            "Pages active: 5000.\n"
+            "Pages inactive: 9000.\n"
+            "Pages speculative: 20.\n"
+        )
+        completed = worker.subprocess.CompletedProcess(
+            ["vm_stat"], 0, stdout=vm_stat, stderr="",
+        )
+        with mock.patch.object(worker.sys, "platform", "darwin"), \
+             mock.patch.object(worker.subprocess, "run", return_value=completed):
+            self.assertEqual(worker.available_memory_bytes(), 120 * 16384)
+
+    def test_materializer_memory_guard_is_distinct_and_fail_closed(self) -> None:
+        with mock.patch.object(
+            worker, "available_memory_bytes",
+            return_value=worker.DEFAULT_MINIMUM_FREE_MEMORY_BYTES - 1,
+        ):
+            detail = worker._materializer_memory_guard(123)
+        self.assertIn("below", detail)
+        with mock.patch.object(
+            worker, "available_memory_bytes", side_effect=RuntimeError("no telemetry"),
+        ):
+            self.assertIn("telemetry unavailable", worker._materializer_memory_guard(123))
+
+        error = worker.ProcessResourceLimitExceeded(
+            ["fixture"], "fixture reserve exhausted", stdout="partial output\n",
+        )
+        with mock.patch.object(worker, "run_process", side_effect=error):
+            code, output = worker.invoke_materializer(
+                self.root / "manifest.json", self.root / "result.json",
+                "Mathlib/A.lean", 10,
+            )
+        self.assertEqual(code, 125)
+        self.assertIn("partial output", output)
+        self.assertIn("stopped by memory guard: fixture reserve exhausted", output)
+
     def manifest(self, *, empty: bool = False, allow_unresolved: bool = False) -> Path:
         source = "theorem a : True := by simp\n" if not empty else "theorem b : True := by exact True.intro\n"
         module = "Mathlib/A.lean" if not empty else "Mathlib/Empty.lean"
