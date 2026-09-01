@@ -90,9 +90,9 @@ private unsafe def parseSourceFully (module : Name) (path : System.FilePath)
   let inputCtx := Parser.mkInputContext source path.toString
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   Lean.enableInitializersExecution
-  let env ← Lean.importModules (Lean.Elab.HeaderSyntax.imports header) {}
-    (loadExts := true)
-  let env := env.setMainModule module
+  let (env, messages) ← Lean.Elab.processHeader header
+    ExplicitLean.SimpEngine.mathlibParserOptions messages inputCtx
+    (mainModule := module)
   let state ← Lean.Elab.IO.processCommands inputCtx parserState
     (Lean.Elab.Command.mkState env messages ExplicitLean.SimpEngine.mathlibParserOptions)
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]

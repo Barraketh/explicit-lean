@@ -34,6 +34,37 @@ PRELOADED_RULE_DECLARATION_NAMES = {
     "cfcTac",
     "cfcZeroTac",
 }
+IMPORT_ALL_MODULE = "Mathlib.Tactic.ReduceModChar"
+IMPORT_ALL_SOURCE = ROOT / ".lake/packages/mathlib/Mathlib/Tactic/ReduceModChar.lean"
+IMPORT_ALL_SOURCE_SHA256 = "9cc32f430a46fd3f72476804e9079949fc253f9b2964e8391faaebd550dbaf45"
+IMPORT_ALL_OCCURRENCES = {
+    (5273, 5277, 113, 2, "simp", "simp"),
+    (6648, 6652, 142, 2, "simp", "simp"),
+}
+IMPORT_ALL_DECLARATION_NAMES = {
+    "Tactic.ReduceModChar.CharP.intCast_eq_mod",
+    "Tactic.ReduceModChar.CharP.isInt_of_mod",
+    "Tactic.ReduceModChar.CharP.isNat_pow",
+    "Tactic.ReduceModChar.CharP.neg_eq_sub_one_mul",
+    "Tactic.ReduceModChar.CharP.neg_mul_eq_sub_one_mul",
+    "Tactic.ReduceModChar.TypeToCharPResult",
+    "Tactic.ReduceModChar.TypeToCharPResult.failure",
+    "Tactic.ReduceModChar.TypeToCharPResult.intLike",
+    "Tactic.ReduceModChar._aux_Mathlib_Tactic_ReduceModChar___elabRules_Tactic_ReduceModChar_reduce_mod_char!_1",
+    "Tactic.ReduceModChar._aux_Mathlib_Tactic_ReduceModChar___elabRules_Tactic_ReduceModChar_reduce_mod_char_1",
+    "Tactic.ReduceModChar.derive",
+    "Tactic.ReduceModChar.instInhabitedTypeToCharPResult",
+    "Tactic.ReduceModChar.matchAndNorm",
+    "Tactic.ReduceModChar.normBareNumeral",
+    "Tactic.ReduceModChar.normIntNumeral",
+    "Tactic.ReduceModChar.normIntNumeral'",
+    "Tactic.ReduceModChar.normNeg",
+    "Tactic.ReduceModChar.normNegCoeffMul",
+    "Tactic.ReduceModChar.normPow",
+    "Tactic.ReduceModChar.reduce_mod_char",
+    "Tactic.ReduceModChar.reduce_mod_char!",
+    "Tactic.ReduceModChar.typeToCharP",
+}
 PACKAGE_OPTION_ARGUMENTS = [
     "-Dpp.unicode.fun=true",
     "-DautoImplicit=false",
@@ -77,6 +108,8 @@ def main() -> None:
         raise RuntimeError("pinned Mathlib package options changed")
     if sha(PRELOADED_RULE_SOURCE) != PRELOADED_RULE_SOURCE_SHA256:
         raise RuntimeError("preloaded-rule regression source changed")
+    if sha(IMPORT_ALL_SOURCE) != IMPORT_ALL_SOURCE_SHA256:
+        raise RuntimeError("import-all regression source changed")
     for consumer in [
         ROOT / "Experiment/SimpEngineInventory.lean",
         ROOT / "Experiment/SimpEngineBoundaryScope.lean",
@@ -84,8 +117,10 @@ def main() -> None:
         consumer_source = consumer.read_text()
         if consumer_source.count("ExplicitLean.SimpEngine.mathlibIncrementalParserOptions") != 1:
             raise RuntimeError(f"{consumer.name} does not use the incremental parser options")
-        if consumer_source.count("ExplicitLean.SimpEngine.mathlibParserOptions") != 1:
-            raise RuntimeError(f"{consumer.name} does not use the full parser options")
+        if consumer_source.count("ExplicitLean.SimpEngine.mathlibParserOptions") != 2:
+            raise RuntimeError(
+                f"{consumer.name} does not use the full parser options for header and commands"
+            )
         if "verificationFrontendOptions" in consumer_source:
             raise RuntimeError(f"{consumer.name} uses verification-only frontend options")
     inputs = [Path(__file__).resolve(), FIXTURE, ROOT / "lean-toolchain",
@@ -100,7 +135,8 @@ def main() -> None:
               ROOT / ".lake/build/bin/simpEngineInventory",
               ROOT / ".lake/build/bin/simpEngineBoundaryScope",
               PACKAGE_OPTIONS_SOURCE,
-              PRELOADED_RULE_SOURCE]
+              PRELOADED_RULE_SOURCE,
+              IMPORT_ALL_SOURCE]
     before = {str(path): sha(path) for path in inputs}
     archived = []
     for index, path in enumerate(inputs):
@@ -380,6 +416,90 @@ def main() -> None:
             "log": str(log),
             "logSha256": sha(log),
         })
+
+    # Full fallbacks must use Lean's module-aware header processor.  This file
+    # accesses a private nested definition through `import all`; importing the
+    # same olean parts into a non-module environment loses that access.
+    import_all_outputs = {}
+    for consumer, command, fallback_marker in [
+        (
+            "inventory",
+            [
+                sys.executable,
+                str(ROOT / "Experiment/lean_toolchain_cache.py"),
+                "inventory",
+                "--full-fallback-only",
+                str(IMPORT_ALL_SOURCE),
+            ],
+            "SIMP_ENGINE_INVENTORY_FULL_FALLBACK file=",
+        ),
+        (
+            "scope",
+            [
+                sys.executable,
+                str(ROOT / "Experiment/lean_toolchain_cache.py"),
+                "scope",
+                "--full-fallback-only",
+                IMPORT_ALL_MODULE,
+                str(IMPORT_ALL_SOURCE),
+            ],
+            f"SIMP_ENGINE_SCOPE_FULL_FALLBACK module={IMPORT_ALL_MODULE} file=",
+        ),
+    ]:
+        code, output, _ = inventory.run(command, timeout=180)
+        log = work / f"import-all-{consumer}.log"
+        log.write_text(output)
+        if code or fallback_marker not in output:
+            raise RuntimeError(f"import-all-{consumer}: module-aware fallback failed; see {log}")
+        if consumer == "inventory":
+            occurrences = [
+                json.loads(line) for line in output.splitlines() if line.startswith("{")
+            ]
+        else:
+            occurrence_marker = "SIMP_ENGINE_SCOPE_OCCURRENCE "
+            occurrences = [
+                json.loads(line.removeprefix(occurrence_marker))
+                for line in output.splitlines()
+                if line.startswith(occurrence_marker)
+            ]
+        actual_occurrences = {
+            (
+                entry["startByte"], entry["endByte"], entry["line"], entry["column"],
+                entry["kind"], entry["source"],
+            )
+            for entry in occurrences
+        }
+        if actual_occurrences != IMPORT_ALL_OCCURRENCES:
+            raise RuntimeError(f"import-all-{consumer}: occurrence set changed; see {log}")
+        import_all_outputs[consumer] = actual_occurrences
+        records.append({
+            "case": f"import-all-{consumer}",
+            "expectedOccurrences": len(IMPORT_ALL_OCCURRENCES),
+            "actualOccurrences": len(occurrences),
+            "source": str(IMPORT_ALL_SOURCE),
+            "sourceSha256": sha(IMPORT_ALL_SOURCE),
+            "log": str(log),
+            "logSha256": sha(log),
+        })
+        if consumer == "scope":
+            declaration_marker = "SIMP_ENGINE_SCOPE_DECLARATION "
+            declarations = [
+                json.loads(line.removeprefix(declaration_marker))
+                for line in output.splitlines()
+                if line.startswith(declaration_marker)
+            ]
+            names = {entry.get("name") for entry in declarations}
+            source_size = IMPORT_ALL_SOURCE.stat().st_size
+            valid_ranges = all(
+                entry.get("module") == IMPORT_ALL_MODULE and
+                0 <= entry["startByte"] <= entry["selectionStartByte"] <=
+                    entry["selectionEndByte"] <= entry["endByte"] <= source_size
+                for entry in declarations
+            )
+            if names != IMPORT_ALL_DECLARATION_NAMES or not valid_ranges:
+                raise RuntimeError(f"import-all-scope: declaration set changed; see {log}")
+    if import_all_outputs["inventory"] != import_all_outputs["scope"]:
+        raise RuntimeError("import-all inventory and scope occurrences disagree")
     if {str(path): sha(path) for path in inputs} != before:
         raise RuntimeError("inventory inputs changed during validation")
     for item in archived:
