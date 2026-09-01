@@ -17,25 +17,25 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-01T02:34:04.657150+00:00",
-    "lastUsedPercent": 59,
+    "lastCheckedAt": "2026-09-01T03:53:43.344533+00:00",
+    "lastUsedPercent": 62,
     "lastDecision": "continue"
   },
   "coverage": {
     "currentCorpusTotal": 83425,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Fresh pinned schema12 analysis covers 83,414 executable calls in 8,260 modules (83,349 direct and 65 reusable); four source-quotation/tactic modules containing 11 additional calls remain separately required. The current indexed identity has 77 provisional module results covering 831 calls. Eight source-pinned manual overrides across six modules pass full composition with 55 remaining calls materialized, zero retained, canonical-to-final declaration oracles, and an independently rehashed 99-file evidence receipt. No bounded result counts as accepted translated-tree coverage.",
+    "note": "Fresh schema13 manifest at 6c0815c covers 83,414 executable calls in 8,260 modules (83,349 direct and 65 reusable), with the authenticated eight-entry manual database bound into manifest/cache/report identities. All six manual modules pass as 63 canonical calls = 8 manual + 55 ordinary, all 55 ordinary variants observed and zero retained. The SQLite index has 83 historical/current provisional modules covering 894 calls; only the six schema13 overlay modules are current-identity verified. Four source-quotation/tactic modules containing 11 calls remain separately required. No bounded result counts as accepted translated-tree coverage.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83414,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 65,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 831,
-    "provisionalCachedModules": 77,
-    "minimumAcceptedReportSchema": 12,
-    "validationHold": "The cold serialized comparator, independent compilation consumer, unconditional pending-synthesis barrier and report12 producer are integrated. Complete translated dependency-tree certification remains pending; every bounded production result remains provisional.",
+    "provisionalCachedOccurrences": 894,
+    "provisionalCachedModules": 83,
+    "minimumAcceptedReportSchema": 13,
+    "validationHold": "Schema13 producer and independent cache consumer reconstruct all durable ordinary/manual evidence and both declaration oracles. Complete translated dependency-tree certification remains pending; every bounded production result remains provisional for whole-Mathlib acceptance.",
     "freshAnalyzedModules": 8260,
     "freshAnalyzedOccurrences": 83414,
     "freshDirectExecutableOccurrences": 83349,
@@ -395,22 +395,28 @@
     {
       "id": "manual-simp-overrides",
       "owner": "coordinator with Luna fix-review",
-      "status": "completed_bounded",
-      "description": "Eight exact source replacements across six modules are pinned with originals as comments. The full composition checker authenticates every removed syntax range and shifted untouched occurrence, materializes all55 remaining calls, and passes canonical-to-final declaration oracles with0retained calls. Accepted corpus coverage remains zero pending worker/tree integration."
+      "status": "completed_integrated_bounded",
+      "description": "Eight exact replacements across six modules are manifest/database bound, preserve originals as comments, and compose before ordinary recording. Fresh schema13 worker verifies all63 canonical calls as8manual+55ordinary, zero remaining."
     },
     {
       "id": "schema12-manual-identity-worker",
       "owner": "coordinator",
-      "status": "completed_bounded",
-      "description": "Fresh manifest c5da9774... at commit1168cc0 analyzed8,260modules/83,414calls. Attempts459-488 processed30modules:24 successes/250calls/255variants,6 fail-closed replay exceptions, no timeout/budget/storage stop. Current index totals77 provisional modules/831calls/893variants.",
+      "status": "superseded_by_schema13",
+      "description": "Fresh manifest c5da9774... at commit1168cc0 analyzed8,260modules/83,414calls. Attempts459-488 processed30modules:24 successes/250calls/255variants,6 fail-closed replay exceptions, no timeout/budget/storage stop. Current index totals77 provisional modules/831calls/893variants. Superseded for current identity by schema13 overlay manifest/worker; historical evidence retained.",
       "verification": ".lake/week-2026-08-31/schema12-manual-worker-root-verification.json",
       "verificationSha256": "1df37f6ee7873fafa48353f4dc6fb24872d61f286a6e809a94d0a22c90b04db8"
     },
     {
       "id": "manual-boundary-composition",
       "owner": "coordinator with Luna review",
+      "status": "completed_integrated_bounded",
+      "description": "Schema13 integration passes6modules/8manual+55ordinary, all observed, zero retained, effective and canonical declaration oracles. Independent worker consumer and120-file evidence receipt pass; whole-tree acceptance remains separate."
+    },
+    {
+      "id": "schema13-authenticated-manual-overlay",
+      "owner": "coordinator with Luna implementation/fix-review",
       "status": "completed_bounded",
-      "description": "Full authenticated database composition passed6modules/8manual overrides plus55 ordinary materialized calls,0retained. Canonical stock-to-final semantic oracles pass; receipt binds99evidence files. Generated public proof helpers are accepted only with exact pinned names, no direct declaration range, proof type and existing owner; derived suggestion metadata is recomputed cache-free."
+      "description": "Commit6c0815c integrates authenticated manual overlays into closed manifests, global cache identities, producer reports and independent worker verification. Fresh8260-module manifest60dc663e; six-module worker6/6 success,63canonical=8manual+55ordinary, zero retained;120-file tree54b38ef8. Whole-tree coverage remains zero."
     }
   ],
   "blockers": [
@@ -466,14 +472,19 @@
     },
     {
       "id": "manual-override-composition",
-      "status": "resolved_bounded",
-      "detail": "Eight exact overrides across six modules pass the full composition checker:55 remaining calls materialized,0retained, every final composite canonical-oracled. Root receipt 97fd1e83... binds99files. Authenticated overlay integration into worker/cache/tree protocol remains separate work."
+      "status": "resolved_integrated_bounded",
+      "detail": "Schema13 manifest/cache/producer/consumer integration passes all6manual modules and exact8+55 partition. Complete translated tree remains the acceptance boundary."
+    },
+    {
+      "id": "nested-fixture-derived-metadata",
+      "status": "open_regression_fixture",
+      "detail": "Existing BoundaryNestedFixture derived sineQueNon metadata check mismatches after d606 composition hardening. Real Unitization and full oracle matrix pass; isolate before broad acceptance without weakening derived-metadata comparison."
     }
   ],
   "nextActions": [
-    "Integrate the authenticated manual overlay into the manifest/cache/worker report protocol without inventing Boundary execution variants; keep canonical stock occurrence identities and source hashes.",
-    "Resume bounded indexed schema12 production from a fresh implementation-bound manifest, triaging each exact failure family under disk and budget guards.",
-    "Process the four separately required modules/11 calls and the 65 reusable executable calls without finite-caller equivalence shortcuts; retain adjacent originals and full source/execution ownership.",
+    "Profile and remove repeated full-manifest/source validation from each one-module producer/consumer process while preserving exact closed-manifest evidence binding.",
+    "Resume bounded schema13 indexed production under disk/budget guards, triaging each exact failure family and preserving immutable per-attempt evidence.",
+    "Process the four separately required modules/11 calls and the 65 reusable executable calls without finite-caller shortcuts; retain adjacent originals and full source/execution ownership.",
     "Assemble the translated dependency tree and cold-certify final composite outputs with strict translated dependency resolution; bounded stock-import results remain provisional.",
     "After full explicit coverage and translated-tree acceptance, mine readable normal forms and continue with other common search tactics."
   ],
@@ -1439,6 +1450,33 @@
       "rootVerification": ".lake/week-2026-08-31/manual-composition/run-_37r_lka/root-verification.json",
       "rootVerificationSha256": "97fd1e83bf3f03290354cc465b1ab1f303d7b8edff32517de02cb402010af5ce",
       "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "schema13-overlay-full-manifest",
+      "status": "independently_verified",
+      "commit": "6c0815c",
+      "modules": 8260,
+      "occurrences": 83414,
+      "manifest": ".lake/week-2026-08-31/schema13-overlay-full-manifest.json",
+      "manifestSha256": "60dc663ee3339bffafe53ebe58b1b7d804a67783bc14be5ad9236f856d63430c",
+      "manualDatabaseSha256": "1dfde349f62ddbb42bf202461f30afeb0d15fe0f752a4fae4944637c04e98d06",
+      "rootVerification": ".lake/week-2026-08-31/schema13-overlay-full-manifest-root-verification.json"
+    },
+    {
+      "id": "schema13-overlay-manual-worker",
+      "status": "completed_independently_verified",
+      "commit": "6c0815c",
+      "modules": 6,
+      "canonicalCalls": 63,
+      "manualReplacements": 8,
+      "ordinaryCalls": 55,
+      "observedVariants": 55,
+      "remainingCalls": 0,
+      "failures": 0,
+      "reportRoot": ".lake/boundary-materialization/schema13-overlay-manual-worker",
+      "rootVerification": ".lake/week-2026-08-31/schema13-overlay-manual-worker-root-verification.json",
+      "evidenceFiles": 120,
+      "evidenceTreeSha256": "54b38ef82e6cb5b465eac941a7134c93f7ca891a7def1dca49593d9f9e119024"
     }
   ],
   "latestCommits": [
@@ -1497,7 +1535,10 @@
     "8b662c1",
     "3a6ae82",
     "0b13883",
-    "451e457"
+    "451e457",
+    "1168cc0",
+    "d606469",
+    "6c0815c"
   ],
   "experiments": [
     {
@@ -1725,14 +1766,16 @@
     "moduleCount": 8264,
     "occurrenceCount": 83425,
     "latestClosedManifest": {
-      "path": ".lake/search-free-mathlib/snapshots/schema12-manual-overrides/.lake/schema12-manual-full-manifest.json",
-      "sha256": "c5da97746df66327435624bf45acf7cdd122e2270623e9013e05d370d0c5c37c",
-      "commit": "1168cc02cd49777ddff05fe080005333d1ed9c3f",
+      "path": ".lake/week-2026-08-31/schema13-overlay-full-manifest.json",
+      "sha256": "60dc663ee3339bffafe53ebe58b1b7d804a67783bc14be5ad9236f856d63430c",
+      "commit": "6c0815cc13377665a437f3608176d04b0271808f",
       "modules": 8260,
       "occurrences": 83414,
       "directExecutable": 83349,
       "reusableExecutable": 65,
       "nestedOccurrences": 91,
+      "manualOverrides": 8,
+      "manualDatabaseSha256": "1dfde349f62ddbb42bf202461f30afeb0d15fe0f752a4fae4944637c04e98d06",
       "separatelyRequiredModules": [
         "Mathlib/Tactic/DeriveEncodable.lean",
         "Mathlib/Tactic/Lift.lean",
@@ -1740,8 +1783,9 @@
         "Mathlib/Tactic/Zify.lean"
       ],
       "separatelyRequiredCalls": 11,
-      "summary": ".lake/schema12-manual-full-manifest-summary.json",
-      "note": "Fresh complete closed manifest bound to the verified four-entry manual-override commit; manual overlays are not yet part of this stock-source manifest protocol."
+      "summary": ".lake/week-2026-08-31/schema13-overlay-full-manifest-summary.json",
+      "rootVerification": ".lake/week-2026-08-31/schema13-overlay-full-manifest-root-verification.json",
+      "note": "Fresh closed manifest binds the exact manual database and all producer/consumer implementation hashes; accepted whole-tree coverage remains zero."
     },
     "analysisDecoupling": {
       "status": "integrated",
@@ -1781,18 +1825,21 @@
   },
   "database": {
     "path": ".lake/search-free-mathlib/translation-index.sqlite3",
-    "status": "current_schema12_index_with_provisional_module_results",
+    "status": "schema13_index_with_historical_and_current_provisional_results",
     "modules": 8264,
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 77,
-    "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
-    "currentCandidateOccurrences": 831,
-    "currentCandidateVariants": 893
+    "verifiedTranslations": 83,
+    "headerMap": ".lake/week-2026-08-31/schema13-overlay-dependency-map.json",
+    "currentCandidateOccurrences": 894,
+    "currentCandidateVariants": 948,
+    "externalDependencyDigests": ".lake/week-2026-08-31/schema13-overlay-external-dependency-digests.json",
+    "currentIdentityVerifiedModules": 6,
+    "currentIdentityVerifiedOccurrences": 63
   },
   "productionValidation": {
-    "commit": "451e457",
+    "commit": "6c0815c",
     "searchFreeEncoding": "Artifact5: lean_expr_dag_v3 with bounded pre-boundary universe/opaque expression references; closed lean_expr_dag_v1 declaration bodies. Generated encoded replay blocks pending typeclass synthesis; legacy handwritten elaboration APIs excluded.",
     "representativeMathlibModules": 5,
     "representativeMathlibOccurrences": 66,
@@ -1874,8 +1921,8 @@
     ],
     "currentArtifactSchema": 5,
     "currentSelectorSchema": 2,
-    "minimumReportSchema": 12,
-    "integratedEngineCommit": "451e457",
+    "minimumReportSchema": 13,
+    "integratedEngineCommit": "6c0815c",
     "focusedEvidenceManifest": ".lake/week-2026-08-31/schema10-focused-verification.json",
     "commandAudit": {
       "handoffManifest": ".lake/week-2026-08-31/command-audit-production/handoff-manifest.json",
@@ -2234,6 +2281,13 @@
       "generatedProofPolicy": "Exact `_proof_<digits>` or `congr_simp`, no direct declaration range, proof-valued, existing owner; authored lookalikes remain observable.",
       "acceptedCampaignCoverage": false,
       "wholeMathlib": false
+    },
+    "manualOverlay": {
+      "manifest": ".lake/week-2026-08-31/schema13-overlay-full-manifest.json",
+      "manifestSha256": "60dc663ee3339bffafe53ebe58b1b7d804a67783bc14be5ad9236f856d63430c",
+      "databaseSha256": "1dfde349f62ddbb42bf202461f30afeb0d15fe0f752a4fae4944637c04e98d06",
+      "workerVerification": ".lake/week-2026-08-31/schema13-overlay-manual-worker-root-verification.json",
+      "wholeMathlib": false
     }
   },
   "failureTriage": {
@@ -2257,8 +2311,8 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 23693328384,
-    "checkedAt": "2026-08-31T22:44:34.925996+00:00",
+    "lastFreeBytes": 44813197312,
+    "checkedAt": "2026-09-01T04:34:24.775354+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)",
     "losslessCertificateStorage": {
       "command": "python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json",
@@ -2268,7 +2322,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-09-01T02:34:04.657150+00:00",
+  "updatedAt": "2026-09-01T04:34:24.775354+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
