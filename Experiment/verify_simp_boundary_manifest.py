@@ -769,24 +769,46 @@ def _verify_manifest(
                 for declaration in declarations
             ):
                 raise _error(module, "occurrence range is outside all declarations")
-            declaration_kind = occurrence.get("declarationKind")
-            proof_values = {declaration["isProof"] for declaration in declarations}
-            if declaration_kind in {"proof", "computational", "mixed", "signature_or_default"}:
-                if not declarations:
-                    raise _error(module, "scope declaration list is empty for classified declaration")
-                if declaration_kind == "proof" and proof_values != {True}:
-                    raise _error(module, "proof classification disagrees with declaration isProof")
-                if declaration_kind == "computational" and proof_values != {False}:
-                    raise _error(module, "computational classification disagrees with declaration isProof")
-                if declaration_kind == "mixed" and proof_values != {False, True}:
-                    raise _error(module, "mixed classification disagrees with declaration isProof")
-            _string(occurrence.get("reason"), f"{module}.occurrence.reason")
+            evidence_status = None
             if "executionEvidence" in occurrence:
                 _validate_evidence(
                     occurrence["executionEvidence"],
                     f"{module}.executionEvidence",
                     compiled,
                 )
+                assert isinstance(occurrence["executionEvidence"], dict)
+                evidence_status = occurrence["executionEvidence"]["status"]
+            declaration_kind = occurrence.get("declarationKind")
+            proof_values = {declaration["isProof"] for declaration in declarations}
+            if declaration_kind in {"proof", "computational", "mixed", "signature_or_default"}:
+                empty_example_proof = (
+                    not declarations
+                    and declaration_kind == "proof"
+                    and occurrence.get("commandKind") == "Lean.Parser.Command.example"
+                    and evidence_status == "complete_proof_declaration"
+                )
+                empty_variable_signature = (
+                    not declarations
+                    and declaration_kind == "signature_or_default"
+                    and occurrence.get("commandKind") == "Lean.Parser.Command.variable"
+                    and "executionEvidence" not in occurrence
+                )
+                if not declarations and not (empty_example_proof or empty_variable_signature):
+                    raise _error(module, "scope declaration list is empty for classified declaration")
+                if declaration_kind == "proof" and proof_values != {True}:
+                    if not empty_example_proof:
+                        raise _error(module, "proof classification disagrees with declaration isProof")
+                if declaration_kind == "computational" and proof_values != {False}:
+                    irreducible_with_proof_helper = (
+                        proof_values == {False, True}
+                        and "Lean.Elab.Command.command_Irreducible_def____"
+                        in occurrence.get("ancestors", [])
+                    )
+                    if not irreducible_with_proof_helper:
+                        raise _error(module, "computational classification disagrees with declaration isProof")
+                if declaration_kind == "mixed" and proof_values != {False, True}:
+                    raise _error(module, "mixed classification disagrees with declaration isProof")
+            _string(occurrence.get("reason"), f"{module}.occurrence.reason")
             try:
                 role, declaration_kind, action = scope.validate_scope_dimensions(occurrence.get("executionRole"), occurrence.get("declarationKind"), occurrence.get("action"))
             except RuntimeError as exc:

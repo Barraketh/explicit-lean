@@ -240,6 +240,25 @@ class ManifestVerifierTests(unittest.TestCase):
         occurrence["declarations"] = []
         self.write(); self.rejects("scope declaration list is empty")
 
+    def test_irreducible_computation_may_include_its_proof_helper(self) -> None:
+        occurrence = self.manifest["modules"][0]["occurrences"][0]
+        occurrence["declarationKind"] = "computational"
+        occurrence["declarations"][0]["isProof"] = False
+        proof_helper = copy.deepcopy(occurrence["declarations"][0])
+        proof_helper["name"] = "a_def"
+        proof_helper["isProof"] = True
+        occurrence["declarations"].append(proof_helper)
+        self.manifest["countsByDeclarationKind"] = {"computational": 1}
+        self.write(); self.rejects("computational classification")
+
+        occurrence["ancestors"].insert(
+            0, "Lean.Elab.Command.command_Irreducible_def____"
+        )
+        self.write(); self.verify()
+
+        occurrence["declarations"][0]["isProof"] = True
+        self.write(); self.rejects("computational classification")
+
     def test_execution_evidence_shape_is_checked(self) -> None:
         occurrence = self.manifest["modules"][0]["occurrences"][0]
         occurrence["executionEvidence"] = {
@@ -250,6 +269,103 @@ class ManifestVerifierTests(unittest.TestCase):
             "scheduling": verifier.scope.SCOPE_PROBE_SCHEDULING,
         }
         self.write(); self.rejects("executionCount")
+
+    def test_unnamed_example_proof_may_use_valid_execution_evidence(self) -> None:
+        occurrence = self.manifest["modules"][0]["occurrences"][0]
+        occurrence["commandKind"] = "Lean.Parser.Command.example"
+        occurrence["scopePaths"][0]["commandKind"] = "Lean.Parser.Command.example"
+        occurrence["declarations"] = []
+        occurrence["executionEvidence"] = {
+            "status": "complete_proof_declaration",
+            "executionCount": 1,
+            "callers": [{
+                "caller": "_private.Mathlib.A.0.simpEngineScopeExample_fixture",
+                "executionCount": 1,
+                "isProofDeclaration": True,
+            }],
+            "module": "Mathlib.A",
+            "scheduling": verifier.scope.SCOPE_PROBE_SCHEDULING,
+        }
+        self.write(); self.verify()
+
+    def test_empty_proof_owner_exception_is_narrow_and_fail_closed(self) -> None:
+        occurrence = self.manifest["modules"][0]["occurrences"][0]
+        proof_declarations = copy.deepcopy(occurrence["declarations"])
+        occurrence["commandKind"] = "Lean.Parser.Command.example"
+        occurrence["scopePaths"][0]["commandKind"] = "Lean.Parser.Command.example"
+        occurrence["declarations"] = []
+        original = copy.deepcopy(occurrence)
+
+        self.write(); self.rejects("scope declaration list is empty")
+
+        occurrence["executionEvidence"] = {
+            "status": "complete_nonproof_declaration",
+            "executionCount": 1,
+            "callers": [{
+                "caller": "forged",
+                "executionCount": 1,
+                "isProofDeclaration": False,
+            }],
+            "module": "Mathlib.A",
+            "scheduling": verifier.scope.SCOPE_PROBE_SCHEDULING,
+        }
+        self.write(); self.rejects("scope declaration list is empty")
+
+        occurrence["executionEvidence"] = {
+            "status": "complete_proof_declaration",
+            "executionCount": 1,
+            "callers": [{
+                "caller": "a",
+                "executionCount": 1,
+                "isProofDeclaration": True,
+            }],
+            "module": "Mathlib.A",
+            "scheduling": verifier.scope.SCOPE_PROBE_SCHEDULING,
+        }
+        occurrence["declarations"] = proof_declarations
+        occurrence["declarations"][0]["isProof"] = False
+        self.write(); self.rejects("proof classification")
+
+        self.manifest["modules"][0]["occurrences"][0] = copy.deepcopy(original)
+        occurrence = self.manifest["modules"][0]["occurrences"][0]
+        occurrence["commandKind"] = "Lean.Parser.Command.theorem"
+        occurrence["scopePaths"][0]["commandKind"] = "Lean.Parser.Command.theorem"
+        occurrence["executionEvidence"] = {
+            "status": "complete_proof_declaration",
+            "executionCount": 1,
+            "callers": [{
+                "caller": "a",
+                "executionCount": 1,
+                "isProofDeclaration": True,
+            }],
+            "module": "Mathlib.A",
+            "scheduling": verifier.scope.SCOPE_PROBE_SCHEDULING,
+        }
+        self.write(); self.rejects("scope declaration list is empty")
+
+    def test_variable_signature_may_have_no_compiled_owner(self) -> None:
+        occurrence = self.manifest["modules"][0]["occurrences"][0]
+        occurrence["commandKind"] = "Lean.Parser.Command.variable"
+        occurrence["scopePaths"][0]["commandKind"] = "Lean.Parser.Command.variable"
+        occurrence["declarationKind"] = "signature_or_default"
+        occurrence["declarations"] = []
+        self.manifest["countsByDeclarationKind"] = {"signature_or_default": 1}
+        self.write(); self.verify()
+
+        occurrence["commandKind"] = "Lean.Parser.Command.theorem"
+        occurrence["scopePaths"][0]["commandKind"] = "Lean.Parser.Command.theorem"
+        self.write(); self.rejects("scope declaration list is empty")
+
+        occurrence["commandKind"] = "Lean.Parser.Command.variable"
+        occurrence["scopePaths"][0]["commandKind"] = "Lean.Parser.Command.variable"
+        occurrence["executionEvidence"] = {
+            "status": "missing_execution",
+            "executionCount": 0,
+            "callers": [],
+            "module": None,
+            "scheduling": verifier.scope.SCOPE_PROBE_SCHEDULING,
+        }
+        self.write(); self.rejects("scope declaration list is empty")
 
     def test_inventory_fallback_mismatch_is_rejected(self) -> None:
         output = json.dumps({
