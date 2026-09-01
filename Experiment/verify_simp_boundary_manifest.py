@@ -13,20 +13,26 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from contextlib import contextmanager
 import copy
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+import threading
 from typing import Any, Iterable
 
 import check_simp_engine_boundary_scope as scope
 import simp_engine_inventory as inventory
 import simp_engine_boundary_corpus as corpus
+
+
+_LAKE_ENV_LOCK = threading.RLock()
 
 
 SCHEMA = 2
@@ -199,6 +205,37 @@ def _checked_binary_digest(path: Path, expected: str, label: str) -> tuple[Path,
     if digest != expected_digest:
         raise _error(label, f"explicit executable digest differs: {digest}")
     return resolved, digest, stat
+
+
+def _assert_pinned_lake(lake_path: Path, expected_sha256: str) -> dict[str, str]:
+    resolved, digest, stat = _checked_binary_digest(lake_path, expected_sha256, "lake")
+    discovered = shutil.which("lake")
+    if discovered is None or Path(discovered).resolve() != resolved:
+        raise _error("recompute", f"PATH lake does not resolve to authenticated executable {resolved}")
+    discovered_stat = resolved.stat()
+    if (discovered_stat.st_dev, discovered_stat.st_ino) != (stat.st_dev, stat.st_ino):
+        raise _error("recompute", "PATH lake executable identity changed")
+    return {"path": str(resolved), "sha256": digest, "PATH": os.environ.get("PATH", "")}
+
+
+@contextmanager
+def _pinned_lake_environment(lake_path: Path, expected_sha256: str):
+    if not _LAKE_ENV_LOCK.acquire(blocking=False):
+        raise _error("recompute", "concurrent pinned Lake verification is unsafe")
+    old_path = os.environ.get("PATH")
+    try:
+        resolved, _, _ = _checked_binary_digest(lake_path, expected_sha256, "lake")
+        entries = [] if old_path is None else old_path.split(os.pathsep)
+        os.environ["PATH"] = os.pathsep.join([str(resolved.parent), *[entry for entry in entries if entry != str(resolved.parent)]])
+        effective = _assert_pinned_lake(resolved, expected_sha256)
+        yield effective
+        _assert_pinned_lake(resolved, expected_sha256)
+    finally:
+        if old_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = old_path
+        _LAKE_ENV_LOCK.release()
 
 
 def _strings(value: object, label: str, *, nonempty: bool = True) -> list[str]:
@@ -827,7 +864,7 @@ def verify_strict(
         check_environment=True, lake_path=lake, expected_lake_sha256=expected_lake_sha256,
         lean_path=lean, expected_lean_sha256=expected_lean_sha256,
     )
-    recompute_source_consistency(
+    effective_subprocess = recompute_source_consistency(
         snapshot.path, repository_root=repository, mathlib_root=mathlib, timeout=timeout,
         manifest=manifest, manifest_snapshot=snapshot, lake_path=lake, lean_path=lean,
         expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
@@ -842,6 +879,7 @@ def verify_strict(
         "manifestSha256": snapshot.digest,
         "lakePath": str(lake), "lakeSha256": lake_digest,
         "leanPath": str(lean), "leanSha256": lean_digest,
+        "subprocessEnvironment": effective_subprocess,
         "sourceConsistencyVerified": True,
         "independentSemanticOracleVerified": False,
         "recomputed": "syntax_scope_declarations",
@@ -869,7 +907,12 @@ def recompute_inventory(
     before = _freshness_snapshot(path, manifest, repository, mathlib, manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path, expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256)
     source_paths = [mathlib / module["module"] for module in manifest["modules"]]
     command = [sys.executable, str(repository / "Experiment" / "lean_toolchain_cache.py"), "inventory", "--header-imports", *(str(p) for p in source_paths)]
-    result = subprocess.run(command, cwd=repository, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+    if lake_path is not None and expected_lake_sha256 is not None:
+        _assert_pinned_lake(lake_path, expected_lake_sha256)
+        with _pinned_lake_environment(lake_path, expected_lake_sha256):
+            result = subprocess.run(command, cwd=repository, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+    else:
+        result = subprocess.run(command, cwd=repository, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
     if result.returncode:
         raise _error("recompute", result.stdout[-4000:])
     actual: dict[str, list[tuple[int, int, str, str, int, int, str]]] = {}
@@ -936,6 +979,9 @@ def _freshness_snapshot(
         if input_path.is_file():
             environment[relative] = sha256(input_path.read_bytes())
     binaries = {}
+    subprocess_identity = None
+    if lake_path is not None and expected_lake_sha256 is not None:
+        subprocess_identity = _assert_pinned_lake(lake_path, expected_lake_sha256)
     for label, executable, expected in (
         ("lake", lake_path, expected_lake_sha256), ("lean", lean_path, expected_lean_sha256)
     ):
@@ -973,6 +1019,7 @@ def _freshness_snapshot(
         "implementation": implementation,
         "environment": environment,
         "binaries": binaries,
+        "subprocess": subprocess_identity,
         "repositoryGit": git_state(repository_root),
         "mathlibGit": git_state(mathlib_root),
     }
@@ -1157,7 +1204,7 @@ def _fresh_scope_and_declarations(
                 raise _error("recompute", f"scope classification differs for {module}:{manifest_occurrence['id']}")
 
 
-def recompute_source_consistency(
+def _recompute_source_consistency_body(
     manifest_path: str | Path, *, repository_root: Path, mathlib_root: Path, timeout: int,
     manifest: dict[str, Any] | None = None, manifest_snapshot: ManifestSnapshot | None = None,
     lake_path: Path | None = None, lean_path: Path | None = None,
@@ -1183,6 +1230,31 @@ def recompute_source_consistency(
         manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path,
         expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
     )
+
+
+def recompute_source_consistency(
+    manifest_path: str | Path, *, repository_root: Path, mathlib_root: Path, timeout: int,
+    manifest: dict[str, Any] | None = None, manifest_snapshot: ManifestSnapshot | None = None,
+    lake_path: Path | None = None, lean_path: Path | None = None,
+    expected_lake_sha256: str | None = None, expected_lean_sha256: str | None = None,
+) -> dict[str, str] | None:
+    """Run fresh checks under the authenticated Lake environment."""
+    if lake_path is None or expected_lake_sha256 is None:
+        return _recompute_source_consistency_body(
+            manifest_path, repository_root=repository_root, mathlib_root=mathlib_root,
+            timeout=timeout, manifest=manifest, manifest_snapshot=manifest_snapshot,
+            lake_path=lake_path, lean_path=lean_path,
+            expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+        )
+    with _pinned_lake_environment(lake_path, expected_lake_sha256) as effective:
+        _assert_pinned_lake(lake_path, expected_lake_sha256)
+        _recompute_source_consistency_body(
+            manifest_path, repository_root=repository_root, mathlib_root=mathlib_root,
+            timeout=timeout, manifest=manifest, manifest_snapshot=manifest_snapshot,
+            lake_path=lake_path, lean_path=lean_path,
+            expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+        )
+        return effective
 
 
 def main() -> None:

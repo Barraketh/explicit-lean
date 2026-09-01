@@ -7,6 +7,7 @@ import copy
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -453,6 +454,30 @@ class ManifestVerifierTests(unittest.TestCase):
             )
         self.assertEqual(identity["leanPath"], str(lean.resolve()))
         self.assertEqual(identity["leanBinarySha256"], verifier.sha256(lean.read_bytes()))
+
+    def test_nonmocked_pinned_environment_bypasses_hostile_lake(self) -> None:
+        trusted_dir = self.root / "trusted-bin"
+        hostile_dir = self.root / "hostile-bin"
+        trusted_dir.mkdir(); hostile_dir.mkdir()
+        trusted_marker = self.root / "trusted-called"
+        hostile_marker = self.root / "hostile-called"
+        trusted = trusted_dir / "lake"
+        hostile = hostile_dir / "lake"
+        trusted.write_text("#!/bin/sh\necho trusted > '" + str(trusted_marker) + "'\n", encoding="utf-8")
+        hostile.write_text("#!/bin/sh\necho hostile > '" + str(hostile_marker) + "'\n", encoding="utf-8")
+        trusted.chmod(0o755); hostile.chmod(0o755)
+        original_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(hostile_dir) + os.pathsep + original_path
+        try:
+            with verifier._pinned_lake_environment(trusted, verifier.sha256(trusted.read_bytes())) as effective:
+                result = subprocess.run(["lake"], text=True, stdout=subprocess.PIPE, check=False)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(effective["path"], str(trusted.resolve()))
+                self.assertIn(str(trusted_dir.resolve()), [str(Path(entry).resolve()) for entry in effective["PATH"].split(os.pathsep)])
+            self.assertTrue(trusted_marker.is_file())
+            self.assertFalse(hostile_marker.exists())
+        finally:
+            os.environ["PATH"] = original_path
 
     def test_implementation_and_manual_identity_are_checked(self) -> None:
         self.manifest["implementationHashes"]["tool.py"] = "0" * 64
