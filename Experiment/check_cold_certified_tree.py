@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -152,6 +154,11 @@ class ColdTreeControls(unittest.TestCase):
         with patch.object(tree.cold, "verify_certification", side_effect=fake_verify), self.assertRaisesRegex(RuntimeError, "plan hash"):
             tree.run_tree(plan, checkpoint_root=checkpoints, certify=certify)
 
+        empty_descendant = self.root / "empty-descendant-checkpoints"
+        (empty_descendant / "Mathlib").mkdir(parents=True)
+        with self.assertRaisesRegex(RuntimeError, "resume is disabled"):
+            tree.run_tree(plan, checkpoint_root=empty_descendant, certify=certify, resume=False)
+
     def test_dependency_map_hashed_keys_and_stray_checkpoint_rejected(self) -> None:
         values = json.loads(self.depmap.read_text())
         hashed = {f"{key}@{value['sourceHash']}": value for key, value in values.items()}
@@ -176,6 +183,19 @@ class ColdTreeControls(unittest.TestCase):
         write_json(manifest_path, manifest)
         plan = tree.build_plan(manifest_path, self.depmap, source_root=self.sources)
         self.assertFalse(plan.complete_corpus)
+        forged_corpus = self.root / "caller-forged-corpus.json"
+        write_json(forged_corpus, {
+            "kind": "cold_pinned_complete_corpus", "schema": 1, "complete": True,
+            "manifestHash": plan.manifest_hash, "dependencyMapHash": plan.dependency_map_hash,
+            "modules": {module: {"sourceHash": node.source_hash} for module, node in plan.nodes.items()},
+        })
+        # A caller-authored two-module identity is not an input to the
+        # production CLI and therefore cannot turn this fixture into a whole
+        # Mathlib claim.
+        with patch.object(sys, "stderr", new_callable=io.StringIO), self.assertRaises(SystemExit) as error:
+            tree.main(["--manifest", str(manifest_path), "--dependency-map", str(self.depmap),
+                       "--source-root", str(self.sources), "--corpus-identity", str(forged_corpus)])
+        self.assertEqual(error.exception.code, 2)
         checkpoint_root = self.root / "production-checkpoints"; checkpoint_root.mkdir()
         output_root = self.root / "production-output"; output_root.mkdir()
         staging = self.root / "production-staging"; staging.mkdir()
@@ -223,6 +243,7 @@ class ColdTreeControls(unittest.TestCase):
                                               staging_parent=staging, receipt_root=receipt_root,
                                               work_parent=work_root)
         self.assertFalse(report["wholeMathlib"])
+        self.assertNotIn("corpusIdentity", report)
         self.assertTrue(report["planComplete"])
         self.assertEqual(report["publicationAudit"]["modules"], 2)
         self.assertEqual(report["status"], "completed")
@@ -265,6 +286,16 @@ class ColdTreeControls(unittest.TestCase):
                                           staging_parent=staging, receipt_root=receipt_root,
                                           work_parent=work_root, resume=False)
         self.assertTrue(any(policy.get("require_target_absent") is False for policy in verify_policies))
+
+        checkpoint = checkpoint_root / "Mathlib/A.json"
+        original_checkpoint = checkpoint.read_bytes()
+        checkpoint_value = json.loads(checkpoint.read_text())
+        checkpoint_value["publication"] = {}
+        checkpoint.write_text(json.dumps(checkpoint_value))
+        with patch.object(tree.cold, "verify_certification", side_effect=AssertionError("cold verifier called too early")), \
+             self.assertRaisesRegex(RuntimeError, "publication identity is incomplete"):
+            tree.validate_checkpoint(checkpoint, plan)
+        checkpoint.write_bytes(original_checkpoint)
 
         excluded_manifest = json.loads(manifest_path.read_text())
         excluded_manifest["modules"][1]["disposition"] = "excluded"
