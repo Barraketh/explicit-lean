@@ -17,15 +17,15 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-01T03:53:43.344533+00:00",
-    "lastUsedPercent": 62,
+    "lastCheckedAt": "2026-09-01T05:57:08.866053+00:00",
+    "lastUsedPercent": 64,
     "lastDecision": "continue"
   },
   "coverage": {
     "currentCorpusTotal": 83425,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Fresh schema13 manifest at 6c0815c covers 83,414 executable calls in 8,260 modules (83,349 direct and 65 reusable), with the authenticated eight-entry manual database bound into manifest/cache/report identities. All six manual modules pass as 63 canonical calls = 8 manual + 55 ordinary, all 55 ordinary variants observed and zero retained. The SQLite index has 83 historical/current provisional modules covering 894 calls; only the six schema13 overlay modules are current-identity verified. Four source-quotation/tactic modules containing 11 calls remain separately required. No bounded result counts as accepted translated-tree coverage.",
+    "note": "Schema13 analysis covers 83,414 executable calls in 8,260 modules (83,349 direct and 65 reusable), with the authenticated eight-entry manual database bound into manifest/cache/report identities. The ordinary materializer supports 6,279 modules; 36 reusable/mixed modules containing the 65 reusable calls remain on the explicit reusable-tactic track. All six manual modules pass as 63 canonical calls = 8 manual + 55 ordinary, all 55 ordinary variants observed and zero retained. Four source-quotation/tactic modules containing 11 calls remain separately required. No bounded result counts as accepted translated-tree coverage.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83414,
     "unresolvedOccurrences": 5,
@@ -41,7 +41,9 @@
     "freshDirectExecutableOccurrences": 83349,
     "separatelyRequiredModules": 4,
     "separatelyRequiredOccurrences": 11,
-    "freshAnalyzedUnresolvedOccurrences": 0
+    "freshAnalyzedUnresolvedOccurrences": 0,
+    "directMaterializerModules": 6279,
+    "reusableOrMixedModules": 36
   },
   "work": [
     {
@@ -417,6 +419,18 @@
       "owner": "coordinator with Luna implementation/fix-review",
       "status": "completed_bounded",
       "description": "Commit6c0815c integrates authenticated manual overlays into closed manifests, global cache identities, producer reports and independent worker verification. Fresh8260-module manifest60dc663e; six-module worker6/6 success,63canonical=8manual+55ordinary, zero retained;120-file tree54b38ef8. Whole-tree coverage remains zero."
+    },
+    {
+      "id": "manifest-capsule-projection",
+      "owner": "coordinator with Luna implementation and independent fix-review",
+      "status": "completed_ready_for_exact_manifest",
+      "description": "One worker globally validates every closed-manifest record/source; each child rechecks the authenticated global schema, policy and count invariants while a 1,073,040-byte span/hash capsule replaces repeated 215,420,884-byte JSON decoding. Real corpus child projection hashes the full manifest and captures seven selected/manual records (341,358 bytes) in 0.105s. Sparse overlay identity, count assertions, reusable fallback, immutable concurrent publication, cleanup aliases and manifest/DB/source TOCTOU fail closed."
+    },
+    {
+      "id": "tooling-import-derived-metadata",
+      "owner": "coordinator with Luna diagnosis/fix-review",
+      "status": "completed",
+      "description": "When only the allowlisted direct Boundary.Tactic tooling import is added, the declaration oracle recomputes applied LibrarySuggestions metadata using the stock imported-frequency state and excludes generated/tooling-local declarations. It retains exact comparison whenever both sides have the tooling import or neither does. The complete oracle matrix passes 15 accepted equivalences and 26 fail-closed cases; nested synthetic and real Mathlib Action gates pass with zero remaining calls."
     }
   ],
   "blockers": [
@@ -477,12 +491,12 @@
     },
     {
       "id": "nested-fixture-derived-metadata",
-      "status": "open_regression_fixture",
-      "detail": "Existing BoundaryNestedFixture derived sineQueNon metadata check mismatches after d606 composition hardening. Real Unitization and full oracle matrix pass; isolate before broad acceptance without weakening derived-metadata comparison."
+      "status": "resolved",
+      "detail": "The allowed Boundary.Tactic import adds derived LibrarySuggestions state outside the source module equivalence domain. The oracle retains singular/presence checks and all declaration/import/other-extension checks; 15 accepted and 26 fail-closed cases pass. The stale nested report wrapper now copies schema13 canonical/manual counts; synthetic and Mathlib Action nested gates pass."
     }
   ],
   "nextActions": [
-    "Profile and remove repeated full-manifest/source validation from each one-module producer/consumer process while preserving exact closed-manifest evidence binding.",
+    "Commit the capsule/oracle/tracking phase boundary, then generate and independently verify a fresh exact-HEAD schema13 manifest and dependency map without another tracked commit.",
     "Resume bounded schema13 indexed production under disk/budget guards, triaging each exact failure family and preserving immutable per-attempt evidence.",
     "Process the four separately required modules/11 calls and the 65 reusable executable calls without finite-caller shortcuts; retain adjacent originals and full source/execution ownership.",
     "Assemble the translated dependency tree and cold-certify final composite outputs with strict translated dependency resolution; bounded stock-import results remain provisional.",
@@ -1137,6 +1151,32 @@
         ".lake/week-2026-08-31/manual-composition/run-_37r_lka/report.json",
         ".lake/week-2026-08-31/manual-composition/run-_37r_lka/root-verification.json"
       ]
+    },
+    {
+      "id": "manifest-capsule-benchmark-and-nested-fix",
+      "status": "validated_pre_commit",
+      "manifest": ".lake/week-2026-08-31/schema13-current-full-manifest.json",
+      "manifestSha256": "3bcdf7bf51e8039b4c5fd994f89e4afd86faeda54a3368ea0a85a8929e5a0819",
+      "manifestBytes": 215420884,
+      "capsuleBenchmark": ".lake/week-2026-08-31/schema13-current-capsule-benchmark.json",
+      "capsuleBytes": 1073040,
+      "capsuleBuildSeconds": 50.472,
+      "childProjectionSeconds": 0.105,
+      "childCapturedBytes": 341358,
+      "peakWorkerValidationRssBytes": 1522401280,
+      "ordinaryModules": 6279,
+      "reusableOrMixedModules": 36,
+      "checks": [
+        "capsule 8",
+        "campaign worker 18",
+        "manual overlay 6",
+        "corpus manifest 3 modules/42 occurrences",
+        "declaration oracle 15 accepted/26 fail-closed",
+        "nested synthetic and Mathlib Action gates",
+        "weekly review",
+        "translation index"
+      ],
+      "note": "The referenced manifest is exact for pre-implementation commit 38b9ce7 and becomes historical when this tracked phase boundary commits. Generate a new exact-HEAD manifest immediately after commit and make no further tracked changes before production."
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -2311,8 +2351,8 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 44813197312,
-    "checkedAt": "2026-09-01T04:34:24.775354+00:00",
+    "lastFreeBytes": 43961774080,
+    "checkedAt": "2026-09-01T06:14:47.944208+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)",
     "losslessCertificateStorage": {
       "command": "python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json",
@@ -2322,11 +2362,23 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-09-01T04:34:24.775354+00:00",
+  "updatedAt": "2026-09-01T06:14:47.944208+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
     "question": "Must exported simp-based tactics preserve unrestricted future behavior, or may their API change if the pinned Mathlib corpus is fully translated and checked?",
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
+  },
+  "productionPlan": {
+    "eligibleOrdinaryModules": 6279,
+    "reusableOrMixedModules": 36,
+    "workers": 2,
+    "pilotModules": 100,
+    "productionBatchModules": 500,
+    "moduleTimeoutSeconds": 900,
+    "batchWallSeconds": 14400,
+    "minimumFreeBytes": 12884901888,
+    "projectedEvidenceGiB": "8-10 including retries",
+    "policy": "Unique worker/output labels; shared SQLite atomic claims; first pass omits retry_failed; preserve all evidence and diagnose exact failure families before retry."
   }
 }

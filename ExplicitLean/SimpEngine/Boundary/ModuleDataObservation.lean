@@ -83,8 +83,8 @@ private def localFrequencyExcluding (excluded : NameSet) : MetaM (NameMap Nat) :
 /-- Recompute the two derived LibrarySuggestions export maps from one
     environment while omitting an authenticated set of proof auxiliaries.
     This never reads or writes the process-global frequency caches. -/
-private unsafe def observeSuggestionMetadataExcludingImpl (env : Environment)
-    (excluded : NameSet) : IO SuggestionMetadataObservation := do
+private unsafe def observeSuggestionMetadataExcludingWithImportsImpl
+    (env importedEnv : Environment) (excluded : NameSet) : IO SuggestionMetadataObservation := do
   let extensions ← persistentEnvExtensionsRef.get
   let some symbolExtension := extensions.find? (·.name == `symbolFrequency)
     | throw <| IO.userError "observed_symbol_frequency_extension_missing"
@@ -97,9 +97,23 @@ private unsafe def observeSuggestionMetadataExcludingImpl (env : Environment)
       LibrarySuggestions.SineQuaNon.sineQuaNonExt.toEnvExtension.idx do
     throw <| IO.userError "observed_sine_qua_non_extension_identity"
   let localMap ← runExportMeta env (localFrequencyExcluding excluded)
-  let importedMap := importedFrequencyFromEnvironment env
+  /- `env` supplies the declarations authored by the source being checked.
+     `importedEnv` supplies the common imported frequency state.  They differ
+     only when the applied source needs the authenticated boundary tooling
+     import; using the stock import state removes that import's derived
+     contribution without hiding changes to source declarations. -/
+  let importedMap := importedFrequencyFromEnvironment importedEnv
   let triggers ← runExportMeta env (prepareTriggers localMap importedMap excluded)
   return { symbolFrequency := localMap, sineQuaNon := triggers }
+
+@[implemented_by observeSuggestionMetadataExcludingWithImportsImpl]
+public opaque observeSuggestionMetadataExcludingWithImports
+    (env importedEnv : Environment) (excluded : NameSet) :
+    IO SuggestionMetadataObservation
+
+private unsafe def observeSuggestionMetadataExcludingImpl (env : Environment)
+    (excluded : NameSet) : IO SuggestionMetadataObservation :=
+  observeSuggestionMetadataExcludingWithImportsImpl env env excluded
 
 @[implemented_by observeSuggestionMetadataExcludingImpl]
 public opaque observeSuggestionMetadataExcluding (env : Environment)

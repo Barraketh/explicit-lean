@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -171,7 +172,7 @@ def _slug(module: str) -> str:
 
 def _atomic_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
+    temporary = path.with_name(path.name + f".tmp-{os.getpid()}-{time.time_ns()}")
     try:
         temporary.write_text(text, encoding="utf-8")
         temporary.replace(path)
@@ -179,11 +180,78 @@ def _atomic_text(path: Path, text: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _cleanup_stale_atomic_temps(root: Path) -> None:
+    """Remove worker temporaries whose owning local process no longer exists."""
+    pattern = re.compile(r"\.tmp-([1-9][0-9]*)-[0-9]+$")
+    for path in root.glob("*.tmp-*"):
+        match = pattern.search(path.name)
+        if match is None:
+            continue
+        owner = int(match.group(1))
+        try:
+            os.kill(owner, 0)
+        except ProcessLookupError:
+            path.unlink(missing_ok=True)
+        except PermissionError:
+            # Another user's live process is not ours to disturb.
+            continue
+
+
+def _write_manifest_capsule(
+    manifest_path: Path,
+    manifest_bytes: bytes,
+    manifest: Mapping[str, Any],
+    selected: Sequence[materializer.SelectedModule],
+    output: Path,
+    *,
+    overlay: manual_overlay.Overlay | None = None,
+) -> tuple[Path, str]:
+    """Publish a compact immutable projection outside per-run cleanup."""
+    manual_modules = tuple(sorted(overlay.modules)) if overlay is not None else ()
+    capsule = materializer.make_manifest_capsule(
+        manifest_path, manifest_bytes, manifest, selected,
+        overlay_identity=overlay.identity() if overlay is not None else None,
+        manual_modules=manual_modules,
+    )
+    payload = json.dumps(capsule, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    boundary_root = materializer.BOUNDARY_DEBUG_ROOT.resolve()
+    root = materializer.BOUNDARY_DEBUG_ROOT / "capsules"
+    if root.exists() and root.is_symlink():
+        raise TranslationIndexError("manifest capsule directory must not be a symlink")
+    if root.exists() and not root.is_dir():
+        raise TranslationIndexError("manifest capsule directory is not a directory")
+    try:
+        root.parent.resolve().relative_to(boundary_root)
+    except ValueError as error:
+        raise TranslationIndexError("manifest capsule directory escapes boundary root") from error
+    path = root / f"{manifest_path.stem}-{_sha256(manifest_bytes)[:24]}-{_sha256(payload)[:24]}.json"
+    root.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        raise TranslationIndexError("manifest capsule file must not be a symlink")
+    temporary = path.with_name(path.name + f".tmp-{os.getpid()}-{time.time_ns()}")
+    try:
+        temporary.write_bytes(payload)
+        try:
+            # ``link`` publishes without replacing an existing capsule.  Two
+            # workers may therefore safely converge on the same immutable file.
+            os.link(temporary, path)
+        except FileExistsError:
+            pass
+        if path.is_symlink():
+            raise TranslationIndexError("manifest capsule file must not be a symlink")
+        if path.read_bytes() != payload:
+            raise TranslationIndexError(f"manifest capsule path collision: {path}")
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path, _sha256(payload)
+
+
 def _selected_for_report_evidence(
     manifest: dict[str, Any],
     module: str,
     overlay: manual_overlay.Overlay | None,
     debug_root: Path,
+    validated_selection: Mapping[str, materializer.SelectedModule] | None = None,
 ) -> list[materializer.SelectedModule]:
     """Reconstruct a report's immutable selection without changing evidence.
 
@@ -193,9 +261,12 @@ def _selected_for_report_evidence(
     ``prepare_overlay_selection`` here because that producer helper writes the
     effective source into the run directory before verification.
     """
-    canonical = materializer.validate_manifest_selection(
-        manifest, [module], expect_total=None, expect_materialize=None
-    )
+    if validated_selection is None:
+        canonical = materializer.validate_manifest_selection(
+            manifest, [module], expect_total=None, expect_materialize=None
+        )
+    else:
+        canonical = [validated_selection[module]] if module in validated_selection else []
     if len(canonical) != 1:
         raise TranslationIndexError(
             f"closed manifest did not select exactly one module: {module}"
@@ -246,6 +317,7 @@ def _report_is_verified(
     report_path: Path,
     overlay: manual_overlay.Overlay | None = None,
     timeout: int = 600,
+    validated_selection: Mapping[str, materializer.SelectedModule] | None = None,
 ) -> bool:
     """Reproduce all durable evidence, then require observed success."""
     value = materializer.validate_shard_shape(report)
@@ -260,7 +332,9 @@ def _report_is_verified(
     if value.get("manualOverlay") != expected_overlay:
         raise TranslationIndexError("materialization report is bound to another manual overlay")
     debug_root = materializer.debug_root_for(report_path.resolve())
-    selected = _selected_for_report_evidence(manifest, module, overlay, debug_root)
+    selected = _selected_for_report_evidence(
+        manifest, module, overlay, debug_root, validated_selection
+    )
     materializer.verify_shard_evidence(
         value,
         manifest=manifest,
@@ -302,6 +376,8 @@ def _report_is_verified(
 def invoke_materializer(
     manifest_path: Path, output_path: Path, module: str, timeout: int,
     manual_overrides: Path | None = None,
+    capsule: Path | None = None,
+    capsule_hash: str | None = None,
 ) -> tuple[int, str]:
     command = [
         sys.executable,
@@ -313,6 +389,11 @@ def invoke_materializer(
     ]
     if manual_overrides is not None:
         command.extend(("--manual-overrides", str(manual_overrides)))
+    if capsule is not None:
+        command.extend(("--capsule", str(capsule)))
+        if capsule_hash is None:
+            raise TranslationIndexError("capsule hash is required")
+        command.extend(("--capsule-sha256", capsule_hash))
     try:
         completed = run_process(
             command,
@@ -358,13 +439,51 @@ def run_worker(
         raise TranslationIndexError("minimum free bytes must be a positive integer")
     manifest_path, manifest_bytes, manifest_value, manifest_hash = _read_manifest(manifest)
     materializer.verify_implementation_hashes(manifest_value)
+    selected, skipped_empty = _selected_modules(manifest_value, modules)
+    # A producer worker is the one place that pays for complete manifest
+    # validation.  Reports below reuse these checked selections; they never
+    # independently walk the 205MiB global occurrence array.
+    validated_selection: dict[str, materializer.SelectedModule] | None = None
+    complete_manifest = all(
+        key in manifest_value
+        for key in ("countsByExecutionRole", "countsByDeclarationKind", "countsByAction")
+    )
+    if complete_manifest:
+        by_name = {
+            str(raw["module"]): raw for raw in manifest_value["modules"]
+            if isinstance(raw, Mapping) and isinstance(raw.get("module"), str)
+        }
+        capsule_candidates = [
+            module for module in selected
+            if not any(
+                isinstance(item, Mapping)
+                and item.get("executionRole") == "reusable_executable"
+                for item in by_name[module].get("occurrences", [])
+            )
+        ]
+        validated = materializer.validate_manifest_selection(
+            manifest_value, capsule_candidates,
+            expect_total=None, expect_materialize=None,
+        ) if capsule_candidates else []
+        validated_selection = {item.module: item for item in validated}
     overlay = None
     if manual_overrides is not None:
-        overlay = manual_overlay.load_overlay(
-            manifest_path, Path(manual_overrides), source_root=MATHLIB
-        )
+        module_records = {
+            str(raw["module"]): raw
+            for raw in manifest_value["modules"]
+            if isinstance(raw, Mapping) and isinstance(raw.get("module"), str)
+        }
+        if complete_manifest:
+            overlay = manual_overlay._load_overlay_projected(
+                manifest_path, Path(manual_overrides), source_root=MATHLIB,
+                manifest_value=manifest_value, manifest_bytes=manifest_bytes,
+                module_records=module_records,
+            )
+        else:
+            overlay = manual_overlay.load_overlay(
+                manifest_path, Path(manual_overrides), source_root=MATHLIB,
+            )
     overlay_identity = overlay.identity() if overlay is not None else None
-    selected, skipped_empty = _selected_modules(manifest_value, modules)
     manifest_order = {
         raw["module"]: index
         for index, raw in enumerate(manifest_value["modules"])
@@ -390,6 +509,14 @@ def run_worker(
         if database_path.absolute().is_relative_to(output) or database_path.resolve().is_relative_to(output):
             raise TranslationIndexError("worker database must not be inside its materializer cleanup root")
     output.mkdir(parents=True, exist_ok=True)
+    _cleanup_stale_atomic_temps(output)
+    capsules: dict[str, tuple[Path, str]] = {}
+    if validated_selection:
+        shared_capsule = _write_manifest_capsule(
+            manifest_path, manifest_bytes, manifest_value,
+            list(validated_selection.values()), output, overlay=overlay,
+        )
+        capsules = {item.module: shared_capsule for item in validated_selection.values()}
     implementation, toolchain = _identities(manifest_value, overlay_identity)
     try:
         preflight_budget = budget_guard()
@@ -489,6 +616,14 @@ def run_worker(
                 continue
             lease = leases[0]
             active_lease = lease
+            capsule = capsules.get(lease.module)
+            if capsule is not None:
+                try:
+                    current_capsule_hash = _sha256(capsule[0].read_bytes())
+                except OSError as error:
+                    raise TranslationIndexError(f"cannot reread manifest capsule: {error}") from error
+                if current_capsule_hash != capsule[1]:
+                    raise TranslationIndexError("manifest capsule changed before child dispatch")
             print(json.dumps({
                 "event": "module_start", "module": lease.module,
                 "attemptId": lease.attempt_id,
@@ -496,17 +631,27 @@ def run_worker(
             report_path = output / f"{_slug(lease.module)}-{lease.attempt_id}.json"
             log_path = output / f"{_slug(lease.module)}-{lease.attempt_id}.log"
             if manual_overrides is None:
-                code, command_output = invoke_materializer(
-                    manifest_path, report_path, lease.module, module_timeout
-                )
+                if capsule is None:
+                    code, command_output = invoke_materializer(
+                        manifest_path, report_path, lease.module, module_timeout
+                    )
+                else:
+                    code, command_output = invoke_materializer(
+                        manifest_path, report_path, lease.module, module_timeout,
+                        capsule=capsule[0], capsule_hash=capsule[1],
+                    )
             else:
-                code, command_output = invoke_materializer(
-                    manifest_path,
-                    report_path,
-                    lease.module,
-                    module_timeout,
-                    Path(manual_overrides).resolve(),
-                )
+                if capsule is None:
+                    code, command_output = invoke_materializer(
+                        manifest_path, report_path, lease.module, module_timeout,
+                        Path(manual_overrides).resolve(),
+                    )
+                else:
+                    code, command_output = invoke_materializer(
+                        manifest_path, report_path, lease.module, module_timeout,
+                        Path(manual_overrides).resolve(),
+                        capsule=capsule[0], capsule_hash=capsule[1],
+                    )
             _atomic_text(log_path, command_output)
             processed += 1
             if code != 0:
@@ -534,6 +679,7 @@ def run_worker(
                     report_path,
                     overlay,
                     module_timeout,
+                    validated_selection=validated_selection,
                 )
             except (OSError, json.JSONDecodeError, TranslationIndexError, RuntimeError) as error:
                 failures += 1

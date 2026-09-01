@@ -489,6 +489,10 @@ private def uniqueNames (names : Array Name) : Array Name := Id.run do
       result := result.push name
   return result
 
+private def hasToolingImport (environment : Environment) : Bool :=
+  environment.header.imports.any fun imp =>
+    imp.module == oracleToolingModule && !imp.importAll && !imp.isExported && !imp.isMeta
+
 private def boundedNameList (names : Array Name) : String :=
   let limit := 32
   let shown := names.extract 0 (min limit names.size)
@@ -664,6 +668,22 @@ private unsafe def observableSuggestionEntries (environment : Environment)
   let _ ← requireSuggestionEntries data name
   let generated ← generatedProofNames environment
   let observed ← Boundary.observeSuggestionMetadataExcluding environment generated
+  if name == `symbolFrequency then
+    return #[unsafeCast observed.symbolFrequency]
+  if name == `sineQueNon then
+    return #[unsafeCast observed.sineQuaNon]
+  oracleFailure "environment_delta_mismatch" s!"unsupported derived metadata extension {name}"
+
+private unsafe def observableSuggestionEntriesAgainstStockImports
+    (stockEnvironment appliedEnvironment : Environment)
+    (appliedData : ModuleData) (name : Name) : IO (Array EnvExtensionEntry) := do
+  let _ ← requireSuggestionEntries appliedData name
+  let mut excluded ← generatedProofNames appliedEnvironment
+  for (declarationName, _) in appliedEnvironment.constants.map₂ do
+    unless stockEnvironment.constants.contains declarationName do
+      excluded := excluded.insert declarationName
+  let observed ← Boundary.observeSuggestionMetadataExcludingWithImports
+    appliedEnvironment stockEnvironment excluded
   if name == `symbolFrequency then
     return #[unsafeCast observed.symbolFrequency]
   if name == `sineQueNon then
@@ -906,8 +926,14 @@ private unsafe def compareExtensions (stockEnvironment appliedEnvironment : Envi
       continue
     if name == `symbolFrequency || name == `sineQueNon then
       let stock ← observableSuggestionEntries stockEnvironment stockData name
-      let applied ← observableSuggestionEntries appliedEnvironment appliedData name
-      unless (← extensionBytes stockData name stock) == (← extensionBytes appliedData name applied) do
+      let applied ←
+        if hasToolingImport appliedEnvironment && !hasToolingImport stockEnvironment then
+          observableSuggestionEntriesAgainstStockImports
+            stockEnvironment appliedEnvironment appliedData name
+        else
+          observableSuggestionEntries appliedEnvironment appliedData name
+      unless (← extensionBytes stockData name stock) ==
+          (← extensionBytes appliedData name applied) do
         oracleFailure "environment_delta_mismatch"
           s!"derived suggestion metadata differs for {name}"
       continue

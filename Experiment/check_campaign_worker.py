@@ -28,6 +28,21 @@ class CampaignWorkerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def test_stale_atomic_temp_cleanup_preserves_live_owner(self) -> None:
+        stale = self.root / "stale.log.tmp-99999999-1"
+        live = self.root / f"live.log.tmp-{worker.os.getpid()}-2"
+        stale.write_text("stale", encoding="utf-8")
+        live.write_text("live", encoding="utf-8")
+        real_kill = worker.os.kill
+        def probe(pid: int, signal: int) -> None:
+            if pid == 99999999:
+                raise ProcessLookupError
+            real_kill(pid, signal)
+        with mock.patch.object(worker.os, "kill", side_effect=probe):
+            worker._cleanup_stale_atomic_temps(self.root)
+        self.assertFalse(stale.exists())
+        self.assertTrue(live.exists())
+
     def manifest(self, *, empty: bool = False, allow_unresolved: bool = False) -> Path:
         source = "theorem a : True := by simp\n" if not empty else "theorem b : True := by exact True.intro\n"
         module = "Mathlib/A.lean" if not empty else "Mathlib/Empty.lean"
@@ -249,6 +264,24 @@ class CampaignWorkerTests(unittest.TestCase):
                 self.assertEqual(memoized_key, fresh_memo_key)
         finally:
             connection.close()
+
+    def test_reusable_only_selection_skips_capsule_without_global_abort(self) -> None:
+        manifest = self.manifest()
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        value.update({
+            "countsByExecutionRole": {"reusable_executable": 1},
+            "countsByDeclarationKind": {"proof": 1},
+            "countsByAction": {"materialize": 1},
+        })
+        value["modules"][0]["occurrences"][0]["executionRole"] = "reusable_executable"
+        value["modules"][0]["occurrences"][0]["declarationKind"] = "caller_dependent"
+        manifest.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+        def invoke(path, output, module, timeout):
+            output.write_text(json.dumps(self.fake_report(manifest, module)), encoding="utf-8")
+            return 0, "ok"
+        with mock.patch.object(worker, "_write_manifest_capsule", side_effect=AssertionError("unexpected capsule")):
+            result = self.run_fixture(manifest, invoke)
+        self.assertEqual(result["processed"], 1)
 
     def test_fresh_pass_rejects_changed_dependency_source(self) -> None:
         manifest = self.manifest_many(["A", "B"], dependencies={"A": ["Mathlib.B"]})

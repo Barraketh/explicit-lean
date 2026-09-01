@@ -174,7 +174,8 @@ def check_coverage_evidence(
     runner_hash = shard.sha256(runner.read_bytes())
     report.update(runnerPath=str(runner), runnerHash=runner_hash,
                   runner={"path": str(runner), "sha256": runner_hash})
-    for field in ("totalCount", "materializeCount", "retainCount", "occurrenceResults",
+    for field in ("canonicalTotalCount", "manualReplacementCount", "totalCount",
+                  "materializeCount", "retainCount", "occurrenceResults",
                   "occurrenceClassificationCounts", "observedIds", "unobservedIds",
                   "executionReportCount", "variantCount", "executionStatusCounts",
                   "variantStatusCounts", "remainingRetainedCount"):

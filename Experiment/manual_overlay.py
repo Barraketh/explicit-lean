@@ -142,10 +142,13 @@ class Overlay:
     sources: dict[str, bytes]
     source_hashes: dict[str, str]
     manifest_hash: str
+    global_counts: dict[str, int] | None = None
 
     @property
     def counts(self) -> dict[str, int]:
         canonical = sum(len(records) for records in self.modules.values())
+        if self.global_counts is not None:
+            return dict(self.global_counts)
         return {
             "modules": len(self.modules),
             "canonicalOccurrences": canonical,
@@ -254,11 +257,14 @@ class Overlay:
     shifted_mapping = shifted_occurrences
 
 
-def load_overlay(
+def _load_overlay_projected(
     manifest_path: Path = DEFAULT_MANIFEST,
     database_path: Path = manual.DEFAULT_PATH,
     *,
     source_root: Path | None = None,
+    manifest_value: Mapping[str, object] | None = None,
+    manifest_bytes: bytes | None = None,
+    module_records: Mapping[str, Mapping[str, object]] | None = None,
 ) -> Overlay:
     """Load, authenticate, and validate the manual DB against a schema-2 manifest."""
     manifest_path, database_path = (
@@ -275,7 +281,17 @@ def load_overlay(
             raise _error("manual override database changed while loading")
     except OSError as error:
         raise _error(f"cannot reread manual override database: {error}") from error
-    manifest_bytes, manifest = _read_manifest(manifest_path)
+    if manifest_value is None:
+        read_manifest_bytes, manifest = _read_manifest(manifest_path)
+        if manifest_bytes is None:
+            manifest_bytes = read_manifest_bytes
+    else:
+        manifest = dict(manifest_value)
+        if manifest_bytes is None:
+            # The caller must provide the authenticated bytes when it supplies
+            # a projection.  Reading/parsing a large manifest here would defeat
+            # the capsule's purpose.
+            raise _error("manifest bytes are required with a projected manifest")
     manifest_environment = _environment(manifest, "manifest")
     if manifest_environment != environment:
         raise _error("manual override environment does not match manifest")
@@ -291,7 +307,14 @@ def load_overlay(
     source_hashes: dict[str, str] = {}
     seen_ids: set[str] = set()
     total = 0
-    for raw_module in manifest["modules"]:
+    raw_modules = manifest.get("modules")
+    if module_records is not None:
+        override_modules = {str(entry["module"]) for entry in entries}
+        raw_modules = [module_records[module] for module in sorted(override_modules)
+                       if module in module_records]
+    if not isinstance(raw_modules, list):
+        raise _error("manifest modules must be an array")
+    for raw_module in raw_modules:
         if not isinstance(raw_module, Mapping):
             raise _error("manifest module record must be an object")
         module = _string(raw_module.get("module"), "manifest module")
@@ -353,7 +376,23 @@ def load_overlay(
         sources[module] = source_bytes
         source_hashes[module] = source_hash
         total += len(records)
-    if total != manifest["occurrenceCount"]:
+    expected_count = manifest.get("occurrenceCount")
+    global_counts = None
+    if module_records is not None:
+        expected_count = total
+        declared_modules = manifest.get("moduleFileCount")
+        declared_occurrences = manifest.get("occurrenceCount")
+        if not isinstance(declared_modules, int) or not isinstance(declared_occurrences, int):
+            raise _error("projected manifest has invalid global counts")
+        if declared_modules < 0 or declared_occurrences < len(entries):
+            raise _error("projected manifest has inconsistent global counts")
+        global_counts = {
+            "modules": declared_modules,
+            "canonicalOccurrences": declared_occurrences,
+            "manualOverrides": len(entries),
+            "untouchedOccurrences": declared_occurrences - len(entries),
+        }
+    if total != expected_count:
         raise _error("manifest occurrenceCount disagrees with records")
 
     by_id = {str(r["id"]): r for rs in modules.values() for r in rs}
@@ -401,6 +440,23 @@ def load_overlay(
         sources=sources,
         source_hashes=source_hashes,
         manifest_hash=sha256(manifest_bytes),
+        global_counts=global_counts,
+    )
+
+
+def load_overlay(
+    manifest_path: Path = DEFAULT_MANIFEST,
+    database_path: Path = manual.DEFAULT_PATH,
+    *,
+    source_root: Path | None = None,
+) -> Overlay:
+    """Load a complete authenticated overlay from a full manifest.
+
+    Projected module records are intentionally private: callers must first
+    authenticate the capsule and then use ``_load_overlay_projected``.
+    """
+    return _load_overlay_projected(
+        manifest_path, database_path, source_root=source_root,
     )
 
 

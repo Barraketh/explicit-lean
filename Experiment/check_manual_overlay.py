@@ -130,6 +130,19 @@ class ManualOverlayChecks(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "canonical source hash"):
             self.load()
 
+    def test_sparse_load_preserves_full_global_identity(self) -> None:
+        value = json.loads(self.manifest.read_text())
+        value["moduleFileCount"] = 1
+        self.manifest.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+        full = self.load()
+        sparse = overlay._load_overlay_projected(
+            self.manifest, self.database, source_root=self.root,
+            manifest_value=value, manifest_bytes=self.manifest.read_bytes(),
+            module_records={MODULE: value["modules"][0]},
+        )
+        self.assertEqual(sparse.identity(), full.identity())
+        self.assertEqual(sparse.counts["canonicalOccurrences"], 2)
+
     def test_composite_report_keeps_manual_ids_out_of_recorder_evidence(self) -> None:
         report = shard_report_fixture()
         module = report["modules"][0]

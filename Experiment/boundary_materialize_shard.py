@@ -23,7 +23,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import check_simp_engine_boundary_scope as scope
 import simp_engine_boundary_corpus as corpus
@@ -77,6 +77,362 @@ FAILURE_SCHEMA = 1
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+# The campaign manifest is intentionally a single JSON document.  A capsule
+# lets a child authenticate one (or a few) module objects without constructing
+# the 200MiB ``modules`` array.  These helpers are a small structural scanner:
+# they recognize JSON strings/brackets, but never decode an unselected value.
+CAPSULE_KIND = "simp_engine_boundary_manifest_capsule"
+CAPSULE_SCHEMA = 1
+
+
+def _json_string_end(data: bytes, offset: int) -> int:
+    if offset >= len(data) or data[offset] != 34:  # ``\"``
+        raise RuntimeError("manifest capsule scanner expected a JSON string")
+    index = offset + 1
+    escaped = False
+    while index < len(data):
+        byte = data[index]
+        if escaped:
+            escaped = False
+        elif byte == 92:
+            escaped = True
+        elif byte == 34:
+            return index + 1
+        index += 1
+    raise RuntimeError("manifest capsule scanner found an unterminated string")
+
+
+def _json_value_end(data: bytes, offset: int) -> int:
+    """Return the end of one JSON value without decoding it."""
+    while offset < len(data) and data[offset] in b" \t\r\n":
+        offset += 1
+    if offset >= len(data):
+        raise RuntimeError("manifest capsule scanner found a missing value")
+    if data[offset] == 34:
+        return _json_string_end(data, offset)
+    if data[offset] in (91, 123):  # array/object
+        opening = data[offset]
+        closing = 93 if opening == 91 else 125
+        depth = 1
+        index = offset + 1
+        while index < len(data):
+            byte = data[index]
+            if byte == 34:
+                index = _json_string_end(data, index)
+                continue
+            if byte == opening:
+                depth += 1
+            elif byte == closing:
+                depth -= 1
+                if depth == 0:
+                    return index + 1
+            index += 1
+        raise RuntimeError("manifest capsule scanner found an unterminated container")
+    index = offset
+    while index < len(data) and data[index] not in b",}] \t\r\n":
+        index += 1
+    return index
+
+
+def _module_object_spans(data: bytes) -> tuple[tuple[int, int], dict[str, tuple[int, int]], tuple[int, int]]:
+    """Find direct objects in the root ``modules`` array and its byte span."""
+    index = 0
+    while index < len(data) and data[index] in b" \t\r\n":
+        index += 1
+    if index >= len(data) or data[index] != 123:
+        raise RuntimeError("manifest capsule scanner expected an object root")
+    index += 1
+    modules_span: tuple[int, int] | None = None
+    spans: dict[str, tuple[int, int]] = {}
+    while True:
+        while index < len(data) and data[index] in b" \t\r\n":
+            index += 1
+        if index >= len(data):
+            break
+        if data[index] == 125:
+            index += 1
+            break
+        key_start = index
+        key_end = _json_string_end(data, key_start)
+        try:
+            key = json.loads(data[key_start:key_end])
+        except json.JSONDecodeError as error:
+            raise RuntimeError("manifest capsule scanner found an invalid root key") from error
+        index = key_end
+        while index < len(data) and data[index] in b" \t\r\n":
+            index += 1
+        if index >= len(data) or data[index] != 58:
+            raise RuntimeError("manifest capsule scanner expected a colon")
+        index += 1
+        while index < len(data) and data[index] in b" \t\r\n":
+            index += 1
+        value_start = index
+        value_end = _json_value_end(data, value_start)
+        if key == "modules":
+            if value_start >= len(data) or data[value_start] != 91:
+                raise RuntimeError("manifest modules must be an array")
+            modules_span = (value_start, value_end)
+            cursor = value_start + 1
+            while cursor < value_end - 1:
+                while cursor < value_end - 1 and data[cursor] in b" \t\r\n,":
+                    cursor += 1
+                if cursor >= value_end - 1:
+                    break
+                object_start = cursor
+                object_end = _json_value_end(data, object_start)
+                if data[object_start] != 123:
+                    raise RuntimeError("manifest modules contains a non-object record")
+                inner = object_start + 1
+                module_name: str | None = None
+                while inner < object_end - 1:
+                    while inner < object_end - 1 and data[inner] in b" \t\r\n,":
+                        inner += 1
+                    if inner >= object_end - 1:
+                        break
+                    inner_end = _json_string_end(data, inner)
+                    field = json.loads(data[inner:inner_end])
+                    inner = inner_end
+                    while inner < object_end - 1 and data[inner] in b" \t\r\n":
+                        inner += 1
+                    if inner >= object_end - 1 or data[inner] != 58:
+                        raise RuntimeError("manifest module object has no field colon")
+                    inner += 1
+                    while inner < object_end - 1 and data[inner] in b" \t\r\n":
+                        inner += 1
+                    field_start = inner
+                    field_end = _json_value_end(data, field_start)
+                    if field == "module":
+                        try:
+                            module_name = json.loads(data[field_start:field_end])
+                        except json.JSONDecodeError as error:
+                            raise RuntimeError("manifest module name is invalid JSON") from error
+                    inner = field_end
+                if not isinstance(module_name, str) or not module_name:
+                    raise RuntimeError("manifest module object has no module name")
+                if module_name in spans:
+                    raise RuntimeError(f"duplicate manifest module: {module_name}")
+                spans[module_name] = (object_start, object_end)
+                cursor = object_end
+
+        index = value_end
+        while index < len(data) and data[index] in b" \t\r\n":
+            index += 1
+        if index < len(data) and data[index] == 44:
+            index += 1
+            continue
+        if index < len(data) and data[index] == 125:
+            index += 1
+            break
+    if modules_span is None:
+        raise RuntimeError("manifest has no modules array")
+    return modules_span, spans, (0, index)
+
+
+def stream_manifest_capsule(
+    manifest_path: Path,
+    capsule: Mapping[str, Any],
+    requested_modules: Sequence[str] | None = None,
+) -> tuple[str, int, dict[str, bytes]]:
+    """Hash a manifest incrementally and capture only capsule-selected objects."""
+    expected_hash = capsule.get("manifestHash")
+    expected_size = capsule.get("manifestSize")
+    modules_span = capsule.get("modulesSpan")
+    selected = capsule.get("selectedModules")
+    manual_modules = capsule.get("manualModules", [])
+    if not isinstance(expected_hash, str) or not isinstance(expected_size, int) or expected_size < 0:
+        raise RuntimeError("capsule has invalid manifest identity")
+    if not isinstance(modules_span, list) or len(modules_span) != 2:
+        raise RuntimeError("capsule has invalid modules span")
+    if not isinstance(selected, list):
+        raise RuntimeError("capsule selectedModules must be an array")
+    spans: dict[str, tuple[int, int]] = {}
+    requested = set(requested_modules) if requested_modules is not None else None
+    selected_to_capture = [raw for raw in selected if requested is None or raw.get("module") in requested]
+    all_records = list(selected_to_capture) + list(manual_modules) if isinstance(manual_modules, list) else list(selected_to_capture)
+    for raw in all_records:
+        if not isinstance(raw, Mapping) or not isinstance(raw.get("module"), str):
+            raise RuntimeError("capsule selected module record is invalid")
+        span = raw.get("span")
+        if not isinstance(span, list) or len(span) != 2 or not all(isinstance(v, int) for v in span):
+            raise RuntimeError(f"capsule span is invalid for {raw.get('module')}")
+        if not 0 <= span[0] < span[1] <= expected_size:
+            raise RuntimeError(f"capsule span is outside the manifest for {raw.get('module')}")
+        # A module record is authenticated only when it is an object inside
+        # the root modules array, never an arbitrary root/global byte range.
+        if not 0 <= int(modules_span[0]) <= span[0] < span[1] <= int(modules_span[1]):
+            raise RuntimeError(f"capsule module span is outside modules: {raw.get('module')}")
+        module = str(raw["module"])
+        if module in spans:
+            if spans[module] != (span[0], span[1]):
+                raise RuntimeError(f"duplicate capsule module projection: {module}")
+            continue
+        spans[module] = (span[0], span[1])
+    hasher = hashlib.sha256()
+    global_hasher = hashlib.sha256()
+    captures: dict[str, bytearray] = {module: bytearray() for module in spans}
+    modules_start, modules_end = int(modules_span[0]), int(modules_span[1])
+    if not 0 <= modules_start < modules_end <= expected_size:
+        raise RuntimeError("capsule modules span is outside the manifest")
+    size = 0
+    try:
+        with manifest_path.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                chunk_start = size
+                size += len(chunk)
+                hasher.update(chunk)
+                # The root bytes outside the modules array authenticate all
+                # global fields without decoding that array.
+                for left, right in ((0, modules_start), (modules_end, size)):
+                    begin = max(chunk_start, left)
+                    end = min(size, right)
+                    if begin < end:
+                        global_hasher.update(chunk[begin - chunk_start:end - chunk_start])
+                for module, (start, end) in spans.items():
+                    begin = max(chunk_start, start)
+                    finish = min(size, end)
+                    if begin < finish:
+                        captures[module].extend(chunk[begin - chunk_start:finish - chunk_start])
+    except OSError as error:
+        raise RuntimeError(f"cannot stream manifest {manifest_path}: {error}") from error
+    actual_hash = hasher.hexdigest()
+    if size != expected_size or actual_hash != expected_hash:
+        raise RuntimeError("manifest changed or does not match capsule")
+    if capsule.get("globalBytesSha256") != global_hasher.hexdigest():
+        raise RuntimeError("manifest global identity does not match capsule")
+    try:
+        with manifest_path.open("rb") as stream:
+            prefix = stream.read(modules_start)
+            stream.seek(modules_end)
+            suffix = stream.read()
+        global_identity = json.loads(prefix + b"[]" + suffix)
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError("manifest global identity is not valid JSON") from error
+    expected_global = capsule.get("globalIdentity")
+    if isinstance(global_identity, dict):
+        global_identity = dict(global_identity)
+        global_identity.pop("modules", None)
+    if not isinstance(global_identity, dict) or global_identity != expected_global:
+        raise RuntimeError("manifest global identity fields differ from capsule")
+    result = {module: bytes(value) for module, value in captures.items()}
+    for raw in all_records:
+        module = str(raw["module"])
+        actual = result[module]
+        if sha256(actual) != raw.get("recordSha256"):
+            raise RuntimeError(f"selected manifest record hash mismatch: {module}")
+    return actual_hash, size, result
+
+
+def make_manifest_capsule(
+    manifest_path: Path,
+    manifest_bytes: bytes,
+    manifest: Mapping[str, Any],
+    selected: Sequence["SelectedModule"],
+    *,
+    overlay_identity: Mapping[str, Any] | None = None,
+    manual_modules: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Build a compact authenticated projection after global validation."""
+    modules_span, spans, _root_span = _module_object_spans(manifest_bytes)
+    records = {str(raw.get("module")): raw for raw in manifest.get("modules", []) if isinstance(raw, Mapping)}
+    selected_records: list[dict[str, Any]] = []
+    for item in selected:
+        raw = records.get(item.module)
+        span = spans.get(item.module)
+        if raw is None or span is None:
+            raise RuntimeError(f"validated selected module is absent from manifest: {item.module}")
+        selected_records.append({
+            "module": item.module,
+            "span": [span[0], span[1]],
+            "recordSha256": sha256(manifest_bytes[span[0]:span[1]]),
+        })
+    manual_records: list[dict[str, Any]] = []
+    for module in sorted(set(manual_modules)):
+        raw = records.get(module)
+        span = spans.get(module)
+        if raw is None or span is None:
+            raise RuntimeError(f"manual overlay module is absent from manifest: {module}")
+        manual_records.append({
+            "module": module,
+            "span": [span[0], span[1]],
+            "recordSha256": sha256(manifest_bytes[span[0]:span[1]]),
+        })
+    global_bytes = manifest_bytes[:modules_span[0]] + manifest_bytes[modules_span[1]:]
+    return {
+        "kind": CAPSULE_KIND,
+        "schema": CAPSULE_SCHEMA,
+        "manifestPath": str(manifest_path.resolve()),
+        "manifestHash": sha256(manifest_bytes),
+        "manifestSize": len(manifest_bytes),
+        "modulesSpan": [modules_span[0], modules_span[1]],
+        "globalBytesSha256": sha256(global_bytes),
+        "globalIdentity": {
+            key: value for key, value in manifest.items() if key != "modules"
+        },
+        "selectedModules": selected_records,
+        "manualModules": manual_records,
+        "manualOverlay": dict(overlay_identity) if overlay_identity is not None else None,
+    }
+
+
+def read_manifest_capsule(path: Path, *, expected_hash: str | None = None) -> tuple[dict[str, Any], bytes]:
+    try:
+        payload = path.read_bytes()
+    except OSError as error:
+        raise RuntimeError(f"cannot read manifest capsule {path}: {error}") from error
+    if expected_hash is not None and sha256(payload) != expected_hash:
+        raise RuntimeError("manifest capsule changed or has the wrong hash")
+    try:
+        value = json.loads(payload)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("manifest capsule is not valid JSON") from error
+    if not isinstance(value, dict) or value.get("kind") != CAPSULE_KIND or value.get("schema") != CAPSULE_SCHEMA:
+        raise RuntimeError("unsupported manifest capsule")
+    return value, payload
+
+
+def validate_capsule_module_record(
+    module: str, raw_module: Mapping[str, Any], source_path: Path,
+) -> "SelectedModule":
+    """Validate the selected projection against the current source bytes."""
+    if not module.startswith("Mathlib/") or not module.endswith(".lean") or ".." in Path(module).parts:
+        raise RuntimeError(f"capsule module is not a pinned Mathlib path: {module}")
+    source_path = source_path.resolve()
+    try:
+        source = source_path.read_bytes()
+    except OSError as error:
+        raise RuntimeError(f"cannot read selected source for {module}: {error}") from error
+    if raw_module.get("module") != module:
+        raise RuntimeError(f"capsule selected module mismatch: {module}")
+    compiled = corpus.compiled_module_name(module)
+    if raw_module.get("compiledModule") != compiled:
+        raise RuntimeError(f"capsule compiled module mismatch: {module}")
+    if raw_module.get("moduleHash") != sha256(module.encode("utf-8")):
+        raise RuntimeError(f"capsule module hash mismatch: {module}")
+    if raw_module.get("sourceHash") != sha256(source):
+        raise RuntimeError(f"selected source hash mismatch: {module}")
+    occurrences = raw_module.get("occurrences")
+    if not isinstance(occurrences, list):
+        raise RuntimeError(f"capsule occurrences must be an array: {module}")
+    checked: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for occurrence in occurrences:
+        item = _validate_occurrence(module, source, occurrence)
+        if str(item["id"]) in seen:
+            raise RuntimeError(f"duplicate capsule occurrence: {item['id']}")
+        seen.add(str(item["id"]))
+        checked.append(item)
+    replacement_plan(source, checked, module)
+    if any(item["executionRole"] == "reusable_executable" for item in checked):
+        raise RuntimeError(f"selected module contains reusable_executable: {module}")
+    if any(item["action"] == "unresolved" for item in checked):
+        raise RuntimeError(f"selected module contains unresolved occurrences: {module}")
+    materialize = tuple(item for item in checked if item["action"] == "materialize")
+    retain = tuple(item for item in checked if item["action"] == "retain")
+    if not materialize:
+        raise RuntimeError(f"selected module has no materialize occurrences: {module}")
+    return SelectedModule(module, compiled, source_path, source, tuple(checked), materialize, retain)
 
 
 def _require_int(value: object, label: str, *, nonnegative: bool = False) -> int:
@@ -278,6 +634,7 @@ def validate_cleanup_targets(
     debug_root: Path,
     *,
     manifest_location: Path | None = None,
+    protected_inputs: Iterable[Path] = (),
 ) -> None:
     """Reject an input manifest that any pre-run cleanup could remove.
 
@@ -290,6 +647,7 @@ def validate_cleanup_targets(
     input_paths = [Path(os.path.abspath(manifest_path))]
     if manifest_location is not None:
         input_paths.append(Path(os.path.abspath(manifest_location)))
+    input_paths.extend(Path(os.path.abspath(path)) for path in protected_inputs)
     cleanup_targets = (
         Path(os.path.abspath(output_path)),
         Path(os.path.abspath(output_path.with_name(output_path.name + ".tmp"))),
@@ -370,6 +728,99 @@ def _validate_count_map(
             raise RuntimeError(f"manifest {label} has an unknown key: {key!r}")
         result[key] = _require_int(raw_count, f"manifest {label}.{key}", nonnegative=True)
     return result
+
+
+def validate_capsule_global_identity(identity: object) -> None:
+    """Validate every authenticated non-module manifest field in capsule mode.
+
+    The campaign worker performs the expensive full record/source validation
+    before it publishes a capsule.  Children still reproduce the complete
+    global schema, policy, and count-map checks instead of treating an
+    authenticated byte projection as semantically valid by itself.
+    """
+    if not isinstance(identity, dict):
+        raise RuntimeError("capsule global identity must be an object")
+    expected_fields = set(corpus.MANIFEST_FIELDS) - {"modules"}
+    if set(identity) != expected_fields:
+        missing = sorted(expected_fields - set(identity))
+        extra = sorted(set(identity) - expected_fields)
+        raise RuntimeError(
+            f"capsule global identity fields differ from manifest schema: "
+            f"missing={missing}, extra={extra}"
+        )
+    if identity.get("reportSchema") != MANIFEST_SCHEMA:
+        raise RuntimeError("capsule manifest schema is unsupported")
+    if identity.get("kind") != MANIFEST_KIND:
+        raise RuntimeError("capsule manifest kind is invalid")
+    if identity.get("allowDirty") is not False or identity.get("allowUnresolved") is not False:
+        raise RuntimeError("capsule requires a closed manifest policy")
+    for field in ("repositoryCommit", "mathlibCommit"):
+        _require_string(identity.get(field), f"capsule {field}")
+    if not isinstance(identity.get("modulePrefix"), str):
+        raise RuntimeError("capsule modulePrefix must be a string")
+    lean = identity.get("lean")
+    if not isinstance(lean, dict) or set(lean) != {"version", "commit"}:
+        raise RuntimeError("capsule Lean identity is invalid")
+    _require_string(lean.get("version"), "capsule lean.version")
+    _require_string(lean.get("commit"), "capsule lean.commit")
+    numeric_fields = (
+        "moduleFileCount", "inventoriedModuleCount", "occurrenceCount",
+        "nestedOccurrenceCount", "duplicateSyntaxRecords",
+        "duplicateScopeSyntaxRecords",
+    )
+    numbers = {
+        field: _require_int(identity.get(field), f"capsule {field}", nonnegative=True)
+        for field in numeric_fields
+    }
+    if numbers["inventoriedModuleCount"] > numbers["moduleFileCount"]:
+        raise RuntimeError("capsule inventoriedModuleCount exceeds moduleFileCount")
+    if numbers["nestedOccurrenceCount"] > numbers["occurrenceCount"]:
+        raise RuntimeError("capsule nestedOccurrenceCount exceeds occurrenceCount")
+    for field in ("fullFrontendFallbacks", "scopeFrontendFallbacks"):
+        value = identity.get(field)
+        if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+            raise RuntimeError(f"capsule {field} must be an array of strings")
+    expected_probe = {
+        "module": scope.SCOPE_PROBE_IMPORT,
+        "scheduling": scope.SCOPE_PROBE_SCHEDULING,
+        "temporaryCopyOnly": True,
+        "reportCommand": "simp_engine_boundary_scope_report",
+    }
+    if identity.get("scopeProbe") != expected_probe:
+        raise RuntimeError("capsule scopeProbe metadata is invalid")
+    implementations = identity.get("implementationHashes")
+    if not isinstance(implementations, dict) or not implementations or not all(
+        isinstance(path, str) and path and isinstance(digest, str) and digest
+        for path, digest in implementations.items()
+    ):
+        raise RuntimeError("capsule implementationHashes is invalid")
+    manual = identity.get("manualOverrides")
+    if not isinstance(manual, dict) or set(manual) != {"sha256", "schema", "environment"}:
+        raise RuntimeError("capsule manualOverrides identity is invalid")
+    digest = manual.get("sha256")
+    if not isinstance(digest, str) or len(digest) != 64 or any(
+        character not in "0123456789abcdef" for character in digest
+    ):
+        raise RuntimeError("capsule manualOverrides digest is invalid")
+    if manual.get("schema") != manual_overrides.SCHEMA:
+        raise RuntimeError("capsule manualOverrides schema is invalid")
+    if manual.get("environment") != {
+        "mathlibCommit": identity["mathlibCommit"], "lean": lean,
+    }:
+        raise RuntimeError("capsule manualOverrides environment is invalid")
+    count_maps = (
+        _validate_count_map(identity.get("countsByExecutionRole"),
+                            "countsByExecutionRole", corpus.EXECUTION_ROLES),
+        _validate_count_map(identity.get("countsByDeclarationKind"),
+                            "countsByDeclarationKind", corpus.DECLARATION_KINDS),
+        _validate_count_map(identity.get("countsByAction"),
+                            "countsByAction", corpus.ACTIONS),
+    )
+    for counts in count_maps:
+        if sum(counts.values()) != numbers["occurrenceCount"]:
+            raise RuntimeError("capsule count map does not sum to occurrenceCount")
+    if count_maps[2].get("unresolved", 0) != 0:
+        raise RuntimeError("capsule closed manifest contains unresolved occurrences")
 
 
 @dataclass(frozen=True)
@@ -3194,8 +3645,60 @@ def verify_shard_evidence(
     return report
 
 
+def _capsule_manifest(
+    capsule: Mapping[str, Any], selected_record: Mapping[str, Any],
+) -> dict[str, Any]:
+    identity = capsule.get("globalIdentity")
+    if not isinstance(identity, Mapping):
+        raise RuntimeError("capsule global identity is invalid")
+    validate_capsule_global_identity(identity)
+    manifest = dict(identity)
+    manifest["modules"] = [dict(selected_record)]
+    # The overlay loader receives a sparse module projection separately.  Its
+    # global counts remain those of the authenticated full manifest for report
+    # verification, while selected source validation uses the one record.
+    manifest["moduleFileCount"] = identity.get("moduleFileCount")
+    manifest["occurrenceCount"] = identity.get("occurrenceCount")
+    return manifest
+
+
+def validate_capsule_expectations(
+    records: Mapping[str, Mapping[str, Any]],
+    modules: Sequence[str],
+    expect_total: int | None,
+    expect_materialize: int | None,
+) -> None:
+    if expect_total is None and expect_materialize is None:
+        return
+    if len(modules) != 1:
+        raise RuntimeError(
+            "--expect-total/--expect-materialize are only valid for one selected module"
+        )
+    module = modules[0]
+    record = records.get(module)
+    if record is None:
+        raise RuntimeError(f"capsule selected module is absent: {module}")
+    occurrences = record.get("occurrences")
+    if not isinstance(occurrences, list):
+        raise RuntimeError("capsule selected record has invalid occurrences")
+    materialize_count = sum(
+        isinstance(item, Mapping) and item.get("action") == "materialize"
+        for item in occurrences
+    )
+    if expect_total is not None and expect_total != len(occurrences):
+        raise RuntimeError(
+            f"--expect-total mismatch for {module}: expected {expect_total}, found {len(occurrences)}"
+        )
+    if expect_materialize is not None and expect_materialize != materialize_count:
+        raise RuntimeError(
+            f"--expect-materialize mismatch for {module}: expected {expect_materialize}, found {materialize_count}"
+        )
+
+
 def run_shard(args: argparse.Namespace) -> dict[str, Any]:
     manual_overrides_arg = getattr(args, "manual_overrides", None)
+    capsule_arg = getattr(args, "capsule", None)
+    capsule_hash_arg = getattr(args, "capsule_sha256", None)
     manifest_location = Path(args.manifest)
     if not manifest_location.is_absolute():
         manifest_location = ROOT / manifest_location
@@ -3203,6 +3706,20 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
     # before following a directory symlink can select a different manifest.
     manifest_location = manifest_location.absolute()
     manifest_path = manifest_location.resolve()
+    capsule_path: Path | None = None
+    capsule: dict[str, Any] | None = None
+    capsule_bytes: bytes | None = None
+    if capsule_arg is not None:
+        if not isinstance(capsule_hash_arg, str) or len(capsule_hash_arg) != 64:
+            raise RuntimeError("--capsule requires a 64-character --capsule-sha256")
+        capsule_location = Path(capsule_arg)
+        if not capsule_location.is_absolute():
+            capsule_location = ROOT / capsule_location
+        capsule_location = capsule_location.absolute()
+        capsule_path = capsule_location.resolve()
+        capsule, capsule_bytes = read_manifest_capsule(capsule_path, expected_hash=capsule_hash_arg)
+        if capsule.get("manifestPath") != str(manifest_path):
+            raise RuntimeError("capsule is bound to another manifest path")
     # Invalidate the exact requested destination after cleanup safety checks,
     # before manifest validation or compiler work.  A failed rerun must not
     # leave a previous success that a consumer could mistake for the current run.
@@ -3220,23 +3737,83 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError(
                 "manual override database must be outside materializer output/cleanup paths"
             )
+    protected_inputs: list[Path] = []
+    if capsule_path is not None:
+        protected_inputs.extend((capsule_path, capsule_location))
+    if manual_overrides_arg is not None:
+        protected_inputs.extend((Path(manual_overrides_arg).resolve(), manual_location))
     validate_cleanup_targets(
         manifest_path,
         output_path,
         debug_root,
         manifest_location=manifest_location,
+        protected_inputs=protected_inputs,
     )
     invalidate_output(output_path)
     clear_debug_root(debug_root)
     if not manifest_path.is_file():
         raise RuntimeError(f"manifest does not exist: {manifest_path}")
-    manifest_bytes = manifest_path.read_bytes()
-    try:
-        manifest = json.loads(manifest_bytes)
-    except json.JSONDecodeError as error:
-        raise RuntimeError(f"manifest is not valid JSON: {manifest_path}") from error
-    if not isinstance(manifest, dict):
-        raise RuntimeError("manifest root must be an object")
+    if capsule is not None:
+        _manifest_hash, _manifest_size, captured = stream_manifest_capsule(
+            manifest_path, capsule, list(args.module)
+        )
+        if not args.module or len(set(args.module)) != len(args.module):
+            raise RuntimeError("selected modules must be nonempty and unique")
+        selected_records = capsule.get("selectedModules")
+        if not isinstance(selected_records, list):
+            raise RuntimeError("capsule selected module projection does not match request")
+        by_module: dict[str, Mapping[str, Any]] = {}
+        for raw in selected_records:
+            if not isinstance(raw, Mapping) or not isinstance(raw.get("module"), str):
+                raise RuntimeError("capsule selected module projection is invalid")
+            module = str(raw["module"])
+            if module not in args.module:
+                continue
+            try:
+                record = json.loads(captured[module])
+            except (KeyError, json.JSONDecodeError) as error:
+                raise RuntimeError(f"capsule selected record is not valid JSON: {module}") from error
+            if not isinstance(record, Mapping):
+                raise RuntimeError(f"capsule record is invalid: {module}")
+            by_module[module] = record
+        if set(by_module) != set(args.module):
+            raise RuntimeError("capsule selected modules differ from request")
+        validate_capsule_expectations(
+            by_module, list(args.module), args.expect_total, args.expect_materialize
+        )
+        selected_records_by_name = by_module
+        selected_modules = []
+        for module in args.module:
+            source_path = (MATHLIB / Path(*module.split("/"))).resolve()
+            try:
+                source_path.relative_to(MATHLIB.resolve())
+            except ValueError as error:
+                raise RuntimeError(f"capsule source escapes pinned Mathlib: {module}") from error
+            selected_modules.append(
+                validate_capsule_module_record(
+                    module, selected_records_by_name[module], source_path,
+                )
+            )
+        # Keep the bytes for the evidence protocol after the streaming
+        # authentication pass.  No global JSON decode occurs in this path.
+        manifest = _capsule_manifest(capsule, selected_records_by_name[args.module[0]])
+        manifest["modules"] = [selected_records_by_name[module] for module in args.module]
+        manifest_bytes = manifest_path.read_bytes()
+        if (
+            len(manifest_bytes) != capsule["manifestSize"]
+            or sha256(manifest_bytes) != capsule["manifestHash"]
+        ):
+            raise RuntimeError("manifest reread does not match authenticated capsule")
+    else:
+        manifest_bytes = manifest_path.read_bytes()
+        try:
+            manifest = json.loads(manifest_bytes)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"manifest is not valid JSON: {manifest_path}") from error
+        if not isinstance(manifest, dict):
+            raise RuntimeError("manifest root must be an object")
+        if not args.module or len(set(args.module)) != len(args.module):
+            raise RuntimeError("selected modules must be nonempty and unique")
 
     verify_implementation_hashes(manifest)
     if manifest.get("allowDirty") is not False:
@@ -3246,18 +3823,51 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         False,
     )
     provenance = verify_environment(manifest, args.timeout)
-    canonical_selected = validate_manifest_selection(
-        manifest,
-        list(args.module),
-        expect_total=args.expect_total,
-        expect_materialize=args.expect_materialize,
-    )
-    verify_selected_classifications(canonical_selected, args.timeout)
+    if capsule is None:
+        canonical_selected = validate_manifest_selection(
+            manifest,
+            list(args.module),
+            expect_total=args.expect_total,
+            expect_materialize=args.expect_materialize,
+        )
+        verify_selected_classifications(canonical_selected, args.timeout)
+    else:
+        canonical_selected = selected_modules
+        # The capsule authenticates the global manifest projection; retain the
+        # selected module's independent inventory/scope check from the normal
+        # path without paying to revalidate unselected modules.
+        verify_selected_classifications(canonical_selected, args.timeout)
     overlay = None
     if manual_overrides_arg is not None:
-        overlay = manual_overlay.load_overlay(
-            manifest_path, Path(manual_overrides_arg), source_root=MATHLIB
-        )
+        if capsule is None:
+            overlay = manual_overlay.load_overlay(
+                manifest_path, Path(manual_overrides_arg), source_root=MATHLIB
+            )
+        else:
+            manual_records = capsule.get("manualModules", [])
+            if not isinstance(manual_records, list):
+                raise RuntimeError("capsule manual module projection is invalid")
+            record_map: dict[str, Mapping[str, Any]] = {}
+            for item in manual_records:
+                if not isinstance(item, Mapping) or not isinstance(item.get("module"), str):
+                    raise RuntimeError("capsule manual module projection is invalid")
+                module = str(item["module"])
+                try:
+                    record = json.loads(captured[module])
+                except (KeyError, json.JSONDecodeError) as error:
+                    raise RuntimeError(f"capsule manual record is invalid: {module}") from error
+                if not isinstance(record, Mapping):
+                    raise RuntimeError(f"capsule manual record is invalid: {module}")
+                record_map[module] = record
+            sparse = dict(manifest)
+            sparse["modules"] = list(record_map.values())
+            overlay = manual_overlay._load_overlay_projected(
+                manifest_path, Path(manual_overrides_arg), source_root=MATHLIB,
+                manifest_value=sparse, manifest_bytes=manifest_bytes,
+                module_records=record_map,
+            )
+            if overlay.identity() != capsule.get("manualOverlay"):
+                raise RuntimeError("manual overlay identity does not match capsule")
     selections = (
         [
             prepare_overlay_selection(item, overlay, debug_root, args.timeout)
@@ -3284,7 +3894,17 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
 
     # Recheck the immutable inputs after all compiler invocations.  A report is
     # only published if the same pinned environment and source set survived.
-    if manifest_path.read_bytes() != manifest_bytes:
+    if capsule is not None:
+        if capsule_path is None or capsule_bytes is None:
+            raise RuntimeError("capsule state is incomplete")
+        try:
+            current_capsule_bytes = capsule_path.read_bytes()
+        except OSError as error:
+            raise RuntimeError(f"cannot reread manifest capsule: {error}") from error
+        if current_capsule_bytes != capsule_bytes:
+            raise RuntimeError("manifest_capsule_changed_during_run")
+        stream_manifest_capsule(manifest_path, capsule, list(args.module))
+    elif manifest_path.read_bytes() != manifest_bytes:
         raise RuntimeError("manifest_changed_during_run")
     verify_implementation_hashes(manifest)
     final_provenance = verify_environment(manifest, args.timeout)
@@ -3295,9 +3915,33 @@ def run_shard(args: argparse.Namespace) -> dict[str, Any]:
         if current_source != item.source:
             raise RuntimeError(f"selected Mathlib source changed during run: {item.module}")
     if overlay is not None:
-        refreshed_overlay = manual_overlay.load_overlay(
-            manifest_path, Path(manual_overrides_arg), source_root=MATHLIB
-        )
+        if capsule is None:
+            refreshed_overlay = manual_overlay.load_overlay(
+                manifest_path, Path(manual_overrides_arg), source_root=MATHLIB
+            )
+        else:
+            manual_records = capsule.get("manualModules", [])
+            if not isinstance(manual_records, list):
+                raise RuntimeError("capsule manual module projection is invalid")
+            record_map: dict[str, Mapping[str, Any]] = {}
+            for item in manual_records:
+                if not isinstance(item, Mapping) or not isinstance(item.get("module"), str):
+                    raise RuntimeError("capsule manual module projection is invalid")
+                module = str(item["module"])
+                try:
+                    record = json.loads(captured[module])
+                except (KeyError, json.JSONDecodeError) as error:
+                    raise RuntimeError(f"capsule manual record is invalid: {module}") from error
+                if not isinstance(record, Mapping):
+                    raise RuntimeError(f"capsule manual record is invalid: {module}")
+                record_map[module] = record
+            sparse = dict(manifest)
+            sparse["modules"] = list(record_map.values())
+            refreshed_overlay = manual_overlay._load_overlay_projected(
+                manifest_path, Path(manual_overrides_arg), source_root=MATHLIB,
+                manifest_value=sparse, manifest_bytes=manifest_bytes,
+                module_records=record_map,
+            )
         if refreshed_overlay.identity() != overlay.identity():
             raise RuntimeError("manual_override_database_changed_during_run")
 
@@ -3450,6 +4094,14 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--manual-overrides",
         help="authenticated manual override database composed before ordinary recording",
+    )
+    result.add_argument(
+        "--capsule",
+        help="authenticated compact manifest projection produced by campaign-worker",
+    )
+    result.add_argument(
+        "--capsule-sha256",
+        help="expected SHA-256 of --capsule",
     )
     result.add_argument("--timeout", type=int, default=600)
     return result
