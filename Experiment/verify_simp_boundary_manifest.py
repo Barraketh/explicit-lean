@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Verify a freshly generated whole-Mathlib simp boundary manifest.
 
-The default pass is deliberately independent of manifest generation: it checks
-the JSON contract, repository/package/toolchain provenance (when enabled),
-every source and occurrence byte range, and all aggregate partitions.  It does
-not rerun Lean's parser.  ``--recompute`` opts into that expensive second
-layer and compares the producer's syntax records with a fresh inventory.
+``verify`` authenticates the exact raw manifest bytes supplied by the caller,
+checks the JSON/source/environment contract, and performs fresh parser,
+scope, and declaration consistency checks.  Its receipt reports source
+consistency only; campaign acceptance still needs independent semantic
+oracles.  ``inspect`` is an explicitly partial structural or syntax-only
+diagnostic mode and never emits an acceptance result.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any, Iterable
@@ -46,7 +48,7 @@ TOP_LEVEL_FIELDS = frozenset(
     }
 )
 OPTIONAL_TOP_LEVEL_FIELDS = frozenset(
-    {"selfHash", "manifestHash", "packageIdentity", "packageIdentities"}
+    {"selfHash", "manifestHash", "packageIdentity", "packageIdentities", "leanBinarySha256"}
 )
 MODULE_FIELDS = frozenset(
     {
@@ -79,6 +81,19 @@ CALLER_FIELDS = frozenset({"caller", "executionCount", "isProofDeclaration"})
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def verify_raw_manifest_digest(manifest_path: str | Path, expected_sha256: str) -> str:
+    """Authenticate the exact manifest bytes before any JSON parsing."""
+    expected = _hash(expected_sha256, "expected-sha256")
+    path = Path(manifest_path).resolve()
+    try:
+        actual = sha256(path.read_bytes())
+    except OSError as exc:
+        raise _error("file", f"cannot read manifest for expected-sha256: {exc}") from exc
+    if actual != expected:
+        raise _error("expected-sha256", f"raw manifest bytes differ: {actual} != {expected}")
+    return actual
 
 
 def canonical_json(value: object) -> bytes:
@@ -293,7 +308,7 @@ def _verify_self_hash(value: dict[str, Any]) -> None:
     if "manifestHash" in value:
         raise _error(
             "manifestHash",
-            "embedded raw-byte self-hashes are ambiguous; use selfHash",
+            "embedded raw-byte hashes are rejected; authenticate with external --expected-sha256",
         )
     if "selfHash" not in value:
         return
@@ -365,7 +380,7 @@ def _current_implementation_paths(repository_root: Path) -> set[str]:
 def _verify_environment(
     manifest: dict[str, Any], repository_root: Path, mathlib_root: Path,
     expected_repository_commit: str | None,
-) -> None:
+) -> dict[str, str]:
     repository = _string(manifest.get("repositoryCommit"), "repositoryCommit")
     if not HEX40.fullmatch(repository):
         raise _error("repositoryCommit", "must be a 40-character lowercase commit")
@@ -401,13 +416,37 @@ def _verify_environment(
     version, commit = _string(lean.get("version"), "lean.version"), _string(lean.get("commit"), "lean.commit")
     if not HEX40.fullmatch(commit):
         raise _error("lean.commit", "must be a 40-character lowercase commit")
-    actual_lean = run("lean", "--version")
-    if f"version {version}" not in actual_lean or f"commit {commit}" not in actual_lean:
-        raise _error("lean", f"toolchain differs: {actual_lean}")
+    lake_command = shutil.which("lake")
+    if lake_command is None:
+        raise _error("lean", "pinned lake executable is not available")
+    lake_path = Path(lake_command).resolve()
+    if not lake_path.is_file() or not lake_path.stat().st_mode & 0o111:
+        raise _error("lean", f"lake executable is not runnable: {lake_path}")
+    prefix = Path(run(str(lake_path), "env", "lean", "--print-prefix")).resolve()
+    lean_path = prefix / "bin" / ("lean.exe" if sys.platform == "win32" else "lean")
+    if not lean_path.is_file() or not lean_path.stat().st_mode & 0o111:
+        raise _error("lean", f"lake env resolved no runnable Lean executable: {lean_path}")
+    actual_lean = run(str(lake_path), "env", "lean", "--version")
+    direct_lean = run(str(lean_path), "--version")
+    expected_version = f"version {version}"
+    expected_commit = f"commit {commit}"
+    if (
+        expected_version not in actual_lean
+        or expected_commit not in actual_lean
+        or direct_lean != actual_lean
+    ):
+        raise _error("lean", f"pinned toolchain differs: lake={actual_lean!r}, executable={direct_lean!r}")
+    toolchain_path = repository_root / "lean-toolchain"
+    if not toolchain_path.is_file() or version not in toolchain_path.read_text(encoding="utf-8").strip():
+        raise _error("lean", "lean-toolchain does not identify the manifest version")
+    lean_digest = sha256(lean_path.read_bytes())
+    if "leanBinarySha256" in manifest and _hash(manifest["leanBinarySha256"], "leanBinarySha256") != lean_digest:
+        raise _error("leanBinarySha256", f"resolved executable digest differs: {lean_digest}")
     if "packageIdentity" in manifest and manifest["packageIdentity"] != lake_identity:
         raise _error("packageIdentity", "does not match pinned lake-manifest.json")
     if "packageIdentities" in manifest and manifest["packageIdentities"] != lake_identity:
         raise _error("packageIdentities", "does not match pinned lake-manifest.json")
+    return {"lakePath": str(lake_path), "leanPath": str(lean_path), "leanBinarySha256": lean_digest}
 
 
 def verify_manifest(
@@ -418,7 +457,6 @@ def verify_manifest(
     expected_repository_commit: str | None = None,
     require_complete: bool = True,
     check_environment: bool = True,
-    require_authenticated_digest: bool = False,
 ) -> dict[str, Any]:
     """Verify one manifest and return a compact summary.
 
@@ -448,16 +486,14 @@ def verify_manifest(
     if manifest.get("allowUnresolved") is not False:
         raise _error("policy", "allowUnresolved must be false")
     _verify_self_hash(manifest)
-    if require_authenticated_digest and "selfHash" not in manifest:
-        raise _error("selfHash", "strict acceptance requires an authenticated digest")
-
     repository_root = Path(repository_root or _repository_root_for_manifest(path)).resolve()
     mathlib_root = Path(mathlib_root or repository_root / ".lake" / "packages" / "mathlib").resolve()
     for field in ("packageIdentity", "packageIdentities"):
         if field in manifest:
             _validate_package_identity_shape(manifest[field], field)
+    environment_identity = None
     if check_environment:
-        _verify_environment(manifest, repository_root, mathlib_root, expected_repository_commit)
+        environment_identity = _verify_environment(manifest, repository_root, mathlib_root, expected_repository_commit)
     elif expected_repository_commit is not None and manifest.get("repositoryCommit") != expected_repository_commit:
         raise _error("repositoryCommit", f"expected {expected_repository_commit}, found {manifest.get('repositoryCommit')}")
 
@@ -681,7 +717,10 @@ def verify_manifest(
         raise _error("countsByAction", "does not match occurrence records")
     if action_counts.get("unresolved", 0):
         raise _error("policy", "unresolved occurrences are not accepted")
-    return {"kind": KIND, "reportSchema": SCHEMA, "modules": len(modules), "occurrences": total_occurrences, "actions": dict(sorted(action_counts.items()))}
+    summary = {"kind": KIND, "reportSchema": SCHEMA, "modules": len(modules), "occurrences": total_occurrences, "actions": dict(sorted(action_counts.items()))}
+    if environment_identity is not None:
+        summary["leanIdentity"] = environment_identity
+    return summary
 
 
 def recompute_inventory(manifest_path: str | Path, *, mathlib_root: str | Path, repository_root: str | Path, timeout: int = 3600) -> None:
@@ -808,6 +847,19 @@ def _manifest_scope_key(path: dict[str, Any], occurrence: dict[str, Any]) -> tup
     )
 
 
+def _scope_recompute_root(repository_root: Path) -> Path:
+    """Return the only checkout whose imported scope helpers can safely use."""
+    root = repository_root.resolve()
+    verifier_root = Path(__file__).resolve().parents[1]
+    if root != verifier_root:
+        raise _error(
+            "recompute",
+            "fresh scope/evidence helpers are bound to the verifier checkout; "
+            f"requested repository_root is {root}",
+        )
+    return root
+
+
 def _declaration_key(value: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(value[field] for field in (
         "module", "name", "startByte", "endByte", "selectionStartByte",
@@ -827,6 +879,7 @@ def _fresh_scope_and_declarations(
     output to source ranges, parser ancestry, declarations, and manifest IDs;
     the policy's semantic trust boundary remains the Scope.lean implementation.
     """
+    _scope_recompute_root(repository_root)
     specs = [
         scope.ModuleSpec(
             _compiled_module(module["module"]),
@@ -924,10 +977,16 @@ def _fresh_scope_and_declarations(
                 raise _error("recompute", f"scope classification differs for {module}:{manifest_occurrence['id']}")
 
 
-def recompute_acceptance(
+def recompute_source_consistency(
     manifest_path: str | Path, *, repository_root: Path, mathlib_root: Path, timeout: int
 ) -> None:
-    """Run all fresh parser/frontend checks required for acceptance."""
+    """Run fresh parser/frontend checks for same-producer source consistency.
+
+    This result is deliberately not campaign acceptance.  Final acceptance
+    still requires independent declaration/replay, cold-tree, and policy
+    oracles; the imported Scope.lean implementation is part of this check's
+    trust boundary.
+    """
     path = Path(manifest_path).resolve()
     manifest = json.loads(path.read_bytes())
     recompute_inventory(
@@ -941,14 +1000,16 @@ def recompute_acceptance(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("accept", "inspect"):
+    for name in ("verify", "inspect"):
         command = commands.add_parser(name)
         command.add_argument("manifest")
         command.add_argument("--repository-root", type=Path)
         command.add_argument("--mathlib-root", type=Path)
         command.add_argument("--expected-repository-commit")
         command.add_argument("--timeout", type=int, default=3600)
-        if name == "inspect":
+        if name == "verify":
+            command.add_argument("--expected-sha256", required=True, help="SHA-256 of the exact manifest bytes")
+        else:
             command.add_argument("--allow-partial", action="store_true", help="inspect a prefix/fixture")
             command.add_argument("--skip-environment", action="store_true", help="offline structural/source checks")
             command.add_argument("--recompute", action="store_true", help="run the expensive parser inventory only")
@@ -957,7 +1018,10 @@ def main() -> None:
     repository = (args.repository_root or _repository_root_for_manifest(manifest_path)).resolve()
     mathlib = (args.mathlib_root or repository / ".lake" / "packages" / "mathlib").resolve()
     try:
-        if args.command == "accept":
+        if args.command == "verify":
+            # This must precede JSON parsing so the receipt authenticates the
+            # exact bytes supplied by the caller, including whitespace/order.
+            manifest_sha256 = verify_raw_manifest_digest(manifest_path, args.expected_sha256)
             summary = verify_manifest(
                 manifest_path,
                 repository_root=repository,
@@ -965,15 +1029,22 @@ def main() -> None:
                 expected_repository_commit=args.expected_repository_commit,
                 require_complete=True,
                 check_environment=True,
-                require_authenticated_digest=True,
             )
-            recompute_acceptance(
+            recompute_source_consistency(
                 manifest_path,
                 repository_root=repository,
                 mathlib_root=mathlib,
                 timeout=args.timeout,
             )
-            print(json.dumps({**summary, "accepted": True, "recomputed": "syntax_scope_declarations"}, sort_keys=True))
+            print(json.dumps({
+                **summary,
+                "kind": "simp_engine_boundary_manifest_source_verification",
+                "expectedSha256": manifest_sha256,
+                "manifestSha256": manifest_sha256,
+                "sourceConsistencyVerified": True,
+                "independentSemanticOracleVerified": False,
+                "recomputed": "syntax_scope_declarations",
+            }, sort_keys=True))
         else:
             summary = verify_manifest(
                 manifest_path,
@@ -990,7 +1061,11 @@ def main() -> None:
                     repository_root=repository,
                     timeout=args.timeout,
                 )
-            print(json.dumps({**summary, "accepted": False, "recomputed": "syntax" if args.recompute else False}, sort_keys=True))
+            print(json.dumps({
+                **summary,
+                "kind": "simp_engine_boundary_manifest_inspection",
+                "inspection": "syntax" if args.recompute else "structural",
+            }, sort_keys=True))
     except Exception as exc:
         print(f"simp boundary manifest verification failed: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

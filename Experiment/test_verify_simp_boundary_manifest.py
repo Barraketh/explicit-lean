@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -283,22 +285,117 @@ class ManifestVerifierTests(unittest.TestCase):
                     "fixture subprocess",
                 )
 
-    def test_inspection_flags_are_not_available_on_acceptance_command(self) -> None:
-        with patch("sys.argv", ["verify_simp_boundary_manifest.py", "accept", str(self.path), "--skip-environment"]):
+    def test_inspection_flags_are_not_available_on_verify_command(self) -> None:
+        digest = verifier.sha256(self.path.read_bytes())
+        with patch("sys.argv", ["verify_simp_boundary_manifest.py", "verify", str(self.path), "--expected-sha256", digest, "--skip-environment"]):
             with self.assertRaises(SystemExit) as result:
                 verifier.main()
         self.assertEqual(result.exception.code, 2)
 
-    def test_acceptance_api_requires_authenticated_digest(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "authenticated digest"):
-            verifier.verify_manifest(
-                self.path,
-                repository_root=self.repository,
-                mathlib_root=self.mathlib,
-                require_complete=False,
-                check_environment=False,
-                require_authenticated_digest=True,
+    def test_verify_cli_authenticates_generator_compatible_raw_fixture(self) -> None:
+        self.assertEqual(set(self.manifest), verifier.TOP_LEVEL_FIELDS)
+        digest = verifier.sha256(self.path.read_bytes())
+        summary = {"kind": verifier.KIND, "reportSchema": verifier.SCHEMA, "modules": 1, "occurrences": 1, "actions": {"materialize": 1}}
+        with patch("sys.argv", [
+            "verify_simp_boundary_manifest.py", "verify", str(self.path),
+            "--expected-sha256", digest, "--repository-root", str(self.repository),
+            "--mathlib-root", str(self.mathlib),
+        ]), patch.object(verifier, "verify_manifest", return_value=summary) as structural, patch.object(
+            verifier, "recompute_source_consistency"
+        ) as recompute, patch("sys.stdout", new_callable=io.StringIO) as output:
+            verifier.main()
+        structural.assert_called_once()
+        recompute.assert_called_once()
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(receipt["kind"], "simp_engine_boundary_manifest_source_verification")
+        self.assertEqual(receipt["expectedSha256"], digest)
+        self.assertEqual(receipt["manifestSha256"], digest)
+        self.assertTrue(receipt["sourceConsistencyVerified"])
+        self.assertFalse(receipt["independentSemanticOracleVerified"])
+        self.assertNotIn("accepted", receipt)
+
+    def test_expected_digest_is_checked_before_json_parsing(self) -> None:
+        self.path.write_bytes(b"not json\n")
+        with self.assertRaisesRegex(RuntimeError, "expected-sha256"):
+            verifier.verify_raw_manifest_digest(self.path, "0" * 64)
+        self.write()
+        self.path.write_bytes(b"not json\n")
+        with patch("sys.argv", [
+            "verify_simp_boundary_manifest.py", "verify", str(self.path),
+            "--expected-sha256", "0" * 64, "--repository-root", str(self.repository),
+            "--mathlib-root", str(self.mathlib),
+        ]), patch.object(verifier, "verify_manifest") as structural:
+            with self.assertRaises(SystemExit):
+                verifier.main()
+        structural.assert_not_called()
+
+    def test_scope_recomputation_binds_to_verifier_checkout(self) -> None:
+        verifier_root = Path(verifier.__file__).resolve().parents[1]
+        with self.assertRaisesRegex(RuntimeError, "bound to the verifier checkout"):
+            verifier._fresh_scope_and_declarations(
+                self.path, self.manifest, self.repository, self.mathlib, 1
             )
+        self.assertEqual(verifier._scope_recompute_root(verifier_root), verifier_root)
+
+    def test_inspection_receipt_has_distinct_nonacceptance_kind(self) -> None:
+        with patch("sys.argv", [
+            "verify_simp_boundary_manifest.py", "inspect", str(self.path),
+            "--repository-root", str(self.repository), "--mathlib-root", str(self.mathlib),
+            "--skip-environment",
+        ]), patch("sys.stdout", new_callable=io.StringIO) as output:
+            verifier.main()
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(receipt["kind"], "simp_engine_boundary_manifest_inspection")
+        self.assertNotIn("accepted", receipt)
+        self.assertNotIn("sourceConsistencyVerified", receipt)
+
+    def test_pinned_lake_resolver_rejects_path_shadow_shim(self) -> None:
+        (self.repository / "lake-manifest.json").write_text(
+            json.dumps({"packages": [{"name": "mathlib", "type": "git", "rev": "b" * 40}]}),
+            encoding="utf-8",
+        )
+        shadow = self.root / "lake-shadow"
+        shadow.write_text("#!/bin/sh\necho shadowed\n", encoding="utf-8")
+        shadow.chmod(0o755)
+        with patch.object(verifier.shutil, "which", return_value=str(shadow)):
+            with patch("subprocess.run") as run:
+                def shadow_run(args, **kwargs):
+                    if args[0] == "git" and args[1:3] == ("rev-parse", "HEAD"):
+                        value = "b" * 40 if kwargs.get("cwd") == self.mathlib else "a" * 40
+                        return SimpleNamespace(returncode=0, stdout=value + "\n")
+                    return SimpleNamespace(returncode=0, stdout="")
+                run.side_effect = shadow_run
+                with self.assertRaisesRegex(RuntimeError, "no runnable Lean executable"):
+                    verifier._verify_environment(self.manifest, self.repository, self.mathlib, None)
+
+    def test_pinned_lake_resolver_positive_identity_control(self) -> None:
+        lake_manifest = {"packages": [{"name": "mathlib", "type": "git", "rev": "b" * 40}]}
+        (self.repository / "lake-manifest.json").write_text(json.dumps(lake_manifest), encoding="utf-8")
+        (self.repository / "lean-toolchain").write_text("leanprover/lean4:v4.32.2\n", encoding="utf-8")
+        prefix = self.root / "pinned-toolchain"
+        lean = prefix / "bin" / "lean"
+        lean.parent.mkdir(parents=True)
+        lean.write_text("#!/bin/sh\necho 'Lean (version 4.32.2, commit " + "c" * 40 + ")'\n", encoding="utf-8")
+        lean.chmod(0o755)
+        lake = self.root / "lake"
+        lake.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$3\" = \"--print-prefix\" ]; then echo '" + str(prefix) + "'; else exec '" + str(lean) + "' --version; fi\n",
+            encoding="utf-8",
+        )
+        lake.chmod(0o755)
+        original_run = subprocess.run
+        def fake_run(args, **kwargs):
+            if args[0] == "git" and args[1:3] == ("rev-parse", "HEAD"):
+                value = "a" * 40 if kwargs["cwd"] == self.repository else "b" * 40
+                return SimpleNamespace(returncode=0, stdout=value + "\n")
+            if args[0] == "git" and args[1] == "status":
+                return SimpleNamespace(returncode=0, stdout="")
+            return original_run(args, **kwargs)
+        with patch.object(verifier.shutil, "which", return_value=str(lake)), patch("subprocess.run", side_effect=fake_run):
+            identity = verifier._verify_environment(self.manifest, self.repository, self.mathlib, None)
+        self.assertEqual(identity["leanPath"], str(lean.resolve()))
+        self.assertEqual(identity["leanBinarySha256"], verifier.sha256(lean.read_bytes()))
 
     def test_implementation_and_manual_identity_are_checked(self) -> None:
         self.manifest["implementationHashes"]["tool.py"] = "0" * 64
