@@ -25,11 +25,12 @@ import subprocess
 import sys
 from dataclasses import dataclass
 import threading
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import check_simp_engine_boundary_scope as scope
 import simp_engine_inventory as inventory
 import simp_engine_boundary_corpus as corpus
+from process_runner import run_process
 
 
 _LAKE_ENV_LOCK = threading.RLock()
@@ -41,7 +42,17 @@ HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
 MANUAL_OVERRIDE_SCHEMA = 1
-FRESH_INVENTORY_BATCH_SIZE = 32
+# Header-import inventory retains the imported environment for every source in
+# one invocation.  A file-count bound therefore does not bound RSS: the first
+# 32-file batch reached a 1,556-module import closure on a 64GB Mac.  The
+# dependency-map bound below limits the union of transitive Mathlib modules in
+# each fresh child.  A child whose own closure exceeds this bound is still run
+# alone (there is no sound way to split one source's imports).
+FRESH_INVENTORY_MAX_IMPORT_MODULES = 512
+# Keep enough headroom for the verifier, the desktop, and the next child.  A
+# strict run that cannot maintain this reserve is a failed verification, never
+# a partial acceptance.
+FRESH_INVENTORY_MIN_FREE_MEMORY_BYTES = 12 * 1024**3
 
 TOP_LEVEL_FIELDS = frozenset(
     {
@@ -870,6 +881,7 @@ def verify_strict(
     expected_sha256: str, lake_path: str | Path, expected_lake_sha256: str,
     lean_path: str | Path, expected_lean_sha256: str,
     expected_repository_commit: str | None = None, timeout: int = 3600,
+    dependency_map: str | Path | Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run non-bypassable production verification and fresh consistency checks."""
     snapshot = _read_manifest_snapshot(manifest_path)
@@ -891,6 +903,7 @@ def verify_strict(
         snapshot.path, repository_root=repository, mathlib_root=mathlib, timeout=timeout,
         manifest=manifest, manifest_snapshot=snapshot, lake_path=lake, lean_path=lean,
         expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+        dependency_map=dependency_map,
     )
     _assert_manifest_snapshot(snapshot)
     _, lake_digest, _ = _checked_binary_digest(lake, expected_lake_sha256, "lake")
@@ -909,11 +922,233 @@ def verify_strict(
     }
 
 
+def _import_module_path(name: str) -> str | None:
+    """Translate a Mathlib header import name to its source module path."""
+    if not name.startswith("Mathlib."):
+        return None
+    return name.replace(".", "/") + ".lean"
+
+
+def _dependency_map_records(
+    dependency_map: str | Path | Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Read and validate a source-bound dependency map for scheduling.
+
+    The map is intentionally not treated as evidence of inventory contents.
+    Its source hashes and exact module membership only authorize use of its
+    import edges to choose child boundaries.
+    """
+    if isinstance(dependency_map, Mapping):
+        value: object = dependency_map
+    else:
+        map_path = Path(dependency_map).resolve()
+        try:
+            value = json.loads(map_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise _error("recompute", f"cannot read dependency map: {exc}") from exc
+    if not isinstance(value, dict) or not value:
+        raise _error("recompute", "dependency map must be a nonempty object")
+    result: dict[str, dict[str, Any]] = {}
+    for key, raw in value.items():
+        if not isinstance(key, str) or "@" not in key:
+            raise _error("recompute", "dependency map key is invalid")
+        module, source_hash = key.rsplit("@", 1)
+        if not module.startswith("Mathlib/") or not module.endswith(".lean"):
+            raise _error("recompute", f"dependency map module is invalid: {module!r}")
+        _hash(source_hash, f"dependency map source hash for {module}")
+        if not isinstance(raw, Mapping):
+            raise _error("recompute", f"dependency map record is invalid: {module}")
+        if set(raw) != {"module", "sourceHash", "dependencies"}:
+            raise _error("recompute", f"dependency map fields are invalid: {module}")
+        if raw.get("module") != module or raw.get("sourceHash") != source_hash:
+            raise _error("recompute", f"dependency map identity disagrees for {module}")
+        dependencies = raw.get("dependencies")
+        if not isinstance(dependencies, list) or not all(
+            isinstance(name, str) and name for name in dependencies
+        ):
+            raise _error("recompute", f"dependency map imports are invalid: {module}")
+        if module in result:
+            raise _error("recompute", f"dependency map contains duplicate module: {module}")
+        result[module] = {
+            "sourceHash": source_hash,
+            "dependencies": list(dependencies),
+        }
+    return result
+
+
+def _fresh_inventory_batches_by_closure(
+    source_paths: list[Path], module_names: list[str], *,
+    dependency_map: str | Path | Mapping[str, Any] | None,
+    max_import_modules: int,
+) -> list[list[Path]]:
+    """Partition sources so every child has a bounded transitive import union."""
+    if dependency_map is None:
+        return [[path] for path in source_paths]
+    records = _dependency_map_records(dependency_map)
+    requested = set(module_names)
+    if len(requested) != len(module_names):
+        raise _error("recompute", "duplicate module name in inventory request")
+    mapped = set(records)
+    if mapped != requested:
+        missing = sorted(requested - mapped)
+        extra = sorted(mapped - requested)
+        raise _error(
+            "recompute",
+            f"dependency map module set differs: missing={missing[:5]}, extra={extra[:5]}",
+        )
+
+    # The map's source hash is the identity that makes its scheduling edges
+    # applicable to this run.  Check each live source before launching any
+    # child; this also catches a map copied from a different manifest.
+    for path, module in zip(source_paths, module_names):
+        try:
+            actual_hash = sha256(path.read_bytes())
+        except OSError as exc:
+            raise _error("recompute", f"cannot read inventory source {path}: {exc}") from exc
+        if actual_hash != records[module]["sourceHash"]:
+            raise _error("recompute", f"dependency map source hash differs for {module}")
+
+    direct = {
+        module: tuple(
+            dependency for dependency in (
+                _import_module_path(name) for name in records[module]["dependencies"]
+            ) if dependency is not None and dependency in records
+        )
+        for module in module_names
+    }
+    closures: dict[str, frozenset[str]] = {}
+
+    def closure(module: str, stack: tuple[str, ...] = ()) -> frozenset[str]:
+        cached = closures.get(module)
+        if cached is not None:
+            return cached
+        if module in stack:
+            # Lean rejects cyclic imports, but treating a malformed map's cycle
+            # as the current node keeps this scheduler total before the strict
+            # child check fails on the actual source imports.
+            return frozenset({module})
+        result = {module}
+        for dependency in direct[module]:
+            result.update(closure(dependency, (*stack, module)))
+        checked = frozenset(result)
+        closures[module] = checked
+        return checked
+
+    batches: list[list[Path]] = []
+    current: list[Path] = []
+    current_closure: set[str] = set()
+    for path, module in zip(source_paths, module_names):
+        module_closure = set(closure(module))
+        if current and len(current_closure | module_closure) > max_import_modules:
+            batches.append(current)
+            current = []
+            current_closure = set()
+        current.append(path)
+        current_closure.update(module_closure)
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _available_memory_bytes() -> int:
+    """Return conservative immediately free memory on supported local hosts."""
+    if sys.platform == "darwin":
+        result = subprocess.run(
+            ["vm_stat"], text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=5, check=False,
+        )
+        if result.returncode:
+            raise RuntimeError(f"vm_stat failed: {result.stderr.strip()}")
+        lines = result.stdout.splitlines()
+        if not lines:
+            raise RuntimeError("vm_stat returned no output")
+        match = re.search(r"page size of (\d+) bytes", lines[0])
+        if match is None:
+            raise RuntimeError("vm_stat omitted page size")
+        page_size = int(match.group(1))
+        pages: dict[str, int] = {}
+        for line in lines[1:]:
+            item = re.fullmatch(r"([^:]+):\s*(\d+)\.?", line.strip())
+            if item is not None:
+                pages[item.group(1)] = int(item.group(2))
+        try:
+            return page_size * (pages["Pages free"] + pages["Pages speculative"])
+        except KeyError as exc:
+            raise RuntimeError(f"vm_stat omitted {exc.args[0]}") from exc
+    if sys.platform.startswith("linux"):
+        try:
+            text = Path("/proc/meminfo").read_text(encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeError(f"cannot read /proc/meminfo: {exc}") from exc
+        match = re.search(r"^MemAvailable:\s*(\d+)\s+kB$", text, re.MULTILINE)
+        if match is None:
+            raise RuntimeError("/proc/meminfo omitted MemAvailable")
+        return int(match.group(1)) * 1024
+    raise RuntimeError(f"memory telemetry is unsupported on {sys.platform}")
+
+
+def _inventory_memory_guard(_pid: int) -> str | None:
+    """Stop a child before it consumes the host's final memory reserve."""
+    try:
+        available = _available_memory_bytes()
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        return f"memory telemetry unavailable: {exc}"
+    if available < FRESH_INVENTORY_MIN_FREE_MEMORY_BYTES:
+        return (
+            f"available memory {available} is below the strict verifier reserve "
+            f"{FRESH_INVENTORY_MIN_FREE_MEMORY_BYTES}"
+        )
+    return None
+
+
 def _run_fresh_inventory_batches(
     source_paths: list[Path], *, repository: Path, timeout: int,
     lake_path: Path | None = None, expected_lake_sha256: str | None = None,
+    module_names: list[str] | None = None,
+    dependency_map: str | Path | Mapping[str, Any] | None = None,
+    max_import_modules: int = FRESH_INVENTORY_MAX_IMPORT_MODULES,
 ) -> list[str]:
-    """Run the independent header-import inventory in bounded fresh processes."""
+    """Run the independent header-import inventory in bounded fresh processes.
+
+    ``lean_toolchain_cache.py --header-imports`` creates one import environment
+    for each requested source and keeps those environments alive until the
+    child exits.  Grouping by source count consequently gives no useful memory
+    bound.  When a source-bound header dependency map is supplied, batches are
+    formed by the union of each source's transitive Mathlib closure.  The map
+    is a scheduling input only: every requested module must be present, every
+    source hash is checked against the live file, and no inventory result is
+    read from it.  A missing map deliberately selects singleton children.
+    """
+    if max_import_modules <= 0:
+        raise _error("recompute", "max_import_modules must be positive")
+    dependency_map_identity: tuple[Path, tuple[int, int, int, int], bytes] | None = None
+    if module_names is not None and len(module_names) != len(source_paths):
+        raise _error("recompute", "module name count does not match source paths")
+    if module_names is None:
+        # Arbitrary fixture paths have no authenticated Mathlib module names.
+        # Keep the safe process-isolation behavior rather than guessing names.
+        batches = [[path] for path in source_paths]
+    else:
+        scheduled_map = dependency_map
+        if isinstance(dependency_map, (str, Path)):
+            map_path = Path(dependency_map).resolve()
+            try:
+                map_stat = map_path.stat()
+                map_raw = map_path.read_bytes()
+                scheduled_map = json.loads(map_raw)
+            except (OSError, json.JSONDecodeError) as exc:
+                raise _error("recompute", f"cannot read dependency map: {exc}") from exc
+            dependency_map_identity = (
+                map_path,
+                (map_stat.st_dev, map_stat.st_ino, map_stat.st_size, map_stat.st_mtime_ns),
+                map_raw,
+            )
+        batches = _fresh_inventory_batches_by_closure(
+            source_paths,
+            module_names,
+            dependency_map=scheduled_map,
+            max_import_modules=max_import_modules,
+        )
     command_prefix = [
         sys.executable,
         str(repository / "Experiment" / "lean_toolchain_cache.py"),
@@ -927,14 +1162,12 @@ def _run_fresh_inventory_batches(
         environment = nullcontext()
     outputs: list[str] = []
     with environment:
-        for batch_index, start in enumerate(
-            range(0, len(source_paths), FRESH_INVENTORY_BATCH_SIZE), start=1
-        ):
-            batch = source_paths[start : start + FRESH_INVENTORY_BATCH_SIZE]
+        for batch_index, batch in enumerate(batches, start=1):
             command = [*command_prefix, *(str(path) for path in batch)]
-            result = subprocess.run(
+            result = run_process(
                 command, cwd=repository, text=True, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, timeout=timeout, check=False,
+                resource_guard=_inventory_memory_guard,
             )
             if result.returncode:
                 raise _error(
@@ -943,6 +1176,19 @@ def _run_fresh_inventory_batches(
                     f"{result.returncode}:\n{result.stdout[-4000:]}",
                 )
             outputs.append(result.stdout)
+    if dependency_map_identity is not None:
+        map_path, identity, raw = dependency_map_identity
+        try:
+            current_stat = map_path.stat()
+            current_raw = map_path.read_bytes()
+        except OSError as exc:
+            raise _error("recompute", f"dependency map changed during inventory: {exc}") from exc
+        current_identity = (
+            current_stat.st_dev, current_stat.st_ino,
+            current_stat.st_size, current_stat.st_mtime_ns,
+        )
+        if current_identity != identity or current_raw != raw:
+            raise _error("recompute", "dependency map changed during inventory")
     return outputs
 
 
@@ -952,6 +1198,7 @@ def recompute_inventory(
     manifest_snapshot: ManifestSnapshot | None = None,
     lake_path: Path | None = None, lean_path: Path | None = None,
     expected_lake_sha256: str | None = None, expected_lean_sha256: str | None = None,
+    dependency_map: str | Path | Mapping[str, Any] | None = None,
 ) -> None:
     """Freshly run the syntax inventory and compare source-backed records.
 
@@ -966,12 +1213,15 @@ def recompute_inventory(
     mathlib = Path(mathlib_root).resolve(); repository = Path(repository_root).resolve()
     before = _freshness_snapshot(path, manifest, repository, mathlib, manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path, expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256)
     source_paths = [mathlib / module["module"] for module in manifest["modules"]]
+    module_names = [module["module"] for module in manifest["modules"]]
     outputs = _run_fresh_inventory_batches(
         source_paths,
         repository=repository,
         timeout=timeout,
         lake_path=lake_path,
         expected_lake_sha256=expected_lake_sha256,
+        module_names=module_names,
+        dependency_map=dependency_map,
     )
     actual: dict[str, list[tuple[int, int, str, str, int, int, str]]] = {}
     fallbacks: set[str] = set()
@@ -1268,6 +1518,7 @@ def _recompute_source_consistency_body(
     manifest: dict[str, Any] | None = None, manifest_snapshot: ManifestSnapshot | None = None,
     lake_path: Path | None = None, lean_path: Path | None = None,
     expected_lake_sha256: str | None = None, expected_lean_sha256: str | None = None,
+    dependency_map: str | Path | Mapping[str, Any] | None = None,
 ) -> None:
     """Run fresh parser/frontend checks for same-producer source consistency.
 
@@ -1283,6 +1534,7 @@ def _recompute_source_consistency_body(
         path, mathlib_root=mathlib_root, repository_root=repository_root, timeout=timeout,
         manifest=manifest, manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path,
         expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+        dependency_map=dependency_map,
     )
     _fresh_scope_and_declarations(
         path, manifest, repository_root, mathlib_root, timeout,
@@ -1296,6 +1548,7 @@ def recompute_source_consistency(
     manifest: dict[str, Any] | None = None, manifest_snapshot: ManifestSnapshot | None = None,
     lake_path: Path | None = None, lean_path: Path | None = None,
     expected_lake_sha256: str | None = None, expected_lean_sha256: str | None = None,
+    dependency_map: str | Path | Mapping[str, Any] | None = None,
 ) -> dict[str, str] | None:
     """Run fresh checks under the authenticated Lake environment."""
     if lake_path is None or expected_lake_sha256 is None:
@@ -1304,6 +1557,7 @@ def recompute_source_consistency(
             timeout=timeout, manifest=manifest, manifest_snapshot=manifest_snapshot,
             lake_path=lake_path, lean_path=lean_path,
             expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+            dependency_map=dependency_map,
         )
     with _pinned_lake_environment(lake_path, expected_lake_sha256) as effective:
         _assert_pinned_lake(lake_path, expected_lake_sha256)
@@ -1312,6 +1566,7 @@ def recompute_source_consistency(
             timeout=timeout, manifest=manifest, manifest_snapshot=manifest_snapshot,
             lake_path=lake_path, lean_path=lean_path,
             expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256,
+            dependency_map=dependency_map,
         )
         return effective
 
@@ -1325,6 +1580,10 @@ def main() -> None:
         command.add_argument("--repository-root", type=Path)
         command.add_argument("--mathlib-root", type=Path)
         command.add_argument("--expected-repository-commit")
+        command.add_argument(
+            "--dependency-map", type=Path,
+            help="fresh source-bound header map used only to bound inventory child closures",
+        )
         command.add_argument("--timeout", type=int, default=3600)
         if name == "verify":
             command.add_argument("--expected-sha256", required=True, help="SHA-256 of the exact manifest bytes")
@@ -1353,6 +1612,7 @@ def main() -> None:
                 expected_lean_sha256=args.expected_lean_sha256,
                 expected_repository_commit=args.expected_repository_commit,
                 timeout=args.timeout,
+                dependency_map=args.dependency_map,
             )
             print(json.dumps(receipt, sort_keys=True))
         else:
@@ -1372,6 +1632,7 @@ def main() -> None:
                     mathlib_root=mathlib,
                     repository_root=repository,
                     timeout=args.timeout,
+                    dependency_map=args.dependency_map,
                 )
             print(json.dumps({
                 **summary,

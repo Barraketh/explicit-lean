@@ -380,8 +380,8 @@ class ManifestVerifierTests(unittest.TestCase):
         })
         result = SimpleNamespace(returncode=0, stdout="SIMP_ENGINE_INVENTORY_FULL_FALLBACK file=" + str(self.source_path) + "\n" + output + "\n")
         with patch("subprocess.run", return_value=result), patch.object(
-            verifier, "_freshness_snapshot", return_value={}
-        ):
+            verifier, "run_process", return_value=result
+        ), patch.object(verifier, "_freshness_snapshot", return_value={}):
             with self.assertRaisesRegex(RuntimeError, "fallback set differs"):
                 verifier.recompute_inventory(
                     self.path,
@@ -392,18 +392,103 @@ class ManifestVerifierTests(unittest.TestCase):
     def test_fresh_inventory_is_split_into_bounded_processes(self) -> None:
         paths = [self.root / f"Module{i}.lean" for i in range(129)]
         completed = SimpleNamespace(returncode=0, stdout="")
-        with patch("subprocess.run", return_value=completed) as run:
+        with patch.object(verifier, "run_process", return_value=completed) as run:
             outputs = verifier._run_fresh_inventory_batches(
                 paths, repository=self.repository, timeout=60
             )
-        self.assertEqual(outputs, ["", "", "", "", ""])
+        self.assertEqual(outputs, [""] * 129)
         commands = [call.args[0] for call in run.call_args_list]
-        self.assertEqual(
-            [len(command[4:]) for command in commands], [32, 32, 32, 32, 1]
-        )
+        self.assertEqual([len(command[4:]) for command in commands], [1] * 129)
         self.assertTrue(all(
             command[3] == "--header-imports" for command in commands
         ))
+
+    def test_fresh_inventory_batches_follow_transitive_import_closure(self) -> None:
+        modules = ["Mathlib/A.lean", "Mathlib/B.lean", "Mathlib/C.lean", "Mathlib/D.lean"]
+        paths = []
+        for module in modules:
+            path = self.mathlib / module
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"module\n-- {module}\n", encoding="utf-8")
+            paths.append(path)
+        def entry(module: str, imports: list[str]) -> tuple[str, dict[str, object]]:
+            digest = verifier.sha256((self.mathlib / module).read_bytes())
+            return f"{module}@{digest}", {
+                "module": module, "sourceHash": digest, "dependencies": imports,
+            }
+        dependency_map = dict([
+            entry("Mathlib/A.lean", ["Mathlib.B"]),
+            entry("Mathlib/B.lean", ["Mathlib.C"]),
+            entry("Mathlib/C.lean", []),
+            entry("Mathlib/D.lean", []),
+        ])
+        batches = verifier._fresh_inventory_batches_by_closure(
+            paths, modules, dependency_map=dependency_map, max_import_modules=2
+        )
+        self.assertEqual([[path.name for path in batch] for batch in batches],
+                         [["A.lean"], ["B.lean", "C.lean"], ["D.lean"]])
+
+    def test_fresh_inventory_dependency_map_is_complete_and_source_bound(self) -> None:
+        modules = ["Mathlib/A.lean", "Mathlib/B.lean"]
+        paths = []
+        for module in modules:
+            path = self.mathlib / module
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("module\n", encoding="utf-8")
+            paths.append(path)
+        def entry(module: str, digest: str | None = None) -> tuple[str, dict[str, object]]:
+            actual = verifier.sha256((self.mathlib / module).read_bytes())
+            value = actual if digest is None else digest
+            return f"{module}@{value}", {
+                "module": module, "sourceHash": value, "dependencies": [],
+            }
+        missing = dict([entry(modules[0])])
+        with self.assertRaisesRegex(RuntimeError, "module set differs"):
+            verifier._fresh_inventory_batches_by_closure(
+                paths, modules, dependency_map=missing, max_import_modules=2
+            )
+        stale = dict([entry(modules[0], "0" * 64), entry(modules[1])])
+        with self.assertRaisesRegex(RuntimeError, "source hash differs"):
+            verifier._fresh_inventory_batches_by_closure(
+                paths, modules, dependency_map=stale, max_import_modules=2
+            )
+
+    def test_fresh_inventory_memory_guard_fails_closed(self) -> None:
+        with patch.object(verifier, "_available_memory_bytes", return_value=13 * 1024**3):
+            self.assertIsNone(verifier._inventory_memory_guard(1))
+        with patch.object(verifier, "_available_memory_bytes", return_value=11 * 1024**3):
+            self.assertRegex(verifier._inventory_memory_guard(1) or "", "below the strict verifier reserve")
+        with patch.object(verifier, "_available_memory_bytes", side_effect=RuntimeError("no telemetry")):
+            self.assertRegex(verifier._inventory_memory_guard(1) or "", "telemetry unavailable")
+
+    def test_fresh_inventory_rejects_dependency_map_change(self) -> None:
+        modules = ["Mathlib/A.lean", "Mathlib/B.lean"]
+        paths = []
+        records = {}
+        for module in modules:
+            path = self.mathlib / module
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("module\n", encoding="utf-8")
+            paths.append(path)
+            digest = verifier.sha256(path.read_bytes())
+            records[f"{module}@{digest}"] = {
+                "module": module, "sourceHash": digest, "dependencies": [],
+            }
+        map_path = self.root / "dependency-map.json"
+        map_path.write_text(json.dumps(records, sort_keys=True), encoding="utf-8")
+        completed = SimpleNamespace(returncode=0, stdout="")
+        calls = []
+        def mutate_map(*_args, **_kwargs):
+            calls.append(True)
+            if len(calls) == 1:
+                map_path.write_text(json.dumps({"changed": True}), encoding="utf-8")
+            return completed
+        with patch.object(verifier, "run_process", side_effect=mutate_map):
+            with self.assertRaisesRegex(RuntimeError, "dependency map changed"):
+                verifier._run_fresh_inventory_batches(
+                    paths, repository=self.repository, timeout=60,
+                    module_names=modules, dependency_map=map_path,
+                )
 
     def test_freshness_guard_rejects_changed_inputs(self) -> None:
         before = {"manifest": "before", "sources": {}, "implementation": {}}
