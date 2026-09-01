@@ -449,8 +449,9 @@ private unsafe def elaborateSource (moduleName : Name) (auditLabel : String)
   let source ← IO.FS.readFile path
   -- Async elaboration is deliberately enabled because it affects declaration
   -- selection.  Temporary overlays use the shared verification additions on
-  -- top of the exact pinned Mathlib package options.
-  let options := ExplicitLean.SimpEngine.verificationFrontendOptions
+  -- top of the exact pinned Mathlib package options used by the compiler.
+  -- Overlay-only linter and heartbeat settings would change selector keys.
+  let options := ExplicitLean.SimpEngine.mathlibParserOptions
   if (← IO.getEnv CommandAudit.enabledVariable) == some "1" then
     let nonce ← CommandAudit.runNonce
     let captured ← try

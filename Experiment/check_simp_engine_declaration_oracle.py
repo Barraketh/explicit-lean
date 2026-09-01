@@ -17,6 +17,9 @@ import subprocess
 import sys
 import tempfile
 
+import boundary_protocol as protocol
+import check_simp_engine_boundary_source as boundary_source
+import simp_engine_inventory as inventory
 from process_runner import run_process
 
 
@@ -25,6 +28,7 @@ MARKER = "SIMP_ENGINE_DECLARATION_ORACLE "
 KIND = "simp_engine_declaration_oracle"
 SCHEMA = 1
 TIMEOUT = 600
+ARTIFACT_MARKER = "SIMP_ENGINE_BOUNDARY_ARTIFACT "
 
 
 @dataclass(frozen=True)
@@ -538,6 +542,66 @@ def parse_report(output: str) -> dict[str, object]:
     return report
 
 
+def check_selector_options_round_trip(root: Path) -> None:
+    """A recorder artifact must replay under the oracle's compiler options.
+
+    This is intentionally an end-to-end source pair: the expected selector
+    options come from a fresh command-line recording, then the generated
+    selector is elaborated by the declaration oracle.  It catches accidental
+    drift in the oracle frontend options while preserving the selector's
+    strict equality check.
+    """
+    stock_root = root / "selector-options-stock"
+    applied_root = root / "selector-options-applied"
+    stock_path = stock_root / "Mathlib" / "SelectorOptions.lean"
+    applied_path = applied_root / "Mathlib" / "SelectorOptions.lean"
+    stock_path.parent.mkdir(parents=True)
+    applied_path.parent.mkdir(parents=True)
+    call = 'simp_engine_boundary_record_applied "selector-options-regression" only'
+    stock = (
+        "module\n\n"
+        "public import Mathlib.Logic.Basic\n"
+        "import ExplicitLean.SimpEngine.Boundary\n\n"
+        "public theorem selectorOptionsSample : True := by\n"
+        f"  {call}\n"
+    )
+    stock_path.write_text(stock, encoding="utf-8")
+    dylib = ROOT / ".lake" / "build" / "lib" / "libexplicitLean_ExplicitLean.dylib"
+    command = inventory.lean_command(stock_path)
+    command.insert(3, f"--load-dynlib={dylib.resolve()}")
+    environment, nonce = protocol.recording_subprocess_environment()
+    recorded = run_process(
+        command, cwd=ROOT, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, timeout=TIMEOUT, check=False, env=environment,
+    )
+    if recorded.returncode != 0:
+        raise RuntimeError(f"selector-options recording failed:\n{recorded.stdout}")
+    reports = protocol.parse_framed_json_lines(
+        recorded.stdout, marker=ARTIFACT_MARKER, expected_nonce=nonce,
+        label="selector-options recording",
+    )
+    if len(reports) != 1 or not isinstance(reports[0], dict):
+        raise RuntimeError(f"selector-options recording emitted {len(reports)} artifacts")
+    report = reports[0]
+    replacement = boundary_source.format_report_variants([report])
+    applied_path.write_text(stock.replace(call, replacement), encoding="utf-8")
+    module = "Mathlib.SelectorOptions"
+    command = [
+        sys.executable, str(ROOT / "Experiment" / "lean_toolchain_cache.py"),
+        "oracle", module, str(stock_path), str(applied_path),
+    ]
+    checked = run_process(
+        command, cwd=ROOT, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, timeout=TIMEOUT, check=False,
+    )
+    oracle = parse_report(checked.stdout)
+    if checked.returncode != 0 or oracle.get("status") != "success":
+        raise RuntimeError(
+            "selector-options oracle rejected a freshly recorded selector:\n"
+            f"{checked.stdout}"
+        )
+
+
 def check_case(case: Case, root: Path, ordinal: int) -> None:
     stock_dir = root / f"{ordinal:02d}-stock"
     applied_dir = root / f"{ordinal:02d}-applied"
@@ -605,6 +669,7 @@ def check_case(case: Case, root: Path, ordinal: int) -> None:
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="declaration-oracle-", dir=ROOT / ".lake") as raw:
         root = Path(raw)
+        check_selector_options_round_trip(root)
         for ordinal, case in enumerate(CASES):
             check_case(case, root, ordinal)
     print(

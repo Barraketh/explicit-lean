@@ -18,6 +18,23 @@ ROOT = Path(__file__).resolve().parent.parent
 MATHLIB = ROOT / ".lake" / "packages" / "mathlib"
 SUPPORTED_KINDS = {"simp", "simp_only"}
 
+# Keep copied source compilation aligned with Mathlib's ``leanOptions`` in
+# lakefile.lean. Selector fingerprints include the complete effective map, so
+# omitting package options here makes a recording unreplayable by the
+# declaration oracle, which uses these options while overlay-only diagnostics
+# remain outside the selector's effective context.
+MATHLIB_PACKAGE_OPTION_ARGUMENTS = (
+    "-Dpp.unicode.fun=true",
+    "-DautoImplicit=false",
+    "-DmaxSynthPendingDepth=3",
+    "-Dweak.linter.mathlibStandardSet=true",
+    "-Dweak.linter.style.header=true",
+    "-Dweak.linter.checkInitImports=true",
+    "-Dweak.linter.allScriptsDocumented=true",
+    "-Dweak.linter.pythonStyle=true",
+    "-Dweak.linter.style.longFile=1500",
+)
+
 
 def run(command: list[str], *, timeout: int | None = None) -> tuple[int, str, float]:
     started = time.monotonic()
@@ -192,16 +209,8 @@ def lean_command(path: Path) -> list[str]:
         "lake",
         "env",
         "lean",
-        # These are semantic Mathlib package options, not linter preferences.
         # Copied modules must elaborate under the same settings as `lake build`.
-        "-DautoImplicit=false",
-        "-DmaxSynthPendingDepth=3",
-        # Not every Mathlib import graph registers every linter option. Weak
-        # settings apply when present without rejecting earlier modules.
-        "-Dweak.linter.unusedVariables=false",
-        "-Dweak.linter.unusedSimpArgs=false",
-        "-Dweak.linter.unreachableTactic=false",
-        "-DmaxHeartbeats=0",
+        *MATHLIB_PACKAGE_OPTION_ARGUMENTS,
     ]
     try:
         mathlib_index = path.parts.index("Mathlib")
