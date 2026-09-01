@@ -26,6 +26,8 @@ from typing import Any, Callable, Mapping, Sequence
 
 import certified_module as base
 import cold_certified_module as cold
+import cold_certified_cone_publication as publication
+from translated_imports import ImportEnvironment, build_import_environment
 
 
 KIND = "cold_certified_tree_plan"
@@ -122,6 +124,14 @@ def _dependency_names(raw: Any, *, label: str) -> tuple[str, ...]:
     return result
 
 
+def _source_file(path: str | Path, module: str, *, label: str) -> Path:
+    checked = _regular(path, label=label)
+    relative = Path(module)
+    if tuple(checked.parts[-len(relative.parts):]) != relative.parts:
+        raise RuntimeError(f"{label} has a non-canonical module path for {module}")
+    return checked
+
+
 @dataclass(frozen=True)
 class PlanNode:
     module: str
@@ -129,6 +139,8 @@ class PlanNode:
     dependencies: tuple[str, ...]
     disposition: str
     source_path: str | None
+    applied_path: str | None
+    applied_hash: str
 
     def result(self) -> dict[str, Any]:
         return {
@@ -137,6 +149,8 @@ class PlanNode:
             "dependencies": list(self.dependencies),
             "disposition": self.disposition,
             "sourcePath": self.source_path,
+            "appliedPath": self.applied_path,
+            "appliedHash": self.applied_hash,
         }
 
 
@@ -149,6 +163,7 @@ class TreePlan:
     order: tuple[str, ...]
     nodes: Mapping[str, PlanNode]
     excluded: tuple[str, ...]
+    complete_corpus: bool
     plan_hash: str
 
     def result(self) -> dict[str, Any]:
@@ -160,6 +175,7 @@ class TreePlan:
             "order": list(self.order),
             "modules": {module: self.nodes[module].result() for module in sorted(self.nodes)},
             "excludedModules": list(self.excluded),
+            "completeCorpus": self.complete_corpus,
             "planHash": self.plan_hash,
         }
 
@@ -197,6 +213,8 @@ def build_plan(
     dependency_map: str | Path,
     *,
     source_root: str | Path | None = None,
+    applied_root: str | Path | None = None,
+    source_bundle: Mapping[str, Mapping[str, Any]] | None = None,
     excluded_modules: Sequence[str] = (),
 ) -> TreePlan:
     """Validate a closed manifest/dependency join and construct its plan.
@@ -272,8 +290,17 @@ def build_plan(
     unknown_excluded = sorted(set(excluded) - set(manifest_rows))
     if unknown_excluded:
         raise RuntimeError(f"excluded module is absent from manifest: {unknown_excluded}")
+    manifest_excluded = tuple(sorted(module for module, row in manifest_rows.items()
+                                     if row.get("disposition") == "excluded"))
+    if manifest_excluded != excluded:
+        raise RuntimeError("manifest excluded disposition does not match plan exclusions")
     nodes: dict[str, PlanNode] = {}
+    if source_root is None and source_bundle is None:
+        raise RuntimeError("complete stock/applied source bundle is required")
     source_base = _directory(source_root, label="source root") if source_root is not None else None
+    applied_base = _directory(applied_root, label="applied source root") if applied_root is not None else source_base
+    if source_bundle is not None and set(source_bundle) != set(manifest_rows):
+        raise RuntimeError("canonical source bundle/module join is incomplete")
     for module in sorted(manifest_rows):
         manifest_row = manifest_rows[module]
         dep_row = dep_rows[module]
@@ -287,23 +314,36 @@ def build_plan(
         unknown = sorted(set(dependencies) - set(manifest_rows))
         if unknown:
             raise RuntimeError(f"dependency is missing from manifest/plan for {module}: {unknown}")
-        source_path: str | None = None
-        candidate = manifest_row.get("sourcePath") or manifest_row.get("source")
-        if candidate is not None:
-            if not isinstance(candidate, str):
-                raise RuntimeError(f"source path is invalid for {module}")
-            source_path = str(_regular(candidate, label=f"source for {module}"))
-        elif source_base is not None:
-            path = source_base / Path(module)
-            source_path = str(_regular(path, label=f"source for {module}"))
-        if source_path is not None:
-            actual = _digest(Path(source_path))
-            if actual != source_hash:
-                raise RuntimeError(f"source hash mismatch for {module}")
+        bundle = source_bundle.get(module) if source_bundle is not None else None
+        if bundle is not None and not isinstance(bundle, Mapping):
+            raise RuntimeError(f"source bundle record is invalid for {module}")
+        stock_candidate = bundle.get("stockPath") if bundle is not None else None
+        applied_candidate = bundle.get("appliedPath") if bundle is not None else None
+        if stock_candidate is None:
+            stock_candidate = manifest_row.get("sourcePath") or manifest_row.get("source")
+        stock_path = _source_file(stock_candidate, module, label=f"stock source for {module}") if stock_candidate is not None else _source_file(source_base / Path(module), module, label=f"stock source for {module}")
+        if applied_candidate is None:
+            applied_candidate = manifest_row.get("appliedSourcePath")
+        applied_path = _source_file(applied_candidate, module, label=f"applied source for {module}") if applied_candidate is not None else _source_file(applied_base / Path(module), module, label=f"applied source for {module}")
+        if _digest(stock_path) != source_hash:
+            raise RuntimeError(f"source hash mismatch for {module}")
+        applied_hash = _digest(applied_path)
+        if bundle is not None:
+            expected_stock = bundle.get("stockHash")
+            if expected_stock is None:
+                expected_stock = bundle.get("sourceHash")
+            expected_applied = bundle.get("appliedHash")
+            if expected_applied is None:
+                expected_applied = bundle.get("appliedSourceHash")
+            if expected_stock != source_hash or expected_applied != applied_hash:
+                raise RuntimeError(f"source bundle hash mismatch for {module}")
+        source_path = str(stock_path)
         disposition = str(manifest_row.get("disposition", "eligible"))
+        if disposition not in {"eligible", "excluded"}:
+            raise RuntimeError(f"manifest module disposition is invalid for {module}")
         if module in excluded:
             disposition = "excluded"
-        nodes[module] = PlanNode(module, source_hash, dependencies, disposition, source_path)
+        nodes[module] = PlanNode(module, source_hash, dependencies, disposition, source_path, str(applied_path), applied_hash)
     order = _topological(nodes)
     provisional = {
         "kind": KIND, "schema": SCHEMA,
@@ -311,8 +351,11 @@ def build_plan(
         "dependencyMap": {"path": str(dep_path), "sha256": dependency_map_hash},
         "order": list(order), "modules": {m: nodes[m].result() for m in sorted(nodes)},
         "excludedModules": list(excluded),
+        "completeCorpus": type(manifest_value.get("moduleFileCount")) is int
+        and manifest_value["moduleFileCount"] == len(manifest_rows),
     }
-    return TreePlan(manifest_path, manifest_hash, dep_path, dependency_map_hash, order, nodes, excluded, _plan_hash(provisional))
+    return TreePlan(manifest_path, manifest_hash, dep_path, dependency_map_hash, order, nodes, excluded,
+                    provisional["completeCorpus"] is True, _plan_hash(provisional))
 
 
 def verify_plan(plan: Mapping[str, Any] | TreePlan) -> TreePlan:
@@ -339,6 +382,7 @@ def verify_plan(plan: Mapping[str, Any] | TreePlan) -> TreePlan:
     if set(nodes_raw) != set(order_raw) or len(order_raw) != len(set(order_raw)):
         raise RuntimeError("plan module order is incomplete")
     nodes: dict[str, PlanNode] = {}
+    source_bundle_for_rebuild: dict[str, dict[str, Any]] = {}
     for key, raw in nodes_raw.items():
         module = _canonical_module(key)
         if module != key or not isinstance(raw, Mapping):
@@ -348,12 +392,21 @@ def verify_plan(plan: Mapping[str, Any] | TreePlan) -> TreePlan:
         if any(dep not in nodes_raw for dep in deps):
             raise RuntimeError(f"plan dependency is absent: {module}")
         source_path = raw.get("sourcePath")
+        applied_path = raw.get("appliedPath")
+        applied_hash = raw.get("appliedHash")
         if source_path is not None:
-            source = _regular(source_path, label=f"source for {module}")
+            source = _source_file(source_path, module, label=f"source for {module}")
             if _digest(source) != source_hash:
                 raise RuntimeError(f"source hash mismatch for {module}")
             source_path = str(source)
-        nodes[module] = PlanNode(module, source_hash, deps, str(raw.get("disposition", "eligible")), source_path)
+        if not isinstance(applied_path, str) or not isinstance(applied_hash, str):
+            raise RuntimeError(f"complete applied source bundle is missing for {module}")
+        applied = _source_file(applied_path, module, label=f"applied source for {module}")
+        if _digest(applied) != applied_hash:
+            raise RuntimeError(f"applied source hash mismatch for {module}")
+        nodes[module] = PlanNode(module, source_hash, deps, str(raw.get("disposition", "eligible")), source_path, str(applied), applied_hash)
+        source_bundle_for_rebuild[module] = {"stockPath": source_path, "stockHash": source_hash,
+                                              "appliedPath": str(applied), "appliedHash": applied_hash}
     expected_order = _topological(nodes)
     if tuple(order_raw) != expected_order:
         raise RuntimeError("plan order is not stable topological order")
@@ -366,7 +419,15 @@ def verify_plan(plan: Mapping[str, Any] | TreePlan) -> TreePlan:
         raise RuntimeError("plan exclusions are invalid") from error
     if tuple(sorted(exclusions)) != exclusions or len(set(exclusions)) != len(exclusions) or any(module not in nodes for module in exclusions):
         raise RuntimeError("plan exclusions are invalid")
-    return TreePlan(manifest_path, str(manifest["sha256"]), dependency_path, str(dependency_map["sha256"]), expected_order, nodes, exclusions, supplied)
+    if type(value.get("completeCorpus")) is not bool:
+        raise RuntimeError("plan corpus completeness is missing")
+    canonical = build_plan(manifest_path, dependency_path, source_bundle=source_bundle_for_rebuild,
+                           excluded_modules=exclusions)
+    if canonical.result() != value:
+        raise RuntimeError("plan graph does not match canonical manifest/dependency inputs")
+    return TreePlan(manifest_path, str(manifest["sha256"]), dependency_path,
+                    str(dependency_map["sha256"]), expected_order, nodes, exclusions,
+                    canonical.complete_corpus, supplied)
 
 
 def write_plan(path: str | Path, plan: Mapping[str, Any] | TreePlan) -> str:
@@ -425,7 +486,10 @@ def validate_checkpoint(
     node = checked_plan.nodes[module]
     if value.get("sourceHash") != node.source_hash or tuple(value.get("dependencies", [])) != node.dependencies:
         raise RuntimeError(f"stale checkpoint identity for {module}")
-    family = _family_complete(value.get("artifactFamily"), module=module, is_module=value.get("isModule", True))
+    if type(value.get("isModule")) is not bool:
+        raise RuntimeError(f"checkpoint module mode is invalid for {module}")
+    is_module = value["isModule"]
+    family = _family_complete(value.get("artifactFamily"), module=module, is_module=is_module)
     receipt = value.get("certification")
     if not isinstance(receipt, Mapping) or not isinstance(receipt.get("path"), str) or not isinstance(receipt.get("sha256"), str):
         raise RuntimeError(f"checkpoint receipt identity is incomplete for {module}")
@@ -435,8 +499,21 @@ def validate_checkpoint(
     receipt_value = json.loads(receipt_path.read_bytes())
     cert = cold.Certification(receipt_path, receipt["sha256"], receipt_value)
     cold_record = cold.verify_certification(cert)
-    if cold_record.get("module") != dotted_module(module) or cold_record.get("outputArtifactFamily") != family:
+    if cold_record.get("module") != dotted_module(module) or cold_record.get("isModule") is not is_module or cold_record.get("outputArtifactFamily") != family:
         raise RuntimeError(f"checkpoint certificate does not match {module}")
+    publication_ref = value.get("publication")
+    if publication_ref is not None:
+        if not isinstance(publication_ref, Mapping) or not isinstance(publication_ref.get("path"), str) or not isinstance(publication_ref.get("sha256"), str):
+            raise RuntimeError(f"checkpoint publication identity is incomplete for {module}")
+        publication_path = _regular(publication_ref["path"], label=f"publication receipt for {module}")
+        if _digest(publication_path) != publication_ref["sha256"]:
+            raise RuntimeError(f"publication receipt hash mismatch for {module}")
+        try:
+            publication_value = json.loads(publication_path.read_bytes())
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"publication receipt changed for {module}") from error
+        if not isinstance(publication_value, Mapping) or publication_value.get("module") != dotted_module(module) or publication_value.get("certification") != dict(receipt):
+            raise RuntimeError(f"checkpoint publication does not match {module}")
     result = dict(value)
     result["artifactFamily"] = family
     return result
@@ -447,7 +524,7 @@ def load_checkpoints(plan: Mapping[str, Any] | TreePlan, checkpoint_root: str | 
     checked_plan = verify_plan(plan)
     root = _directory(checkpoint_root, label="checkpoint root")
     expected_paths = {_checkpoint_path(root, module) for module in checked_plan.order}
-    unexpected = sorted(path for path in root.rglob("*.json") if path.is_file() or path.is_symlink() if path not in expected_paths)
+    unexpected = sorted(path for path in root.rglob("*") if path.is_file() or path.is_symlink() if path not in expected_paths)
     if unexpected:
         raise RuntimeError(f"unexpected or stale checkpoint: {unexpected[0]}")
     result: dict[str, dict[str, Any]] = {}
@@ -498,7 +575,8 @@ def run_tree(
 ) -> dict[str, Any]:
     """Run modules in stable order with immutable sequential checkpoints.
 
-    ``certify`` receives ``(module, node, dependency_checkpoints)``.  It must
+    ``certify`` is a deliberately small test injection and receives
+    ``(module, node, dependency_checkpoints)``.  It must
     return a ``Certification``, a checkpoint-shaped mapping, or a mapping with
     ``certification`` and ``artifactFamily`` fields.  The callback is required
     for modules not already checkpointed, which makes accidental partial runs
@@ -511,7 +589,7 @@ def run_tree(
     completed: dict[str, dict[str, Any]] = {}
     if resume:
         completed = load_checkpoints(checked_plan, root)
-    elif any(_checkpoint_path(root, module).exists() or _checkpoint_path(root, module).is_symlink() for module in checked_plan.order):
+    elif load_checkpoints(checked_plan, root):
         raise RuntimeError("checkpoint exists while resume is disabled")
     processed = 0
     for module in checked_plan.order:
@@ -547,20 +625,146 @@ def run_tree(
                       "planHash": checked_plan.plan_hash, "module": module,
                       "sourceHash": node.source_hash, "dependencies": list(node.dependencies),
                       "isModule": is_module, "certification": dict(receipt), "artifactFamily": dict(family)}
+        if isinstance(produced, Mapping) and "publication" in produced:
+            publication_ref = produced["publication"]
+            if not isinstance(publication_ref, Mapping):
+                raise RuntimeError(f"certifier returned an invalid publication reference for {module}")
+            checkpoint["publication"] = dict(publication_ref)
         path = _checkpoint_path(root, module)
         checkpoint_hash = _write_exclusive(path, checkpoint)
         completed[module] = validate_checkpoint(path, checked_plan, expected_sha256=checkpoint_hash)
         processed += 1
     report = {"kind": REPORT_KIND, "schema": REPORT_SCHEMA,
               "status": "completed" if len(completed) == len(checked_plan.order) else "partial",
-              "wholeMathlib": len(completed) == len(checked_plan.order),
+              "wholeMathlib": False,
               "planHash": checked_plan.plan_hash, "order": list(checked_plan.order),
               "completed": [{"module": module, "path": str(_checkpoint_path(root, module)),
                              "sha256": _digest(_checkpoint_path(root, module))} for module in checked_plan.order if module in completed]}
     return report
 
 
-__all__ = ["TreePlan", "PlanNode", "build_plan", "verify_plan", "write_plan", "load_plan", "validate_checkpoint", "load_checkpoints", "run_tree", "dotted_module"]
+def _dependency_closure(plan: TreePlan, module: str) -> tuple[str, ...]:
+    seen: set[str] = set()
+    pending = list(plan.nodes[module].dependencies)
+    while pending:
+        dependency = pending.pop()
+        if dependency in seen:
+            continue
+        seen.add(dependency)
+        pending.extend(plan.nodes[dependency].dependencies)
+    return tuple(sorted(seen))
+
+
+def _read_publication_records(plan: TreePlan, receipt_root: Path,
+                              expected_hashes: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    expected = {_checkpoint_path(receipt_root, module) for module in plan.order}
+    actual = {path for path in receipt_root.rglob("*") if path.is_file() or path.is_symlink()}
+    if not actual.issubset(expected):
+        raise RuntimeError("unexpected or stale publication receipt")
+    for module in plan.order:
+        path = _checkpoint_path(receipt_root, module)
+        if path.exists() or path.is_symlink():
+            _regular(path, label=f"publication receipt for {module}")
+            if expected_hashes is not None and str(path) in expected_hashes and _digest(path) != expected_hashes[str(path)]:
+                raise RuntimeError(f"publication receipt hash mismatch for {module}")
+            try:
+                value = json.loads(path.read_bytes())
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"publication receipt changed for {module}") from error
+            if not isinstance(value, dict):
+                raise RuntimeError(f"publication receipt is invalid for {module}")
+            records.append({"path": str(path), "sha256": _digest(path), **value})
+    return records
+
+
+def run_production_tree(
+    plan: Mapping[str, Any] | TreePlan,
+    *,
+    imports: ImportEnvironment,
+    oracle: base.InputFile,
+    auditor: base.InputFile,
+    checkpoint_root: str | Path,
+    output_root: str | Path,
+    staging_parent: str | Path,
+    receipt_root: str | Path,
+    work_parent: str | Path,
+    timeout: float = 900,
+    max_modules: int | None = None,
+) -> dict[str, Any]:
+    """Run the maintained cold certifier and publication lifecycle.
+
+    This is the production entry point.  It wires strict translated imports,
+    transitive certified artifact families, five-process cold certification,
+    single-writer publication, and output/receipt audits.  ``run_tree`` above
+    remains only the deterministic fixture seam used by unit controls.
+    """
+    checked_plan = verify_plan(plan)
+    checkpoint_dir = _directory(checkpoint_root, label="checkpoint root")
+    output_dir = _directory(output_root, label="output root")
+    staging_dir = _directory(staging_parent, label="staging root")
+    receipt_dir = _directory(receipt_root, label="receipt root")
+    work_dir = _directory(work_parent, label="certificate work root")
+    oracle = base._checked_file(oracle); auditor = base._checked_file(auditor)
+    if not os.access(oracle.path, os.X_OK) or not os.access(auditor.path, os.X_OK):
+        raise RuntimeError("certification tool is not executable")
+    existing = load_checkpoints(checked_plan, checkpoint_dir)
+    expected_publication_hashes = {
+        str(item["publication"]["path"]): item["publication"]["sha256"]
+        for item in existing.values() if isinstance(item.get("publication"), Mapping)
+        and isinstance(item["publication"].get("path"), str)
+        and isinstance(item["publication"].get("sha256"), str)
+    }
+    records = _read_publication_records(checked_plan, receipt_dir, expected_publication_hashes)
+    publication.verify_publications(records, output_dir, receipt_root=receipt_dir)
+    publications = {_canonical_module(record["module"]): record for record in records}
+    for module in existing:
+        publication_record = publications.get(module)
+        checkpoint_publication = existing[module].get("publication")
+        publication_ref = ({"path": publication_record.get("path"), "sha256": publication_record.get("sha256")}
+                           if publication_record is not None else None)
+        if (publication_record is None or publication_record.get("certification") != existing[module].get("certification")
+                or checkpoint_publication != publication_ref):
+            raise RuntimeError(f"checkpoint/publication join is incomplete for {module}")
+
+    def certify(module: str, node: PlanNode, _ignored: Mapping[str, Any]) -> Mapping[str, Any]:
+        dependency_families: dict[str, Mapping[str, str]] = {}
+        for dependency in _dependency_closure(checked_plan, module):
+            dependency_record = publications.get(dependency)
+            if dependency_record is None:
+                raise RuntimeError(f"transitive dependency publication is missing for {module}: {dependency}")
+            family = dependency_record.get("artifactFamily")
+            if not isinstance(family, Mapping):
+                raise RuntimeError(f"dependency artifact family is missing for {module}: {dependency}")
+            dependency_families[dotted_module(dependency)] = dict(family)
+        cert = cold.certify_module(
+            module=dotted_module(module),
+            stock=base.InputFile(Path(node.source_path), _digest(Path(node.source_path))),
+            applied=base.InputFile(Path(node.applied_path), node.applied_hash),
+            is_module=True, oracle=oracle, auditor=auditor, imports=imports,
+            dependencies=dependency_families, work_parent=work_dir, timeout=timeout,
+        )
+        cold.verify_certification(cert)
+        published = publication.publish(cert, output_root=output_dir,
+                                        staging_parent=staging_dir, receipt_root=receipt_dir)
+        publications[module] = published
+        records.append(published)
+        publication.verify_publications(records, output_dir, receipt_root=receipt_dir)
+        return {"certification": {"path": str(cert.receipt_path), "sha256": cert.receipt_sha256},
+                "artifactFamily": cert.receipt["outputArtifactFamily"], "isModule": True,
+                "publication": {"path": published["path"], "sha256": published["sha256"]}}
+
+    report = run_tree(checked_plan, checkpoint_root=checkpoint_dir, certify=certify,
+                      max_modules=max_modules)
+    publication.verify_publications(records, output_dir, receipt_root=receipt_dir)
+    complete = (report["status"] == "completed" and len(publications) == len(checked_plan.order)
+                and checked_plan.complete_corpus and not checked_plan.excluded)
+    report["wholeMathlib"] = complete
+    report["publicationAudit"] = {"modules": len(publications), "artifacts": sum(len(record["artifactFamily"]) for record in records), "verified": True}
+    return report
+
+
+__all__ = ["TreePlan", "PlanNode", "build_plan", "verify_plan", "write_plan", "load_plan", "validate_checkpoint", "load_checkpoints", "run_tree", "run_production_tree", "dotted_module"]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -576,17 +780,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--dependency-map", type=Path, required=True)
     parser.add_argument("--source-root", type=Path)
+    parser.add_argument("--applied-root", type=Path)
+    parser.add_argument("--translated-olean-root", type=Path)
     parser.add_argument("--plan-output", type=Path)
     parser.add_argument("--checkpoint-root", type=Path)
+    parser.add_argument("--output-root", type=Path)
+    parser.add_argument("--staging-parent", type=Path)
+    parser.add_argument("--receipt-root", type=Path)
+    parser.add_argument("--work-parent", type=Path)
+    parser.add_argument("--oracle", type=Path)
+    parser.add_argument("--auditor", type=Path)
+    parser.add_argument("--timeout", type=float, default=900)
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--max-modules", type=int)
     args = parser.parse_args(argv)
-    plan = build_plan(args.manifest, args.dependency_map, source_root=args.source_root)
+    plan = build_plan(args.manifest, args.dependency_map, source_root=args.source_root,
+                      applied_root=args.applied_root)
     if args.plan_output is not None:
         plan_hash = write_plan(args.plan_output, plan)
         print(json.dumps({"plan": str(args.plan_output.absolute()), "sha256": plan_hash}, sort_keys=True))
     if args.checkpoint_root is not None:
-        report = run_tree(plan, checkpoint_root=args.checkpoint_root, resume=not args.no_resume, max_modules=args.max_modules)
+        production = (args.output_root, args.staging_parent, args.receipt_root, args.work_parent,
+                      args.translated_olean_root, args.oracle, args.auditor)
+        if any(item is None for item in production):
+            raise RuntimeError("production checkpoint runs require output, staging, receipt, work, import, oracle, and auditor paths")
+        args.output_root.mkdir(parents=True, exist_ok=True)
+        args.staging_parent.mkdir(parents=True, exist_ok=True)
+        args.receipt_root.mkdir(parents=True, exist_ok=True)
+        args.work_parent.mkdir(parents=True, exist_ok=True)
+        imports = build_import_environment(args.source_root, args.translated_olean_root)
+        oracle = base.InputFile(args.oracle, _digest(args.oracle))
+        auditor = base.InputFile(args.auditor, _digest(args.auditor))
+        report = run_production_tree(plan, imports=imports, oracle=oracle, auditor=auditor,
+                                     checkpoint_root=args.checkpoint_root, output_root=args.output_root,
+                                     staging_parent=args.staging_parent, receipt_root=args.receipt_root,
+                                     work_parent=args.work_parent, timeout=args.timeout,
+                                     max_modules=args.max_modules)
         print(json.dumps(report, sort_keys=True))
     elif args.plan_output is None:
         print(json.dumps(plan.result(), sort_keys=True))
