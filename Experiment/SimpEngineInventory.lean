@@ -1,4 +1,5 @@
 import Mathlib
+import ExplicitLean.SimpEngine.FrontendOptions
 import ExplicitLean.SimpEngine.Inventory
 import Lean.Elab.Frontend
 import Lean.Elab.Import
@@ -73,6 +74,7 @@ private def parseModuleIncrementally (env : Environment) (path : System.FilePath
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   let initialState : Lean.Elab.Frontend.State := {
     commandState := Lean.Elab.Command.mkState env messages
+      ExplicitLean.SimpEngine.mathlibParserOptions
     parserState
     cmdPos := parserState.pos
   }
@@ -89,7 +91,7 @@ private unsafe def parseModuleFully (path : System.FilePath)
     (loadExts := true)
   let env := env.setMainModule `ExplicitLean.SimpEngine.InventoryFallback
   let state ← Lean.Elab.IO.processCommands inputCtx parserState
-    (Lean.Elab.Command.mkState env messages)
+    (Lean.Elab.Command.mkState env messages ExplicitLean.SimpEngine.mathlibParserOptions)
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
   return (moduleSyntax, state.commandState.messages)
 

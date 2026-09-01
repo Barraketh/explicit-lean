@@ -92,10 +92,13 @@ OCCURRENCE_OPTIONAL_FIELDS = {"executionEvidence"}
 IMPLEMENTATION_SOURCE_PATTERNS = (
     "ExplicitLean.lean",
     "ExplicitLean/SimpEngine/Inventory.lean",
+    "ExplicitLean/SimpEngine/FrontendOptions.lean",
+    "ExplicitLean/SimpEngine/CommandAudit.lean",
     "ExplicitLean/SimpEngine/Boundary.lean",
     "ExplicitLean/SimpEngine/Boundary/*.lean",
     "Experiment/SimpEngineInventory.lean",
     "Experiment/SimpEngineBoundary*.lean",
+    "Experiment/SimpEngineCommandAudit.lean",
     "Experiment/SimpEngineDeclarationOracle.lean",
     "Experiment/lean_toolchain_cache.py",
     "Experiment/process_runner.py",

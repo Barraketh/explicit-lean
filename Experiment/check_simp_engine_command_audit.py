@@ -177,6 +177,7 @@ def self_test() -> Path:
     work = Path(tempfile.mkdtemp(prefix="command-audit-", dir=ROOT / ".lake"))
     print(work, flush=True)
     paths = [Path(__file__).resolve(), binary, oracle, ROOT / "lakefile.toml", ROOT / "lean-toolchain",
+             ROOT / "ExplicitLean/SimpEngine/FrontendOptions.lean",
              ROOT / "ExplicitLean/SimpEngine/CommandAudit.lean",
              ROOT / "Experiment/SimpEngineCommandAudit.lean",
              ROOT / "Experiment/SimpEngineDeclarationOracle.lean",

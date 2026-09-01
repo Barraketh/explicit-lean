@@ -8,6 +8,7 @@ import Lean.DocString.Extension
 import Lean.Util.CollectAxioms
 import Lean.ExtraModUses
 import ExplicitLean.SimpEngine.CommandAudit
+import ExplicitLean.SimpEngine.FrontendOptions
 
 open Lean
 
@@ -446,14 +447,10 @@ private unsafe def elaborateSource (moduleName : Name) (auditLabel : String)
     (path : System.FilePath) (oleanFileName? : Option System.FilePath := none) : IO Environment := do
   Lean.enableInitializersExecution
   let source ← IO.FS.readFile path
-  -- Keep this in sync with `simp_engine_inventory.py`; async elaboration is
-  -- deliberately enabled because it affects declaration selection.
-  let options := Elab.async.set (Elab.autoImplicit.set {} false) true
-    |>.set `maxSynthPendingDepth (3 : Nat)
-    |>.set `weak.linter.unusedVariables false
-    |>.set `weak.linter.unusedSimpArgs false
-    |>.set `weak.linter.unreachableTactic false
-    |>.set `maxHeartbeats (0 : Nat)
+  -- Async elaboration is deliberately enabled because it affects declaration
+  -- selection.  Temporary overlays use the shared verification additions on
+  -- top of the exact pinned Mathlib package options.
+  let options := ExplicitLean.SimpEngine.verificationFrontendOptions
   if (← IO.getEnv CommandAudit.enabledVariable) == some "1" then
     let nonce ← CommandAudit.runNonce
     let captured ← try

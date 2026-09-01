@@ -1,4 +1,5 @@
 import Mathlib
+import ExplicitLean.SimpEngine.FrontendOptions
 import Lean.DeclarationRange
 import Lean.Elab.Frontend
 import Lean.Elab.Import
@@ -75,6 +76,7 @@ private unsafe def parseSource (env : Environment) (path : System.FilePath)
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   let initialState : Lean.Elab.Frontend.State := {
     commandState := Lean.Elab.Command.mkState env messages
+      ExplicitLean.SimpEngine.mathlibParserOptions
     parserState
     cmdPos := parserState.pos
   }
@@ -91,7 +93,7 @@ private unsafe def parseSourceFully (path : System.FilePath)
     (loadExts := true)
   let env := env.setMainModule `ExplicitLean.SimpEngine.BoundaryScopeFallback
   let state ← Lean.Elab.IO.processCommands inputCtx parserState
-    (Lean.Elab.Command.mkState env messages)
+    (Lean.Elab.Command.mkState env messages ExplicitLean.SimpEngine.mathlibParserOptions)
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
   return (moduleSyntax, state.commandState.messages)
 

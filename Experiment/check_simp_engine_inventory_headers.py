@@ -12,6 +12,26 @@ import simp_engine_inventory as inventory
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "Experiment/SimpEngineInventoryHeaderFixture.lean"
 CALL = "simp only [go_append tl _, Array.toListAppend_eq, append_assoc, Array.toList_push]"
+PACKAGE_OPTIONS_MODULE = "Mathlib.AlgebraicGeometry.EllipticCurve.DivisionPolynomial.Basic"
+PACKAGE_LAKEFILE = ROOT / ".lake/packages/mathlib/lakefile.lean"
+PACKAGE_LAKEFILE_SHA256 = "e3e8ac4d3ea441b062dbd29a2910165e55d8463c8bd9a3feb830cf6fb64a1b7a"
+PACKAGE_OPTIONS_SOURCE = (
+    ROOT
+    / ".lake/packages/mathlib/Mathlib/AlgebraicGeometry/EllipticCurve/DivisionPolynomial/Basic.lean"
+)
+PACKAGE_OPTIONS_SOURCE_SHA256 = "a02c592f5d685b6f4c3b3738de223883cc70a1b96f5c2ef0625ce2694e4d38be"
+PACKAGE_OPTIONS_OCCURRENCES = 32
+PACKAGE_OPTION_ARGUMENTS = [
+    "-Dpp.unicode.fun=true",
+    "-DautoImplicit=false",
+    "-DmaxSynthPendingDepth=3",
+    "-Dweak.linter.mathlibStandardSet=true",
+    "-Dweak.linter.style.header=true",
+    "-Dweak.linter.checkInitImports=true",
+    "-Dweak.linter.allScriptsDocumented=true",
+    "-Dweak.linter.pythonStyle=true",
+    "-Dweak.linter.style.longFile=1500",
+]
 LOCAL_SYNTAX_SOURCE = """\
 import Mathlib.Data.Nat.Basic
 
@@ -38,13 +58,31 @@ def main() -> None:
     work = Path(tempfile.mkdtemp(prefix="controls-", dir=parent))
     source = FIXTURE.read_text()
     assert source.count(CALL) == 1
+    if sha(PACKAGE_OPTIONS_SOURCE) != PACKAGE_OPTIONS_SOURCE_SHA256:
+        raise RuntimeError("package-options regression source changed")
+    if sha(PACKAGE_LAKEFILE) != PACKAGE_LAKEFILE_SHA256:
+        raise RuntimeError("pinned Mathlib package options changed")
+    for consumer in [
+        ROOT / "Experiment/SimpEngineInventory.lean",
+        ROOT / "Experiment/SimpEngineBoundaryScope.lean",
+    ]:
+        consumer_source = consumer.read_text()
+        if consumer_source.count("ExplicitLean.SimpEngine.mathlibParserOptions") != 2:
+            raise RuntimeError(f"{consumer.name} does not use the shared options in both parser paths")
+        if "verificationFrontendOptions" in consumer_source:
+            raise RuntimeError(f"{consumer.name} uses verification-only frontend options")
     inputs = [Path(__file__).resolve(), FIXTURE, ROOT / "lean-toolchain",
+              PACKAGE_LAKEFILE,
               ROOT / "Experiment/SimpEngineInventory.lean",
               ROOT / "Experiment/simp_engine_inventory.py",
               ROOT / "Experiment/boundary_materialize_shard.py",
               ROOT / "ExplicitLean/SimpEngine/Inventory.lean",
               ROOT / "ExplicitLean/SimpEngine/Boundary/Tactic.lean",
-              ROOT / ".lake/build/bin/simpEngineInventory"]
+              ROOT / "ExplicitLean/SimpEngine/FrontendOptions.lean",
+              ROOT / "Experiment/SimpEngineBoundaryScope.lean",
+              ROOT / ".lake/build/bin/simpEngineInventory",
+              ROOT / ".lake/build/bin/simpEngineBoundaryScope",
+              PACKAGE_OPTIONS_SOURCE]
     before = {str(path): sha(path) for path in inputs}
     archived = []
     for index, path in enumerate(inputs):
@@ -90,6 +128,134 @@ def main() -> None:
                         "expectedFallback": expect_fallback, "actualFallback": fallback,
                         "source": str(path), "sourceSha256": sha(path),
                         "log": str(log), "logSha256": sha(log)})
+
+    # This source forced the full fallback to elaborate parser-context
+    # declarations.  With Lean's defaults it failed at valid `simp_rw`
+    # commands; Mathlib's package options (notably autoImplicit=false) parse it
+    # cleanly.  Pin both consumers so their parser semantics cannot drift.
+    compiler_controls = [
+        (
+            "package-options-default-negative",
+            [
+                "lake", "env", "lean",
+                "-R", str(ROOT / ".lake/packages/mathlib"),
+                "-o", str(work / "package-options-default.olean"),
+                str(PACKAGE_OPTIONS_SOURCE),
+            ],
+            False,
+        ),
+        (
+            "package-options-positive",
+            [
+                "lake", "env", "lean",
+                *PACKAGE_OPTION_ARGUMENTS,
+                "-R", str(ROOT / ".lake/packages/mathlib"),
+                "-o", str(work / "package-options-positive.olean"),
+                str(PACKAGE_OPTIONS_SOURCE),
+            ],
+            True,
+        ),
+    ]
+    for label, command, should_succeed in compiler_controls:
+        code, output, _ = inventory.run(command, timeout=180)
+        log = work / f"{label}.log"
+        log.write_text(output)
+        if (code == 0) != should_succeed:
+            raise RuntimeError(f"{label}: unexpected compiler status; see {log}")
+        if not should_succeed and "`simp` made no progress" not in output:
+            raise RuntimeError(f"{label}: expected the option-sensitive failure; see {log}")
+        records.append({
+            "case": label,
+            "expectedSuccess": should_succeed,
+            "actualSuccess": code == 0,
+            "source": str(PACKAGE_OPTIONS_SOURCE),
+            "sourceSha256": sha(PACKAGE_OPTIONS_SOURCE),
+            "log": str(log),
+            "logSha256": sha(log),
+        })
+
+    package_commands = [
+        (
+            "package-options-inventory",
+            [
+                sys.executable,
+                str(ROOT / "Experiment/lean_toolchain_cache.py"),
+                "inventory",
+                str(PACKAGE_OPTIONS_SOURCE),
+            ],
+            "SIMP_ENGINE_INVENTORY_FULL_FALLBACK file=",
+            "inventory",
+        ),
+        (
+            "package-options-scope",
+            [
+                sys.executable,
+                str(ROOT / "Experiment/lean_toolchain_cache.py"),
+                "scope",
+                PACKAGE_OPTIONS_MODULE,
+                str(PACKAGE_OPTIONS_SOURCE),
+            ],
+            f"SIMP_ENGINE_SCOPE_FULL_FALLBACK module={PACKAGE_OPTIONS_MODULE} file=",
+            "scope",
+        ),
+    ]
+    package_entries = {}
+    source_bytes = PACKAGE_OPTIONS_SOURCE.read_bytes()
+    for label, command, fallback_marker, consumer in package_commands:
+        code, output, _ = inventory.run(command, timeout=180)
+        log = work / f"{label}.log"
+        log.write_text(output)
+        if consumer == "inventory":
+            entries = [
+                json.loads(line)
+                for line in output.splitlines()
+                if line.startswith("{")
+            ]
+            for entry in entries:
+                if entry.pop("file", None) != str(PACKAGE_OPTIONS_SOURCE):
+                    raise RuntimeError(f"{label}: occurrence names the wrong source; see {log}")
+                entry["module"] = PACKAGE_OPTIONS_MODULE
+        else:
+            marker = "SIMP_ENGINE_SCOPE_OCCURRENCE "
+            entries = [
+                json.loads(line.split(marker, 1)[1])
+                for line in output.splitlines()
+                if line.startswith(marker)
+            ]
+            if any(entry.get("module") != PACKAGE_OPTIONS_MODULE for entry in entries):
+                raise RuntimeError(f"{label}: occurrence names the wrong module; see {log}")
+        for entry in entries:
+            inventory.validate_occurrence(source_bytes, entry)
+        ranges = [(entry["startByte"], entry["endByte"]) for entry in entries]
+        if len(ranges) != len(set(ranges)):
+            raise RuntimeError(f"{label}: duplicate occurrence ranges; see {log}")
+        count = len(entries)
+        fallback = fallback_marker in output
+        if code or not fallback or count != PACKAGE_OPTIONS_OCCURRENCES:
+            raise RuntimeError(
+                f"{label}: expected a clean fallback with "
+                f"{PACKAGE_OPTIONS_OCCURRENCES} occurrences; see {log}"
+            )
+        package_entries[consumer] = {
+            (
+                entry["startByte"], entry["endByte"], entry["line"], entry["column"],
+                entry["kind"], entry["source"],
+            )
+            for entry in entries
+        }
+        records.append({
+            "case": label,
+            "expectedCount": PACKAGE_OPTIONS_OCCURRENCES,
+            "actualCount": count,
+            "expectedFallback": True,
+            "actualFallback": fallback,
+            "source": str(PACKAGE_OPTIONS_SOURCE),
+            "sourceSha256": sha(PACKAGE_OPTIONS_SOURCE),
+            "log": str(log),
+            "logSha256": sha(log),
+        })
+    if package_entries["inventory"] != package_entries["scope"]:
+        raise RuntimeError("package-options inventory and scope occurrences disagree")
     if {str(path): sha(path) for path in inputs} != before:
         raise RuntimeError("inventory inputs changed during validation")
     for item in archived:

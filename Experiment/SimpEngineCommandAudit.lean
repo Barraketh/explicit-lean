@@ -1,4 +1,5 @@
 import ExplicitLean.SimpEngine.CommandAudit
+import ExplicitLean.SimpEngine.FrontendOptions
 
 open Lean
 
@@ -13,14 +14,9 @@ unsafe def main (args : List String) : IO UInt32 := do
     initSearchPath (← findSysroot)
     let nonce ← ExplicitLean.SimpEngine.CommandAudit.runNonce
     let source ← IO.FS.readFile file
-    -- Same package options as the existing inventory/declaration oracle.
-    -- capture itself passes these to runFrontend without modifying them.
-    let options := Elab.async.set (Elab.autoImplicit.set {} false) true
-      |>.set `maxSynthPendingDepth (3 : Nat)
-      |>.set `weak.linter.unusedVariables false
-      |>.set `weak.linter.unusedSimpArgs false
-      |>.set `weak.linter.unreachableTactic false
-      |>.set `maxHeartbeats (0 : Nat)
+    -- `capture` passes the shared package-plus-verification options to
+    -- `runFrontend` without modifying them.
+    let options := ExplicitLean.SimpEngine.verificationFrontendOptions
     let captured ← ExplicitLean.SimpEngine.CommandAudit.capture source options file moduleName.toName
       (oleanFileName? := output?)
     ExplicitLean.SimpEngine.CommandAudit.emit captured "standalone" nonce

@@ -1567,6 +1567,8 @@ def validate_manifest(manifest: dict[str, object]) -> None:
         raise RuntimeError("manifest has no implementation hash mapping")
     required_hashes = {
         "ExplicitLean/SimpEngine/Inventory.lean",
+        "ExplicitLean/SimpEngine/FrontendOptions.lean",
+        "ExplicitLean/SimpEngine/CommandAudit.lean",
         "ExplicitLean/SimpEngine/Boundary.lean",
         "ExplicitLean/SimpEngine/Boundary/Apply.lean",
         "ExplicitLean/SimpEngine/Boundary/Selector.lean",
@@ -1574,6 +1576,7 @@ def validate_manifest(manifest: dict[str, object]) -> None:
         "ExplicitLean/SimpEngine/Boundary/ScopeProbe.lean",
         "Experiment/SimpEngineInventory.lean",
         "Experiment/SimpEngineBoundaryScope.lean",
+        "Experiment/SimpEngineCommandAudit.lean",
         "Experiment/SimpEngineDeclarationOracle.lean",
         "Experiment/boundary_materialize_shard.py",
         "Experiment/check_simp_engine_boundary_scope.py",
