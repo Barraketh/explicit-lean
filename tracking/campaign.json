@@ -17,15 +17,15 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-01T14:39:24.031513+00:00",
-    "lastUsedPercent": 80,
+    "lastCheckedAt": "2026-09-01T19:21:39.331350+00:00",
+    "lastUsedPercent": 87,
     "lastDecision": "continue"
   },
   "coverage": {
     "currentCorpusTotal": 83627,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "The current checked classifier partitions all 83,627 source occurrences in 8,264 modules as 83,556 direct and 71 reusable, with zero unresolved. Exactly five diagnostic missing-execution quotations move to reusable under authenticated nonproof declaration ownership; no other diagnostic record changes. The authenticated 16-entry manual database covers 16 exact calls across 14 modules. Production remains unaccepted until exact-HEAD remanifesting, current per-module semantic reports and cold translated-tree certification.",
+    "note": "Authenticated v7 partitions all 83,627 source occurrences in 8,264 modules as 83,556 direct and 71 reusable, with zero unresolved. Production coverage remains zero until current-HEAD v8 module reports and cold translated-tree certification pass.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83627,
     "unresolvedOccurrences": 0,
@@ -35,7 +35,7 @@
     "provisionalCachedOccurrences": 894,
     "provisionalCachedModules": 83,
     "minimumAcceptedReportSchema": 13,
-    "validationHold": "The classifier and bounded producer/consumer gates are integrated, but no historical module result has exact current repository, manifest, manual-overlay and worker identity. Complete translated dependency-tree certification remains pending; every bounded result is provisional for whole-Mathlib acceptance.",
+    "validationHold": "Authenticated v7 is structurally complete and indexed, but selector option parity changed at 7b76a60, so no v7 result is accepted under the final identity. Refresh once to v8, pass the NeZero pilot, then resume bounded direct production. Complete translated dependency-tree certification remains pending.",
     "freshAnalyzedModules": 8264,
     "freshAnalyzedOccurrences": 83627,
     "freshDirectExecutableOccurrences": 83556,
@@ -80,7 +80,7 @@
       "id": "corpus-translation",
       "owner": "coordinator",
       "status": "in_progress",
-      "description": "Fresh inventory, broad shards, reusable code, full translated tree"
+      "description": "Authenticated v7 inventory/index complete; final-option v8 refresh, guarded pilot, broad direct shards, reusable code, and full translated tree in progress."
     },
     {
       "id": "readability",
@@ -431,6 +431,24 @@
       "owner": "coordinator with Luna diagnosis/fix-review",
       "status": "completed",
       "description": "When only the allowlisted direct Boundary.Tactic tooling import is added, the declaration oracle recomputes applied LibrarySuggestions metadata using the stock imported-frequency state and excludes generated/tooling-local declarations. It retains exact comparison whenever both sides have the tooling import or neither does. The complete oracle matrix passes 15 accepted equivalences and 26 fail-closed cases; nested synthetic and real Mathlib Action gates pass with zero remaining calls."
+    },
+    {
+      "id": "materializer-memory-guard",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Commit aa6d3de owns subprocess groups and polls conservative host memory. Materializers stop explicitly below a 12 GiB reserve with partial output preserved; 27 worker checks and process child/grandchild controls pass."
+    },
+    {
+      "id": "strict-import-closure-batching",
+      "owner": "coordinator with Luna-style fix-review",
+      "status": "completed_fail_closed",
+      "description": "Commit d235563 authenticates the exact source-bound dependency map and plans fresh inventory children by transitive import closure capped at 512 modules. Giant single closures are never skipped and fail explicitly if the 12 GiB reserve cannot be maintained. Focused verifier suite 32/32 passes."
+    },
+    {
+      "id": "final-mathlib-selector-options",
+      "owner": "coordinator with delegated fix-review",
+      "status": "completed",
+      "description": "Commit 7b76a60 aligns recording and declaration-oracle selector fingerprints with the true pinned Mathlib package leanOptions, excluding overlay-only linter suppressions and maxHeartbeats. Fresh recording to generated selector to oracle round-trip passes."
     }
   ],
   "blockers": [
@@ -493,12 +511,17 @@
       "id": "nested-fixture-derived-metadata",
       "status": "resolved",
       "detail": "The allowed Boundary.Tactic import adds derived LibrarySuggestions state outside the source module equivalence domain. The oracle retains singular/presence checks and all declaration/import/other-extension checks; 15 accepted and 26 fail-closed cases pass. The stale nested report wrapper now copies schema13 canonical/manual counts; synthetic and Mathlib Action nested gates pass."
+    },
+    {
+      "id": "selector-option-environment",
+      "status": "resolved",
+      "detail": "NeZero exposed recording/oracle option drift. Commit 7b76a60 uses the exact final Mathlib package option map in both paths and removes overlay-only settings from selector context; a fresh end-to-end selector round-trip passes."
     }
   ],
   "nextActions": [
-    "Publish and strictly source-verify a clean exact-HEAD 8,264-module/83,627-call manifest with 83,556 direct, 71 reusable and zero unresolved records.",
-    "Import the closed manifest with the exact 8,264-module source-bound dependency map and rerun the eight former pilot failures under the 16-entry manual database.",
-    "Resume bounded schema13 production for exactly the 6,280 direct-only modules under allowance and 12 GiB free-space guards; reusable-containing modules must be skipped and reported.",
+    "Publish and structurally inspect one clean exact-HEAD v8 manifest for all 8,264 modules and 83,627 calls; compare it against authenticated v7 and import it with the exact source-bound dependency map.",
+    "Rerun Mathlib/Algebra/NeZero.lean as the guarded final-option pilot. Require recording, replay, declaration oracle, original-call comment, and zero remaining executable syntax before broad dispatch.",
+    "Run two bounded direct-only workers against the shared SQLite claim index, with 12 GiB memory and disk reserves; preserve every failure and accepted evidence family.",
     "Implement authenticated caller/configuration/state recording and fatal replay closure for all 71 reusable calls in 40 modules.",
     "Assemble and cold-certify the translated dependency tree; then mine readable normal forms and continue with other common search tactics."
   ],
@@ -1192,6 +1215,21 @@
         "direct-only production rerun and reusable caller-dependent architecture",
         "complete cold translated-tree acceptance"
       ]
+    },
+    {
+      "at": "2026-09-01T19:21:39.331350+00:00",
+      "summary": "Authenticated schema13 v7 covers 8,264 modules/83,627 calls with 83,556 direct, 71 reusable and zero unresolved. Integrated 12 GiB materializer guard, dependency-closure strict batching, and exact final Mathlib selector options. NeZero diagnosed option drift; v8 refresh and guarded retry are next. Weekly usage 87%.",
+      "checks": [
+        "v7 SHA256 9c967e61e34faf8068b9006fbeab9665b1caaa468e0967b1f67a7fc4e0d0623d; structural inspect passed",
+        "v7 imported into SQLite: 8,264 modules, 83,627 occurrences, zero unresolved",
+        "strict verifier 32/32, campaign worker 27/27, process-group/resource-guard controls passed",
+        "fresh selector option recording/replay/declaration-oracle round-trip passed",
+        "independent review: authentic RingQuot irreducible records recompute computational/materialize; mixed evidence remains fail-closed"
+      ],
+      "limitations": [
+        "v7 predates final selector option identity and is analysis/index evidence only",
+        "whole translated tree and reusable executable semantics remain incomplete"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1532,6 +1570,20 @@
       "rootVerification": ".lake/week-2026-08-31/schema13-overlay-manual-worker-root-verification.json",
       "evidenceFiles": 120,
       "evidenceTreeSha256": "54b38ef82e6cb5b465eac941a7134c93f7ca891a7def1dca49593d9f9e119024"
+    },
+    {
+      "id": "schema13-v7-full-manifest-and-option-pilot",
+      "status": "manifest_authenticated_pilot_failed_option_drift_fixed_pending_v8",
+      "commit": "e62f65d",
+      "modules": 8264,
+      "occurrences": 83627,
+      "manifest": ".lake/week-2026-08-31/schema13-isolated-closed-manifest-v7.json",
+      "manifestSha256": "9c967e61e34faf8068b9006fbeab9665b1caaa468e0967b1f67a7fc4e0d0623d",
+      "dependencyMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
+      "pilotModule": "Mathlib/Algebra/NeZero.lean",
+      "pilotAttempt": 604,
+      "diagnosis": "Ordinary replay compiled, but selector options differed between reduced recording and final Mathlib frontend. Commit 7b76a60 fixes both recording and oracle; retry only under v8 identity.",
+      "acceptedCampaignCoverage": false
     }
   ],
   "latestCommits": [
@@ -1593,7 +1645,10 @@
     "451e457",
     "1168cc0",
     "d606469",
-    "6c0815c"
+    "6c0815c",
+    "aa6d3de",
+    "d235563",
+    "7b76a60"
   ],
   "experiments": [
     {
@@ -1812,7 +1867,7 @@
     ]
   },
   "inventory": {
-    "status": "complete_diagnostic",
+    "status": "authenticated_v7_pending_final_option_v8_refresh",
     "manifest": ".lake/search-free-mathlib/snapshots/corpus-bootstrap/.lake/campaign-inventory.json",
     "commit": "188e649edf3b00c7772712b466c9a800f48db491",
     "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c",
@@ -1821,26 +1876,20 @@
     "moduleCount": 8264,
     "occurrenceCount": 83425,
     "latestClosedManifest": {
-      "path": ".lake/week-2026-08-31/schema13-overlay-full-manifest.json",
-      "sha256": "60dc663ee3339bffafe53ebe58b1b7d804a67783bc14be5ad9236f856d63430c",
-      "commit": "6c0815cc13377665a437f3608176d04b0271808f",
-      "modules": 8260,
-      "occurrences": 83414,
-      "directExecutable": 83349,
-      "reusableExecutable": 65,
+      "path": ".lake/week-2026-08-31/schema13-isolated-closed-manifest-v7.json",
+      "sha256": "9c967e61e34faf8068b9006fbeab9665b1caaa468e0967b1f67a7fc4e0d0623d",
+      "commit": "e62f65d143f44064dba31acea679764784f0675d",
+      "modules": 8264,
+      "occurrences": 83627,
+      "directExecutable": 83556,
+      "reusableExecutable": 71,
       "nestedOccurrences": 91,
-      "manualOverrides": 8,
-      "manualDatabaseSha256": "1dfde349f62ddbb42bf202461f30afeb0d15fe0f752a4fae4944637c04e98d06",
-      "separatelyRequiredModules": [
-        "Mathlib/Tactic/DeriveEncodable.lean",
-        "Mathlib/Tactic/Lift.lean",
-        "Mathlib/Tactic/Nontriviality/Core.lean",
-        "Mathlib/Tactic/Zify.lean"
-      ],
-      "separatelyRequiredCalls": 11,
-      "summary": ".lake/week-2026-08-31/schema13-overlay-full-manifest-summary.json",
-      "rootVerification": ".lake/week-2026-08-31/schema13-overlay-full-manifest-root-verification.json",
-      "note": "Fresh closed manifest binds the exact manual database and all producer/consumer implementation hashes; accepted whole-tree coverage remains zero."
+      "unresolved": 0,
+      "manualOverrides": 16,
+      "dependencyMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
+      "dependencyMapSha256": "eba4654477f16d81f870bf3b2cd15d0d9fe886357384d10f5e8a5f374ab95448",
+      "structuralInspection": ".lake/week-2026-08-31/schema13-v7-structural-inspect.log",
+      "note": "Authenticated full corpus analysis/index evidence. Refresh required because exact selector option identity changed at 7b76a60; no production coverage is claimed."
     },
     "analysisDecoupling": {
       "status": "integrated",
@@ -1880,18 +1929,18 @@
   },
   "database": {
     "path": ".lake/search-free-mathlib/translation-index.sqlite3",
-    "status": "schema13_index_with_historical_and_current_provisional_results",
+    "status": "schema13_v7_full_index_no_active_leases",
     "modules": 8264,
-    "occurrenceFacts": 83425,
+    "occurrenceFacts": 83627,
     "importEdges": 26396,
-    "unresolved": 5,
+    "unresolved": 0,
     "verifiedTranslations": 83,
-    "headerMap": ".lake/week-2026-08-31/schema13-overlay-dependency-map.json",
+    "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
     "currentCandidateOccurrences": 894,
     "currentCandidateVariants": 948,
     "externalDependencyDigests": ".lake/week-2026-08-31/schema13-overlay-external-dependency-digests.json",
-    "currentIdentityVerifiedModules": 6,
-    "currentIdentityVerifiedOccurrences": 63
+    "currentIdentityVerifiedModules": 0,
+    "currentIdentityVerifiedOccurrences": 0
   },
   "productionValidation": {
     "commit": "6c0815c",
@@ -2366,8 +2415,8 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 43961774080,
-    "checkedAt": "2026-09-01T06:14:47.944208+00:00",
+    "lastFreeBytes": 40999374848,
+    "checkedAt": "2026-09-01T19:21:39.331350+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)",
     "losslessCertificateStorage": {
       "command": "python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json",
@@ -2377,7 +2426,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-09-01T06:14:47.944208+00:00",
+  "updatedAt": "2026-09-01T19:21:39.331350+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
@@ -2385,15 +2434,15 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "productionPlan": {
-    "eligibleOrdinaryModules": 6279,
-    "reusableOrMixedModules": 36,
+    "eligibleOrdinaryModules": 6280,
+    "reusableOrMixedModules": 40,
     "workers": 2,
-    "pilotModules": 100,
+    "pilotModules": 1,
     "productionBatchModules": 500,
     "moduleTimeoutSeconds": 900,
     "batchWallSeconds": 14400,
     "minimumFreeBytes": 12884901888,
     "projectedEvidenceGiB": "8-10 including retries",
-    "policy": "Unique worker/output labels; shared SQLite atomic claims; first pass omits retry_failed; preserve all evidence and diagnose exact failure families before retry."
+    "policy": "Gate on a guarded NeZero success under v8. Then use unique worker/output labels and shared SQLite atomic claims; first pass omits retry_failed. Preserve all evidence and diagnose exact failure families before retry."
   }
 }
