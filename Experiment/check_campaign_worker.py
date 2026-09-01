@@ -281,6 +281,7 @@ class CampaignWorkerTests(unittest.TestCase):
              mock.patch.object(worker.materializer, "verify_environment", return_value={"fixture": True}), \
              mock.patch.object(worker.materializer.corpus, "assert_repository"), \
              mock.patch.object(worker.materializer, "validate_shard_shape", side_effect=lambda value: value), \
+             mock.patch.object(worker, "available_memory_bytes", return_value=64 * 1024**3), \
              mock.patch.object(worker, "_selected_for_report_evidence", return_value=[]), \
              mock.patch.object(
                  worker.materializer, "verify_shard_evidence",
@@ -623,6 +624,65 @@ class CampaignWorkerTests(unittest.TestCase):
              mock.patch.object(worker, "invoke_materializer", side_effect=failing):
             worker.run_worker(self.db, manifest, self.boundary / "runs", "worker-test", retry_failed=True, budget_guard=lambda: {"canDispatch": True})
         self.assertEqual(calls, 2)
+
+    def test_memory_stop_keeps_log_and_requeues_without_result_failure(self) -> None:
+        manifest = self.manifest_many(["A", "B"])
+        calls: list[str] = []
+
+        def stopped(path, output, module, timeout):
+            calls.append(module)
+            return 125, "child output before resource stop\n"
+
+        result = self.run_fixture(manifest, stopped)
+        self.assertEqual(result["processed"], 1)
+        self.assertEqual(calls, ["Mathlib/A.lean"])
+        self.assertEqual(result["candidates"], 2)
+        self.assertEqual(result["failures"], 0)
+        self.assertTrue(result["resourceStopped"])
+        connection = connect(self.db)
+        try:
+            attempt = connection.execute("SELECT status,failure FROM attempts").fetchone()
+            self.assertEqual(attempt["status"], "abandoned")
+            self.assertIn("exit 125", attempt["failure"])
+            states = connection.execute(
+                "SELECT module,state FROM work_queue ORDER BY module"
+            ).fetchall()
+            self.assertEqual([(row["module"], row["state"]) for row in states], [
+                ("Mathlib/A.lean", "queued"), ("Mathlib/B.lean", "queued"),
+            ])
+            self.assertIsNone(connection.execute("SELECT * FROM result_cache").fetchone())
+            log_ref = self.root / "boundary-materialization" / "runs"
+            logs = list(log_ref.glob("*.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0].read_text(encoding="utf-8"), "child output before resource stop\n")
+        finally:
+            connection.close()
+
+    def test_preclaim_memory_admission_stops_before_claim(self) -> None:
+        manifest = self.manifest()
+        calls = 0
+
+        def invoke(path, output, module, timeout):
+            nonlocal calls
+            calls += 1
+            return 125, "should not run"
+
+        denied = {
+            "canDispatch": False, "availableBytes": 1,
+            "minimumFreeMemoryBytes": worker.DEFAULT_MINIMUM_FREE_MEMORY_BYTES,
+        }
+        with mock.patch.object(worker, "memory_status", return_value=denied):
+            result = self.run_fixture(manifest, invoke)
+        self.assertTrue(result["memoryDenied"])
+        self.assertFalse(result["resourceStopped"])
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(calls, 0)
+        connection = connect(self.db)
+        try:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM attempts").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT state FROM work_queue").fetchone()[0], "queued")
+        finally:
+            connection.close()
 
     def test_keyboard_interrupt_abandons_claimed_lease(self) -> None:
         manifest = self.manifest()

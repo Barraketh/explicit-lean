@@ -102,14 +102,38 @@ def available_memory_bytes() -> int:
     raise RuntimeError(f"memory telemetry is unsupported on {sys.platform}")
 
 
-def _materializer_memory_guard(_pid: int) -> str | None:
+def memory_status(minimum_free_memory_bytes: int = DEFAULT_MINIMUM_FREE_MEMORY_BYTES) -> dict[str, Any]:
+    """Report whether it is safe to start or continue one materializer.
+
+    Memory telemetry is deliberately fail closed. A missing or malformed
+    reading must stop dispatch rather than allow a second large Lean process
+    to start on an unknown host.
+    """
     try:
         available = available_memory_bytes()
-    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-        return f"memory telemetry unavailable: {error}"
-    if available < DEFAULT_MINIMUM_FREE_MEMORY_BYTES:
+        if type(available) is not int or available < 0:
+            raise RuntimeError(f"invalid available memory reading: {available!r}")
+    except (OSError, RuntimeError, ValueError, TypeError, subprocess.SubprocessError) as error:
+        return {
+            "canDispatch": False,
+            "availableBytes": None,
+            "minimumFreeMemoryBytes": minimum_free_memory_bytes,
+            "error": str(error),
+        }
+    return {
+        "canDispatch": available >= minimum_free_memory_bytes,
+        "availableBytes": available,
+        "minimumFreeMemoryBytes": minimum_free_memory_bytes,
+    }
+
+
+def _materializer_memory_guard(_pid: int) -> str | None:
+    status = memory_status()
+    if not status["canDispatch"]:
+        if status["availableBytes"] is None:
+            return f"memory telemetry unavailable: {status['error']}"
         return (
-            f"available memory {available} is below the "
+            f"available memory {status['availableBytes']} is below the "
             f"{DEFAULT_MINIMUM_FREE_MEMORY_BYTES}-byte reserve"
         )
     return None
@@ -693,6 +717,7 @@ def run_worker(
             "skippedReusable": skipped_reusable if modules is None else 0,
             "budgetDenied": preflight_denied, "timedOut": False,
             "storageDenied": not storage["canDispatch"], "storage": storage,
+            "memoryDenied": False, "resourceStopped": False,
         }
     materializer.corpus.assert_repository(
         str(manifest_value["repositoryCommit"]), False,
@@ -702,6 +727,7 @@ def run_worker(
     started = time.monotonic()
     processed = succeeded = candidates = failures = skipped_failed = candidate_reports = skipped_verified = 0
     budget_denied = timed_out = storage_denied = False
+    memory_denied = resource_stopped = False
     active_lease = None
     try:
         import_manifest(
@@ -767,6 +793,11 @@ def run_worker(
                 storage_denied = True
                 print(json.dumps({"event": "storage_stop", **storage}, sort_keys=True), flush=True)
                 break
+            memory = memory_status()
+            if not memory["canDispatch"]:
+                memory_denied = True
+                print(json.dumps({"event": "memory_stop", **memory}, sort_keys=True), flush=True)
+                break
             leases = claim_work(
                 connection, worker, limit=1,
                 lease_seconds=max(float(module_timeout) + 120.0, 900.0),
@@ -814,6 +845,18 @@ def run_worker(
                     )
             _atomic_text(log_path, command_output)
             processed += 1
+            if code == 125:
+                # Keep the immutable child log, but do not cache a semantic
+                # failure: another worker may retry after pressure falls.
+                abandon_lease(
+                    connection, lease.attempt_id, worker,
+                    "materializer stopped by memory guard (exit 125)",
+                )
+                resource_stopped = True
+                active_lease = None
+                print(json.dumps({"event": "memory_stop", "module": lease.module,
+                                  "exitCode": code, "log": str(log_path)}, sort_keys=True), flush=True)
+                break
             if code != 0:
                 timed_out = timed_out or code == 124
                 failures += 1
@@ -895,6 +938,8 @@ def run_worker(
         "budgetDenied": budget_denied,
         "timedOut": timed_out,
         "storageDenied": storage_denied,
+        "memoryDenied": memory_denied,
+        "resourceStopped": resource_stopped,
         "storage": storage,
     }
 
