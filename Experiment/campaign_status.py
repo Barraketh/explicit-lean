@@ -152,7 +152,52 @@ def _manifest_input(connection: sqlite3.Connection, manifest: Path | None) -> tu
         raise StatusError("newest stored manifest payload is invalid JSON") from error
 
 
-def _report_info(row: sqlite3.Row, required_schema: int, manifest_hash: str | None = None) -> dict[str, Any]:
+def _strict_report_verified(
+    row: sqlite3.Row,
+    module: str,
+    manifest_path: Path,
+    manifest_bytes: bytes,
+    manifest: dict[str, Any],
+    overlay: manual_overlay.Overlay | None,
+) -> bool:
+    """Run the maintained evidence consumer for an exact-current report.
+
+    ``result_cache`` stores a copy of the report alongside its artifact path.
+    Bind those two copies before delegating to the worker's strict verifier;
+    otherwise a forged cache JSON could point at a valid-looking evidence tree.
+    Historical rows deliberately do not pay this current-evidence check.
+    """
+    artifact = Path(row["artifact_ref"]) if row["artifact_ref"] else None
+    if artifact is None or not artifact.is_file():
+        return False
+    try:
+        result = json.loads(row["result_json"])
+        artifact_result = json.loads(artifact.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return False
+    if artifact_result != result:
+        return False
+    try:
+        return campaign_worker._report_is_verified(
+            result,
+            module,
+            manifest_path,
+            manifest_bytes,
+            manifest,
+            artifact.resolve(),
+            overlay=overlay,
+        )
+    except (TranslationIndexError, RuntimeError, OSError, ValueError, TypeError, KeyError, IndexError):
+        return False
+
+
+def _report_info(
+    row: sqlite3.Row,
+    required_schema: int,
+    manifest_hash: str | None = None,
+    *,
+    strict_verified: bool = False,
+) -> dict[str, Any]:
     artifact = Path(row["artifact_ref"]) if row["artifact_ref"] else None
     present = artifact is not None and artifact.is_file()
     report_schema = replay_schema = oracle_replay_schema = report_manifest_hash = None
@@ -172,6 +217,7 @@ def _report_info(row: sqlite3.Row, required_schema: int, manifest_hash: str | No
         present and report_schema == required_schema and replay_schema == 1
         and oracle_replay_schema == 1
         and (manifest_hash is None or report_manifest_hash == manifest_hash)
+        and strict_verified
     )
     return {
         "artifact": str(artifact) if artifact else None,
@@ -216,6 +262,7 @@ def snapshot(
         # still pass a different path to diagnose an explicitly chosen table.
         if manual_overrides is None and isinstance(value.get("manualOverrides"), dict):
             manual_overrides = manual_overlay.DEFAULT_DATABASE
+        overlay = None
         overlay_identity = None
         if manual_overrides is not None:
             if not manual_overrides.is_file():
@@ -306,7 +353,17 @@ def snapshot(
                     historical.append({"module": module, "cacheKey": key, **info, "verified": current["status"] == "success" and current["translation_status"] == "verified_translated"})
                     historical_keys.add(key)
                 else:
-                    info = _report_info(current, required_schema, manifest_hash)
+                    strict_verified = (
+                        current["status"] == "success"
+                        and current["translation_status"] == "verified_translated"
+                        and _strict_report_verified(
+                            current, module, manifest_path, manifest_bytes, value, overlay
+                        )
+                    )
+                    info = _report_info(
+                        current, required_schema, manifest_hash,
+                        strict_verified=strict_verified,
+                    )
                     item = {"module": module, "cacheKey": key, "dependencyIdentity": dependencies, **info}
                     item["verified"] = current["status"] == "success" and current["translation_status"] == "verified_translated"
                     item["queueCurrent"] = queue is not None and queue["cache_key"] == key and queue["state"] == "succeeded"
@@ -377,6 +434,8 @@ def snapshot(
 
 
 def markdown(status: dict[str, object]) -> str:
+    missing_indexed = status["missingIndexedModules"]
+    missing_names = ", ".join(f"`{module}`" for module in missing_indexed) or "none"
     lines = [
         "# Search-free Mathlib campaign", "", f"Updated {status['updatedAt']}", "",
         f"- Indexed: {status['indexedSourceCalls']:,} calls in {status['indexedModules']:,} modules.",
@@ -386,7 +445,7 @@ def markdown(status: dict[str, object]) -> str:
         f"- Unresolved source classifications: {status['unresolvedCalls']}.",
         f"- Stale queue identities: {status['staleQueueModules']}; missing exact-current reports: {status['missingVerifiedReportFiles']}.", "",
         f"Manifest: `{status['manifest']['sha256']}` ({status['manifest']['identityMatchedModules']} modules match the indexed source/analysis identity).", "",
-        f"Manifest modules absent from index: {len(status['missingIndexedModules'])}; cache identity mismatches: {len(status['cacheIdentityMismatches'])}.", "",
+        f"Manifest modules absent from index ({len(missing_indexed)}): {missing_names}; cache identity mismatches: {len(status['cacheIdentityMismatches'])}.", "",
         str(status["verificationScope"]), "",
         "Queue: " + ", ".join(f"{key}={value}" for key, value in sorted(status["queueStates"].items())),
         f"Backlog: {status['backlog']['openUnresolvedRows']} open unresolved rows.",

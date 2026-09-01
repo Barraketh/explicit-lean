@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import campaign_status
 import campaign_worker
@@ -89,14 +90,16 @@ class CampaignStatusTests(unittest.TestCase):
             result=self.report(7, "old-manifest"),
         )
         artifact = self.root / "artifact.json"
-        artifact.write_text("{}", encoding="utf-8")
+        current_report = self.report(3, hashlib.sha256(self.manifest.read_bytes()).hexdigest())
+        artifact.write_text(json.dumps(current_report), encoding="utf-8")
         plan_work(self.connection, implementation, toolchain)
         record_result(
             self.connection, "Mathlib/A.lean", implementation, toolchain,
             status="success", translated=True, verified=True,
-            result=self.report(3, hashlib.sha256(self.manifest.read_bytes()).hexdigest()), artifact_ref=str(artifact),
+            result=current_report, artifact_ref=str(artifact),
         )
-        status = campaign_status.snapshot(self.database, self.manifest, source_root=self.root, minimum_free_bytes=0)
+        with patch.object(campaign_worker, "_report_is_verified", return_value=True):
+            status = campaign_status.snapshot(self.database, self.manifest, source_root=self.root, minimum_free_bytes=0)
         self.assertEqual(status["exactCurrentVerifiedModules"], 1)
         self.assertEqual(status["exactCurrentVerifiedCalls"], 3)
         self.assertEqual(status["historicalVerifiedModules"], 1)
@@ -159,6 +162,61 @@ class CampaignStatusTests(unittest.TestCase):
                     (expected[field], row["cache_key"]),
                 )
                 self.connection.commit()
+
+    def test_minimal_current_report_is_excluded(self) -> None:
+        implementation, toolchain = campaign_worker._identities(self.manifest_value)
+        plan_work(self.connection, implementation, toolchain)
+        manifest_hash = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
+        report = self.report(3, manifest_hash)
+        artifact = self.root / "artifact.json"
+        artifact.write_text(json.dumps(report), encoding="utf-8")
+        record_result(
+            self.connection, "Mathlib/A.lean", implementation, toolchain,
+            status="success", translated=True, verified=True,
+            result=report, artifact_ref=str(artifact),
+        )
+        status = campaign_status.snapshot(
+            self.database, self.manifest, source_root=self.root, minimum_free_bytes=0
+        )
+        self.assertEqual(status["exactCurrentVerifiedModules"], 0)
+        self.assertEqual(status["exactCurrentVerifiedCalls"], 0)
+
+    def test_forged_report_artifact_content_is_excluded(self) -> None:
+        implementation, toolchain = campaign_worker._identities(self.manifest_value)
+        plan_work(self.connection, implementation, toolchain)
+        manifest_hash = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
+        report = self.report(3, manifest_hash)
+        forged_artifact = dict(report)
+        forged_artifact["aggregate"] = {"materializeCount": 99}
+        artifact = self.root / "artifact.json"
+        artifact.write_text(json.dumps(forged_artifact), encoding="utf-8")
+        record_result(
+            self.connection, "Mathlib/A.lean", implementation, toolchain,
+            status="success", translated=True, verified=True,
+            result=report, artifact_ref=str(artifact),
+        )
+        with patch.object(campaign_worker, "_report_is_verified", return_value=True):
+            status = campaign_status.snapshot(
+                self.database, self.manifest, source_root=self.root, minimum_free_bytes=0
+            )
+        self.assertEqual(status["exactCurrentVerifiedModules"], 0)
+        self.assertEqual(status["exactCurrentVerifiedCalls"], 0)
+
+    def test_missing_current_report_is_excluded(self) -> None:
+        implementation, toolchain = campaign_worker._identities(self.manifest_value)
+        plan_work(self.connection, implementation, toolchain)
+        record_result(
+            self.connection, "Mathlib/A.lean", implementation, toolchain,
+            status="success", translated=True, verified=True,
+            result=self.report(3, hashlib.sha256(self.manifest.read_bytes()).hexdigest()),
+            artifact_ref=str(self.root / "missing-report.json"),
+        )
+        status = campaign_status.snapshot(
+            self.database, self.manifest, source_root=self.root, minimum_free_bytes=0
+        )
+        self.assertEqual(status["exactCurrentVerifiedModules"], 0)
+        self.assertEqual(status["exactCurrentVerifiedCalls"], 0)
+        self.assertEqual(status["missingVerifiedReportFiles"], 1)
 
     def test_manifest_module_missing_from_index_is_reported(self) -> None:
         self.connection.execute("DELETE FROM work_queue WHERE module=?", ("Mathlib/A.lean",))
