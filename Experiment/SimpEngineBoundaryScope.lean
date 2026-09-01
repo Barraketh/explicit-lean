@@ -15,6 +15,7 @@ private def affectsParserContext (stx : Syntax) : Bool :=
   stx.isOfKind ``Lean.Parser.Command.«open»
 
 private def definesNotation (stx : Syntax) : Bool :=
+  stx.isOfKind ``Lean.Parser.Command.syntax ||
   stx.isOfKind ``Lean.Parser.Command.«notation» ||
   stx.isOfKind ``Lean.Parser.Command.«mixfix» ||
   stx.isOfKind `Mathlib.Tactic.scopedNS
@@ -37,7 +38,7 @@ private def elabNotationForParser
     after with scopes := { scope with opts := savedOptions } :: scopes
   }
 
-private def processCommand : Lean.Elab.Frontend.FrontendM Bool := do
+private def processCommand : Lean.Elab.Frontend.FrontendM (Bool × Bool) := do
   Lean.Elab.Frontend.updateCmdPos
   let commandState ← Lean.Elab.Frontend.getCommandState
   let inputCtx ← Lean.Elab.Frontend.getInputContext
@@ -54,18 +55,22 @@ private def processCommand : Lean.Elab.Frontend.FrontendM Bool := do
   modify fun state => { state with commands := state.commands.push command }
   Lean.Elab.Frontend.setParserState nextParserState
   Lean.Elab.Frontend.setMessages messages
+  let parserHadErrors := messages.hasErrors
   if definesNotation command then
     elabNotationForParser command
   else if affectsParserContext command then
     Lean.Elab.Frontend.elabCommandAtFrontend command
-  return Parser.isTerminalCommand command
+  return (Parser.isTerminalCommand command, parserHadErrors)
 
-private partial def processCommands : Lean.Elab.Frontend.FrontendM Unit := do
-  unless ← processCommand do
-    processCommands
+private partial def processCommands : Lean.Elab.Frontend.FrontendM Bool := do
+  let (terminal, parserHadErrors) ← processCommand
+  if terminal then
+    return parserHadErrors
+  let laterHadErrors ← processCommands
+  return parserHadErrors || laterHadErrors
 
 private unsafe def parseSource (env : Environment) (path : System.FilePath)
-    (source : String) : IO (Syntax × MessageLog) := do
+    (source : String) : IO (Syntax × MessageLog × Bool) := do
   let inputCtx := Parser.mkInputContext source path.toString
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   let initialState : Lean.Elab.Frontend.State := {
@@ -73,9 +78,9 @@ private unsafe def parseSource (env : Environment) (path : System.FilePath)
     parserState
     cmdPos := parserState.pos
   }
-  let (_, state) ← (processCommands.run { inputCtx }).run initialState
+  let (parserHadErrors, state) ← (processCommands.run { inputCtx }).run initialState
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
-  return (moduleSyntax, state.commandState.messages)
+  return (moduleSyntax, state.commandState.messages, parserHadErrors)
 
 private unsafe def parseSourceFully (path : System.FilePath)
     (source : String) : IO (Syntax × MessageLog) := do
@@ -212,8 +217,8 @@ private unsafe def emitFile (env : Environment) (module : Name)
   let source ← IO.FS.readFile path
   let fileMap := FileMap.ofString source
   try
-    let (fastSyntax, fastMessages) ← parseSource env path source
-    let (moduleSyntax, messages) ← if fastMessages.hasErrors then
+    let (fastSyntax, fastMessages, fastParserHadErrors) ← parseSource env path source
+    let (moduleSyntax, messages) ← if fastParserHadErrors || fastMessages.hasErrors then
       IO.println s!"SIMP_ENGINE_SCOPE_FULL_FALLBACK module={module} file={path}"
       parseSourceFully path source
     else

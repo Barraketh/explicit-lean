@@ -78,6 +78,69 @@
       "replacement": "rfl",
       "source": "simp",
       "startByte": 9830
+    },
+    {
+      "endByte": 29941,
+      "module": "Mathlib/Algebra/Algebra/Unitization.lean",
+      "moduleSourceSha256": "d6c1336ad59b0998a58c3b2a9c3e9431342d78bc35f501e76bd91ad3f37b2119",
+      "occurrence": "2a91b1eea39ed281",
+      "replacement": "change starMap φ (algebraMap R (Unitization R A) r) = _\n  exact (starMap φ).commutes r",
+      "source": "simp",
+      "startByte": 29937
+    },
+    {
+      "endByte": 16250,
+      "module": "Mathlib/Algebra/BigOperators/Expect.lean",
+      "moduleSourceSha256": "ae6d7d4d5ca899860dbb9e6db45573500e5251d60f2df14059789edd2eda044a",
+      "occurrence": "de466c9de1d4619f",
+      "replacement": "rw [expect, sum_indicator_eq_sum_inter, univ_inter, dens, div_eq_inv_mul, NNRat.smul_def]\n  have hOne : (∑ i ∈ s, (1 : ι → K) i) = ∑ _ ∈ s, (1 : K) := by rfl\n  rw [hOne, Finset.sum_const, nsmul_eq_mul, mul_one, card_univ,\n    NNRat.cast_mul, NNRat.cast_inv, NNRat.cast_natCast, NNRat.cast_natCast]",
+      "source": "simp [expect, sum_indicator_eq_sum_inter, dens, div_eq_inv_mul, NNRat.smul_def]",
+      "startByte": 16171
+    },
+    {
+      "endByte": 13875,
+      "module": "Mathlib/Algebra/BigOperators/Finsupp/Basic.lean",
+      "moduleSourceSha256": "45859804149193b4de6cee37c614076106cc0ff84965c21cbc3a849eaf52ba70",
+      "occurrence": "48748adc2b2197cc",
+      "replacement": "intro hd; subst d; rw [sum_zero_index] at h1; exact Nat.zero_ne_one h1",
+      "source": "simp [·] at h1",
+      "startByte": 13860
+    },
+    {
+      "endByte": 3579,
+      "module": "Mathlib/Algebra/BigOperators/Group/List/Lemmas.lean",
+      "moduleSourceSha256": "29992ab6273e432591ab88dbde9fdb6418a64147db443caa7c5dffe61f8527da",
+      "occurrence": "5516c981cbb2846b",
+      "replacement": "-- Preserve the stock filter matcher declarations explicitly.\n        have _filterMatcherIdentity :\n            List.filter.match_1 (motive := fun _ => Bool) (p a)\n              (fun _ : Unit => true) (fun _ : Unit => false) = p a := by\n          split <;> rename_i _ hp <;> exact hp.symm\n        rw [dedup_cons_of_notMem ha, List.filter]",
+      "source": "simp only [dedup_cons_of_notMem ha, List.filter]",
+      "startByte": 3531
+    },
+    {
+      "endByte": 11745,
+      "module": "Mathlib/Algebra/BigOperators/Intervals.lean",
+      "moduleSourceSha256": "c969bea5adca8855d8dd38d6cc80523edb8ee2fd41dcda77a7b47b09fa710570",
+      "occurrence": "39eeda04a6f52649",
+      "replacement": "have ha : (a : ℕ) < n + 1 := Nat.lt_succ_of_le (Nat.le_of_lt a.isLt)\n    rw [dif_pos ha]",
+      "source": "simp only [Order.lt_add_one_iff, is_le', ↓reduceDIte]",
+      "startByte": 11690
+    },
+    {
+      "endByte": 7759,
+      "module": "Mathlib/Algebra/Category/Grp/EpiMono.lean",
+      "moduleSourceSha256": "05c54873977fe6565685910b943ed5f8d966f0bc5ab7194f7b739ec26db5324a",
+      "occurrence": "3251bc59333b0c31",
+      "replacement": "dsimp only [tau, Equiv.coe_trans, Function.comp_apply]",
+      "source": "simp only [tau, Equiv.coe_trans, Function.comp_apply]",
+      "startByte": 7706
+    },
+    {
+      "endByte": 2286,
+      "module": "Mathlib/Algebra/Category/ModuleCat/Differentials/Basic.lean",
+      "moduleSourceSha256": "75ff2b4ebe57ecac2b204f511abed0583013de0614e75c1e0233061ff4e8916f",
+      "occurrence": "a986650d1792d44d",
+      "replacement": "letI := f.hom.toAlgebra; letI := Module.compHom M f.hom; exact D.leibniz b b'",
+      "source": "simp [d]",
+      "startByte": 2278
     }
   ]
 }

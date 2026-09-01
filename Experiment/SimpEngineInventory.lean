@@ -14,6 +14,7 @@ private def affectsParserContext (stx : Syntax) : Bool :=
   stx.isOfKind ``Lean.Parser.Command.«open»
 
 private def definesNotation (stx : Syntax) : Bool :=
+  stx.isOfKind ``Lean.Parser.Command.syntax ||
   stx.isOfKind ``Lean.Parser.Command.«notation» ||
   stx.isOfKind ``Lean.Parser.Command.«mixfix» ||
   stx.isOfKind `Mathlib.Tactic.scopedNS
@@ -35,7 +36,7 @@ private def elabNotationForParser (command : Syntax) : Lean.Elab.Frontend.Fronte
     after with scopes := { scope with opts := savedOptions } :: scopes
   }
 
-private def processInventoryCommand : Lean.Elab.Frontend.FrontendM Bool := do
+private def processInventoryCommand : Lean.Elab.Frontend.FrontendM (Bool × Bool) := do
   Lean.Elab.Frontend.updateCmdPos
   let commandState ← Lean.Elab.Frontend.getCommandState
   let inputCtx ← Lean.Elab.Frontend.getInputContext
@@ -52,18 +53,22 @@ private def processInventoryCommand : Lean.Elab.Frontend.FrontendM Bool := do
   modify fun state => { state with commands := state.commands.push command }
   Lean.Elab.Frontend.setParserState nextParserState
   Lean.Elab.Frontend.setMessages messages
+  let parserHadErrors := messages.hasErrors
   if definesNotation command then
     elabNotationForParser command
   else if affectsParserContext command then
     Lean.Elab.Frontend.elabCommandAtFrontend command
-  return Parser.isTerminalCommand command
+  return (Parser.isTerminalCommand command, parserHadErrors)
 
-private partial def processInventoryCommands : Lean.Elab.Frontend.FrontendM Unit := do
-  unless ← processInventoryCommand do
-    processInventoryCommands
+private partial def processInventoryCommands : Lean.Elab.Frontend.FrontendM Bool := do
+  let (terminal, parserHadErrors) ← processInventoryCommand
+  if terminal then
+    return parserHadErrors
+  let laterHadErrors ← processInventoryCommands
+  return parserHadErrors || laterHadErrors
 
 private def parseModuleIncrementally (env : Environment) (path : System.FilePath)
-    (source : String) : IO (Syntax × MessageLog) := do
+    (source : String) : IO (Syntax × MessageLog × Bool) := do
   let inputCtx := Parser.mkInputContext source path.toString
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   let initialState : Lean.Elab.Frontend.State := {
@@ -71,9 +76,9 @@ private def parseModuleIncrementally (env : Environment) (path : System.FilePath
     parserState
     cmdPos := parserState.pos
   }
-  let (_, state) ← (processInventoryCommands.run { inputCtx }).run initialState
+  let (parserHadErrors, state) ← (processInventoryCommands.run { inputCtx }).run initialState
   let moduleSyntax := mkNode `Lean.Parser.Module.module #[header.raw, mkListNode state.commands]
-  return (moduleSyntax, state.commandState.messages)
+  return (moduleSyntax, state.commandState.messages, parserHadErrors)
 
 private unsafe def parseModuleFully (path : System.FilePath)
     (source : String) : IO (Syntax × MessageLog) := do
@@ -101,8 +106,9 @@ private unsafe def inventoryFile (aggregateEnv? : Option Environment) (path : Sy
       | none =>
         let (header, _, _) ← Parser.parseHeader (Parser.mkInputContext source path.toString)
         Lean.importModules (Lean.Elab.HeaderSyntax.imports header) {} (loadExts := true)
-    let (fastSyntax, fastMessages) ← parseModuleIncrementally env path source
-    let (stx, messages) ← if fastMessages.hasErrors then
+    let (fastSyntax, fastMessages, fastParserHadErrors) ←
+      parseModuleIncrementally env path source
+    let (stx, messages) ← if fastParserHadErrors || fastMessages.hasErrors then
       IO.println s!"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={path}"
       parseModuleFully path source
     else

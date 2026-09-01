@@ -340,11 +340,16 @@ private def encodeBoundaryRealizationBatchV1? (before stock : Environment) (chec
     let source ← if cached then withEnv stock do
         let some (.thmInfo thm) := stock.checked.get.find? group.key
           | throwError "boundary_realization_root_not_theorem"
-        let mapping := (eqnsExt.getState stock).mapInv.find? group.key
-        unless mapping.isNone || mapping == some group.owner do
-          throwError "boundary_realization_root_mapping"
-        encodeBoundaryEquation group.owner thm (defeqAttr.hasTag stock group.key)
-          (backwardDefeqAttr.hasTag stock group.key) mapping.isSome
+        if let some kinds := congrKindsExt.find? stock group.key then
+          unless group.members == #[group.key] && group.publicMembers == #[group.key] do
+            throwError "boundary_realization_congruence_group_shape"
+          encodeBoundaryCongruence group.owner thm kinds
+        else
+          let mapping := (eqnsExt.getState stock).mapInv.find? group.key
+          unless mapping.isNone || mapping == some group.owner do
+            throwError "boundary_realization_root_mapping"
+          encodeBoundaryEquation group.owner thm (defeqAttr.hasTag stock group.key)
+            (backwardDefeqAttr.hasTag stock group.key) mapping.isSome
       else
         let some (_, source) := equations.find? (·.1 == group.key)
           | throwError "boundary_realization_missing_captured_root"
@@ -421,11 +426,19 @@ private def executeBoundaryRealizationBatchV1 (expectedAnchor : Name) (source : 
     let key ← ofExcept (decodeBoundaryName keyJson)
     if index == 0 && key != expectedAnchor then throwError "boundary_realization_foreign_anchor"
     index := index + 1
-    let (equationOwner, theoremSource, defeqTag, backwardTag, registerEqn) ←
-      ofExcept (parseEquationPayload equationSource)
-    unless owner == equationOwner && before.isImportedConst owner do
-      throwError "boundary_realization_foreign_owner"
-    validateEquationAnchor owner key
+    let congruencePayload : Bool := match Json.parse equationSource with
+      | .ok (.arr values) => values[0]? == some (.str "boundary_congruence_v1")
+      | _ => false
+    if congruencePayload then
+      let (congruenceOwner, _, _) ← ofExcept (parseCongruencePayload equationSource)
+      unless cached && children.isEmpty && owner == congruenceOwner &&
+          before.isImportedConst owner do throwError "boundary_realization_congruence_root"
+      validateCongruenceAnchor owner key
+    else
+      let (equationOwner, _, _, _, _) ← ofExcept (parseEquationPayload equationSource)
+      unless owner == equationOwner && before.isImportedConst owner do
+        throwError "boundary_realization_foreign_owner"
+      validateEquationAnchor owner key
     let existing ← lookupCacheTask (← getEnv) owner key
     if cached || existing.isSome then
       -- A fresh producer's recorder trial sees the stock memo before its
@@ -453,11 +466,16 @@ private def executeBoundaryRealizationBatchV1 (expectedAnchor : Name) (source : 
         | throwError "boundary_realization_invalid_child"
       checkDescriptor (← ofExcept <| decodeBoundaryName childOwner)
         (← ofExcept <| decodeBoundaryName childKey) childDescriptor
-    executeBoundaryTheorem key theoremSource
-    unless defeqAttr.hasTag (← getEnv) key == defeqTag &&
-        backwardDefeqAttr.hasTag (← getEnv) key == backwardTag do
-      throwError "boundary_realization_root_tags"
-    registerCapturedEquation owner key registerEqn
+    if congruencePayload then
+      executeBoundaryCongruence key equationSource
+    else
+      let (_, theoremSource, defeqTag, backwardTag, registerEqn) ←
+        ofExcept (parseEquationPayload equationSource)
+      executeBoundaryTheorem key theoremSource
+      unless defeqAttr.hasTag (← getEnv) key == defeqTag &&
+          backwardDefeqAttr.hasTag (← getEnv) key == backwardTag do
+        throwError "boundary_realization_root_tags"
+      registerCapturedEquation owner key registerEqn
   let after ← getEnv
   unless (← branchDelta before after) == added && (← branchDelta before after true) == publicAdded do
     throwError "boundary_realization_branch_transition_conflict"
@@ -540,25 +558,34 @@ private partial def captureRealizationNode (fuel : Nat) (stock : Environment)
       pure ("matcher", source, #[])
     else do
       unless group.key.getPrefix == group.owner do throwError "boundary_realization_v2_equation_owner"
-      let source ← if cached then do
-          let some (.thmInfo thm) := stock.checked.get.find? group.key
-            | throwError "boundary_realization_root_not_theorem"
-          let mapping := (eqnsExt.getState stock).mapInv.find? group.key
-          unless mapping.isNone || mapping == some group.owner do throwError "boundary_realization_root_mapping"
-          encodeBoundaryEquation group.owner thm (defeqAttr.hasTag stock group.key)
-            (backwardDefeqAttr.hasTag stock group.key) mapping.isSome
-        else do
-          let some (_, source) := equations.find? (·.1 == group.key)
-            | throwError "boundary_realization_missing_captured_root"
-          pure source
-      let childNames := group.members.pop
-      let childCandidates := candidates.filter fun child => child.members.size < group.members.size &&
-        !child.members.isEmpty && child.members.all childNames.contains
-      let covers := groupCovers childCandidates childNames
-      unless covers.size == 1 do throwError "boundary_realization_ambiguous_nested_cover"
-      let children ← covers[0]!.mapM fun child =>
-        captureRealizationNode (fuel - 1) stock cached candidates equations matchers child
-      pure ("equation", Json.str source, children)
+      let congruenceKinds? := if cached then congrKindsExt.find? stock group.key else none
+      if let some kinds := congruenceKinds? then
+        unless group.members == #[group.key] && group.publicMembers == #[group.key] do
+          throwError "boundary_realization_v2_congruence_group_shape"
+        let some (.thmInfo thm) := stock.checked.get.find? group.key
+          | throwError "boundary_realization_root_not_theorem"
+        let source ← encodeBoundaryCongruence group.owner thm kinds
+        pure ("congruence", Json.str source, #[])
+      else do
+        let source ← if cached then do
+            let some (.thmInfo thm) := stock.checked.get.find? group.key
+              | throwError "boundary_realization_root_not_theorem"
+            let mapping := (eqnsExt.getState stock).mapInv.find? group.key
+            unless mapping.isNone || mapping == some group.owner do throwError "boundary_realization_root_mapping"
+            encodeBoundaryEquation group.owner thm (defeqAttr.hasTag stock group.key)
+              (backwardDefeqAttr.hasTag stock group.key) mapping.isSome
+          else do
+            let some (_, source) := equations.find? (·.1 == group.key)
+              | throwError "boundary_realization_missing_captured_root"
+            pure source
+        let childNames := group.members.pop
+        let childCandidates := candidates.filter fun child => child.members.size < group.members.size &&
+          !child.members.isEmpty && child.members.all childNames.contains
+        let covers := groupCovers childCandidates childNames
+        unless covers.size == 1 do throwError "boundary_realization_ambiguous_nested_cover"
+        let children ← covers[0]!.mapM fun child =>
+          captureRealizationNode (fuel - 1) stock cached candidates equations matchers child
+        pure ("equation", Json.str source, children)
   let nodes ← get
   let index := nodes.size
   set (nodes.push { kind, owner := group.owner, key := group.key, source, children, descriptor })
@@ -1043,6 +1070,14 @@ private def parseRealizationNodes (cached : Bool) (values : Array Json) : MetaM 
           throwError "boundary_realization_v2_unordered_matcher"
         unless (← boundaryMatcherDeclarationNames owner source) == members do
           throwError "boundary_realization_matcher_members_conflict"
+    else if kind == "congruence" then
+      unless cached && children.isEmpty && members == #[key] && publicMembers == #[key] do
+        throwError "boundary_realization_v2_congruence_node"
+      let .str source := source | throwError "boundary_realization_v2_missing_congruence"
+      let (congruenceOwner, _, _) ← ofExcept (parseCongruencePayload source)
+      unless congruenceOwner == owner && !isPrivateName key do
+        throwError "boundary_realization_v2_congruence_owner"
+      validateCongruenceAnchor owner key
     else if kind == "equation" then
       let .str source := source | throwError "boundary_realization_v2_missing_equation"
       let (equationOwner, _, _, _, _) ← ofExcept (parseEquationPayload source)
@@ -1088,6 +1123,11 @@ private partial def executeRealizationNode (nodes : Array RealizationNode) (cach
     let some eqns := state.map.find? node.owner
       | throwError "boundary_realization_v2_child_not_matcher"
     unless eqns.splitterName == node.key do throwError "boundary_realization_v2_matcher_key"
+  else if node.kind == "congruence" then
+    unless cached || existing.isSome do throwError "boundary_realization_v2_congruence_cache"
+    realizeBoundaryConst node.owner node.key (throwError "boundary_realization_forbidden_callback")
+    let .str source := node.source | throwError "boundary_realization_v2_missing_congruence"
+    executeBoundaryCongruence node.key source
   else
     let .str source := node.source | throwError "boundary_realization_v2_missing_equation"
     let (_, theoremSource, defeqTag, backwardTag, registration) ← ofExcept (parseEquationPayload source)
@@ -1137,7 +1177,8 @@ private def executeBoundaryRealizationBatchV2 (expectedAnchor : Name) (source : 
   let mut seenPublic := #[]
   for root in roots do
     let node := nodes[root]!
-    unless node.kind == "equation" do throwError "boundary_realization_v2_private_root"
+    unless node.kind == "equation" || node.kind == "congruence" do
+      throwError "boundary_realization_v2_private_root"
     let (members, publicMembers) ← descriptorNames node.owner node.key node.descriptor
     seenPrivate := seenPrivate ++ members.filter (!seenPrivate.contains ·)
     seenPublic := seenPublic ++ publicMembers.filter (!seenPublic.contains ·)

@@ -12,6 +12,20 @@ import simp_engine_inventory as inventory
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "Experiment/SimpEngineInventoryHeaderFixture.lean"
 CALL = "simp only [go_append tl _, Array.toListAppend_eq, append_assoc, Array.toList_push]"
+LOCAL_SYNTAX_SOURCE = """\
+import Mathlib.Data.Nat.Basic
+
+namespace LocalInventorySyntax
+scoped syntax "localInventoryTerm" : term
+scoped macro_rules | `(localInventoryTerm) => `(0)
+end LocalInventorySyntax
+
+open scoped LocalInventorySyntax
+
+example : True := by
+  have : Nat := localInventoryTerm
+  simp
+"""
 
 
 def sha(path: Path) -> str:
@@ -39,30 +53,41 @@ def main() -> None:
         shutil.copy2(path, destination)
         archived.append({"path": str(path), "archivedPath": str(destination), "sha256": sha(path)})
     records = []
-    # Aggregate parsing historically returns zero here, but that is diagnostic:
-    # an improvement to it must not break the actual-header correctness checks.
-    for label, text, header, expected in [
-        ("aggregate-diagnostic", source, False, None),
-        ("actual-header-one-call", source, True, 1),
-        ("actual-header-no-calls", source.replace(CALL, "skip"), True, 0),
+    # Aggregate parsing lacks the replay syntax imported by this source. It must
+    # now detect that recovery, use the full parser, and retain the occurrence.
+    for label, text, header, allow_errors, expected_source, expect_fallback in [
+        ("aggregate-diagnostic", source, False, True, CALL, True),
+        ("actual-header-one-call", source, True, False, CALL, False),
+        ("actual-header-no-calls", source.replace(CALL, "skip"), True, False, None, False),
+        ("actual-header-local-syntax", LOCAL_SYNTAX_SOURCE, True, False, "simp", False),
     ]:
         path = work / f"{label}.lean"
         path.write_text(text)
         command = [sys.executable, str(ROOT / "Experiment/lean_toolchain_cache.py"), "inventory"]
+        if allow_errors:
+            command.append("--allow-elaboration-errors")
         if header:
             command.append("--header-imports")
         code, output, _ = inventory.run(command + [str(path)], timeout=120)
         log = path.with_suffix(".log")
         log.write_text(output)
-        if code or "FULL_FALLBACK" in output or "ELABORATION_ERRORS_ALLOWED" in output:
+        fallback = "FULL_FALLBACK" in output
+        if code or fallback != expect_fallback:
             raise RuntimeError(f"{label}: expected a clean syntax parse; see {log}")
         entries = [json.loads(line) for line in output.splitlines() if line.startswith("{")]
-        if expected is not None and len(entries) != expected:
-            raise RuntimeError(f"{label}: expected {expected} calls, got {len(entries)}")
-        if expected == 1:
+        expected_count = int(expected_source is not None)
+        if len(entries) != expected_count:
+            raise RuntimeError(f"{label}: expected {expected_count} calls, got {len(entries)}")
+        if expected_source is not None:
             entry = entries[0]
-            assert text.encode()[entry["startByte"]:entry["endByte"]].decode() == CALL
-        records.append({"case": label, "expectedCount": expected, "actualCount": len(entries),
+            actual_source = text.encode()[entry["startByte"]:entry["endByte"]].decode()
+            if actual_source != expected_source:
+                raise RuntimeError(
+                    f"{label}: expected source {expected_source!r}, got {actual_source!r}"
+                )
+        records.append({"case": label, "expectedCount": expected_count,
+                        "actualCount": len(entries),
+                        "expectedFallback": expect_fallback, "actualFallback": fallback,
                         "source": str(path), "sourceSha256": sha(path),
                         "log": str(log), "logSha256": sha(log)})
     if {str(path): sha(path) for path in inputs} != before:

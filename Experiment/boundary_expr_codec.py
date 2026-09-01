@@ -1094,8 +1094,8 @@ def validate_realization_payload(source: object, expected_anchor: object,
                 if not (len(step) == 2 and _nat(step[1]) and step[1] < len(nodes)):
                     reject("invalid sequence group index")
                 root = step[1]
-                if nodes[root][0] != "equation":
-                    reject("sequence root is not equation")
+                if nodes[root][0] not in {"equation", "congruence"}:
+                    reject("sequence root is not public theorem")
                 closure = {root}
                 for i in range(root, -1, -1):
                     if i in closure:
@@ -1151,7 +1151,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
         nodes, roots = value[10:12]
         for index, node in enumerate(nodes):
             if not (isinstance(node, list) and len(node) == 6
-                    and isinstance(node[0], str) and node[0] in {"matcher", "equation"}
+                    and isinstance(node[0], str) and node[0] in {"matcher", "equation", "congruence"}
                     and isinstance(node[4], list)):
                 reject("invalid recursive node")
             kind, owner, root_name, payload, children, captured = node
@@ -1179,6 +1179,14 @@ def validate_realization_payload(source: object, expected_anchor: object,
                     matcher = validate_matcher_payload(payload, owner, label)
                     if matcher[0] != "boundary_matcher_bundle_v3" or matcher[19] != private:
                         reject("recursive matcher member mismatch")
+            elif kind == "congruence":
+                if (not value[1] or children or _private_name(root_name)
+                        or root_name[:-1] != owner or private != [root_name]
+                        or public != [root_name]):
+                    reject("invalid recursive congruence")
+                congruence = validate_congruence_payload(payload, root_name, label)
+                if congruence[1] != owner:
+                    reject("recursive congruence anchor mismatch")
             else:
                 if _private_name(root_name) or root_name[:-1] != owner:
                     reject("foreign recursive equation owner")
@@ -1195,7 +1203,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
             node_members.append(private); node_public.append(public)
         if (any(not _nat(i) or i >= len(nodes) for i in roots)
                 or len(set(roots)) != len(roots)
-                or any(nodes[i][0] != "equation" for i in roots)):
+                or any(nodes[i][0] not in {"equation", "congruence"} for i in roots)):
             reject("invalid recursive roots")
         reachable = set(roots)
         for index in range(len(nodes) - 1, -1, -1):
@@ -1226,8 +1234,20 @@ def validate_realization_payload(source: object, expected_anchor: object,
         key(owner); key(root_name)
         if root_name[:-1] != owner:
             reject("foreign root owner")
-        validate_equation_payload(equation, root_name, label)
         private, public = descriptor(captured, owner, root_name)
+        try:
+            decoded = json.loads(equation) if isinstance(equation, str) else None
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, list) and decoded and decoded[0] == "boundary_congruence_v1":
+            if (not value[1] or children or private != [root_name]
+                    or public != [root_name]):
+                reject("invalid cached congruence root")
+            congruence = validate_congruence_payload(equation, root_name, label)
+            if congruence[1] != owner:
+                reject("congruence root anchor mismatch")
+        else:
+            validate_equation_payload(equation, root_name, label)
         child_names = []
         for child in children:
             if not isinstance(child, list) or len(child) != 4:
