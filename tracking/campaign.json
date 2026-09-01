@@ -17,15 +17,15 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-01T19:21:39.331350+00:00",
-    "lastUsedPercent": 87,
+    "lastCheckedAt": "2026-09-01T21:51:58.506236+00:00",
+    "lastUsedPercent": 91,
     "lastDecision": "continue"
   },
   "coverage": {
     "currentCorpusTotal": 83627,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Authenticated v7 partitions all 83,627 source occurrences in 8,264 modules as 83,556 direct and 71 reusable, with zero unresolved. Production coverage remains zero until current-HEAD v8 module reports and cold translated-tree certification pass.",
+    "note": "Authenticated v8 partitions all 83,627 source occurrences in 8,264 modules as 83,556 direct and 71 reusable, with zero unresolved. Its guarded pilot and closure passes verified 39 modules / 165 occurrences before the planned scheduling-control freeze. Accepted current-HEAD and complete-tree coverage remains zero until v9 reruns and cold translated-tree certification pass.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83627,
     "unresolvedOccurrences": 0,
@@ -35,7 +35,7 @@
     "provisionalCachedOccurrences": 894,
     "provisionalCachedModules": 83,
     "minimumAcceptedReportSchema": 13,
-    "validationHold": "Authenticated v7 is structurally complete and indexed, but selector option parity changed at 7b76a60, so no v7 result is accepted under the final identity. Refresh once to v8, pass the NeZero pilot, then resume bounded direct production. Complete translated dependency-tree certification remains pending.",
+    "validationHold": "V8 is structurally authenticated and produced 39 verified module reports, but commit 3860bf3 deliberately moves the worker identity to requeue resource stops safely. Publish exact-HEAD v9, rerun the direct campaign under that identity, fix semantic failure families fail-closed, integrate reusable provenance, then certify the complete translated dependency tree.",
     "freshAnalyzedModules": 8264,
     "freshAnalyzedOccurrences": 83627,
     "freshDirectExecutableOccurrences": 83556,
@@ -43,7 +43,11 @@
     "separatelyRequiredOccurrences": 0,
     "freshAnalyzedUnresolvedOccurrences": 0,
     "directMaterializerModules": 6280,
-    "reusableOrMixedModules": 40
+    "reusableOrMixedModules": 40,
+    "authenticatedV8VerifiedModules": 39,
+    "authenticatedV8VerifiedOccurrences": 165,
+    "authenticatedV8FailedModules": 31,
+    "authenticatedV8QueuedModules": 6212
   },
   "work": [
     {
@@ -80,7 +84,7 @@
       "id": "corpus-translation",
       "owner": "coordinator",
       "status": "in_progress",
-      "description": "Authenticated v7 inventory/index complete; final-option v8 refresh, guarded pilot, broad direct shards, reusable code, and full translated tree in progress."
+      "description": "Authenticated v8 inventory/index/pilot and 39-module direct evidence complete; exact-HEAD v9 refresh, guarded broad direct shards, reusable code, and full translated tree in progress."
     },
     {
       "id": "readability",
@@ -116,7 +120,7 @@
       "id": "resumable-campaign-worker",
       "owner": "coordinator (Luna initial implementation; Sol integration after capacity error)",
       "status": "completed",
-      "description": "Bounded worker committed54fcbd0. Strict preflight, explicit implementation/toolchain/dependency identities, per-module leases, budget checks and durable outcomes. Restarts skip unchanged failures/partial results and advance beyond verified prefixes. Seven worker and10index checks passed."
+      "description": "Worker commit 3860bf3 adds fail-closed pre-claim memory admission and treats exit125 as an immutable logged, abandoned/requeued lease that stops the batch without semantic failure cache. Independent review plus29 worker,13 index and process-group checks pass."
     },
     {
       "id": "unresolved-caller-probes",
@@ -449,6 +453,24 @@
       "owner": "coordinator with delegated fix-review",
       "status": "completed",
       "description": "Commit 7b76a60 aligns recording and declaration-oracle selector fingerprints with the true pinned Mathlib package leanOptions, excluding overlay-only linter suppressions and maxHeartbeats. Fresh recording to generated selector to oracle round-trip passes."
+    },
+    {
+      "id": "local-macro-lowering-overlay",
+      "owner": "coordinator with Luna implementation/review",
+      "status": "completed_bounded_not_integrated",
+      "description": "Commits0c725f5/35a5849 authenticate and lower22 nullary local macro definitions and88 same-module invocations across12 elliptic modules, preserving originals as comments. Production integration remains blocked on canonical provenance mapping and kernel-checked generated-source evidence."
+    },
+    {
+      "id": "authenticated-v8-direct-campaign",
+      "owner": "coordinator",
+      "status": "completed_planned_freeze",
+      "description": "Manifest3b4b4b85 at exact commit35a5849 covers8264modules/83627occurrences. NeZero and closure-ordered passes leave39 verified modules/165 occurrences,31 fail-closed modules,6212 queued; attempts618+ contain37 successes,21 failures and3 deliberate abandoned leases. V8 frozen before integrating resource-stop control."
+    },
+    {
+      "id": "resource-stop-requeue",
+      "owner": "Luna implementation; Terra and Sol review",
+      "status": "completed",
+      "description": "Commit3860bf3 preserves exit125 logs, atomically abandons/requeues leases, avoids semantic failure cache entries, stops the batch, and checks host memory before claims. All focused tests and independent review pass."
     }
   ],
   "blockers": [
@@ -516,14 +538,20 @@
       "id": "selector-option-environment",
       "status": "resolved",
       "detail": "NeZero exposed recording/oracle option drift. Commit 7b76a60 uses the exact final Mathlib package option map in both paths and removes overlay-only settings from selector context; a fresh end-to-end selector round-trip passes."
+    },
+    {
+      "id": "v8-semantic-failure-families",
+      "status": "open",
+      "owner": "coordinator with isolated fix-review branches",
+      "reason": "Current fail-closed families include stock/applied generator drift, matcher equation-state conflict, local equation sequence coverage, activation aux cache, unsupported realization roots, multiple helpers, and a typed declaration-oracle delta. No family is counted as translated until exact replay and oracle checks pass."
     }
   ],
   "nextActions": [
-    "Publish and structurally inspect one clean exact-HEAD v8 manifest for all 8,264 modules and 83,627 calls; compare it against authenticated v7 and import it with the exact source-bound dependency map.",
-    "Rerun Mathlib/Algebra/NeZero.lean as the guarded final-option pilot. Require recording, replay, declaration oracle, original-call comment, and zero remaining executable syntax before broad dispatch.",
-    "Run two bounded direct-only workers against the shared SQLite claim index, with 12 GiB memory and disk reserves; preserve every failure and accepted evidence family.",
-    "Implement authenticated caller/configuration/state recording and fatal replay closure for all 71 reusable calls in 40 modules.",
-    "Assemble and cold-certify the translated dependency tree; then mine readable normal forms and continue with other common search tactics."
+    "Publish and structurally inspect one clean exact-HEAD v9 manifest for all 8,264 modules and 83,627 calls; compare semantic fields with v8 and import it with the exact source-bound dependency map.",
+    "Run one closure-ordered direct-only worker against the shared SQLite index. Exit125 must requeue and stop without a semantic failure result; preserve immutable logs and relaunch only after memory admission.",
+    "Triage and fix concrete v8 semantic failures in isolated fix-review branches. Require focused Lean record/replay/oracle evidence before integration; keep unsupported generator and state cases fail-closed.",
+    "Integrate authenticated canonical provenance for all 71 reusable calls in 40 modules, beginning with the 22 local macro bodies and 88 same-module invocations.",
+    "Assemble and cold-certify the complete translated dependency tree; then mine readable deterministic normal forms and continue with other common search tactics."
   ],
   "checkpoints": [
     {
@@ -1584,6 +1612,30 @@
       "pilotAttempt": 604,
       "diagnosis": "Ordinary replay compiled, but selector options differed between reduced recording and final Mathlib frontend. Commit 7b76a60 fixes both recording and oracle; retry only under v8 identity.",
       "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "schema13-v8-authenticated-direct-campaign",
+      "status": "completed_planned_freeze",
+      "commit": "35a5849a29d5c23cee6288bd4086310d7b9ec9aa",
+      "manifest": ".lake/week-2026-08-31/schema13-isolated-closed-manifest-v8.json",
+      "manifestSha256": "3b4b4b85946c800fccecfbcd2a79b7126a31a8c238b7560eca9e5ea92b33b240",
+      "dependencyMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
+      "database": ".lake/search-free-mathlib/translation-index.sqlite3",
+      "modules": 8264,
+      "occurrences": 83627,
+      "directExecutable": 83556,
+      "reusableExecutable": 71,
+      "unresolved": 0,
+      "verifiedModules": 39,
+      "verifiedOccurrences": 165,
+      "failedModules": 31,
+      "queuedModules": 6212,
+      "attemptsSince618": {
+        "success": 37,
+        "failure": 21,
+        "abandoned": 3
+      },
+      "acceptedCompleteTreeCoverage": false
     }
   ],
   "latestCommits": [
@@ -1648,7 +1700,10 @@
     "6c0815c",
     "aa6d3de",
     "d235563",
-    "7b76a60"
+    "7b76a60",
+    "0c725f5",
+    "35a5849",
+    "3860bf3"
   ],
   "experiments": [
     {
@@ -2415,8 +2470,8 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 40999374848,
-    "checkedAt": "2026-09-01T19:21:39.331350+00:00",
+    "lastFreeBytes": 42444226560,
+    "checkedAt": "2026-09-01T21:52:46.128881+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)",
     "losslessCertificateStorage": {
       "command": "python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json",
@@ -2426,7 +2481,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-09-01T19:21:39.331350+00:00",
+  "updatedAt": "2026-09-01T21:52:46.128881+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
@@ -2436,13 +2491,13 @@
   "productionPlan": {
     "eligibleOrdinaryModules": 6280,
     "reusableOrMixedModules": 40,
-    "workers": 2,
+    "workers": 1,
     "pilotModules": 1,
     "productionBatchModules": 500,
     "moduleTimeoutSeconds": 900,
-    "batchWallSeconds": 14400,
+    "batchWallSeconds": 21600,
     "minimumFreeBytes": 12884901888,
     "projectedEvidenceGiB": "8-10 including retries",
-    "policy": "Gate on a guarded NeZero success under v8. Then use unique worker/output labels and shared SQLite atomic claims; first pass omits retry_failed. Preserve all evidence and diagnose exact failure families before retry."
+    "policy": "Publish exact-HEAD v9, then use one closure-ordered worker with unique immutable output labels and shared SQLite claims. Keep12GiB memory/disk reserves. Pre-claim denial or exit125 stops the batch; exit125 logs and requeues without semantic failure. Preserve all evidence and diagnose exact failure families before retry."
   }
 }
