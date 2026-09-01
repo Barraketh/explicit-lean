@@ -36,12 +36,20 @@ private def importedFrequency (env : Environment) : IO (NameMap Nat) := do
       map.foldl (init := acc) fun acc name count =>
         acc.insert name (acc.getD name 0 + count)
 
-private def prepareTriggers (localMap importedMap : NameMap Nat) :
+private def importedFrequencyFromEnvironment (env : Environment) : NameMap Nat :=
+  let mapss := LibrarySuggestions.symbolFrequencyExt.getState env
+  mapss.foldl (init := {}) fun acc maps =>
+    maps.foldl (init := acc) fun acc map =>
+      map.foldl (init := acc) fun acc name count =>
+        acc.insert name (acc.getD name 0 + count)
+
+private def prepareTriggers (localMap importedMap : NameMap Nat) (excluded : NameSet := {}) :
     MetaM (NameMap (List (Name × Float))) := do
   let env ← getEnv
   let denyList := LibrarySuggestions.SineQuaNon.triggerDenyListExt.getState env
   let names := env.constants.map₂.toArray.map (·.1) |>.filter fun name =>
-    !LibrarySuggestions.isDeniedPremise env name && wasOriginallyTheorem env name
+    !excluded.contains name && !LibrarySuggestions.isDeniedPremise env name &&
+      wasOriginallyTheorem env name
   let mut map := {}
   for name in names do
     let ci ← getConstInfo name
@@ -57,6 +65,45 @@ private def prepareTriggers (localMap importedMap : NameMap Nat) :
       for (trigger, tolerance) in triggers do
         map := LibrarySuggestions.SineQuaNon.insertTrigger map trigger name tolerance
   return map
+
+public structure SuggestionMetadataObservation where
+  symbolFrequency : NameMap Nat
+  sineQuaNon : NameMap (List (Name × Float))
+
+private def localFrequencyExcluding (excluded : NameSet) : MetaM (NameMap Nat) := do
+  let env ← getEnv
+  env.constants.map₂.foldlM (init := {}) fun acc name info => do
+    if excluded.contains name || LibrarySuggestions.isDeniedPremise env name ||
+        !wasOriginallyTheorem env name then
+      pure acc
+    else
+      info.type.foldRelevantConstants (init := acc) fun constant acc =>
+        pure <| acc.alter constant fun count? => some (count?.getD 0 + 1)
+
+/-- Recompute the two derived LibrarySuggestions export maps from one
+    environment while omitting an authenticated set of proof auxiliaries.
+    This never reads or writes the process-global frequency caches. -/
+private unsafe def observeSuggestionMetadataExcludingImpl (env : Environment)
+    (excluded : NameSet) : IO SuggestionMetadataObservation := do
+  let extensions ← persistentEnvExtensionsRef.get
+  let some symbolExtension := extensions.find? (·.name == `symbolFrequency)
+    | throw <| IO.userError "observed_symbol_frequency_extension_missing"
+  unless symbolExtension.toEnvExtension.idx ==
+      LibrarySuggestions.symbolFrequencyExt.toEnvExtension.idx do
+    throw <| IO.userError "observed_symbol_frequency_extension_identity"
+  let some sineExtension := extensions.find? (·.name == `sineQueNon)
+    | throw <| IO.userError "observed_sine_qua_non_extension_missing"
+  unless sineExtension.toEnvExtension.idx ==
+      LibrarySuggestions.SineQuaNon.sineQuaNonExt.toEnvExtension.idx do
+    throw <| IO.userError "observed_sine_qua_non_extension_identity"
+  let localMap ← runExportMeta env (localFrequencyExcluding excluded)
+  let importedMap := importedFrequencyFromEnvironment env
+  let triggers ← runExportMeta env (prepareTriggers localMap importedMap excluded)
+  return { symbolFrequency := localMap, sineQuaNon := triggers }
+
+@[implemented_by observeSuggestionMetadataExcludingImpl]
+public opaque observeSuggestionMetadataExcluding (env : Environment)
+    (excluded : NameSet) : IO SuggestionMetadataObservation
 
 private def moduleDocExtensionName : Name :=
   "_private.Lean.DocString.Extension.0.Lean.moduleDocExt".toName

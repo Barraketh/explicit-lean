@@ -17,23 +17,23 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-08-31T22:44:34.925996+00:00",
-    "lastUsedPercent": 52,
+    "lastCheckedAt": "2026-09-01T02:34:04.657150+00:00",
+    "lastUsedPercent": 59,
     "lastDecision": "continue"
   },
   "coverage": {
     "currentCorpusTotal": 83425,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "The independently verified fresh analysis covers 83,414 executable calls in 8,260 modules (83,349 direct and 65 reusable); four modules containing 11 additional calls remain separately required, not exempted. Frozen per-module candidates against stock imports remain provisional. Current producer is report12/artifact5 with applied recording, exact native invocation/log bindings, pending-synthesis restrictions and bounded expression references. Acceptance additionally requires source/comment provenance, cold serialized output certification, and the complete translated tree.",
+    "note": "Fresh pinned schema12 analysis covers 83,414 executable calls in 8,260 modules (83,349 direct and 65 reusable); four source-quotation/tactic modules containing 11 additional calls remain separately required. The current indexed identity has 77 provisional module results covering 831 calls. Eight source-pinned manual overrides across six modules pass full composition with 55 remaining calls materialized, zero retained, canonical-to-final declaration oracles, and an independently rehashed 99-file evidence receipt. No bounded result counts as accepted translated-tree coverage.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83414,
     "unresolvedOccurrences": 5,
     "reusableExecutableOccurrences": 65,
     "nestedOccurrences": 91,
     "verifiedTranslatedModules": 0,
-    "provisionalCachedOccurrences": 1456,
-    "provisionalCachedModules": 165,
+    "provisionalCachedOccurrences": 831,
+    "provisionalCachedModules": 77,
     "minimumAcceptedReportSchema": 12,
     "validationHold": "The cold serialized comparator, independent compilation consumer, unconditional pending-synthesis barrier and report12 producer are integrated. Complete translated dependency-tree certification remains pending; every bounded production result remains provisional.",
     "freshAnalyzedModules": 8260,
@@ -258,7 +258,7 @@
       "id": "worker-preflight-memo",
       "owner": "Luna implementation with coordinator review",
       "status": "completed",
-      "description": "Reuse dependency identity/source memos within one preflight pass, retaining fresh selected-root checks and a fresh planning pass. Root shared-dependency fixture and source-change rejection checks pass. Independent96-module benchmark:4.61s\u21920.113s, identical keys (about41x for this preflight sample). Active frozen workers are unchanged; apply on next dispatch."
+      "description": "Reuse dependency identity/source memos within one preflight pass, retaining fresh selected-root checks and a fresh planning pass. Root shared-dependency fixture and source-change rejection checks pass. Independent96-module benchmark:4.61s→0.113s, identical keys (about41x for this preflight sample). Active frozen workers are unchanged; apply on next dispatch."
     },
     {
       "id": "mixed-realization-sequences",
@@ -391,6 +391,26 @@
       "owner": "coordinator with Luna implementation/fix-review",
       "status": "completed_bounded",
       "description": "Commit451e457 counts exact serialized bytes only for unique cached DAG nodes and fails closed above16MiB without truncation. Main20-owner suite and16 auxiliary records pass, including ExtraDegeneracy record/replay. Known11,015,063-byte auxiliary payload remains supported; historical Unitization node JSON71,368,653 bytes grounds the limit. No fresh over-limit runtime negative or Unitization rerun."
+    },
+    {
+      "id": "manual-simp-overrides",
+      "owner": "coordinator with Luna fix-review",
+      "status": "completed_bounded",
+      "description": "Eight exact source replacements across six modules are pinned with originals as comments. The full composition checker authenticates every removed syntax range and shifted untouched occurrence, materializes all55 remaining calls, and passes canonical-to-final declaration oracles with0retained calls. Accepted corpus coverage remains zero pending worker/tree integration."
+    },
+    {
+      "id": "schema12-manual-identity-worker",
+      "owner": "coordinator",
+      "status": "completed_bounded",
+      "description": "Fresh manifest c5da9774... at commit1168cc0 analyzed8,260modules/83,414calls. Attempts459-488 processed30modules:24 successes/250calls/255variants,6 fail-closed replay exceptions, no timeout/budget/storage stop. Current index totals77 provisional modules/831calls/893variants.",
+      "verification": ".lake/week-2026-08-31/schema12-manual-worker-root-verification.json",
+      "verificationSha256": "1df37f6ee7873fafa48353f4dc6fb24872d61f286a6e809a94d0a22c90b04db8"
+    },
+    {
+      "id": "manual-boundary-composition",
+      "owner": "coordinator with Luna review",
+      "status": "completed_bounded",
+      "description": "Full authenticated database composition passed6modules/8manual overrides plus55 ordinary materialized calls,0retained. Canonical stock-to-final semantic oracles pass; receipt binds99evidence files. Generated public proof helpers are accepted only with exact pinned names, no direct declaration range, proof type and existing owner; derived suggestion metadata is recomputed cache-free."
     }
   ],
   "blockers": [
@@ -443,15 +463,19 @@
       "id": "inline-first-selector-rendering",
       "status": "open_bounded_reproduction",
       "detail": "Generated multiline simp_engine_boundary_select is ambiguous inside inline `first | simp ... | exact ...`; frozen failure in declaration-branch handoff. No waiver. Fix renderer before final corpus closure."
+    },
+    {
+      "id": "manual-override-composition",
+      "status": "resolved_bounded",
+      "detail": "Eight exact overrides across six modules pass the full composition checker:55 remaining calls materialized,0retained, every final composite canonical-oracled. Root receipt 97fd1e83... binds99files. Authenticated overlay integration into worker/cache/tree protocol remains separate work."
     }
   ],
   "nextActions": [
-    "Freeze the latest integrated runtime, publish a fresh provenance manifest from the content-bound analysis checkpoints, and start a bounded indexed production worker under disk and budget guards.",
-    "Finish the bounded Unitization descriptor-size guard without regressing the authenticated 11,015,063-byte ExtraDegeneracy auxiliary certificate; then diagnose a compact deterministic encoding for the 73,341,536-byte Unitization descriptor.",
+    "Integrate the authenticated manual overlay into the manifest/cache/worker report protocol without inventing Boundary execution variants; keep canonical stock occurrence identities and source hashes.",
+    "Resume bounded indexed schema12 production from a fresh implementation-bound manifest, triaging each exact failure family under disk and budget guards.",
     "Process the four separately required modules/11 calls and the 65 reusable executable calls without finite-caller equivalence shortcuts; retain adjacent originals and full source/execution ownership.",
-    "Expand report12 production across the indexed corpus, triage exact failure families, and keep bounded successes provisional until translated-tree certification.",
-    "Assemble the translated dependency tree and cold-certify outputs; optional lossless storage only before publication after complete validation.",
-    "After full explicit coverage and translated-tree acceptance, improve readable normal forms and extend other tactics if time remains."
+    "Assemble the translated dependency tree and cold-certify final composite outputs with strict translated dependency resolution; bounded stock-import results remain provisional.",
+    "After full explicit coverage and translated-tree acceptance, mine readable normal forms and continue with other common search tactics."
   ],
   "checkpoints": [
     {
@@ -1092,6 +1116,16 @@
     {
       "at": "2026-08-31T21:26:34.168800+00:00",
       "summary": "Declaration-branch reservation integrated6b97bfd after independent2510file/10livebinding/83nonce verification. Final runtime focus2+Finprod45/45 pass, oracle352decl315public34extensions0omissions;21runtime+3wire+19source/protocol/legacy/failure controls pass. Main71jobbuild,6schema12,source-gap/pycompile pass. Deterministic active-equation insertion precedes computed mkChild; both infrastructure and recording-failure generator rollback repaired. Inline-first renderer issue retainedopen."
+    },
+    {
+      "at": "2026-09-01T02:34:04.657150+00:00",
+      "id": "manual-composition-eight",
+      "status": "full_database_composition_verified_bounded",
+      "summary": "Eight explicit source-pinned overrides across six modules pass full composition with55 remaining simp calls materialized and0retained. Every canonical stock module matches the final composite declaration oracle. Generated `_proof_n`/`congr_simp` auxiliaries are ignored only when source-less, proof-valued and owned; authored range lookalikes remain strict. Cache-free symbolFrequency/sineQueNon recomputation and15accepted/26fail-closed oracle controls pass. Independent rehash confirms99 evidence files.",
+      "evidence": [
+        ".lake/week-2026-08-31/manual-composition/run-_37r_lka/report.json",
+        ".lake/week-2026-08-31/manual-composition/run-_37r_lka/root-verification.json"
+      ]
     }
   ],
   "automationId": "complete-search-free-mathlib-by-sep-8",
@@ -1392,6 +1426,19 @@
       "directExecutable": 83349,
       "reusableExecutable": 65,
       "separatelyRequiredOccurrences": 11
+    },
+    {
+      "id": "manual-composition-eight",
+      "status": "completed_bounded",
+      "modules": 6,
+      "manualOverrides": 8,
+      "remainingCallsMaterialized": 55,
+      "retainedCalls": 0,
+      "report": ".lake/week-2026-08-31/manual-composition/run-_37r_lka/report.json",
+      "reportSha256": "c5a80a755b0f05fa0683d7bf6f5b5dbd3b3c644535799daeb397ad93b7a400b6",
+      "rootVerification": ".lake/week-2026-08-31/manual-composition/run-_37r_lka/root-verification.json",
+      "rootVerificationSha256": "97fd1e83bf3f03290354cc465b1ab1f303d7b8edff32517de02cb402010af5ce",
+      "acceptedCampaignCoverage": false
     }
   ],
   "latestCommits": [
@@ -1597,7 +1644,7 @@
       "status": "fresh_typed_diagnosis_independently_verified_strict_failure_retained",
       "snapshot": ".lake/search-free-mathlib/snapshots/toadditive-typed-diagnosis",
       "rootVerification": ".lake/week-2026-08-31/toadditive-typed-root-verification.json",
-      "finding": "Exact registered extension lookup and recursive typed fields show75stock/73applied entries;73common entries/order/lookups identical. Two stock-only current-module private proof\u2192private proof translations have identity reorder/noArg. Fresh receipt/native/source/log bindings verified1092hashes. No metadata exemption approved; investigating exact preservation. Earlier wrong-snapshot diagnostic remains quarantined, not evidence.",
+      "finding": "Exact registered extension lookup and recursive typed fields show75stock/73applied entries;73common entries/order/lookups identical. Two stock-only current-module private proof→private proof translations have identity reorder/noArg. Fresh receipt/native/source/log bindings verified1092hashes. No metadata exemption approved; investigating exact preservation. Earlier wrong-snapshot diagnostic remains quarantined, not evidence.",
       "acceptedCampaignCoverage": false
     },
     {
@@ -1678,9 +1725,9 @@
     "moduleCount": 8264,
     "occurrenceCount": 83425,
     "latestClosedManifest": {
-      "path": ".lake/search-free-mathlib/snapshots/schema12-current-campaign/.lake/schema12-full-manifest.json",
-      "sha256": "b2899816cd8e6fca49878e91d05751d3a7859c214997cd1d4c985e8fb18ec021",
-      "commit": "11cfcfdde4cf5a71bb090d5b469df48dcfe6ec45",
+      "path": ".lake/search-free-mathlib/snapshots/schema12-manual-overrides/.lake/schema12-manual-full-manifest.json",
+      "sha256": "c5da97746df66327435624bf45acf7cdd122e2270623e9013e05d370d0c5c37c",
+      "commit": "1168cc02cd49777ddff05fe080005333d1ed9c3f",
       "modules": 8260,
       "occurrences": 83414,
       "directExecutable": 83349,
@@ -1693,8 +1740,8 @@
         "Mathlib/Tactic/Zify.lean"
       ],
       "separatelyRequiredCalls": 11,
-      "rootVerification": ".lake/week-2026-08-31/schema12-full-manifest-root-verification.json",
-      "note": "Fresh complete closed subset analysis and source verification. Replay provenance predates current pending Finprod/helper-reference changes; no broad worker started from it."
+      "summary": ".lake/schema12-manual-full-manifest-summary.json",
+      "note": "Fresh complete closed manifest bound to the verified four-entry manual-override commit; manual overlays are not yet part of this stock-source manifest protocol."
     },
     "analysisDecoupling": {
       "status": "integrated",
@@ -1734,13 +1781,15 @@
   },
   "database": {
     "path": ".lake/search-free-mathlib/translation-index.sqlite3",
-    "status": "diagnostic_inventory_with_frozen_module_results",
+    "status": "current_schema12_index_with_provisional_module_results",
     "modules": 8264,
     "occurrenceFacts": 83425,
     "importEdges": 26396,
     "unresolved": 5,
-    "verifiedTranslations": 53,
-    "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json"
+    "verifiedTranslations": 77,
+    "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
+    "currentCandidateOccurrences": 831,
+    "currentCandidateVariants": 893
   },
   "productionValidation": {
     "commit": "451e457",
@@ -2165,6 +2214,26 @@
       "policy": "Cumulative unique serialized DAG nodes; fail closed, never truncate or project.",
       "limitation": "No fresh over-limit runtime negative; Unitization measurement is preserved historical evidence and the module was not rerun.",
       "acceptedCampaignCoverage": false
+    },
+    "manualOverrideComposition": {
+      "status": "full_database_composition_verified_bounded",
+      "modules": 6,
+      "manualOverrides": 8,
+      "remainingCallsMaterialized": 55,
+      "retainedCalls": 0,
+      "report": ".lake/week-2026-08-31/manual-composition/run-_37r_lka/report.json",
+      "reportSha256": "c5a80a755b0f05fa0683d7bf6f5b5dbd3b3c644535799daeb397ad93b7a400b6",
+      "rootVerification": ".lake/week-2026-08-31/manual-composition/run-_37r_lka/root-verification.json",
+      "rootVerificationSha256": "97fd1e83bf3f03290354cc465b1ab1f303d7b8edff32517de02cb402010af5ce",
+      "evidenceFiles": 99,
+      "evidenceTreeSha256": "f3bce0b7dd7e268aac8fcb4d7e64f6df82560e728183fbba9b4651b7ee96b8f6",
+      "oracleControls": {
+        "accepted": 15,
+        "failClosed": 26
+      },
+      "generatedProofPolicy": "Exact `_proof_<digits>` or `congr_simp`, no direct declaration range, proof-valued, existing owner; authored lookalikes remain observable.",
+      "acceptedCampaignCoverage": false,
+      "wholeMathlib": false
     }
   },
   "failureTriage": {
@@ -2199,7 +2268,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-08-31T22:44:34.925996+00:00",
+  "updatedAt": "2026-09-01T02:34:04.657150+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",

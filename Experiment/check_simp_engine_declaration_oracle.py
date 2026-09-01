@@ -143,6 +143,46 @@ def duplicate_public_translation_source(first: str, second: str) -> str:
     )
 
 
+def generated_proof_numbering_source(first_as_term: bool) -> str:
+    first = "True.intro" if first_as_term else "by exact True.intro"
+    return source(
+        "structure OracleProofBox where\n"
+        "  first : True\n"
+        "  second : (1 : Nat) = 1\n"
+        "def oracleSample : OracleProofBox where\n"
+        f"  first := {first}\n"
+        "  second := by rfl"
+    )
+
+
+def generated_congruence_source(include_helper: bool, *, direct_range: bool = False) -> str:
+    range_entry = (
+        "  Lean.addDeclarationRanges `oracleOwner.congr_simp "
+        "{ range := default, selectionRange := default }\n"
+        if direct_range
+        else ""
+    )
+    helper = (
+        "run_cmd do\n"
+        "  let theoremValue : TheoremVal := {\n"
+        "    name := `oracleOwner.congr_simp\n"
+        "    levelParams := []\n"
+        "    type := mkConst ``True\n"
+        "    value := mkConst ``True.intro\n"
+        "  }\n"
+        "  liftCoreM <| addDecl (.thmDecl theoremValue)\n"
+        + range_entry
+        if include_helper else ""
+    )
+    return source(
+        "open Lean Elab Command\n"
+        "def oracleOwner : Nat := 0\n"
+        "namespace oracleOwner\nend oracleOwner\n"
+        + helper
+        + "theorem oracleSample : True := True.intro"
+    )
+
+
 CASES = (
     Case("async-matcher-checked-declarations", async_matcher_source(), async_matcher_source(), True),
     Case("async-private-computational-equivalence", async_private_body_source(1),
@@ -158,6 +198,32 @@ CASES = (
         source("theorem oracleSample : True := by trivial"),
         source("theorem oracleSample : True := by exact True.intro"),
         True,
+    ),
+    Case(
+        "generated-public-proof-renumbering",
+        generated_proof_numbering_source(False),
+        generated_proof_numbering_source(True),
+        True,
+    ),
+    Case(
+        "authored-public-proof-lookalike-renamed",
+        source("namespace oracleOwner\ntheorem _proof_1 : True := True.intro\nend oracleOwner"),
+        source("namespace oracleOwner\ntheorem _proof_2 : True := True.intro\nend oracleOwner"),
+        False,
+        "declaration_set_mismatch",
+    ),
+    Case(
+        "generated-public-congruence-omission",
+        generated_congruence_source(True),
+        generated_congruence_source(False),
+        True,
+    ),
+    Case(
+        "authored-public-congruence-lookalike-omission",
+        generated_congruence_source(True, direct_range=True),
+        generated_congruence_source(False),
+        False,
+        "declaration_set_mismatch",
     ),
     Case(
         "private-to-additive-proof-translation-renamed",

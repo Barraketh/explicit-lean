@@ -504,10 +504,24 @@ private def declarationNameSetMismatchDetail
     s!"appliedOnlyCount={appliedOnly.size}; stockOnly={boundedNameList stockOnly}; " ++
     s!"appliedOnly={boundedNameList appliedOnly}"
 
--- A generated-looking suffix does not establish private provenance: users can
--- legally export names such as `proof_1`. Keep every such public declaration.
+-- A generated-looking suffix alone does not establish private provenance:
+-- users can legally export names such as `proof_1` or even `_proof_1`.
 private def privateDeclarationName (name : Name) : Bool :=
   isPrivateName name
+
+private def generatedProofComponent (component : String) : Bool :=
+  let marker := "_proof_"
+  component == "congr_simp" ||
+    (component.startsWith marker && (component.drop marker.length).all (·.isDigit) &&
+      component.rawEndPos > marker.rawEndPos)
+
+private def generatedProofName : Name → Bool
+  | .str _ component => generatedProofComponent component
+  | _ => false
+
+private def hasDirectDeclarationRange (environment : Environment) (name : Name) : Bool :=
+  (Lean.declRangeExt.find? (level := .exported) environment name).isSome ||
+    (Lean.declRangeExt.find? (level := .server) environment name).isSome
 
 private unsafe def runMetaInEnvironment (environment : Environment) (action : MetaM α) : IO α :=
   PPContext.runMetaM { env := environment } action
@@ -613,15 +627,64 @@ private unsafe def privateProofDeclaration (environment : Environment)
   | .defnInfo _ | .opaqueInfo _ => isPropInEnvironment environment info.type
   | _ => pure false
 
+/- Lean and simp give proof auxiliaries public-looking names such as
+   `owner._proof_5` and `owner.congr_simp`, but Mathlib declares these generated
+   names unstable implementation details. Recognize only the pinned frontend's
+   exact auxiliary components, no declaration-range entry of their own, an
+   existing declaration owner, and a proof-valued declaration. An authored
+   lookalike has its own range and remains observable. -/
+private unsafe def generatedProofDeclaration (environment : Environment)
+    (info : ConstantInfo) : IO Bool := do
+  if !generatedProofName info.name || hasDirectDeclarationRange environment info.name ||
+      !environment.constants.contains info.name.getPrefix then
+    return false
+  match info with
+  | .thmInfo _ => pure true
+  | .defnInfo _ | .opaqueInfo _ => isPropInEnvironment environment info.type
+  | _ => pure false
+
+private unsafe def generatedProofNames (environment : Environment) : IO NameSet := do
+  let mut result : NameSet := {}
+  for (_, info) in environment.constants.map₂ do
+    if ← generatedProofDeclaration environment info then
+      result := result.insert info.name
+  return result
+
+private def requireSuggestionEntries (data : ModuleData) (name : Name) :
+    IO (Array EnvExtensionEntry) := do
+  let some (_, entries) := data.entries.find? (·.1 == name)
+    | oracleFailure "environment_delta_mismatch" s!"missing derived metadata extension {name}"
+  unless entries.size == 1 do
+    oracleFailure "environment_delta_mismatch"
+      s!"derived metadata extension {name} has {entries.size} entries"
+  return entries
+
+private unsafe def observableSuggestionEntries (environment : Environment)
+    (data : ModuleData) (name : Name) : IO (Array EnvExtensionEntry) := do
+  let _ ← requireSuggestionEntries data name
+  let generated ← generatedProofNames environment
+  let observed ← Boundary.observeSuggestionMetadataExcluding environment generated
+  if name == `symbolFrequency then
+    return #[unsafeCast observed.symbolFrequency]
+  if name == `sineQueNon then
+    return #[unsafeCast observed.sineQuaNon]
+  oracleFailure "environment_delta_mismatch" s!"unsupported derived metadata extension {name}"
+
 private unsafe def checkDeclarationSets (stockEnvironment appliedEnvironment : Environment)
     (stockDeclarations appliedDeclarations : Array ConstantInfo) (counts : OracleCounts) :
     IO OracleCounts := do
   let stockMap := declarationMap stockDeclarations
   let appliedMap := declarationMap appliedDeclarations
-  let stockPublic := stockDeclarations.filter
-    (fun info => !privateDeclarationName info.name)
-  let appliedPublic := appliedDeclarations.filter
-    (fun info => !privateDeclarationName info.name)
+  let mut stockPublic := #[]
+  for info in stockDeclarations do
+    unless privateDeclarationName info.name ||
+        (← generatedProofDeclaration stockEnvironment info) do
+      stockPublic := stockPublic.push info
+  let mut appliedPublic := #[]
+  for info in appliedDeclarations do
+    unless privateDeclarationName info.name ||
+        (← generatedProofDeclaration appliedEnvironment info) do
+      appliedPublic := appliedPublic.push info
   let stockPublicNames := stockPublic.map (·.name)
   let appliedPublicNames := appliedPublic.map (·.name)
   unless stockPublicNames == appliedPublicNames do
@@ -632,20 +695,32 @@ private unsafe def checkDeclarationSets (stockEnvironment appliedEnvironment : E
     if let some appliedInfo := appliedMap.find? stockInfo.name then
       let stockPrivateProof ← privateProofDeclaration stockEnvironment stockInfo
       let appliedPrivateProof ← privateProofDeclaration appliedEnvironment appliedInfo
+      let stockGeneratedProof ← generatedProofDeclaration stockEnvironment stockInfo
+      let appliedGeneratedProof ← generatedProofDeclaration appliedEnvironment appliedInfo
       unless stockPrivateProof == appliedPrivateProof do
         oracleFailure "declaration_set_mismatch"
           s!"private-proof classification differs for {stockInfo.name}"
-      unless stockPrivateProof do
+      unless stockGeneratedProof == appliedGeneratedProof do
+        oracleFailure "declaration_set_mismatch"
+          s!"generated-proof classification differs for {stockInfo.name}"
+      unless stockPrivateProof || stockGeneratedProof do
         compareDeclaration stockEnvironment appliedEnvironment stockInfo appliedInfo
           s!"{stockInfo.name}"
       result := { result with checkedDeclarations := result.checkedDeclarations + 1 }
     else
-      unless ← privateProofDeclaration stockEnvironment stockInfo do
+      let stockPrivateProof ← privateProofDeclaration stockEnvironment stockInfo
+      let stockGeneratedProof ← generatedProofDeclaration stockEnvironment stockInfo
+      unless stockPrivateProof || stockGeneratedProof do
         oracleFailure "declaration_set_mismatch" s!"stock-only non-proof declaration {stockInfo.name}"
+      -- The schema-1 count fields predate source-less public proof helpers.
+      -- Account every permitted proof-only omission in the corresponding
+      -- proof bucket so both declaration-total invariants remain exact.
       result := { result with stockOnlyPrivateProof := result.stockOnlyPrivateProof + 1 }
   for appliedInfo in appliedDeclarations do
     if stockMap.find? appliedInfo.name |>.isNone then
-      unless ← privateProofDeclaration appliedEnvironment appliedInfo do
+      let appliedPrivateProof ← privateProofDeclaration appliedEnvironment appliedInfo
+      let appliedGeneratedProof ← generatedProofDeclaration appliedEnvironment appliedInfo
+      unless appliedPrivateProof || appliedGeneratedProof do
         oracleFailure "declaration_set_mismatch" s!"applied-only non-proof declaration {appliedInfo.name}"
       result := { result with appliedOnlyPrivateProof := result.appliedOnlyPrivateProof + 1 }
   return result
@@ -670,7 +745,8 @@ private unsafe def checkAxiomSubset (stockEnvironment appliedEnvironment : Envir
     (stockDeclarations appliedDeclarations : Array ConstantInfo) : IO Unit := do
   let stockMap := declarationMap stockDeclarations
   for appliedInfo in appliedDeclarations do
-    if !privateDeclarationName appliedInfo.name then
+    if !privateDeclarationName appliedInfo.name &&
+        !(← generatedProofDeclaration appliedEnvironment appliedInfo) then
       let some _ := stockMap.find? appliedInfo.name
         | oracleFailure "declaration_set_mismatch" s!"missing stock declaration {appliedInfo.name}"
       let stockAxioms ← collectAxiomsInEnvironment stockEnvironment appliedInfo.name
@@ -756,6 +832,25 @@ private unsafe def observableMatcherEntries (environment : Environment)
   -- Preserve order as well as every field after filtering private proofs.
   return unsafeCast result
 
+private unsafe def observableCongrKindsEntries (environment : Environment)
+    (entries : Array EnvExtensionEntry) : IO (Array EnvExtensionEntry) := do
+  let mut result : Array EnvExtensionEntry := #[]
+  for rawEntry in entries do
+    let entry : Name × Array Meta.CongrArgKind := unsafeCast rawEntry
+    let some info := environment.constants.find? entry.1
+      | oracleFailure "environment_delta_mismatch"
+          s!"congruence metadata has no declaration: {entry.1}"
+    -- MapDeclarationExtension entries form an overwrite log. Retain repeated
+    -- keys byte-exact so filtering cannot change the effective final map.
+    let mut keyCount := 0
+    for rawCandidate in entries do
+      let candidate : Name × Array Meta.CongrArgKind := unsafeCast rawCandidate
+      if candidate.1 == entry.1 then
+        keyCount := keyCount + 1
+    unless keyCount == 1 && (← generatedProofDeclaration environment info) do
+      result := result.push rawEntry
+  return result
+
 -- Pinned view of the first field of Mathlib's three-field TranslationInfo.
 -- Access only `translation`; retain each original opaque extension entry for
 -- serialization so the ignored field types are never read or reconstructed.
@@ -809,6 +904,13 @@ private unsafe def compareExtensions (stockEnvironment appliedEnvironment : Envi
       continue
     if allowlistedExtension name then
       continue
+    if name == `symbolFrequency || name == `sineQueNon then
+      let stock ← observableSuggestionEntries stockEnvironment stockData name
+      let applied ← observableSuggestionEntries appliedEnvironment appliedData name
+      unless (← extensionBytes stockData name stock) == (← extensionBytes appliedData name applied) do
+        oracleFailure "environment_delta_mismatch"
+          s!"derived suggestion metadata differs for {name}"
+      continue
     if name == `Lean.Compiler.inlineAttrs then
       let stock ← observableInlineAttributes stockEnvironment ((stockMap.find? name).getD #[])
       let applied ← observableInlineAttributes appliedEnvironment ((appliedMap.find? name).getD #[])
@@ -820,6 +922,12 @@ private unsafe def compareExtensions (stockEnvironment appliedEnvironment : Envi
       let applied ← observableMatcherEntries appliedEnvironment ((appliedMap.find? name).getD #[])
       unless (← extensionBytes stockData name stock) == (← extensionBytes appliedData name applied) do
         oracleFailure "environment_delta_mismatch" s!"extension state differs for {name}"
+      continue
+    if name == `Lean.Meta.congrKindsExt then
+      let stock ← observableCongrKindsEntries stockEnvironment ((stockMap.find? name).getD #[])
+      let applied ← observableCongrKindsEntries appliedEnvironment ((appliedMap.find? name).getD #[])
+      unless (← extensionBytes stockData name stock) == (← extensionBytes appliedData name applied) do
+        oracleFailure "environment_delta_mismatch" "observable congruence metadata differs"
       continue
     if name == `Mathlib.Tactic.ToAdditive.translations then
       let stock ← observableToAdditiveTranslations stockEnvironment ((stockMap.find? name).getD #[])
@@ -990,7 +1098,8 @@ private unsafe def observableSerializedInterface (environment : Environment)
       | oracleFailure "environment_delta_mismatch" s!"serialized interface has no checked owner: {info.name}"
     -- Exported theorem interfaces may be axioms. Only the corresponding bound
     -- private declaration can justify the existing private-proof omission rule.
-    unless ← privateProofDeclaration environment original do
+    unless (← privateProofDeclaration environment original) ||
+        (← generatedProofDeclaration environment original) do
       result := result.push info
   return result.qsort (fun a b => a.name.toString < b.name.toString)
 

@@ -26,6 +26,15 @@
       "startByte": 2071
     },
     {
+      "endByte": 5598,
+      "module": "Mathlib/Algebra/Algebra/Bilinear.lean",
+      "moduleSourceSha256": "b5f215cf4eadac7c6f9754350b2eea8e0f5d2135c14ced3b4efe579b04b26116",
+      "occurrence": "af1f3238d87dcae6",
+      "replacement": "intro x y; change (a * x) * y = a * (x * y); exact mul_assoc a x y",
+      "source": "simp +contextual [mul', smul_tmul', mul_assoc]",
+      "startByte": 5552
+    },
+    {
       "endByte": 18668,
       "module": "Mathlib/Algebra/Algebra/Spectrum/Quasispectrum.lean",
       "moduleSourceSha256": "86daaff4a1e1ed9d97d7dcf185be7df0da41c9b2ae049e4a852eeedca7f99791",
@@ -42,6 +51,33 @@
       "replacement": "rw [Subalgebra.setRange_algebraMap, AlgHom.coe_range, IsScalarTower.coe_toAlgHom']",
       "source": "simp",
       "startByte": 5295
+    },
+    {
+      "endByte": 11570,
+      "module": "Mathlib/Algebra/Algebra/Subalgebra/Unitization.lean",
+      "moduleSourceSha256": "35c8da597790f20fc8ab16ea39c6e18e6cedcd809ef8e0929d163499bab22566",
+      "occurrence": "1734864b48394331",
+      "replacement": "dsimp [starAlgHom]\n                   rw [map_zero, zero_add]",
+      "source": "simp [starAlgHom]",
+      "startByte": 11553
+    },
+    {
+      "endByte": 9638,
+      "module": "Mathlib/Algebra/Algebra/Tower.lean",
+      "moduleSourceSha256": "80c681c1674d180828b520f3533b549f302153ee5042c2e65ea7733c8c8c9e38",
+      "occurrence": "1dd139c47db82ca8",
+      "replacement": "rfl",
+      "source": "simp",
+      "startByte": 9634
+    },
+    {
+      "endByte": 9834,
+      "module": "Mathlib/Algebra/Algebra/Tower.lean",
+      "moduleSourceSha256": "80c681c1674d180828b520f3533b549f302153ee5042c2e65ea7733c8c8c9e38",
+      "occurrence": "0b1d23453545f5c2",
+      "replacement": "rfl",
+      "source": "simp",
+      "startByte": 9830
     }
   ]
 }
