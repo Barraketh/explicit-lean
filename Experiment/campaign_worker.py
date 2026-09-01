@@ -508,27 +508,35 @@ def run_worker(
     # validation.  Reports below reuse these checked selections; they never
     # independently walk the 205MiB global occurrence array.
     validated_selection: dict[str, materializer.SelectedModule] | None = None
-    complete_manifest = all(
-        key in manifest_value
-        for key in ("countsByExecutionRole", "countsByDeclarationKind", "countsByAction")
-    )
+    complete_manifest = materializer.corpus.MANIFEST_FIELDS <= manifest_value.keys()
     if complete_manifest:
-        by_name = {
-            str(raw["module"]): raw for raw in manifest_value["modules"]
+        module_names = [
+            str(raw["module"]) for raw in manifest_value["modules"]
             if isinstance(raw, Mapping) and isinstance(raw.get("module"), str)
-        }
-        capsule_candidates = [
-            module for module in selected
-            if not any(
-                isinstance(item, Mapping)
-                and item.get("executionRole") == "reusable_executable"
-                for item in by_name[module].get("occurrences", [])
-            )
         ]
-        validated = materializer.validate_manifest_selection(
-            manifest_value, capsule_candidates,
-            expect_total=None, expect_materialize=None,
-        ) if capsule_candidates else []
+        # ``validate_manifest_selection`` authenticates the complete manifest
+        # before it constructs the selected-module result.  A default run can
+        # legitimately have no dispatchable modules (all reusable or empty),
+        # but the validator requires one selected name, so probe one module and
+        # discard only the expected post-validation selection error.
+        validation_names = selected or module_names[:1]
+        if not validation_names:
+            raise TranslationIndexError("closed manifest contains no module records")
+        try:
+            validated = materializer.validate_manifest_selection(
+                manifest_value, validation_names,
+                expect_total=None, expect_materialize=None,
+            )
+        except RuntimeError as error:
+            if selected or not any(
+                marker in str(error)
+                for marker in (
+                    "selected module contains reusable_executable",
+                    "selected module has no materialize occurrences",
+                )
+            ):
+                raise
+            validated = []
         validated_selection = {item.module: item for item in validated}
     overlay = None
     if manual_overrides is not None:

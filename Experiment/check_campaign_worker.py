@@ -151,6 +151,57 @@ class CampaignWorkerTests(unittest.TestCase):
         result.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
         return result
 
+    def complete_manifest(self, *, mutate: str | None = None) -> Path:
+        """Turn the one-module fixture into a schema-2 closed manifest."""
+        manifest = self.manifest()
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        module = value["modules"][0]
+        occurrence = module["occurrences"][0]
+        module_name = module["module"]
+        occurrence["executionRole"] = "reusable_executable"
+        occurrence["declarationKind"] = "caller_dependent"
+        module.update({
+            "moduleHash": hashlib.sha256(module_name.encode()).hexdigest(),
+            "duplicateSyntaxRecords": 0,
+            "duplicateScopeSyntaxRecords": 0,
+        })
+        occurrence.update({
+            "line": 1, "column": 1, "ancestors": [], "commandKind": None,
+            "commandStartByte": None, "commandEndByte": None,
+            "scopePaths": [{
+                "ancestors": [], "commandKind": None,
+                "commandStartByte": None, "commandEndByte": None,
+            }],
+            "reason": "fixture", "declarations": [],
+        })
+        if mutate == "stale_source":
+            occurrence["source"] = "stale"
+        elif mutate == "module_hash":
+            module["moduleHash"] = "invalid-module-hash"
+        value.update({
+            "modulePrefix": "Mathlib/", "inventoriedModuleCount": 1,
+            "nestedOccurrenceCount": 0, "duplicateSyntaxRecords": 0,
+            "duplicateScopeSyntaxRecords": 0, "fullFrontendFallbacks": [],
+            "scopeFrontendFallbacks": [],
+            "scopeProbe": {
+                "module": "ExplicitLean.SimpEngine.Boundary.ScopeProbe",
+                "scheduling": "set_option Elab.async false", "temporaryCopyOnly": True,
+                "reportCommand": "simp_engine_boundary_scope_report",
+            },
+            "countsByExecutionRole": {"reusable_executable": 1},
+            "countsByDeclarationKind": {"caller_dependent": 1},
+            "countsByAction": {"materialize": 1},
+            "manualOverrides": {
+            "sha256": "0" * 64, "schema": 1,
+                "environment": {
+                    "mathlibCommit": value["mathlibCommit"], "lean": value["lean"],
+                },
+            },
+        })
+        result = self.root / f"complete-{mutate or 'valid'}.json"
+        result.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+        return result
+
     def fake_report(self, manifest: Path, module: str, *, unobserved: bool = False, failed_variant: bool = False) -> dict[str, object]:
         occurrence = hashlib.sha256(f"{module}:23:27".encode()).hexdigest()[:16]
         return {
@@ -171,6 +222,7 @@ class CampaignWorkerTests(unittest.TestCase):
 
     def run_fixture(self, manifest: Path, invoke, **options) -> dict[str, object]:
         evidence_side_effect = options.pop("evidence_side_effect", None)
+        budget_guard = options.pop("budget_guard", lambda: {"canDispatch": True})
         with mock.patch.object(worker, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "MATHLIB", self.root), \
              mock.patch.object(worker.materializer, "BOUNDARY_DEBUG_ROOT", self.boundary), \
@@ -187,7 +239,7 @@ class CampaignWorkerTests(unittest.TestCase):
              mock.patch.object(worker, "invoke_materializer", side_effect=invoke):
             return worker.run_worker(
                 self.db, manifest, self.boundary / "runs", "worker-test",
-                module_timeout=10, budget_guard=lambda: {"canDispatch": True}, **options,
+                module_timeout=10, budget_guard=budget_guard, **options,
             )
 
     def test_verified_report_counts_and_filter_claims_only_requested_module(self) -> None:
@@ -363,6 +415,26 @@ class CampaignWorkerTests(unittest.TestCase):
         value["modules"][0]["occurrences"] = [None]
         with self.assertRaisesRegex(RuntimeError, "invalid manifest occurrence.*occurrence must be an object"):
             worker._selected_modules(value, None)
+
+    def test_reusable_only_invalid_manifest_rejected_before_budget_decision(self) -> None:
+        for mutation, expected in (
+            ("stale_source", "stale inventory"),
+            ("module_hash", "module hash mismatch"),
+        ):
+            errors = []
+            for can_dispatch in (False, True):
+                manifest = self.complete_manifest(mutate=mutation)
+                invoke = mock.Mock(side_effect=AssertionError("reusable module was dispatched"))
+                with self.subTest(mutation=mutation, can_dispatch=can_dispatch):
+                    with self.assertRaisesRegex(RuntimeError, expected) as raised:
+                        self.run_fixture(
+                            manifest,
+                            invoke,
+                            budget_guard=lambda: {"canDispatch": can_dispatch},
+                        )
+                    errors.append(str(raised.exception))
+                invoke.assert_not_called()
+            self.assertEqual(errors[0], errors[1])
 
     def test_explicit_direct_only_selection_dispatches(self) -> None:
         manifest = self.manifest_with_roles({"Direct": ["direct_executable"]})
