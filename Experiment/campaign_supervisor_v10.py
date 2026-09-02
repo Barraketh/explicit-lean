@@ -35,7 +35,7 @@ import campaign_budget
 import campaign_worker
 import manual_overlay
 from translation_index import IndexError as TranslationIndexError
-from translation_index import connect, import_manifest, plan_work
+from translation_index import cache_key, connect, import_manifest, plan_work
 
 
 V10_MANIFEST_LABEL = "schema13-isolated-closed-manifest-v10.json"
@@ -284,6 +284,40 @@ def _authenticated_report_manifest(
     return path, payload
 
 
+def _authenticated_report_manifest_path(
+    report: Mapping[str, object],
+    manifest_hash: str,
+    snapshot: InvocationSnapshot,
+) -> tuple[Path, bytes]:
+    """Authenticate the immutable snapshot named by one durable report.
+
+    The index's manifest record identifies the bootstrap snapshot, while a
+    worker may bind its report to a later pass snapshot.  Every such path must
+    independently resolve to the exact authenticated v10 bytes under the
+    fixed input root.
+    """
+    raw_path = report.get("manifestPath")
+    if not isinstance(raw_path, str) or not raw_path:
+        raise TranslationIndexError("cached v10 report has no manifest path")
+    path = Path(raw_path)
+    if path == snapshot.manifest:
+        _assert_snapshot(snapshot)
+        return path, snapshot.manifest_bytes
+    root = INPUTS_ROOT.resolve()
+    if INPUTS_ROOT.is_symlink() or not INPUTS_ROOT.is_dir() or path.is_symlink() or not path.is_file():
+        raise TranslationIndexError("cached v10 report manifest is not an immutable input")
+    try:
+        path.resolve().relative_to(root)
+    except ValueError as error:
+        raise TranslationIndexError("cached v10 report manifest is outside the v10 input root") from error
+    if path.name != V10_MANIFEST_LABEL:
+        raise TranslationIndexError("cached v10 report has an unexpected manifest label")
+    payload = path.read_bytes()
+    if sha256(payload) != manifest_hash or payload != snapshot.manifest_bytes:
+        raise TranslationIndexError("cached v10 report manifest bytes do not match the authenticated snapshot")
+    return path, payload
+
+
 _SMALL_EVIDENCE_HASH_LIMIT = 1024 * 1024
 
 
@@ -401,7 +435,7 @@ def ordered_modules(
     connection = connect(config.database)
     try:
         verify_v10_index(connection, config, snapshot.manifest, manifest_hash, manifest_value, snapshot.manifest_bytes)
-        report_manifest, report_manifest_bytes = _authenticated_report_manifest(
+        _authenticated_report_manifest(
             connection, manifest_hash, snapshot
         )
         modules = {
@@ -425,18 +459,19 @@ def ordered_modules(
                 "AND SUM(execution_role='reusable_executable') = 0"
             )
         ]
-        planned = plan_work(connection, implementation, toolchain, modules=eligible)
-        expected_keys = {entry["module"]: entry["cacheKey"] for entry in planned}
+        identity_memo: dict[str, str] = {}
+        source_memo: dict[str, str] = {}
+        preplanned = []
+        for module in eligible:
+            key, dependency = cache_key(
+                connection, module, implementation, toolchain,
+                identity_memo=identity_memo, source_memo=source_memo,
+            )
+            preplanned.append({"module": module, "cacheKey": key, "dependencyIdentity": dependency})
+        expected_keys = {entry["module"]: entry["cacheKey"] for entry in preplanned}
         expected_dependencies = {
-            entry["module"]: entry["dependencyIdentity"] for entry in planned
+            entry["module"]: entry["dependencyIdentity"] for entry in preplanned
         }
-        queue_keys = {
-            str(row[0]): str(row[1])
-            for row in connection.execute("SELECT module,cache_key FROM work_queue")
-            if row[0] in expected_keys
-        }
-        if queue_keys != expected_keys:
-            raise TranslationIndexError("v10 queue cache identity does not match the planned identity")
         implementation_json = json.dumps(implementation, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         toolchain_json = json.dumps(toolchain, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         for row in connection.execute(
@@ -446,8 +481,8 @@ def ordered_modules(
             tuple(expected_keys.values()),
         ) if expected_keys else ():
             module = str(row[0])
-            cache_key = str(row[1])
-            if expected_keys.get(module) != cache_key:
+            row_cache_key = str(row[1])
+            if expected_keys.get(module) != row_cache_key:
                 raise TranslationIndexError("v10 cache row module/key association is mismatched")
             if module_identity.get(module) != (str(row[2]), str(row[3])):
                 raise TranslationIndexError("v10 cache row source identity is mismatched")
@@ -462,6 +497,9 @@ def ordered_modules(
                     raise TranslationIndexError("v10 cache report is not JSON") from error
                 if not isinstance(report, dict) or report.get("manifestHash") != manifest_hash:
                     raise TranslationIndexError("v10 cache report is bound to a different manifest")
+                report_manifest, report_manifest_bytes = _authenticated_report_manifest_path(
+                    report, manifest_hash, snapshot
+                )
                 artifact_ref = row[9]
                 if not isinstance(artifact_ref, str):
                     raise TranslationIndexError("v10 cached success has no durable artifact")
@@ -486,12 +524,12 @@ def ordered_modules(
                 if artifact_report != report or canonical_artifact != canonical_report:
                     raise TranslationIndexError("v10 cached artifact JSON differs from the durable result")
                 debug_root = materializer.debug_root_for(artifact)
-                previous = verified_cache_fingerprints.get(cache_key)
+                previous = verified_cache_fingerprints.get(row_cache_key)
                 evidence_tree = _evidence_tree(
                     debug_root, previous.evidence_tree if previous is not None else None
                 )
                 fingerprint = VerifiedCacheFingerprint(
-                    cache_key, module, str(row[2]), str(row[3]), str(row[4]), str(row[5]),
+                    row_cache_key, module, str(row[2]), str(row[3]), str(row[4]), str(row[5]),
                     str(row[6]), str(row[8]), artifact, artifact_sha256, evidence_tree,
                 )
                 if previous is not None:
@@ -506,7 +544,19 @@ def ordered_modules(
                 if verified_tree != evidence_tree:
                     raise TranslationIndexError("v10 cached evidence changed during verification")
                 fingerprint = replace(fingerprint, evidence_tree=verified_tree)
-                verified_cache_fingerprints[cache_key] = fingerprint
+                verified_cache_fingerprints[row_cache_key] = fingerprint
+        planned = plan_work(connection, implementation, toolchain, modules=eligible)
+        if {
+            entry["module"]: entry["cacheKey"] for entry in planned
+        } != expected_keys:
+            raise TranslationIndexError("v10 planned cache identity changed during validation")
+        queue_keys = {
+            str(row[0]): str(row[1])
+            for row in connection.execute("SELECT module,cache_key FROM work_queue")
+            if row[0] in expected_keys
+        }
+        if queue_keys != expected_keys:
+            raise TranslationIndexError("v10 queue cache identity does not match the planned identity")
     finally:
         connection.close()
 

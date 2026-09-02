@@ -161,11 +161,14 @@ class V10SupervisorTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def _insert_success(self, module, value, overlay, artifact):
+    def _insert_success(self, module, value, overlay, artifact, manifest_path):
         """Record the same durable success shape that c328 writes."""
         implementation, toolchain = campaign_worker._identities(value, overlay.identity())
         canonical = lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"))
-        report_json = canonical({"manifestHash": self.v10_hash})
+        report_json = canonical({
+            "manifestHash": self.v10_hash,
+            "manifestPath": str(Path(manifest_path).resolve()),
+        })
         artifact = Path(artifact)
         artifact.write_text(report_json, encoding="utf-8")
         evidence_root = supervisor.materializer.debug_root_for(artifact)
@@ -309,8 +312,34 @@ class V10SupervisorTests(unittest.TestCase):
             )
         finally:
             connection.close()
+        connection = connect(self.database)
+        try:
+            queue_before = connection.execute(
+                "SELECT module,cache_key,state,worker,lease_expires_at,last_attempt_id "
+                "FROM work_queue ORDER BY module"
+            ).fetchall()
+            attempts_before = connection.execute(
+                "SELECT module,cache_key,worker,status,failure FROM attempts ORDER BY attempt_id"
+            ).fetchall()
+        finally:
+            connection.close()
         with self.assertRaisesRegex(RuntimeError, "bound to a different manifest"):
             supervisor.ordered_modules(self.config, value, self.v10_hash, overlay, snapshot)
+        connection = connect(self.database)
+        try:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT module,cache_key,state,worker,lease_expires_at,last_attempt_id "
+                    "FROM work_queue ORDER BY module"
+                ).fetchall(), queue_before,
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT module,cache_key,worker,status,failure FROM attempts ORDER BY attempt_id"
+                ).fetchall(), attempts_before,
+            )
+        finally:
+            connection.close()
 
     def test_cache_row_module_must_match_its_planned_cache_key(self) -> None:
         self._import_v9()
@@ -384,8 +413,10 @@ class V10SupervisorTests(unittest.TestCase):
         self._import_v9()
         first = supervisor.bootstrap_index(self.config)
         first_snapshot, _, _, value, _, overlay = first
+        pass_snapshot = supervisor._snapshot(self.config)
         self._insert_success(
-            "Mathlib/A.lean", value, overlay, self.output_parent / "cached-a.json"
+            "Mathlib/A.lean", value, overlay, self.output_parent / "cached-a.json",
+            pass_snapshot.manifest,
         )
         cached_artifact = self.output_parent / "cached-a.json"
         cached_report = json.loads(cached_artifact.read_text(encoding="utf-8"))
@@ -397,7 +428,19 @@ class V10SupervisorTests(unittest.TestCase):
         self.assertEqual(modules, ["Mathlib/B.lean"])
         self.assertEqual(verified.call_args.args[0], cached_report)
         self.assertEqual(verified.call_args.args[1], "Mathlib/A.lean")
-        self.assertEqual(verified.call_args.args[2], first_snapshot.manifest)
+        self.assertEqual(verified.call_args.args[2], pass_snapshot.manifest)
+        pass_manifest_bytes = pass_snapshot.manifest.read_bytes()
+        pass_snapshot.manifest.write_bytes(b"changed-pass-snapshot")
+        with self.assertRaisesRegex(RuntimeError, "manifest bytes do not match"):
+            supervisor.ordered_modules(self.config, value, self.v10_hash, overlay, first_snapshot)
+        pass_snapshot.manifest.write_bytes(pass_manifest_bytes)
+        escaped_manifest = self.root / "escaped-v10-manifest.json"
+        escaped_manifest.write_bytes(pass_manifest_bytes)
+        with self.assertRaisesRegex(RuntimeError, "outside the v10 input root"):
+            supervisor._authenticated_report_manifest_path(
+                {"manifestPath": str(escaped_manifest)},
+                self.v10_hash, first_snapshot,
+            )
         cached_artifact.write_text(
             json.dumps({"manifestHash": self.v9_hash}, indent=2), encoding="utf-8"
         )
@@ -414,13 +457,14 @@ class V10SupervisorTests(unittest.TestCase):
         self.assertEqual(modules, ["Mathlib/B.lean"])
         self.assertEqual(resumed.call_args.args[0], cached_report)
         self.assertEqual(resumed.call_args.args[1], "Mathlib/A.lean")
-        self.assertEqual(resumed.call_args.args[2], first_snapshot.manifest)
+        self.assertEqual(resumed.call_args.args[2], pass_snapshot.manifest)
 
     def test_cached_success_is_verified_once_per_process_and_new_success_is_checked(self) -> None:
         self._import_v9()
         snapshot, _, _, value, _, overlay = supervisor.bootstrap_index(self.config)
         self._insert_success(
-            "Mathlib/A.lean", value, overlay, self.output_parent / "cached-a.json"
+            "Mathlib/A.lean", value, overlay, self.output_parent / "cached-a.json",
+            snapshot.manifest,
         )
         verified_keys = {}
         with patch.object(supervisor.campaign_worker, "_report_is_verified", return_value=True) as verified:
@@ -431,7 +475,8 @@ class V10SupervisorTests(unittest.TestCase):
                 self.config, value, self.v10_hash, overlay, snapshot, verified_keys
             )
             self._insert_success(
-                "Mathlib/B.lean", value, overlay, self.output_parent / "cached-b.json"
+                "Mathlib/B.lean", value, overlay, self.output_parent / "cached-b.json",
+                snapshot.manifest,
             )
             third, _ = supervisor.ordered_modules(
                 self.config, value, self.v10_hash, overlay, snapshot, verified_keys
@@ -508,7 +553,7 @@ class V10SupervisorTests(unittest.TestCase):
                 self._insert_success(
                     "Mathlib/B.lean", json.loads(self.v10.read_text()),
                     Mock(identity=lambda: {"fixture": "overlay"}),
-                    Path(output) / "b-report.json",
+                    Path(output) / "b-report.json", manifest,
                 )
                 return {"manifestHash": self.v10_hash, "processed": 2, "succeeded": 1, "failures": 0,
                         "resourceStopped": True, "memoryDenied": False,
