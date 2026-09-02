@@ -7,6 +7,7 @@ import hashlib
 import json
 import fcntl
 import os
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 import time
@@ -601,16 +602,65 @@ class V10SupervisorTests(unittest.TestCase):
                 "storageDenied": False, "timedOut": False,
             }
 
+        def planned(*_args, **_kwargs):
+            events.append("ordered")
+            return ["Mathlib/A.lean"], 0
+
+        def reconstruct(*_args, **_kwargs):
+            events.append("reconstruct")
+            return json.loads(self.v10.read_bytes())
+
         with patch.object(supervisor.campaign_budget, "check", return_value={"canDispatch": True}), \
              patch.object(supervisor.campaign_worker, "memory_status", side_effect=admission), \
              patch.object(supervisor.campaign_worker, "storage_status", return_value={"canDispatch": True}), \
-             patch.object(supervisor, "ordered_modules", return_value=(["Mathlib/A.lean"], 0)), \
+             patch.object(supervisor, "ordered_modules", side_effect=planned), \
+             patch.object(supervisor, "_reconstruct_manifest_value", side_effect=reconstruct), \
              patch.object(supervisor.campaign_worker, "run_worker", side_effect=fake_worker), \
              patch.object(supervisor.gc, "collect", side_effect=lambda: events.append("gc")):
             self.assertEqual(supervisor.run_supervisor(self.config), 0)
 
         self.assertEqual(calls, 2)
-        self.assertEqual(events, ["admission", "worker", "gc", "admission", "worker", "gc"])
+        self.assertEqual(events, [
+            "admission", "ordered", "gc", "worker", "gc",
+            "admission", "reconstruct", "ordered", "gc", "worker", "gc",
+        ])
+
+    def test_invalid_manifest_reconstruction_fails_before_planning(self) -> None:
+        self._import_v9()
+        ordered = Mock(return_value=(["Mathlib/A.lean"], 0))
+        calls = 0
+        original_reconstruction = supervisor._reconstruct_manifest_value
+
+        def fake_worker(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return {
+                "manifestHash": self.v10_hash, "processed": 1, "succeeded": 0,
+                "failures": 0, "resourceStopped": True,
+                "memoryDenied": False, "budgetDenied": False,
+                "storageDenied": False, "timedOut": False,
+            }
+
+        def invalid_reconstruction(config, snapshot, manifest_hash):
+            invalid = replace(
+                snapshot,
+                manifest_bytes=b"{}",
+                manifest_hash=hashlib.sha256(b"{}").hexdigest(),
+            )
+            return original_reconstruction(config, invalid, manifest_hash)
+
+        with patch.object(supervisor.campaign_budget, "check", return_value={"canDispatch": True}), \
+             patch.object(supervisor.campaign_worker, "memory_status", return_value={"canDispatch": True, "availableBytes": 64}), \
+             patch.object(supervisor.campaign_worker, "storage_status", return_value={"canDispatch": True}), \
+             patch.object(supervisor, "ordered_modules", ordered), \
+             patch.object(supervisor, "_reconstruct_manifest_value", side_effect=invalid_reconstruction), \
+             patch.object(supervisor.campaign_worker, "run_worker", side_effect=fake_worker), \
+             patch.object(supervisor.gc, "collect"):
+            with self.assertRaisesRegex(RuntimeError, "immutable v10 run input changed"):
+                supervisor.run_supervisor(self.config)
+
+        self.assertEqual(calls, 1)
+        ordered.assert_called_once()
 
     def test_worker_pass_cleanup_runs_after_exception(self) -> None:
         self._import_v9()
@@ -629,7 +679,7 @@ class V10SupervisorTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "fixture worker failure"):
                 supervisor.run_supervisor(self.config)
 
-        self.assertEqual(events, ["worker", "gc"])
+        self.assertEqual(events, ["gc", "worker", "gc"])
 
     def test_budget_storage_memory_and_time_stops_are_fail_closed(self) -> None:
         cases = (

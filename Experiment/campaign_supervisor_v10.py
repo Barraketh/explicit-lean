@@ -159,6 +159,30 @@ def _assert_snapshot(snapshot: InvocationSnapshot) -> None:
             raise TranslationIndexError(f"immutable v10 run input changed: {path}")
 
 
+def _reconstruct_manifest_value(
+    config: SupervisorConfig,
+    snapshot: InvocationSnapshot,
+    manifest_hash: str,
+) -> dict[str, object]:
+    """Reparse the already authenticated immutable manifest for another pass."""
+    _assert_snapshot(snapshot)
+    if snapshot.manifest.name != V10_MANIFEST_LABEL:
+        raise TranslationIndexError("v10 manifest snapshot has an unexpected label")
+    if snapshot.manifest_hash != manifest_hash or sha256(snapshot.manifest_bytes) != manifest_hash:
+        raise TranslationIndexError("v10 manifest snapshot hash changed")
+    try:
+        value = json.loads(snapshot.manifest_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise TranslationIndexError("v10 manifest snapshot is not valid JSON") from error
+    if not isinstance(value, dict):
+        raise TranslationIndexError("v10 manifest snapshot must be an object")
+    if value.get("moduleFileCount") != config.expected_modules:
+        raise TranslationIndexError("v10 reconstructed moduleFileCount disagrees with configured identity")
+    if value.get("occurrenceCount") != config.expected_occurrences:
+        raise TranslationIndexError("v10 reconstructed occurrenceCount disagrees with configured identity")
+    return value
+
+
 def authenticate_v10_manifest(config: SupervisorConfig, snapshot: InvocationSnapshot) -> tuple[Path, bytes, dict[str, object], str, manual_overlay.Overlay]:
     """Authenticate the fresh closed manifest and exact manual overlay."""
     _assert_snapshot(snapshot)
@@ -671,6 +695,9 @@ def _run_supervisor_locked(config: SupervisorConfig) -> int:
     config = replace(config, output_parent=output_parent)
     started = time.monotonic()
     snapshot, _manifest_path, _manifest_bytes, manifest_value, manifest_hash, overlay = bootstrap_index(config)
+    # ``snapshot.manifest_bytes`` is the retained immutable input; the
+    # bootstrap payload is a separate read buffer and is no longer needed.
+    del _manifest_path, _manifest_bytes
     dependency_map = json.loads(snapshot.dependency_bytes)
     verified_cache_fingerprints: dict[str, VerifiedCacheFingerprint] = {}
     pass_number = config.start_pass
@@ -693,12 +720,19 @@ def _run_supervisor_locked(config: SupervisorConfig) -> int:
         if not storage["canDispatch"]:
             print(json.dumps({"event": "v10_storage_stop", **storage}, sort_keys=True), flush=True)
             return 0
+        if manifest_value is None:
+            manifest_value = _reconstruct_manifest_value(config, snapshot, manifest_hash)
         worker, output = fresh_paths(config, pass_number)
         _assert_snapshot(snapshot)
         modules, deferred = ordered_modules(
             config, manifest_value, manifest_hash, overlay, snapshot,
             verified_cache_fingerprints=verified_cache_fingerprints,
         )
+        # ``ordered_modules`` has completed all cache/evidence authentication
+        # for this pass.  Keep only the immutable bytes so the worker's own
+        # full-manifest parse does not overlap this parsed mapping.
+        manifest_value = None
+        gc.collect()
         print(json.dumps({
             "event": "v10_pass_start", "pass": pass_number, "worker": worker,
             "eligible": len(modules), "resourceDeferred": deferred,
