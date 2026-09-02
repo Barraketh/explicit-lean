@@ -629,32 +629,90 @@ class CampaignWorkerTests(unittest.TestCase):
         manifest = self.manifest_many(["A", "B"])
         calls: list[str] = []
 
-        def stopped(path, output, module, timeout):
+        def stopped_then_succeeds(path, output, module, timeout):
             calls.append(module)
-            return 125, "child output before resource stop\n"
+            if module.endswith("A.lean"):
+                return 125, "child output before resource stop\n"
+            output.write_text(json.dumps(self.fake_report(manifest, module)), encoding="utf-8")
+            return 0, "second module succeeded\n"
 
-        result = self.run_fixture(manifest, stopped)
-        self.assertEqual(result["processed"], 1)
-        self.assertEqual(calls, ["Mathlib/A.lean"])
+        result = self.run_fixture(manifest, stopped_then_succeeds)
+        self.assertEqual(result["processed"], 2)
+        self.assertEqual(calls, ["Mathlib/A.lean", "Mathlib/B.lean"])
         self.assertEqual(result["candidates"], 2)
+        self.assertEqual(result["succeeded"], 1)
         self.assertEqual(result["failures"], 0)
         self.assertTrue(result["resourceStopped"])
         connection = connect(self.db)
         try:
-            attempt = connection.execute("SELECT status,failure FROM attempts").fetchone()
-            self.assertEqual(attempt["status"], "abandoned")
-            self.assertIn("exit 125", attempt["failure"])
+            attempts = connection.execute(
+                "SELECT module,status,failure FROM attempts ORDER BY attempt_id"
+            ).fetchall()
+            self.assertEqual([(row["module"], row["status"]) for row in attempts], [
+                ("Mathlib/A.lean", "abandoned"), ("Mathlib/B.lean", "success"),
+            ])
+            self.assertIn("exit 125", attempts[0]["failure"])
             states = connection.execute(
                 "SELECT module,state FROM work_queue ORDER BY module"
             ).fetchall()
             self.assertEqual([(row["module"], row["state"]) for row in states], [
-                ("Mathlib/A.lean", "queued"), ("Mathlib/B.lean", "queued"),
+                ("Mathlib/A.lean", "queued"), ("Mathlib/B.lean", "succeeded"),
             ])
-            self.assertIsNone(connection.execute("SELECT * FROM result_cache").fetchone())
+            self.assertEqual(
+                [tuple(row) for row in connection.execute(
+                    "SELECT module,status FROM result_cache"
+                ).fetchall()],
+                [("Mathlib/B.lean", "success")],
+            )
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM work_queue WHERE state='running'").fetchone()[0],
+                0,
+            )
             log_ref = self.root / "boundary-materialization" / "runs"
             logs = list(log_ref.glob("*.log"))
-            self.assertEqual(len(logs), 1)
-            self.assertEqual(logs[0].read_text(encoding="utf-8"), "child output before resource stop\n")
+            self.assertEqual(len(logs), 2)
+            self.assertEqual(
+                next(path for path in logs if "A-" in path.name).read_text(encoding="utf-8"),
+                "child output before resource stop\n",
+            )
+        finally:
+            connection.close()
+
+    def test_memory_stop_rechecks_admission_before_next_claim(self) -> None:
+        manifest = self.manifest_many(["A", "B"])
+        calls: list[str] = []
+
+        def stopped(path, output, module, timeout):
+            calls.append(module)
+            return 125, "child output before resource stop\n"
+
+        allowed = {
+            "canDispatch": True, "availableBytes": 64 * 1024**3,
+            "minimumFreeMemoryBytes": worker.DEFAULT_MINIMUM_FREE_MEMORY_BYTES,
+        }
+        denied = {
+            "canDispatch": False, "availableBytes": 1,
+            "minimumFreeMemoryBytes": worker.DEFAULT_MINIMUM_FREE_MEMORY_BYTES,
+        }
+        with mock.patch.object(worker, "memory_status", side_effect=[allowed, denied]):
+            result = self.run_fixture(manifest, stopped)
+        self.assertEqual(calls, ["Mathlib/A.lean"])
+        self.assertEqual(result["processed"], 1)
+        self.assertTrue(result["resourceStopped"])
+        self.assertTrue(result["memoryDenied"])
+        connection = connect(self.db)
+        try:
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM attempts").fetchone()[0], 1
+            )
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM work_queue WHERE state='running'").fetchone()[0],
+                0,
+            )
+            states = dict(connection.execute("SELECT module,state FROM work_queue"))
+            self.assertEqual(states, {
+                "Mathlib/A.lean": "queued", "Mathlib/B.lean": "queued",
+            })
         finally:
             connection.close()
 

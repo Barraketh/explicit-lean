@@ -847,7 +847,10 @@ def run_worker(
             processed += 1
             if code == 125:
                 # Keep the immutable child log, but do not cache a semantic
-                # failure: another worker may retry after pressure falls.
+                # failure: another worker may retry after pressure falls. The
+                # current planned entry is complete for this pass; continue to
+                # the next distinct entry so the loop rechecks all guards
+                # before claiming it.
                 abandon_lease(
                     connection, lease.attempt_id, worker,
                     "materializer stopped by memory guard (exit 125)",
@@ -856,7 +859,7 @@ def run_worker(
                 active_lease = None
                 print(json.dumps({"event": "memory_stop", "module": lease.module,
                                   "exitCode": code, "log": str(log_path)}, sort_keys=True), flush=True)
-                break
+                continue
             if code != 0:
                 timed_out = timed_out or code == 124
                 failures += 1
