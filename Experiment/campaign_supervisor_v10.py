@@ -439,7 +439,7 @@ def run_supervisor(config: SupervisorConfig) -> int:
         except Exception as error:
             print(json.dumps({"event": "v10_budget_stop", "error": str(error)}, sort_keys=True), flush=True)
             return 0
-        if budget.get("canDispatch") is not True:
+        if not isinstance(budget, Mapping) or budget.get("canDispatch") is not True:
             print(json.dumps({"event": "v10_budget_stop", "budget": budget}, sort_keys=True), flush=True)
             return 0
         memory = campaign_worker.memory_status()
