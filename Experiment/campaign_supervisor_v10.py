@@ -14,6 +14,7 @@ import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import fcntl
+import gc
 import hashlib
 import json
 import os
@@ -707,30 +708,41 @@ def _run_supervisor_locked(config: SupervisorConfig) -> int:
         if remaining <= 0:
             break
         module_timeout = min(config.module_timeout, max(1, int(remaining)))
-        result = campaign_worker.run_worker(
-            config.database,
-            snapshot.manifest,
-            output,
-            worker,
-            modules=modules,
-            manual_overrides=snapshot.manual_overrides,
-            module_timeout=module_timeout,
-            max_seconds=min(21600.0, remaining),
-            dependency_map=dependency_map,
-            minimum_free_bytes=config.minimum_free_bytes,
-        )
-        _assert_snapshot(snapshot)
-        if not isinstance(result, Mapping):
-            raise TranslationIndexError("v10 worker returned a non-object result")
-        if result.get("manifestHash") != manifest_hash:
-            raise TranslationIndexError("v10 worker returned a different manifest hash")
-        print(json.dumps({"event": "v10_pass_result", "pass": pass_number, **result}, sort_keys=True), flush=True)
-        completed_passes += 1
-        pass_number += 1
-        if result.get("budgetDenied") or result.get("storageDenied") or result.get("timedOut"):
-            return 0
-        if not result.get("resourceStopped") and not result.get("memoryDenied"):
-            return 0
+        result = None
+        try:
+            result = campaign_worker.run_worker(
+                config.database,
+                snapshot.manifest,
+                output,
+                worker,
+                modules=modules,
+                manual_overrides=snapshot.manual_overrides,
+                module_timeout=module_timeout,
+                max_seconds=min(21600.0, remaining),
+                dependency_map=dependency_map,
+                minimum_free_bytes=config.minimum_free_bytes,
+            )
+            _assert_snapshot(snapshot)
+            if not isinstance(result, Mapping):
+                raise TranslationIndexError("v10 worker returned a non-object result")
+            if result.get("manifestHash") != manifest_hash:
+                raise TranslationIndexError("v10 worker returned a different manifest hash")
+            print(json.dumps({"event": "v10_pass_result", "pass": pass_number, **result}, sort_keys=True), flush=True)
+            completed_passes += 1
+            pass_number += 1
+            if result.get("budgetDenied") or result.get("storageDenied") or result.get("timedOut"):
+                return 0
+            if not result.get("resourceStopped") and not result.get("memoryDenied"):
+                return 0
+        finally:
+            # Release the per-pass worker result and planning/output objects
+            # before the next resource admission check.  The authenticated
+            # snapshot, manifest, overlay, and dependency map remain alive for
+            # the whole invocation; clearing them would weaken the exact-input
+            # contract.  ``gc.collect`` is best-effort for cycles; allocator
+            # page return is intentionally not assumed here.
+            del result, modules, deferred, worker, output
+            gc.collect()
     print(json.dumps({
         "event": "v10_limit_stop", "completedPasses": completed_passes,
         "nextPass": pass_number, "elapsedSeconds": time.monotonic() - started,

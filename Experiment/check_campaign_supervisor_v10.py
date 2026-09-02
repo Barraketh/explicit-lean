@@ -581,6 +581,56 @@ class V10SupervisorTests(unittest.TestCase):
         self.assertIn("pass-1", calls[0][0])
         self.assertIn("pass-2", calls[1][0])
 
+    def test_worker_pass_cleanup_runs_before_next_admission(self) -> None:
+        self._import_v9()
+        events = []
+        calls = 0
+
+        def admission():
+            events.append("admission")
+            return {"canDispatch": True, "availableBytes": 64, "minimumFreeMemoryBytes": 1}
+
+        def fake_worker(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            events.append("worker")
+            return {
+                "manifestHash": self.v10_hash, "processed": 1, "succeeded": 1,
+                "failures": 0, "resourceStopped": calls == 1,
+                "memoryDenied": False, "budgetDenied": False,
+                "storageDenied": False, "timedOut": False,
+            }
+
+        with patch.object(supervisor.campaign_budget, "check", return_value={"canDispatch": True}), \
+             patch.object(supervisor.campaign_worker, "memory_status", side_effect=admission), \
+             patch.object(supervisor.campaign_worker, "storage_status", return_value={"canDispatch": True}), \
+             patch.object(supervisor, "ordered_modules", return_value=(["Mathlib/A.lean"], 0)), \
+             patch.object(supervisor.campaign_worker, "run_worker", side_effect=fake_worker), \
+             patch.object(supervisor.gc, "collect", side_effect=lambda: events.append("gc")):
+            self.assertEqual(supervisor.run_supervisor(self.config), 0)
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(events, ["admission", "worker", "gc", "admission", "worker", "gc"])
+
+    def test_worker_pass_cleanup_runs_after_exception(self) -> None:
+        self._import_v9()
+        events = []
+
+        def fake_worker(*_args, **_kwargs):
+            events.append("worker")
+            raise RuntimeError("fixture worker failure")
+
+        with patch.object(supervisor.campaign_budget, "check", return_value={"canDispatch": True}), \
+             patch.object(supervisor.campaign_worker, "memory_status", return_value={"canDispatch": True, "availableBytes": 64}), \
+             patch.object(supervisor.campaign_worker, "storage_status", return_value={"canDispatch": True}), \
+             patch.object(supervisor, "ordered_modules", return_value=(["Mathlib/A.lean"], 0)), \
+             patch.object(supervisor.campaign_worker, "run_worker", side_effect=fake_worker), \
+             patch.object(supervisor.gc, "collect", side_effect=lambda: events.append("gc")):
+            with self.assertRaisesRegex(RuntimeError, "fixture worker failure"):
+                supervisor.run_supervisor(self.config)
+
+        self.assertEqual(events, ["worker", "gc"])
+
     def test_budget_storage_memory_and_time_stops_are_fail_closed(self) -> None:
         cases = (
             ("budget", {"canDispatch": False}, {"canDispatch": True}, {"canDispatch": True}),
