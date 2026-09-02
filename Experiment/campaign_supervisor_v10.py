@@ -321,8 +321,11 @@ def ordered_modules(
     manifest_hash: str,
     overlay: manual_overlay.Overlay,
     snapshot: InvocationSnapshot,
+    verified_cache_keys: set[str] | None = None,
 ) -> tuple[list[str], int]:
     """Plan with the v10 identity, then return closure ordered retry work."""
+    if verified_cache_keys is None:
+        verified_cache_keys = set()
     implementation, toolchain = campaign_worker._identities(manifest_value, overlay.identity())
     connection = connect(config.database)
     try:
@@ -364,6 +367,9 @@ def ordered_modules(
             if row[2] != implementation_json or row[3] != toolchain_json:
                 raise TranslationIndexError("v10 cache row has a mismatched implementation/toolchain identity")
             if row[4] == "success":
+                cache_key = str(row[1])
+                if cache_key in verified_cache_keys:
+                    continue
                 try:
                     report = json.loads(row[5])
                 except json.JSONDecodeError as error:
@@ -380,12 +386,23 @@ def ordered_modules(
                 if not artifact.is_file():
                     raise TranslationIndexError("v10 cached artifact is missing or is a symlink")
                 artifact_bytes = artifact.read_bytes()
-                if artifact_bytes.decode("utf-8") != row[5]:
+                try:
+                    artifact_report = json.loads(artifact_bytes)
+                except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                    raise TranslationIndexError("v10 cached artifact is not valid JSON") from error
+                canonical_artifact = json.dumps(
+                    artifact_report, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                )
+                canonical_report = json.dumps(
+                    report, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                )
+                if artifact_report != report or canonical_artifact != canonical_report:
                     raise TranslationIndexError("v10 cached artifact JSON differs from the durable result")
                 if not campaign_worker._report_is_verified(
-                        report, str(row[0]), report_manifest, report_manifest_bytes,
+                        artifact_report, str(row[0]), report_manifest, report_manifest_bytes,
                         dict(manifest_value), artifact, overlay, config.module_timeout):
                     raise TranslationIndexError("v10 cached artifact is not verified")
+                verified_cache_keys.add(cache_key)
     finally:
         connection.close()
 
@@ -474,6 +491,7 @@ def run_supervisor(config: SupervisorConfig) -> int:
     started = time.monotonic()
     snapshot, _manifest_path, _manifest_bytes, manifest_value, manifest_hash, overlay = bootstrap_index(config)
     dependency_map = json.loads(snapshot.dependency_bytes)
+    verified_cache_keys: set[str] = set()
     pass_number = config.start_pass
     completed_passes = 0
     while completed_passes < config.max_passes and time.monotonic() - started < config.max_seconds:
@@ -496,7 +514,10 @@ def run_supervisor(config: SupervisorConfig) -> int:
             return 0
         worker, output = fresh_paths(config, pass_number)
         _assert_snapshot(snapshot)
-        modules, deferred = ordered_modules(config, manifest_value, manifest_hash, overlay, snapshot)
+        modules, deferred = ordered_modules(
+            config, manifest_value, manifest_hash, overlay, snapshot,
+            verified_cache_keys=verified_cache_keys,
+        )
         print(json.dumps({
             "event": "v10_pass_start", "pass": pass_number, "worker": worker,
             "eligible": len(modules), "resourceDeferred": deferred,

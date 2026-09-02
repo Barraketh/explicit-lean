@@ -311,6 +311,9 @@ class V10SupervisorTests(unittest.TestCase):
         self._insert_success(
             "Mathlib/A.lean", value, overlay, self.output_parent / "cached-a.json"
         )
+        cached_artifact = self.output_parent / "cached-a.json"
+        cached_report = json.loads(cached_artifact.read_text(encoding="utf-8"))
+        cached_artifact.write_text(json.dumps(cached_report, indent=2), encoding="utf-8")
         with patch.object(supervisor.campaign_worker, "_report_is_verified", return_value=True) as verified:
             modules, _ = supervisor.ordered_modules(
                 self.config, value, self.v10_hash, overlay, first_snapshot
@@ -318,6 +321,12 @@ class V10SupervisorTests(unittest.TestCase):
         self.assertEqual(modules, ["Mathlib/B.lean"])
         self.assertEqual(verified.call_args.args[1], "Mathlib/A.lean")
         self.assertEqual(verified.call_args.args[2], first_snapshot.manifest)
+        cached_artifact.write_text(
+            json.dumps({"manifestHash": self.v9_hash}, indent=2), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(RuntimeError, "differs from the durable result"):
+            supervisor.ordered_modules(self.config, value, self.v10_hash, overlay, first_snapshot)
+        cached_artifact.write_text(json.dumps(cached_report, indent=2), encoding="utf-8")
 
         second_snapshot, _, _, value2, _, overlay2 = supervisor.bootstrap_index(self.config)
         self.assertNotEqual(first_snapshot.manifest, second_snapshot.manifest)
@@ -328,6 +337,35 @@ class V10SupervisorTests(unittest.TestCase):
         self.assertEqual(modules, ["Mathlib/B.lean"])
         self.assertEqual(resumed.call_args.args[1], "Mathlib/A.lean")
         self.assertEqual(resumed.call_args.args[2], first_snapshot.manifest)
+
+    def test_cached_success_is_verified_once_per_process_and_new_success_is_checked(self) -> None:
+        self._import_v9()
+        snapshot, _, _, value, _, overlay = supervisor.bootstrap_index(self.config)
+        self._insert_success(
+            "Mathlib/A.lean", value, overlay, self.output_parent / "cached-a.json"
+        )
+        verified_keys = set()
+        with patch.object(supervisor.campaign_worker, "_report_is_verified", return_value=True) as verified:
+            first, _ = supervisor.ordered_modules(
+                self.config, value, self.v10_hash, overlay, snapshot, verified_keys
+            )
+            second, _ = supervisor.ordered_modules(
+                self.config, value, self.v10_hash, overlay, snapshot, verified_keys
+            )
+            self._insert_success(
+                "Mathlib/B.lean", value, overlay, self.output_parent / "cached-b.json"
+            )
+            third, _ = supervisor.ordered_modules(
+                self.config, value, self.v10_hash, overlay, snapshot, verified_keys
+            )
+        self.assertEqual(first, ["Mathlib/B.lean"])
+        self.assertEqual(second, first)
+        self.assertEqual(third, [])
+        self.assertEqual(verified.call_count, 2)
+        self.assertEqual(
+            [call.args[1] for call in verified.call_args_list],
+            ["Mathlib/A.lean", "Mathlib/B.lean"],
+        )
 
     def test_exit125_a_then_b_success_stays_one_pass_and_next_pass_is_unique(self) -> None:
         self._import_v9()
