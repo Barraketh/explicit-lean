@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import fcntl
 import hashlib
 import json
@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "Experiment"))
 import boundary_materialize_shard as materializer
 import campaign_budget
 import campaign_worker
+import manual_overlay
 from translation_index import IndexError as TranslationIndexError
 from translation_index import connect, import_manifest, plan_work
 
@@ -39,6 +40,10 @@ from translation_index import connect, import_manifest, plan_work
 V10_MANIFEST_LABEL = "schema13-isolated-closed-manifest-v10.json"
 V10_WORKER_LABEL = "schema13-v10-direct-closure"
 V10_LOCK_LABEL = "schema13-v10-supervisor.lock"
+V9_LOCK_LABEL = "schema13-v9-supervisor.lock"
+V9_LOCK_PATH = ROOT / ".lake" / V9_LOCK_LABEL
+V10_LOCK_PATH = ROOT / ".lake" / V10_LOCK_LABEL
+INPUTS_ROOT = ROOT / ".lake" / "search-free-mathlib" / "schema13-v10-inputs"
 RESOURCE_FAILURE = "materializer stopped by memory guard (exit 125)"
 DEFAULT_MINIMUM_FREE_BYTES = 12 * 1024**3
 
@@ -50,7 +55,8 @@ class SupervisorConfig:
     dependency_map: Path | None
     source_root: Path
     output_parent: Path
-    lock_path: Path
+    manual_overrides: Path
+    expected_v9_manifest_path: Path
     expected_v9_manifest_hash: str
     expected_v10_manifest_hash: str
     expected_modules: int
@@ -61,6 +67,20 @@ class SupervisorConfig:
     max_passes: int = 1000
     max_seconds: float = 21600.0
     start_pass: int = 1
+
+
+@dataclass(frozen=True)
+class InvocationSnapshot:
+    root: Path
+    manifest: Path
+    dependency_map: Path
+    manual_overrides: Path
+    manifest_bytes: bytes
+    dependency_bytes: bytes
+    manual_bytes: bytes
+    manifest_hash: str
+    dependency_hash: str
+    manual_hash: str
 
 
 def sha256(data: bytes) -> str:
@@ -79,21 +99,53 @@ def _safe_label(value: str, label: str) -> str:
     return value
 
 
-def v10_identity(manifest_value: Mapping[str, object], manifest_hash: str) -> tuple[dict[str, object], dict[str, object]]:
-    """Return the ordinary worker identities, checked against this v10 hash."""
-    _hash_argument(manifest_hash, "v10 manifest hash")
-    implementation, toolchain = campaign_worker._identities(manifest_value)
-    # The manifest path/hash is checked independently by bootstrap. Keeping
-    # the worker's c328 identity contract unchanged avoids changing historical
-    # cache semantics; the exact v10 toolchain object is still checked below.
-    if not isinstance(toolchain.get("repositoryCommit"), str):
-        raise TranslationIndexError("v10 toolchain identity omitted repositoryCommit")
-    return implementation, toolchain
+def _exclusive_write(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        view = memoryview(payload)
+        while view:
+            view = view[os.write(descriptor, view):]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
-def authenticate_v10_manifest(config: SupervisorConfig) -> tuple[Path, bytes, dict[str, object], str]:
-    """Authenticate the fresh closed manifest before any index planning."""
-    manifest_path, payload, value, actual_hash = campaign_worker._read_manifest(config.manifest)
+def _snapshot(config: SupervisorConfig) -> InvocationSnapshot:
+    """Capture immutable input bytes once under a fresh, private run root."""
+    for path, label in ((config.manifest, "manifest"), (config.dependency_map, "dependency map"), (config.manual_overrides, "manual overrides")):
+        if path is None or not path.is_file() or path.is_symlink():
+            raise TranslationIndexError(f"{label} must be a regular non-symlink file")
+    manifest_bytes = config.manifest.read_bytes()
+    dependency_bytes = config.dependency_map.read_bytes()
+    manual_bytes = config.manual_overrides.read_bytes()
+    nonce = f"{time.time_ns()}-{uuid.uuid4().hex}"
+    if INPUTS_ROOT.is_symlink() or (INPUTS_ROOT.exists() and not INPUTS_ROOT.is_dir()):
+        raise TranslationIndexError("v10 input root must be a plain directory")
+    INPUTS_ROOT.mkdir(parents=True, exist_ok=True)
+    root = INPUTS_ROOT / f"{_safe_label(config.run_id, 'run id')}-{nonce}"
+    root.mkdir(parents=True, exist_ok=False)
+    snapshot = InvocationSnapshot(
+        root, root / V10_MANIFEST_LABEL, root / "index-header-dependency-map.json",
+        root / "simp_manual_overrides.json", manifest_bytes, dependency_bytes,
+        manual_bytes, sha256(manifest_bytes), sha256(dependency_bytes), sha256(manual_bytes),
+    )
+    _exclusive_write(snapshot.manifest, manifest_bytes)
+    _exclusive_write(snapshot.dependency_map, dependency_bytes)
+    _exclusive_write(snapshot.manual_overrides, manual_bytes)
+    return snapshot
+
+
+def _assert_snapshot(snapshot: InvocationSnapshot) -> None:
+    for path, expected in ((snapshot.manifest, snapshot.manifest_bytes), (snapshot.dependency_map, snapshot.dependency_bytes), (snapshot.manual_overrides, snapshot.manual_bytes)):
+        if path.read_bytes() != expected:
+            raise TranslationIndexError(f"immutable v10 run input changed: {path}")
+
+
+def authenticate_v10_manifest(config: SupervisorConfig, snapshot: InvocationSnapshot) -> tuple[Path, bytes, dict[str, object], str, manual_overlay.Overlay]:
+    """Authenticate the fresh closed manifest and exact manual overlay."""
+    _assert_snapshot(snapshot)
+    manifest_path, payload, value, actual_hash = campaign_worker._read_manifest(snapshot.manifest)
     if manifest_path.name != V10_MANIFEST_LABEL:
         raise TranslationIndexError(
             f"v10 manifest must use fresh label {V10_MANIFEST_LABEL}: {manifest_path.name}"
@@ -102,10 +154,23 @@ def authenticate_v10_manifest(config: SupervisorConfig) -> tuple[Path, bytes, di
         raise TranslationIndexError(
             f"v10 manifest hash changed: {actual_hash} != {config.expected_v10_manifest_hash}"
         )
+    materializer.corpus.enforce_manifest_policy(value)
+    direct = [str(raw["module"]) for raw in value["modules"] if isinstance(raw, Mapping) and any(isinstance(item, Mapping) and item.get("executionRole") == "direct_executable" for item in raw.get("occurrences", []))]
+    if not direct:
+        raise TranslationIndexError("v10 manifest has no direct executable module")
+    materializer.validate_manifest_selection(value, [direct[0]], expect_total=None, expect_materialize=None)
     # This checks the current implementation source set before the expensive
     # source/occurrence join in import_manifest.
     materializer.verify_implementation_hashes(value)
-    return manifest_path, payload, value, actual_hash
+    materializer.verify_environment(value, config.module_timeout)
+    try:
+        overlay = manual_overlay._load_overlay_projected(
+            snapshot.manifest, snapshot.manual_overrides, source_root=config.source_root,
+            manifest_value=value, manifest_bytes=payload,
+        )
+    except (OSError, RuntimeError) as error:
+        raise TranslationIndexError(f"v10 manual overlay authentication failed: {error}") from error
+    return manifest_path, payload, value, actual_hash, overlay
 
 
 def _current_manifest_rows(connection: sqlite3.Connection) -> list[tuple[str, int]]:
@@ -123,11 +188,13 @@ def verify_v9_index(connection: sqlite3.Connection, config: SupervisorConfig) ->
     if rows != [(expected, config.expected_modules)]:
         raise TranslationIndexError(f"index is not the expected v9 current index: {rows}")
     record = connection.execute(
-        "SELECT path,schema_version,diagnostic FROM manifests WHERE manifest_hash=?",
+        "SELECT path,schema_version,diagnostic,payload_json FROM manifests WHERE manifest_hash=?",
         (expected,),
     ).fetchone()
-    if record is None or int(record[1]) != 2 or int(record[2]) != 0:
+    if record is None or tuple(record[:3]) != (str(config.expected_v9_manifest_path.resolve()), 2, 0):
         raise TranslationIndexError("expected authenticated v9 manifest record is missing")
+    if record[3].encode("utf-8") != config.expected_v9_manifest_path.read_bytes():
+        raise TranslationIndexError("expected v9 manifest payload changed")
 
 
 def verify_v10_index(
@@ -136,6 +203,8 @@ def verify_v10_index(
     manifest_path: Path,
     manifest_hash: str,
     manifest_value: Mapping[str, object],
+    manifest_bytes: bytes,
+    require_path: bool = False,
 ) -> None:
     rows = _current_manifest_rows(connection)
     if rows != [(manifest_hash, config.expected_modules)]:
@@ -146,11 +215,13 @@ def verify_v10_index(
             f"v10 occurrence count changed: {occurrences} != {config.expected_occurrences}"
         )
     record = connection.execute(
-        "SELECT path,schema_version,diagnostic FROM manifests WHERE manifest_hash=?",
+        "SELECT path,schema_version,diagnostic,payload_json FROM manifests WHERE manifest_hash=?",
         (manifest_hash,),
     ).fetchone()
     expected_record = (str(manifest_path.resolve()), 2, 0)
-    if record is None or tuple(record) != expected_record:
+    if record is None or tuple(record[1:3]) != expected_record[1:] or record[3].encode("utf-8") != manifest_bytes:
+        raise TranslationIndexError(f"v10 manifest record changed: {record!r}")
+    if require_path and record[0] != expected_record[0]:
         raise TranslationIndexError(f"v10 manifest record changed: {record!r}")
     if manifest_value.get("moduleFileCount") != config.expected_modules:
         raise TranslationIndexError("v10 moduleFileCount disagrees with configured identity")
@@ -158,50 +229,65 @@ def verify_v10_index(
         raise TranslationIndexError("v10 occurrenceCount disagrees with configured identity")
 
 
-def bootstrap_index(config: SupervisorConfig) -> tuple[Path, bytes, dict[str, object], str]:
+def _clear_expired_leases(connection: sqlite3.Connection) -> None:
+    """Use the index's normal expiry path, then reject any live lease."""
+    from translation_index import claim_work
+    claim_work(connection, "schema13-v10-bootstrap-expiry", modules=[], limit=1)
+    live = connection.execute(
+        "SELECT module,lease_expires_at FROM work_queue WHERE state='running'"
+    ).fetchall()
+    if live:
+        raise TranslationIndexError(f"current worker leases are active: {[row[0] for row in live]}")
+
+
+def bootstrap_index(config: SupervisorConfig) -> tuple[InvocationSnapshot, Path, bytes, dict[str, object], str, manual_overlay.Overlay]:
     """Verify v9, then authenticate and import v10 as one ordered operation."""
-    manifest_path, payload, manifest_value, manifest_hash = authenticate_v10_manifest(config)
-    dependency_map = None
-    if config.dependency_map is not None:
-        try:
-            dependency_map = json.loads(config.dependency_map.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise TranslationIndexError(f"cannot read v10 dependency map: {error}") from error
-        if not isinstance(dependency_map, dict):
-            raise TranslationIndexError("v10 dependency map must be an object")
+    if config.dependency_map is None:
+        raise TranslationIndexError("v10 dependency map is required")
+    if (config.module_timeout <= 0 or config.minimum_free_bytes <= 0
+            or config.expected_modules <= 0 or config.expected_occurrences < 0):
+        raise TranslationIndexError("v10 numeric configuration is invalid")
+    if (config.source_root.resolve() != campaign_worker.MATHLIB.resolve()
+            or config.source_root.resolve() != materializer.MATHLIB.resolve()):
+        raise TranslationIndexError("v10 source root must equal campaign_worker.MATHLIB")
+    snapshot = _snapshot(config)
+    manifest_path, payload, manifest_value, manifest_hash, overlay = authenticate_v10_manifest(config, snapshot)
+    try:
+        dependency_map = json.loads(snapshot.dependency_bytes)
+    except json.JSONDecodeError as error:
+        raise TranslationIndexError(f"cannot read v10 dependency map snapshot: {error}") from error
+    if not isinstance(dependency_map, dict):
+        raise TranslationIndexError("v10 dependency map must be an object")
     connection = connect(config.database)
     try:
-        verify_v9_index(connection, config)
-        imported = import_manifest(
-            connection,
-            manifest_path,
-            source_root=config.source_root,
-            dependency_map=dependency_map,
-        )
-        if imported != {
-            "manifestHash": manifest_hash,
-            "modules": config.expected_modules,
-            "occurrences": config.expected_occurrences,
-            "diagnostic": False,
-            "unresolved": 0,
-        }:
-            raise TranslationIndexError(f"v10 import result is not exact: {imported}")
-        verify_v10_index(connection, config, manifest_path, manifest_hash, manifest_value)
+        _clear_expired_leases(connection)
+        rows = _current_manifest_rows(connection)
+        if rows == [(manifest_hash, config.expected_modules)]:
+            verify_v10_index(connection, config, manifest_path, manifest_hash, manifest_value, payload, require_path=False)
+        else:
+            verify_v9_index(connection, config)
+            imported = import_manifest(connection, manifest_path, source_root=config.source_root, dependency_map=dependency_map)
+            if imported != {"manifestHash": manifest_hash, "modules": config.expected_modules, "occurrences": config.expected_occurrences, "diagnostic": False, "unresolved": 0}:
+                raise TranslationIndexError(f"v10 import result is not exact: {imported}")
+            verify_v10_index(connection, config, manifest_path, manifest_hash, manifest_value, payload, require_path=True)
     finally:
         connection.close()
-    return manifest_path, payload, manifest_value, manifest_hash
+    _assert_snapshot(snapshot)
+    return snapshot, manifest_path, payload, manifest_value, manifest_hash, overlay
 
 
 def ordered_modules(
     config: SupervisorConfig,
     manifest_value: Mapping[str, object],
     manifest_hash: str,
+    overlay: manual_overlay.Overlay,
+    snapshot: InvocationSnapshot,
 ) -> tuple[list[str], int]:
     """Plan with the v10 identity, then return closure ordered retry work."""
-    implementation, toolchain = v10_identity(manifest_value, manifest_hash)
+    implementation, toolchain = campaign_worker._identities(manifest_value, overlay.identity())
     connection = connect(config.database)
     try:
-        verify_v10_index(connection, config, config.manifest.resolve(), manifest_hash, manifest_value)
+        verify_v10_index(connection, config, snapshot.manifest, manifest_hash, manifest_value, snapshot.manifest_bytes)
         modules = {
             str(row[0]) for row in connection.execute("SELECT module FROM modules")
         }
@@ -229,7 +315,7 @@ def ordered_modules(
         implementation_json = json.dumps(implementation, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         toolchain_json = json.dumps(toolchain, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         for row in connection.execute(
-            "SELECT cache_key,implementation_identity,toolchain_identity,status,result_json "
+            "SELECT cache_key,implementation_identity,toolchain_identity,status,result_json,artifact_ref "
             "FROM result_cache WHERE cache_key IN (%s)" % ",".join("?" * len(expected_keys)),
             tuple(expected_keys.values()),
         ) if expected_keys else ():
@@ -242,6 +328,22 @@ def ordered_modules(
                     raise TranslationIndexError("v10 cache report is not JSON") from error
                 if not isinstance(report, dict) or report.get("manifestHash") != manifest_hash:
                     raise TranslationIndexError("v10 cache report is bound to a different manifest")
+                artifact_ref = row[5]
+                if not isinstance(artifact_ref, str):
+                    raise TranslationIndexError("v10 cached success has no durable artifact")
+                artifact_raw = Path(artifact_ref)
+                if artifact_raw.is_symlink():
+                    raise TranslationIndexError("v10 cached artifact is missing or is a symlink")
+                artifact = artifact_raw.resolve()
+                if not artifact.is_file():
+                    raise TranslationIndexError("v10 cached artifact is missing or is a symlink")
+                artifact_bytes = artifact.read_bytes()
+                if artifact_bytes.decode("utf-8") != row[4]:
+                    raise TranslationIndexError("v10 cached artifact JSON differs from the durable result")
+                if not campaign_worker._report_is_verified(
+                        report, str(row[0]), snapshot.manifest, snapshot.manifest_bytes,
+                        dict(manifest_value), artifact, overlay, config.module_timeout):
+                    raise TranslationIndexError("v10 cached artifact is not verified")
     finally:
         connection.close()
 
@@ -277,20 +379,23 @@ def ordered_modules(
 
 
 @contextmanager
-def supervisor_lock(path: Path, run_id: str, manifest_hash: str):
-    path = path.resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+def supervisor_locks(run_id: str, manifest_hash: str):
+    descriptors: list[int] = []
     try:
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise RuntimeError(f"another v10 supervisor holds {path}") from error
-        os.ftruncate(descriptor, 0)
-        os.write(descriptor, f"schema={V10_WORKER_LABEL}\nrun={run_id}\nmanifest={manifest_hash}\npid={os.getpid()}\n".encode())
+        for path in (V9_LOCK_PATH, V10_LOCK_PATH):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+            descriptors.append(descriptor)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise RuntimeError(f"another schema13 supervisor holds {path}") from error
+            os.ftruncate(descriptor, 0)
+            os.write(descriptor, f"schema={V10_WORKER_LABEL}\nrun={run_id}\nmanifest={manifest_hash}\npid={os.getpid()}\n".encode())
         yield
     finally:
-        os.close(descriptor)
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
 
 
 def fresh_paths(config: SupervisorConfig, pass_number: int) -> tuple[str, Path]:
@@ -305,25 +410,35 @@ def fresh_paths(config: SupervisorConfig, pass_number: int) -> tuple[str, Path]:
 
 
 def run_supervisor(config: SupervisorConfig) -> int:
-    if config.start_pass <= 0 or config.max_passes <= 0 or config.max_seconds <= 0:
-        raise TranslationIndexError("pass counts and max-seconds must be positive")
-    if config.expected_modules <= 0 or config.expected_occurrences < 0:
-        raise TranslationIndexError("v10 manifest counts are invalid")
+    if (config.start_pass <= 0 or config.max_passes <= 0 or config.max_seconds <= 0
+            or config.module_timeout <= 0 or config.minimum_free_bytes <= 0
+            or config.expected_modules <= 0 or config.expected_occurrences < 0):
+        raise TranslationIndexError("v10 numeric configuration is invalid")
+    if config.dependency_map is None:
+        raise TranslationIndexError("v10 dependency map is required")
+    if (config.source_root.resolve() != campaign_worker.MATHLIB.resolve()
+            or config.source_root.resolve() != materializer.MATHLIB.resolve()):
+        raise TranslationIndexError("v10 source root must equal campaign_worker.MATHLIB")
     _safe_label(config.run_id, "run id")
+    if config.output_parent.is_symlink():
+        raise TranslationIndexError("v10 output parent must not be a symlink")
     output_parent = config.output_parent.resolve()
     try:
         output_parent.relative_to(materializer.BOUNDARY_DEBUG_ROOT.resolve())
     except ValueError as error:
         raise TranslationIndexError("v10 output parent must be below .lake/boundary-materialization") from error
-    _, _, manifest_value, manifest_hash = bootstrap_index(config)
-    dependency_map = None
-    if config.dependency_map is not None:
-        dependency_map = json.loads(config.dependency_map.read_text(encoding="utf-8"))
+    config = replace(config, output_parent=output_parent)
     started = time.monotonic()
+    snapshot, _manifest_path, _manifest_bytes, manifest_value, manifest_hash, overlay = bootstrap_index(config)
+    dependency_map = json.loads(snapshot.dependency_bytes)
     pass_number = config.start_pass
     completed_passes = 0
     while completed_passes < config.max_passes and time.monotonic() - started < config.max_seconds:
-        budget = campaign_budget.check()
+        try:
+            budget = campaign_budget.check()
+        except Exception as error:
+            print(json.dumps({"event": "v10_budget_stop", "error": str(error)}, sort_keys=True), flush=True)
+            return 0
         if budget.get("canDispatch") is not True:
             print(json.dumps({"event": "v10_budget_stop", "budget": budget}, sort_keys=True), flush=True)
             return 0
@@ -337,7 +452,8 @@ def run_supervisor(config: SupervisorConfig) -> int:
             print(json.dumps({"event": "v10_storage_stop", **storage}, sort_keys=True), flush=True)
             return 0
         worker, output = fresh_paths(config, pass_number)
-        modules, deferred = ordered_modules(config, manifest_value, manifest_hash)
+        _assert_snapshot(snapshot)
+        modules, deferred = ordered_modules(config, manifest_value, manifest_hash, overlay, snapshot)
         print(json.dumps({
             "event": "v10_pass_start", "pass": pass_number, "worker": worker,
             "eligible": len(modules), "resourceDeferred": deferred,
@@ -346,18 +462,24 @@ def run_supervisor(config: SupervisorConfig) -> int:
         remaining = config.max_seconds - (time.monotonic() - started)
         if remaining <= 0:
             break
+        module_timeout = min(config.module_timeout, max(1, int(remaining)))
         result = campaign_worker.run_worker(
             config.database,
-            config.manifest,
+            snapshot.manifest,
             output,
             worker,
             modules=modules,
-            retry_failed=True,
-            module_timeout=config.module_timeout,
+            manual_overrides=snapshot.manual_overrides,
+            module_timeout=module_timeout,
             max_seconds=min(21600.0, remaining),
             dependency_map=dependency_map,
             minimum_free_bytes=config.minimum_free_bytes,
         )
+        _assert_snapshot(snapshot)
+        if not isinstance(result, Mapping):
+            raise TranslationIndexError("v10 worker returned a non-object result")
+        if result.get("manifestHash") != manifest_hash:
+            raise TranslationIndexError("v10 worker returned a different manifest hash")
         print(json.dumps({"event": "v10_pass_result", "pass": pass_number, **result}, sort_keys=True), flush=True)
         completed_passes += 1
         pass_number += 1
@@ -379,7 +501,8 @@ def _config_from_args(args: argparse.Namespace) -> SupervisorConfig:
         dependency_map=Path(args.dependency_map).resolve() if args.dependency_map else None,
         source_root=Path(args.source_root).resolve(),
         output_parent=Path(args.output_parent).resolve(),
-        lock_path=Path(args.lock_path).resolve(),
+        manual_overrides=Path(args.manual_overrides).resolve(),
+        expected_v9_manifest_path=Path(args.v9_manifest).resolve(),
         expected_v9_manifest_hash=_hash_argument(args.v9_manifest_sha256, "v9 manifest hash"),
         expected_v10_manifest_hash=_hash_argument(args.v10_manifest_sha256, "v10 manifest hash"),
         expected_modules=args.modules,
@@ -399,8 +522,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--source-root", required=True)
     parser.add_argument("--output-parent", required=True)
-    parser.add_argument("--lock-path", default=str(ROOT / ".lake" / V10_LOCK_LABEL))
-    parser.add_argument("--dependency-map")
+    parser.add_argument("--dependency-map", required=True)
+    parser.add_argument("--manual-overrides", required=True)
+    parser.add_argument("--v9-manifest", required=True)
     parser.add_argument("--v9-manifest-sha256", required=True)
     parser.add_argument("--v10-manifest-sha256", required=True)
     parser.add_argument("--modules", type=int, required=True)
@@ -412,12 +536,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-seconds", type=float, default=21600.0)
     parser.add_argument("--start-pass", type=int, required=True)
     args = parser.parse_args(argv)
-    config = _config_from_args(args)
-    # The lock is acquired only after static v10 authentication has enough
-    # information to write an auditable owner record.
-    manifest_hash = sha256(config.manifest.read_bytes())
-    with supervisor_lock(config.lock_path, config.run_id, manifest_hash):
-        return run_supervisor(config)
+    try:
+        config = _config_from_args(args)
+        # The lock is acquired only after static v10 authentication has enough
+        # information to write an auditable owner record.
+        manifest_hash = sha256(config.manifest.read_bytes())
+        with supervisor_locks(config.run_id, manifest_hash):
+            return run_supervisor(config)
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"schema13 v10 supervisor: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
