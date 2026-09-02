@@ -17,15 +17,15 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-01T21:51:58.506236+00:00",
-    "lastUsedPercent": 91,
+    "lastCheckedAt": "2026-09-02T11:09:15.612927+00:00",
+    "lastUsedPercent": 95,
     "lastDecision": "continue"
   },
   "coverage": {
     "currentCorpusTotal": 83627,
     "verifiedTranslatedOccurrences": 0,
     "completeTranslatedTreeBuilt": false,
-    "note": "Authenticated v8 partitions all 83,627 source occurrences in 8,264 modules as 83,556 direct and 71 reusable, with zero unresolved. Its guarded pilot and closure passes verified 39 modules / 165 occurrences before the planned scheduling-control freeze. Accepted current-HEAD and complete-tree coverage remains zero until v9 reruns and cold translated-tree certification pass.",
+    "note": "Authenticated v9 partitions all 83,627 source occurrences in 8,264 modules as 83,556 direct and 71 reusable with zero unresolved. The exact v9 direct run produced 190 verified module reports and 17 semantic failures before an intentional no-lease stop after sustained memory-reserve wait. Reviewed v10 continuation is integrated at 400eec0; fresh exact-HEAD v10 publication/pilot is pending >=12GiB free-memory admission.",
     "inventoriedModules": 8264,
     "materializationCandidates": 83627,
     "unresolvedOccurrences": 0,
@@ -47,7 +47,11 @@
     "authenticatedV8VerifiedModules": 39,
     "authenticatedV8VerifiedOccurrences": 165,
     "authenticatedV8FailedModules": 31,
-    "authenticatedV8QueuedModules": 6212
+    "authenticatedV8QueuedModules": 6212,
+    "authenticatedV9VerifiedModules": 190,
+    "authenticatedV9SemanticFailures": 17,
+    "authenticatedV9ResourceAbandonments": 172,
+    "authenticatedV9QueuedModules": 6073
   },
   "work": [
     {
@@ -84,7 +88,7 @@
       "id": "corpus-translation",
       "owner": "coordinator",
       "status": "in_progress",
-      "description": "Authenticated v8 inventory/index/pilot and 39-module direct evidence complete; exact-HEAD v9 refresh, guarded broad direct shards, reusable code, and full translated tree in progress."
+      "description": "Authenticated v9 inventory/index and 190-module direct evidence preserved. Reviewed v10 same-pass resource continuation, exact bootstrap/resume, cache/evidence validation, and dual-lock supervisor integrated at 400eec0; fresh manifest/pilot/launch awaits the unchanged 12GiB memory reserve."
     },
     {
       "id": "readability",
@@ -2452,7 +2456,13 @@
   "failureTriage": {
     "command": "python3 Experiment/campaign_failures.py",
     "latestReport": ".lake/week-2026-08-31/failure-families.json",
-    "scope": "Diagnostic family grouping only; preserves implementation identities and log hashes, not proof of common root cause."
+    "scope": "Diagnostic family grouping only; preserves implementation identities and log hashes, not proof of common root cause.",
+    "v9NewFamilies": {
+      "Mathlib/Data/List/TakeDrop.lean": "known boundary_matcher_equation_state_conflict:capture-complete-local",
+      "Mathlib/Data/List/ReduceOption.lean": "new boundary_realization_caller_after_conflict in generic v1 final caller state",
+      "Mathlib/Data/List/NatAntidiagonal.lean": "new boundary_local_cached_after in direct local-cache final caller state",
+      "next": "Add diagnostic-only expected/actual match/equation/sparse details and adversarial rejection controls before semantic changes."
+    }
   },
   "frontierFailurePlan": {
     "frozenImplementation": "7839c0f",
@@ -2470,8 +2480,8 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
-    "lastFreeBytes": 42444226560,
-    "checkedAt": "2026-09-01T21:52:46.128881+00:00",
+    "lastFreeBytes": 48586747904,
+    "checkedAt": "2026-09-02T11:12:29.361543+00:00",
     "command": "campaign_worker.py --minimum-free-bytes (default12GiB)",
     "losslessCertificateStorage": {
       "command": "python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json",
@@ -2481,7 +2491,7 @@
       "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
     }
   },
-  "updatedAt": "2026-09-01T21:52:46.128881+00:00",
+  "updatedAt": "2026-09-02T11:12:29.361543+00:00",
   "scopeQuestion": {
     "askedAt": "2026-08-31T18:08:49.612907+00:00",
     "status": "awaiting_optional_user_steering",
@@ -2498,6 +2508,47 @@
     "batchWallSeconds": 21600,
     "minimumFreeBytes": 12884901888,
     "projectedEvidenceGiB": "8-10 including retries",
-    "policy": "Publish exact-HEAD v9, then use one closure-ordered worker with unique immutable output labels and shared SQLite claims. Keep12GiB memory/disk reserves. Pre-claim denial or exit125 stops the batch; exit125 logs and requeues without semantic failure. Preserve all evidence and diagnose exact failure families before retry."
+    "policy": "Generate and authenticate exact-HEAD v10 only after >=12GiB memory/disk admission; atomically bootstrap the v9 index or verify an exact v10 resume; run a fresh NeZero pilot, then one closure-ordered v10 supervisor with fixed dual locks, unique immutable input/output labels, manual-overlay identity, same-pass exit125 continuation, and incremental cache/evidence revalidation. Preserve all evidence and diagnose semantic families before retry."
+  },
+  "v10Supervisor": {
+    "status": "integrated_reviewed_waiting_resource_admission",
+    "integratedHead": "400eec04b1d6d470e0b07ceaef35366a63f9889d",
+    "workerCommits": [
+      "2857b9f",
+      "f93c9d9"
+    ],
+    "supervisorCommits": [
+      "c4e9628",
+      "78e0044",
+      "e43152a",
+      "295bb76",
+      "2268a51",
+      "da55435",
+      "49a4e5b",
+      "400eec0"
+    ],
+    "checks": {
+      "supervisor": 15,
+      "worker": 33,
+      "translationIndex": 13,
+      "mainSupervisorRerun": 15,
+      "pyCompile": true,
+      "treeEqualToReviewedCandidate": true
+    },
+    "behavior": "Exit125 abandons/requeues the current module without a semantic cache result and continues to the next distinct planned module after all admission rechecks. Exact v9-to-v10 or v10-resume bootstrap uses fresh immutable invocation inputs, manual-overlay identity, fixed dual locks, durable cache/evidence validation, and bounded wall time.",
+    "publicationHold": "Do not generate/import/pilot/launch until fresh free-memory telemetry is at least 12884901888 bytes.",
+    "reviewResidualThreatModel": "Standard local cooperative-process model. O_NOFOLLOW and inode checks reject stale symlinks and ordinary races; a hostile same-user process deliberately replacing a held lock inode is out of scope. Large evidence files use inode/size/mtime metadata on the fast path; ordinary mutation/deletion/addition is rejected, while adversarial same-size mutation with restored nanosecond mtime is out of scope under the frozen-evidence rule."
+  },
+  "v9SupervisorStop": {
+    "status": "intentional_idle_stop",
+    "recordedAt": "2026-09-02T10:40:26.188836+00:00",
+    "reason": "No child or lease; sustained wait below unchanged 12GiB reserve; release memory for reviewed v10 path.",
+    "attempts": {
+      "success": 190,
+      "failure": 17,
+      "abandoned": 172
+    },
+    "logSha256": "a7ce8dcb10601d35c1b061a1527f08f5c4c4e7a0d20f008c780a0cb6eb177784",
+    "evidence": ".lake/week-2026-08-31/schema13-v9-supervisor-v103-intentional-stop.json"
   }
 }
