@@ -154,6 +154,30 @@ class V10SupervisorTests(unittest.TestCase):
         path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
         return path
 
+    def _reconstruction_snapshot(self, payload: bytes, label: str) -> supervisor.InvocationSnapshot:
+        root = self.root / "reconstruction" / label
+        root.mkdir(parents=True)
+        manifest = root / supervisor.V10_MANIFEST_LABEL
+        dependency_map = root / "dependency-map.json"
+        manual_overrides = root / "simp_manual_overrides.json"
+        dependency_bytes = b"{}"
+        manual_bytes = b"{}"
+        manifest.write_bytes(payload)
+        dependency_map.write_bytes(dependency_bytes)
+        manual_overrides.write_bytes(manual_bytes)
+        return supervisor.InvocationSnapshot(
+            root=root,
+            manifest=manifest,
+            dependency_map=dependency_map,
+            manual_overrides=manual_overrides,
+            manifest_bytes=payload,
+            dependency_bytes=dependency_bytes,
+            manual_bytes=manual_bytes,
+            manifest_hash=hashlib.sha256(payload).hexdigest(),
+            dependency_hash=hashlib.sha256(dependency_bytes).hexdigest(),
+            manual_hash=hashlib.sha256(manual_bytes).hexdigest(),
+        )
+
     def _import_v9(self) -> None:
         connection = connect(self.database)
         try:
@@ -661,6 +685,34 @@ class V10SupervisorTests(unittest.TestCase):
 
         self.assertEqual(calls, 1)
         ordered.assert_called_once()
+
+    def test_reconstruct_manifest_value_rejects_each_invalid_contract(self) -> None:
+        cases = (
+            ("invalid-json", b"{not-json", "not valid JSON"),
+            ("non-object", b"[]", "must be an object"),
+            (
+                "module-count",
+                json.dumps({"moduleFileCount": 1, "occurrenceCount": 2}).encode(),
+                "moduleFileCount",
+            ),
+            (
+                "occurrence-count",
+                json.dumps({"moduleFileCount": 2, "occurrenceCount": 1}).encode(),
+                "occurrenceCount",
+            ),
+        )
+        for label, payload, message in cases:
+            with self.subTest(label=label):
+                snapshot = self._reconstruction_snapshot(payload, label)
+                with self.assertRaisesRegex(RuntimeError, message):
+                    supervisor._reconstruct_manifest_value(
+                        self.config, snapshot, snapshot.manifest_hash
+                    )
+
+        payload = json.dumps({"moduleFileCount": 2, "occurrenceCount": 2}).encode()
+        snapshot = self._reconstruction_snapshot(payload, "hash-mismatch")
+        with self.assertRaisesRegex(RuntimeError, "snapshot hash changed"):
+            supervisor._reconstruct_manifest_value(self.config, snapshot, "0" * 64)
 
     def test_worker_pass_cleanup_runs_after_exception(self) -> None:
         self._import_v9()
