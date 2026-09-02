@@ -168,6 +168,11 @@ class V10SupervisorTests(unittest.TestCase):
         report_json = canonical({"manifestHash": self.v10_hash})
         artifact = Path(artifact)
         artifact.write_text(report_json, encoding="utf-8")
+        evidence_root = supervisor.materializer.debug_root_for(artifact)
+        evidence_root.mkdir(parents=True, exist_ok=True)
+        (evidence_root / "referenced-evidence.txt").write_text(
+            "fixture-evidence-v1", encoding="utf-8"
+        )
         connection = connect(self.database)
         try:
             from translation_index import cache_key
@@ -334,7 +339,6 @@ class V10SupervisorTests(unittest.TestCase):
             supervisor.ordered_modules(self.config, value, self.v10_hash, overlay, snapshot)
 
     def test_public_run_path_holds_each_fixed_lock(self) -> None:
-        digest = supervisor.sha256(self.config.manifest.read_bytes())
         for path in (supervisor.V9_LOCK_PATH, supervisor.V10_LOCK_PATH):
             descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
             try:
@@ -344,6 +348,21 @@ class V10SupervisorTests(unittest.TestCase):
             finally:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
                 os.close(descriptor)
+
+    def test_lock_symlink_is_rejected_without_touching_fixed_locks(self) -> None:
+        lock_root = self.root / "isolated-locks"
+        lock_root.mkdir()
+        target = lock_root / "target"
+        target.write_text("target", encoding="utf-8")
+        symlink = lock_root / "v9.lock"
+        symlink.symlink_to(target)
+        v10_lock = lock_root / "v10.lock"
+        with patch.object(supervisor, "V9_LOCK_PATH", symlink), \
+             patch.object(supervisor, "V10_LOCK_PATH", v10_lock):
+            with self.assertRaises(OSError):
+                with supervisor.supervisor_locks("fixture-v10", self.v10_hash):
+                    self.fail("symlink lock unexpectedly acquired")
+        self.assertEqual(target.read_text(encoding="utf-8"), "target")
 
     def test_cli_preserves_symlink_output_parent_for_rejection(self) -> None:
         link = self.root / "output-link"
@@ -421,6 +440,27 @@ class V10SupervisorTests(unittest.TestCase):
         self.assertEqual(second, first)
         cached_artifact = self.output_parent / "cached-a.json"
         cached_report = json.loads(cached_artifact.read_text(encoding="utf-8"))
+        evidence_root = supervisor.materializer.debug_root_for(cached_artifact)
+        evidence_file = evidence_root / "referenced-evidence.txt"
+        evidence_file.write_text("fixture-evidence-v2", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "evidence changed after verification"):
+            supervisor.ordered_modules(
+                self.config, value, self.v10_hash, overlay, snapshot, verified_keys
+            )
+        evidence_file.write_text("fixture-evidence-v1", encoding="utf-8")
+        evidence_file.unlink()
+        with self.assertRaisesRegex(RuntimeError, "evidence changed after verification"):
+            supervisor.ordered_modules(
+                self.config, value, self.v10_hash, overlay, snapshot, verified_keys
+            )
+        evidence_file.write_text("fixture-evidence-v1", encoding="utf-8")
+        extra_evidence = evidence_root / "added-evidence.txt"
+        extra_evidence.write_text("unexpected", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "evidence changed after verification"):
+            supervisor.ordered_modules(
+                self.config, value, self.v10_hash, overlay, snapshot, verified_keys
+            )
+        extra_evidence.unlink()
         cached_artifact.write_text(json.dumps(cached_report, indent=2), encoding="utf-8")
         with self.assertRaisesRegex(RuntimeError, "changed after verification"):
             supervisor.ordered_modules(

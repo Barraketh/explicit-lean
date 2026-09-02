@@ -19,6 +19,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import sys
 import time
 import uuid
@@ -95,6 +96,7 @@ class VerifiedCacheFingerprint:
     result_json: str
     artifact_path: Path
     artifact_sha256: str
+    evidence_tree: tuple[tuple[str, str, int, int, int, str | None], ...]
 
 
 def sha256(data: bytes) -> str:
@@ -282,6 +284,61 @@ def _authenticated_report_manifest(
     return path, payload
 
 
+_SMALL_EVIDENCE_HASH_LIMIT = 1024 * 1024
+
+
+def _evidence_tree(
+    root: Path,
+    previous: tuple[tuple[str, str, int, int, int, str | None], ...] | None = None,
+) -> tuple[tuple[str, str, int, int, int, str | None], ...]:
+    """Inventory verifier-referenced evidence without hashing large files each pass.
+
+    Every entry is required to remain a plain directory or regular file. Small
+    files are content-hashed every pass; larger files use inode, size, and
+    nanosecond mtime metadata, which catches ordinary mutation without
+    repeatedly reading gigabytes of durable evidence. A changed large file is
+    hashed when observed, but the metadata mismatch already rejects it.
+    """
+    if root.is_symlink() or not root.is_dir():
+        raise TranslationIndexError("cached evidence debug root is missing or is a symlink")
+    prior = {entry[0]: entry for entry in previous or ()}
+    entries: list[tuple[str, str, int, int, int, str | None]] = []
+
+    def visit(directory: Path, relative_parent: str = "") -> None:
+        try:
+            children = sorted(os.scandir(directory), key=lambda entry: entry.name)
+        except OSError as error:
+            raise TranslationIndexError(f"cannot inventory cached evidence: {directory}") from error
+        for child in children:
+            relative = f"{relative_parent}/{child.name}" if relative_parent else child.name
+            try:
+                info = child.stat(follow_symlinks=False)
+            except OSError as error:
+                raise TranslationIndexError(f"cannot stat cached evidence: {relative}") from error
+            if stat.S_ISLNK(info.st_mode):
+                raise TranslationIndexError(f"cached evidence contains a symlink: {relative}")
+            if stat.S_ISDIR(info.st_mode):
+                entries.append((relative, "directory", info.st_ino, info.st_size, info.st_mtime_ns, None))
+                visit(Path(child.path), relative)
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                raise TranslationIndexError(f"cached evidence contains a non-regular entry: {relative}")
+            content_hash = None
+            prior_entry = prior.get(relative)
+            metadata = (relative, "file", info.st_ino, info.st_size, info.st_mtime_ns)
+            if info.st_size <= _SMALL_EVIDENCE_HASH_LIMIT or (
+                prior_entry is not None and prior_entry[1:5] != metadata[1:5]
+            ):
+                try:
+                    content_hash = sha256(Path(child.path).read_bytes())
+                except OSError as error:
+                    raise TranslationIndexError(f"cannot hash cached evidence: {relative}") from error
+            entries.append((*metadata, content_hash))
+
+    visit(root)
+    return tuple(entries)
+
+
 def _clear_expired_leases(connection: sqlite3.Connection) -> None:
     """Use the index's normal expiry path, then reject any live lease."""
     from translation_index import claim_work
@@ -428,19 +485,27 @@ def ordered_modules(
                 )
                 if artifact_report != report or canonical_artifact != canonical_report:
                     raise TranslationIndexError("v10 cached artifact JSON differs from the durable result")
+                debug_root = materializer.debug_root_for(artifact)
+                previous = verified_cache_fingerprints.get(cache_key)
+                evidence_tree = _evidence_tree(
+                    debug_root, previous.evidence_tree if previous is not None else None
+                )
                 fingerprint = VerifiedCacheFingerprint(
                     cache_key, module, str(row[2]), str(row[3]), str(row[4]), str(row[5]),
-                    str(row[6]), str(row[8]), artifact, artifact_sha256,
+                    str(row[6]), str(row[8]), artifact, artifact_sha256, evidence_tree,
                 )
-                previous = verified_cache_fingerprints.get(cache_key)
                 if previous is not None:
                     if previous != fingerprint:
-                        raise TranslationIndexError("v10 cached success changed after verification")
+                        raise TranslationIndexError("v10 cached success evidence changed after verification")
                     continue
                 if not campaign_worker._report_is_verified(
                         artifact_report, module, report_manifest, report_manifest_bytes,
                         dict(manifest_value), artifact, overlay, config.module_timeout):
                     raise TranslationIndexError("v10 cached artifact is not verified")
+                verified_tree = _evidence_tree(debug_root, evidence_tree)
+                if verified_tree != evidence_tree:
+                    raise TranslationIndexError("v10 cached evidence changed during verification")
+                fingerprint = replace(fingerprint, evidence_tree=verified_tree)
                 verified_cache_fingerprints[cache_key] = fingerprint
     finally:
         connection.close()
@@ -482,14 +547,40 @@ def supervisor_locks(run_id: str, manifest_hash: str):
     descriptors: list[int] = []
     try:
         for path in (V9_LOCK_PATH, V10_LOCK_PATH):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-            descriptors.append(descriptor)
             try:
+                parent_stat = os.lstat(path.parent)
+            except FileNotFoundError:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                parent_stat = os.lstat(path.parent)
+            if not stat.S_ISDIR(parent_stat.st_mode):
+                raise RuntimeError(f"lock parent is not a directory: {path.parent}")
+            flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags, 0o600)
+            try:
+                def verify_identity() -> None:
+                    path_stat = os.lstat(path)
+                    fd_stat = os.fstat(descriptor)
+                    parent_now = os.lstat(path.parent)
+                    if (
+                        not stat.S_ISREG(path_stat.st_mode)
+                        or (path_stat.st_dev, path_stat.st_ino)
+                        != (fd_stat.st_dev, fd_stat.st_ino)
+                        or (parent_now.st_dev, parent_now.st_ino)
+                        != (parent_stat.st_dev, parent_stat.st_ino)
+                    ):
+                        raise RuntimeError(f"lock path changed during open: {path}")
+
+                verify_identity()
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                verify_identity()
             except BlockingIOError as error:
                 raise RuntimeError(f"another schema13 supervisor holds {path}") from error
+            except BaseException:
+                os.close(descriptor)
+                raise
+            descriptors.append(descriptor)
             os.ftruncate(descriptor, 0)
+            verify_identity()
             os.write(descriptor, f"schema={V10_WORKER_LABEL}\nrun={run_id}\nmanifest={manifest_hash}\npid={os.getpid()}\n".encode())
         yield
     finally:
