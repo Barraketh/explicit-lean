@@ -319,6 +319,7 @@ class V10SupervisorTests(unittest.TestCase):
                 self.config, value, self.v10_hash, overlay, first_snapshot
             )
         self.assertEqual(modules, ["Mathlib/B.lean"])
+        self.assertEqual(verified.call_args.args[0], cached_report)
         self.assertEqual(verified.call_args.args[1], "Mathlib/A.lean")
         self.assertEqual(verified.call_args.args[2], first_snapshot.manifest)
         cached_artifact.write_text(
@@ -335,6 +336,7 @@ class V10SupervisorTests(unittest.TestCase):
                 self.config, value2, self.v10_hash, overlay2, second_snapshot
             )
         self.assertEqual(modules, ["Mathlib/B.lean"])
+        self.assertEqual(resumed.call_args.args[0], cached_report)
         self.assertEqual(resumed.call_args.args[1], "Mathlib/A.lean")
         self.assertEqual(resumed.call_args.args[2], first_snapshot.manifest)
 
