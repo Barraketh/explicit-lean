@@ -229,6 +229,45 @@ def verify_v10_index(
         raise TranslationIndexError("v10 occurrenceCount disagrees with configured identity")
 
 
+def _authenticated_report_manifest(
+    connection: sqlite3.Connection,
+    manifest_hash: str,
+    snapshot: InvocationSnapshot,
+) -> tuple[Path, bytes]:
+    """Return the authenticated manifest path recorded for durable reports.
+
+    A resumed invocation has a fresh input directory, so the index record can
+    legitimately point at an older v10 snapshot.  Reuse that path only when it
+    is still an immutable v10 input beneath the fixed input root and has the
+    exact authenticated bytes; otherwise cached evidence is rejected.
+    """
+    record = connection.execute(
+        "SELECT path,payload_json FROM manifests WHERE manifest_hash=?",
+        (manifest_hash,),
+    ).fetchone()
+    if record is None:
+        raise TranslationIndexError("v10 manifest record is missing for cached evidence")
+    path = Path(str(record[0]))
+    if path == snapshot.manifest:
+        _assert_snapshot(snapshot)
+        return path, snapshot.manifest_bytes
+    root = INPUTS_ROOT.resolve()
+    if INPUTS_ROOT.is_symlink() or not INPUTS_ROOT.is_dir() or path.is_symlink() or not path.is_file():
+        raise TranslationIndexError("cached v10 manifest path is not an immutable input")
+    try:
+        path.resolve().relative_to(root)
+    except ValueError as error:
+        raise TranslationIndexError("cached v10 manifest path is outside the v10 input root") from error
+    if path.name != V10_MANIFEST_LABEL:
+        raise TranslationIndexError("cached v10 manifest has an unexpected label")
+    payload = path.read_bytes()
+    if payload != snapshot.manifest_bytes or sha256(payload) != manifest_hash:
+        raise TranslationIndexError("cached v10 manifest bytes do not match the authenticated snapshot")
+    if record[1].encode("utf-8") != payload:
+        raise TranslationIndexError("cached v10 manifest record payload differs from its input")
+    return path, payload
+
+
 def _clear_expired_leases(connection: sqlite3.Connection) -> None:
     """Use the index's normal expiry path, then reject any live lease."""
     from translation_index import claim_work
@@ -288,6 +327,9 @@ def ordered_modules(
     connection = connect(config.database)
     try:
         verify_v10_index(connection, config, snapshot.manifest, manifest_hash, manifest_value, snapshot.manifest_bytes)
+        report_manifest, report_manifest_bytes = _authenticated_report_manifest(
+            connection, manifest_hash, snapshot
+        )
         modules = {
             str(row[0]) for row in connection.execute("SELECT module FROM modules")
         }
@@ -315,20 +357,20 @@ def ordered_modules(
         implementation_json = json.dumps(implementation, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         toolchain_json = json.dumps(toolchain, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         for row in connection.execute(
-            "SELECT cache_key,implementation_identity,toolchain_identity,status,result_json,artifact_ref "
+            "SELECT module,cache_key,implementation_identity,toolchain_identity,status,result_json,artifact_ref "
             "FROM result_cache WHERE cache_key IN (%s)" % ",".join("?" * len(expected_keys)),
             tuple(expected_keys.values()),
         ) if expected_keys else ():
-            if row[1] != implementation_json or row[2] != toolchain_json:
+            if row[2] != implementation_json or row[3] != toolchain_json:
                 raise TranslationIndexError("v10 cache row has a mismatched implementation/toolchain identity")
-            if row[3] == "success":
+            if row[4] == "success":
                 try:
-                    report = json.loads(row[4])
+                    report = json.loads(row[5])
                 except json.JSONDecodeError as error:
                     raise TranslationIndexError("v10 cache report is not JSON") from error
                 if not isinstance(report, dict) or report.get("manifestHash") != manifest_hash:
                     raise TranslationIndexError("v10 cache report is bound to a different manifest")
-                artifact_ref = row[5]
+                artifact_ref = row[6]
                 if not isinstance(artifact_ref, str):
                     raise TranslationIndexError("v10 cached success has no durable artifact")
                 artifact_raw = Path(artifact_ref)
@@ -338,10 +380,10 @@ def ordered_modules(
                 if not artifact.is_file():
                     raise TranslationIndexError("v10 cached artifact is missing or is a symlink")
                 artifact_bytes = artifact.read_bytes()
-                if artifact_bytes.decode("utf-8") != row[4]:
+                if artifact_bytes.decode("utf-8") != row[5]:
                     raise TranslationIndexError("v10 cached artifact JSON differs from the durable result")
                 if not campaign_worker._report_is_verified(
-                        report, str(row[0]), snapshot.manifest, snapshot.manifest_bytes,
+                        report, str(row[0]), report_manifest, report_manifest_bytes,
                         dict(manifest_value), artifact, overlay, config.module_timeout):
                     raise TranslationIndexError("v10 cached artifact is not verified")
     finally:
@@ -374,6 +416,7 @@ def ordered_modules(
         }
     finally:
         connection.close()
+    eligible = [entry["module"] for entry in planned if entry["state"] != "succeeded"]
     eligible.sort(key=lambda module: (module in resource_deferred, len(closure(module)), module))
     return eligible, len(resource_deferred)
 

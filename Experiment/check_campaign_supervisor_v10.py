@@ -158,6 +158,32 @@ class V10SupervisorTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def _insert_success(self, module, value, overlay, artifact):
+        """Record the same durable success shape that c328 writes."""
+        implementation, toolchain = campaign_worker._identities(value, overlay.identity())
+        canonical = lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"))
+        report_json = canonical({"manifestHash": self.v10_hash})
+        artifact = Path(artifact)
+        artifact.write_text(report_json, encoding="utf-8")
+        connection = connect(self.database)
+        try:
+            from translation_index import cache_key
+            key, dependency = cache_key(connection, module, implementation, toolchain)
+            row = connection.execute(
+                "SELECT source_hash,analysis_identity FROM modules WHERE module=?", (module,)
+            ).fetchone()
+            connection.execute(
+                "INSERT INTO result_cache(cache_key,module,source_hash,analysis_identity,"
+                "implementation_identity,toolchain_identity,dependency_identity,status,"
+                "translation_status,result_json,failure,log_ref,artifact_ref,recorded_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (key, module, row[0], row[1], canonical(implementation),
+                 canonical(toolchain), dependency, "success", "verified_translated",
+                 report_json, None, None, str(artifact), 0),
+            )
+        finally:
+            connection.close()
+
     def test_v9_index_bootstraps_to_authenticated_v10_before_ordering(self) -> None:
         self._import_v9()
         with patch.object(supervisor, "ordered_modules", side_effect=AssertionError("ordering ran during bootstrap")):
@@ -278,6 +304,31 @@ class V10SupervisorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "bound to a different manifest"):
             supervisor.ordered_modules(self.config, value, self.v10_hash, overlay, snapshot)
 
+    def test_valid_cached_success_uses_module_and_survives_fresh_resume_snapshot(self) -> None:
+        self._import_v9()
+        first = supervisor.bootstrap_index(self.config)
+        first_snapshot, _, _, value, _, overlay = first
+        self._insert_success(
+            "Mathlib/A.lean", value, overlay, self.output_parent / "cached-a.json"
+        )
+        with patch.object(supervisor.campaign_worker, "_report_is_verified", return_value=True) as verified:
+            modules, _ = supervisor.ordered_modules(
+                self.config, value, self.v10_hash, overlay, first_snapshot
+            )
+        self.assertEqual(modules, ["Mathlib/B.lean"])
+        self.assertEqual(verified.call_args.args[1], "Mathlib/A.lean")
+        self.assertEqual(verified.call_args.args[2], first_snapshot.manifest)
+
+        second_snapshot, _, _, value2, _, overlay2 = supervisor.bootstrap_index(self.config)
+        self.assertNotEqual(first_snapshot.manifest, second_snapshot.manifest)
+        with patch.object(supervisor.campaign_worker, "_report_is_verified", return_value=True) as resumed:
+            modules, _ = supervisor.ordered_modules(
+                self.config, value2, self.v10_hash, overlay2, second_snapshot
+            )
+        self.assertEqual(modules, ["Mathlib/B.lean"])
+        self.assertEqual(resumed.call_args.args[1], "Mathlib/A.lean")
+        self.assertEqual(resumed.call_args.args[2], first_snapshot.manifest)
+
     def test_exit125_a_then_b_success_stays_one_pass_and_next_pass_is_unique(self) -> None:
         self._import_v9()
         calls = []
@@ -304,6 +355,11 @@ class V10SupervisorTests(unittest.TestCase):
                     )
                 finally:
                     connection.close()
+                self._insert_success(
+                    "Mathlib/B.lean", json.loads(self.v10.read_text()),
+                    Mock(identity=lambda: {"fixture": "overlay"}),
+                    Path(output) / "b-report.json",
+                )
                 return {"manifestHash": self.v10_hash, "processed": 2, "succeeded": 1, "failures": 0,
                         "resourceStopped": True, "memoryDenied": False,
                         "budgetDenied": False, "storageDenied": False, "timedOut": False}
@@ -316,11 +372,12 @@ class V10SupervisorTests(unittest.TestCase):
         with patch.object(supervisor.campaign_budget, "check", return_value={"canDispatch": True}), \
              patch.object(supervisor.campaign_worker, "memory_status", return_value=admitted), \
              patch.object(supervisor.campaign_worker, "storage_status", return_value=storage), \
+             patch.object(supervisor.campaign_worker, "_report_is_verified", return_value=True), \
              patch.object(supervisor.campaign_worker, "run_worker", side_effect=fake_worker):
             self.assertEqual(supervisor.run_supervisor(self.config), 0)
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0][2], ["Mathlib/A.lean", "Mathlib/B.lean"])
-        self.assertIn("Mathlib/A.lean", calls[1][2])
+        self.assertEqual(calls[1][2], ["Mathlib/A.lean"])
         self.assertFalse(calls[0][3])
         self.assertLessEqual(calls[0][4], self.config.module_timeout)
         self.assertLessEqual(calls[0][5], self.config.max_seconds)
