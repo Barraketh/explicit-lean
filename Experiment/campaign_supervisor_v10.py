@@ -83,6 +83,20 @@ class InvocationSnapshot:
     manual_hash: str
 
 
+@dataclass(frozen=True)
+class VerifiedCacheFingerprint:
+    cache_key: str
+    module: str
+    source_hash: str
+    analysis_identity: str
+    implementation_identity: str
+    toolchain_identity: str
+    dependency_identity: str
+    result_json: str
+    artifact_path: Path
+    artifact_sha256: str
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -321,11 +335,11 @@ def ordered_modules(
     manifest_hash: str,
     overlay: manual_overlay.Overlay,
     snapshot: InvocationSnapshot,
-    verified_cache_keys: set[str] | None = None,
+    verified_cache_fingerprints: dict[str, VerifiedCacheFingerprint] | None = None,
 ) -> tuple[list[str], int]:
     """Plan with the v10 identity, then return closure ordered retry work."""
-    if verified_cache_keys is None:
-        verified_cache_keys = set()
+    if verified_cache_fingerprints is None:
+        verified_cache_fingerprints = {}
     implementation, toolchain = campaign_worker._identities(manifest_value, overlay.identity())
     connection = connect(config.database)
     try:
@@ -335,6 +349,12 @@ def ordered_modules(
         )
         modules = {
             str(row[0]) for row in connection.execute("SELECT module FROM modules")
+        }
+        module_identity = {
+            str(row[0]): (str(row[1]), str(row[2]))
+            for row in connection.execute(
+                "SELECT module,source_hash,analysis_identity FROM modules"
+            )
         }
         dependencies = {module: [] for module in modules}
         for row in connection.execute("SELECT module,dependency FROM imports"):
@@ -350,6 +370,9 @@ def ordered_modules(
         ]
         planned = plan_work(connection, implementation, toolchain, modules=eligible)
         expected_keys = {entry["module"]: entry["cacheKey"] for entry in planned}
+        expected_dependencies = {
+            entry["module"]: entry["dependencyIdentity"] for entry in planned
+        }
         queue_keys = {
             str(row[0]): str(row[1])
             for row in connection.execute("SELECT module,cache_key FROM work_queue")
@@ -360,23 +383,29 @@ def ordered_modules(
         implementation_json = json.dumps(implementation, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         toolchain_json = json.dumps(toolchain, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         for row in connection.execute(
-            "SELECT module,cache_key,implementation_identity,toolchain_identity,status,result_json,artifact_ref "
+            "SELECT module,cache_key,source_hash,analysis_identity,implementation_identity,"
+            "toolchain_identity,dependency_identity,status,result_json,artifact_ref "
             "FROM result_cache WHERE cache_key IN (%s)" % ",".join("?" * len(expected_keys)),
             tuple(expected_keys.values()),
         ) if expected_keys else ():
-            if row[2] != implementation_json or row[3] != toolchain_json:
+            module = str(row[0])
+            cache_key = str(row[1])
+            if expected_keys.get(module) != cache_key:
+                raise TranslationIndexError("v10 cache row module/key association is mismatched")
+            if module_identity.get(module) != (str(row[2]), str(row[3])):
+                raise TranslationIndexError("v10 cache row source identity is mismatched")
+            if row[6] != expected_dependencies[module]:
+                raise TranslationIndexError("v10 cache row dependency identity is mismatched")
+            if row[4] != implementation_json or row[5] != toolchain_json:
                 raise TranslationIndexError("v10 cache row has a mismatched implementation/toolchain identity")
-            if row[4] == "success":
-                cache_key = str(row[1])
-                if cache_key in verified_cache_keys:
-                    continue
+            if row[7] == "success":
                 try:
-                    report = json.loads(row[5])
+                    report = json.loads(row[8])
                 except json.JSONDecodeError as error:
                     raise TranslationIndexError("v10 cache report is not JSON") from error
                 if not isinstance(report, dict) or report.get("manifestHash") != manifest_hash:
                     raise TranslationIndexError("v10 cache report is bound to a different manifest")
-                artifact_ref = row[6]
+                artifact_ref = row[9]
                 if not isinstance(artifact_ref, str):
                     raise TranslationIndexError("v10 cached success has no durable artifact")
                 artifact_raw = Path(artifact_ref)
@@ -386,6 +415,7 @@ def ordered_modules(
                 if not artifact.is_file():
                     raise TranslationIndexError("v10 cached artifact is missing or is a symlink")
                 artifact_bytes = artifact.read_bytes()
+                artifact_sha256 = sha256(artifact_bytes)
                 try:
                     artifact_report = json.loads(artifact_bytes)
                 except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -398,11 +428,20 @@ def ordered_modules(
                 )
                 if artifact_report != report or canonical_artifact != canonical_report:
                     raise TranslationIndexError("v10 cached artifact JSON differs from the durable result")
+                fingerprint = VerifiedCacheFingerprint(
+                    cache_key, module, str(row[2]), str(row[3]), str(row[4]), str(row[5]),
+                    str(row[6]), str(row[8]), artifact, artifact_sha256,
+                )
+                previous = verified_cache_fingerprints.get(cache_key)
+                if previous is not None:
+                    if previous != fingerprint:
+                        raise TranslationIndexError("v10 cached success changed after verification")
+                    continue
                 if not campaign_worker._report_is_verified(
-                        artifact_report, str(row[0]), report_manifest, report_manifest_bytes,
+                        artifact_report, module, report_manifest, report_manifest_bytes,
                         dict(manifest_value), artifact, overlay, config.module_timeout):
                     raise TranslationIndexError("v10 cached artifact is not verified")
-                verified_cache_keys.add(cache_key)
+                verified_cache_fingerprints[cache_key] = fingerprint
     finally:
         connection.close()
 
@@ -469,7 +508,7 @@ def fresh_paths(config: SupervisorConfig, pass_number: int) -> tuple[str, Path]:
     return worker, output
 
 
-def run_supervisor(config: SupervisorConfig) -> int:
+def _run_supervisor_locked(config: SupervisorConfig) -> int:
     if (config.start_pass <= 0 or config.max_passes <= 0 or config.max_seconds <= 0
             or config.module_timeout <= 0 or config.minimum_free_bytes <= 0
             or config.expected_modules <= 0 or config.expected_occurrences < 0):
@@ -491,7 +530,7 @@ def run_supervisor(config: SupervisorConfig) -> int:
     started = time.monotonic()
     snapshot, _manifest_path, _manifest_bytes, manifest_value, manifest_hash, overlay = bootstrap_index(config)
     dependency_map = json.loads(snapshot.dependency_bytes)
-    verified_cache_keys: set[str] = set()
+    verified_cache_fingerprints: dict[str, VerifiedCacheFingerprint] = {}
     pass_number = config.start_pass
     completed_passes = 0
     while completed_passes < config.max_passes and time.monotonic() - started < config.max_seconds:
@@ -516,7 +555,7 @@ def run_supervisor(config: SupervisorConfig) -> int:
         _assert_snapshot(snapshot)
         modules, deferred = ordered_modules(
             config, manifest_value, manifest_hash, overlay, snapshot,
-            verified_cache_keys=verified_cache_keys,
+            verified_cache_fingerprints=verified_cache_fingerprints,
         )
         print(json.dumps({
             "event": "v10_pass_start", "pass": pass_number, "worker": worker,
@@ -558,13 +597,22 @@ def run_supervisor(config: SupervisorConfig) -> int:
     return 0
 
 
+def run_supervisor(config: SupervisorConfig) -> int:
+    """Run one v10 invocation while holding both fixed supervisor locks."""
+    if config.manifest.is_symlink() or not config.manifest.is_file():
+        raise TranslationIndexError("v10 manifest must be a regular non-symlink file")
+    manifest_hash = sha256(config.manifest.read_bytes())
+    with supervisor_locks(config.run_id, manifest_hash):
+        return _run_supervisor_locked(config)
+
+
 def _config_from_args(args: argparse.Namespace) -> SupervisorConfig:
     return SupervisorConfig(
         database=Path(args.database).resolve(),
         manifest=Path(args.manifest).resolve(),
         dependency_map=Path(args.dependency_map).resolve() if args.dependency_map else None,
         source_root=Path(args.source_root).resolve(),
-        output_parent=Path(args.output_parent).resolve(),
+        output_parent=Path(os.path.abspath(args.output_parent)),
         manual_overrides=Path(args.manual_overrides).resolve(),
         expected_v9_manifest_path=Path(args.v9_manifest).resolve(),
         expected_v9_manifest_hash=_hash_argument(args.v9_manifest_sha256, "v9 manifest hash"),
@@ -602,11 +650,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         config = _config_from_args(args)
-        # The lock is acquired only after static v10 authentication has enough
-        # information to write an auditable owner record.
-        manifest_hash = sha256(config.manifest.read_bytes())
-        with supervisor_locks(config.run_id, manifest_hash):
-            return run_supervisor(config)
+        return run_supervisor(config)
     except (OSError, RuntimeError, ValueError) as error:
         print(f"schema13 v10 supervisor: {error}", file=sys.stderr)
         return 2

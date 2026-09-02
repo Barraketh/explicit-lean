@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import fcntl
+import os
 from pathlib import Path
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import campaign_supervisor_v10 as supervisor
@@ -304,6 +307,60 @@ class V10SupervisorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "bound to a different manifest"):
             supervisor.ordered_modules(self.config, value, self.v10_hash, overlay, snapshot)
 
+    def test_cache_row_module_must_match_its_planned_cache_key(self) -> None:
+        self._import_v9()
+        snapshot, _, _, value, _, overlay = supervisor.bootstrap_index(self.config)
+        implementation, toolchain = campaign_worker._identities(value, overlay.identity())
+        canonical = lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"))
+        connection = connect(self.database)
+        try:
+            from translation_index import cache_key
+            key, dependency = cache_key(connection, "Mathlib/A.lean", implementation, toolchain)
+            row = connection.execute(
+                "SELECT source_hash,analysis_identity FROM modules WHERE module='Mathlib/B.lean'"
+            ).fetchone()
+            connection.execute(
+                "INSERT INTO result_cache(cache_key,module,source_hash,analysis_identity,"
+                "implementation_identity,toolchain_identity,dependency_identity,status,"
+                "translation_status,result_json,failure,log_ref,artifact_ref,recorded_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (key, "Mathlib/B.lean", row[0], row[1], canonical(implementation),
+                 canonical(toolchain), dependency, "failed", "unverified", "{}",
+                 "forged", None, None, 0),
+            )
+        finally:
+            connection.close()
+        with self.assertRaisesRegex(RuntimeError, "module/key association"):
+            supervisor.ordered_modules(self.config, value, self.v10_hash, overlay, snapshot)
+
+    def test_public_run_path_holds_each_fixed_lock(self) -> None:
+        digest = supervisor.sha256(self.config.manifest.read_bytes())
+        for path in (supervisor.V9_LOCK_PATH, supervisor.V10_LOCK_PATH):
+            descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaisesRegex(RuntimeError, "another schema13 supervisor holds"):
+                    supervisor.run_supervisor(self.config)
+            finally:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                os.close(descriptor)
+
+    def test_cli_preserves_symlink_output_parent_for_rejection(self) -> None:
+        link = self.root / "output-link"
+        link.symlink_to(self.output_parent, target_is_directory=True)
+        args = SimpleNamespace(
+            database=str(self.database), manifest=str(self.v10), source_root=str(self.source_root),
+            output_parent=str(link), dependency_map=str(self.dependency_map),
+            manual_overrides=str(self.manual), v9_manifest=str(self.v9),
+            v9_manifest_sha256=self.v9_hash, v10_manifest_sha256=self.v10_hash,
+            modules=2, occurrences=2, run_id="fixture-v10", minimum_free_bytes=1,
+            module_timeout=10, max_passes=2, max_seconds=10, start_pass=1,
+        )
+        config = supervisor._config_from_args(args)
+        self.assertTrue(config.output_parent.is_symlink())
+        with self.assertRaisesRegex(RuntimeError, "output parent must not be a symlink"):
+            supervisor.run_supervisor(config)
+
     def test_valid_cached_success_uses_module_and_survives_fresh_resume_snapshot(self) -> None:
         self._import_v9()
         first = supervisor.bootstrap_index(self.config)
@@ -346,7 +403,7 @@ class V10SupervisorTests(unittest.TestCase):
         self._insert_success(
             "Mathlib/A.lean", value, overlay, self.output_parent / "cached-a.json"
         )
-        verified_keys = set()
+        verified_keys = {}
         with patch.object(supervisor.campaign_worker, "_report_is_verified", return_value=True) as verified:
             first, _ = supervisor.ordered_modules(
                 self.config, value, self.v10_hash, overlay, snapshot, verified_keys
@@ -362,6 +419,19 @@ class V10SupervisorTests(unittest.TestCase):
             )
         self.assertEqual(first, ["Mathlib/B.lean"])
         self.assertEqual(second, first)
+        cached_artifact = self.output_parent / "cached-a.json"
+        cached_report = json.loads(cached_artifact.read_text(encoding="utf-8"))
+        cached_artifact.write_text(json.dumps(cached_report, indent=2), encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "changed after verification"):
+            supervisor.ordered_modules(
+                self.config, value, self.v10_hash, overlay, snapshot, verified_keys
+            )
+        cached_artifact.unlink()
+        with self.assertRaisesRegex(RuntimeError, "missing or is a symlink"):
+            supervisor.ordered_modules(
+                self.config, value, self.v10_hash, overlay, snapshot, verified_keys
+            )
+        cached_artifact.write_text(json.dumps(cached_report, separators=(",", ":")), encoding="utf-8")
         self.assertEqual(third, [])
         self.assertEqual(verified.call_count, 2)
         self.assertEqual(
