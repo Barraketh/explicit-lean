@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import hashlib
+import io
 import json
 import fcntl
 import os
@@ -634,20 +636,79 @@ class V10SupervisorTests(unittest.TestCase):
             events.append("reconstruct")
             return json.loads(self.v10.read_bytes())
 
+        def pressure_relief():
+            events.append("pressure")
+            return {
+                "platform": "darwin", "attempted": True,
+                "releasedBytes": 123, "error": None,
+            }
+
+        output = io.StringIO()
         with patch.object(supervisor.campaign_budget, "check", return_value={"canDispatch": True}), \
              patch.object(supervisor.campaign_worker, "memory_status", side_effect=admission), \
              patch.object(supervisor.campaign_worker, "storage_status", return_value={"canDispatch": True}), \
              patch.object(supervisor, "ordered_modules", side_effect=planned), \
              patch.object(supervisor, "_reconstruct_manifest_value", side_effect=reconstruct), \
              patch.object(supervisor.campaign_worker, "run_worker", side_effect=fake_worker), \
+             patch.object(supervisor, "_malloc_zone_pressure_relief", side_effect=pressure_relief), \
              patch.object(supervisor.gc, "collect", side_effect=lambda: events.append("gc")):
-            self.assertEqual(supervisor.run_supervisor(self.config), 0)
+            with redirect_stdout(output):
+                self.assertEqual(supervisor.run_supervisor(self.config), 0)
 
         self.assertEqual(calls, 2)
         self.assertEqual(events, [
-            "admission", "ordered", "gc", "worker", "gc",
-            "admission", "reconstruct", "ordered", "gc", "worker", "gc",
+            "admission", "ordered", "gc", "pressure", "worker", "gc",
+            "admission", "reconstruct", "ordered", "gc", "pressure", "worker", "gc",
         ])
+        starts = [
+            json.loads(line) for line in output.getvalue().splitlines()
+            if line and json.loads(line).get("event") == "v10_pass_start"
+        ]
+        self.assertEqual(len(starts), 2)
+        self.assertEqual(
+            starts[0]["allocatorPressureRelief"],
+            {"attempted": True, "error": None, "platform": "darwin", "releasedBytes": 123},
+        )
+
+    def test_allocator_pressure_relief_calls_all_zone_api_with_zero_goal(self) -> None:
+        calls = []
+
+        def pressure_relief(zone, goal):
+            calls.append((zone, goal))
+            return 4096
+
+        library = SimpleNamespace(malloc_zone_pressure_relief=pressure_relief)
+        with patch.object(supervisor.sys, "platform", "darwin"), \
+             patch.object(supervisor.ctypes, "CDLL", return_value=library) as load:
+            telemetry = supervisor._malloc_zone_pressure_relief()
+
+        load.assert_called_once_with("/usr/lib/libSystem.B.dylib")
+        self.assertEqual(calls, [(None, 0)])
+        self.assertEqual(telemetry, {
+            "platform": "darwin", "attempted": True,
+            "releasedBytes": 4096, "error": None,
+        })
+
+    def test_allocator_pressure_relief_is_deterministically_skipped_off_macos(self) -> None:
+        with patch.object(supervisor.sys, "platform", "linux"), \
+             patch.object(supervisor.ctypes, "CDLL") as load:
+            telemetry = supervisor._malloc_zone_pressure_relief()
+
+        load.assert_not_called()
+        self.assertEqual(telemetry, {
+            "platform": "linux", "attempted": False,
+            "releasedBytes": None, "error": None,
+        })
+
+    def test_allocator_pressure_relief_failure_is_nonfatal_telemetry(self) -> None:
+        with patch.object(supervisor.sys, "platform", "darwin"), \
+             patch.object(supervisor.ctypes, "CDLL", side_effect=OSError("fixture")):
+            telemetry = supervisor._malloc_zone_pressure_relief()
+
+        self.assertEqual(telemetry, {
+            "platform": "darwin", "attempted": True,
+            "releasedBytes": None, "error": "OSError",
+        })
 
     def test_invalid_manifest_reconstruction_fails_before_planning(self) -> None:
         self._import_v9()

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import ctypes
 from dataclasses import dataclass, replace
 import fcntl
 import gc
@@ -674,6 +675,36 @@ def fresh_paths(config: SupervisorConfig, pass_number: int) -> tuple[str, Path]:
     return worker, output
 
 
+def _malloc_zone_pressure_relief() -> dict[str, object]:
+    """Ask macOS libSystem to return releasable malloc pages to the OS.
+
+    ``malloc_zone_pressure_relief(NULL, 0)`` is a best-effort advisory API:
+    zero asks all zones for maximal relief, and the return value is the number
+    of bytes released.  Keep this optional operation fail-open because it is a
+    memory optimization after all authentication and admission checks.
+    """
+    telemetry: dict[str, object] = {
+        "platform": sys.platform,
+        "attempted": False,
+        "releasedBytes": None,
+        "error": None,
+    }
+    if sys.platform != "darwin":
+        return telemetry
+    telemetry["attempted"] = True
+    try:
+        libsystem = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        pressure_relief = libsystem.malloc_zone_pressure_relief
+        pressure_relief.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        pressure_relief.restype = ctypes.c_size_t
+        telemetry["releasedBytes"] = int(pressure_relief(None, 0))
+    except Exception as error:
+        # A missing symbol/library or an unavailable allocator must not turn a
+        # completed authenticated pass into a supervisor failure.
+        telemetry["error"] = type(error).__name__
+    return telemetry
+
+
 def _run_supervisor_locked(config: SupervisorConfig) -> int:
     if (config.start_pass <= 0 or config.max_passes <= 0 or config.max_seconds <= 0
             or config.module_timeout <= 0 or config.minimum_free_bytes <= 0
@@ -733,10 +764,12 @@ def _run_supervisor_locked(config: SupervisorConfig) -> int:
         # full-manifest parse does not overlap this parsed mapping.
         manifest_value = None
         gc.collect()
+        allocator_pressure = _malloc_zone_pressure_relief()
         print(json.dumps({
             "event": "v10_pass_start", "pass": pass_number, "worker": worker,
             "eligible": len(modules), "resourceDeferred": deferred,
             "availableBytes": memory.get("availableBytes"), "freeBytes": storage.get("freeBytes"),
+            "allocatorPressureRelief": allocator_pressure,
         }, sort_keys=True), flush=True)
         remaining = config.max_seconds - (time.monotonic() - started)
         if remaining <= 0:
@@ -773,8 +806,9 @@ def _run_supervisor_locked(config: SupervisorConfig) -> int:
             # before the next resource admission check.  The authenticated
             # snapshot, manifest, overlay, and dependency map remain alive for
             # the whole invocation; clearing them would weaken the exact-input
-            # contract.  ``gc.collect`` is best-effort for cycles; allocator
-            # page return is intentionally not assumed here.
+            # contract.  ``gc.collect`` is best-effort for cycles; the
+            # Darwin allocator advisory is reserved for the pre-dispatch
+            # manifest release above.
             del result, modules, deferred, worker, output
             gc.collect()
     print(json.dumps({
