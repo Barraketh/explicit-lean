@@ -20,24 +20,49 @@ def snapshot(used=1, resets=RESET):
 
 
 def main():
-    assert evaluate(POLICY, snapshot(98), NOW)["canDispatch"]
-    assert not evaluate(POLICY, snapshot(99), NOW)["canDispatch"]
+    # The legacy percentage fields are intentionally ignored. Account
+    # availability, not the former 25% project allowance, controls dispatch.
+    for percent in [0, 18, 22, 24, 25, 98, 99]:
+        result = evaluate(POLICY, snapshot(percent), NOW)
+        assert result["canDispatch"] and result["window"] == "weekly"
+        assert "dispatchStopPercent" not in result
+        assert "maximumNewAgents" not in result
+    assert not evaluate(POLICY, snapshot(100), NOW)["canDispatch"]
     following = RESET + 7 * 86400
-    for percent in [0, 18, 19, 21]:
+    for percent in [0, 18, 22, 24, 25, 99]:
         result = evaluate(POLICY, snapshot(percent, following), NOW)
-        assert result["canDispatch"] and result["window"] == "next_limited"
-        assert result["maximumNewAgents"] == (1 if percent >= 19 else 3)
-    for percent in [22, 24, 25, 99, 100]:
+        assert result["canDispatch"] and result["window"] == "weekly"
+    for percent in [100]:
         assert not evaluate(POLICY, snapshot(percent, following), NOW)["canDispatch"]
+    # A policy with no legacy budget block remains valid; its explicit deadline
+    # is still required and still gates dispatch.
+    assert evaluate({"deadline": POLICY["deadline"]}, snapshot(99), NOW)["canDispatch"]
+    allowed = snapshot(99)
+    allowed["ordinaryUsageAllowed"] = True
+    assert evaluate(POLICY, allowed, NOW)["canDispatch"]
+    denied = snapshot(1)
+    denied["ordinaryUsageAllowed"] = False
+    assert evaluate(POLICY, denied, NOW) == {
+        "decision": "ordinary_usage_not_allowed", "canDispatch": False}
+    assert evaluate(POLICY, {"ordinaryUsageAllowed": False}, NOW)["decision"] == \
+        "ordinary_usage_not_allowed"
+    assert evaluate({"deadline": "2026-09-10T00:00:00Z",
+                     "notAfter": "2026-09-02T00:00:00Z"},
+                    snapshot(99), NOW)["canDispatch"]
+    assert evaluate({"deadline": "2026-09-01T00:00:00Z",
+                     "notAfter": "2026-09-10T00:00:00Z"},
+                    {}, NOW)["decision"] == "deadline_reached"
     assert evaluate(POLICY, {}, datetime(2026, 9, 9, tzinfo=timezone.utc))["decision"] == "deadline_reached"
     reached = snapshot()
     reached["rateLimits"]["spendControlReached"] = True
     assert not evaluate(POLICY, reached, NOW)["canDispatch"]
     keyed = snapshot(1)
-    keyed["rateLimitsByLimitId"] = {"codex": snapshot(25, following)["rateLimits"]}
-    assert not evaluate(POLICY, keyed, NOW)["canDispatch"]
+    keyed["rateLimitsByLimitId"] = {"codex": snapshot(99, following)["rateLimits"]}
+    assert evaluate(POLICY, keyed, NOW)["canDispatch"]
     short = snapshot()
-    short["rateLimits"]["secondary"] = {"usedPercent": 100, "windowDurationMins": 300}
+    short["rateLimits"]["secondary"] = {"usedPercent": 99, "windowDurationMins": 300}
+    assert evaluate(POLICY, short, NOW)["canDispatch"]
+    short["rateLimits"]["secondary"]["usedPercent"] = 100
     assert not evaluate(POLICY, short, NOW)["canDispatch"]
     for mutation in [
         lambda x: x["rateLimits"].update(limitId="other"),
@@ -47,6 +72,8 @@ def main():
         lambda x: x["rateLimits"]["primary"].update(resetsAt=0),
         lambda x: x["rateLimits"]["primary"].update(windowDurationMins=300),
         lambda x: x["rateLimits"].update(secondary=deepcopy(x["rateLimits"]["primary"])),
+        lambda x: x["rateLimits"].update(secondary={"usedPercent": -1, "windowDurationMins": 300}),
+        lambda x: x.update(ordinaryUsageAllowed="false"),
     ]:
         malformed = snapshot()
         mutation(malformed)
@@ -56,7 +83,7 @@ def main():
             pass
         else:
             raise AssertionError(f"accepted malformed usage: {malformed}")
-    print("campaign budget: reset boundaries, cap, headroom, stale/missing data and backend limits: ok")
+    print("campaign budget: deadline, account availability, stale/missing data and backend limits: ok")
 
 
 if __name__ == "__main__":

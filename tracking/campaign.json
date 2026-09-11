@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-11T01:48:29.252368+00:00",
+  "updatedAt": "2026-09-11T23:17:41.535647+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -14,33 +14,56 @@
     "sha256": "a6ed38284491583e0bb02db966876f93516a35da63c8aea620c3e1c4df9ca589",
     "scope": "Original tracker preserved byte-for-byte. Its pending actions, active owners, old counts and prototype statuses are historical, not current dispatch instructions."
   },
-  "deadline": "2026-09-08T00:00:00-07:00",
-  "deadlineStatus": "expired_original_campaign_deadline_retained_no_new_deadline_agreed",
-  "machine": "local_mac_for_preparation_aws_pilot_direction_agreed_not_provisioned",
+  "deadline": "2026-09-12T11:00:00Z",
+  "notAfter": "2026-09-12T11:00:00Z",
+  "deadlineStatus": "one_pilot_bounded_continuation_materialized_publication_pending",
+  "machine": "local_mac_for_preparation_one_us_west_1_r7i_4xlarge_pilot_authorized_not_provisioned",
   "budget": {
     "resetDate": "2026-09-07",
-    "currentWindowAllowance": "all remaining",
-    "nextWindowMaximumPercent": 25,
-    "nextWindowDispatchStopPercent": 22,
+    "currentWindowAllowance": "normal account availability",
+    "dispatchPolicy": "ordinary_account_availability",
+    "formerPercentagePolicy": "The September 7 campaign-specific 25% maximum and 22% dispatch stop were explicitly retired by the user on September 11.",
     "usageSource": "codex app-server account/rateLimits/read",
     "unknownUsageAfterReset": "stop",
-    "paidResourcesAuthorized": false,
+    "paidResourcesAuthorized": true,
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-11T01:48:29.252368+00:00",
-    "lastUsedPercent": 7,
-    "lastDecision": "deadline_reached",
-    "telemetrySource": "Codex app get_usage_limits (read during documentation handoff)",
-    "note": "7% is a historical reading, not permission for another batch. The original September 8 deadline is still enforced by campaign_budget.py; a bounded continuation policy must be made explicit before production dispatch."
+    "lastCheckedAt": "2026-09-11T23:17:41.535647+00:00",
+    "lastUsedPercent": 22,
+    "ordinaryUsageAllowed": true,
+    "lastDecision": "continue",
+    "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
+    "note": "Fresh telemetry reported ordinary usage available at 22%. The former 25%/22% project budget is obsolete. The one-pilot continuation ends at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed. AWS dispatch remains blocked until the clean authorization commit is published and explicitly identified."
   },
   "direction": {
     "userConversationDate": "2026-09-10",
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "Preparation may proceed locally; no cloud resources have been provisioned. Account/region, maximum spend, runtime/stop conditions and continuation scheduling policy remain to be specified before launch.",
-    "originalLocalOnlyPolicy": "Still applies to resource acquisition until the bounded cloud launch is explicitly authorized. AWS planning is now in scope. Do not use explicit-lean-cloud implicitly.",
+    "readiness": "The user authorized a reproducible one-host pilot in account 538639825139/us-west-1 with a $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. No compute resources have been provisioned. explicit-lean-pilot resolves to the non-root operator and the user explicitly waived MFA. AWS approved 32 On-Demand Standard vCPUs, above the 16 required. The exact 2026-09-12T11:00:00Z cutoff is materialized; a clean published authorization checkout explicitly identified by full hash remains required before launch.",
+    "pilotPreparation": {
+      "procedure": "tracking/AWS-LINUX-PILOT.md",
+      "policy": "tracking/aws-linux-pilot-policy.json",
+      "processSampler": "Experiment/linux_process_sampler.py",
+      "authorizationStatus": "authorized_window_publication_pending",
+      "awsAccountId": "538639825139",
+      "region": "us-west-1",
+      "maximumSpendUsd": 20,
+      "maximumWorkerRuntimeSeconds": 36000,
+      "maximumInstanceLifetimeSeconds": 43200,
+      "estimatedBoundedSubtotalUsd": 14.492,
+      "observedPrincipalArn": "arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator",
+      "onDemandStandardVcpuQuota": 32,
+      "requiredOnDemandStandardVcpuQuota": 16,
+      "quotaIncreaseRequestId": "c5fd28c3aaa34b40898ffab61a5fefc6HXVHEjzY",
+      "quotaIncreaseRequestStatus": "CASE_CLOSED",
+      "quotaCaseId": "178915936800175",
+      "historicalEvidenceCheck": "Five selected success reports exist; five selected semantic logs match recorded SHA-256; the five memory-stop attempt rows have no durable log_ref and remain labels only.",
+      "preparedAt": "2026-09-11T18:24:58.596257+00:00",
+      "locallyReviewedAt": "2026-09-11T18:28:51.442818+00:00"
+    },
+    "originalLocalOnlyPolicy": "Superseded only for the single recorded bounded pilot after all launch gates close. No long campaign or second host is authorized. Do not use explicit-lean-cloud implicitly.",
     "memoryCleanupPriority": "Optional small follow-up; measured about 559 MiB steady-state RSS reduction, with unchanged 1.42 GiB initial parsing peak. Do not make extensive memory optimization a prerequisite."
   },
   "coverage": {
@@ -154,7 +177,12 @@
     {
       "id": "bounded-run-policy",
       "status": "open",
-      "detail": "The prior September 8 deadline stops campaign_budget.py. AWS launch account/region/spend/runtime limits and bounded continuation policy have not been set. Prepare the launch before requesting missing launch details; do not bypass the guard."
+      "detail": "The one-pilot continuation and exact 2026-09-12T11:00:00Z cutoff are materialized. The clean authorization commit must still be published and explicitly identified by full hash before any paid launch."
+    },
+    {
+      "id": "aws-launch-identity-and-quota",
+      "status": "resolved",
+      "detail": "explicit-lean-pilot resolves to arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator; the user explicitly waived MFA. default and softmax remain root sessions and must not be used. AWS closed request c5fd28c3aaa34b40898ffab61a5fefc6HXVHEjzY and raised the us-west-1 On-Demand Standard quota to 32 vCPUs, above the 16 required."
     },
     {
       "id": "resource-throughput",
@@ -203,8 +231,8 @@
     },
     {
       "id": "aws-pilot-preparation",
-      "status": "pending",
-      "description": "Direction endorsed; no machine provisioned, cost/runtime cap or revised deadline recorded."
+      "status": "in_progress",
+      "description": "Launch procedure, exact 15-module policy, CloudFormation controller and Linux Python/Lean RSS sampler prepared locally. The user authorized account 538639825139/us-west-1, a $20 all-in ceiling, 12-hour host lifetime and 10-hour worker. The non-root operator is active, MFA was explicitly waived, and the quota is 32 vCPUs. The exact 2026-09-12T11:00:00Z cutoff is materialized. No machine provisioned; clean publication and explicit full-hash identification remain open."
     },
     {
       "id": "corpus-translation",
@@ -217,7 +245,74 @@
       "description": "Begins after complete explicit coverage."
     }
   ],
-  "activeChecks": [],
+  "activeChecks": [
+    {
+      "checkedAt": "2026-09-11T18:21:21.795140+00:00",
+      "scope": "checkout_and_handoff_reconciliation",
+      "result": "passed",
+      "detail": "Branch matched; base and reviewed code commits are ancestors of HEAD 72deec7708f1115b3096e62cc722bb35e85d1199; Lean/Mathlib pins and frozen manifest/handoff hashes matched; queue states matched; no unfinished attempts or live leases; disk and memory reserves were available. Unrelated untracked .idea/ was preserved."
+    },
+    {
+      "checkedAt": "2026-09-11T18:21:21.795140+00:00",
+      "scope": "isolated_python_checks",
+      "result": "passed",
+      "detail": "check_campaign_supervisor_v10.py: 22; check_campaign_worker.py: 33; check_translation_index.py: 13. No Lean compilation or corpus translation was run."
+    },
+    {
+      "checkedAt": "2026-09-11T18:24:58.596257+00:00",
+      "scope": "linux_process_sampler_unit_checks",
+      "result": "passed",
+      "detail": "check_linux_process_sampler.py: 2 fixture tests on process-tree selection and Python/Lean RSS categorization. Linux /proc integration remains to be exercised on the pilot host."
+    },
+    {
+      "checkedAt": "2026-09-11T19:49:51+00:00",
+      "scope": "aws_read_only_launch_preflight",
+      "result": "blocked",
+      "detail": "Fresh Codex usage was 17%. AWS STS confirmed account 538639825139, but default, softmax and explicit-lean-pilot all resolve to the root principal. r7i.4xlarge is offered in us-west-1a/us-west-1c at $1.176/hour and requires 16 vCPUs; the regional On-Demand Standard quota is 5. gp3 is $0.096/GB-month. No AWS resources, quota requests, roles or budgets were created or changed."
+    },
+    {
+      "checkedAt": "2026-09-11T20:02:52+00:00",
+      "scope": "aws_identity_bootstrap_discovery",
+      "result": "blocked_identity_type_choice",
+      "detail": "Fresh Codex usage was 18%. Read-only AWS CLI discovery found a standalone account, no AWS Organization, no IAM Identity Center instances and zero IAM users. AWS documents that a CLI-created account instance does not support permission sets or AWS account access. Creating the full organization instance would require the broader AWS Organizations setup; the bounded CLI-only alternative is a dedicated IAM user with console access and no access keys. No AWS identity resources were created or changed."
+    },
+    {
+      "checkedAt": "2026-09-11T20:06:54+00:00",
+      "scope": "aws_operator_identity_bootstrap",
+      "result": "awaiting_user_activation",
+      "detail": "Created IAM user arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator, enabled console login with forced password reset, attached only AWS managed AdministratorAccess, verified zero inline policies and zero access keys, and stored the generated temporary password only in the user's macOS Keychain. No EC2 resources or quota requests were created. The user must change the password, enroll MFA and refresh explicit-lean-pilot as this non-root identity."
+    },
+    {
+      "checkedAt": "2026-09-11T20:22:50+00:00",
+      "scope": "aws_operator_activation_verification",
+      "result": "blocked_missing_mfa",
+      "detail": "explicit-lean-pilot resolves to the intended non-root IAM user, PasswordResetRequired is false and access key count remains zero. AWS returned no MFA devices, so the quota request and launch preparation remain paused. Removed the now-invalid temporary password from the macOS Keychain. No EC2 resources or quota requests were created."
+    },
+    {
+      "checkedAt": "2026-09-11T20:39:50+00:00",
+      "scope": "aws_mfa_waiver_and_quota_request",
+      "result": "quota_pending",
+      "detail": "Fresh Codex usage was 18%. explicit-lean-pilot resolved to the non-root operator and the user explicitly waived the MFA recommendation. Submitted one us-west-1 EC2 On-Demand Standard quota increase from 5 to 16 vCPUs as request c5fd28c3aaa34b40898ffab61a5fefc6HXVHEjzY; AWS returned PENDING. No EC2 resources were provisioned."
+    },
+    {
+      "checkedAt": "2026-09-11T21:48:53+00:00",
+      "scope": "aws_quota_and_codex_policy_refresh",
+      "result": "passed",
+      "detail": "Fresh Codex telemetry reported ordinary usage available at 19%; the user explicitly retired the former 25%/22% campaign budget. explicit-lean-pilot remained the non-root operator. AWS closed quota case 178915936800175 and the effective us-west-1 On-Demand Standard quota is 32 vCPUs. No EC2 resources were provisioned."
+    },
+    {
+      "checkedAt": "2026-09-11T23:17:10+00:00",
+      "scope": "aws_controller_fix_review_and_live_gates",
+      "result": "passed",
+      "detail": "Luna Max implemented the bounded controller under narrow ownership and the coordinating review fixed three preflight defects: the us-west-1 public IPv4 price filter, safe handling of an absent S3 bucket policy, and separation of nominal 128 GiB AWS capacity from a 120 GiB guest-visible sanity floor. Ten mock controller checks, generated worker and cloud-init shell syntax, Python compilation, AWS CloudFormation ValidateTemplate, and live read-only identity/quota/instance-type/AMI/network/bucket/pricing/zero-active-host gates passed. The live worst-case subtotal was $14.492. No AWS resources were mutated."
+    },
+    {
+      "checkedAt": "2026-09-11T23:17:41.535647+00:00",
+      "scope": "bounded_continuation_and_regression_checks",
+      "result": "passed",
+      "detail": "Materialized matching top-level deadline/notAfter and policy notAfter at 2026-09-12T11:00:00Z. Fresh telemetry showed ordinary usage available at 22% and campaign_budget.py returned continue. Focused checks passed: budget policy, supervisor 22, worker 33, translation index 13, campaign status 9, Linux sampler 2, AWS controller 10, Python compilation and git diff whitespace validation. No Lean build, corpus translation, worker dispatch or AWS resource provisioning was run."
+    }
+  ],
   "historicalAutomation": {
     "id": "complete-search-free-mathlib-by-sep-8",
     "instruction": "Do not restart the old September 8 continuation automation as part of handoff. Scheduler state was not inspected or changed in this documentation task."
@@ -228,14 +323,24 @@
     "policy": "Preserve the existing 12 GiB disk and host-memory reserves for local runs. Check fresh telemetry; no automatic evidence cleanup."
   },
   "documentationValidation": {
-    "date": "2026-09-10",
+    "date": "2026-09-11",
     "localMarkdownLinks": "passed",
     "jsonCrossDocumentInvariants": "passed",
     "archiveSha256": "verified",
-    "budgetChecks": "passed",
+    "budgetChecks": "continue_with_materialized_not_after",
     "campaignStatusTests": 9,
     "supervisorTests": 22,
+    "workerTests": 33,
+    "translationIndexTests": 13,
+    "linuxProcessSamplerTests": 2,
+    "awsLinuxPilotTests": 10,
+    "generatedWorkerShellSyntax": "passed",
+    "cloudInitShellSyntax": "passed",
+    "cloudFormationValidateTemplate": "passed",
+    "liveAwsReadOnlyLaunchGates": "passed",
+    "linuxProcessSamplerIntegrationRun": false,
     "leanBuildRun": false,
-    "productionDispatchRun": false
+    "productionDispatchRun": false,
+    "awsResourcesProvisioned": false
   }
 }

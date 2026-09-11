@@ -60,27 +60,43 @@ merge needed for that supervisor. Its old `.lake` loader scripts are historical.
 
 ## Next deliverable: a reproducible bounded Linux pilot
 
-The user accepted the direction of an AWS pilot: one dedicated **128 GiB Linux
-machine, one worker**, and a representative 10–20-module sample. No resources
-have been provisioned. Prepare setup and launch instructions locally, with the
-exact code/toolchain pins, selected sample, output location, measurements and
-stop conditions. The deliverable is a repeatable launch procedure and a pilot
-report before a long campaign or additional machines.
+The user authorized one AWS pilot in account `538639825139`, region `us-west-1`,
+with a **$20 all-in ceiling**. The selected bounds are one single-purpose,
+default-tenancy `r7i.4xlarge`-class **128 GiB Linux machine**, a 12-hour instance lifetime, a
+10-hour worker, one worker total, and the 15-module sample. No resources have
+been provisioned. A fail-closed policy and repeatable procedure
+are now in [tracking/aws-linux-pilot-policy.json](tracking/aws-linux-pilot-policy.json)
+and [tracking/AWS-LINUX-PILOT.md](tracking/AWS-LINUX-PILOT.md), with a Linux
+process sampler for separate Python and Lean RSS measurements. The controller's
+mock checks, generated shell syntax, live read-only AWS gates and AWS template
+validation pass; Linux integration remains a host preflight. A
+dedicated `explicit-lean-operator` IAM user has a console login, temporary
+`AdministratorAccess` and no access keys. Its password
+was changed, the invalid temporary password was removed from Keychain, and the
+user explicitly chose to proceed without MFA. `explicit-lean-pilot` resolves to
+this non-root user; `default` and `softmax` remain root sessions and must not be
+used. AWS closed quota case `178915936800175` and raised the region's On-Demand
+Standard quota to 32 vCPUs, above the 16 required. The exact cutoff is
+`2026-09-12T11:00:00Z`; a clean published authorization checkout explicitly
+identified by full hash is required before use. The pilot
+report remains required before a long campaign or additional machines.
 
-Before launch, settle the account/region, maximum spend and runtime. Also make
-an explicit bounded continuation policy: the existing
-`Experiment/campaign_budget.py` checks the old September 8 deadline and returns
-`deadline_reached` (CLI exit 3), even when account usage is low. Do not work
-around this by skipping the guard or silently changing its date. The original
-post-reset allowance remains capped at 25%, with dispatch stopping at 22%;
-fresh telemetry is required. Preparing and reviewing the pilot can proceed
-without paid resources. Do not use the older `explicit-lean-cloud` host.
+Before launch, close the publication gate. The exact one-pilot continuation is
+recorded in both top-level tracker boundaries and remains fail-closed at its
+absolute cutoff. Do not work around the guard or extend that time. The original
+campaign-specific 25%/22% usage policy is obsolete by explicit user direction.
+Fresh telemetry must still show ordinary account availability; unknown or
+actually rate-limited availability stops dispatch, and credits must never be
+bought or redeemed. Preparing and reviewing the pilot can proceed without paid
+resources. Do not use the older `explicit-lean-cloud` host.
 The Codex usage allowance and the AWS spending limit are separate budgets.
 
 On the selected Linux host, recreate the pinned dependencies and native tools.
 Do not copy Mac runtime artifacts or relabel Mac receipts as Linux evidence.
-The budget reader currently calls local `codex app-server`; include working,
-authorized usage telemetry in the Linux launch design. The Mac index also
+The controller pauses after provisioning for a Session Manager device-code
+login and creates only a nonsecret, run-bound proof after `codex login status`
+and the remote budget check pass. Do not copy `auth.json`, tokens, or Mac runtime
+state to the host. The Mac index also
 contains absolute paths, so plan a fresh Linux index/output namespace.
 Inspect path/platform assumptions, generate/authenticate fresh invocation
 inputs, and use a fresh output directory and nonce for each run. Start from the

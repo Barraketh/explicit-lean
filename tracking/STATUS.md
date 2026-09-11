@@ -32,11 +32,24 @@ parsing peak. It is optional cleanup, not a prerequisite for the next milestone.
 
 ## Next milestone
 
-Prepare a bounded AWS/Linux pilot with one 128 GiB machine, one worker and a
-15-module sample spanning successes, resource stops and semantic failures.
-No AWS resources have been provisioned. Account/region, spending/runtime limits
-and the replacement for the expired scheduling policy remain to be specified.
-The current `campaign_budget.py` still rejects dispatch after September 8.
+The bounded AWS/Linux pilot is authorized for account `538639825139` in
+`us-west-1` with a $20 all-in ceiling. It remains exactly one 128 GiB
+`r7i.4xlarge`-class machine, one worker and 15 modules spanning successes,
+resource stops and semantic failures. The chosen bounds are a 10-hour worker
+and a 12-hour instance lifetime; the estimated bounded subtotal is $14.492.
+No AWS compute resources have been provisioned. A dedicated
+`explicit-lean-operator` IAM user has console login, temporary
+`AdministratorAccess` and no access keys. Its password was changed, the invalid
+temporary password was removed from Keychain, and the user explicitly chose to
+proceed without MFA. `explicit-lean-pilot` resolves to this non-root user;
+`default` and `softmax` remain root sessions and must not be used. AWS closed
+quota case `178915936800175` and raised the On-Demand Standard quota to 32
+vCPUs, above the 16 required. The one-pilot continuation now has the exact
+`2026-09-12T11:00:00Z` cutoff. A clean published authorization checkout,
+explicitly identified by full hash, remains the final pre-provisioning gate.
+Fresh September 11 telemetry reported ordinary Codex work available at 22%.
+The user retired the former campaign-specific 25%/22% policy; unknown
+availability or an actual rate-limit/spend stop still halts dispatch.
 
 After the pilot, prioritize `Mathlib.Logic.Relation`, `Mathlib.Data.Nat.Init`
 and `Mathlib.Logic.IsEmpty.Basic`, then cold-certify their translated dependency

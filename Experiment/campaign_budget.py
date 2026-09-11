@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Read Codex allowance telemetry and apply the user's campaign spend policy.
+"""Read Codex rate-limit telemetry and enforce the campaign end time.
 
 This only calls initialize and account/rateLimits/read; it never starts a model
-turn, buys credits, or consumes a reset. Exit 0 permits a new bounded work batch;
-exit 3 means do not dispatch more work. The backend remains the usage authority.
+turn, buys credits, or consumes a reset. Dispatch follows the account's actual
+rate-limit availability rather than a project-specific percentage allowance.
+Exit 0 permits a new bounded work batch; exit 3 means do not dispatch more work.
+The backend remains the usage authority.
 """
 
 from __future__ import annotations
@@ -89,18 +91,37 @@ def _integer(value: object, label: str) -> int:
     return value
 
 
+def _campaign_end(policy: dict[str, Any]) -> datetime:
+    """Return the earliest explicit campaign deadline/not-after boundary."""
+    if not isinstance(policy, dict):
+        raise ValueError("campaign policy is not an object")
+    ends = []
+    for name in ("deadline", "notAfter"):
+        value = policy.get(name)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise ValueError(f"{name} must be an ISO-8601 string")
+        end = datetime.fromisoformat(value)
+        if end.tzinfo is None:
+            raise ValueError(f"{name} must include a timezone")
+        ends.append(end)
+    if not ends:
+        raise ValueError("campaign deadline/not-after is missing")
+    return min(ends)
+
+
 def evaluate(policy: dict[str, Any], snapshot: dict[str, Any], now: datetime) -> dict[str, Any]:
     if now.tzinfo is None:
         raise ValueError("budget time must be timezone-aware")
-    end = datetime.fromisoformat(policy["deadline"])
+    end = _campaign_end(policy)
     if now >= end:
         return {"decision": "deadline_reached", "canDispatch": False}
-    budget = policy["budget"]
-    initial_reset = _integer(budget["initialWindowResetsAt"], "initial reset")
-    maximum = _integer(budget["nextWindowMaximumPercent"], "maximum percent")
-    stop = _integer(budget["nextWindowDispatchStopPercent"], "dispatch stop")
-    if not 0 < stop < maximum <= 25:
-        raise ValueError("next-window policy must preserve headroom below the 25% cap")
+    ordinary_usage_allowed = snapshot.get("ordinaryUsageAllowed", True)
+    if type(ordinary_usage_allowed) is not bool:
+        raise ValueError("ordinaryUsageAllowed must be a boolean")
+    if not ordinary_usage_allowed:
+        return {"decision": "ordinary_usage_not_allowed", "canDispatch": False}
     keyed = snapshot.get("rateLimitsByLimitId")
     rate = keyed.get("codex") if isinstance(keyed, dict) else None
     if rate is None:
@@ -117,29 +138,29 @@ def evaluate(policy: dict[str, Any], snapshot: dict[str, Any], now: datetime) ->
     window = weekly[0]
     used = _integer(window.get("usedPercent"), "used percent")
     resets = _integer(window.get("resetsAt"), "reset timestamp")
-    if not 0 <= used <= 100 or resets <= now.timestamp() or resets < initial_reset:
+    if not 0 <= used <= 100 or resets <= now.timestamp():
         raise ValueError("weekly usage window is stale or invalid")
-    # A changed reset boundary is treated as the limited window even if it
-    # arrives earlier than expected. The campaign never authorizes extra resets.
-    next_window = resets > initial_reset or now.timestamp() >= initial_reset
-    threshold = stop if next_window else 99
-    short_limit = any(
-        isinstance(window, dict) and window.get("windowDurationMins") != 10080
-        and _integer(window.get("usedPercent"), "short-window usage") >= 99
-        for window in windows if window is not None
-    )
-    permit = used < threshold and not short_limit
+    short_limit = False
+    for candidate in windows:
+        if candidate is None or candidate is window:
+            continue
+        if not isinstance(candidate, dict):
+            raise ValueError("rate-limit window is not an object")
+        short_used = _integer(candidate.get("usedPercent"), "short-window usage")
+        if not 0 <= short_used <= 100:
+            raise ValueError("short-window usage is outside 0..100")
+        short_limit = short_limit or short_used >= 100
+    # Percentages are telemetry about the backend window, not a project cap.
+    # Permit work until the account reports that the weekly or a short window
+    # is exhausted; backend limit flags above remain authoritative as well.
+    permit = used < 100 and not short_limit
     return {
         "decision": "continue" if permit else "wait_for_allowance",
         "canDispatch": permit,
-        "window": "next_limited" if next_window else "current",
+        "window": "weekly",
         "usedPercent": used,
-        "dispatchStopPercent": threshold,
-        "userMaximumPercent": maximum if next_window else 100,
         "resetsAt": resets,
         "resetsAtUtc": datetime.fromtimestamp(resets, timezone.utc).isoformat(),
-        "smallBatchesOnly": next_window and used >= stop - 3,
-        "maximumNewAgents": 1 if next_window and used >= stop - 3 else 3,
     }
 
 
@@ -147,7 +168,7 @@ def check() -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     try:
         policy = json.loads(POLICY.read_text())
-        if now >= datetime.fromisoformat(policy["deadline"]):
+        if now >= _campaign_end(policy):
             result = {"decision": "deadline_reached", "canDispatch": False}
         else:
             result = evaluate(policy, read_account_limits(), now)

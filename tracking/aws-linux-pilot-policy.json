@@ -1,0 +1,124 @@
+{
+  "schema": 1,
+  "status": "authorized_window_publication_pending",
+  "authorization": {
+    "awsAccountId": "538639825139",
+    "region": "us-west-1",
+    "maximumSpendUsd": 20,
+    "maximumRuntimeSeconds": 36000,
+    "maximumInstanceLifetimeSeconds": 43200,
+    "notAfter": "2026-09-12T11:00:00Z",
+    "notAfterRule": "Absolute pilot cutoff materialized before publication; the host must terminate by this time and may run for less than 12 hours.",
+    "paidResourcesAuthorized": true,
+    "authorizedAt": "2026-09-11T19:47:58Z",
+    "scope": "One r7i.4xlarge-class On-Demand pilot host, one worker, and the 15 listed modules only. No long campaign or second host."
+  },
+  "pins": {
+    "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
+    "leanToolchain": "leanprover/lean4:v4.32.2",
+    "leanCommit": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
+    "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c"
+  },
+  "machine": {
+    "provider": "aws",
+    "operatingSystem": "linux",
+    "architecture": "x86_64",
+    "minimumMemoryBytes": 137438953472,
+    "instanceType": "r7i.4xlarge",
+    "rootVolumeType": "gp3",
+    "rootVolumeSizeGiB": 200,
+    "workers": 1,
+    "purpose": "single_purpose",
+    "tenancy": "default"
+  },
+  "costEstimate": {
+    "checkedAt": "2026-09-11T23:10:45Z",
+    "ec2OnDemandUsdPerHour": 1.176,
+    "ec2MaximumUsd": 14.112,
+    "gp3UsdPerGbMonth": 0.096,
+    "gp3MaximumTwelveHourUsdApprox": 0.32,
+    "publicIpv4UsdPerHour": 0.005,
+    "publicIpv4MaximumUsd": 0.06,
+    "estimatedBoundedSubtotalUsd": 14.492,
+    "unallocatedSpendHeadroomUsd": 5.508,
+    "pricingEffectiveDate": "2026-09-01T00:00:00Z",
+    "note": "Terminate no later than the materialized notAfter time. The unused headroom covers small ancillary charges; stop rather than exceed the $20 all-in ceiling."
+  },
+  "launchGate": {
+    "status": "blocked_publication",
+    "observedPrincipalArn": "arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator",
+    "requiredPrincipal": "A non-root temporary operator session",
+    "identityBootstrap": {
+      "status": "active_non_root_mfa_waived_by_user",
+      "userArn": "arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator",
+      "consoleLogin": true,
+      "passwordResetRequired": false,
+      "mfaEnrolled": false,
+      "mfaRecommendationWaivedAt": "2026-09-11T20:39:46Z",
+      "attachedManagedPolicy": "arn:aws:iam::aws:policy/AdministratorAccess",
+      "accessKeyCount": 0,
+      "temporaryPasswordStorage": "removed_from_macos_keychain_after_successful_password_change",
+      "temporaryPasswordRemovedAt": "2026-09-11T20:22:50Z",
+      "createdAt": "2026-09-11T20:06:40Z",
+      "removalRequiredAfterPilot": true
+    },
+    "onDemandStandardVcpuQuota": 32,
+    "requiredOnDemandStandardVcpuQuota": 16,
+    "quotaIncreaseRequest": {
+      "id": "c5fd28c3aaa34b40898ffab61a5fefc6HXVHEjzY",
+      "status": "CASE_CLOSED",
+      "desiredValue": 16,
+      "createdAt": "2026-09-11T20:39:46.005Z",
+      "requestedBy": "arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator",
+      "caseId": "178915936800175",
+      "approvedQuotaValue": 32,
+      "lastUpdatedAt": "2026-09-11T20:45:11.890Z"
+    },
+    "availabilityZones": [
+      "us-west-1a",
+      "us-west-1c"
+    ],
+    "authorizationRefMode": "Required full launch argument; must equal clean local HEAD and be published on the exact HTTPS origin. Record externally in AWS tags and run receipts; do not attempt a self-referential checked-in commit hash.",
+    "controller": "Experiment/aws_linux_pilot.py",
+    "remoteCodexAuth": "After stack creation, use the controller's SSM Session Manager device-auth phase as root. Do not copy auth.json, access tokens, or Mac runtime state. Dispatch the worker only after the nonsecret, run-bound remote auth proof passes.",
+    "blockers": [
+      "The clean published authorization ref must be materialized and explicitly identified before provisioning."
+    ],
+    "warning": "default and softmax remain root sessions and must not be used. The user explicitly chose to proceed without MFA on the temporary operator."
+  },
+  "limits": {
+    "moduleTimeoutSeconds": 1800,
+    "minimumFreeDiskBytes": 12884901888,
+    "minimumAvailableMemoryBytes": 12884901888,
+    "maximumAttemptsPerModule": 1,
+    "codexAvailabilityPolicy": "ordinary_account_availability",
+    "unknownCodexAvailability": "stop",
+    "actualCodexRateLimitOrSpendControl": "stop",
+    "remoteCodexAuthStrategy": "ssm_device_code",
+    "remoteCodexCliVersion": "0.154.0",
+    "buyOrRedeemCredits": false
+  },
+  "modules": [
+    "Mathlib/Algebra/Homology/CommSq.lean",
+    "Mathlib/Algebra/BigOperators/Group/Finset/Piecewise.lean",
+    "Mathlib/Algebra/Ring/GeomSum.lean",
+    "Mathlib/CategoryTheory/Monoidal/Cartesian/Over.lean",
+    "Mathlib/Control/Applicative.lean",
+    "Mathlib/Topology/QuasiSeparated.lean",
+    "Mathlib/Topology/Convenient/OpenClosed.lean",
+    "Mathlib/CategoryTheory/Sites/Precoverage/Generates.lean",
+    "Mathlib/CategoryTheory/Sites/Hypercover/SheafOfTypes.lean",
+    "Mathlib/Topology/NoetherianSpace.lean",
+    "Mathlib/Logic/Relation.lean",
+    "Mathlib/Data/Nat/Init.lean",
+    "Mathlib/Logic/IsEmpty/Basic.lean",
+    "Mathlib/Order/Compare.lean",
+    "Mathlib/Data/Set/Restrict.lean"
+  ],
+  "output": {
+    "inputsParent": ".lake/search-free-mathlib/aws-linux-pilot",
+    "workerParent": ".lake/boundary-materialization/aws-linux-pilot",
+    "databaseName": "translation-index.sqlite3",
+    "freshRunIdRequired": true
+  }
+}

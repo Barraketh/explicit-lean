@@ -6,12 +6,15 @@ acceptance criteria; its September 8 schedule and launch sequence are historical
 `tracking/archive/` and the implementation sections of `PLAN.md` are history,
 not current work assignments. Later explicit user instructions take precedence.
 
-- Prepare the agreed bounded AWS/Linux pilot locally. No cloud resources have
-  been provisioned or a cloud spending/runtime cap recorded. Do not acquire
-  paid resources until the concrete launch is authorized; do not use
+- Prepare the agreed bounded AWS/Linux pilot. The user authorized only one
+  `r7i.4xlarge`-class host in account 538639825139/us-west-1, within a $20
+  all-in cap, 12-hour instance lifetime and 10-hour worker runtime. Do not add a
+  second host or long campaign without new authorization; do not use
   explicit-lean-cloud implicitly. Never buy or redeem credits.
-- Prefer Luna for bounded implementation and review; escalate unexpected Lean,
-  semantic, or architectural complexity to the coordinating Sol agent.
+- Delegate significant implementation work to Luna at max reasoning with strict
+  design constraints and narrow file ownership. Luna must escalate unexpected
+  Lean, semantic, security, or architectural complexity to the coordinating
+  primary agent before broadening scope.
 - Perform fix-review cycles: implement, run focused meaningful checks, review
   the diff for correctness and scope, fix findings, and repeat before offering
   a change for commit. Do not claim that unrun checks passed.
@@ -24,13 +27,15 @@ not current work assignments. Later explicit user instructions take precedence.
 - Preserve kernel-checked theorem statements and computational semantics.
   Existing architecture may change; validation must not be weakened merely to
   make a failing case pass.
-- Before a new work batch, read fresh usage telemetry. The allowance following
-  the September 7 reset is capped at 25%, with dispatch stopping at 22% for
-  headroom. Unknown usage means no costly dispatch. No extension of this budget
-  has been agreed for later windows.
-- The original deadline is still enforced: `campaign_budget.py check` returns
-  `deadline_reached`. Prepare an explicit bounded continuation policy before
-  production dispatch; do not silently extend the date or bypass the guard.
+- Before a new work batch, read fresh usage telemetry to confirm ordinary Codex
+  work is available. The former September 7 campaign-specific 25% cap and 22%
+  dispatch stop are obsolete; parallel work elsewhere does not consume a local
+  campaign allocation. Unknown availability or an actual rate-limit/spend stop
+  still means no costly dispatch. Never buy or redeem credits.
+- The original deadline is historical. The only continuation ends at the exact
+  top-level tracker `deadline`/`notAfter` boundary for the one authorized pilot.
+  Do not extend that date, bypass the guard, or dispatch from an unpublished
+  authorization checkout.
 - Count the 529 archived-v10 module reports separately from whole-tree
   acceptance (still zero). The 62 v10 cached failures are queued and therefore
   missing from `campaign_failures.py`'s queue-state-only report; use the handoff
