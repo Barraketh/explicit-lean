@@ -4,11 +4,12 @@ The user authorized a single bounded pilot in AWS account `538639825139`, region
 `us-west-1`, with a $20 all-in ceiling and delegated the runtime choice. The
 selected bounds are a 10-hour worker and a 12-hour absolute instance lifetime.
 The exact absolute cutoff is `2026-09-12T11:00:00Z`. This is not yet
-launch-ready: `explicit-lean-pilot` resolves to the dedicated non-root operator
-and AWS raised the On-Demand Standard quota to 32 vCPUs, but the clean
-authorization commit is not yet published and explicitly identified by full
-hash. The user explicitly waived the MFA recommendation for this temporary
-operator. Do not provision or dispatch until that remaining gate closes.
+launch-ready: `explicit-lean-pilot` resolves to the dedicated non-root operator,
+AWS raised the On-Demand Standard quota to 32 vCPUs, and the authorization
+checkout is published, but the user has not yet explicitly identified its clean
+HEAD by full hash. The user explicitly waived the MFA recommendation for this
+temporary operator. Do not provision or dispatch until that remaining gate
+closes.
 
 The pilot is exactly one single-purpose, default-tenancy Linux x86-64 host with
 at least 128 GiB of RAM, one worker, one attempt for each of the 15 recorded

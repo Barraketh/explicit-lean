@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "status": "authorized_window_publication_pending",
+  "status": "authorized_window_published_hash_confirmation_pending",
   "authorization": {
     "awsAccountId": "538639825139",
     "region": "us-west-1",
@@ -45,7 +45,7 @@
     "note": "Terminate no later than the materialized notAfter time. The unused headroom covers small ancillary charges; stop rather than exceed the $20 all-in ceiling."
   },
   "launchGate": {
-    "status": "blocked_publication",
+    "status": "blocked_explicit_authorization_ref_confirmation",
     "observedPrincipalArn": "arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator",
     "requiredPrincipal": "A non-root temporary operator session",
     "identityBootstrap": {
