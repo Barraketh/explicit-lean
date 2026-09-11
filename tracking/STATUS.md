@@ -48,8 +48,8 @@ vCPUs, above the 16 required. The one-pilot continuation now has the exact
 `2026-09-12T11:00:00Z` cutoff. The first CloudFormation request failed regional
 schedule-property validation and auto-deleted before creating any resource;
 fresh EC2 and volume queries confirmed nothing remains. Its exact authorization
-hash is superseded. A clean published fix, explicitly identified by its new full
-hash, remains the final pre-provisioning gate. Fresh September 11 telemetry
+hash is superseded. The clean fix is published; explicitly identifying its new
+full hash remains the final pre-provisioning gate. Fresh September 11 telemetry
 reported ordinary Codex work available at 23%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.

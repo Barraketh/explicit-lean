@@ -79,8 +79,8 @@ used. AWS closed quota case `178915936800175` and raised the region's On-Demand
 Standard quota to 32 vCPUs, above the 16 required. The exact cutoff is
 `2026-09-12T11:00:00Z`. The first CloudFormation request failed regional
 schedule-property validation and auto-deleted before any resource was created;
-its authorization hash is superseded. Publish and explicitly identify the clean
-fix by full hash before retrying. The pilot
+its authorization hash is superseded. The clean fix is published; explicitly
+identify its replacement HEAD by full hash before retrying. The pilot
 report remains required before a long campaign or additional machines.
 
 Before launch, close the publication gate. The exact one-pilot continuation is

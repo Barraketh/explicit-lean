@@ -9,8 +9,8 @@ resource was created. Its authorization ref
 `e5c86887d311853eb4013d1582e79c68f4d47535` is superseded and must not be
 reused. `explicit-lean-pilot` still resolves to the dedicated non-root operator,
 AWS raised the On-Demand Standard quota to 32 vCPUs, and the user explicitly
-waived the MFA recommendation. Publish and explicitly identify the clean
-schedule-validation fix before retrying.
+waived the MFA recommendation. The clean schedule-validation fix is published;
+explicitly identify its replacement HEAD by full hash before retrying.
 
 The pilot is exactly one single-purpose, default-tenancy Linux x86-64 host with
 at least 128 GiB of RAM, one worker, one attempt for each of the 15 recorded

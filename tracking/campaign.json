@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-11T23:24:43+00:00",
+  "updatedAt": "2026-09-11T23:25:23+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,7 +16,7 @@
   },
   "deadline": "2026-09-12T11:00:00Z",
   "notAfter": "2026-09-12T11:00:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_schedule_fix_publication_pending",
+  "deadlineStatus": "one_pilot_bounded_continuation_schedule_fix_published_hash_confirmation_pending",
   "machine": "local_mac_for_preparation_one_us_west_1_r7i_4xlarge_pilot_authorized_not_provisioned",
   "budget": {
     "resetDate": "2026-09-07",
@@ -41,12 +41,12 @@
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized a reproducible one-host pilot in account 538639825139/us-west-1 with a $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. The first CloudFormation request failed regional early validation and auto-deleted before any resource was created; fresh EC2 and volume queries confirmed none remain. explicit-lean-pilot resolves to the non-root operator, MFA is explicitly waived, and the quota is 32 vCPUs. The exact 2026-09-12T11:00:00Z cutoff remains. Publish and explicitly identify the schedule-validation fix before retrying; the superseded e5c86887d311853eb4013d1582e79c68f4d47535 authorization must not be reused.",
+    "readiness": "The user authorized a reproducible one-host pilot in account 538639825139/us-west-1 with a $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. The first CloudFormation request failed regional early validation and auto-deleted before any resource was created; fresh EC2 and volume queries confirmed none remain. The corrected checkout is published. explicit-lean-pilot resolves to the non-root operator, MFA is explicitly waived, and the quota is 32 vCPUs. The exact 2026-09-12T11:00:00Z cutoff remains. Explicitly identify the clean replacement HEAD by full hash before retrying; the superseded e5c86887d311853eb4013d1582e79c68f4d47535 authorization must not be reused.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_window_schedule_validation_fix_publication_pending",
+      "authorizationStatus": "authorized_window_schedule_fix_published_hash_confirmation_pending",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -177,7 +177,7 @@
     {
       "id": "bounded-run-policy",
       "status": "open",
-      "detail": "The one-pilot continuation and exact 2026-09-12T11:00:00Z cutoff remain materialized. Publish and explicitly identify the schedule-validation fix by full hash before retrying. The superseded e5c86887d311853eb4013d1582e79c68f4d47535 authorization must not be reused."
+      "detail": "The one-pilot continuation, exact 2026-09-12T11:00:00Z cutoff and corrected publication are materialized. Explicitly identify the clean replacement HEAD by full hash before retrying. The superseded e5c86887d311853eb4013d1582e79c68f4d47535 authorization must not be reused."
     },
     {
       "id": "aws-launch-identity-and-quota",
@@ -232,7 +232,7 @@
     {
       "id": "aws-pilot-preparation",
       "status": "in_progress",
-      "description": "Launch procedure, exact 15-module policy, CloudFormation controller and Linux Python/Lean RSS sampler are prepared. The first CloudFormation request failed regional schedule-property validation and auto-deleted before resource creation. The non-root operator, MFA waiver, 32-vCPU quota, $20 ceiling and exact 2026-09-12T11:00:00Z cutoff remain. Publish and explicitly identify the narrow schedule fix before retrying."
+      "description": "Launch procedure, exact 15-module policy, corrected CloudFormation controller and Linux Python/Lean RSS sampler are published. The first CloudFormation request failed regional schedule-property validation and auto-deleted before resource creation. The non-root operator, MFA waiver, 32-vCPU quota, $20 ceiling and exact 2026-09-12T11:00:00Z cutoff remain. Explicitly identify the clean replacement HEAD before retrying."
     },
     {
       "id": "corpus-translation",
