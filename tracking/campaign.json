@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-11T23:42:11.670040+00:00",
+  "updatedAt": "2026-09-11T23:43:03+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,7 +16,7 @@
   },
   "deadline": "2026-09-12T11:25:00Z",
   "notAfter": "2026-09-12T11:25:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_boot_auth_fix_publication_pending",
+  "deadlineStatus": "one_pilot_bounded_continuation_boot_auth_fix_published_hash_confirmation_pending",
   "machine": "local_mac_for_preparation_one_us_west_1_r7i_4xlarge_pilot_authorized_not_provisioned",
   "budget": {
     "resetDate": "2026-09-07",
@@ -41,12 +41,12 @@
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized a reproducible one-host pilot in account 538639825139/us-west-1 with a $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. The first CloudFormation request failed regional validation before resource creation. The second created the bounded stack, but guest setup failed on the systemd timer timestamp before Codex installation. Its apparent auth proof was explicitly invalidated because Session Manager transport success did not prove remote command success. The stack was manually deleted after about four minutes; fresh EC2/volume queries confirmed none remain and the worker never started. Publish and explicitly identify the guest-timer/auth-proof fix before retrying. Neither superseded authorization may be reused.",
+    "readiness": "The user authorized a reproducible one-host pilot in account 538639825139/us-west-1 with a $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. The first CloudFormation request failed regional validation before resource creation. The second created the bounded stack, but guest setup failed on the systemd timer timestamp before Codex installation. Its apparent auth proof was explicitly invalidated because Session Manager transport success did not prove remote command success. The stack was manually deleted after about four minutes; fresh EC2/volume queries confirmed none remain and the worker never started. The hardened guest-timer/auth-proof fix is published. Explicitly identify its clean replacement HEAD before retrying. Neither superseded authorization may be reused.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_window_boot_and_auth_proof_fix_publication_pending",
+      "authorizationStatus": "authorized_window_boot_auth_fix_published_hash_confirmation_pending",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -177,7 +177,7 @@
     {
       "id": "bounded-run-policy",
       "status": "open",
-      "detail": "The one-pilot continuation remains bounded. Publish and explicitly identify the guest-timer/auth-proof fix before retrying. The superseded e5c86887d311853eb4013d1582e79c68f4d47535 and c0414c3f107cffb0c7afa1b43f97b517e0d6c7da authorizations must not be reused."
+      "detail": "The one-pilot continuation and hardened fix are published. Explicitly identify the clean replacement HEAD by full hash before retrying. The superseded e5c86887d311853eb4013d1582e79c68f4d47535 and c0414c3f107cffb0c7afa1b43f97b517e0d6c7da authorizations must not be reused."
     },
     {
       "id": "aws-launch-identity-and-quota",
@@ -232,7 +232,7 @@
     {
       "id": "aws-pilot-preparation",
       "status": "in_progress",
-      "description": "The first request failed regional validation before resources. The second created the bounded stack, but cloud-init stopped before Codex installation because the guest systemd timer rejected its timestamp; a transport-success false auth proof was invalidated, no worker was dispatched, and the stack was deleted after about four minutes. The non-root operator, MFA waiver, 32-vCPU quota and $20 ceiling remain. Publish and explicitly identify the bounded guest-timer/auth-proof fix before retrying."
+      "description": "The first request failed regional validation before resources. The second created the bounded stack, but cloud-init stopped before Codex installation because the guest systemd timer rejected its timestamp; a transport-success false auth proof was invalidated, no worker was dispatched, and the stack was deleted after about four minutes. The non-root operator, MFA waiver, 32-vCPU quota and $20 ceiling remain. The bounded guest-timer/auth-proof fix is published; explicitly identify its replacement HEAD before retrying."
     },
     {
       "id": "corpus-translation",

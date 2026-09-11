@@ -53,9 +53,9 @@ hash is superseded. A second bounded stack was created, but guest setup stopped
 before Codex installation because systemd rejected the backup-timer timestamp.
 A Session Manager transport-success false auth proof was invalidated before any
 worker dispatch, and the stack was deleted after about four minutes; no pilot
-resources currently remain. Publish and explicitly identify the clean
-guest-timer/auth-proof fix before retrying. Fresh September 11 telemetry
-reported ordinary Codex work available at 25%.
+resources currently remain. The clean guest-timer/auth-proof fix is published;
+explicitly identify its replacement HEAD before retrying. Fresh September 11
+telemetry reported ordinary Codex work available at 25%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 

@@ -11,8 +11,9 @@ coordinating review invalidated it before worker dispatch and deleted the stack.
 No pilot resources currently remain. Both authorization refs
 `e5c86887d311853eb4013d1582e79c68f4d47535` and
 `c0414c3f107cffb0c7afa1b43f97b517e0d6c7da` are superseded and must not be
-reused. Publish and explicitly identify the clean guest-timer/auth-proof fix
-before retrying. The replacement exact cutoff is `2026-09-12T11:25:00Z`.
+reused. The clean guest-timer/auth-proof fix is published; explicitly identify
+its replacement HEAD before retrying. The replacement exact cutoff is
+`2026-09-12T11:25:00Z`.
 
 The pilot is exactly one single-purpose, default-tenancy Linux x86-64 host with
 at least 128 GiB of RAM, one worker, one attempt for each of the 15 recorded

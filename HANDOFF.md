@@ -83,9 +83,9 @@ schedule-property validation and created no resources. A second bounded stack
 was created, but guest setup stopped before Codex installation because systemd
 rejected the backup-timer timestamp. A transport-success false auth proof was
 invalidated before worker dispatch, and the stack was deleted after about four
-minutes; no pilot resources currently remain. Publish and explicitly identify
-the clean guest-timer/auth-proof fix before retrying. The pilot
-report remains required before a long campaign or additional machines.
+minutes; no pilot resources currently remain. The clean guest-timer/auth-proof
+fix is published; explicitly identify its replacement HEAD before retrying. The
+pilot report remains required before a long campaign or additional machines.
 
 Before launch, close the publication gate. The exact one-pilot continuation is
 recorded in both top-level tracker boundaries and remains fail-closed at its
