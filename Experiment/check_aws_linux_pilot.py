@@ -185,7 +185,7 @@ def test_static_guards() -> None:
 
 
 def test_template_and_worker_invariants() -> None:
-    result = pilot.validate_template_invariants(); assert result["defaultTenancy"] and result["noIngress"] and result["oneTimeTtl"] and result["managedSsmPolicy"]
+    result = pilot.validate_template_invariants(); template = pilot.load_template(); assert result["defaultTenancy"] and result["noIngress"] and result["oneTimeTtl"] and result["managedSsmPolicy"] and result["schedulerMode"] == "OFF" and result["schedulerActionAfterCompletion"] is False; assert "ActionAfterCompletion" not in template and "Mode: 'OFF'" in template and "Mode: OFF" not in template and "at(${NotAfter})" in template and "MaximumRetryAttempts: 0" in template; require_blocked(lambda: pilot.validate_template_invariants(template.replace("Mode: 'OFF'", "Mode: OFF")), "bare scheduler OFF accepted"); require_blocked(lambda: pilot.validate_template_invariants(template + "\nActionAfterCompletion: DELETE\n"), "unsupported scheduler property accepted")
     commands = pilot.build_worker_commands(repo_url=pilot.CANONICAL_REPO_URL, authorization_ref=AUTH_REF, run_id=RUN_ID, not_after=datetime(2026, 9, 12, 9, tzinfo=timezone.utc), input_root=f".lake/search-free-mathlib/aws-linux-pilot/{RUN_ID}", output_root=f".lake/boundary-materialization/aws-linux-pilot/{RUN_ID}", worker_id="worker")
     joined = "\n".join(commands)
     assert "git clone --no-checkout" in joined and "git ls-remote " + pilot.CANONICAL_REPO_URL in joined and "git ls-remote origin" not in joined

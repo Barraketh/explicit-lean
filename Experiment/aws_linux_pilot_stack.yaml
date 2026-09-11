@@ -242,10 +242,9 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      ActionAfterCompletion: DELETE
       Description: One-time AWS-side termination at the approved pilot deadline.
       FlexibleTimeWindow:
-        Mode: OFF
+        Mode: 'OFF'
       ScheduleExpression:
         Fn::Sub: at(${NotAfter})
       ScheduleExpressionTimezone: UTC

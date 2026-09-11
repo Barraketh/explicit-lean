@@ -3,13 +3,14 @@
 The user authorized a single bounded pilot in AWS account `538639825139`, region
 `us-west-1`, with a $20 all-in ceiling and delegated the runtime choice. The
 selected bounds are a 10-hour worker and a 12-hour absolute instance lifetime.
-The exact absolute cutoff is `2026-09-12T11:00:00Z`. This is not yet
-launch-ready: `explicit-lean-pilot` resolves to the dedicated non-root operator,
-AWS raised the On-Demand Standard quota to 32 vCPUs, and the authorization
-checkout is published, but the user has not yet explicitly identified its clean
-HEAD by full hash. The user explicitly waived the MFA recommendation for this
-temporary operator. Do not provision or dispatch until that remaining gate
-closes.
+The exact absolute cutoff is `2026-09-12T11:00:00Z`. The first launch request
+failed CloudFormation's regional early validation and auto-deleted before any
+resource was created. Its authorization ref
+`e5c86887d311853eb4013d1582e79c68f4d47535` is superseded and must not be
+reused. `explicit-lean-pilot` still resolves to the dedicated non-root operator,
+AWS raised the On-Demand Standard quota to 32 vCPUs, and the user explicitly
+waived the MFA recommendation. Publish and explicitly identify the clean
+schedule-validation fix before retrying.
 
 The pilot is exactly one single-purpose, default-tenancy Linux x86-64 host with
 at least 128 GiB of RAM, one worker, one attempt for each of the 15 recorded

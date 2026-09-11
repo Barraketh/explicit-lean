@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-11T23:18:33+00:00",
+  "updatedAt": "2026-09-11T23:24:43+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,7 +16,7 @@
   },
   "deadline": "2026-09-12T11:00:00Z",
   "notAfter": "2026-09-12T11:00:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_published_hash_confirmation_pending",
+  "deadlineStatus": "one_pilot_bounded_continuation_schedule_fix_publication_pending",
   "machine": "local_mac_for_preparation_one_us_west_1_r7i_4xlarge_pilot_authorized_not_provisioned",
   "budget": {
     "resetDate": "2026-09-07",
@@ -29,8 +29,8 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-11T23:17:41.535647+00:00",
-    "lastUsedPercent": 22,
+    "lastCheckedAt": "2026-09-11T23:19:14.550570+00:00",
+    "lastUsedPercent": 23,
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
     "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
@@ -41,12 +41,12 @@
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized a reproducible one-host pilot in account 538639825139/us-west-1 with a $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. No compute resources have been provisioned. explicit-lean-pilot resolves to the non-root operator and the user explicitly waived MFA. AWS approved 32 On-Demand Standard vCPUs, above the 16 required. The exact 2026-09-12T11:00:00Z cutoff and clean publication are materialized; the user must explicitly identify the clean published HEAD by full hash before launch.",
+    "readiness": "The user authorized a reproducible one-host pilot in account 538639825139/us-west-1 with a $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. The first CloudFormation request failed regional early validation and auto-deleted before any resource was created; fresh EC2 and volume queries confirmed none remain. explicit-lean-pilot resolves to the non-root operator, MFA is explicitly waived, and the quota is 32 vCPUs. The exact 2026-09-12T11:00:00Z cutoff remains. Publish and explicitly identify the schedule-validation fix before retrying; the superseded e5c86887d311853eb4013d1582e79c68f4d47535 authorization must not be reused.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_window_published_hash_confirmation_pending",
+      "authorizationStatus": "authorized_window_schedule_validation_fix_publication_pending",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -177,7 +177,7 @@
     {
       "id": "bounded-run-policy",
       "status": "open",
-      "detail": "The one-pilot continuation, exact 2026-09-12T11:00:00Z cutoff and clean publication are materialized. The user must still explicitly identify the clean published HEAD by full hash before any paid launch."
+      "detail": "The one-pilot continuation and exact 2026-09-12T11:00:00Z cutoff remain materialized. Publish and explicitly identify the schedule-validation fix by full hash before retrying. The superseded e5c86887d311853eb4013d1582e79c68f4d47535 authorization must not be reused."
     },
     {
       "id": "aws-launch-identity-and-quota",
@@ -232,7 +232,7 @@
     {
       "id": "aws-pilot-preparation",
       "status": "in_progress",
-      "description": "Launch procedure, exact 15-module policy, CloudFormation controller and Linux Python/Lean RSS sampler are prepared and published. The user authorized account 538639825139/us-west-1, a $20 all-in ceiling, 12-hour host lifetime and 10-hour worker. The non-root operator is active, MFA was explicitly waived, and the quota is 32 vCPUs. The exact 2026-09-12T11:00:00Z cutoff is materialized. No machine provisioned; explicit full-hash identification remains open."
+      "description": "Launch procedure, exact 15-module policy, CloudFormation controller and Linux Python/Lean RSS sampler are prepared. The first CloudFormation request failed regional schedule-property validation and auto-deleted before resource creation. The non-root operator, MFA waiver, 32-vCPU quota, $20 ceiling and exact 2026-09-12T11:00:00Z cutoff remain. Publish and explicitly identify the narrow schedule fix before retrying."
     },
     {
       "id": "corpus-translation",
@@ -311,6 +311,18 @@
       "scope": "bounded_continuation_and_regression_checks",
       "result": "passed",
       "detail": "Materialized matching top-level deadline/notAfter and policy notAfter at 2026-09-12T11:00:00Z. Fresh telemetry showed ordinary usage available at 22% and campaign_budget.py returned continue. Focused checks passed: budget policy, supervisor 22, worker 33, translation index 13, campaign status 9, Linux sampler 2, AWS controller 10, Python compilation and git diff whitespace validation. No Lean build, corpus translation, worker dispatch or AWS resource provisioning was run."
+    },
+    {
+      "checkedAt": "2026-09-11T23:22:51.693000+00:00",
+      "scope": "first_authorized_cloudformation_request",
+      "result": "failed_validation_cleaned_up",
+      "detail": "The exact e5c86887d311853eb4013d1582e79c68f4d47535 authorization was used once. CloudFormation early validation rejected unsupported TerminationSchedule.ActionAfterCompletion and YAML-coerced FlexibleTimeWindow.Mode=false. The stack reached DELETE_COMPLETE within six seconds before any resource was created. Fresh tagged-instance and tagged-volume queries returned none. No auth session or worker dispatch occurred. That authorization ref is superseded; publish and explicitly identify the fix before retrying."
+    },
+    {
+      "checkedAt": "2026-09-11T23:24:43+00:00",
+      "scope": "regional_schedule_validation_fix_review",
+      "result": "passed_publication_pending",
+      "detail": "Luna Max removed the unsupported Scheduler ActionAfterCompletion property, quoted FlexibleTimeWindow.Mode as the string OFF, and strengthened local invariants to reject both original forms while retaining the one-time at(NotAfter) termination, zero retries, and independent guest timer. The complete focused suite passed: budget policy, supervisor 22, worker 33, translation index 13, campaign status 9, Linux sampler 2, AWS controller 10, generated shell syntax, YAML parsing, Python compilation, whitespace validation and AWS ValidateTemplate. No AWS mutation or retry occurred."
     }
   ],
   "historicalAutomation": {

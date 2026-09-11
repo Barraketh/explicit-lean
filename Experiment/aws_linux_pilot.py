@@ -383,13 +383,15 @@ def load_template(path: Path = TEMPLATE_PATH) -> str:
 
 def validate_template_invariants(template: str | None = None) -> dict[str, Any]:
     text = load_template() if template is None else template
-    required = {"AWS::EC2::SecurityGroup", "AWS::EC2::Instance", "AWS::IAM::Role", "AWS::IAM::InstanceProfile", "AWS::Scheduler::Schedule", "TerminationRole", "ActionAfterCompletion: DELETE", "Tenancy: default", "VolumeType: gp3", "VolumeSize: 200", "DeleteOnTermination: true", "Encrypted: true", "MaximumRetryAttempts: 0", "AmazonSSMManagedInstanceCore", "HttpTokens: required", "Ref: RootDeviceName", CODEX_URL, CODEX_SHA512_HEX, "auth-checkout", "git clone --no-checkout"}
-    forbidden = {"SecurityGroupIngress", "KeyName", "InstanceMarketOptions", "SpotOptions", "Dedicated", "ec2:RunInstances", "s3:DeleteObject", "s3:PutObjectAcl"}
+    required = {"AWS::EC2::SecurityGroup", "AWS::EC2::Instance", "AWS::IAM::Role", "AWS::IAM::InstanceProfile", "AWS::Scheduler::Schedule", "TerminationRole", "Tenancy: default", "VolumeType: gp3", "VolumeSize: 200", "DeleteOnTermination: true", "Encrypted: true", "MaximumRetryAttempts: 0", "AmazonSSMManagedInstanceCore", "HttpTokens: required", "Ref: RootDeviceName", "FlexibleTimeWindow", "ScheduleExpressionTimezone: UTC", "at(${NotAfter})", CODEX_URL, CODEX_SHA512_HEX, "auth-checkout", "git clone --no-checkout"}
+    forbidden = {"SecurityGroupIngress", "KeyName", "InstanceMarketOptions", "SpotOptions", "Dedicated", "ec2:RunInstances", "s3:DeleteObject", "s3:PutObjectAcl", "ActionAfterCompletion"}
     missing, present = sorted(x for x in required if x not in text), sorted(x for x in forbidden if x in text)
+    if not re.search(r"(?m)^\s+Mode:\s*'OFF'\s*$", text): present.append("scheduler Mode must be quoted 'OFF'")
+    if not re.search(r"(?m)^\s+MaximumRetryAttempts:\s*0\s*$", text): present.append("scheduler MaximumRetryAttempts must be numeric zero")
     if missing or present:
         detail = (["missing " + ", ".join(missing)] if missing else []) + (["forbidden " + ", ".join(present)] if present else [])
         raise GateBlocked("CloudFormation invariant failure: " + "; ".join(detail))
-    return {"ok": True, "resources": 6, "noIngress": True, "defaultTenancy": True, "oneTimeTtl": True, "managedSsmPolicy": True, "imdsV2": True, "rootDeviceParameterized": True, "pinnedCodex": True}
+    return {"ok": True, "resources": 6, "noIngress": True, "defaultTenancy": True, "oneTimeTtl": True, "schedulerMode": "OFF", "schedulerActionAfterCompletion": False, "managedSsmPolicy": True, "imdsV2": True, "rootDeviceParameterized": True, "pinnedCodex": True}
 
 
 @dataclass(frozen=True)
