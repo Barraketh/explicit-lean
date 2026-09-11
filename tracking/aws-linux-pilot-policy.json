@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "status": "authorized_window_schedule_fix_published_hash_confirmation_pending",
+  "status": "authorized_window_boot_and_auth_proof_fix_publication_pending",
   "authorization": {
     "awsAccountId": "538639825139",
     "region": "us-west-1",
     "maximumSpendUsd": 20,
     "maximumRuntimeSeconds": 36000,
     "maximumInstanceLifetimeSeconds": 43200,
-    "notAfter": "2026-09-12T11:00:00Z",
+    "notAfter": "2026-09-12T11:25:00Z",
     "notAfterRule": "Absolute pilot cutoff materialized before publication; the host must terminate by this time and may run for less than 12 hours.",
     "paidResourcesAuthorized": true,
     "authorizedAt": "2026-09-11T19:47:58Z",
@@ -45,7 +45,7 @@
     "note": "Terminate no later than the materialized notAfter time. The unused headroom covers small ancillary charges; stop rather than exceed the $20 all-in ceiling."
   },
   "launchGate": {
-    "status": "blocked_replacement_authorization_ref_confirmation",
+    "status": "blocked_boot_and_auth_proof_fix_publication",
     "observedPrincipalArn": "arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator",
     "requiredPrincipal": "A non-root temporary operator session",
     "identityBootstrap": {
@@ -82,7 +82,7 @@
     "controller": "Experiment/aws_linux_pilot.py",
     "remoteCodexAuth": "After stack creation, use the controller's SSM Session Manager device-auth phase as root. Do not copy auth.json, access tokens, or Mac runtime state. Dispatch the worker only after the nonsecret, run-bound remote auth proof passes.",
     "blockers": [
-      "Explicitly identify the clean published replacement HEAD before retrying provisioning; do not reuse the superseded e5c86887d311853eb4013d1582e79c68f4d47535 authorization."
+      "Publish and explicitly identify the clean guest-timer/auth-proof fix before retrying provisioning; do not reuse the superseded e5c86887d311853eb4013d1582e79c68f4d47535 or c0414c3f107cffb0c7afa1b43f97b517e0d6c7da authorizations."
     ],
     "warning": "default and softmax remain root sessions and must not be used. The user explicitly chose to proceed without MFA on the temporary operator."
   },
@@ -95,6 +95,7 @@
     "unknownCodexAvailability": "stop",
     "actualCodexRateLimitOrSpendControl": "stop",
     "remoteCodexAuthStrategy": "ssm_device_code",
+    "remoteCodexAuthProofMode": "independent_ssm_postcheck_requires_success_and_response_code_zero",
     "remoteCodexCliVersion": "0.154.0",
     "buyOrRedeemCredits": false
   },

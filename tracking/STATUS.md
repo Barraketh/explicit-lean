@@ -44,13 +44,18 @@ temporary password was removed from Keychain, and the user explicitly chose to
 proceed without MFA. `explicit-lean-pilot` resolves to this non-root user;
 `default` and `softmax` remain root sessions and must not be used. AWS closed
 quota case `178915936800175` and raised the On-Demand Standard quota to 32
-vCPUs, above the 16 required. The one-pilot continuation now has the exact
-`2026-09-12T11:00:00Z` cutoff. The first CloudFormation request failed regional
-schedule-property validation and auto-deleted before creating any resource;
+vCPUs, above the 16 required. The replacement one-pilot continuation has the
+exact `2026-09-12T11:25:00Z` cutoff. The first CloudFormation request failed
+regional schedule-property validation and auto-deleted before creating any
+resource;
 fresh EC2 and volume queries confirmed nothing remains. Its exact authorization
-hash is superseded. The clean fix is published; explicitly identifying its new
-full hash remains the final pre-provisioning gate. Fresh September 11 telemetry
-reported ordinary Codex work available at 23%.
+hash is superseded. A second bounded stack was created, but guest setup stopped
+before Codex installation because systemd rejected the backup-timer timestamp.
+A Session Manager transport-success false auth proof was invalidated before any
+worker dispatch, and the stack was deleted after about four minutes; no pilot
+resources currently remain. Publish and explicitly identify the clean
+guest-timer/auth-proof fix before retrying. Fresh September 11 telemetry
+reported ordinary Codex work available at 25%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 

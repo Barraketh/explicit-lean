@@ -147,12 +147,12 @@ Resources:
             Type=oneshot
             ExecStart=/usr/bin/systemctl poweroff
             UNIT
-            cat > /etc/systemd/system/explicit-lean-pilot-shutdown.timer <<'UNIT'
+            cat > /etc/systemd/system/explicit-lean-pilot-shutdown.timer <<UNIT
             [Unit]
             Description=Guest backup deadline for explicit-lean pilot
 
             [Timer]
-            OnCalendar=${NotAfter} UTC
+            OnCalendar=$(printf '%s\n' '${NotAfter}' | tr 'T' ' ') UTC
             AccuracySec=1s
             Persistent=true
             Unit=explicit-lean-pilot-shutdown.service

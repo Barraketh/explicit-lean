@@ -3,14 +3,16 @@
 The user authorized a single bounded pilot in AWS account `538639825139`, region
 `us-west-1`, with a $20 all-in ceiling and delegated the runtime choice. The
 selected bounds are a 10-hour worker and a 12-hour absolute instance lifetime.
-The exact absolute cutoff is `2026-09-12T11:00:00Z`. The first launch request
-failed CloudFormation's regional early validation and auto-deleted before any
-resource was created. Its authorization ref
-`e5c86887d311853eb4013d1582e79c68f4d47535` is superseded and must not be
-reused. `explicit-lean-pilot` still resolves to the dedicated non-root operator,
-AWS raised the On-Demand Standard quota to 32 vCPUs, and the user explicitly
-waived the MFA recommendation. The clean schedule-validation fix is published;
-explicitly identify its replacement HEAD by full hash before retrying.
+The first launch request failed CloudFormation's regional early validation and
+created no resources. The second created the correct stack, but guest setup
+stopped before Codex installation because systemd rejected the timer timestamp.
+Session Manager transport success then produced an unverified local auth proof;
+coordinating review invalidated it before worker dispatch and deleted the stack.
+No pilot resources currently remain. Both authorization refs
+`e5c86887d311853eb4013d1582e79c68f4d47535` and
+`c0414c3f107cffb0c7afa1b43f97b517e0d6c7da` are superseded and must not be
+reused. Publish and explicitly identify the clean guest-timer/auth-proof fix
+before retrying. The replacement exact cutoff is `2026-09-12T11:25:00Z`.
 
 The pilot is exactly one single-purpose, default-tenancy Linux x86-64 host with
 at least 128 GiB of RAM, one worker, one attempt for each of the 15 recorded
@@ -68,11 +70,16 @@ python3 Experiment/aws_linux_pilot.py auth \
   --run-id "${PILOT_RUN_ID:?returned run ID}" --confirm-auth
 ```
 
-The remote command runs the pinned Codex CLI as root, verifies `codex login
-status`, runs the campaign budget guard in the pinned checkout, and produces a
-local nonsecret proof bound to the run and instance. Do not copy `auth.json`, an
-access token, API key, or Mac runtime state. Only after that phase succeeds may
-the controller send the one worker command:
+The interactive command runs the pinned Codex CLI as root. After the session
+returns, the controller sends a separately tagged, non-worker SSM post-check and
+requires its terminal status to be `Success` with response code zero. That
+post-check verifies cloud-init, the exact active shutdown timer/run/deadline,
+`codex login status`, the pinned clean checkout, and a fresh campaign budget
+guard. Session transport success alone can never produce a proof. Only the
+verified post-check produces a local nonsecret proof bound to the run and
+instance. Do not copy `auth.json`, an access token, API key, or Mac runtime
+state. Only after that phase succeeds may the controller send the one worker
+command:
 
 ```sh
 python3 Experiment/aws_linux_pilot.py start-worker \
@@ -82,8 +89,9 @@ python3 Experiment/aws_linux_pilot.py start-worker \
 ```
 
 The worker repeats the login-status and budget checks before preparing inputs.
-An ambiguous dispatch is not retried; inspect status and rely on the absolute
-stack termination schedule while preserving evidence.
+An auth post-check failure emits no proof and returns to the auth gate. An
+ambiguous worker dispatch is not retried; inspect status and rely on the
+absolute stack termination schedule while preserving evidence.
 
 ## Fresh Linux checkout and tools
 

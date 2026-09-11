@@ -50,13 +50,15 @@ class AwsFixture:
     def __init__(self, *, root: bool = False, quota: int = 16, stack_failure: bool = False,
                  create_error: bool = False, malformed_create: bool = False,
                  delete_error: bool = False, malformed_send: bool = False,
-                 no_bucket_policy: bool = False, instance_type_shape: str = "valid") -> None:
+                 no_bucket_policy: bool = False, instance_type_shape: str = "valid",
+                 auth_probe_failure: bool = False, auth_probe_not_found_once: bool = False) -> None:
         self.commands: list[tuple[str, ...]] = []
         self.stack: dict[str, Any] | None = None
         self.root, self.quota, self.stack_failure = root, quota, stack_failure
         self.create_error, self.malformed_create = create_error, malformed_create
         self.delete_error, self.malformed_send = delete_error, malformed_send
         self.no_bucket_policy, self.instance_type_shape = no_bucket_policy, instance_type_shape
+        self.auth_probe_failure, self.auth_probe_not_found_once = auth_probe_failure, auth_probe_not_found_once
 
     @staticmethod
     def operation(command: Sequence[str]) -> tuple[str, str]:
@@ -143,12 +145,19 @@ class AwsFixture:
         if (service, operation) == ("ssm", "describe-instance-information"):
             return {"InstanceInformationList": [{"InstanceId": "i-0123456789abcdef0", "PingStatus": "Online"}]}
         if (service, operation) == ("ssm", "send-command"):
+            comment = command[command.index("--comment") + 1]
+            if "auth-postcheck" in comment: return {"Command": {"CommandId": "cmd-auth-probe"}}
             if self.malformed_send: return {"Command": {}}
             return {"Command": {"CommandId": "cmd-1"}}
         if (service, operation) == ("s3api", "list-objects-v2"):
             return {"Contents": []}
         if (service, operation) == ("ssm", "get-command-invocation"):
-            return {"Status": "Success"}
+            command_id = command[command.index("--command-id") + 1]
+            if command_id == "cmd-auth-probe" and self.auth_probe_not_found_once:
+                self.auth_probe_not_found_once = False
+                raise pilot.PilotError("AWS CLI failed (254): An error occurred (InvocationDoesNotExist) when calling the GetCommandInvocation operation")
+            if command_id == "cmd-auth-probe" and self.auth_probe_failure: return {"Status": "Failed", "ResponseCode": 1}
+            return {"Status": "Success", "ResponseCode": 0}
         raise AssertionError(f"unexpected fixture call: {service} {operation}")
 
 
@@ -185,7 +194,7 @@ def test_static_guards() -> None:
 
 
 def test_template_and_worker_invariants() -> None:
-    result = pilot.validate_template_invariants(); template = pilot.load_template(); assert result["defaultTenancy"] and result["noIngress"] and result["oneTimeTtl"] and result["managedSsmPolicy"] and result["schedulerMode"] == "OFF" and result["schedulerActionAfterCompletion"] is False; assert "ActionAfterCompletion" not in template and "Mode: 'OFF'" in template and "Mode: OFF" not in template and "at(${NotAfter})" in template and "MaximumRetryAttempts: 0" in template; require_blocked(lambda: pilot.validate_template_invariants(template.replace("Mode: 'OFF'", "Mode: OFF")), "bare scheduler OFF accepted"); require_blocked(lambda: pilot.validate_template_invariants(template + "\nActionAfterCompletion: DELETE\n"), "unsupported scheduler property accepted")
+    result = pilot.validate_template_invariants(); template = pilot.load_template(); assert result["defaultTenancy"] and result["noIngress"] and result["oneTimeTtl"] and result["managedSsmPolicy"] and result["schedulerMode"] == "OFF" and result["schedulerActionAfterCompletion"] is False; assert "ActionAfterCompletion" not in template and "Mode: 'OFF'" in template and "Mode: OFF" not in template and "at(${NotAfter})" in template and "MaximumRetryAttempts: 0" in template and "OnCalendar=$(printf '%s\\n' '${NotAfter}' | tr 'T' ' ') UTC" in template and "OnCalendar=${NotAfter} UTC" not in template; require_blocked(lambda: pilot.validate_template_invariants(template.replace("Mode: 'OFF'", "Mode: OFF")), "bare scheduler OFF accepted"); require_blocked(lambda: pilot.validate_template_invariants(template + "\nActionAfterCompletion: DELETE\n"), "unsupported scheduler property accepted"); require_blocked(lambda: pilot.validate_template_invariants(template.replace("OnCalendar=$(printf '%s\\n' '${NotAfter}' | tr 'T' ' ') UTC", "OnCalendar=${NotAfter} UTC")), "T-separated guest timer accepted")
     commands = pilot.build_worker_commands(repo_url=pilot.CANONICAL_REPO_URL, authorization_ref=AUTH_REF, run_id=RUN_ID, not_after=datetime(2026, 9, 12, 9, tzinfo=timezone.utc), input_root=f".lake/search-free-mathlib/aws-linux-pilot/{RUN_ID}", output_root=f".lake/boundary-materialization/aws-linux-pilot/{RUN_ID}", worker_id="worker")
     joined = "\n".join(commands)
     assert "git clone --no-checkout" in joined and "git ls-remote " + pilot.CANONICAL_REPO_URL in joined and "git ls-remote origin" not in joined
@@ -222,18 +231,24 @@ def test_invalid_checkout_and_confirmation_are_pre_mutation() -> None:
 
 
 def test_launch_stops_for_auth_then_one_worker_dispatch() -> None:
-    fixture = AwsFixture()
+    fixture = AwsFixture(auth_probe_not_found_once=True)
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory); checkout = root / "checkout"; checkout.mkdir(); repo(checkout); policy_path = write_policy(root); ctl = controller(fixture, root, policy_path, checkout)
         launched = ctl.launch(repo_url=pilot.CANONICAL_REPO_URL, authorization_ref=AUTH_REF, run_id=RUN_ID, confirm_launch=True); assert launched["phase"] == "awaiting-codex-auth" and ops(fixture).count("create-stack") == 1 and ops(fixture).count("send-command") == 0
         session_commands: list[tuple[str, ...]] = []
         ctl.session_runner = lambda command: (session_commands.append(tuple(command)) or subprocess.CompletedProcess([], 0, "", ""))
-        auth_result = ctl.auth(run_id=RUN_ID, confirm_auth=True); assert auth_result["kind"] == "aws_linux_pilot_auth"
+        auth_result = ctl.auth(run_id=RUN_ID, confirm_auth=True); assert auth_result["kind"] == "aws_linux_pilot_auth" and auth_result["authProbeCommandId"] == "cmd-auth-probe" and ops(fixture).count("send-command") == 1; assert sum(1 for command in fixture.commands if "get-command-invocation" in command and command[command.index("--command-id") + 1] == "cmd-auth-probe") == 2; probe_command = next(x for x in fixture.commands if "send-command" in x and any("auth-postcheck" in part for part in x)); probe_script = "\n".join(json.loads(probe_command[probe_command.index("--parameters") + 1])["commands"]); assert "systemctl is-active --quiet explicit-lean-pilot-shutdown.timer" in probe_script and "campaign_budget.py check" in probe_script and "campaign_worker.py" not in probe_script
         assert session_commands and "cloud-init status --wait" in session_commands[0][-1] and "sudo -H /usr/local/bin/codex login --device-auth" in session_commands[0][-1] and "sudo -H /usr/local/bin/codex login status" in session_commands[0][-1] and "campaign_budget.py check" in session_commands[0][-1] and "auth-budget.json" in session_commands[0][-1] and "jq -e" in session_commands[0][-1]
         proof_path = Path(auth_result["remoteAuthProof"]); assert proof_path.is_file(); generated = json.loads(proof_path.read_text()); assert generated["runId"] == RUN_ID and generated["instanceId"] == "i-0123456789abcdef0"; assert pilot.validate_remote_auth_proof(proof_path, instance_id="i-0123456789abcdef0", run_id=RUN_ID, now=NOW)["codexLoginStatus"] == "verified"; require_blocked(lambda: pilot.validate_remote_auth_proof(proof_path, instance_id="i-0123456789abcdef0", run_id=RUN_ID_2, now=NOW))
-        started = ctl.start_worker(run_id=RUN_ID, remote_auth_proof=proof_path, confirm_start_worker=True); assert started["phase"] == "worker-started" and started["workerCommandId"] == "cmd-1"; assert ops(fixture).count("create-stack") == 1 and ops(fixture).count("send-command") == 1 and ops(fixture).count("delete-stack") == 0
-        command = next(x for x in fixture.commands if pilot.AwsClient and "send-command" in x); script = json.loads(command[command.index("--parameters") + 1])["commands"]; joined = "\n".join(script); assert "codex login status" in joined and "campaign_budget.py check" in joined
-        duplicate = ctl.start_worker(run_id=RUN_ID, remote_auth_proof=proof_path, confirm_start_worker=True); assert duplicate["idempotent"] and ops(fixture).count("send-command") == 1
+        started = ctl.start_worker(run_id=RUN_ID, remote_auth_proof=proof_path, confirm_start_worker=True); assert started["phase"] == "worker-started" and started["workerCommandId"] == "cmd-1"; assert ops(fixture).count("create-stack") == 1 and ops(fixture).count("send-command") == 2 and ops(fixture).count("delete-stack") == 0
+        command = next(x for x in fixture.commands if "send-command" in x and any("bounded-worker" in part for part in x)); script = json.loads(command[command.index("--parameters") + 1])["commands"]; joined = "\n".join(script); assert "codex login status" in joined and "campaign_budget.py check" in joined
+        duplicate = ctl.start_worker(run_id=RUN_ID, remote_auth_proof=proof_path, confirm_start_worker=True); assert duplicate["idempotent"] and ops(fixture).count("send-command") == 2
+
+
+def test_auth_transport_zero_postcheck_failure_emits_no_proof() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory); checkout = root / "checkout"; checkout.mkdir(); repo(checkout); policy_path = write_policy(root); fixture = AwsFixture(auth_probe_failure=True); ctl = controller(fixture, root, policy_path, checkout)
+        ctl.launch(repo_url=pilot.CANONICAL_REPO_URL, authorization_ref=AUTH_REF, run_id=RUN_ID, confirm_launch=True); require_blocked(lambda: ctl.auth(run_id=RUN_ID, confirm_auth=True)); state = json.loads((root / "states" / f"{RUN_ID}.json").read_text()); assert state["phase"] == "awaiting-codex-auth" and state["authRetryRequired"] is True and state["authProbe"]["commandId"] == "cmd-auth-probe" and state["authProbe"]["status"] == "Failed" and not list((root / "states").glob(f"{RUN_ID}.remote-auth-proof.json")); assert ops(fixture).count("send-command") == 1 and not any(any("bounded-worker" in part for part in command) for command in fixture.commands)
 
 
 def test_preworker_cleanup_and_cleanup_failure_are_distinct() -> None:
@@ -277,7 +292,7 @@ def test_remote_proof_and_ambiguous_send_retain_stack() -> None:
 
 
 def main() -> None:
-    tests = [test_static_guards, test_template_and_worker_invariants, test_read_only_plan_and_dry_run, test_invalid_checkout_and_confirmation_are_pre_mutation, test_launch_stops_for_auth_then_one_worker_dispatch, test_preworker_cleanup_and_cleanup_failure_are_distinct, test_ambiguous_create_and_duplicate_nonce, test_nominal_instance_capacity_and_guest_sanity_gate, test_root_quota_deadline_cost_and_status_are_safe, test_remote_proof_and_ambiguous_send_retain_stack]
+    tests = [test_static_guards, test_template_and_worker_invariants, test_read_only_plan_and_dry_run, test_invalid_checkout_and_confirmation_are_pre_mutation, test_launch_stops_for_auth_then_one_worker_dispatch, test_auth_transport_zero_postcheck_failure_emits_no_proof, test_preworker_cleanup_and_cleanup_failure_are_distinct, test_ambiguous_create_and_duplicate_nonce, test_nominal_instance_capacity_and_guest_sanity_gate, test_root_quota_deadline_cost_and_status_are_safe, test_remote_proof_and_ambiguous_send_retain_stack]
     for test in tests: test()
     print(f"aws linux pilot: {len(tests)} mock-only tests passed")
 

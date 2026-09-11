@@ -63,24 +63,28 @@ merge needed for that supervisor. Its old `.lake` loader scripts are historical.
 The user authorized one AWS pilot in account `538639825139`, region `us-west-1`,
 with a **$20 all-in ceiling**. The selected bounds are one single-purpose,
 default-tenancy `r7i.4xlarge`-class **128 GiB Linux machine**, a 12-hour instance lifetime, a
-10-hour worker, one worker total, and the 15-module sample. No resources have
-been provisioned. A fail-closed policy and repeatable procedure
+10-hour worker, one worker total, and the 15-module sample. No resources are
+currently provisioned. A fail-closed policy and repeatable procedure
 are now in [tracking/aws-linux-pilot-policy.json](tracking/aws-linux-pilot-policy.json)
 and [tracking/AWS-LINUX-PILOT.md](tracking/AWS-LINUX-PILOT.md), with a Linux
 process sampler for separate Python and Lean RSS measurements. The controller's
-mock checks, generated shell syntax, live read-only AWS gates and AWS template
-validation pass; Linux integration remains a host preflight. A
+mock checks, generated shell syntax, live read-only AWS gates, AWS template
+validation and Amazon Linux systemd calendar parsing pass; full Linux
+integration remains a host preflight. A
 dedicated `explicit-lean-operator` IAM user has a console login, temporary
 `AdministratorAccess` and no access keys. Its password
 was changed, the invalid temporary password was removed from Keychain, and the
 user explicitly chose to proceed without MFA. `explicit-lean-pilot` resolves to
 this non-root user; `default` and `softmax` remain root sessions and must not be
 used. AWS closed quota case `178915936800175` and raised the region's On-Demand
-Standard quota to 32 vCPUs, above the 16 required. The exact cutoff is
-`2026-09-12T11:00:00Z`. The first CloudFormation request failed regional
-schedule-property validation and auto-deleted before any resource was created;
-its authorization hash is superseded. The clean fix is published; explicitly
-identify its replacement HEAD by full hash before retrying. The pilot
+Standard quota to 32 vCPUs, above the 16 required. The replacement exact cutoff
+is `2026-09-12T11:25:00Z`. The first CloudFormation request failed regional
+schedule-property validation and created no resources. A second bounded stack
+was created, but guest setup stopped before Codex installation because systemd
+rejected the backup-timer timestamp. A transport-success false auth proof was
+invalidated before worker dispatch, and the stack was deleted after about four
+minutes; no pilot resources currently remain. Publish and explicitly identify
+the clean guest-timer/auth-proof fix before retrying. The pilot
 report remains required before a long campaign or additional machines.
 
 Before launch, close the publication gate. The exact one-pilot continuation is

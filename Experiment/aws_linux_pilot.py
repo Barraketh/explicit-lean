@@ -374,6 +374,36 @@ def build_worker_commands(*, repo_url: str, authorization_ref: str, run_id: str,
     ]
 
 
+def build_auth_probe_commands(*, repo_url: str, authorization_ref: str, run_id: str,
+                              not_after: datetime) -> list[str]:
+    """Build a root-only, non-worker SSM proof probe for the same run."""
+    repo_url = validate_repo_url(repo_url)
+    if not AUTHORIZATION_REF_RE.fullmatch(authorization_ref):
+        raise GateBlocked("auth probe requires the full authorization ref")
+    validate_run_id(run_id)
+    q = {k: shlex.quote(v) for k, v in {"repo": repo_url, "ref": authorization_ref, "run": run_id,
+         "deadline": _utc(not_after)}.items()}
+    checkout = "/var/lib/explicit-lean-pilot/auth-checkout"
+    return [
+        "set -Eeuo pipefail",
+        "cloud-init status --wait",
+        "test -f /var/lib/explicit-lean-pilot/shutdown-installed",
+        "test \"$(cat /var/lib/explicit-lean-pilot/shutdown-run-id)\" = " + q["run"],
+        "test \"$(cat /var/lib/explicit-lean-pilot/shutdown-deadline)\" = " + q["deadline"],
+        "systemctl is-enabled --quiet explicit-lean-pilot-shutdown.timer",
+        "systemctl is-active --quiet explicit-lean-pilot-shutdown.timer",
+        "test -x /usr/local/bin/codex",
+        "/usr/local/bin/codex login status >/dev/null",
+        "test -d " + checkout,
+        "test \"$(git -C " + checkout + " rev-parse HEAD)\" = " + q["ref"],
+        "test \"$(git -C " + checkout + " remote get-url origin)\" = " + q["repo"],
+        "test -z \"$(git -C " + checkout + " status --porcelain --untracked-files=all)\"",
+        "cd " + checkout,
+        "python3 -B Experiment/campaign_budget.py check > /var/lib/explicit-lean-pilot/auth-budget.json",
+        "jq -e '.canDispatch == true' /var/lib/explicit-lean-pilot/auth-budget.json >/dev/null",
+    ]
+
+
 def load_template(path: Path = TEMPLATE_PATH) -> str:
     try:
         return path.read_text(encoding="utf-8")
@@ -383,8 +413,8 @@ def load_template(path: Path = TEMPLATE_PATH) -> str:
 
 def validate_template_invariants(template: str | None = None) -> dict[str, Any]:
     text = load_template() if template is None else template
-    required = {"AWS::EC2::SecurityGroup", "AWS::EC2::Instance", "AWS::IAM::Role", "AWS::IAM::InstanceProfile", "AWS::Scheduler::Schedule", "TerminationRole", "Tenancy: default", "VolumeType: gp3", "VolumeSize: 200", "DeleteOnTermination: true", "Encrypted: true", "MaximumRetryAttempts: 0", "AmazonSSMManagedInstanceCore", "HttpTokens: required", "Ref: RootDeviceName", "FlexibleTimeWindow", "ScheduleExpressionTimezone: UTC", "at(${NotAfter})", CODEX_URL, CODEX_SHA512_HEX, "auth-checkout", "git clone --no-checkout"}
-    forbidden = {"SecurityGroupIngress", "KeyName", "InstanceMarketOptions", "SpotOptions", "Dedicated", "ec2:RunInstances", "s3:DeleteObject", "s3:PutObjectAcl", "ActionAfterCompletion"}
+    required = {"AWS::EC2::SecurityGroup", "AWS::EC2::Instance", "AWS::IAM::Role", "AWS::IAM::InstanceProfile", "AWS::Scheduler::Schedule", "TerminationRole", "Tenancy: default", "VolumeType: gp3", "VolumeSize: 200", "DeleteOnTermination: true", "Encrypted: true", "MaximumRetryAttempts: 0", "AmazonSSMManagedInstanceCore", "HttpTokens: required", "Ref: RootDeviceName", "FlexibleTimeWindow", "ScheduleExpressionTimezone: UTC", "at(${NotAfter})", "OnCalendar=$(printf '%s\\n' '${NotAfter}' | tr 'T' ' ') UTC", CODEX_URL, CODEX_SHA512_HEX, "auth-checkout", "git clone --no-checkout"}
+    forbidden = {"SecurityGroupIngress", "KeyName", "InstanceMarketOptions", "SpotOptions", "Dedicated", "ec2:RunInstances", "s3:DeleteObject", "s3:PutObjectAcl", "ActionAfterCompletion", "OnCalendar=${NotAfter} UTC"}
     missing, present = sorted(x for x in required if x not in text), sorted(x for x in forbidden if x in text)
     if not re.search(r"(?m)^\s+Mode:\s*'OFF'\s*$", text): present.append("scheduler Mode must be quoted 'OFF'")
     if not re.search(r"(?m)^\s+MaximumRetryAttempts:\s*0\s*$", text): present.append("scheduler MaximumRetryAttempts must be numeric zero")
@@ -690,7 +720,11 @@ class PilotController:
                     if stack:
                         outputs = _outputs(stack); iid = state.get("instanceId") or outputs.get("InstanceId")
                         if iid: result["checks"]["instance"] = {"ok": True, "instances": _instances(client, iid)}
-                        if state.get("workerCommandId") and iid: result["checks"]["ssm"] = {"ok": True, "invocation": client.call("ssm", "get-command-invocation", ["--command-id", state["workerCommandId"], "--instance-id", iid])}
+                        if iid and (state.get("authProbeCommandId") or state.get("workerCommandId")):
+                            ssm = {"ok": True}
+                            if state.get("authProbeCommandId"): ssm["authProbeInvocation"] = client.call("ssm", "get-command-invocation", ["--command-id", state["authProbeCommandId"], "--instance-id", iid])
+                            if state.get("workerCommandId"): ssm["invocation"] = client.call("ssm", "get-command-invocation", ["--command-id", state["workerCommandId"], "--instance-id", iid])
+                            result["checks"]["ssm"] = ssm
                         prefix = state.get("evidencePrefix") or outputs.get("EvidencePrefix")
                         if prefix: result["checks"]["evidence"] = {"ok": True, "bucket": EVIDENCE_BUCKET, "prefix": prefix, "listing": client.call("s3api", "list-objects-v2", ["--bucket", EVIDENCE_BUCKET, "--prefix", prefix])}
             result["awsCalls"] = len(client.calls)
@@ -716,6 +750,19 @@ class PilotController:
             if time.monotonic() >= end: raise PilotError("SSM agent did not become online before the bounded wait")
             self.sleep(5)
 
+    def _wait_command(self, client: AwsClient, command_id: str, iid: str, timeout: int = 600) -> dict[str, Any]:
+        terminal = {"Success", "Cancelled", "TimedOut", "Failed", "Cancelling", "Undeliverable", "Terminated"}; end = time.monotonic() + timeout
+        while True:
+            try:
+                invocation = _obj(client.call("ssm", "get-command-invocation", ["--command-id", command_id, "--instance-id", iid]), "SSM command invocation")
+            except PilotError as error:
+                if "InvocationDoesNotExist" not in str(error): raise
+                if time.monotonic() >= end: raise PilotError("SSM command invocation did not become visible before the bounded wait") from error
+                self.sleep(5); continue
+            if invocation.get("Status") in terminal: return invocation
+            if time.monotonic() >= end: raise PilotError("SSM command did not reach a terminal state before the bounded wait")
+            self.sleep(5)
+
     def _delete_stack(self, client: AwsClient, name: str) -> dict[str, Any]:
         cleanup = {"attempted": True, "requested": False, "stackName": name}
         try: client.call("cloudformation", "delete-stack", ["--stack-name", name], mutation=True)
@@ -726,6 +773,11 @@ class PilotController:
     def _send(self, client: AwsClient, iid: str, commands: Sequence[str], run_id: str) -> str:
         response = client.call("ssm", "send-command", ["--document-name", "AWS-RunShellScript", "--instance-ids", iid, "--comment", f"explicit-lean-pilot {run_id} bounded-worker", "--parameters", _json({"commands": list(commands)}), "--timeout-seconds", str(MAX_WORKER_SECONDS + 120)], mutation=True); command = _obj(response.get("Command"), "SSM command"); value = command.get("CommandId")
         if type(value) is not str or not value: raise PilotError("SSM send-command did not return a command ID")
+        return value
+
+    def _send_auth_probe(self, client: AwsClient, iid: str, commands: Sequence[str], run_id: str) -> str:
+        response = client.call("ssm", "send-command", ["--document-name", "AWS-RunShellScript", "--instance-ids", iid, "--comment", f"explicit-lean-pilot {run_id} auth-postcheck", "--parameters", _json({"commands": list(commands)}), "--timeout-seconds", "600"], mutation=True); command = _obj(response.get("Command"), "SSM auth probe"); value = command.get("CommandId")
+        if type(value) is not str or not value: raise PilotError("SSM auth probe did not return a command ID")
         return value
 
     def _instance(self, client: AwsClient, identity: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -819,12 +871,29 @@ class PilotController:
                    "python3 -B Experiment/campaign_budget.py check > /var/lib/explicit-lean-pilot/auth-budget.json && "
                    "/usr/bin/jq -e \".canDispatch == true\" /var/lib/explicit-lean-pilot/auth-budget.json >/dev/null'")
         command = ("aws", "--profile", PROFILE, "--region", REGION, "ssm", "start-session", "--target", iid, "--document-name", "AWS-StartInteractiveCommand", "--parameters", _json({"command": [session]})); completed = (self.session_runner or (lambda value: subprocess.run(list(value), cwd=ROOT, text=True, check=False)))(command)
-        if getattr(completed, "returncode", None) != 0: raise PilotError("Session Manager device-auth session failed")
+        if getattr(completed, "returncode", None) != 0:
+            state.update({"instanceId": iid, "instanceShape": shape, "phase": "awaiting-codex-auth", "authRetryRequired": True, "authFailure": "Session Manager transport or remote command failed"}); _write_state(path, state)
+            raise PilotError("Session Manager device-auth session failed")
+        probe_commands = build_auth_probe_commands(repo_url=identity["parameters"]["RepoUrl"], authorization_ref=ref, run_id=run_id, not_after=current_deadline)
+        state.update({"instanceId": iid, "instanceShape": shape, "authSessionCompletedAt": _utc(self.now()), "remoteAuthStrategy": REMOTE_AUTH_STRATEGY, "authRetryRequired": True, "phase": "auth-probe", "authProbe": {"kind": "auth-postcheck", "runId": run_id, "instanceId": iid, "status": "dispatching"}}); _write_state(path, state)
+        mutating = AwsClient(runner=self.runner, allow_mutations=True)
+        try:
+            probe_id = self._send_auth_probe(mutating, iid, probe_commands, run_id)
+            state.update({"authProbeCommandId": probe_id, "authProbe": {"kind": "auth-postcheck", "runId": run_id, "instanceId": iid, "commandId": probe_id, "status": "InProgress", "responseCode": None}}); _write_state(path, state)
+            invocation = self._wait_command(mutating, probe_id, iid)
+        except Exception as error:
+            state.update({"phase": "awaiting-codex-auth", "authRetryRequired": True, "authProbe": {**state.get("authProbe", {}), "status": "ambiguous", "error": str(error)[:500]}}); _write_state(path, state)
+            raise error if isinstance(error, PilotError) else PilotError(str(error))
+        probe_status, response_code = invocation.get("Status"), invocation.get("ResponseCode")
+        probe_info = {**state.get("authProbe", {}), "status": probe_status, "responseCode": response_code}
+        if probe_status != "Success" or type(response_code) is not int or response_code != 0:
+            state.update({"phase": "awaiting-codex-auth", "authRetryRequired": True, "authProbe": probe_info, "authProbeFailure": "post-check did not return Success with ResponseCode 0"}); _write_state(path, state)
+            raise GateBlocked(f"SSM auth post-check failed: status={probe_status!r}, responseCode={response_code!r}")
         checked_at = _utc(self.now()); proof_path = path.with_name(f"{run_id}.remote-auth-proof.json")
         proof = {"schema": 1, "strategy": REMOTE_AUTH_STRATEGY, "checkedAt": checked_at, "instanceId": iid, "runId": run_id, "codexLoginStatus": "logged_in", "campaignBudget": {"canDispatch": True, "decision": "continue"}}
         _write_state(proof_path, proof)
-        state.update({"instanceId": iid, "instanceShape": shape, "authSessionCompletedAt": checked_at, "remoteAuthStrategy": REMOTE_AUTH_STRATEGY, "remoteAuthProofPath": str(proof_path), "phase": "awaiting-codex-auth-proof"}); _write_state(path, state)
-        return {"schema": 2, "kind": "aws_linux_pilot_auth", "readOnly": False, "runId": run_id, "instanceId": iid, "phase": state["phase"], "remoteAuthProof": str(proof_path), "proof": proof}
+        state.update({"instanceId": iid, "instanceShape": shape, "authSessionCompletedAt": checked_at, "remoteAuthStrategy": REMOTE_AUTH_STRATEGY, "remoteAuthProofPath": str(proof_path), "authRetryRequired": False, "phase": "awaiting-codex-auth-proof", "authProbe": probe_info}); _write_state(path, state)
+        return {"schema": 2, "kind": "aws_linux_pilot_auth", "readOnly": False, "runId": run_id, "instanceId": iid, "phase": state["phase"], "authProbeCommandId": probe_id, "authProbeStatus": probe_info, "remoteAuthProof": str(proof_path), "proof": proof}
 
     def start_worker(self, *, run_id: str, remote_auth_proof: Path | str | None = None, confirm_start_worker: bool = False, dry_run: bool = False) -> dict[str, Any]:
         if not confirm_start_worker and not dry_run: raise PilotError("worker dispatch requires --confirm-start-worker")
@@ -843,6 +912,7 @@ class PilotController:
         if state.get("instanceId") not in {None, iid}: raise GateBlocked("run state instance differs from the stack")
         if state.get("workerCommandId") and state.get("phase") in {"worker-started", "worker-dispatched"}: return {"schema": 2, "kind": "aws_linux_pilot_start_worker", "readOnly": True, "idempotent": True, "runId": run_id, "workerCommandId": state["workerCommandId"], "state": state, "statePath": str(path)}
         if state.get("phase") not in {"awaiting-codex-auth", "awaiting-codex-auth-proof"}: raise GateBlocked(f"start-worker is not available in run phase {state.get('phase')!r}")
+        if state.get("authRetryRequired") is True: raise GateBlocked("auth post-check failed; rerun auth before worker dispatch")
         remote = validate_remote_auth_proof(remote_auth_proof, instance_id=iid, now=now, run_id=run_id); authorization = validate_authorization(policy, self.repo_root, ref, git_runner=self.git_runner); checks, gate_client = self._aws_gates(policy, now); active = _active_hosts(gate_client)
         if len(active) != 1 or active[0].get("InstanceId") != iid: raise GateBlocked("requested run is not the only active pilot host")
         repo_url = validate_repo_url(state.get("repoUrl", identity["parameters"]["RepoUrl"])); commands = build_worker_commands(repo_url=repo_url, authorization_ref=ref, run_id=run_id, not_after=deadline, input_root=f".lake/search-free-mathlib/aws-linux-pilot/{run_id}", output_root=f".lake/boundary-materialization/aws-linux-pilot/{run_id}", worker_id=f"aws-linux-pilot-{run_id}"); checks.update({"authorization": {"ok": True, **authorization}, "remoteAuth": {"ok": True, **remote}, "campaignBudget": dict((self.budget_check or _budget)()), "template": {"ok": True, **validate_template_invariants()}})
