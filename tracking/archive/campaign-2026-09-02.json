@@ -1,0 +1,2554 @@
+{
+  "schema": 1,
+  "campaign": "search-free-mathlib-2026-08-31",
+  "deadline": "2026-09-08T00:00:00-07:00",
+  "phase": "explicit_encoding",
+  "branch": "codex/search-free-mathlib-2026-08-31",
+  "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
+  "machine": "local-mac-only",
+  "budget": {
+    "resetDate": "2026-09-07",
+    "currentWindowAllowance": "all remaining",
+    "nextWindowMaximumPercent": 25,
+    "nextWindowDispatchStopPercent": 22,
+    "usageSource": "codex app-server account/rateLimits/read",
+    "unknownUsageAfterReset": "stop",
+    "paidResourcesAuthorized": false,
+    "initialWindowResetsAt": 1788764817,
+    "initialUsedPercent": 1,
+    "guardCommand": "python3 Experiment/campaign_budget.py check",
+    "lastCheckedAt": "2026-09-02T11:09:15.612927+00:00",
+    "lastUsedPercent": 95,
+    "lastDecision": "continue"
+  },
+  "coverage": {
+    "currentCorpusTotal": 83627,
+    "verifiedTranslatedOccurrences": 0,
+    "completeTranslatedTreeBuilt": false,
+    "note": "Authenticated v9 partitions all 83,627 source occurrences in 8,264 modules as 83,556 direct and 71 reusable with zero unresolved. The exact v9 direct run produced 190 verified module reports and 17 semantic failures before an intentional no-lease stop after sustained memory-reserve wait. Reviewed v10 continuation is integrated at 400eec0; fresh exact-HEAD v10 publication/pilot is pending >=12GiB free-memory admission.",
+    "inventoriedModules": 8264,
+    "materializationCandidates": 83627,
+    "unresolvedOccurrences": 0,
+    "reusableExecutableOccurrences": 71,
+    "nestedOccurrences": 91,
+    "verifiedTranslatedModules": 0,
+    "provisionalCachedOccurrences": 894,
+    "provisionalCachedModules": 83,
+    "minimumAcceptedReportSchema": 13,
+    "validationHold": "V8 is structurally authenticated and produced 39 verified module reports, but commit 3860bf3 deliberately moves the worker identity to requeue resource stops safely. Publish exact-HEAD v9, rerun the direct campaign under that identity, fix semantic failure families fail-closed, integrate reusable provenance, then certify the complete translated dependency tree.",
+    "freshAnalyzedModules": 8264,
+    "freshAnalyzedOccurrences": 83627,
+    "freshDirectExecutableOccurrences": 83556,
+    "separatelyRequiredModules": 0,
+    "separatelyRequiredOccurrences": 0,
+    "freshAnalyzedUnresolvedOccurrences": 0,
+    "directMaterializerModules": 6280,
+    "reusableOrMixedModules": 40,
+    "authenticatedV8VerifiedModules": 39,
+    "authenticatedV8VerifiedOccurrences": 165,
+    "authenticatedV8FailedModules": 31,
+    "authenticatedV8QueuedModules": 6212,
+    "authenticatedV9VerifiedModules": 190,
+    "authenticatedV9SemanticFailures": 17,
+    "authenticatedV9ResourceAbandonments": 172,
+    "authenticatedV9QueuedModules": 6073
+  },
+  "work": [
+    {
+      "id": "orchestration",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Tracking, usage guard, recurring continuation, integration"
+    },
+    {
+      "id": "review-fixes",
+      "owner": "/root/review_fixes",
+      "status": "completed",
+      "description": "Protect input manifests and correct antiquotation classification"
+    },
+    {
+      "id": "occurrence-index",
+      "owner": "/root/occurrence_index",
+      "status": "completed",
+      "description": "Durable SQLite index and exact Lean header dependency extraction committed at bab90be; complete diagnostic inventory imported."
+    },
+    {
+      "id": "fast-lean-tools",
+      "owner": "coordinator (Luna implementation integrated)",
+      "status": "completed",
+      "description": "Avoid repeated --run elaboration for inventory/scope/oracle tools"
+    },
+    {
+      "id": "original-comments",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Preserve each original replaced call as a comment"
+    },
+    {
+      "id": "corpus-translation",
+      "owner": "coordinator",
+      "status": "in_progress",
+      "description": "Authenticated v9 inventory/index and 190-module direct evidence preserved. Reviewed v10 same-pass resource continuation, exact bootstrap/resume, cache/evidence validation, and dual-lock supervisor integrated at 400eec0; fresh manifest/pilot/launch awaits the unchanged 12GiB memory reserve."
+    },
+    {
+      "id": "readability",
+      "owner": null,
+      "status": "pending",
+      "description": "After explicit closure, mine and normalize common replacement patterns"
+    },
+    {
+      "id": "process-lifetimes",
+      "owner": "coordinator (Sol bounded implementation)",
+      "status": "completed",
+      "description": "Own POSIX process groups and stop compiler descendants on timeout"
+    },
+    {
+      "id": "closed-expression-encoding",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Production artifact schema2 committed at5f02c0c; raw Expr DAG evidence encodes names, universes, instances and local indices without term elaboration. Fresh source tests passed."
+    },
+    {
+      "id": "captured-theorem-declarations",
+      "owner": "/root/congruence_codec",
+      "status": "completed",
+      "description": "Congruence and equation declaration codecs committed atb2ea843/1d5b550 and integrated at5f02c0c; checked proof replay with exact extension metadata preserves namespace state. Fresh-process codec/source fixtures and unchanged full boundary comparator passed."
+    },
+    {
+      "id": "inventory-checkpoints",
+      "owner": "/root/inventory_checkpoints",
+      "status": "completed",
+      "description": "Atomic completed syntax/scope checkpoints with source/implementation freshness and exact expected occurrence counts committed at b990bef."
+    },
+    {
+      "id": "resumable-campaign-worker",
+      "owner": "coordinator (Luna initial implementation; Sol integration after capacity error)",
+      "status": "completed",
+      "description": "Worker commit 3860bf3 adds fail-closed pre-claim memory admission and treats exit125 as an immutable logged, abandoned/requeued lease that stops the batch without semantic failure cache. Independent review plus29 worker,13 index and process-group checks pass."
+    },
+    {
+      "id": "unresolved-caller-probes",
+      "owner": "/root/unresolved_probe_finish",
+      "status": "completed",
+      "description": "Committed a53b749; four source quotations have witnessed caller execution, with Nontriviality immediate consumer diagnostics and separately recorded enclosing proof. No corpus reclassification or translation claim."
+    },
+    {
+      "id": "translated-import-isolation",
+      "owner": "/root/tree_build_plan",
+      "status": "completed",
+      "description": "Committed13373ad; direct pinned Lean with explicit search path, stock Mathlib fallback excluded. Positive and missing/conflicting translated dependency controls passed; first39module translated cone compiled provisionally under6287642."
+    },
+    {
+      "id": "reusable-replay-design",
+      "owner": "/root/unresolved_probe_finish",
+      "status": "completed",
+      "description": "Read-only note .lake/week-2026-08-31/reusable-design.md; local macro scopes first, general exported tactics need parametric deterministic rewrites rather than finite caller-table semantic claims."
+    },
+    {
+      "id": "replay-abort-guard",
+      "owner": "/root/unresolved_probe_finish",
+      "status": "completed",
+      "description": "Committed45c8f56 after fix-review. Schema6 scans independently nonce-framed applied/oracle logs and hashes/rescans durable evidence.14case caught-error matrix plus17source gate passed; prior113calls remain provisional until new reports."
+    },
+    {
+      "id": "local-matcher-state-guard",
+      "owner": "coordinator with Luna review and controls",
+      "status": "completed",
+      "description": "Schema7 compares typed local MatchEqns state and all completed async declaration snapshots.16mutation unit checks, direct-local/equation-set-only negative controls, real Prop async negative and cached positives passed. Earlier schema5/6 cache remains provisional."
+    },
+    {
+      "id": "coherent-declaration-delta",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Snapshot pre-boundary checked declaration names and subtract in the same checked domain. Avoid attributing earlier async realizations to an unrelated simp call. No generator reset or public-name exemption."
+    },
+    {
+      "id": "local-auxiliary-cache-guard",
+      "owner": "coordinator with Luna review",
+      "status": "completed",
+      "description": "Schema8 typed local+async AuxLemmas comparison;13reviewed controls passed including public-key-to-private-proof, malformed private caches and realasync fresh/cached. Original public/async falseacceptance reproduced with old runtime. Private omission applies only to fresh valid PRIVATE keys; preexisting and public entries exact."
+    },
+    {
+      "id": "captured-public-theorems",
+      "owner": "coordinator with reviewed agent implementation",
+      "status": "completed",
+      "description": "Superseded standalone action design by the integrated ordinary local theorem bundle, covering public and private checked helper declarations."
+    },
+    {
+      "id": "captured-matcher-bundles",
+      "status": "completed",
+      "owner": "coordinator with Sol implementation",
+      "description": "6b99b9a: one authenticated private splitter/equation bundle plus independently supported equation/congruence actions. Strict checked bodies/metadata/local+async state. Root41jobbuild,12freshsourcecontrols andpure4protocolspassed; frozenprototype698hashes/35noncelogs independently verified; Nat.Init5calls/139declarations passed prototype."
+    },
+    {
+      "id": "oracle-checked-domain",
+      "status": "completed",
+      "owner": "coordinator with Sol implementation",
+      "description": "7839c0f: typed inline/matcher metadata owners resolved in checked constants view. Main4controls passed: identical asyncmatcher/privatecomputation accepted; changedinline/bodyrejected. No privatecomputation exemption."
+    },
+    {
+      "id": "captured-local-helper-bundle",
+      "owner": "coordinator with reviewed agent implementation",
+      "status": "completed",
+      "description": "Integrated ordinary public/private helper actions and exact auxiliary name-generator state, with isolated recording trials. Final main19helper and4selector controls passed; immutable prototype387hashes/38nonce logs independently checked."
+    },
+    {
+      "id": "pre-boundary-universe-references",
+      "owner": "coordinator with reviewed agent implementation",
+      "status": "completed",
+      "description": "Integrated expr_dag_v2/artifact3 references to existing selector-reachable universe variables. Main9codec controls and strict Ore57/Extra168declaration comparisons passed; declaration bodies keep closed v1 encoding."
+    },
+    {
+      "id": "sparse-matcher-helper",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Integrated sparse-helper closed definition/typed cache codec and matcher-v2 support. Mainbuild46jobs,17multiple+12existing+16freshcompilercontrols pass;124freshhashes independently checked. Portablefourdrivers verified264handoff hashes,42wirecontrols; copiedmain and reran21wirecontrols on fresh mainpayloads. FullModifyLast5 remains unaccepted pending combinedrealization-group fix."
+    },
+    {
+      "id": "translated-schema8-forest",
+      "owner": "/root/tree_build_plan",
+      "status": "completed",
+      "description": "Independent verification passed:80translated modules,15source roots,98replaced calls,402hashes,80nonce logs and15full shard evidence checks. All80outputs reused; one deliberately corrupted output was rebuilt. Historical schema8 compilation evidence only; actual translated-output semantic oracles and current-schema reruns still required."
+    },
+    {
+      "id": "preexisting-pending-recursion",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "All fields of existing pending recursion must remain exact on both sides of the common pre-state; new/changed/deleted entries remain rejected. Narrow validated recursive-call diagnostic position ranks allow source relocation. Main11controls including26typed/6routing/5malformed/3full-comparator cases and Int.Init7sites/148declarations passed."
+    },
+    {
+      "id": "sparse-cache-state-guard",
+      "owner": "coordinator with Luna review",
+      "status": "completed",
+      "description": "Typed caller-local and all completed async SparseCases cache equality. Retargeted private helper fixture to avoid earlier prefix restriction; reran old coherent runtime and main runtime:2accepted/3specific cache rejections, identical5source pairs, archived inputs."
+    },
+    {
+      "id": "replay-syntax-keywords",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Replay outcome category uses symbol behavior so failure/apply_encoded words do not reserve ordinary terms or binders. Source17includes a parser regression. Control.Basic now reaches a separate generator mismatch rather than failing to parse."
+    },
+    {
+      "id": "actual-import-remaining-audit",
+      "owner": "coordinator; Sol reproduction",
+      "status": "completed",
+      "description": "Actual-header parser fix and Python default integrated. Reduced3case control passed; exact partial Lookmap scan9 and Int.Init remaining0; source17 passed under new default. Luna read-only review found no callsite omission. Aggregate counts remain diagnostic, not acceptance."
+    },
+    {
+      "id": "multiple-matcher-bundles",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Integrated disjoint closed bundles; main17multiple+12existing matcher+17source+4protocol controls passed. Frozen821hashes/37nonce logs independently checked, main356archived inputs rehashed. FullLookmap remains blocked on cached realization activation; no full-module claim."
+    },
+    {
+      "id": "cached-realization-activation",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Exact completed realization groups integrated at9b35bf6. Combined artifact4/report10 Lookmap passes10 calls,33 declarations and0 remaining calls. Frozen workers are revalidating the index. Mixed cached activation plus ordinary helper remains a separate unsupported case."
+    },
+    {
+      "id": "fresh-post-generator-guard",
+      "owner": "coordinator with Luna implementation and review",
+      "status": "completed",
+      "description": "Integratede3af2f2 artifact4/report10 structural stock generator and fresh post-success assertion inside fatal replay guard. Main17replay+17source+17multiple+10groupcontrols pass;1672hashes/46nonce logs checked. Historical truncatedoldflat now rejected by exactpostgencheck;415additionalhashes verified. No setters or offset actions. Python rendering canonicalized; existing valid protocol fixtures updated."
+    },
+    {
+      "id": "ordered-recursive-realizations",
+      "owner": "coordinator with assigned agent",
+      "status": "completed",
+      "description": "Integrated strict structural expression/definition encoding, exact matcher declaration order and finite recursive realization batches. Main4/10 build,15ordered+12recursive+10legacygroup+17multiple controls,5wire negatives,17replay-guard and17source gates pass (source fixture includes1explicit unobserved). Root1866hash checks/54nonces. Full ModifyLast fourth mixed boundary remains unsupported; no full-module credit."
+    },
+    {
+      "id": "complete-command-context-audit",
+      "owner": "coordinator with independent Sol review and integration",
+      "status": "completed",
+      "description": "Integrated scoped read-only frontend command collector and nonce/source-bound parser. Main36process+10wire controls verified; fresh39-module cone source-pair audits under strict translated imports emit78records, original2calls/applied0, matching prior oracle results. No whole-corpus or existing-output semantic binding claim."
+    },
+    {
+      "id": "worker-preflight-memo",
+      "owner": "Luna implementation with coordinator review",
+      "status": "completed",
+      "description": "Reuse dependency identity/source memos within one preflight pass, retaining fresh selected-root checks and a fresh planning pass. Root shared-dependency fixture and source-change rejection checks pass. Independent96-module benchmark:4.61s→0.113s, identical keys (about41x for this preflight sample). Active frozen workers are unchanged; apply on next dispatch."
+    },
+    {
+      "id": "mixed-realization-sequences",
+      "owner": "coordinator with assigned Sol agent",
+      "status": "completed",
+      "description": "Versioned mixed sequence contract integrated: checked/fresh root modes, exact ordered branch transitions, ordinary helper snapshots and authenticated preexisting public equation registrations. Main32mixed+10legacy process checks/19wire,17multiple matcher,17source and17replay guard gates pass. Root1131mainhashes/42nonces plus1597private hashes/64nonces checked. Full-module acceptance remains under global metadata hold."
+    },
+    {
+      "id": "raw-oracle-certified-output",
+      "owner": "coordinator with assigned Sol agent",
+      "status": "completed",
+      "description": "Superseded by integrated same-frontend-compiler-output and quarantined-module-certificates milestones; global metadata/fresh-compilation acceptance hold remains."
+    },
+    {
+      "id": "same-frontend-compiler-output",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Raw frontend comparison and optional normal serialization integrated; main57jobbuild and70process+17consumer/wire controls passed. Root260hashes/69nonces/90auditframes verified; frozen54process prototype independently verified. Quarantine only; certified forest publication remains separate."
+    },
+    {
+      "id": "quarantined-module-certificates",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Reusable certify_module emits fresh normal compiler family in isolated quarantine; strict source/tool/dependency hashes, command audit and semantic oracle, exact module4/legacy1 family, exclusive durable receipts. Main41checks/20nativeprocesses+1mocktimeout passed; root226hashes/21logs/4positive receipts independently verified. Caller owns complete dependency graph and source/comment provenance; no promotion/DB changes."
+    },
+    {
+      "id": "same-frontend-certified-first-cone",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Fresh private39module/2call cone passed using current same-frontend semantic+command-audit certificates, exact156artifact parts and translated-only Mathlib dependencies. Original source/comment provenance rechecked with frozen report as candidate provenance only. Root independently verified39certificates/78auditframes/11486external artifact hashes and fresh downstream proof+#eval7. No old compiler outputs/certificates reused; whole Mathlib remains incomplete."
+    },
+    {
+      "id": "observational-metadata-and-frontend-isolation",
+      "owner": "coordinator with Sol diagnosis",
+      "status": "completed",
+      "description": "Pure typed module-data observation integrated and independently verified on Lookmap10, Control.Basic16, ModifyLast5. No metadata resets or proof exemptions. Later replay failures are tracked separately."
+    },
+    {
+      "id": "audit-without-export-hooks",
+      "owner": "coordinator with Sol diagnosis",
+      "status": "completed",
+      "description": "CommandAudit enumerates private checked declarations using pinned mkModuleData fold order directly, without invoking persistent export hooks. Root57jobbuild and29process/10wire checks pass;174diagnosis hashes and main inputs/logs independently verified. Broader boundary metadata observation and frontend-isolation acceptance hold remain."
+    },
+    {
+      "id": "local-owner-equation-realizations",
+      "owner": "Sol bounded repair after Luna prototype review",
+      "status": "completed_bounded",
+      "description": "Fresh-local then cached-local ordered equation sequence integrated293cab9. Fresh production Cubic20/29variants passes applied recording, independent replay and strict full oracle147decl/131public/39extensions; root1103hash assertions and3fresh native invocations verified. Broader owner combinations remain fail-closed."
+    },
+    {
+      "id": "preexisting-expression-metavariable-references",
+      "owner": "Sol private implementation after root-reviewed diagnosis",
+      "status": "completed",
+      "description": "Integrated f231289; bounded context-owned Expr references and unconditional NoSynthesis controls independently verified. Whole-tree acceptance remains separate."
+    },
+    {
+      "id": "bounded-library-suggestions-observation",
+      "owner": "coordinator with Sol implementation",
+      "status": "completed",
+      "description": "Pinned frequency/trigger export observation avoids two cache writes without resetting caches or skipping metadata. Private8positive and1explicit callback counterexample; main fresh Lookmap10/Control16/ModifyLast5 all compile, compare and have remaining0. Root inputs,31artifacts, source/comments regeneration and scans independently checked. Acceptance hold remains for independent cold outputs."
+    },
+    {
+      "id": "cold-serialized-certificates",
+      "owner": "coordinator consumer with Sol native comparator",
+      "status": "completed",
+      "description": "Integrated native V2 emitted3oleanviews+IR comparison without exporter callbacks and five-fresh-process/six-family consumer. Main and private43checks/76stageprocesses each pass; real late/first exporter counterexamples reject at separate layers. Root1446hashes/150nonces plus native1198hashes/26binding mutations independently verified. Caller still owns source/comment provenance and complete translated dependency/runtime closure; no whole-corpus acceptance."
+    },
+    {
+      "id": "local-cached-owner-primitive",
+      "owner": "coordinator with Sol implementation after Luna review",
+      "status": "completed",
+      "description": "Separate cached-only local equation action authenticates current safe owner and full bounded AsyncConst DAG. No fresh fallback or saved-context equivalence claim. Main59-job build/20compiler+15wire+8kind/13field controls pass; root source/comment regenerated and inputs archived. Frozen imported10process/5wire regression passed. Cubic target passes; fullCubic and Extra80-entryauxcache remain separate."
+    },
+    {
+      "id": "expression-reference-search-barrier",
+      "owner": "coordinator with Sol implementation and Luna independent search-path review",
+      "status": "completed",
+      "description": "Integrated artifact5/report11 bounded pre-boundary expression references with exact raw dependency/scope/cycle guards and unconditional pending-synthesis barrier across encoded selection/application, realization callbacks and export Meta runners. Frozen3138hash/75nonce verification; main66jobbuild,39guard/8wire controls,3real-source pipelines,20localcache/15wire regression,17replayabort matrix and4pure corpus protocol validators all passed. Root regenerated actual replacements/comments and archived runtime inputs. Luna found no concrete generated-path bypass; handwritten elaboration API explicitly excluded. Complete translated-tree acceptance remains pending."
+    },
+    {
+      "id": "applied-recording-shared-dispatcher",
+      "owner": "coordinator with Sol implementation and Luna review",
+      "status": "completed",
+      "description": "Shared Tactic dispatcher and fully validated applied continuation integrated; stock diagnostic unchanged. Main65-job build,12fresh controls and2038root hash assertions pass. Frozen fullExtra24calls(23roots+1nested)/168declarations/120public/44extensions passes;6562root hash assertions15independent invocation receipts. Production report12 integration remains pending; no accepted corpus increment."
+    },
+    {
+      "id": "analysis-checkpoint-identity",
+      "status": "completed",
+      "owner": "coordinator with Luna tests and review",
+      "description": "Content-bound identity excludes replay-only project inputs but includes fiveanalysis modules, native executables and pinned package/toolchain source/runtimeclosure. Prewarm beforecapture, perbatch native/source/ctimeguards includinghits, fullclosurebefore/end. Real replay-edit two-run reusedbothcheckpoints withfresh manifestprovenance."
+    },
+    {
+      "id": "linear-instrumentation-source-guard",
+      "owner": "coordinator",
+      "status": "completed_fresh_production_pending",
+      "description": "Instrumentation now supplies exact sorted outer-tactic replacement lengths to existing independent linear byte-gap validator. Authored bytes/import/expected-render checks unchanged; no diff fallback. Unicode/head-antiquotation/nested/stock-applied and corrupted-context controls pass. Actual45call Finprod olddiff timesout6s with captured difflib stack; linear guard passes0.002s. Six schema12 tests pass."
+    },
+    {
+      "id": "declaration-branch-reservation",
+      "owner": "coordinator with Luna fix-review and Sol integration",
+      "status": "completed_bounded",
+      "description": "Integrated6b97bfd. Replays exactly one computed mkChild plus optional authenticated absent-key registration of an active imported equation theorem; exact pre/final checked/branch/matcher/equation/sparse/aux states and parsed original source. No Aesop/search/raw counter/state assignment. Failure catches restore authentic pre-generator. Private Finprod45/45 fresh replay+oracle352/315/34 pass;21runtime+3wire controls,83unique receipts/2510frozenfiles independently verified. Main71job build, Python/schema12/source-gap checks pass."
+    },
+    {
+      "id": "fresh-schema12-corpus-analysis",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Commit 11cfcfd analysis independently verified 8,260 modules/83,414 calls: 83,349 direct, 65 reusable, 91 nested, zero unresolved. Four excluded modules/11 calls remain separately required. Manifest b2899816... is analysis evidence only; replay provenance must be refreshed."
+    },
+    {
+      "id": "fresh-helper-reference-closure",
+      "owner": "coordinator with Luna implementation and fix-review",
+      "status": "completed_bounded",
+      "description": "Integrated at 2b5b9ed. Exact first-capture local-theorem names may remain as fresh theorem references; all other fresh constants close or reject, and exact second capture must match. Fresh List.Basic 51/51, 57 variants, oracle 166/166 declarations and 22/22 extensions; typed ToAdditive 75/75. Integrated Finprod regression 45/45, oracle 352/352 and 34/34. Runtime corruption controls fail closed. Whole-tree coverage unchanged."
+    },
+    {
+      "id": "inline-first-selector-rendering",
+      "owner": "coordinator with Luna implementation and fix-review",
+      "status": "completed",
+      "description": "Commits 2a7db88/237d539 group each generated selector as one tactic. Self-contained fresh record/replay regression covers inline first siblings, nested try/first, single/multiple variants, recorded failure, UTF-8, indentation and adjacent original comments."
+    },
+    {
+      "id": "fresh-theorem-recapture-scope",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Commit0b13883 revalidates only declare_local_theorems actions after artifact capture and skips the second environment encoding when the authenticated theorem whitelist is empty. Main helper19 negatives and final List.Basic51 pass; ExtraDegeneracy production heartbeat regression reproduced before the fix and record/replay pass after it."
+    },
+    {
+      "id": "cached-descriptor-resource-guard",
+      "owner": "coordinator with Luna implementation/fix-review",
+      "status": "completed_bounded",
+      "description": "Commit451e457 counts exact serialized bytes only for unique cached DAG nodes and fails closed above16MiB without truncation. Main20-owner suite and16 auxiliary records pass, including ExtraDegeneracy record/replay. Known11,015,063-byte auxiliary payload remains supported; historical Unitization node JSON71,368,653 bytes grounds the limit. No fresh over-limit runtime negative or Unitization rerun."
+    },
+    {
+      "id": "manual-simp-overrides",
+      "owner": "coordinator with Luna fix-review",
+      "status": "completed_integrated_bounded",
+      "description": "Eight exact replacements across six modules are manifest/database bound, preserve originals as comments, and compose before ordinary recording. Fresh schema13 worker verifies all63 canonical calls as8manual+55ordinary, zero remaining."
+    },
+    {
+      "id": "schema12-manual-identity-worker",
+      "owner": "coordinator",
+      "status": "superseded_by_schema13",
+      "description": "Fresh manifest c5da9774... at commit1168cc0 analyzed8,260modules/83,414calls. Attempts459-488 processed30modules:24 successes/250calls/255variants,6 fail-closed replay exceptions, no timeout/budget/storage stop. Current index totals77 provisional modules/831calls/893variants. Superseded for current identity by schema13 overlay manifest/worker; historical evidence retained.",
+      "verification": ".lake/week-2026-08-31/schema12-manual-worker-root-verification.json",
+      "verificationSha256": "1df37f6ee7873fafa48353f4dc6fb24872d61f286a6e809a94d0a22c90b04db8"
+    },
+    {
+      "id": "manual-boundary-composition",
+      "owner": "coordinator with Luna review",
+      "status": "completed_integrated_bounded",
+      "description": "Schema13 integration passes6modules/8manual+55ordinary, all observed, zero retained, effective and canonical declaration oracles. Independent worker consumer and120-file evidence receipt pass; whole-tree acceptance remains separate."
+    },
+    {
+      "id": "schema13-authenticated-manual-overlay",
+      "owner": "coordinator with Luna implementation/fix-review",
+      "status": "completed_bounded",
+      "description": "Commit6c0815c integrates authenticated manual overlays into closed manifests, global cache identities, producer reports and independent worker verification. Fresh8260-module manifest60dc663e; six-module worker6/6 success,63canonical=8manual+55ordinary, zero retained;120-file tree54b38ef8. Whole-tree coverage remains zero."
+    },
+    {
+      "id": "manifest-capsule-projection",
+      "owner": "coordinator with Luna implementation and independent fix-review",
+      "status": "completed_ready_for_exact_manifest",
+      "description": "One worker globally validates every closed-manifest record/source; each child rechecks the authenticated global schema, policy and count invariants while a 1,073,040-byte span/hash capsule replaces repeated 215,420,884-byte JSON decoding. Real corpus child projection hashes the full manifest and captures seven selected/manual records (341,358 bytes) in 0.105s. Sparse overlay identity, count assertions, reusable fallback, immutable concurrent publication, cleanup aliases and manifest/DB/source TOCTOU fail closed."
+    },
+    {
+      "id": "tooling-import-derived-metadata",
+      "owner": "coordinator with Luna diagnosis/fix-review",
+      "status": "completed",
+      "description": "When only the allowlisted direct Boundary.Tactic tooling import is added, the declaration oracle recomputes applied LibrarySuggestions metadata using the stock imported-frequency state and excludes generated/tooling-local declarations. It retains exact comparison whenever both sides have the tooling import or neither does. The complete oracle matrix passes 15 accepted equivalences and 26 fail-closed cases; nested synthetic and real Mathlib Action gates pass with zero remaining calls."
+    },
+    {
+      "id": "materializer-memory-guard",
+      "owner": "coordinator",
+      "status": "completed",
+      "description": "Commit aa6d3de owns subprocess groups and polls conservative host memory. Materializers stop explicitly below a 12 GiB reserve with partial output preserved; 27 worker checks and process child/grandchild controls pass."
+    },
+    {
+      "id": "strict-import-closure-batching",
+      "owner": "coordinator with Luna-style fix-review",
+      "status": "completed_fail_closed",
+      "description": "Commit d235563 authenticates the exact source-bound dependency map and plans fresh inventory children by transitive import closure capped at 512 modules. Giant single closures are never skipped and fail explicitly if the 12 GiB reserve cannot be maintained. Focused verifier suite 32/32 passes."
+    },
+    {
+      "id": "final-mathlib-selector-options",
+      "owner": "coordinator with delegated fix-review",
+      "status": "completed",
+      "description": "Commit 7b76a60 aligns recording and declaration-oracle selector fingerprints with the true pinned Mathlib package leanOptions, excluding overlay-only linter suppressions and maxHeartbeats. Fresh recording to generated selector to oracle round-trip passes."
+    },
+    {
+      "id": "local-macro-lowering-overlay",
+      "owner": "coordinator with Luna implementation/review",
+      "status": "completed_bounded_not_integrated",
+      "description": "Commits0c725f5/35a5849 authenticate and lower22 nullary local macro definitions and88 same-module invocations across12 elliptic modules, preserving originals as comments. Production integration remains blocked on canonical provenance mapping and kernel-checked generated-source evidence."
+    },
+    {
+      "id": "authenticated-v8-direct-campaign",
+      "owner": "coordinator",
+      "status": "completed_planned_freeze",
+      "description": "Manifest3b4b4b85 at exact commit35a5849 covers8264modules/83627occurrences. NeZero and closure-ordered passes leave39 verified modules/165 occurrences,31 fail-closed modules,6212 queued; attempts618+ contain37 successes,21 failures and3 deliberate abandoned leases. V8 frozen before integrating resource-stop control."
+    },
+    {
+      "id": "resource-stop-requeue",
+      "owner": "Luna implementation; Terra and Sol review",
+      "status": "completed",
+      "description": "Commit3860bf3 preserves exit125 logs, atomically abandons/requeues leases, avoids semantic failure cache entries, stops the batch, and checks host memory before claims. All focused tests and independent review pass."
+    }
+  ],
+  "blockers": [
+    {
+      "id": "implicit-evidence-elaboration",
+      "status": "resolved",
+      "detail": "Schema2 generated replay decodes checked raw Expr DAGs; no prettyprinted term elaboration. Representative Mathlib validation is running; unsupported metavariable forms still fail closed."
+    },
+    {
+      "id": "reusable-tactic-ownership",
+      "status": "open",
+      "detail": "Reusable tactic source ownership and execution-module identity plus transformed metaprogram equivalence remain to be resolved for corpus closure."
+    },
+    {
+      "id": "reserved-theorem-generation",
+      "status": "resolved",
+      "detail": "Captured checked congruence/equation theorem replay uses controlled realization closures with exact captured extension metadata, without generator or attribute inference calls. Fresh-process fixtures and unchanged full boundary comparator passed."
+    },
+    {
+      "id": "unpaired-assignment-fvar",
+      "status": "resolved",
+      "detail": "Committed3005bcd. Pre-boundary cached eAssignment fvars preserve exact existing identity. Action.End1 and SimpleGraph55 both passed schema5 gates; provisional pending schema6 rerun."
+    },
+    {
+      "id": "swallowed-replay-failures",
+      "status": "resolved",
+      "detail": "Committed45c8f56. Reached replay errors emit process output surviving tactic catches; intended recorded stock failure remains ordinary. Schema6 requires two fresh compiler nonces and durable log rescans."
+    },
+    {
+      "id": "local-auxiliary-cache-state",
+      "status": "resolved",
+      "detail": "Typed local+async comparison plus13controls and old-runtime falseacceptance witnesses. Schema8minimum; prior module/cone reports remain provisional until current frozen reruns."
+    },
+    {
+      "id": "final-grammar-coverage-audit",
+      "status": "open",
+      "detail": "Production same-frontend observer integrated and39-module translated cone audit passes78records with0remaining executable/unresolved calls. Full corpus audit remains pending."
+    },
+    {
+      "id": "fresh-replay-cache-grouping",
+      "status": "resolved",
+      "detail": "Original truncatedLookmap cache-priming defect repaired by exact group replay9b35bf6 and freshpostgenerator assertione3af2f2. Current4/10 fullLookmap10calls33declarations20public22extensions remaining0; historicalflatnegative is rejected. Olderreports9remainprovisional until fresh10 revalidation."
+    },
+    {
+      "id": "pending-typeclass-synthesis-during-replay",
+      "status": "resolved_bounded_revalidation_pending",
+      "detail": "Unconditional maxSynthPendingDepth barrier integrated f231289 across generated replay and callbacks. Fresh bounded tests pass. Earlier artifact4 reports remain historical; whole translated tree acceptance still pending."
+    },
+    {
+      "id": "inline-first-selector-rendering",
+      "status": "open_bounded_reproduction",
+      "detail": "Generated multiline simp_engine_boundary_select is ambiguous inside inline `first | simp ... | exact ...`; frozen failure in declaration-branch handoff. No waiver. Fix renderer before final corpus closure."
+    },
+    {
+      "id": "manual-override-composition",
+      "status": "resolved_integrated_bounded",
+      "detail": "Schema13 manifest/cache/producer/consumer integration passes all6manual modules and exact8+55 partition. Complete translated tree remains the acceptance boundary."
+    },
+    {
+      "id": "nested-fixture-derived-metadata",
+      "status": "resolved",
+      "detail": "The allowed Boundary.Tactic import adds derived LibrarySuggestions state outside the source module equivalence domain. The oracle retains singular/presence checks and all declaration/import/other-extension checks; 15 accepted and 26 fail-closed cases pass. The stale nested report wrapper now copies schema13 canonical/manual counts; synthetic and Mathlib Action nested gates pass."
+    },
+    {
+      "id": "selector-option-environment",
+      "status": "resolved",
+      "detail": "NeZero exposed recording/oracle option drift. Commit 7b76a60 uses the exact final Mathlib package option map in both paths and removes overlay-only settings from selector context; a fresh end-to-end selector round-trip passes."
+    },
+    {
+      "id": "v8-semantic-failure-families",
+      "status": "open",
+      "owner": "coordinator with isolated fix-review branches",
+      "reason": "Current fail-closed families include stock/applied generator drift, matcher equation-state conflict, local equation sequence coverage, activation aux cache, unsupported realization roots, multiple helpers, and a typed declaration-oracle delta. No family is counted as translated until exact replay and oracle checks pass."
+    }
+  ],
+  "nextActions": [
+    "Publish and structurally inspect one clean exact-HEAD v9 manifest for all 8,264 modules and 83,627 calls; compare semantic fields with v8 and import it with the exact source-bound dependency map.",
+    "Run one closure-ordered direct-only worker against the shared SQLite index. Exit125 must requeue and stop without a semantic failure result; preserve immutable logs and relaunch only after memory admission.",
+    "Triage and fix concrete v8 semantic failures in isolated fix-review branches. Require focused Lean record/replay/oracle evidence before integration; keep unsupported generator and state cases fail-closed.",
+    "Integrate authenticated canonical provenance for all 71 reusable calls in 40 modules, beginning with the 22 local macro bodies and 88 same-module invocations.",
+    "Assemble and cold-certify the complete translated dependency tree; then mine readable deterministic normal forms and continue with other common search tactics."
+  ],
+  "checkpoints": [
+    {
+      "at": "2026-08-31T08:25:45.764090+00:00",
+      "summary": "Campaign contract, live read-only usage guard, hourly heartbeat and three Luna workstreams established. Weekly usage 1%; reset 2026-09-07T07:06:57Z.",
+      "checks": [
+        "check_campaign_budget.py passed",
+        "live campaign_budget.py check permits dispatch"
+      ]
+    },
+    {
+      "at": "2026-08-31T08:35:57.646673+00:00",
+      "summary": "Original call comments and linear source-gap verifier implemented. AddConstMap diagnostic rendered and checked 308670 bytes in 0.015s and compiled in 7.13s; uses historical artifacts, not fresh campaign closure. Weekly usage 2%.",
+      "checks": [
+        "check_original_comments.py passed",
+        "check_source_gaps.py passed (1.16MB repeated-output corruption checks in 0.007s)",
+        "check_campaign_budget.py and live budget check passed"
+      ],
+      "pending": [
+        "Full 17-occurrence source gate running; three Luna infrastructure reviews pending"
+      ]
+    },
+    {
+      "at": "2026-08-31T08:42:13.786888+00:00",
+      "summary": "Full 17-occurrence source fixture passed with original-call comments and zero remaining syntax occurrences. Linear source-gap check reviewed and tested. Nested fixture plus Mathlib Action oracle gate in progress.",
+      "checks": [
+        "Experiment/check_simp_engine_boundary_source.py passed; log .lake/week-2026-08-31/source-comments-gate.log",
+        "All four pure corpus protocol validators passed",
+        "AST parse of 43 coordinator/stable Python files passed"
+      ]
+    },
+    {
+      "at": "2026-08-31T08:47:17.227328+00:00",
+      "summary": "Nested fixture passed (7 roots, 9 covered calls, semantic oracle, zero remaining). Mathlib Action phase is still running. Created isolated evidence-prototype worktree at fae96be with APFS cloned build cache (1.6GB in 0.23s); testing pp.instances/pp.coercions explicit output and an instance-search trace audit there."
+    },
+    {
+      "summary": "The combined nested gate stopped in Mathlib manifest generation because the shared shard runner changed during the run; nested fixture itself passed. This verifies the need for frozen runs. Positive audit control in the isolated prototype rejected old AddConstMap artifacts and detected instance search in 14 of 17 replacements."
+    },
+    {
+      "at": "2026-08-31T08:55:59.726405+00:00",
+      "summary": "Integrated Luna review fixes: input manifests protected from cleanup and antiquotations no longer silently retained as syntax data.",
+      "checks": [
+        "Agent: check_weekly_review_fixes.py passed",
+        "Agent: existing check_simp_engine_boundary_scope.py passed",
+        "Coordinator: cleanup preflight, diff and source review passed"
+      ]
+    },
+    {
+      "at": "2026-08-31T08:57:41.300814+00:00",
+      "summary": "Explicit-instance prototype passed full 17-occurrence source gate plus fresh 17-call AddConstMap recording, zero-instance-search application, syntax inventory, and declaration oracle (141 checked; 103 common public). Old evidence positive control detected search in 14/17. Five-module prototype gate is running; independent Luna search-free audit requested.",
+      "checks": [
+        "prototype-source.log: passed",
+        "prototype-addconst-result.json: 17 materialized, 0 unobserved, oracle success (109.3s)"
+      ]
+    },
+    {
+      "at": "2026-08-31T09:06:51.675227+00:00",
+      "summary": "Native inventory/scope/oracle launcher hardened and integrated. Cache fingerprints now cover root aggregator and binary bytes and reject source changes during build. Fixed symlink/../manifest resolution after reproducing wrong-file selection.",
+      "checks": [
+        "check_lean_toolchain_cache.py passed",
+        "native inventory integration: 17 occurrences",
+        "native oracle integration: AddConstMap success",
+        "check_weekly_review_fixes.py passed, including symlink-parent regression"
+      ]
+    },
+    {
+      "at": "2026-08-31T09:13:29.831750+00:00",
+      "summary": "Committed native tool integration at188e649 and subprocess process-group cleanup at0c4e537. Full diagnostic corpus inventory running in clean detached corpus-bootstrap snapshot. Prototype five-module gate passed first4 modules/63 calls but rejected PosPart coercion search; pp.coercions=true hides concrete functions, corrected tofalse in prototype only. Focused PosPart rerun in progress. Current weekly usage3%.",
+      "checks": [
+        "Coordinator check_process_runner.py passed; real child/grandchild cleanup with live and exited launcher",
+        "Coordinator check_translation_index.py six tests passed; additional queue and diagnostic intake review fixes requested",
+        "Prototype first4 module declaration oracles passed; sourcefixture17 passed; full searchfree contract not yet established"
+      ]
+    },
+    {
+      "summary": "Snapshot isolation and scope timeout propagation reviewed and fixed; helper documents shared package caches require coordinator no-writes lease. Current full syntax scan8264modules finished; scope stage running. Independent audit confirms trace alone misses tactic/default-instance search. Closed shared Expr DAG prototype compiles; roundtrip edge-case test under review."
+    },
+    {
+      "at": "2026-08-31T09:20:37.276659+00:00",
+      "summary": "FocusedPosPart3passed compile/inventory/declarationoraclewithpp.coercions=false; totalrepresentatives66inboundedruns. RawExprDAGcodeccompiledandpassedroundtrip/sharedreferences/literals/names/projections/malformednodeandunresolvedmvarrejectionprobe; integrationbuildinprogress. No productionartifactschemamigration yet."
+    },
+    {
+      "at": "2026-08-31T09:32:42.867871+00:00",
+      "summary": "The raw Expr DAG prototype passed the 17-call source fixture (including one explicitly unobserved occurrence) and the three-call PosPart gate with its semantic oracle. PosPart artifacts shrank from 6,602,372 to 186,517 bytes. The main, not-yet-integrated codec now rejects implicit reserved-constant generation and ambiguous local indices; its build and focused fixture passed. The Python wire validator accepted all 14 real PosPart terms. Eight index tests passed; a full header audit found 21 valid import-all forms unsupported by the Python lexer, so exact Lean header extraction is being added."
+    },
+    {
+      "at": "2026-08-31T09:37:08.782231+00:00",
+      "summary": "Committed standalone closed Expr DAG codec and focused Lean/Python checks at 113d9b3. No production artifact schema change yet. The full frozen inventory finished syntax and scope batches and is now compiling execution-evidence probes for unresolved cases. Weekly usage remains 3%."
+    },
+    {
+      "at": "2026-08-31T09:39:39.431171+00:00",
+      "summary": "Fresh frozen diagnostic inventory completed successfully: 8,264 modules; 83,425 calls; 83,420 materialization candidates; 66 reusable executable calls; 91 nested calls; five unresolved quotations in DeriveEncodable, Lift (two), Nontriviality/Core, and Zify. The unresolved records are preserved under .lake/week-2026-08-31/corpus-unresolved.json. No production translated-coverage claim is made."
+    },
+    {
+      "at": "2026-08-31T09:50:00.844407+00:00",
+      "summary": "Production schema2 integration now compiles: raw expression DAG application and captured checked theorem actions replace term elaboration and reserved-name replay. Python protocol validators pass. Main expression fixture passed. Source gate interrupted by a concurrent dependency rebuild removing Apply.olean; rerun in a frozen snapshot is required, no source-gate success claimed."
+    },
+    {
+      "at": "2026-08-31T09:52:11.012449+00:00",
+      "summary": "Exact Lean header extraction covered all 8,264 modules in 5.69s. Luna imported 83,425 occurrence facts and 26,396 import edges into a diagnostic SQLite index in 7.68s; coordinator reran all 10 index checks successfully. Schema2 boundary gate exposed a real namespacesExt mismatch from direct addDecl; captured declaration replay must preserve Lean realization-branch semantics. Assigned fix and fresh-process validation to Luna, preserving the full comparator."
+    },
+    {
+      "at": "2026-08-31T10:00:37.710413+00:00",
+      "summary": "Committed exact dependency index (bab90be), validated checkpoint batches (b990bef), and generic closed theorem codec (d73b4c2). Coordinator checks: 10 index tests; checkpoint freshness/corruption/zero-count/nonzero-missing checks; process timeout and scope propagation checks; generic declaration fixture including actual reserved-name negative control and early proposition checks. New generated-selector expression fixture passed. Production schema2 remains uncommitted pending congruence realization semantics; no verified translated coverage claimed."
+    },
+    {
+      "at": "2026-08-31T10:07:43.114694+00:00",
+      "summary": "Controlled congruence declaration codec + fresh-process namespace/kind/cache tests committed at b2ea843. Root shared build and raw generated-selector fixture passed. Schema2 full source fixture now passes (17 calls including one explicitly unobserved occurrence). Unchanged semantic boundary comparator now identifies generated equation theorem boundaryAlias.eq_1 as a second declaration family requiring captured tags and caller-local equation mapping; typed equation codec in progress. No production translation coverage claimed."
+    },
+    {
+      "at": "2026-08-31T10:13:36.400855+00:00",
+      "summary": "Equation declaration codec with exact tags and caller-local map committed at 1d5b550. Coordinator reran its fresh-process fixture successfully. Production schema2 shared build, full unchanged boundary comparator, and source fixture passed. Source alias is now exposed and the source gate explicitly requires an equation action, to check real recorded equation evidence in a fresh materialized process; strengthened rerun is in progress. Current weekly usage 5%."
+    },
+    {
+      "at": "2026-08-31T10:18:16.162704+00:00",
+      "summary": "Committed production artifact schema2 at5f02c0c. Strengthened fresh-source fixture requiring a real captured equation action passed (.lake/week-2026-08-31/schema2-public-equation-source.log). Created isolated clean snapshots for five-module representative gate and new closed 8260-module/83414-call inventory. Fixed a missing module_prefix in the generated inventory launch script and restarted before any batches ran. Weekly usage5%.",
+      "checks": [
+        "Full unchanged boundary comparator passed",
+        "Fresh encoded selector, generic theorem, congruence and equation fixtures passed",
+        "Strengthened source fixture17 passed with1 explicitly unobserved",
+        "Four pure protocol validators and codec wire validators passed"
+      ]
+    },
+    {
+      "at": "2026-08-31T10:25:57.152819+00:00",
+      "summary": "Frozen production schema2 five-module Mathlib gate passed all66calls with compilation, zero remaining executable syntax and declaration/environment oracle. Frozen nested fixture and Mathlib Action gate also passed9fixturecalls and10Mathlibcalls. Selected a diverse first worker batch20modules/231calls including reusable metaprograms. Root review reproduced an outer worker-timeout orphaning nested compiler groups; cooperative interrupt plus unconditional hard cleanup passes regression, final rerun in progress."
+    },
+    {
+      "at": "2026-08-31T10:32:39.198384+00:00",
+      "summary": "Nested process timeout fix committeda2173da after old-code positive control and real three-group regression. Fresh closed subset inventory stopped on legitimate duplicate parser paths in Types.Basic; fixed count validation to count unique source identities while preserving all paths and unchanged semantic join (0804eaf). Focused real8-call/9-record regression passed and second run hit checkpoint in0.00s. No new closed full manifest published. First worker batch will use a small freshly generated manifest at its final committed revision."
+    },
+    {
+      "at": "2026-08-31T10:35:22.250782+00:00",
+      "summary": "Luna worker and unresolved-probe agents hit capacity. Coordinator finished worker integration/fix-review and committed54fcbd0;7worker+10index checks passed. Started frozen20-module/231-call worker batch in schema2-worker-one with fresh bounded manifest generation and master SQLite result index. Caller probes escalated narrowly to inherited Sol; Luna continues import-isolation helper. Current weekly usage5%."
+    },
+    {
+      "at": "2026-08-31T10:47:11.848868+00:00",
+      "summary": "Worker has 57 verified calls in 6 modules against stock imports. Read-only status command publishes honest scope and queue. Caller probes committeda53b749 after independent83-hash verification and10negative provenance checks. Current weekly usage6%. Unpairedfvar comparison failures now have labeled diagnostics in working tree; not yet fixed.",
+      "checks": [
+        "python3 Experiment/check_simp_engine_unresolved_callers.py --verify .lake/week-2026-08-31/unresolved-callers/20260831T104343Z-uy61mn56/caller-evidence.json",
+        "python3 .lake/week-2026-08-31/unresolved-callers/20260831T104343Z-uy61mn56/review-provenance.py",
+        "python3 Experiment/campaign_status.py --markdown"
+      ]
+    },
+    {
+      "at": "2026-08-31T10:57:55.362073+00:00",
+      "summary": "First20-module batch completed6success/14failure;57calls are provisional because a new replay-error audit requirement invalidates prior acceptance counting. Committed3005bcd cached-assignment FVar identity fix after full boundary suite and targeted recording pass; frozen Action.End per-module pass1call. Agent implementing schema6 replay guard. Root fixes oracle Mathlib preloading/options and typed private-proof inline metadata comparison; focused tests running. Weekly usage7%.",
+      "checks": [
+        "cached-fvar-boundary-gate.log: passed",
+        "action-end-fix-run.log: recording passed",
+        "oracle-no-mathlib-debug.log: unchanged Logic.Function.Defs artifacts passed56checked/45public after removing aggregate tool import"
+      ],
+      "limitations": [
+        "No full translated dependency-tree build",
+        "General exported reusable tactic semantics not solved",
+        "All current worker cache results predate mandatory replay guard"
+      ]
+    },
+    {
+      "at": "2026-08-31T11:14:09.407943+00:00",
+      "summary": "Replay guard committed45c8f56 with coordinator protocol/hash verification. Real Data.Set.Basic15 oracle now passes after removing global Mathlib preloading and consistently filtering genuine private-proof helper metadata. Final oracle review exposed unordered matcher metadata sorting and public proof_1 misclassification; tightening before freeze. Prepared fresh51module/150call manifest selection with complete39module Function.Defs dependency cone. Weeklyusage7%.",
+      "checks": [
+        "14case final replay matrix28source/log hashes verified independently",
+        "Focused occurrence/oracle/shard/replay protocol mutations passed",
+        "Native oracle targeted private-inline omission, public-inline metadata, public-matcher metadata tests passed"
+      ],
+      "limitations": [
+        "New public-name policy/runtime regression in progress",
+        "No accepted schema6 corpus reports yet",
+        "No full translated tree"
+      ]
+    },
+    {
+      "at": "2026-08-31T11:32:40.583079+00:00",
+      "summary": "Committed13373ad import isolation,38492ab oracle fixes and6287642 genuine-private classifier. All29oracle cases passed. Frozen51module/150call schema6 diagnostic batch is running. First complete translated dependency cone passed39modules/2calls using the exact recording compiler options;39source, olean and log hashes independently verified. New schema7 local MatchEqns guard passes16mutation checks and a real Prop async negative/cached positive; independent review and default-local controls pending. Weekly usage9%.",
+      "checks": [
+        "oracle-final-regression.log:10acceptedequivalence+19failclosedpassed",
+        "translated-imports-check/coordinator-final-report.json: passed compiler/importnegativecontrols",
+        "private-declarations/fixture-qzugpjmw: privatecontrol and caughtpublicomission rejectionverified",
+        "first-cone-options.log:39moduleclosedtreebuilt",
+        "match-state-unit-2.log:16mutationsrejected",
+        "match-state-async.log: newrealizationrejectedbytypedasyncguard; cachedpositivepassed"
+      ],
+      "limitations": [
+        "All schema5/6 corpus cache results remain provisional pending schema7 local matcher-state checks.",
+        "Data.Set.Basic strict oracle rejects generated public proof-helper renaming.",
+        "Two boundary location fixtures and one trust fixture reject public helper omissions; no fixture was weakened.",
+        "No complete Mathlib tree or general reusable metaprogram solution."
+      ]
+    },
+    {
+      "at": "2026-08-31T11:45:07.991524+00:00",
+      "summary": "Schema7 local matcher-state guard passed fix-review. Luna field/state audit found no omitted fields; proposed sorting change was unnecessary because pinned NameSet is a TreeSet. Coordinator corrected fixture goal preservation, then all3 default-local controls passed;6source/log hashes and authenticated outcomes rechecked. Real Prop async and16mutation tests also passed. Schema6 batch finished9success/4failure/67provisional calls. Root reproduced a public helper naming drift and Sol identified inconsistent global/branch declaration delta views; correction is in progress before next freeze.",
+      "checks": [
+        "match-state/fixture-nqj4s3ol/report.json: unchanged accepted, map and equation-set-only mutations rejected",
+        "match-state-async.log: real Prop async mismatch rejected and cached matcher accepted",
+        "match-state-unit-2.log:16mutations rejected",
+        "Three pure corpus protocol validators and git diff --check passed"
+      ],
+      "limitations": [
+        "Old-library direct-local controls still pending.",
+        "No accepted schema7 module reports yet.",
+        "No full translated Mathlib tree."
+      ]
+    },
+    {
+      "at": "2026-08-31T11:56:04.247916+00:00",
+      "summary": "Committed7b4c71c local matcher-state guard. Identical direct-local and equation-set mutation fixtures falsely accepted by old6287642 and rejected by current guard. Coherent checked-name delta fix now passes combined main38jobbuild, full17sourcegate, default-local and real async controls. Promoted5process tiny delta regression passed: pre-existing off-branch helper excluded, fresh equation replay retained, fresh private computation rejected. Actual Set single-target replay preserves idx1/public _proof_1. All44archived Sol evidence hashes and10nonce-framed logs verified independently. Matcher and public-theorem replay prototypes remain unintegrated. Weeklyusage10%.",
+      "checks": [
+        "coherent-delta-build.log:38jobs passed",
+        "coherent-delta-source.log:17calls materialized including1explicit unobserved; compiled and zero remaining",
+        "coherent-delta-match-state.log and coherent-delta-async-state.log: passed",
+        "checked-delta-promoted.log: all5compiler controls passed",
+        "matcher-codec-prototype/.lake/aux-state/checked-delta-evidence.json SHA2565e482f4564ae876145c50c78c98b88fd0e780e110c0cc778fea6d1b426eb6b3c verified"
+      ],
+      "limitations": [
+        "No accepted schema7 module reports yet; next fresh batch pending.",
+        "Actual Set regression replaces only1of15calls, not full-module coverage.",
+        "Branch activation and checked declaration appearance are distinct effects; no universal generator-state equivalence claim."
+      ]
+    },
+    {
+      "at": "2026-08-31T12:02:01.189531+00:00",
+      "summary": "Fresh frozen560bbab manifest completed151modules/1473calls (syntax26.85s,scope38.79s). Separate direct13module and diverse100module workers started with master SQLite leases. Strict schema7 results can count toward per-module acceptance; full translated-tree closure still separate. Public theorem prototype passed initial6process checks; independent review led to stricter singleton groups/canonical cached bodies, expanded fixture pending. Matcher integration is running only in isolated prototype. Weeklyusage10%.",
+      "pending": [
+        "Wait for Function.Defs schema7 report, then rerun39module strict translated cone.",
+        "Review/integrate matcher capability after fresh source and actual Nat.Init checks.",
+        "Finish public theorem/captured auxiliary cache fixture review before integration."
+      ]
+    },
+    {
+      "at": "2026-08-31T12:07:48.864663+00:00",
+      "summary": "Schema7 translated dependency cone passed39modules/2calls with stockMathlib roots excluded. Independently rehashed stock/translated sources, compiled/dependency oleans, manifest/report, and rescanned39nonce-framed logs. Current per-module index counts66calls/8modules, against stock imports; full Mathlib closure remains pending. Matcher mixed-delta integration and public theorem codec fixtures remain isolated. Luna improving exact missing/extra oracle diagnostics. Weeklyusage11%.",
+      "evidence": {
+        "report": ".lake/search-free-mathlib/snapshots/schema7-broad/.lake/translated-first-cone-schema7/report.json",
+        "sha256": "598669c5068374b5e4da7be4a423e681dd840a997fa27c45632e4403cfeccebc",
+        "verifiedModules": 39,
+        "replacedCalls": 2,
+        "scope": "bounded translated dependency cone; not whole Mathlib",
+        "checks": "stock/translated sources, compiled/dependency oleans, 39 authenticated output rescans, manifest/report hashes"
+      },
+      "limitations": [
+        "39module cone contains only2replacedcalls; other37modules have no source simp sites.",
+        "New schema7 workers remain active; counts are timestamped, not final."
+      ]
+    },
+    {
+      "at": "2026-08-31T12:25:38.388189+00:00",
+      "summary": "Aux-cache guard completed with13meaningful runtime controls, independent Luna review and archived old-runtime falseacceptances. Private omission requires fresh valid private key; public/preexisting entries preserved in local and async state. Main39job buildpassed and standalonepubliccodec12casespassed.42call/3module manifest protocolcheckpassed.17sourcegatepassed before final private-key tightening; final13controls include positiveprivateproofcase after tightening. All schema7results nowprovisional. Nexttranslatedfrontier91modules/146calls selected. Matcher+oracle integration pending finalhandoff.",
+      "evidence": [
+        ".lake/week-2026-08-31/aux-cache-guard-verification.json",
+        ".lake/week-2026-08-31/aux-state-controls-reviewed.log",
+        ".lake/week-2026-08-31/aux-state-source-final.log",
+        ".lake/week-2026-08-31/schema8-corpus-protocol.log",
+        ".lake/public-theorem-codec/fixture-jrgb2xn_/report.json"
+      ],
+      "limitations": [
+        "No schema8 frozen campaign acceptance reports yet.",
+        "Public theorem codec remains standalone; no productionaction support yet."
+      ]
+    },
+    {
+      "at": "2026-08-31T12:36:15.892507+00:00",
+      "summary": "Committed standalone publiccodec73b487b, auxguard994e5c3, diagnosticnamesf629783, matcher6b99b9a andoraclecheckedview7839c0f. Mainmergedbuild41jobs,12matchersourceprocesses,pure4protocols,4oraclecontrolspassed. Frozenmatcher698hashes/35noncelogsverified. Fresh7839c0f frontiermanifest91modules146calls built (syntax32.90s/scope32.17s), sourceworkerstarting. Genericstateeffects/privatehelpernamecollision investigation runsseparately; publiccodecnotproductionintegrated. Weekly12%.",
+      "evidence": [
+        ".lake/search-free-mathlib/snapshots/matcher-codec-prototype/.lake/matcher-codec/final-evidence/manifest.json",
+        ".lake/week-2026-08-31/matcher-integration-build.log",
+        ".lake/week-2026-08-31/match-state-async/fixture-iaawrw_t/report.json",
+        ".lake/week-2026-08-31/oracle-checked-domain-main",
+        ".lake/search-free-mathlib/snapshots/schema8-frontier/.lake/schema8-frontier-manifest.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T12:40:41.591720+00:00",
+      "summary": "Fresh schema8 frozen Function.Defs and Nat.Init passed (7 source calls). Independent public wire validator committed9a74d7f after3real payloads and6mutations passed. Same-scope synthetic probe now isolates both recording trial leakage and omitted private helper naming effects; exact helper replay design is pending. Strict translated forest runner in progress. Weekly usage13%.",
+      "evidence": [
+        ".lake/public-theorem-codec/wire-validator-report.json",
+        ".lake/search-free-mathlib/snapshots/schema8-frontier/.lake/boundary-materialization/schema8-frontier/Logic-Function-Defs-74.json",
+        ".lake/search-free-mathlib/snapshots/schema8-frontier/.lake/boundary-materialization/schema8-frontier/Data-Nat-Init-77.json"
+      ],
+      "limitations": [
+        "No full translated Mathlib tree.",
+        "Standalone public theorem codec not yet integrated into production actions.",
+        "Generator state is not yet an independently validated boundary effect."
+      ]
+    },
+    {
+      "at": "2026-08-31T12:55:39.667344+00:00",
+      "summary": "Read-only failure triage committede765695. Universe-reference prototype passes nine compiler controls plus six wire negatives; ExtraDegeneracy one source call/two executions passes full168decl comparison. OreLocalization singlecall now compiles but exposes helper naming mismatch. Sol helper replay+isolated trials now matches original next public name in three fresh production paths; real module checks pending. Sparse helper probe identifies exact checked private definition, reducer/sparse tags, typed metadata and local cache. No new prototype acceptance credited. Budget13%.",
+      "evidence": [
+        ".lake/search-free-mathlib/snapshots/boundary-level-reference-prototype/.lake/level-reference-diagnostics/fixture-s4zy1wun/report.json",
+        ".lake/search-free-mathlib/snapshots/boundary-level-reference-prototype/.lake/level-reference-diagnostics/source-lfe0t432/report.json",
+        ".lake/search-free-mathlib/snapshots/sparse-matcher-prototype/.lake/sparse-probe/fixture-5.log",
+        ".lake/week-2026-08-31/failure-families.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T13:09:49.327324+00:00",
+      "summary": "Schema8 frontier completed15passed/6failed modules,98sourcecalls accepted against stock imports. Sparse guard5paired controls independently verify3old-runtime falseacceptances; standalone sparse helper9controls pass and fresh/cached matcher v2 replay passes. Sol helper production prototype passes actual Prod oracle and selector2 generator routing control. All prototypes remain unintegrated. Weeklyusage14%.",
+      "evidence": [
+        ".lake/week-2026-08-31/sparse-cache-guard-verification.json",
+        ".lake/search-free-mathlib/snapshots/schema8-frontier/.lake/schema8-frontier-worker.log",
+        ".lake/search-free-mathlib/snapshots/sparse-matcher-prototype/.lake/sparse-probe/codec-3hxj4d6q/report.json"
+      ],
+      "limitations": [
+        "Sparse standalone report predates added matcher API; rerun in progress; no campaign coverage claimed.",
+        "Generator/sparse report9 integration will make existing schema8 results provisional.",
+        "Full translated Mathlib tree not yet built."
+      ]
+    },
+    {
+      "at": "2026-08-31T14:01:19.436978+00:00",
+      "summary": "Combined engine tests passed for helpers, universe references, unchanged pending recursion, matcher replay, and caught errors. Int.Init7whole-source calls/148declarations passed; Control.Basic progressed from parser collision to explicit generator mismatch. Remaining-call audit bug reproduced and fixed; final strict source gate pending. Schema9invalidates older counts; no complete Mathlib claim. Final strict source17 and native cache invalidation checks passed; whole-tree parser-context audit remains explicit final work.",
+      "evidence": [
+        ".lake/week-2026-08-31/helper-integration-verification.json",
+        ".lake/week-2026-08-31/letrec-integration-verification.json",
+        ".lake/week-2026-08-31/combined-pre-letrec-evidence/manifest.json",
+        ".lake/week-2026-08-31/schema8-forest-verification.json",
+        ".lake/sparse-probe/promoted-controls/controls-rj7tcx_c/report.json",
+        ".lake/inventory-header-controls/controls-gt96p5_p/report.json",
+        ".lake/week-2026-08-31/header-inventory-source-gate-2.log",
+        ".lake/week-2026-08-31/header-inventory-int-recheck.log"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:11:20.044287+00:00",
+      "summary": "Committed combined artifact3/selector2/report9 engine and actual-import audit atf3db7d4. Clean schema9-expansion snapshot copied project cache and Lake validation passed; expansion201/full8260 manifests launched. Independently verified frozen multiple-matcher handoff821hashes/37nonce logs; integration build running. Weekly usage18%.",
+      "checks": [
+        "18final focused evidence files pinned in .lake/week-2026-08-31/schema9-final-focused-evidence.json",
+        "schema9-cache-validation.log: build completed, cached dependencies unchanged"
+      ],
+      "pending": [
+        "Broad schema9 worker dispatch after manifests close",
+        "Multiple matcher main controls and sparse matcher integration",
+        "Cached realization activation and final source-local grammar audit"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:17:00.461910+00:00",
+      "summary": "Multiple matcher integration passed main17multiple,12existingmatcher,17source and4protocol controls. Fresh expansion inventory201modules/1604calls exactly matches prior per-module counts; first23root worker active. First closed schema9 Int.Init7calls passed. Full8260syntax scan completed5batches; scope scan pending/running.",
+      "evidence": [
+        ".lake/week-2026-08-31/multiple-integration-verification.json",
+        ".lake/matcher-multiple/controls-f9x2t5t9/report.json",
+        ".lake/week-2026-08-31/multiple-main-source.log",
+        ".lake/week-2026-08-31/sparse-handoff-verification.json"
+      ],
+      "pending": [
+        "Cached activation: actual same-context producer preserves7-membergroup; narrow activation work continues",
+        "Sparse v2 production integration and portable driver cleanup",
+        "Full fresh manifest and translated-tree oracles"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:20:03.190959+00:00",
+      "summary": "Independent fresh default-async truncated Lookmap test exposes realization cache priming: flat replay changes group shape and auxiliary generator. Raise campaign minimum acceptance to future report10 before producer exists; no premature schema10 claims. Existing report9 counts now provisional. Preserve diagnostic runs and implement direct fresh post-replay assertion plus exact nested group replay.",
+      "evidence": [
+        ".lake/search-free-mathlib/snapshots/cached-activation-prototype/.lake/cached-activation/design.md",
+        ".lake/search-free-mathlib/snapshots/cached-activation-prototype/.lake/cached-activation/producer-evidence.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:28:04.642073+00:00",
+      "summary": "Old100module diagnostic batch finished45success/55fail. Main sparse-v2 build and17multiple+12existing controls pass; fullModifyLast still rejected on generator stock5/applied4. Full8260manifest scope scan progressing (20/50lastcheck). Independently archived22cache-producer inputs, rescanned4nonce logs and verified actual7vs1member /5vs7counter mismatch.",
+      "pending": [
+        "Portable sparse fresh-process/wire drivers",
+        "Artifact4/report10 fresh post-generator guard",
+        "Strict outer/nested realization group codec and later cached activation",
+        "Final grammar coverage audit and full translated-output validation"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:40:54.923130+00:00",
+      "summary": "Fresh frozen9 full inventory completed50scopebatches:8260modules83414calls; all per-module counts and source hashes match prior inventory. Four modules11calls still required/separately tracked. Main sparse-cache5pairedcontrols passed against latest v2 runtime; portable standalone drivers and fresh post-generator guard pending. No report9translation accepted under campaign minimum10.",
+      "evidence": [
+        ".lake/week-2026-08-31/schema9-full-inventory-verification.json",
+        ".lake/week-2026-08-31/sparse-main-intermediate-evidence.json",
+        ".lake/week-2026-08-31/cached-producer-evidence/manifest.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:44:36.013375+00:00",
+      "summary": "Frozen9 first23worker finished12success/11failure, no timeout/budget denial; all provisional under minimum10. Portable sparse-driver cleanup and exact fresh generator guard remain active Luna work; Sol strict group replay passes truncated/defaultasync production case but full Lookmap still fails conservatively on nonquiet snapshot. Source-local grammar controls completed without reproduced omission; final audit remains open. Usage20%.",
+      "evidence": [
+        ".lake/search-free-mathlib/snapshots/schema9-expansion/.lake/schema9-expansion-first-worker.log",
+        ".lake/week-2026-08-31/source-local-grammar-audit.md"
+      ]
+    },
+    {
+      "at": "2026-08-31T14:49:52.169924+00:00",
+      "summary": "Worker storage preflight now pauses below12GiB or on telemetry failure before claiming another module, without deleting evidence.10worker tests and10index tests passed, including loss of space after one completed result with next module left queued. Current disk about64GiB free.",
+      "evidence": [
+        ".lake/week-2026-08-31/worker-storage-controls.log"
+      ]
+    },
+    {
+      "at": "2026-08-31T15:02:17.370412+00:00",
+      "summary": "Independent verification: strict group handoff660hashes/34noncelogs/471unchanged inputs plus main sparse16freshcontrols/124hashes. Group mainmerge prepared separately while portablewire checks complete. Root found caught-missing-generator and unselected-sibling gaps in draft freshguard; Luna fixing with Sol independentreview. No bulk dispatch or acceptedcoverage yet.",
+      "evidence": [
+        ".lake/week-2026-08-31/group-handoff-verification.json",
+        ".lake/week-2026-08-31/sparse-main-fresh-verification.json",
+        ".lake/week-2026-08-31/final-command-audit-design.md"
+      ]
+    },
+    {
+      "at": "2026-08-31T15:05:15.619220+00:00",
+      "summary": "Sparse-v2 and four portable test drivers ready for commit after rootdiff review. Main fresh9+7 compiler controls,17multiple,12existing,5pairedcacheguard and21wire controls passed; frozen portablehandoff another42wire controls validated. Main group merge staged and frozen660hashes validated. Freshpost-generator guard still awaiting two reviewed fixes; no acceptedcoverage or bulkdispatch.",
+      "evidence": [
+        ".lake/week-2026-08-31/sparse-main-fresh-verification.json",
+        ".lake/week-2026-08-31/sparse-driver-handoff-verification.json",
+        ".lake/week-2026-08-31/sparse-main-wire-helper.log",
+        ".lake/week-2026-08-31/sparse-main-wire-matcher.log"
+      ]
+    },
+    {
+      "at": "2026-08-31T15:30:34.486345+00:00",
+      "summary": "Committedexactgroupreplay9b35bf6 andfreshpostgeneratorguarde3af2f2. Current4/10focusedchecks pass;fullLookmap10passes,Control.Basic failsclosedatnewjoinM_map_joinM site. Allold691calls/66modules remainprovisionalpendingfresh10workers. Budget23%; noactiveDBleases. Nextfreeze/dispatch. Knownlegacyauxfixture expects a later cache error but aborts earlier at boundary_local_theorem_multiple_cache_keys; no production guard relaxed.",
+      "evidence": ".lake/week-2026-08-31/schema10-focused-verification.json"
+    },
+    {
+      "at": "2026-08-31T15:34:02.773764+00:00",
+      "summary": "Frozen1f6f12c campaign withenginee3af2f2. Cloned projectcache validated(all17351Lakejobs current/successful). Fresh priority201-module/131-root andfull8260-module pipelines launched, sessions38300/72713. Runnerf539d8f5 checks freshbudget/storage and live selectedleases; module reports remain immutable, overall summaries diagnostic. Fullworkerbounded500attempts/4hours. Sharedpackage no-write lease remainsactive.",
+      "evidence": ".lake/week-2026-08-31/schema10-dispatch.json"
+    },
+    {
+      "at": "2026-08-31T15:38:09.704577+00:00",
+      "summary": "Fresh schema10priority manifest verified201modules/1604calls, SHA3b483892. First worker has verified Int.Init7calls, then continues boundedfrontier; fullanalysis still running. Actual-command-audit review rejected initial classification/header/module claims; corrected private prototype assigned. No production dependency on this prototype.",
+      "evidence": ".lake/week-2026-08-31/schema10-priority-manifest-verification.json"
+    },
+    {
+      "at": "2026-08-31T15:55:59.118229+00:00",
+      "summary": "Frozen report10 now verifies12 modules/53 calls against stock imports. A fresh39-module Function.Defs cone compiled all156 artifact files and passed39 source-pair oracles under translated-only imports. Control.Basic mixed-activation failure diagnosed. Corrected command audit passed independent review; production integration in progress.",
+      "checks": [
+        "schema10-first-cone-verification.json:1071 hash checks,204 archived inputs,78 nonce logs; no prior compile reuse or stock fallback",
+        "translated-oracle-verification.json:639 hash checks,208 unchanged inputs,5 nonce logs; changed computation/caught replay/missing dependency rejected",
+        "final-command-audit-v2-verification.json plus command-audit-v2-review/verification.json:6 fixtures and5 additional controls",
+        "control-generator-independent-verification.json:24 archives,637 stable input entries,6 fresh processes",
+        "Budget at15:49UTC:24% used in current authorized window"
+      ]
+    },
+    {
+      "at": "2026-08-31T16:07:16.094977+00:00",
+      "summary": "Worker preflight memo optimization reviewed;12 worker and10 index tests pass. Root benchmark independently reproduces about41x speedup over96 modules with identical keys. Fresh raw compiled-output prototype accepts the correct two-declaration artifact and rejects a changed computational body; extension/IR/general constructor binding remains unfinished.",
+      "evidence": [
+        ".lake/week-2026-08-31/campaign-worker-memo/root-verification.json",
+        ".lake/week-2026-08-31/compiled-output-prototype-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T16:15:56.704281+00:00",
+      "summary": "Actual command audit infrastructure ready:36process+10wire controls, root142hash checks/36logs. New39-module translated-import audit passes78source records,2originalcalls/0remaining, with identical declaration oracle results; root527hash checks. Read-only review identifies self-replay synchronization as an obligation before binding ordinary frontend outputs to oracle checks. Bulk campaign continues unchanged.",
+      "evidence": [
+        ".lake/week-2026-08-31/command-audit-production-root-verification.json",
+        ".lake/week-2026-08-31/schema10-cone-audit-verification.json",
+        ".lake/week-2026-08-31/certified-output-design-review/manifest.json",
+        ".lake/week-2026-08-31/certificate-revalidation-design.md"
+      ]
+    },
+    {
+      "at": "2026-08-31T16:29:41.730566+00:00",
+      "summary": "Ordered structural matcher/recursive realization milestone integrated after main4/10 build and focused regressions. Root reverified2209private archive files/59logs plus1866main hashes/54logs. First ModifyLast source boundary passes fresh/cached; fourth mixed boundary still assigned. Shared packages and frozen campaign workers unchanged.",
+      "evidence": [
+        ".lake/week-2026-08-31/ordered-recursive-handoff-root-verification.log",
+        ".lake/week-2026-08-31/ordered-recursive-main-checkpoint.json",
+        ".lake/week-2026-08-31/ordered-recursive-main-verification.json",
+        ".lake/week-2026-08-31/mixed-segment-design/manifest.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T17:07:10.768401+00:00",
+      "summary": "Removed audit-triggered export side effects after causal empty/warm/stock/applied controls. Cold serialized20vs10symbolFrequency difference confirms broader issue; provisional coverage retained and acceptance hold remains. Boundary metadata reader repair assigned independently.",
+      "evidence": [
+        ".lake/week-2026-08-31/audit-export-observation-handoff-root-verification.json",
+        ".lake/week-2026-08-31/audit-export-observation-main-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T17:19:59.201576+00:00",
+      "summary": "Mixed realization sequences integrated after focused original-source and regression gates, immutable main/private evidence independently rechecked. Cold metadata-only probe confirms exact symbolFrequency+sineQueNon differences in historical ordinary outputs. Observational helper fix is in private review and has made fresh frequency outputs agree; extraModUses broad-import issue being narrowed without exemption.",
+      "evidence": [
+        ".lake/week-2026-08-31/mixed-sequence-main-evidence-rtu9vyr5/manifest.json",
+        ".lake/week-2026-08-31/mixed-sequence-main-regressions-verification.json",
+        ".lake/week-2026-08-31/cold-metadata-yhpko__p/report.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T17:36:47.331238+00:00",
+      "summary": "Bounded metadata observation repair integrated; main fresh full Lookmap, Control and ModifyLast pass31calls with originals/comments preserved. Two pinned suggestion exporters no longer warm caches during boundary observation; arbitrary callback limitation explicit. Independent cold-output bridge catches synthetic first-export cache poisoning even when semantic source oracle succeeds. Expression-mvar diagnosis verified and bounded guarded implementation assigned.",
+      "evidence": [
+        ".lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+        ".lake/week-2026-08-31/module-data-observation-handoff-root-verification.json",
+        ".lake/week-2026-08-31/expression-mvar-diagnosis-root-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T17:45:13.792878+00:00",
+      "summary": "Confirmed and independently rehashed late-export counterexample: same-source cold equality plus old semantic oracle can still mask cross-source serialized metadata difference. V1 native and private certificate results preserved only as bounded diagnostics. V2 must use emitted declarations/metadata directly and no exporter callbacks during comparison; consumer now rejectsV1. Acceptance hold remains.",
+      "evidence": [
+        ".lake/week-2026-08-31/late-export-root-verification.json",
+        ".lake/week-2026-08-31/cold-bridge-v1-root-verification.json",
+        ".lake/week-2026-08-31/cold-certificate-v1-hardening-archive/manifest.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T18:01:24.168141+00:00",
+      "summary": "Integrated serialized cold V2 native comparison and quarantined five-process consumer after fix-review, main43controls and independent evidence verification. Real late exporter rejects native comparison; first exporter passes native but fails stock cold family equality, proving both layers necessary. Current frozen index118modules1158calls remains provisional; new pending-synthesis replay barrier and full translated tree are outstanding.",
+      "evidence": [
+        ".lake/week-2026-08-31/cold-consumer-v2-root-verification.json",
+        ".lake/week-2026-08-31/cold-bridge-v2-root-verification.json",
+        ".lake/week-2026-08-31/mixed-observer-nat-basic-root-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T18:21:40.512389+00:00",
+      "summary": "Integrated local cached-owner primitive after frozen231hash/30nonce verification and main20process/15wire/13field controls. Root regenerated Cubic target replacement and original comment; archived main inputs. Managed process runner is the sole integration fix. Pending search guard, larger local aux cache, multiple-helper composition and translated tree remain separate obligations.",
+      "evidence": [
+        ".lake/week-2026-08-31/local-cached-handoff-root-verification.json",
+        ".lake/week-2026-08-31/local-cached-main-root-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T18:33:01.889463+00:00",
+      "summary": "Integrated bounded expression references and unconditional pending-synthesis barrier after frozen and main fix-review cycles. Main39controls/3sourcepipelines/local20/replay17 passed; root archived runtime and regenerated source/comments. New cold39-module cone started. Artifact5/report11 supersedes prior generated evidence; accepted coverage remains0. Removed stale duplicate root status counts in favor of canonical tracker.",
+      "evidence": [
+        ".lake/week-2026-08-31/expression-reference-root-verification.json",
+        ".lake/week-2026-08-31/expression-reference-main-root-verification.json",
+        ".lake/week-2026-08-31/local-cached-schema11-root-verification.json",
+        ".lake/week-2026-08-31/replay-schema11-root-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T18:38:19.120261+00:00",
+      "summary": "Fresh cold39-module cone passed195compiler runs,234complete families936parts and156command audits under strict translated Mathlib imports. Root24936hash assertions/195nonces/source-comment regeneration and external11502artifacts verified. Two calls/three variants covered; acceptance remains held for complete tree. Private schema11 snapshot f231289 validates shared runtime+fourtools with only2rebuilt scope targets. Discarded Luna manifest-recipe draft as not an executable/provenance-complete reuse producer; root will resolve reuse. Localcached/ordinary-helper composition delegated to new Sol; imported synthetic2helper fixture correctly takes all-fresh fallback and remains unaccepted.",
+      "evidence": [
+        ".lake/week-2026-08-31/cold-schema11-cone-root-verification.json",
+        ".lake/week-2026-08-31/schema11-snapshot-preparation.json",
+        ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-runtime-build.log"
+      ]
+    },
+    {
+      "at": "2026-08-31T18:57:08.422647+00:00",
+      "summary": "Integrated separate nonempty auxiliary-cache witness after root648+206frozen hash checks/51nonce logs/exact80proof table expansion. Main16new+20legacy controls/27wire negatives passed; root source/comments and archivedruntime verified. Whole Extra24probe correctly rejected earlier-translated-proof descriptor drift; Cubic20probe rejected separate missingsequencecover. Local sequence8call prototype passed independent review/frozen verification; integrate next. Storageprototype revised after root caught cross-source equality and path-validation errors; realcertificate validation still pending.",
+      "evidence": [
+        ".lake/week-2026-08-31/local-aux-root-verification.json",
+        ".lake/week-2026-08-31/local-aux-main-root-verification.json",
+        ".lake/week-2026-08-31/local-aux-legacy-root-verification.json",
+        ".lake/week-2026-08-31/local-sequence-root-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T19:07:07.725678+00:00",
+      "summary": "Integrated ordered localcached/ordinary-helper sequence with NoSynthesis and auxflag merge reviewed. MainExistsUnique8calls passed54declaration41public30extension oracle plus21mutation runs/13wire,2explicitnonce negativeoracles,16aux/12wire and20v1/15wire regressions. Rootarchived1621+678+155hashcheckedinputs and regeneratedcomments. Genuine storagefixture passed cold5stagecertificate,24paths->8inodes unchangedbytes/receipt; optionalhelperpromotion pending. Fresh8260module83414callinventory complete awaitingrootvalidation; oldschema10worker remainslive. Forwardrawcontinuation experiment insufficient; sharedencodeddecoder prototype inprogress.",
+      "evidence": [
+        ".lake/week-2026-08-31/local-sequence-main-root-verification.json",
+        ".lake/week-2026-08-31/local-sequence-aux-root-verification.json",
+        ".lake/week-2026-08-31/local-sequence-v1-root-verification.json",
+        ".lake/week-2026-08-31/certificate-storage-root-verification.json",
+        ".lake/week-2026-08-31/translated-prefix-diagnosis-root-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T19:10:03.310598+00:00",
+      "summary": "Promoted opt-in certificate_storage.py after two rootfix-review cycles,5focusedtests,genuine5stagecoldcertificate with24files/8inodes/16replacements, and mainCLIrepeat0replacements underproductionreceiptverification. Rootarchived everyreceiptimplementation input. No existingcone/sharedcache cleanup; invoke beforepublication onfuturecompleted certificates. Mainsequence integration committed8afe18c; forwardrecordprototype needs explicit returnedcontinuation because Leanfinally closesover pretrymutablevalue. Raw-vs-decoded strategy stillbeingisolated, so earlierraw-forward comparison didnotproveencodingdifference.",
+      "evidence": [
+        ".lake/week-2026-08-31/certificate-storage-root-verification.json",
+        ".lake/week-2026-08-31/certificate-storage-main-genuine-repeat.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T19:16:08.141328+00:00",
+      "summary": "Fresh schema11 inventory independently verified against all8264 master source/occurrence identities:8260modules83414calls plus4modules11calls separately tracked. Optional storage committed7bd0092. Forward-applied8focused controls pass after explicit returned state fixes Leanfinally capture; fullExtra stillfails strict metadata comparison, now isolated to20ExtraModUses leaves with all232node proofs/signatures and80auxproof bodies equal. Private scope-analysis decoupling and read-only throughput review underway. Fresh weeklyusage41%; old schema10 worker remains live; noDBwrites or acceptedcoverage increment.",
+      "evidence": [
+        ".lake/week-2026-08-31/schema11-inventory-root-verification.json",
+        ".lake/forward-recording-independent-review.md"
+      ]
+    },
+    {
+      "at": "2026-08-31T19:32:43.475436+00:00",
+      "summary": "Root verified initialforwardhandoff3024hashes13persistedinvocations:8controls andexact20ExtraModUses differences, nofullpassforoldcandidate. SharedTacticdispatcher newcandidatefullExtra replay/oracle passed168decl120public44extensions24calls(23roots+1covered), but laterfinalrun invalidatedbyconcurrentPythonedit; exact5fielddelta archivedandrestored. Repeatingall12controls/fullrununderexclusiveSolownership. Separate schema12Pythonworktree preparedbyroot. FreshUnitization1734864 trace provesmissingalreadychecked localcongruenceactivation, not an arbitrarycounterstep; exactcachedcongruenceprototypecurrentlyfailsstrictbefore/stockdescriptor equality. Noacceptedcoveragechange.",
+      "evidence": [
+        ".lake/week-2026-08-31/forward-recording-root-verification.json",
+        ".lake/week-2026-08-31/dispatcher-concurrent-write/restoration.json",
+        ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype/.lake/aux-generator-diagnosis-frozen-ngaviqxn/manifest.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T19:43:15.608368+00:00",
+      "summary": "Shared dispatcher frozen rerun independently verified:12controls,24Extra source calls/168declarations with exact input guards. Main65-job build and12controls pass;2038hash assertions/12prelaunch invocation receipts. Separate report12 private implementation active. Analysis decoupling201module outputs reported equal, pending root handoff and excluded-module controls. Old schema10 worker finished with130attempts104success26failure this batch; no current worker lease. Currentbudget43%; acceptedcoverage remains0.",
+      "evidence": [
+        ".lake/week-2026-08-31/forward-dispatcher-root-verification.json",
+        ".lake/week-2026-08-31/forward-dispatcher-main-root-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T19:51:59.048886+00:00",
+      "summary": "Dispatcher integrated7b543bc. Root caught stale scope executable in claimed201 decoupling run: generatedC/trace stillimportExplicitLean and binary identical oldmain. That evidence rejected; actualprivate rebuild nowpassed and comparison rerunning. Report12 initial Luna patches lacked actual runtime/command/nonce/logbindings; root nowowns materializer implementation in report-schema12-prototype, Lunaowns only focusedtests. Root canonical runtime/actualnativeoracle/prebuild+exact3receipt/log/source/nonces helper implemented, validationpending. FreshCubic mixedlocal equations diagnosed with1308hashes. Unitization focusedcandidate passes61decl22extensions butwhole9freshreplayfailsinitialdescriptor; Solisolateddiagnosis pending.",
+      "evidence": [
+        ".lake/week-2026-08-31/cubic-forward-root-verification.json",
+        ".lake/week-2026-08-31/cubic-local-equation-diagnosis-root-verification.json"
+      ]
+    },
+    {
+      "at": "2026-08-31T20:02:00.989443+00:00",
+      "summary": "Report12 integrated Python, default applied recording, exact canonical actualnative runtime/command/source/cwd/nonces/log bindings for all3processes. Oracle builds before receipt and invokes actualbinary directly. Main6puretests incl producerorder and4existingvalidators/23fullconsumertamperingcontrols pass; actualfreshschema12nativepipeline pending. Corpusacceptedcoverage unchanged0. Actualrebuiltanalysis201outputs nowequal06f07b...; explicit4excludedcontrols stillrunning. Unitization18docmetadata leaves typeddecoded only+20line range shifts with exacttext; opt-in normalizer approved consistent with existing fulloracle moduleDoc policy, inprivate Solfix-review."
+    },
+    {
+      "at": "2026-08-31T20:13:45.734595+00:00",
+      "id": "cached-congruence-v2-and-production12-smoke",
+      "status": "bounded_verified",
+      "verification": ".lake/week-2026-08-31/congruence-doc-policy-root-verification.json",
+      "note": "Main31-job Lean build, six schema12 tests and four full Python validators pass. Unitization9-call private pipeline and45unique invocation receipts verified; fresh main production rerun pending. Separate production12 two-module26-call smoke fully revalidated. Whole-corpus acceptance unchanged."
+    },
+    {
+      "at": "2026-08-31T20:16:42.222863+00:00",
+      "id": "scope-analysis-decoupled",
+      "status": "verified",
+      "note": "Removed full ExplicitLean import/build prerequisite from scope tool;205module byte comparisons and fresh two-process fixture pass; main native bytes equal corrected verified prototype; source timeout and checkpoint controls pass.",
+      "verification": ".lake/week-2026-08-31/scope-decoupling-main-verification.json"
+    },
+    {
+      "at": "2026-08-31T20:22:04.289222+00:00",
+      "id": "production12-unitization9",
+      "status": "independently_verified_bounded",
+      "verification": ".lake/week-2026-08-31/schema12-unitization-root-verification.json",
+      "note": "Frozen3ecc925 runtime:9calls9variants0unobserved/remaining; three exact native receipts and fullconsumer/sourcecomments independentlyverified1082hashassertions. No whole-tree acceptance increment."
+    },
+    {
+      "at": "2026-08-31T21:03:12.219863+00:00",
+      "summary": "Fresh production Cubic20/29variants independently verified1103hashes/3native invocations/147decl131public39extensions. Full current inventory completed all5inventory batches, scope analysis running. Aesop branch reservation cause verified7862hashes; active imported equation registration additionally exposed in strict prototype. Fresh ToAdditive typed diagnostic verified1092hashes, strict failure retained. Weekly48%; no accepted corpus coverage increment."
+    },
+    {
+      "at": "2026-08-31T21:12:39.020278+00:00",
+      "summary": "Production instrumentation still used quadratic bytewise diff, identified during fullFinprod run.20line length-witness addition preserves existing exact byte-gap validator; actual45callsource olddiff bounded6s timeout/stack vslinear0.002s, all corruption/nested/Unicode/head-annotation controls and6schema12tests pass. Finprod privatewhole45 now passes fulloracle; finallegacycontrols/freeze pending. Broadworker held for imminent finalruntime freeze."
+    },
+    {
+      "at": "2026-08-31T21:18:40.236954+00:00",
+      "summary": "Fresh current closed-subset manifest independently verified:8260modules/83414materialize calls/91nested,83349direct+65reusable,0unresolved in subset; four separately required modules contain11calls. All sourcebytes/ranges/IDs/role/action counts and implementation inputs verified. Broad worker held because replay runtime is advancing. ToAdditive strict cause isolated: replayed helper declarations exist but their root references are inlined, preventing normal traversal; exact helper-reference preservation prototype started, no metadata exemption."
+    },
+    {
+      "at": "2026-08-31T21:26:34.168800+00:00",
+      "summary": "Declaration-branch reservation integrated6b97bfd after independent2510file/10livebinding/83nonce verification. Final runtime focus2+Finprod45/45 pass, oracle352decl315public34extensions0omissions;21runtime+3wire+19source/protocol/legacy/failure controls pass. Main71jobbuild,6schema12,source-gap/pycompile pass. Deterministic active-equation insertion precedes computed mkChild; both infrastructure and recording-failure generator rollback repaired. Inline-first renderer issue retainedopen."
+    },
+    {
+      "at": "2026-09-01T02:34:04.657150+00:00",
+      "id": "manual-composition-eight",
+      "status": "full_database_composition_verified_bounded",
+      "summary": "Eight explicit source-pinned overrides across six modules pass full composition with55 remaining simp calls materialized and0retained. Every canonical stock module matches the final composite declaration oracle. Generated `_proof_n`/`congr_simp` auxiliaries are ignored only when source-less, proof-valued and owned; authored range lookalikes remain strict. Cache-free symbolFrequency/sineQueNon recomputation and15accepted/26fail-closed oracle controls pass. Independent rehash confirms99 evidence files.",
+      "evidence": [
+        ".lake/week-2026-08-31/manual-composition/run-_37r_lka/report.json",
+        ".lake/week-2026-08-31/manual-composition/run-_37r_lka/root-verification.json"
+      ]
+    },
+    {
+      "id": "manifest-capsule-benchmark-and-nested-fix",
+      "status": "validated_pre_commit",
+      "manifest": ".lake/week-2026-08-31/schema13-current-full-manifest.json",
+      "manifestSha256": "3bcdf7bf51e8039b4c5fd994f89e4afd86faeda54a3368ea0a85a8929e5a0819",
+      "manifestBytes": 215420884,
+      "capsuleBenchmark": ".lake/week-2026-08-31/schema13-current-capsule-benchmark.json",
+      "capsuleBytes": 1073040,
+      "capsuleBuildSeconds": 50.472,
+      "childProjectionSeconds": 0.105,
+      "childCapturedBytes": 341358,
+      "peakWorkerValidationRssBytes": 1522401280,
+      "ordinaryModules": 6279,
+      "reusableOrMixedModules": 36,
+      "checks": [
+        "capsule 8",
+        "campaign worker 18",
+        "manual overlay 6",
+        "corpus manifest 3 modules/42 occurrences",
+        "declaration oracle 15 accepted/26 fail-closed",
+        "nested synthetic and Mathlib Action gates",
+        "weekly review",
+        "translation index"
+      ],
+      "note": "The referenced manifest is exact for pre-implementation commit 38b9ce7 and becomes historical when this tracked phase boundary commits. Generate a new exact-HEAD manifest immediately after commit and make no further tracked changes before production."
+    },
+    {
+      "at": "2026-09-01T14:45:00+00:00",
+      "summary": "Closed diagnostic review found 83,627 calls in 8,264 modules. The reviewed quoted-tactic rule yields 83,556 direct and 71 reusable calls with zero unresolved; scheduling is 6,280 direct-only, 40 reusable-containing and 1,944 empty modules. Manual database now has 16 exact overrides across 14 modules. Weekly usage 80%.",
+      "checks": [
+        "exact diagnostic postprocess changes five unique IDs and no other corpus record",
+        "8,264-key dependency map exactly joins current Mathlib source hashes with no external gap",
+        "manual override cardinality guard requires 16 entries across 14 modules",
+        "live campaign budget check permits dispatch at 80% current-window usage"
+      ],
+      "pending": [
+        "clean exact-HEAD remanifest and strict source verification",
+        "direct-only production rerun and reusable caller-dependent architecture",
+        "complete cold translated-tree acceptance"
+      ]
+    },
+    {
+      "at": "2026-09-01T19:21:39.331350+00:00",
+      "summary": "Authenticated schema13 v7 covers 8,264 modules/83,627 calls with 83,556 direct, 71 reusable and zero unresolved. Integrated 12 GiB materializer guard, dependency-closure strict batching, and exact final Mathlib selector options. NeZero diagnosed option drift; v8 refresh and guarded retry are next. Weekly usage 87%.",
+      "checks": [
+        "v7 SHA256 9c967e61e34faf8068b9006fbeab9665b1caaa468e0967b1f67a7fc4e0d0623d; structural inspect passed",
+        "v7 imported into SQLite: 8,264 modules, 83,627 occurrences, zero unresolved",
+        "strict verifier 32/32, campaign worker 27/27, process-group/resource-guard controls passed",
+        "fresh selector option recording/replay/declaration-oracle round-trip passed",
+        "independent review: authentic RingQuot irreducible records recompute computational/materialize; mixed evidence remains fail-closed"
+      ],
+      "limitations": [
+        "v7 predates final selector option identity and is analysis/index evidence only",
+        "whole translated tree and reusable executable semantics remain incomplete"
+      ]
+    }
+  ],
+  "automationId": "complete-search-free-mathlib-by-sep-8",
+  "activeChecks": [
+    {
+      "id": "schema2-representative-mathlib",
+      "sessionId": 72206,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-gates",
+      "commit": "5f02c0c",
+      "log": ".lake/representative-gate.log",
+      "status": "passed",
+      "modules": 5,
+      "occurrences": 66
+    },
+    {
+      "id": "schema2-closed-subset-inventory",
+      "sessionId": 42560,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-corpus",
+      "commit": "5f02c0c",
+      "log": ".lake/campaign-closed-inventory.log",
+      "status": "failed",
+      "modules": 8260,
+      "expectedOccurrences": 83414,
+      "note": "Four modules with five unresolved sites remain in master diagnostic index; this subset is not full corpus closure.",
+      "failure": "Scope checkpoint counted raw parser paths: Types.Basic has8unique source calls and9scope records; no manifest published."
+    },
+    {
+      "id": "schema2-nested",
+      "sessionId": 59749,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-gates",
+      "commit": "5f02c0c",
+      "log": ".lake/nested-gate.log",
+      "status": "passed",
+      "fixtureCalls": 9,
+      "mathlibActionCalls": 10
+    },
+    {
+      "id": "schema2-fin-exploration",
+      "sessionId": 30262,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-gates",
+      "commit": "5f02c0c",
+      "log": ".lake/fin-probe.log",
+      "status": "failed_expected_unsupported",
+      "detail": "Fresh26-call manifest succeeded; shard selection rejects1reusable executable call before recording."
+    },
+    {
+      "id": "worker-batch-one",
+      "sessionId": 84576,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema2-worker-one",
+      "commit": "54fcbd0",
+      "log": ".lake/worker-batch.log",
+      "status": "completed_provisional",
+      "modules": 20,
+      "expectedOccurrences": 231,
+      "database": ".lake/search-free-mathlib/translation-index.sqlite3",
+      "limits": {
+        "maxModules": 20,
+        "moduleTimeoutSeconds": 900,
+        "maxSeconds": 3600
+      },
+      "note": "Six reports passed schema5; replay-abort audit gap found after batch. They require schema6 revalidation before acceptance counting.",
+      "succeededModules": 6,
+      "failedModules": 14,
+      "provisionalCalls": 57
+    },
+    {
+      "id": "cached-fvar-gates",
+      "sessionId": 55260,
+      "snapshot": ".lake/search-free-mathlib/snapshots/cached-fvar-gates",
+      "commit": "3005bcd",
+      "log": ".lake/cached-fvar-gates.log",
+      "status": "completed_provisional",
+      "modules": 2,
+      "expectedOccurrences": 56,
+      "note": "Both modules passed56calls under schema5; replayguard schema6 revalidation still required."
+    },
+    {
+      "id": "schema6-direct-gates",
+      "sessionId": 90582,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema6-direct-gates",
+      "commit": "6287642",
+      "log": ".lake/schema6-gates.log",
+      "status": "completed_provisional",
+      "modules": 13,
+      "inventoriedModules": 51,
+      "expectedOccurrences": 150,
+      "succeededModules": 9,
+      "failedModules": 4,
+      "provisionalCalls": 67
+    },
+    {
+      "id": "schema7-direct",
+      "sessionId": 39676,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema7-broad",
+      "commit": "560bbab",
+      "log": ".lake/schema7-direct.log",
+      "status": "completed_provisional",
+      "modules": 13,
+      "expectedOccurrences": 150,
+      "succeededModules": 11,
+      "failedModules": 2,
+      "provisionalCalls": 90,
+      "note": "Coherent declaration delta resolves Set15/ExistsUnique8 old oracle failures. Nat.Init5 and SimpleGraph55 still fail old frozen runtime; matcher prototype nowpasses Nat.Init under8 butunintegrated."
+    },
+    {
+      "id": "schema7-diverse",
+      "sessionId": 83129,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema7-broad",
+      "commit": "560bbab",
+      "log": ".lake/schema7-diverse.log",
+      "status": "completed_provisional",
+      "modules": 100,
+      "expectedOccurrences": 1323,
+      "processed": 100,
+      "succeededModules": 45,
+      "failedModules": 55
+    },
+    {
+      "id": "schema8-frontier",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema8-frontier",
+      "commit": "7839c0f",
+      "status": "completed",
+      "log": ".lake/schema8-frontier-worker.log",
+      "inventoriedModules": 91,
+      "modules": 21,
+      "expectedOccurrences": 146,
+      "note": "Frozen schema8 per-module results against stock imports:15modules98calls.21roots processed,6failed. Strict forest assembly separate; upcoming schema9 generator/sparse checks will require revalidation.",
+      "sessionId": 51150,
+      "succeededModules": 15,
+      "failedModules": 6,
+      "verifiedCalls": 98
+    },
+    {
+      "id": "schema9-expansion-inventory",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema9-expansion",
+      "commit": "f3db7d4",
+      "status": "completed",
+      "sessionId": 52377,
+      "log": ".lake/schema9-expansion-manifest.log",
+      "inventoriedModules": 201,
+      "scope": "Fresh discovery/closure manifest; not translated coverage.",
+      "occurrences": 1604,
+      "manifestSha256": "6477e49f7309e01fc2dbac1cb54896adc7acbf4874a6e39e89649f83bdbad2de"
+    },
+    {
+      "id": "schema9-full-inventory",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema9-expansion",
+      "commit": "f3db7d4",
+      "status": "completed",
+      "sessionId": 65043,
+      "log": ".lake/schema9-full-manifest.log",
+      "inventoriedModules": 8260,
+      "scope": "Fresh discovery/closure manifest; not translated coverage.",
+      "occurrences": 83414,
+      "manifestSha256": "2557b23930394e58057d6ee196e28f785a0bf3961b37f9506818c4b87704c342",
+      "verification": ".lake/week-2026-08-31/schema9-full-inventory-verification.json"
+    },
+    {
+      "id": "schema9-expansion-first",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema9-expansion",
+      "commit": "f3db7d4",
+      "status": "completed_provisional",
+      "sessionId": 39890,
+      "log": ".lake/schema9-expansion-first-worker.log",
+      "note": "Diagnostic run finished without timeout or budget denial. All12successful reports remain provisional pending fresh post-generator report10 validation. No live module leases from this run.",
+      "processed": 23,
+      "succeededModules": 12,
+      "failedModules": 11
+    },
+    {
+      "id": "schema10-priority",
+      "sessionId": 38300,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
+      "commit": "1f6f12c",
+      "status": "stopped_budget_guard",
+      "phase": "expansion_worker",
+      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-expansion-worker.log",
+      "modules": 201,
+      "note": "Fresh201-module manifest then first23 priorityworker then full131-root priorityworker. Disjoint from full worker. Per-mode logs preserve each stage; expansion summary is current diagnostic only. Expansion ended conservatively after a budget-guard denial:84processed48success36failures; root fresh telemetry subsequently permits current-window work at35%. Do not relabel old frozen outputs or restart before choosing new runtime.",
+      "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py",
+      "firstWorkerResult": {
+        "processed": 23,
+        "succeeded": 13,
+        "failures": 10
+      },
+      "expansionWorkerResult": {
+        "processed": 84,
+        "succeeded": 48,
+        "failures": 36,
+        "budgetDenied": true,
+        "timedOut": false
+      }
+    },
+    {
+      "id": "schema10-full",
+      "sessionId": 72713,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
+      "commit": "1f6f12c",
+      "status": "completed_bounded_budget_guard_stop",
+      "phase": "bulk_worker",
+      "log": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/schema10-full-worker.log",
+      "modules": 8260,
+      "note": "Fresh8260-module manifest then bounded500-module bulkworker excluding all131priorityroots. Fourmodules/11calls remain separately required, not exempted.",
+      "runner": ".lake/search-free-mathlib/snapshots/schema10-campaign/.lake/run_schema10_campaign.py",
+      "manifestVerification": ".lake/week-2026-08-31/schema10-full-inventory-verification.json",
+      "processedThisBatch": 130,
+      "succeededThisBatch": 104,
+      "failuresThisBatch": 26,
+      "leaseActive": false
+    },
+    {
+      "id": "schema10-first-translated-cone",
+      "sessionId": 17662,
+      "status": "completed_bounded",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema10-campaign",
+      "commit": "1f6f12c",
+      "root": "Mathlib.Logic.Function.Defs",
+      "modules": 39,
+      "log": ".lake/week-2026-08-31/translated-schema10-first-cone.log",
+      "runner": ".lake/week-2026-08-31/run_schema10_translated_forest.py",
+      "verification": ".lake/week-2026-08-31/schema10-first-cone-verification.json",
+      "scope": "Fresh compilation of all companions plus source-pair oracles under translated dependencies. Full command audit and direct compiled-output semantic binding remain required."
+    },
+    {
+      "id": "schema11-cold-first-cone",
+      "sessionId": 81381,
+      "status": "completed_bounded_cold_certified",
+      "root": "Mathlib.Logic.Function.Defs",
+      "modules": 39,
+      "freshSourceReport": ".lake/observational-data/Mathlib-Logic-Function-Defs-9sy6wegl/report.json",
+      "runner": ".lake/week-2026-08-31/run_cold_certified_cone.py",
+      "work": ".lake/week-2026-08-31/cold-certified-first-cone-tmf6awe3",
+      "log": ".lake/week-2026-08-31/cold-certified-schema11-cone-r3.log",
+      "scope": "Bounded fresh39-module cone, not wholeMathlib acceptance. Main Python paths bound by receipts; exact source/runtime inputs archived before subsequent edits. Future production cones must run wholly from immutable snapshots.",
+      "report": ".lake/week-2026-08-31/cold-certified-first-cone-tmf6awe3/report.json",
+      "reportSha256": "0fc23ab039027041b0de2436a54a41fc05503c3710fd8087062bc6139e238398",
+      "rootVerification": ".lake/week-2026-08-31/cold-schema11-cone-root-verification.json",
+      "freshCompilerProcesses": 195,
+      "completeArtifactFamilies": 234,
+      "checkedArtifactParts": 936,
+      "commandAuditFrames": 156,
+      "replacedCalls": 2,
+      "recordedVariants": 3
+    },
+    {
+      "id": "schema11-full-inventory",
+      "status": "verified_complete",
+      "sessionId": 29489,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema11-campaign",
+      "commit": "f231289",
+      "runner": ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/run_schema11_campaign.py",
+      "runnerSha256": "997c9ff8ea2578007e12f6a18fc667114737d917f39897a9205490d50bf5b917",
+      "log": ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-full-manifest-r2.log",
+      "modules": 8260,
+      "expectedOccurrences": 83414,
+      "scope": "Fresh source/scope inventory only, no DB/queue writes and no translated coverage. Fourmodules11calls/fiveunresolved remain in master8264 inventory. Avoid unsupported source-provenance rebinding; bulk dispatch must wait for conflicting old worker/leases to end.",
+      "manifest": ".lake/search-free-mathlib/snapshots/schema11-campaign/.lake/schema11-full-manifest.json",
+      "manifestSha256": "575459858fe808b02b86f79911847058d6d1532986a85fbc6f69950502c46c60",
+      "rootVerification": ".lake/week-2026-08-31/schema11-inventory-root-verification.json",
+      "reusableOccurrences": 65,
+      "nestedOccurrences": 91
+    },
+    {
+      "id": "schema12-bigoperators150",
+      "status": "completed_two_pass_one_failure_after_bounded_fix",
+      "sessionId": 31932,
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema12-congruence-campaign",
+      "commit": "3ecc925",
+      "modules": 3,
+      "expectedOccurrences": 150,
+      "log": ".lake/schema12-bigoperators.log",
+      "resultRoot": ".lake/schema12-bigoperators-yuxn215i",
+      "note": "Finset.Basic54/57 and fresh final-runtime Finprod45/45 pass strict replay/oracles. List.Basic51 records/replays but strict ToAdditive map remains until helper-reference repair. Finprod evidence is a separate current private pipeline, not a rebinding of the historical BigOperators run. Whole-tree coverage unchanged.",
+      "succeededModules": 1,
+      "failedModules": 2,
+      "verifiedCalls": 54,
+      "rootVerification": ".lake/week-2026-08-31/schema12-bigoperators-root-verification.json"
+    },
+    {
+      "id": "schema12-full-inventory",
+      "status": "independently_verified_complete_analysis_checkpoint",
+      "snapshot": ".lake/search-free-mathlib/snapshots/schema12-current-campaign",
+      "commit": "11cfcfd",
+      "sessionId": 19953,
+      "driver": ".lake/run_schema12_full.py",
+      "log": ".lake/schema12-full-manifest.log",
+      "expectedModules": 8260,
+      "expectedOccurrences": 83414,
+      "checkpointRoot": ".lake/search-free-mathlib/analysis-checkpoints-v1",
+      "note": "Fresh source/scope analysis at11cfcfd. Independently verified all source hashes/ranges/IDs/counts/implementation inputs. Replay implementation has since advanced; use checkpoint results for a fresh latest-provenance manifest, never rebind this manifest or start its known-stale worker.",
+      "manifest": ".lake/search-free-mathlib/snapshots/schema12-current-campaign/.lake/schema12-full-manifest.json",
+      "sha256": "b2899816cd8e6fca49878e91d05751d3a7859c214997cd1d4c985e8fb18ec021",
+      "seconds": 1564.4566501250956,
+      "rootVerification": ".lake/week-2026-08-31/schema12-full-manifest-root-verification.json",
+      "modules": 8260,
+      "occurrences": 83414,
+      "nestedOccurrences": 91,
+      "directExecutable": 83349,
+      "reusableExecutable": 65,
+      "separatelyRequiredOccurrences": 11
+    },
+    {
+      "id": "manual-composition-eight",
+      "status": "completed_bounded",
+      "modules": 6,
+      "manualOverrides": 8,
+      "remainingCallsMaterialized": 55,
+      "retainedCalls": 0,
+      "report": ".lake/week-2026-08-31/manual-composition/run-_37r_lka/report.json",
+      "reportSha256": "c5a80a755b0f05fa0683d7bf6f5b5dbd3b3c644535799daeb397ad93b7a400b6",
+      "rootVerification": ".lake/week-2026-08-31/manual-composition/run-_37r_lka/root-verification.json",
+      "rootVerificationSha256": "97fd1e83bf3f03290354cc465b1ab1f303d7b8edff32517de02cb402010af5ce",
+      "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "schema13-overlay-full-manifest",
+      "status": "independently_verified",
+      "commit": "6c0815c",
+      "modules": 8260,
+      "occurrences": 83414,
+      "manifest": ".lake/week-2026-08-31/schema13-overlay-full-manifest.json",
+      "manifestSha256": "60dc663ee3339bffafe53ebe58b1b7d804a67783bc14be5ad9236f856d63430c",
+      "manualDatabaseSha256": "1dfde349f62ddbb42bf202461f30afeb0d15fe0f752a4fae4944637c04e98d06",
+      "rootVerification": ".lake/week-2026-08-31/schema13-overlay-full-manifest-root-verification.json"
+    },
+    {
+      "id": "schema13-overlay-manual-worker",
+      "status": "completed_independently_verified",
+      "commit": "6c0815c",
+      "modules": 6,
+      "canonicalCalls": 63,
+      "manualReplacements": 8,
+      "ordinaryCalls": 55,
+      "observedVariants": 55,
+      "remainingCalls": 0,
+      "failures": 0,
+      "reportRoot": ".lake/boundary-materialization/schema13-overlay-manual-worker",
+      "rootVerification": ".lake/week-2026-08-31/schema13-overlay-manual-worker-root-verification.json",
+      "evidenceFiles": 120,
+      "evidenceTreeSha256": "54b38ef82e6cb5b465eac941a7134c93f7ca891a7def1dca49593d9f9e119024"
+    },
+    {
+      "id": "schema13-v7-full-manifest-and-option-pilot",
+      "status": "manifest_authenticated_pilot_failed_option_drift_fixed_pending_v8",
+      "commit": "e62f65d",
+      "modules": 8264,
+      "occurrences": 83627,
+      "manifest": ".lake/week-2026-08-31/schema13-isolated-closed-manifest-v7.json",
+      "manifestSha256": "9c967e61e34faf8068b9006fbeab9665b1caaa468e0967b1f67a7fc4e0d0623d",
+      "dependencyMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
+      "pilotModule": "Mathlib/Algebra/NeZero.lean",
+      "pilotAttempt": 604,
+      "diagnosis": "Ordinary replay compiled, but selector options differed between reduced recording and final Mathlib frontend. Commit 7b76a60 fixes both recording and oracle; retry only under v8 identity.",
+      "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "schema13-v8-authenticated-direct-campaign",
+      "status": "completed_planned_freeze",
+      "commit": "35a5849a29d5c23cee6288bd4086310d7b9ec9aa",
+      "manifest": ".lake/week-2026-08-31/schema13-isolated-closed-manifest-v8.json",
+      "manifestSha256": "3b4b4b85946c800fccecfbcd2a79b7126a31a8c238b7560eca9e5ea92b33b240",
+      "dependencyMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
+      "database": ".lake/search-free-mathlib/translation-index.sqlite3",
+      "modules": 8264,
+      "occurrences": 83627,
+      "directExecutable": 83556,
+      "reusableExecutable": 71,
+      "unresolved": 0,
+      "verifiedModules": 39,
+      "verifiedOccurrences": 165,
+      "failedModules": 31,
+      "queuedModules": 6212,
+      "attemptsSince618": {
+        "success": 37,
+        "failure": 21,
+        "abandoned": 3
+      },
+      "acceptedCompleteTreeCoverage": false
+    }
+  ],
+  "latestCommits": [
+    "7bd0092",
+    "8afe18c",
+    "55f49fb",
+    "f231289",
+    "a17ef7f",
+    "fae96be",
+    "2105937",
+    "188e649",
+    "0c4e537",
+    "2e73bcf",
+    "113d9b3",
+    "bab90be",
+    "b990bef",
+    "d73b4c2",
+    "b2ea843",
+    "1d5b550",
+    "5f02c0c",
+    "531a3ad",
+    "a8fea49",
+    "a2173da",
+    "0804eaf",
+    "585bb83",
+    "54fcbd0",
+    "a53b749",
+    "f458c4d",
+    "3005bcd",
+    "45c8f56",
+    "13373ad",
+    "5819eda",
+    "38492ab",
+    "6287642",
+    "7b4c71c",
+    "560bbab",
+    "994e5c3",
+    "73b487b",
+    "f629783",
+    "6b99b9a",
+    "7839c0f",
+    "9a74d7f",
+    "e765695",
+    "4e1142c",
+    "f3db7d4",
+    "2ae2609",
+    "af21f51",
+    "617c69d",
+    "db59a3e",
+    "9b35bf6",
+    "e3af2f2",
+    "1f6f12c",
+    "2b5b9ed",
+    "2a7db88",
+    "237d539",
+    "8b662c1",
+    "3a6ae82",
+    "0b13883",
+    "451e457",
+    "1168cc0",
+    "d606469",
+    "6c0815c",
+    "aa6d3de",
+    "d235563",
+    "7b76a60",
+    "0c725f5",
+    "35a5849",
+    "3860bf3"
+  ],
+  "experiments": [
+    {
+      "id": "explicit-instance-evidence",
+      "path": ".lake/search-free-mathlib/evidence-prototype",
+      "baseCommit": "fae96be8a63378bcd6660295b1ad28b7e3c70858",
+      "owner": "coordinator",
+      "status": "superseded",
+      "note": "Historical bounded prototype evidence; superseded by strict production schema2 integration5f02c0c."
+    },
+    {
+      "id": "cold-publication-preparation",
+      "status": "bounded_full_cone_passed",
+      "runner": ".lake/week-2026-08-31/run_cold_certified_cone.py",
+      "publicationHelper": ".lake/week-2026-08-31/cold_certified_cone_publication.py",
+      "bytePublicationChecks": ".lake/week-2026-08-31/cold-publication-controls-mvghvl9g/report.json",
+      "actualCertificateChecks": ".lake/week-2026-08-31/cold-publication-receipts-uxypch1t/report.json",
+      "actualCertificateChecksSha256": "2f669d623145817049ed033367872f10f7c45534b01657a5ae020aa501189741",
+      "actualCertificates": 2,
+      "downstreamComputed": 14,
+      "rootHashChecks": 114,
+      "wholeMathlib": false,
+      "coneReport": ".lake/week-2026-08-31/cold-certified-first-cone-tmf6awe3/report.json",
+      "rootVerification": ".lake/week-2026-08-31/cold-schema11-cone-root-verification.json"
+    },
+    {
+      "id": "expression-reference-handoff",
+      "status": "integrated_main_verified",
+      "manifest": ".lake/search-free-mathlib/snapshots/expression-reference-prototype/.lake/expression-reference/final-evidence/manifest.json",
+      "manifestSha256": "1f9570a8a22cad69291813021832aa543d26b398e93e924007585e3620420562",
+      "rootVerification": ".lake/week-2026-08-31/expression-reference-root-verification.json",
+      "artifactSchema": 5,
+      "reportSchema": 11,
+      "finalControls": 39,
+      "independentReviewControls": 5,
+      "distinctWireNegatives": 8,
+      "sourcePipelines": 3,
+      "acceptedCoverage": false,
+      "mainRootVerification": ".lake/week-2026-08-31/expression-reference-main-root-verification.json",
+      "mainControls": ".lake/expression-reference/controls-j60fypkj/report.json",
+      "mainSources": ".lake/expression-reference/source-3_7tebqq/report.json",
+      "mainHashAssertions": 922,
+      "localCacheRegression": ".lake/week-2026-08-31/local-cached-schema11-root-verification.json",
+      "replayRegression": ".lake/week-2026-08-31/replay-schema11-root-verification.json",
+      "independentReview": ".lake/schema11-search-review/findings.md"
+    },
+    {
+      "id": "local-cached-sequence-handoff",
+      "status": "integrated_main_verified",
+      "handoffManifestSha256": "3504e562ae7beea99efd72afce482fb6201fe4e865e8e4be2c57a8a63f75af1e",
+      "rootVerification": ".lake/week-2026-08-31/local-sequence-root-verification.json",
+      "independentReview": ".lake/local-sequence-independent-review.md",
+      "sourceCalls": 8,
+      "module": "Mathlib/Logic/ExistsUnique.lean",
+      "wholeMathlib": false,
+      "mainRootVerification": ".lake/week-2026-08-31/local-sequence-main-root-verification.json"
+    },
+    {
+      "id": "local-aux-full-source-probes",
+      "status": "failed_strict_checks_retained",
+      "extraReport": ".lake/observational-data/Mathlib-AlgebraicTopology-ExtraDegeneracy-q7fj5m0f/report.json",
+      "extraReportSha256": "8bf34bf3fce6e02eba4a5f174007d821c9ddf10a554278439f228c3bfc72a9ad",
+      "extraFailure": "All24 calls record; whole replay rejects c0b5b3940818fb9f descriptor. Read-only diagnosis isolates earlier proof-node changes after translation; original-prefix-only controls pass. Need translated-prefix-aware recording, no relaxed equality.",
+      "cubicReport": ".lake/observational-data/Mathlib-Algebra-CubicDiscriminant-5_8u_5u6/report.json",
+      "cubicFailure": "aa693119975056ee boundary_sequence_ambiguous_or_missing_cover during recording; no wholemodule success claim.",
+      "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "translated-prefix-diagnosis",
+      "status": "verified_forward_applied_mode_in_progress",
+      "manifestSha256": "8910e9b8f40063a57cf4eab1a7c61bd431f744d5126f4dffb1b2368f74967a3a",
+      "rootVerification": ".lake/week-2026-08-31/translated-prefix-diagnosis-root-verification.json",
+      "finding": "Earlier call6687f846adec5f98 changes laterofIso._proof_3 from646to720DAGnodes. The apparent raw/decoded difference was caused by Lean finally capturing pre-try mutable values. Returning validated applied state and observed generator outside try/finally fixes focused raw-forward versus fresh serialized replay equality; no shared-decoder refactor is required. All8 focused processes pass. WholeExtra fresh replay still rejects c0b5b3940818fb9f; paired prefix diagnosis now finds all232 node signatures/proof bodies and80proof table equal, but20 ExtraModUses metadata leaves differ. Exact dependency delta remains under investigation; no guard loosened.",
+      "implementationOwner": "local_cached_sequence",
+      "acceptedCampaignCoverage": false,
+      "independentReview": ".lake/forward-recording-independent-review.md"
+    },
+    {
+      "id": "certificate-storage-prototype",
+      "status": "integrated_opt_in_cli_verified",
+      "rootVerification": ".lake/week-2026-08-31/certificate-storage-root-verification.json",
+      "helper": ".lake/certificate-storage-prototype/dedup.py",
+      "focusedTests": 5,
+      "genuineCertificateStages": 5,
+      "artifactPaths": 24,
+      "uniqueInodes": 8,
+      "duplicatePathsReplaced": 16,
+      "repeatReplacements": 0,
+      "receiptAndAllBytesPreserved": true,
+      "wholeMathlib": false,
+      "mainHelper": "Experiment/certificate_storage.py",
+      "mainTests": "Experiment/check_certificate_storage.py",
+      "mainGenuineRepeat": ".lake/week-2026-08-31/certificate-storage-main-genuine-repeat.json",
+      "commit": "7bd0092"
+    },
+    {
+      "id": "cached-local-congruence-activation",
+      "status": "bounded_fix_integrated_production_verified",
+      "snapshot": ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype",
+      "witnessManifestSha256": "34aff3098527adc556b9613596181f505cd9c0692e44a73ee46e1b2cbd917b9c",
+      "finding": "Unitization1734864b48394331 stock/capture realize StarAlgHom.codRestrict.congr_simp plus prechecked/offbranch NonUnitalStarSubalgebra.unitization.congr_simp; replay onlyfirst. Pre/stock/appliedgeneratorindices1/3/2. No generatorpatch proposed; missingcheckedactivation needs exactauthenticcachewitness. Balancefocusedcurrentcheckmatchesgenerator3; Bilinearfails earlieractivation_nonempty_aux_cache.",
+      "acceptedCampaignCoverage": false,
+      "failedCandidateManifest": ".lake/search-free-mathlib/snapshots/auxiliary-generator-transition-prototype/.lake/cached-congruence-failure-frozen-a6243ck4/manifest.json",
+      "failedCandidateManifestSha256": "7a6a40f2d5dabe5283d5ed3df33c4781ad4f5ced5c3f070b4beb1ccd77137d98",
+      "descriptorFinding": "115nodes exact proof/signature/auxiliary data;80metadata leaves change in sineQueNon/symbolFrequency after fresh StarAlgHom congruence creation. Preserve initial and post-fresh full descriptors and authentic activation order; do not filter metadata or patch generator.",
+      "rootVerification": ".lake/week-2026-08-31/schema12-unitization-root-verification.json"
+    },
+    {
+      "id": "cubic-mixed-local-equations",
+      "status": "bounded_fix_integrated_production_verified",
+      "snapshot": ".lake/search-free-mathlib/snapshots/cubic-mixed-cover-diagnosis",
+      "rootVerification": ".lake/week-2026-08-31/local-equation-sequence-root-verification.json",
+      "finding": "aa693119975056ee needs fresh Cubic.map.eq_1 followed by completed cached Cubic.toPoly.eq_1, both local owners, no helper. Imported-only sequence cover excludes both; new narrow ordered equation sequence pending.",
+      "acceptedCampaignCoverage": false,
+      "productionRootVerification": ".lake/week-2026-08-31/schema12-cubic-root-verification.json"
+    },
+    {
+      "id": "finprod-empty-delta-generator",
+      "status": "bounded_fix_integrated_main_verified",
+      "rootVerification": ".lake/week-2026-08-31/declaration-branch-reservation-root-verification.json",
+      "occurrences": [
+        "054f57be19797140",
+        "a3bb7cb79374a720"
+      ],
+      "finding": "Pinned Aesop root preprocessing reserves one child declaration namespace via mkChild. Fresh full-source controls independently verified. Reservation prototype additionally exposed exact imported HasFiniteSupport.eq_1 mapInv registration; capture/replay must authenticate this insertion and retain all other state checks. Infrastructure rollback prototype exposed Core.SavedState omission of generator; minimal explicit catch restoration under validation.",
+      "owner": "local_cached_sequence",
+      "acceptedCampaignCoverage": false,
+      "consumerRootVerification": ".lake/week-2026-08-31/finprod-consumer-root-verification.json",
+      "commit": "6b97bfd",
+      "handoffManifest": ".lake/search-free-mathlib/snapshots/declaration-branch-reservation-prototype/.lake/declaration-branch-reservation-handoff/manifest.json",
+      "handoffSha256": "f5717509d0260a3f8d48198ceb0aef669d271355e4b7b5fc24abac8248140267",
+      "fullModuleCalls": 45,
+      "oracle": "352decl/315public/34extensions/0privateproofomissions"
+    },
+    {
+      "id": "toadditive-translations-diagnostic",
+      "status": "provisional_wrong_snapshot_quarantined",
+      "incidentReport": ".lake/week-2026-08-31/snapshot-write-incident.json",
+      "finding": "Diagnostic suggests two stock-only private List.prod_set proof translation entries. No new prelaunch receipt/complete registered-identity guard; needs fresh isolated reproduction. Existing production snapshot source/native restored exactly from prelaunch archives, unbound diagnostic build outputs quarantined; both full production consumers reverified.",
+      "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "toadditive-typed-translations-diagnostic",
+      "status": "fresh_typed_diagnosis_independently_verified_strict_failure_retained",
+      "snapshot": ".lake/search-free-mathlib/snapshots/toadditive-typed-diagnosis",
+      "rootVerification": ".lake/week-2026-08-31/toadditive-typed-root-verification.json",
+      "finding": "Exact registered extension lookup and recursive typed fields show75stock/73applied entries;73common entries/order/lookups identical. Two stock-only current-module private proof→private proof translations have identity reorder/noArg. Fresh receipt/native/source/log bindings verified1092hashes. No metadata exemption approved; investigating exact preservation. Earlier wrong-snapshot diagnostic remains quarantined, not evidence.",
+      "acceptedCampaignCoverage": false
+    },
+    {
+      "id": "linear-instrumentation-benchmark",
+      "status": "verified_bounded_performance_not_compiler_evidence",
+      "report": ".lake/week-2026-08-31/instrumentation-gap-benchmark-jkxre69m/report.json",
+      "sourceArchives": ".lake/week-2026-08-31/instrumentation-gap-benchmark-jkxre69m/source-archives.json",
+      "sourceBytes": 68444,
+      "calls": 45,
+      "oldDiffTimedOutAfterSeconds": 6,
+      "linearSeconds": 0.002033290918916464,
+      "tests": [
+        ".lake/instrumentation-linear-source-tests.log",
+        ".lake/instrumentation-linear-schema12-tests.log"
+      ]
+    },
+    {
+      "id": "toadditive-helper-reference-cause",
+      "status": "strict_repair_in_private_implementation",
+      "snapshot": ".lake/search-free-mathlib/snapshots/helper-reference-closure-prototype",
+      "finding": "Two replayed private helper theorems exist but closeFreshConstants inlines their references out of the root proof. ToAdditive findAuxDecls traverses only referenced constants, hence73vs75. No map filtering approved. Strict repair whitelists only exact fresh theorem members of captured local-theorem actions; all definitions/unknown/unlisted constants remain closed.",
+      "acceptedCampaignCoverage": false
+    }
+  ],
+  "prototypeCoverage": {
+    "branchBase": "fae96be",
+    "completeSourceFixture": 17,
+    "completeMathlibModules": [
+      "Mathlib.Algebra.AddConstMap.Basic",
+      "Mathlib.CategoryTheory.EqToHom",
+      "Mathlib.Data.Fintype.List",
+      "Mathlib.Algebra.Algebra.NonUnitalHom",
+      "Mathlib.Analysis.CStarAlgebra.SpecialFunctions.PosPart"
+    ],
+    "materializedMathlibOccurrences": 66,
+    "instanceSearchAudit": "fresh evidence passed; 14 old replacements rejected by positive control",
+    "fullSearchFreeContract": "Not established by term-source encoding: independent audit reproduced tacticsearch withnoinstance traces. RawExpr DAG prototype underdevelopment.",
+    "partialFiveModuleGate": [
+      "First4 modules passed63calls withpp.instances=true/pp.coercions=true",
+      "PosPart3 passed afterpp.coercions=false; nowhole5modulererununderunifiedsetting yet"
+    ]
+  },
+  "packageWriteLease": {
+    "owner": "coordinator",
+    "status": "active",
+    "paths": [
+      ".lake/packages"
+    ],
+    "constraint": "No source or build-artifact writes in shared pinned packages while frozen/prototype runs are active. Project-only builds allowed when dependencies are already current. For package changes use a separate private copy after existing runs finish."
+  },
+  "rawDagPrototype": {
+    "path": ".lake/search-free-mathlib/evidence-prototype",
+    "status": "Historical prototype superseded by production schema2 at5f02c0c.",
+    "sourceFixtureOccurrences": 17,
+    "sourceFixtureUnobservedOccurrences": 1,
+    "mathlibModules": {
+      "Mathlib.Analysis.CStarAlgebra.SpecialFunctions.PosPart": 3
+    },
+    "posPartArtifactBytes": 186517,
+    "previousExplicitSourceArtifactBytes": 6602372,
+    "logs": [
+      ".lake/prototype-expr-dag-source.log",
+      ".lake/prototype-expr-dag-pospart.log"
+    ],
+    "limitations": [
+      "The prototype lacks the constant preflight now implemented in the main standalone codec.",
+      "The prototype still uses schema 1 metadata and a temporary mixed validator; strict schema 2 migration is pending.",
+      "Unresolved expression and universe metavariables are rejected; existing boundary metavariables will need canonical references."
+    ]
+  },
+  "inventory": {
+    "status": "authenticated_v7_pending_final_option_v8_refresh",
+    "manifest": ".lake/search-free-mathlib/snapshots/corpus-bootstrap/.lake/campaign-inventory.json",
+    "commit": "188e649edf3b00c7772712b466c9a800f48db491",
+    "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c",
+    "allowUnresolved": true,
+    "unresolvedDetails": ".lake/week-2026-08-31/corpus-unresolved.json",
+    "moduleCount": 8264,
+    "occurrenceCount": 83425,
+    "latestClosedManifest": {
+      "path": ".lake/week-2026-08-31/schema13-isolated-closed-manifest-v7.json",
+      "sha256": "9c967e61e34faf8068b9006fbeab9665b1caaa468e0967b1f67a7fc4e0d0623d",
+      "commit": "e62f65d143f44064dba31acea679764784f0675d",
+      "modules": 8264,
+      "occurrences": 83627,
+      "directExecutable": 83556,
+      "reusableExecutable": 71,
+      "nestedOccurrences": 91,
+      "unresolved": 0,
+      "manualOverrides": 16,
+      "dependencyMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
+      "dependencyMapSha256": "eba4654477f16d81f870bf3b2cd15d0d9fe886357384d10f5e8a5f374ab95448",
+      "structuralInspection": ".lake/week-2026-08-31/schema13-v7-structural-inspect.log",
+      "note": "Authenticated full corpus analysis/index evidence. Refresh required because exact selector option identity changed at 7b76a60; no production coverage is claimed."
+    },
+    "analysisDecoupling": {
+      "status": "integrated",
+      "verification": ".lake/week-2026-08-31/scope-decoupling-main-verification.json",
+      "frozenManifestSha256": "6b9eaf4e20cc57c0fd0f659d9271631c1bd30abd2e27bc8a0dbe83086f8ecb3c",
+      "comparedModules": 205,
+      "fixtureOccurrences": 13,
+      "fixtureDeclarations": 18,
+      "mainNativeMatchesVerifiedPrototype": true,
+      "earlierStaleBuild": "rejected; prototype originally shared main build symlink; corrected private native rebuild and comparisons frozen separately",
+      "checkpointIdentityWork": "new conservative analysis-only identity under development; no old manifest rebinding"
+    },
+    "reusableMasterVerification": {
+      "path": ".lake/week-2026-08-31/reusable-master-root-verification.json",
+      "calls": 66,
+      "ownerGroups": 52,
+      "extraOverClosedSubset": {
+        "module": "Mathlib/Tactic/Zify.lean",
+        "id": "b3360f1193c3c8b2",
+        "sourceHash": "f0ce5e1e74c0a884b5bce026651e0efc15723caaae87cbac0e6c1f3a54a84da3",
+        "startByte": 2404,
+        "endByte": 2471
+      },
+      "scope": "Allsourcehashes/ranges/exacttext verified; dynamic exported behavior remains unresolved, no finitecaller equivalence claim."
+    },
+    "analysisCheckpointIdentity": {
+      "status": "integrated_live_reuse_verified",
+      "rootVerification": ".lake/week-2026-08-31/analysis-checkpoint-identity-root-verification.json",
+      "schema": 1,
+      "liveTestCalls": 6,
+      "firstRunSeconds": 90.2284,
+      "cachedRunSeconds": 58.413,
+      "sameInventoryAndScopeKeys": true,
+      "freshManifestProvenanceChanged": true,
+      "limitation": "About50seconds broadclosure hashing permanifest; use large batches. Fullfreshmanifest undernewcurrentengine pending. Oldmanifests neverrebound."
+    }
+  },
+  "database": {
+    "path": ".lake/search-free-mathlib/translation-index.sqlite3",
+    "status": "schema13_v7_full_index_no_active_leases",
+    "modules": 8264,
+    "occurrenceFacts": 83627,
+    "importEdges": 26396,
+    "unresolved": 0,
+    "verifiedTranslations": 83,
+    "headerMap": ".lake/week-2026-08-31/index-header-dependency-map.json",
+    "currentCandidateOccurrences": 894,
+    "currentCandidateVariants": 948,
+    "externalDependencyDigests": ".lake/week-2026-08-31/schema13-overlay-external-dependency-digests.json",
+    "currentIdentityVerifiedModules": 0,
+    "currentIdentityVerifiedOccurrences": 0
+  },
+  "productionValidation": {
+    "commit": "6c0815c",
+    "searchFreeEncoding": "Artifact5: lean_expr_dag_v3 with bounded pre-boundary universe/opaque expression references; closed lean_expr_dag_v1 declaration bodies. Generated encoded replay blocks pending typeclass synthesis; legacy handwritten elaboration APIs excluded.",
+    "representativeMathlibModules": 5,
+    "representativeMathlibOccurrences": 66,
+    "nestedMathlibOccurrences": 10,
+    "sourceFixtureOccurrences": 17,
+    "sourceFixtureUnobservedOccurrences": 1,
+    "completeTreeBuilt": false,
+    "note": "Bounded fixture/module validation; durable campaign worker closure accounting remains separate.",
+    "closedDependencyCones": [
+      {
+        "commit": "6287642",
+        "root": "Mathlib.Logic.Function.Defs",
+        "modules": 39,
+        "replacedCalls": 2,
+        "report": ".lake/search-free-mathlib/snapshots/schema6-direct-gates/.lake/translated-first-cone-options/report.json",
+        "reportSha256": "d7f6f8501d54fb53c8f987b32cd45151153e76f2f851a3d11f03e071e3567d56",
+        "status": "compiled_provisional_pending_schema7"
+      },
+      {
+        "commit": "560bbab",
+        "root": "Mathlib.Logic.Function.Defs",
+        "modules": 39,
+        "replacedCalls": 2,
+        "report": ".lake/search-free-mathlib/snapshots/schema7-broad/.lake/translated-first-cone-schema7/report.json",
+        "reportSha256": "598669c5068374b5e4da7be4a423e681dd840a997fa27c45632e4403cfeccebc",
+        "status": "compiled_provisional_pending_schema8_aux_cache_check",
+        "wholeMathlib": false,
+        "independentVerification": ".lake/week-2026-08-31/schema7-cone-verification.json"
+      },
+      {
+        "commit": "7839c0f",
+        "modules": 80,
+        "replacedCalls": 98,
+        "report": ".lake/week-2026-08-31/translated-schema8-forest-all/report.json",
+        "reportSha256": "418f796705f89e3e327472483b97a485b6052fc4b2b2963e38bf6af548bbeb74",
+        "status": "compiled_provisional_pending_schema9_and_translated_output_oracles",
+        "wholeMathlib": false,
+        "independentVerification": ".lake/week-2026-08-31/schema8-forest-verification.json"
+      },
+      {
+        "commit": "1f6f12c",
+        "modules": 39,
+        "replacedCalls": 2,
+        "report": ".lake/week-2026-08-31/translated-schema10-first-cone/report.json",
+        "reportSha256": "112bc8a6b1deded08159db9ac12d05deab68dc75461a9bfd71b672d20ba2e572",
+        "status": "compiled_and_source_pair_oracles_under_translated_dependencies",
+        "wholeMathlib": false,
+        "independentVerification": ".lake/week-2026-08-31/schema10-first-cone-verification.json",
+        "limitations": "Command audit and direct compiled-output semantic binding remain separate acceptance requirements."
+      },
+      {
+        "commit": "5a9abd1",
+        "root": "Mathlib.Logic.Function.Defs",
+        "modules": 39,
+        "replacedCalls": 2,
+        "report": ".lake/week-2026-08-31/certified-first-cone-obcaztm0/report.json",
+        "reportSha256": "799e7fe2346451891d22cc87d563940f146362a7edda6c861261e4f357c25fe0",
+        "status": "provisional_pending_observational_metadata_and_fresh_compilation_equivalence",
+        "wholeMathlib": false,
+        "independentVerification": ".lake/week-2026-08-31/certified-cone-root-verification.json",
+        "artifactParts": 156,
+        "auditFrames": 78,
+        "externalArtifactHashes": 11486,
+        "publicationPolicy": "Fresh private single-writer run; exact family then receipt; no resume or existing-output overwrite. External roots verified free of nested directory symlinks."
+      },
+      {
+        "commit": "f231289",
+        "root": "Mathlib.Logic.Function.Defs",
+        "modules": 39,
+        "replacedCalls": 2,
+        "status": "cold_certified_bounded_with_strict_translated_imports",
+        "report": ".lake/week-2026-08-31/cold-certified-first-cone-tmf6awe3/report.json",
+        "reportSha256": "0fc23ab039027041b0de2436a54a41fc05503c3710fd8087062bc6139e238398",
+        "independentVerification": ".lake/week-2026-08-31/cold-schema11-cone-root-verification.json",
+        "freshCompilerProcesses": 195,
+        "wholeMathlib": false,
+        "limitations": "Two replaced source calls/three variants; no inference of complete corpus coverage. Original receipt Python input paths are main checkout; archived immutable copies preserve historical evidence, while later production runs use frozen snapshot paths."
+      }
+    ],
+    "currentArtifactSchema": 5,
+    "currentSelectorSchema": 2,
+    "minimumReportSchema": 13,
+    "integratedEngineCommit": "6c0815c",
+    "focusedEvidenceManifest": ".lake/week-2026-08-31/schema10-focused-verification.json",
+    "commandAudit": {
+      "handoffManifest": ".lake/week-2026-08-31/command-audit-production/handoff-manifest.json",
+      "handoffSha256": "0d693f40dfa66663fd9f04b221a6171179d86016277ab00e1a5e7bfca71050c8",
+      "processChecks": 36,
+      "wireMutations": 10,
+      "rootVerification": ".lake/week-2026-08-31/command-audit-production-root-verification.json",
+      "translatedConeAudit": ".lake/week-2026-08-31/schema10-cone-audit-verification.json",
+      "translatedConeAuditReportSha256": "608b7fc619c7bcb9cccf8b2f4f1b52bd8e1269a7de980f919fd6dd881c07d2f4",
+      "wholeMathlib": false
+    },
+    "orderedRecursiveRealizations": {
+      "artifactSchema": 4,
+      "reportSchema": 10,
+      "mainEvidence": ".lake/week-2026-08-31/ordered-recursive-main-checkpoint.json",
+      "privateHandoffSha256": "669301b33c096a57a4b3a6d290d82cc60818792dbf5f275921cadcc6f7b70194",
+      "wholeModifyLast": false,
+      "performanceNote": "Two-site fresh/cached fixture is5.2MiB source and observed about24GiB peak RSS on64GiB Mac. Avoid concurrent heavy ModifyLast controls; investigate sharing-preserving storage separately without weakening descriptors."
+    },
+    "rawFrontendOutput": {
+      "mainEvidence": ".lake/week-2026-08-31/raw-oracle-main-verification.json",
+      "privateHandoffSha256": "229f6ba5f113ac06f104af4b63b2d4e8bb11397758d4a1ec9a2363651d055d43",
+      "mainProcessChecks": 70,
+      "mainConsumerAndWireMutations": 17,
+      "outputPolicy": "normal applied frontend output in quarantine; separate consumer must validate audit, semantics, identity and exact artifact family before publication",
+      "wholeMathlib": false,
+      "knownLimits": "Baseline and raw oracle both reject checked-only non-reserved private unfolding; old Lookmap candidate also fails both frontends before comparison. No exemptions or old-result relabelling."
+    },
+    "quarantinedModuleCertificates": {
+      "mainReport": ".lake/certified-module-check-27pmda8s/report.json",
+      "mainReportSha256": "db351ca1f4b172ef0349eec1ed41d9230626e9d887697280ddb2a1c071778655",
+      "rootVerification": ".lake/week-2026-08-31/certified-module-main-root-verification.json",
+      "handoffManifest": ".lake/week-2026-08-31/certified-module-helper-handoff-bkdhog2e/manifest.json",
+      "handoffManifestSha256": "f86a63977c36582c8f1ac4590ce6cc0c852d5b7522eaa6759d436f7be04f666c",
+      "publication": "First39module/2call cone passed same-frontend output certification; root independently verified. Bounded fresh-run publication, not full corpus or resumable publication.",
+      "wholeMathlib": false
+    },
+    "metadataObservationHold": {
+      "diagnosisSnapshot": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis",
+      "knownCause": "CommandAudit.declarations -> mkModuleData -> symbolFrequency export -> localSymbolFrequencyMapRef; Boundary/RealizationCodec and Boundary metadata comparison also invoke mkModuleData mid-elaboration.",
+      "scope": "Current source-pair oracle results and first certified cone remain provisional for complete fresh-compilation metadata semantics. Byte hashes, audit identities and passing proof compilation evidence remain valid.",
+      "status": "cold-comparator-integrated-translated-tree-revalidation-pending",
+      "diagnosisManifest": ".lake/search-free-mathlib/snapshots/lookmap-portability-diagnosis/.lake/lookmap-diagnosis/handoff-tljlgnu9/manifest.json",
+      "diagnosisManifestSha256": "5f39e8eb73ee682d3284d6daa7b4d21b898467ceb91d9861eaf3dc5f06a84aba",
+      "diagnosisVerification": ".lake/week-2026-08-31/audit-export-observation-handoff-root-verification.json",
+      "auditRepairVerification": ".lake/week-2026-08-31/audit-export-observation-main-verification.json",
+      "independentColdOutputs": "Ordinary stock/applied fresh processes write equal declaration counts but different symbolFrequency maps20vs10 in all3olean views; do not infer metadata equivalence from same-process oracle.",
+      "coldArtifactDiagnostic": {
+        "report": ".lake/week-2026-08-31/cold-metadata-yhpko__p/report.json",
+        "sha256": "94c67f473189bad9bb5c05520ed5fb1f90d4b4c9240fab3ad1e1b20ba11f1867",
+        "result": "Two self comparisons pass; original cold stock/applied differs in symbolFrequency and sineQueNon in all3views, typedLCNF and extraConstNames equal. No root import/initialization.",
+        "design": ".lake/week-2026-08-31/cold-artifact-comparison-design.md"
+      },
+      "boundaryRepairVerification": ".lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+      "boundaryRepairHandoffVerification": ".lake/week-2026-08-31/module-data-observation-handoff-root-verification.json",
+      "boundaryRepairScope": "Substitutes only pinned symbolFrequency/sineQueNon export computations without their cache writes. Other callbacks remain unchanged and can mutate caches; no generic observational purity claim.",
+      "coldBridgePrototype": "V1 rejected by late exporter counterexample. NativeV2 now compares normal emitted3views+IR without new exports and exactly binds private declarations to rawchecked environments. Consumer additionally requires all per-source cold ordinary/audited/paired families equal. Both real exporter controls correctly reject. Complete translated-tree revalidation remains pending.",
+      "lateExporterCounterexample": {
+        "manifest": ".lake/week-2026-08-31/late-export-diagnosis-0nqvan7e/manifest.json",
+        "sha256": "b08b5a4231d6e87cf8a5e54396c5672de8b8802a02a1a825ebdc52ad5f7449a6",
+        "rootVerification": ".lake/week-2026-08-31/late-export-root-verification.json"
+      }
+    },
+    "mixedRealizationSequences": {
+      "mainEvidence": ".lake/week-2026-08-31/mixed-sequence-main-evidence-rtu9vyr5/manifest.json",
+      "mainEvidenceSha256": "41fd690a08f30a648d56d5750cd33c738d181809e063b6348aafbf164c10076b",
+      "regressionsVerification": ".lake/week-2026-08-31/mixed-sequence-main-regressions-verification.json",
+      "privateHandoffVerification": ".lake/week-2026-08-31/mixed-sequence-handoff-root-verification.json",
+      "mainExtraGuard": "Lean active registration rejects private names, matching Python contract.",
+      "excludedAttempt": "control-z8bwswt8 loaded stale shared library; explicit shared rebuild corrected test setup; fresh rerun controls passed.",
+      "wholeMathlib": false
+    },
+    "boundedModuleDataObservation": {
+      "mainVerification": ".lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+      "mainVerificationSha256": "dc40a2a541c370b799e82a68470bfe9636070d333b273b6df0c541bd4c874ff8",
+      "modules": [
+        {
+          "module": "Mathlib/Data/List/Lookmap.lean",
+          "calls": 10,
+          "report": "/Users/ptsier/projects/explicit-lean/.lake/observational-data/lookmap-r9diq3hd/report.json",
+          "sha256": "fd03994c851a6b84c84f86f0dbd89d1d6b8c7636aa037c2812e5eaca173d00b2",
+          "declarations": 33,
+          "publicDeclarations": 20,
+          "extensionStates": 22,
+          "remainingCalls": 0
+        },
+        {
+          "module": "Mathlib/Control/Basic.lean",
+          "calls": 16,
+          "report": "/Users/ptsier/projects/explicit-lean/.lake/observational-data/Mathlib-Control-Basic-sabzb0u3/report.json",
+          "sha256": "4afd5e9ad0f187320cdde09c55a7afbc5a28869ad0bbafe468aa7971e8a6f7e7",
+          "declarations": 62,
+          "publicDeclarations": 56,
+          "extensionStates": 39,
+          "remainingCalls": 0
+        },
+        {
+          "module": "Mathlib/Data/List/ModifyLast.lean",
+          "calls": 5,
+          "report": "/Users/ptsier/projects/explicit-lean/.lake/observational-data/Mathlib-Data-List-ModifyLast-cvna1hf0/report.json",
+          "sha256": "dd458c8e30a9de35bd19dd4bba2558be4a472e61c4aed3e5916cb0f3bca1e43f",
+          "declarations": 16,
+          "publicDeclarations": 9,
+          "extensionStates": 19,
+          "remainingCalls": 0
+        }
+      ],
+      "privateHandoffSha256": "48c2244114648cdf0e16b77f6441ed305e5256cdae8b91ba929be708154674fa",
+      "privatePositiveCacheControls": 8,
+      "retainedCallbackCounterexample": true,
+      "wholeMathlib": false
+    },
+    "coldSerializedCertificates": {
+      "nativeContract": "serialized_bridge_v2",
+      "nativeHandoffManifest": ".lake/search-free-mathlib/snapshots/cold-serialized-bridge-v2-prototype/.lake/bridge-v2/handoff-brznjzkd/manifest.json",
+      "nativeHandoffSha256": "4b257628453bd4b371f1a1887af2127d2500df751013d96c0f8ed450fabbda92",
+      "nativeRootVerification": ".lake/week-2026-08-31/cold-bridge-v2-root-verification.json",
+      "consumerRootVerification": ".lake/week-2026-08-31/cold-consumer-v2-root-verification.json",
+      "mainReport": ".lake/cold-certificate-check-3u9rk0iw/report.json",
+      "mainReportSha256": "acf278a8712dafa570578ad19e18590fe16a9bee8876f48e29b09054eea2b6ab",
+      "mainChecks": 43,
+      "mainFreshStageProcesses": 76,
+      "publicationCandidate": "ordinary-applied only",
+      "sourceCommentProvenanceAccepted": false,
+      "wholeMathlib": false
+    },
+    "localCachedOwner": {
+      "mainReport": "/Users/ptsier/projects/explicit-lean/.lake/local-cached-owner-check/controls-pgzbmdya/report.json",
+      "mainReportSha256": "03cb3c17e481d253ea0c0cdb72528cc288e0c94c6cc79b9952d832d1aa71f000",
+      "mainRootVerification": ".lake/week-2026-08-31/local-cached-main-root-verification.json",
+      "handoffRootVerification": ".lake/week-2026-08-31/local-cached-handoff-root-verification.json",
+      "handoffManifestSha256": "a31f1159fbc847f2fe5bde6096294fe4b6f8968f5efd12bbd9541b01f7695377",
+      "mainCompilerProcesses": 20,
+      "mainWireNegatives": 15,
+      "constantFieldMutations": 13,
+      "scope": "single authentic completed local cached equation root; full structural owner and nested async DAG; no fresh production or nonempty auxiliary-proof cache",
+      "wholeMathlib": false
+    },
+    "localCachedAux": {
+      "status": "integrated_bounded_controls_passed",
+      "handoffRootVerification": ".lake/week-2026-08-31/local-aux-root-verification.json",
+      "mainRootVerification": ".lake/week-2026-08-31/local-aux-main-root-verification.json",
+      "legacyRootVerification": ".lake/week-2026-08-31/local-aux-legacy-root-verification.json",
+      "compilerProcesses": 36,
+      "wireNegatives": 27,
+      "proofTableReconstruction": {
+        "proofs": 80,
+        "nodes": 232,
+        "expandedIdentical": true,
+        "oldBytes": 24497278,
+        "newBytes": 10968930
+      },
+      "guard": "Exact checked proof table, owner and async DAG; cached-only failure callback retains unconditional pending-synthesis barrier. Old v1 remains empty auxiliary contract.",
+      "wholeModule": false,
+      "wholeMathlib": false
+    },
+    "localCachedSequence": {
+      "status": "integrated_main_verified",
+      "handoffRootVerification": ".lake/week-2026-08-31/local-sequence-root-verification.json",
+      "mainRootVerification": ".lake/week-2026-08-31/local-sequence-main-root-verification.json",
+      "auxRegressionVerification": ".lake/week-2026-08-31/local-sequence-aux-root-verification.json",
+      "v1RegressionVerification": ".lake/week-2026-08-31/local-sequence-v1-root-verification.json",
+      "independentReview": ".lake/local-sequence-independent-review.md",
+      "module": "Mathlib/Logic/ExistsUnique.lean",
+      "sourceCalls": 8,
+      "oracleDeclarations": 54,
+      "oraclePublicDeclarations": 41,
+      "oracleExtensions": 30,
+      "wireNegatives": 40,
+      "scope": "Separate local cached root with ordered fresh ordinary helpers; oldemptyauxdescriptor used bysequence, auxiliary flag explicitly threaded only for standalone auxbatch. NoSynthesis retained.",
+      "wholeMathlib": false,
+      "acceptedCampaignCoverage": false
+    },
+    "appliedRecordingDispatcher": {
+      "status": "integrated_bounded_controls_verified",
+      "mainRootVerification": ".lake/week-2026-08-31/forward-dispatcher-main-root-verification.json",
+      "handoffRootVerification": ".lake/week-2026-08-31/forward-dispatcher-root-verification.json",
+      "independentReview": ".lake/forward-dispatcher-independent-review.md",
+      "controls": 12,
+      "inputCheckpoints": 25,
+      "guardedInputs": 649,
+      "fullModule": "Mathlib/AlgebraicTopology/ExtraDegeneracy.lean",
+      "sourceCalls": 24,
+      "declarations": 168,
+      "publicDeclarations": 120,
+      "extensions": 44,
+      "productionReport12Pending": false,
+      "acceptedCampaignCoverage": false
+    },
+    "schema12Invocations": {
+      "status": "integrated_pure_controls_passed_fresh_native_pipeline_pending",
+      "producerDefault": "applied",
+      "historicalReports": "Use frozen consumer; no11/12compatibilitypath",
+      "newPureTests": 6,
+      "existingPureValidators": 4,
+      "fullConsumerTamperingControls": 23,
+      "sourceFileBindings": ".lake/week-2026-08-31/schema12-integration-files.json",
+      "wholeMathlib": false,
+      "acceptedCampaignCoverage": false,
+      "productionSmoke": {
+        "reportSha256": "5164e0121101e84086425d0fa039e2b06dabd3c30ff96f9b9a27f5b546fad145",
+        "rootVerification": ".lake/week-2026-08-31/schema12-smoke-root-verification.json",
+        "modules": 2,
+        "sourceCalls": 26,
+        "variants": 31,
+        "nativeInvocations": 6,
+        "status": "full_production_consumer_independently_verified",
+        "wrapperLimitation": "Extra postcondition used missing totalOccurrences field after production run succeeded; original wrapper error retained, independent verifier checks actual totalCount=26 and all evidence.",
+        "acceptedCampaignCoverage": false
+      }
+    },
+    "cachedCongruenceSequence": {
+      "status": "integrated_production_report12_verified",
+      "handoffManifestSha256": "fc7dde4f31595835845a193fa1a6105d6dd107655860eed08897db136002cf5f",
+      "rootVerification": ".lake/week-2026-08-31/congruence-doc-policy-root-verification.json",
+      "mainBuild": ".lake/congruence-doc-policy-main-build.log",
+      "mainBuildJobs": 31,
+      "boundedModule": "Mathlib/Algebra/Algebra/Subalgebra/Unitization.lean",
+      "sourceCalls": 9,
+      "runtimeNegativeControls": 11,
+      "wireCases": 12,
+      "legacyLocalProcesses": 20,
+      "legacyWireNegatives": 15,
+      "sourceRangePolicy": "V2 canonicalizes only exact registered moduleDocExt DeclarationRange; exact text/count/order retained. Existing default/raw V1 contracts unchanged.",
+      "wholeMathlib": false,
+      "integratedCommit": "3ecc925",
+      "productionVerification": {
+        "report": "/Users/ptsier/projects/explicit-lean/.lake/search-free-mathlib/snapshots/schema12-congruence-campaign/.lake/boundary-materialization/schema12-unitization-_d5lth3_/report.json",
+        "reportSha256": "81efb82790937aa74c1bea8ec996d450e30eae6ffae19c99b63eb31e11c21cfc",
+        "modules": 1,
+        "calls": 9,
+        "variants": 9,
+        "nativeInvocations": 3,
+        "acceptedCampaignCoverage": false,
+        "rootVerification": ".lake/week-2026-08-31/schema12-unitization-root-verification.json"
+      }
+    },
+    "localEquationSequence": {
+      "status": "integrated_production_independently_verified",
+      "handoffRootVerification": ".lake/week-2026-08-31/local-equation-sequence-root-verification.json",
+      "handoffManifestSha256": "2aef0a19c3c700812d0bc10a1cc305c7aa8ba68690c43515b89062e3bbae71e8",
+      "module": "Mathlib/Algebra/CubicDiscriminant.lean",
+      "sourceCalls": 20,
+      "variants": 29,
+      "oracleDeclarations": 147,
+      "oraclePublicDeclarations": 131,
+      "oracleExtensions": 39,
+      "runtimeNegatives": 16,
+      "wireCases": 13,
+      "mainBuildJobs": 32,
+      "acceptedCampaignCoverage": false,
+      "scope": "Exactly fresh safe-local equation followed by authentic completed cached equation from distinct local owner; full owner/DAG/proof/state/snapshot/generator checks. EquationV2 explicitly opts into existing typed document-range policy; old contracts unchanged.",
+      "production": {
+        "commit": "11cfcfd",
+        "report": ".lake/search-free-mathlib/snapshots/schema12-current-campaign/.lake/boundary-materialization/schema12-cubic-f4pe_krk/report.json",
+        "sha256": "f3172ea492b26d0980e407b3a2b6758fa863ddfe98088dbef83f51f2935ef04d",
+        "rootVerification": ".lake/week-2026-08-31/schema12-cubic-root-verification.json",
+        "nativeInvocations": 3,
+        "hashAssertions": 1103
+      }
+    },
+    "freshHelperReferences": {
+      "status": "integrated_bounded_production_independently_verified",
+      "commit": "2b5b9ed1cab94e7e5ed17b919847e715a3b4d813",
+      "module": "Mathlib/Algebra/BigOperators/Group/List/Basic.lean",
+      "calls": 51,
+      "variants": 57,
+      "declarations": 166,
+      "extensions": 22,
+      "typedToAdditiveEntries": 75,
+      "report": ".lake/boundary-materialization/integrated-helper-list-v1/report.json",
+      "reportSha256": "8df0d8942303b91a97de51597b50c3a8f76fda460e5b54dba614412d6e09c89d",
+      "manifestSha256": "21f97075f969f795d0c36ea9a8fa9388a37159aa8d16b8018ec8f66706a147c5",
+      "rootVerification": ".lake/week-2026-08-31/integrated-helper-list-root-verification.json",
+      "negativeControls": 19,
+      "limitation": "No separate synthetic whitelisted definition/opaque fixture; production metadata branch accepts theorem info only.",
+      "acceptedCampaignCoverage": false,
+      "finalIntegratedRegression": {
+        "commit": "451e4577104bdb6cf2d0924d2d92e5168cd407d7",
+        "combinedReport": ".lake/boundary-materialization/final-list-finprod-v1/report.json",
+        "combinedReportSha256": "2e8d1dcb24903df2f7e6ebe2f96fe37ee515c12889df98916217ad9d6c90c7f7",
+        "manifestSha256": "16b9f0bfff0c357944b3e7676475b1a1da25a141d5ce65782c231154f17ccbde",
+        "rootVerification": ".lake/week-2026-08-31/final-list-finprod-root-verification.json",
+        "calls": 51,
+        "variants": 57,
+        "nativeInvocations": 3
+      }
+    },
+    "integratedFinprodRegression": {
+      "status": "post_helper_merge_independently_verified",
+      "commit": "2b5b9ed1cab94e7e5ed17b919847e715a3b4d813",
+      "module": "Mathlib/Algebra/BigOperators/Finprod.lean",
+      "calls": 45,
+      "variants": 45,
+      "declarations": 352,
+      "extensions": 34,
+      "report": ".lake/boundary-materialization/integrated-finprod-v1/report.json",
+      "reportSha256": "5098a575798a916fdf458ff00a3dfa616fa617d4dbd656eedb08fb6c3e087343",
+      "manifestSha256": "c86ed1f8b2440bc6d93f28b22e4a6baac2e082553349f4be7909e11f8e3912d6",
+      "rootVerification": ".lake/week-2026-08-31/integrated-finprod-root-verification.json",
+      "acceptedCampaignCoverage": false,
+      "finalIntegratedRegression": {
+        "commit": "451e4577104bdb6cf2d0924d2d92e5168cd407d7",
+        "combinedReport": ".lake/boundary-materialization/final-list-finprod-v1/report.json",
+        "combinedReportSha256": "2e8d1dcb24903df2f7e6ebe2f96fe37ee515c12889df98916217ad9d6c90c7f7",
+        "rootVerification": ".lake/week-2026-08-31/final-list-finprod-root-verification.json",
+        "calls": 45,
+        "variants": 45,
+        "nativeInvocations": 3
+      }
+    },
+    "inlineFirstRenderer": {
+      "status": "integrated_self_contained_regression_passed",
+      "commits": [
+        "2a7db88",
+        "237d539",
+        "3a6ae82"
+      ],
+      "checker": "Experiment/check_inline_first_renderer.py",
+      "scope": "Grouped selector tactic under inline and nested first/try; single/multiple variants, failure, UTF-8 and original comments.",
+      "acceptedCampaignCoverage": false,
+      "receipt": ".lake/inline-first-renderer-handoff/run-HlEB6B7-mU33LeOYvMKyJG8Y6Lo_X1q5L5oy4L3eIT8/fresh-receipt.json",
+      "receiptSha256": "1843039c80f1952ebd20019f7753700ea6c466293366e841233c4ff62d469ec2",
+      "fullSourceGate": "17 occurrences materialized, one explicit unobserved, zero remaining"
+    },
+    "descriptorSizeGuard": {
+      "status": "integrated_known_successes_verified",
+      "commit": "451e457",
+      "limitBytes": 16777216,
+      "extraDegeneracyPayloadBytes": 11015063,
+      "unitizationHistoricalNodeJsonBytes": 71368653,
+      "mainOwnerProcesses": 20,
+      "mainAuxiliaryRecords": 16,
+      "rootVerification": ".lake/week-2026-08-31/integrated-aux-guard-root-verification.json",
+      "rootVerificationSha256": "08cd9e26dcd5587ffb9f6ad376f1f0dddc7e561c7ab9568fe2868e1b92610184",
+      "policy": "Cumulative unique serialized DAG nodes; fail closed, never truncate or project.",
+      "limitation": "No fresh over-limit runtime negative; Unitization measurement is preserved historical evidence and the module was not rerun.",
+      "acceptedCampaignCoverage": false
+    },
+    "manualOverrideComposition": {
+      "status": "full_database_composition_verified_bounded",
+      "modules": 6,
+      "manualOverrides": 8,
+      "remainingCallsMaterialized": 55,
+      "retainedCalls": 0,
+      "report": ".lake/week-2026-08-31/manual-composition/run-_37r_lka/report.json",
+      "reportSha256": "c5a80a755b0f05fa0683d7bf6f5b5dbd3b3c644535799daeb397ad93b7a400b6",
+      "rootVerification": ".lake/week-2026-08-31/manual-composition/run-_37r_lka/root-verification.json",
+      "rootVerificationSha256": "97fd1e83bf3f03290354cc465b1ab1f303d7b8edff32517de02cb402010af5ce",
+      "evidenceFiles": 99,
+      "evidenceTreeSha256": "f3bce0b7dd7e268aac8fcb4d7e64f6df82560e728183fbba9b4651b7ee96b8f6",
+      "oracleControls": {
+        "accepted": 15,
+        "failClosed": 26
+      },
+      "generatedProofPolicy": "Exact `_proof_<digits>` or `congr_simp`, no direct declaration range, proof-valued, existing owner; authored lookalikes remain observable.",
+      "acceptedCampaignCoverage": false,
+      "wholeMathlib": false
+    },
+    "manualOverlay": {
+      "manifest": ".lake/week-2026-08-31/schema13-overlay-full-manifest.json",
+      "manifestSha256": "60dc663ee3339bffafe53ebe58b1b7d804a67783bc14be5ad9236f856d63430c",
+      "databaseSha256": "1dfde349f62ddbb42bf202461f30afeb0d15fe0f752a4fae4944637c04e98d06",
+      "workerVerification": ".lake/week-2026-08-31/schema13-overlay-manual-worker-root-verification.json",
+      "wholeMathlib": false
+    }
+  },
+  "failureTriage": {
+    "command": "python3 Experiment/campaign_failures.py",
+    "latestReport": ".lake/week-2026-08-31/failure-families.json",
+    "scope": "Diagnostic family grouping only; preserves implementation identities and log hashes, not proof of common root cause.",
+    "v9NewFamilies": {
+      "Mathlib/Data/List/TakeDrop.lean": "known boundary_matcher_equation_state_conflict:capture-complete-local",
+      "Mathlib/Data/List/ReduceOption.lean": "new boundary_realization_caller_after_conflict in generic v1 final caller state",
+      "Mathlib/Data/List/NatAntidiagonal.lean": "new boundary_local_cached_after in direct local-cache final caller state",
+      "next": "Add diagnostic-only expected/actual match/equation/sparse details and adversarial rejection controls before semantic changes."
+    }
+  },
+  "frontierFailurePlan": {
+    "frozenImplementation": "7839c0f",
+    "scope": "six failed roots from schema8 frontier; diagnostic grouping only",
+    "modules": {
+      "Mathlib/Order/Interval/Set/Defs.lean": "declaration oracle name mismatch; retest helper+generator fix",
+      "Mathlib/Data/List/ModifyLast.lean": "Fresh main observer+mixed runtime: all5calls record/apply, 16declarations/9public/19extension states compare, remaining0. Source/comments regenerated; provisional under cold-output/translated-tree acceptance hold. .lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+      "Mathlib/Data/String/Lemmas.lean": "matcher equation capture-complete-local state mismatch",
+      "Mathlib/Data/Int/Init.lean": "Main bounded7-site/148-declaration pipeline passes; strict actual-import remaining scan0. Await fresh closed schema9 report.",
+      "Mathlib/Data/List/Lookmap.lean": "Fresh main observer+mixed runtime: all10calls record/apply, 33declarations/20public/22extension states compare, remaining0. Source/comments regenerated; provisional under cold-output/translated-tree acceptance hold. .lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+      "Mathlib/Control/Basic.lean": "Fresh main observer+mixed runtime: all16calls record/apply, 62declarations/56public/39extension states compare, remaining0. Source/comments regenerated; provisional under cold-output/translated-tree acceptance hold. .lake/week-2026-08-31/module-data-observation-main-root-verification.json",
+      "Mathlib/Data/Nat/Basic.lean": "Fresh observer+mixed main7calls pass;28decl24public23extensionstates,remaining0. Root610hashes/7artifacts/2nonces verified. Provisional under search-barrier/translated-tree hold; .lake/week-2026-08-31/mixed-observer-nat-basic-root-verification.json"
+    }
+  },
+  "storage": {
+    "minimumFreeBytes": 12884901888,
+    "policy": "Check output-volume free space before index planning and every module claim. Pause without cleanup if below reserve or telemetry fails. Active modules may finish; preserve evidence.",
+    "lastFreeBytes": 48586747904,
+    "checkedAt": "2026-09-02T11:12:29.361543+00:00",
+    "command": "campaign_worker.py --minimum-free-bytes (default12GiB)",
+    "losslessCertificateStorage": {
+      "command": "python3 Experiment/certificate_storage.py /absolute/path/to/receipt.json",
+      "stage": "Completed unpublished certificate only; verify before/after; callbeforepublication in futurefrozencone runner.",
+      "scope": "Exact originalbytes/alllogicalpaths; stock/appliedgroups separate; no receipt changes, no sharedpackage mutation, no automatic existingevidence cleanup.",
+      "rootVerification": ".lake/week-2026-08-31/certificate-storage-root-verification.json",
+      "accounting": "Reported uniqueinode bytes are not measured APFSphysicalallocation."
+    }
+  },
+  "updatedAt": "2026-09-02T11:12:29.361543+00:00",
+  "scopeQuestion": {
+    "askedAt": "2026-08-31T18:08:49.612907+00:00",
+    "status": "awaiting_optional_user_steering",
+    "question": "Must exported simp-based tactics preserve unrestricted future behavior, or may their API change if the pinned Mathlib corpus is fully translated and checked?",
+    "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
+  },
+  "productionPlan": {
+    "eligibleOrdinaryModules": 6280,
+    "reusableOrMixedModules": 40,
+    "workers": 1,
+    "pilotModules": 1,
+    "productionBatchModules": 500,
+    "moduleTimeoutSeconds": 900,
+    "batchWallSeconds": 21600,
+    "minimumFreeBytes": 12884901888,
+    "projectedEvidenceGiB": "8-10 including retries",
+    "policy": "Generate and authenticate exact-HEAD v10 only after >=12GiB memory/disk admission; atomically bootstrap the v9 index or verify an exact v10 resume; run a fresh NeZero pilot, then one closure-ordered v10 supervisor with fixed dual locks, unique immutable input/output labels, manual-overlay identity, same-pass exit125 continuation, and incremental cache/evidence revalidation. Preserve all evidence and diagnose semantic families before retry."
+  },
+  "v10Supervisor": {
+    "status": "integrated_reviewed_waiting_resource_admission",
+    "integratedHead": "400eec04b1d6d470e0b07ceaef35366a63f9889d",
+    "workerCommits": [
+      "2857b9f",
+      "f93c9d9"
+    ],
+    "supervisorCommits": [
+      "c4e9628",
+      "78e0044",
+      "e43152a",
+      "295bb76",
+      "2268a51",
+      "da55435",
+      "49a4e5b",
+      "400eec0"
+    ],
+    "checks": {
+      "supervisor": 15,
+      "worker": 33,
+      "translationIndex": 13,
+      "mainSupervisorRerun": 15,
+      "pyCompile": true,
+      "treeEqualToReviewedCandidate": true
+    },
+    "behavior": "Exit125 abandons/requeues the current module without a semantic cache result and continues to the next distinct planned module after all admission rechecks. Exact v9-to-v10 or v10-resume bootstrap uses fresh immutable invocation inputs, manual-overlay identity, fixed dual locks, durable cache/evidence validation, and bounded wall time.",
+    "publicationHold": "Do not generate/import/pilot/launch until fresh free-memory telemetry is at least 12884901888 bytes.",
+    "reviewResidualThreatModel": "Standard local cooperative-process model. O_NOFOLLOW and inode checks reject stale symlinks and ordinary races; a hostile same-user process deliberately replacing a held lock inode is out of scope. Large evidence files use inode/size/mtime metadata on the fast path; ordinary mutation/deletion/addition is rejected, while adversarial same-size mutation with restored nanosecond mtime is out of scope under the frozen-evidence rule."
+  },
+  "v9SupervisorStop": {
+    "status": "intentional_idle_stop",
+    "recordedAt": "2026-09-02T10:40:26.188836+00:00",
+    "reason": "No child or lease; sustained wait below unchanged 12GiB reserve; release memory for reviewed v10 path.",
+    "attempts": {
+      "success": 190,
+      "failure": 17,
+      "abandoned": 172
+    },
+    "logSha256": "a7ce8dcb10601d35c1b061a1527f08f5c4c4e7a0d20f008c780a0cb6eb177784",
+    "evidence": ".lake/week-2026-08-31/schema13-v9-supervisor-v103-intentional-stop.json"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "kind": "read_only_overlay_size_measurement",
+  "head": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
+  "scriptSha256": "aedc0f9510ab7ddd9ad1b1239a7ab731fe9714c1c016606316e32c33319d4a8b",
+  "results": [
+    {
+      "baselineRssBytes": 21250048,
+      "identity": {
+        "counts": {
+          "canonicalOccurrences": 83627,
+          "manualOverrides": 16,
+          "modules": 8264,
+          "untouchedOccurrences": 83611
+        },
+        "database": {
+          "environment": {
+            "lean": {
+              "commit": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
+              "version": "4.32.2"
+            },
+            "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c"
+          },
+          "schema": 1,
+          "sha256": "37907d683c09ad2fae534bc0f899af45abe16dfb115de83dd6f5a0b49abf7820"
+        },
+        "environment": {
+          "lean": {
+            "commit": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
+            "version": "4.32.2"
+          },
+          "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c"
+        },
+        "kind": "simp_manual_overlay",
+        "schema": 2
+      },
+      "loadSeconds": 3.3271887502633035,
+      "loadedModules": 8264,
+      "loadedOccurrences": 83627,
+      "manifestSha256": "6d33d5eae0abdf7203040dcf24fccbbf5b9d8b999fe028841cb31c50a07b4dd3",
+      "mode": "full",
+      "overrideCount": 16,
+      "peakRssBeforeSizeBytes": 1523892224,
+      "reachableObjects": 5087526,
+      "reachablePythonBytes": 503596861,
+      "retainedRssBytes": 622477312,
+      "rssIncrementBytes": 601227264,
+      "sourceBytes": 96127495,
+      "observedPeakRssBytes": 1523892224
+    },
+    {
+      "baselineRssBytes": 21479424,
+      "identity": {
+        "counts": {
+          "canonicalOccurrences": 83627,
+          "manualOverrides": 16,
+          "modules": 8264,
+          "untouchedOccurrences": 83611
+        },
+        "database": {
+          "environment": {
+            "lean": {
+              "commit": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
+              "version": "4.32.2"
+            },
+            "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c"
+          },
+          "schema": 1,
+          "sha256": "37907d683c09ad2fae534bc0f899af45abe16dfb115de83dd6f5a0b49abf7820"
+        },
+        "environment": {
+          "lean": {
+            "commit": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
+            "version": "4.32.2"
+          },
+          "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c"
+        },
+        "kind": "simp_manual_overlay",
+        "schema": 2
+      },
+      "loadSeconds": 1.3847964997403324,
+      "loadedModules": 14,
+      "loadedOccurrences": 216,
+      "manifestSha256": "6d33d5eae0abdf7203040dcf24fccbbf5b9d8b999fe028841cb31c50a07b4dd3",
+      "mode": "sparse",
+      "overrideCount": 16,
+      "peakRssBeforeSizeBytes": 1524252672,
+      "reachableObjects": 13250,
+      "reachablePythonBytes": 1269090,
+      "retainedRssBytes": 37011456,
+      "rssIncrementBytes": 15532032,
+      "sourceBytes": 204046,
+      "observedPeakRssBytes": 1524252672
+    }
+  ],
+  "limitation": "Object size is reachable Python heap, not peak or exclusively retained memory during real production. RSS after release is measured in isolated fresh processes. No production pipeline or Lean compiler invoked.",
+  "identityEqual": true,
+  "reachableReductionBytes": 502327771,
+  "rssIncrementReductionBytes": 585695232
+}

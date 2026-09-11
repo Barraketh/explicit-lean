@@ -1,7 +1,9 @@
 # Simprocs under boundary-state replacement
 
-[PLAN.md](PLAN.md) is the authoritative correctness contract. This document
-records only the simproc-specific evidence and risks relevant to that contract.
+[HANDOFF.md](HANDOFF.md) is the current entry point; [PLAN.md](PLAN.md) supplies
+the boundary design background. This document records simproc-specific evidence
+and risks, including historical prototype observations rather than current
+coverage counts.
 The detailed schema-27 semantic models are historical and are described in
 [SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md).
 

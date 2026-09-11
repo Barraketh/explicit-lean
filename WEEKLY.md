@@ -1,5 +1,12 @@
 # Search-free Mathlib: August 31–September 8, 2026
 
+> Historical campaign brief. The deadline has passed and the goal is incomplete.
+> Start with [HANDOFF.md](HANDOFF.md) for September 10 status and next work.
+> The acceptance criteria below remain applicable. The original launch sequence,
+> local-only campaign scheduling and ownership statements describe that earlier
+> run; current AWS preparation and unresolved launch limits are recorded in the
+> handoff and [campaign tracker](tracking/campaign.json).
+
 ## User objective and authority
 
 By the user's return on September 8, deliver a buildable version of pinned

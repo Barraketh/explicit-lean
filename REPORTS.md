@@ -1,5 +1,11 @@
 # Durable report storage
 
+> Archive conventions and historical S3 setup. Start with [HANDOFF.md](HANDOFF.md)
+> for current evidence locations. The latest v10 reports and memory measurements
+> are local under `.lake`; this document does not establish that they were
+> uploaded. Bucket configuration and access have not been rechecked for the
+> September 10 handoff. Do not run the upload procedure merely to get started.
+
 The shared archive for Explicit Lean validation reports is the private S3
 bucket:
 

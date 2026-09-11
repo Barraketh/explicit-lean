@@ -4,8 +4,8 @@
 > This document specifies the operational recorder/replayer currently present
 > in the repository. It is retained for regression review and engineering
 > evidence. It is not the correctness contract or roadmap for the active
-> boundary-state translator. [PLAN.md](PLAN.md) is authoritative, and
-> [README.md](README.md) explains the distinction for new implementers.
+> boundary-state translator. Start with [HANDOFF.md](HANDOFF.md); use
+> [PLAN.md](PLAN.md) for historical boundary design background.
 
 Pinned engine: Lean 4.32.2, commit
 `f3b06c705e6c85f5314019d5d3baab0fec5b580c`

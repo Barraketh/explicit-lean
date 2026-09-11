@@ -1,8 +1,11 @@
 # Project status
 
-The current campaign status is in [tracking/STATUS.md](tracking/STATUS.md).
-Its accepted and provisional counts are derived from the durable occurrence index
-and the active validation hold in [tracking/campaign.json](tracking/campaign.json).
+Start with [HANDOFF.md](HANDOFF.md).
 
-The objective, deadline, budget policy, and acceptance criteria are in
-[WEEKLY.md](WEEKLY.md).
+- [Current status](tracking/STATUS.md): coverage, blockers and next milestone.
+- [Campaign tracker](tracking/campaign.json): active policy and task state.
+- [Portable evidence summary](tracking/handoff-snapshot.json): reviewed v10
+  counts, 62 failure diagnostics and 15 suggested pilot modules.
+
+The original September 8 campaign ended without complete translated-tree
+acceptance. Its historical tracker is preserved under [tracking/archive/](tracking/archive/).

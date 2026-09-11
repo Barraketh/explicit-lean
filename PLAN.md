@@ -1,15 +1,15 @@
-# Explicit Lean roadmap
+# Boundary design and historical roadmap
 
-The August 31–September 8 delivery objective in [WEEKLY.md](WEEKLY.md) now
-governs active work: complete search-free replacement, originals preserved as
-comments, then readability. The user permits revising the implementation choices
-below. Current ownership and progress are in `tracking/campaign.json`.
+> Reference material, not the current startup plan. Read [HANDOFF.md](HANDOFF.md)
+> first. The goal and semantic principles below explain the design; the original
+> implementation-status sections, counts, schemas and proposed experiments are
+> historical. Current state is in [tracking/STATUS.md](tracking/STATUS.md).
+> The user's current instructions and the acceptance criteria in
+> [WEEKLY.md](WEEKLY.md) supersede conflicting older implementation choices.
 
-This document is the authoritative product and engineering contract. The
-existing schema-27 implementation is retained as legacy evidence; its frozen
-contract in [SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md) does not override
-this plan. See [README.md](README.md) for setup, repository orientation, and
-terminology.
+The existing schema-27 implementation is retained as legacy evidence. Its
+frozen contract in [SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md) does not
+describe the active boundary-state translator.
 
 ## Goal and scope
 

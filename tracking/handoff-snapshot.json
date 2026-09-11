@@ -1,0 +1,690 @@
+{
+  "schema": 1,
+  "kind": "handoff_review_snapshot",
+  "checkedAt": "2026-09-11T01:48:29.252368+00:00",
+  "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
+  "sourceRun": "schema13 v10 Mac campaign, completed September 8",
+  "scope": "Portable review summary, not a translation acceptance certificate or authorization to dispatch. No Lean compilation or recursive evidence verification was rerun for this snapshot.",
+  "manifest": {
+    "path": ".lake/week-2026-08-31/schema13-isolated-closed-manifest-v10.json",
+    "sha256": "6d33d5eae0abdf7203040dcf24fccbbf5b9d8b999fe028841cb31c50a07b4dd3",
+    "repositoryCommit": "092a8af810e546f54ead239b5f4e124cc4bc5442",
+    "mathlibCommit": "905b95818eb32af7874a58b427f50c1711a5e96c",
+    "modules": 8264,
+    "occurrences": 83627,
+    "directExecutableOccurrences": 83556,
+    "reusableExecutableOccurrences": 71
+  },
+  "handoffReceipt": {
+    "path": ".lake/week-2026-08-31/schema13-v10-handoff-scope-20260908T0640Z.json",
+    "sha256": "ef724074c7ea36f1774ef56d13b1f2cff71ce827811810c1588a62b9df8bb2bf"
+  },
+  "successfulReports": {
+    "modules": 529,
+    "occurrences": 2063,
+    "variants": 2227,
+    "allReportHashesAndSummaryFlagsRechecked": true,
+    "implementationIdentitySha256": "a2c15cf4be12d2c900a67074668e1fc23ced579da2bde97277cbd4f515551641"
+  },
+  "acceptedTranslatedTree": {
+    "modules": 0,
+    "occurrences": 0,
+    "complete": false
+  },
+  "queueStates": {
+    "failed": 2,
+    "queued": 5751,
+    "stale": 5,
+    "succeeded": 529
+  },
+  "activeAttempts": [],
+  "v10Attempts": {
+    "abandoned": 1632,
+    "failure": 62,
+    "success": 529
+  },
+  "currentCachedFailureCount": 62,
+  "failureCaveat": "These 62 results belong to the same archived v10 implementation identity as the successes. They are queued, so campaign_failures.py misses them. Diagnostic families are hints, not proven common causes. Importer sets overlap.",
+  "pilotCandidates": [
+    {
+      "module": "Mathlib/Algebra/Homology/CommSq.lean",
+      "baseline": "successful_module_report",
+      "occurrences": 20
+    },
+    {
+      "module": "Mathlib/Algebra/BigOperators/Group/Finset/Piecewise.lean",
+      "baseline": "successful_module_report",
+      "occurrences": 18
+    },
+    {
+      "module": "Mathlib/Algebra/Ring/GeomSum.lean",
+      "baseline": "successful_module_report",
+      "occurrences": 18
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Monoidal/Cartesian/Over.lean",
+      "baseline": "successful_module_report",
+      "occurrences": 17
+    },
+    {
+      "module": "Mathlib/Control/Applicative.lean",
+      "baseline": "successful_module_report",
+      "occurrences": 17
+    },
+    {
+      "module": "Mathlib/Topology/QuasiSeparated.lean",
+      "baseline": "memory_guard_exit_125",
+      "attemptId": 3280
+    },
+    {
+      "module": "Mathlib/Topology/Convenient/OpenClosed.lean",
+      "baseline": "memory_guard_exit_125",
+      "attemptId": 3279
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Sites/Precoverage/Generates.lean",
+      "baseline": "memory_guard_exit_125",
+      "attemptId": 3278
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Sites/Hypercover/SheafOfTypes.lean",
+      "baseline": "memory_guard_exit_125",
+      "attemptId": 3277
+    },
+    {
+      "module": "Mathlib/Topology/NoetherianSpace.lean",
+      "baseline": "memory_guard_exit_125",
+      "attemptId": 3276
+    },
+    {
+      "module": "Mathlib/Logic/Relation.lean",
+      "baseline": "semantic_or_unsupported_failure",
+      "transitiveImporters": 7700,
+      "familyHint": "activation_nonempty_aux_cache"
+    },
+    {
+      "module": "Mathlib/Data/Nat/Init.lean",
+      "baseline": "semantic_or_unsupported_failure",
+      "transitiveImporters": 7605,
+      "familyHint": "boundary_forward_post_generator_mismatch"
+    },
+    {
+      "module": "Mathlib/Logic/IsEmpty/Basic.lean",
+      "baseline": "semantic_or_unsupported_failure",
+      "transitiveImporters": 7534,
+      "familyHint": "boundary_sequence_multiple_helpers_unsupported"
+    },
+    {
+      "module": "Mathlib/Order/Compare.lean",
+      "baseline": "semantic_or_unsupported_failure",
+      "transitiveImporters": 7451,
+      "familyHint": "boundary_local_sequence_root_shape"
+    },
+    {
+      "module": "Mathlib/Data/Set/Restrict.lean",
+      "baseline": "semantic_or_unsupported_failure",
+      "transitiveImporters": 7154,
+      "familyHint": "boundary_cached_congruence_requires_sequence"
+    }
+  ],
+  "failures": [
+    {
+      "module": "Mathlib/Algebra/ContinuedFractions/Computation/Basic.lean",
+      "queueState": "queued",
+      "transitiveImporters": 6,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='a7c1f87ee54dcb25', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-19-1788801664260708000-46f80eac10a74aee83f91ddd95374376/Algebra-ContinuedFractions-Computation-Basic-2318.log",
+      "logSha256": "c69cd2444061b36be4794e4f0e34171b3e6cb12dfa18ab87b798a2a2ba2f2b36"
+    },
+    {
+      "module": "Mathlib/Algebra/Module/Submodule/Invariant.lean",
+      "queueState": "queued",
+      "transitiveImporters": 2818,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='c794083ba1c0e3c9', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-28-1788827087392915000-92b6eff79d434731a7a6fe41ca8d0055/Algebra-Module-Submodule-Invariant-3129.log",
+      "logSha256": "bbcc99bc7c60bfa22dbdedaecd5ab19799cc65451afb540ad7a7e510383bbd9f"
+    },
+    {
+      "module": "Mathlib/Algebra/Order/Antidiag/Finsupp.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1678,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='bd201a8f27e0c9e1', stage='post_stock', detail=activation_nonempty_aux_cache",
+      "familyHint": "activation_nonempty_aux_cache",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-28-1788827087392915000-92b6eff79d434731a7a6fe41ca8d0055/Algebra-Order-Antidiag-Finsupp-3119.log",
+      "logSha256": "53ddb6393d9c4bec5c1a2c91d0f089a425dd36ffc168c45790cb8999d9ddfb1b"
+    },
+    {
+      "module": "Mathlib/Algebra/Order/Group/Defs.lean",
+      "queueState": "queued",
+      "transitiveImporters": 4850,
+      "diagnostic": "boundary materialization shard failed: declaration oracle failed for Mathlib/Algebra/Order/Group/Defs.lean: environment_delta_mismatch: to_additive translation has no source declaration: LinearOrderedCommGroup; see /Users/ptsier/projects/explicit-lean/.lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1725Z-pass-6-1788369808750696000-bab7565c213b45f697fccfa74b6dc1d0/Algebra-Order-Group-Defs-1295-run/Algebra-Order-Group-Defs/declaration-oracle.log",
+      "familyHint": "oracle_or_other",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1725Z-pass-6-1788369808750696000-bab7565c213b45f697fccfa74b6dc1d0/Algebra-Order-Group-Defs-1295.log",
+      "logSha256": "ccb7878e4653e41f19d0de1f06ae5c0bf84fcf5cd9b7f2ab2f8d15a201a06151"
+    },
+    {
+      "module": "Mathlib/Algebra/Order/Group/Nat.lean",
+      "queueState": "queued",
+      "transitiveImporters": 4870,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='11da6cd0d8bab260', stage='post_stock', detail=boundary_local_theorems_cache_conflict:local",
+      "familyHint": "boundary_local_theorems_cache_conflict",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1725Z-pass-6-1788369808750696000-bab7565c213b45f697fccfa74b6dc1d0/Algebra-Order-Group-Nat-1321.log",
+      "logSha256": "4c8e676cba27263b604def0993f35210c132a004d54878cd1651602fd0b02c96"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Category/PartialFun.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='e6de51de43d61f9d', stage='post_stock', detail=boundary_comparison_unsupported_synthetic_coe",
+      "familyHint": "boundary_comparison_unsupported_synthetic_coe",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T0712Z-pass-12-1788765169293314000-d2543ce4d7674eb5bece6d7f377d0393/CategoryTheory-Category-PartialFun-1910.log",
+      "logSha256": "821e5ab8165bd83c3c8f71bf4c11c0f063c5dd0d8b40ca7719de9e1740df9901"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Functor/KanExtension/Adjunction.lean",
+      "queueState": "queued",
+      "transitiveImporters": 509,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='bacfdd72f780deb7', stage='post_stock', detail=boundary_forward_post_generator_mismatch",
+      "familyHint": "boundary_forward_post_generator_mismatch",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/CategoryTheory-Functor-KanExtension-Adjunction-2162.log",
+      "logSha256": "27df14fcb79162d32d7fded4e699fa09226018e5b9846b4580ed851df83bfd25"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Groupoid/FreeGroupoidOfCategory.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='fea83bf91b7be49c', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/CategoryTheory-Groupoid-FreeGroupoidOfCategory-2565.log",
+      "logSha256": "c86cfb21bfcac1b920d22bbf8650494245ee38bd9dfe6a583e9ddbce8f6550b9"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Limits/Connected.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1047,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='ec3aa504e306a920', stage='post_stock', detail=boundary_theorem_existing_declaration_conflict",
+      "familyHint": "boundary_theorem_existing_declaration_conflict",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/CategoryTheory-Limits-Connected-2182.log",
+      "logSha256": "3c77e2d5b68a1a8ab88147294f76aa24225d861ab56575eefbf8e2057cb8864e"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Limits/Indization/LocallySmall.lean",
+      "queueState": "queued",
+      "transitiveImporters": 6,
+      "diagnostic": "boundary materialization shard failed: declaration oracle failed for Mathlib/CategoryTheory/Limits/Indization/LocallySmall.lean: declaration_set_mismatch: non-private declaration name set differs; stockCount=8; appliedCount=8; stockOnlyCount=1; appliedOnlyCount=1; stockOnly=[CategoryTheory.hint._@.Mathlib.CategoryTheory.Limits.Indization.LocallySmall.2896761628._hygCtx._hyg.13]; appliedOnly=[CategoryTheory.hint._@.Mathlib.CategoryTheory.Limits.Indization.LocallySmall.3593626713._hygCtx._hyg.13]; see /Users/ptsier/projects/explicit-lean/.lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-32-1788838347094219000-96b2f3b9aa0a4e38971e3733baa11629/CategoryTheory-Limits-Indization-LocallySmall-3215-run/CategoryTheory-Limits-Indization-LocallySmall/declaration-oracle.log",
+      "familyHint": "oracle_or_other",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-32-1788838347094219000-96b2f3b9aa0a4e38971e3733baa11629/CategoryTheory-Limits-Indization-LocallySmall-3215.log",
+      "logSha256": "92a7ee71266fbac78b132e785785e30708a8830b06f93d948a3658f3dd0234aa"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Limits/Preserves/Shapes/AbelianImages.lean",
+      "queueState": "queued",
+      "transitiveImporters": 90,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='9a4a698e3db13cf7', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/CategoryTheory-Limits-Preserves-Shapes-AbelianImages-2199.log",
+      "logSha256": "4668aee22828dd73d863dbc86faae151d40ab0bc0e46b7a90d8414831b47d1bf"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Limits/Preserves/Shapes/Multiequalizer.lean",
+      "queueState": "queued",
+      "transitiveImporters": 45,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='1f93eebc73da263d', stage='post_stock', detail=boundary_local_cached_only",
+      "familyHint": "boundary_local_cached_only",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/CategoryTheory-Limits-Preserves-Shapes-Multiequalizer-2158.log",
+      "logSha256": "bc486f68dfedeffb16332df264076f42c78c690be22c083d23d530bdd0aa7485"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Limits/Types/Coproducts.lean",
+      "queueState": "queued",
+      "transitiveImporters": 380,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='2dc6da1b8821e87a', stage='post_stock', detail=boundary_comparison_unpaired_fresh_constant",
+      "familyHint": "boundary_comparison_unpaired_fresh_constant",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/CategoryTheory-Limits-Types-Coproducts-2206.log",
+      "logSha256": "195f53905dbb7add0d0408b4e0324a7162cdaacd215a2a8cc1bbc0e39fc21d1d"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Limits/Types/Images.lean",
+      "queueState": "queued",
+      "transitiveImporters": 713,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='e710d54ac098bbc7', stage='post_stock', detail=boundary_comparison_unpaired_fresh_expression_mvar:goals[0].target",
+      "familyHint": "boundary_comparison_unpaired_fresh_expression_mvar",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/CategoryTheory-Limits-Types-Images-2201.log",
+      "logSha256": "270cfc43076b160e5b42b4af934b9f2f686cd568564c9e78ddb872d238fa51e0"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Localization/Adjunction.lean",
+      "queueState": "queued",
+      "transitiveImporters": 265,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='7fb6f58ab1bf375d', stage='post_stock', detail=boundary_sequence_ambiguous_or_missing_cover",
+      "familyHint": "boundary_sequence_ambiguous_or_missing_cover",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T0712Z-pass-12-1788765169293314000-d2543ce4d7674eb5bece6d7f377d0393/CategoryTheory-Localization-Adjunction-1994.log",
+      "logSha256": "a95301f74f5840d293ef305bc497f616607e71c22478e947f91dbc0838f7e05b"
+    },
+    {
+      "module": "Mathlib/CategoryTheory/Monoidal/Braided/Reflection.lean",
+      "queueState": "queued",
+      "transitiveImporters": 3,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='861c793f638c4136', stage='post_stock', detail=boundary_local_theorem_reserved_name",
+      "familyHint": "boundary_local_theorem_reserved_name",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-19-1788801664260708000-46f80eac10a74aee83f91ddd95374376/CategoryTheory-Monoidal-Braided-Reflection-2297.log",
+      "logSha256": "e5a54d8952feddb2e768bda60bc344e4ffce76a0d5a30f3425b1b29482abd2ee"
+    },
+    {
+      "module": "Mathlib/Combinatorics/Additive/SubsetSum.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='acf8d55ce5e6ee68', stage='post_stock', detail=boundary_local_theorem_reserved_name",
+      "familyHint": "boundary_local_theorem_reserved_name",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/Combinatorics-Additive-SubsetSum-2563.log",
+      "logSha256": "f70448d8b193b8a819c8b9e2946083022f2663e3b6d6aa95c637a01f0ca376c8"
+    },
+    {
+      "module": "Mathlib/Combinatorics/SetFamily/Shatter.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='371fb45df0ec7f0b', stage='post_stock', detail=boundary_cached_congruence_requires_sequence",
+      "familyHint": "boundary_cached_congruence_requires_sequence",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/Combinatorics-SetFamily-Shatter-2541.log",
+      "logSha256": "ff38f74aa37be9aac22c00df7e0ff56afb7b1f103f3855bf62f8cebaccc95e06"
+    },
+    {
+      "module": "Mathlib/Combinatorics/SimpleGraph/Coloring/EdgeLabeling.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='5b064b1123abf3ff', stage='post_stock', detail=boundary_comparison_unpaired_fresh_constant",
+      "familyHint": "boundary_comparison_unpaired_fresh_constant",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/Combinatorics-SimpleGraph-Coloring-EdgeLabeling-2572.log",
+      "logSha256": "4fa99e07375bc164cb8b6e8e17b5d35324eb5700dfca22a3c32f7856bccfab0c"
+    },
+    {
+      "module": "Mathlib/Control/Functor.lean",
+      "queueState": "queued",
+      "transitiveImporters": 6349,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='42ebb61bf919b7a0', stage='post_stock', detail=boundary_local_equation_sequence_cover",
+      "familyHint": "boundary_local_equation_sequence_cover",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-20260902T1418Z-pass-1-1788358538292003000-cd612eb8b1164ff19c36c9d3cd572033/Control-Functor-1079.log",
+      "logSha256": "3abfb580e984e83a2e507df914d5aa211afbcd74a26502ae37f920d05c0b9061"
+    },
+    {
+      "module": "Mathlib/Data/Finset/NatDivisors.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary replay abort: occurrence='e81326614b2c7e74', stage='select', detail=boundary_variant_missing: actualState={ targetFingerprint := \"targets-v1:12312871327349025143\",",
+      "familyHint": "boundary_variant_missing",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-32-1788838347094219000-96b2f3b9aa0a4e38971e3733baa11629/Data-Finset-NatDivisors-3189.log",
+      "logSha256": "fa33375d59982d8548b9c9edf22db7c9508874b8a1b3ab258e7edd9ca789d73b"
+    },
+    {
+      "module": "Mathlib/Data/Int/WithZero.lean",
+      "queueState": "queued",
+      "transitiveImporters": 80,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='6bd37fca2679fd94', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-32-1788838347094219000-96b2f3b9aa0a4e38971e3733baa11629/Data-Int-WithZero-3205.log",
+      "logSha256": "8fdb4f8844c72940022216248fa87daea70c91ba4f53b0ec302adf688f564b45"
+    },
+    {
+      "module": "Mathlib/Data/List/Indexes.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='8cb0579a53dfe956', stage='post_stock', detail=boundary_matcher_equation_state_conflict:capture-complete-local",
+      "familyHint": "boundary_matcher_equation_state_conflict",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-20260902T1418Z-pass-1-1788358538292003000-cd612eb8b1164ff19c36c9d3cd572033/Data-List-Indexes-1086.log",
+      "logSha256": "904435eba3943e59232e72d99096b75b668ff9f401b31d7ffa991af711ee5521"
+    },
+    {
+      "module": "Mathlib/Data/List/PeriodicityLemma.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='d74cd6dd7dbec052', stage='post_stock', detail=boundary_local_theorems_cache_conflict:local",
+      "familyHint": "boundary_local_theorems_cache_conflict",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/Data-List-PeriodicityLemma-2561.log",
+      "logSha256": "dabb2ef00b4108dd14c60b8be80980e8736dc8f357fe7b41c61544192c7af481"
+    },
+    {
+      "module": "Mathlib/Data/Multiset/Functor.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='e2fb3be5b331017c', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/Data-Multiset-Functor-2115.log",
+      "logSha256": "f49f2937abfaa586ce8bf079b06476c7758182358ec26db553f778f23b2808fd"
+    },
+    {
+      "module": "Mathlib/Data/Nat/Cast/Defs.lean",
+      "queueState": "queued",
+      "transitiveImporters": 5703,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='6e3fb0da5b872530', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-20260902T1418Z-pass-1-1788358538292003000-cd612eb8b1164ff19c36c9d3cd572033/Data-Nat-Cast-Defs-1100.log",
+      "logSha256": "fe63ca53398f2c3740481d02fe1c6acebc5ad823818dc73b3d1caed35ebf7fe1"
+    },
+    {
+      "module": "Mathlib/Data/Nat/Cast/SetInterval.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='258b6c349b418b57', stage='post_stock', detail=boundary_sequence_unknown_node",
+      "familyHint": "boundary_sequence_unknown_node",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T0712Z-pass-12-1788765169293314000-d2543ce4d7674eb5bece6d7f377d0393/Data-Nat-Cast-SetInterval-1914.log",
+      "logSha256": "8248b50bf5b51d352504df5fcc0a66194ffeb70a600cf38f5a53b5cde227874a"
+    },
+    {
+      "module": "Mathlib/Data/Nat/ChineseRemainder.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='8774714f7e8608d5', stage='post_stock', detail=boundary_realization_ambiguous_or_missing_projected_cover",
+      "familyHint": "boundary_realization_ambiguous_or_missing_projected_cover",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-19-1788801664260708000-46f80eac10a74aee83f91ddd95374376/Data-Nat-ChineseRemainder-2390.log",
+      "logSha256": "3e6a0ec26dbf026a3b104d52fc5d444ccc5ad705fafdd74d697e35dd202c0ba6"
+    },
+    {
+      "module": "Mathlib/Data/Nat/Init.lean",
+      "queueState": "queued",
+      "transitiveImporters": 7605,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='7063e52927a3778e', stage='post_stock', detail=boundary_forward_post_generator_mismatch",
+      "familyHint": "boundary_forward_post_generator_mismatch",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-20260902T1418Z-pass-1-1788358538292003000-cd612eb8b1164ff19c36c9d3cd572033/Data-Nat-Init-1069.log",
+      "logSha256": "982aec3d280e0641dd0b687aa65ccc78b3cbdcbdb6af6c2941b24aa13793dcec"
+    },
+    {
+      "module": "Mathlib/Data/PFunctor/Multivariate/M.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='17377c8eb7059ab2', stage='post_stock', detail=boundary_matcher_equation_state_conflict:capture-complete-local",
+      "familyHint": "boundary_matcher_equation_state_conflict",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-19-1788801664260708000-46f80eac10a74aee83f91ddd95374376/Data-PFunctor-Multivariate-M-2409.log",
+      "logSha256": "ca30d6abb5e72ba57272055ee4414f5e624681fd9e02edcfea20216e95cab53b"
+    },
+    {
+      "module": "Mathlib/Data/PNat/Factors.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='5c6320bf7e487fc2', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/Data-PNat-Factors-2514.log",
+      "logSha256": "0070de72530aa74cfe7839672647da7acb90e2ed0f35a047e9f7d2975ce08111"
+    },
+    {
+      "module": "Mathlib/Data/PNat/Find.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='b0eab587af6ff5f8', stage='post_stock', detail=boundary_cached_congruence_requires_sequence",
+      "familyHint": "boundary_cached_congruence_requires_sequence",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/Data-PNat-Find-2193.log",
+      "logSha256": "d0c94f6e86467c1eb36a4d437e443a54819f954cf4f71be37a858e8e279a1d21"
+    },
+    {
+      "module": "Mathlib/Data/QPF/Multivariate/Constructions/Cofix.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: declaration oracle failed for Mathlib/Data/QPF/Multivariate/Constructions/Cofix.lean: environment_delta_mismatch: typed baseExt declaration differs for Mathlib.Tactic.MvBisim._aux_Mathlib_Data_QPF_Multivariate_Constructions_Cofix___elabRules_Mathlib_Tactic_MvBisim_tacticMv_bisim___With____1; see /Users/ptsier/projects/explicit-lean/.lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-19-1788801664260708000-46f80eac10a74aee83f91ddd95374376/Data-QPF-Multivariate-Constructions-Cofix-2420-run/Data-QPF-Multivariate-Constructions-Cofix/declaration-oracle.log",
+      "familyHint": "oracle_or_other",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-19-1788801664260708000-46f80eac10a74aee83f91ddd95374376/Data-QPF-Multivariate-Constructions-Cofix-2420.log",
+      "logSha256": "5c0bbc60be6e2bf075c8317c8e359088b5ed4d1a2f558b4ddfa9f4f234ff49ac"
+    },
+    {
+      "module": "Mathlib/Data/Rel/Cover.lean",
+      "queueState": "queued",
+      "transitiveImporters": 2229,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='f0dc9b8bf342e449', stage='post_stock', detail=boundary_local_cached_after",
+      "familyHint": "boundary_local_cached_after",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1725Z-pass-6-1788369808750696000-bab7565c213b45f697fccfa74b6dc1d0/Data-Rel-Cover-1341.log",
+      "logSha256": "ff529a9c3cfce807417dab32c5c13389cc2a378213bb142b0657e5faed4a6c88"
+    },
+    {
+      "module": "Mathlib/Data/Set/FiniteExhaustion.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='298a35a3e3714726', stage='post_stock', detail=boundary_artifact_fresh_constant_missing:_private.Mathlib.Data.Set.FiniteExhaustion.0.Set.Countable.finiteExhaustion._simp_4",
+      "familyHint": "boundary_artifact_fresh_constant_missing",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-19-1788801664260708000-46f80eac10a74aee83f91ddd95374376/Data-Set-FiniteExhaustion-2447.log",
+      "logSha256": "ef774e37b3731e23d4f0ffeb2919fa86d641580697beee37a6d9d51c59254a03"
+    },
+    {
+      "module": "Mathlib/Data/Set/List.lean",
+      "queueState": "queued",
+      "transitiveImporters": 6187,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='dcb7e6c71b4b00d7', stage='post_stock', detail=boundary_reference_ineligible",
+      "familyHint": "boundary_reference_ineligible",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1725Z-pass-6-1788369808750696000-bab7565c213b45f697fccfa74b6dc1d0/Data-Set-List-1317.log",
+      "logSha256": "84842bfabf959f018090ab2682cc8e794bd09d7e0a3e67abe8641c83282eb530"
+    },
+    {
+      "module": "Mathlib/Data/Set/MemPartition.lean",
+      "queueState": "queued",
+      "transitiveImporters": 696,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='23c16e3f920c2bad', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-19-1788801664260708000-46f80eac10a74aee83f91ddd95374376/Data-Set-MemPartition-2428.log",
+      "logSha256": "5602d05ec9cfae0fae81f168007176f7b18e63e597c6332cd8ab06d7a9873f7c"
+    },
+    {
+      "module": "Mathlib/Data/Set/Restrict.lean",
+      "queueState": "queued",
+      "transitiveImporters": 7154,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='ace8e6ca540313f1', stage='post_stock', detail=boundary_cached_congruence_requires_sequence",
+      "familyHint": "boundary_cached_congruence_requires_sequence",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1725Z-pass-6-1788369808750696000-bab7565c213b45f697fccfa74b6dc1d0/Data-Set-Restrict-1314.log",
+      "logSha256": "2d5aad0ee1407f1c53e8d5c9433894b05b4a075ca7599064312be00993676561"
+    },
+    {
+      "module": "Mathlib/Data/SetLike/Basic.lean",
+      "queueState": "queued",
+      "transitiveImporters": 6402,
+      "diagnostic": "boundary materialization shard failed: declaration oracle failed for Mathlib/Data/SetLike/Basic.lean: declaration_value_mismatch: SetLike.exists_not_mem_of_ne_top._auto_1; see /Users/ptsier/projects/explicit-lean/.lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1725Z-pass-6-1788369808750696000-bab7565c213b45f697fccfa74b6dc1d0/Data-SetLike-Basic-1259-run/Data-SetLike-Basic/declaration-oracle.log",
+      "familyHint": "oracle_or_other",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1725Z-pass-6-1788369808750696000-bab7565c213b45f697fccfa74b6dc1d0/Data-SetLike-Basic-1259.log",
+      "logSha256": "788d473978a0cd0650110f7499d9f8804980b1e9cbead079737705e8ccf3a260"
+    },
+    {
+      "module": "Mathlib/Data/Setoid/Partition.lean",
+      "queueState": "queued",
+      "transitiveImporters": 99,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='6b00db9a132115f8', stage='post_stock', detail=boundary_comparison_mismatch:exprMVars.missingStock",
+      "familyHint": "boundary_comparison_mismatch",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/Data-Setoid-Partition-2575.log",
+      "logSha256": "040776db54f81b71420a096dfdee6a1b0e01f939fd2fee245ecbebeb3bb99afe"
+    },
+    {
+      "module": "Mathlib/Data/String/Lemmas.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='0e205cf9715b3a2d', stage='post_stock', detail=boundary_matcher_equation_state_conflict:capture-complete-local",
+      "familyHint": "boundary_matcher_equation_state_conflict",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-20260902T1418Z-pass-1-1788358538292003000-cd612eb8b1164ff19c36c9d3cd572033/Data-String-Lemmas-1070.log",
+      "logSha256": "8038c6a780cacf674431e205d30261d893744ae7041308886b186a04c42db1e8"
+    },
+    {
+      "module": "Mathlib/Logic/Equiv/Finset.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1302,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='d544036111f43b91', stage='post_stock', detail=boundary_realization_ambiguous_or_missing_projected_cover",
+      "familyHint": "boundary_realization_ambiguous_or_missing_projected_cover",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-19-1788801664260708000-46f80eac10a74aee83f91ddd95374376/Logic-Equiv-Finset-2352.log",
+      "logSha256": "dd32d5e63311df8cf49ecb40da02332daf1a940a23a12c7a532e95ca397e2968"
+    },
+    {
+      "module": "Mathlib/Logic/Equiv/List.lean",
+      "queueState": "queued",
+      "transitiveImporters": 4086,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='c673d6adf9e6ab56', stage='post_stock', detail=boundary_theorem_value_type_mismatch",
+      "familyHint": "boundary_theorem_value_type_mismatch",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/Logic-Equiv-List-2154.log",
+      "logSha256": "367351b085623a8fd570f0f7d8aaa8ffa89a12ed3051526389aa34f2c683e53f"
+    },
+    {
+      "module": "Mathlib/Logic/Equiv/Multiset.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1303,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='2aec683fdd6250b6', stage='post_stock', detail=boundary_realization_ambiguous_or_missing_projected_cover",
+      "familyHint": "boundary_realization_ambiguous_or_missing_projected_cover",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1326Z-pass-17-1788794474330020000-b3b173777c1c4a17a7ace3094fc494ef/Logic-Equiv-Multiset-2178.log",
+      "logSha256": "213d3e4947f7b7108fca54e7153f5fc1d85d5e185f26934febe061cbee7c0ac6"
+    },
+    {
+      "module": "Mathlib/Logic/Godel/GodelBetaFunction.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='f0f66e650f146203', stage='post_stock', detail=boundary_local_cached_group_shape",
+      "familyHint": "boundary_local_cached_group_shape",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/Logic-Godel-GodelBetaFunction-2562.log",
+      "logSha256": "9ed344e5ee0500f6ef622743f095001d666828bf6b2dd75a59882a90571d4bd7"
+    },
+    {
+      "module": "Mathlib/Logic/IsEmpty/Basic.lean",
+      "queueState": "queued",
+      "transitiveImporters": 7534,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='2a463dc65ca681b6', stage='post_stock', detail=boundary_sequence_multiple_helpers_unsupported",
+      "familyHint": "boundary_sequence_multiple_helpers_unsupported",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-20260902T1418Z-pass-1-1788358538292003000-cd612eb8b1164ff19c36c9d3cd572033/Logic-IsEmpty-Basic-1103.log",
+      "logSha256": "8f9a8a46dd86f902d8ab77aec20673d8ea17a5180c203c56334a72dd9db5d215"
+    },
+    {
+      "module": "Mathlib/Logic/Relation.lean",
+      "queueState": "queued",
+      "transitiveImporters": 7700,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='40d00689f4eea47b', stage='post_stock', detail=activation_nonempty_aux_cache",
+      "familyHint": "activation_nonempty_aux_cache",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-20260902T1418Z-pass-1-1788358538292003000-cd612eb8b1164ff19c36c9d3cd572033/Logic-Relation-1099.log",
+      "logSha256": "c16fa62c09ed696dddb9c1d135b2b52b22daab018f996f87170d32b859494b1a"
+    },
+    {
+      "module": "Mathlib/NumberTheory/ADEInequality.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary replay abort: occurrence='5a967471ab5ce7b6', stage='apply', detail=boundary_local_cached_descriptor_conflict",
+      "familyHint": "boundary_local_cached_descriptor_conflict",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-32-1788838347094219000-96b2f3b9aa0a4e38971e3733baa11629/NumberTheory-ADEInequality-3206.log",
+      "logSha256": "a5c8d69c0dc3151a2112876073c7b5312c4ccaece41c5b8a95a36e017e93f018"
+    },
+    {
+      "module": "Mathlib/Order/Compare.lean",
+      "queueState": "queued",
+      "transitiveImporters": 7451,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='203e793f570fe332', stage='post_stock', detail=boundary_local_sequence_root_shape",
+      "familyHint": "boundary_local_sequence_root_shape",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1538Z-pass-5-1788366079938529000-4f74cf48f8c84edbba2dff5d725465bc/Order-Compare-1185.log",
+      "logSha256": "c218b1cd0a261fdaa65c17313944da4a263107abe94b878d7e18f899d0c27f9f"
+    },
+    {
+      "module": "Mathlib/Order/Lattice/Nat.lean",
+      "queueState": "queued",
+      "transitiveImporters": 4437,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='4f48377be4013147', stage='post_stock', detail=boundary_comparison_unpaired_fresh_constant",
+      "familyHint": "boundary_comparison_unpaired_fresh_constant",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/Order-Lattice-Nat-2554.log",
+      "logSha256": "4a0eb1d3d17881dbdf046dd2ebb4e205a8bfe3f2d4d1de7ebe89c079d25f3fdc"
+    },
+    {
+      "module": "Mathlib/Order/Partition/Equipartition.lean",
+      "queueState": "queued",
+      "transitiveImporters": 15,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='096cb0b5ed6d6399', stage='prestate_fingerprint', detail=unknown free variable `_fvar.6067.601`",
+      "familyHint": "unknown",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-25-1788823326110284000-4c87bdb29d284d28b51633c93fbbf5be/Order-Partition-Equipartition-2947.log",
+      "logSha256": "8134ad3ce8d27d14e619284dbc8f8c51d311c6179b82d55031e4a2c00e10f0f1"
+    },
+    {
+      "module": "Mathlib/Order/Types/Arithmetic.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='9bf7419212e50d7e', stage='post_stock', detail=boundary_forward_post_generator_mismatch",
+      "familyHint": "boundary_forward_post_generator_mismatch",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-32-1788838347094219000-96b2f3b9aa0a4e38971e3733baa11629/Order-Types-Arithmetic-3232.log",
+      "logSha256": "ab9cbb7b110a5177be29f51582b3850348afc3be47c516587c11d02680da4526"
+    },
+    {
+      "module": "Mathlib/RingTheory/OreLocalization/NonZeroDivisors.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1745,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='cd07c8da2837e83b', stage='post_stock', detail=boundary_comparison_unpaired_fresh_constant",
+      "familyHint": "boundary_comparison_unpaired_fresh_constant",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-manifest-release-resume-20260907T1933Z-pass-23-1788812615457283000-b55196b67573405fa38b2284bc9535c9/RingTheory-OreLocalization-NonZeroDivisors-2532.log",
+      "logSha256": "8a33eb182292e5bc7ff43acf3d87710d52891464da4bd6ab8ee26d45b52a3237"
+    },
+    {
+      "module": "Mathlib/SetTheory/Cardinal/Cofinality/Basic.lean",
+      "queueState": "queued",
+      "transitiveImporters": 2061,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='ed68ccc64a0ca841', stage='post_stock', detail=boundary_local_cached_group_shape",
+      "familyHint": "boundary_local_cached_group_shape",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-28-1788827087392915000-92b6eff79d434731a7a6fe41ca8d0055/SetTheory-Cardinal-Cofinality-Basic-3059.log",
+      "logSha256": "e49c7c1efb78816e3d882454d6311cd77d6a16d572e0b55a61993625325bea17"
+    },
+    {
+      "module": "Mathlib/SetTheory/Cardinal/Cofinality/Club.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='1aa389397c52e126', stage='post_stock', detail=activation_nonempty_aux_cache",
+      "familyHint": "activation_nonempty_aux_cache",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-28-1788827087392915000-92b6eff79d434731a7a6fe41ca8d0055/SetTheory-Cardinal-Cofinality-Club-3158.log",
+      "logSha256": "071f047aab1e95c8569eb0c8c5a7afca0c08972cb4d566fc4d4fac5dbcca7816"
+    },
+    {
+      "module": "Mathlib/SetTheory/Ordinal/Family.lean",
+      "queueState": "queued",
+      "transitiveImporters": 2074,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='2531a4a9edd4ecbb', stage='post_stock', detail=boundary_realization_unsupported_root",
+      "familyHint": "boundary_realization_unsupported_root",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-28-1788827087392915000-92b6eff79d434731a7a6fe41ca8d0055/SetTheory-Ordinal-Family-3123.log",
+      "logSha256": "f7868e829b3ac54eece049e23a6253ded9c6ec9ed7883bff28788231f34fd743"
+    },
+    {
+      "module": "Mathlib/Tactic/Order/ToInt.lean",
+      "queueState": "queued",
+      "transitiveImporters": 2998,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='4464805e3db239e4', stage='post_stock', detail=boundary_local_theorem_reserved_name",
+      "familyHint": "boundary_local_theorem_reserved_name",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1725Z-pass-6-1788369808750696000-bab7565c213b45f697fccfa74b6dc1d0/Tactic-Order-ToInt-1247.log",
+      "logSha256": "a51453634eb9045b72136f9ba4025536215f78d67b80b28a583c0e3810aacf71"
+    },
+    {
+      "module": "Mathlib/Tactic/Sat/FromLRAT.lean",
+      "queueState": "queued",
+      "transitiveImporters": 1,
+      "diagnostic": "boundary materialization shard failed: declaration oracle failed for Mathlib/Tactic/Sat/FromLRAT.lean: environment_delta_mismatch: typed baseExt declaration differs for Mathlib.Tactic.Sat.buildClauses; see /Users/ptsier/projects/explicit-lean/.lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1538Z-pass-2-1788363481642790000-d811479036664dcdafda11d0d632e769/Tactic-Sat-FromLRAT-1111-run/Tactic-Sat-FromLRAT/declaration-oracle.log",
+      "familyHint": "oracle_or_other",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-reviewed-resume-20260902T1538Z-pass-2-1788363481642790000-d811479036664dcdafda11d0d632e769/Tactic-Sat-FromLRAT-1111.log",
+      "logSha256": "d0c914e7ef5a2f530893b99a756473c792c3ec8e8b51d6d08d3a8ea109a97065"
+    },
+    {
+      "module": "Mathlib/Topology/Connected/Clopen.lean",
+      "queueState": "queued",
+      "transitiveImporters": 2572,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='76a7a796adbfcd94', stage='post_stock', detail=boundary_theorem_existing_declaration_conflict",
+      "familyHint": "boundary_theorem_existing_declaration_conflict",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-28-1788827087392915000-92b6eff79d434731a7a6fe41ca8d0055/Topology-Connected-Clopen-3098.log",
+      "logSha256": "2765285f6f967ad777916727ca9aa4f9dd94cb3e0356382ee58d7e2708ecceff"
+    },
+    {
+      "module": "Mathlib/Topology/Order/HullKernel.lean",
+      "queueState": "queued",
+      "transitiveImporters": 0,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='f09965c363a102e4', stage='post_stock', detail=boundary_sequence_unknown_node",
+      "familyHint": "boundary_sequence_unknown_node",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-32-1788838347094219000-96b2f3b9aa0a4e38971e3733baa11629/Topology-Order-HullKernel-3197.log",
+      "logSha256": "12201a1c1e9ee9699747ae992cd90541948c3b714fbd9a71b4b93c6fab8ab5f4"
+    },
+    {
+      "module": "Mathlib/Topology/Perfect.lean",
+      "queueState": "queued",
+      "transitiveImporters": 700,
+      "diagnostic": "boundary materialization shard failed: boundary recording abort: occurrence='aabcbe2f0cf1e09a', stage='post_stock', detail=boundary_local_sequence_helper_capture_snapshot",
+      "familyHint": "boundary_local_sequence_helper_capture_snapshot",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-28-1788827087392915000-92b6eff79d434731a7a6fe41ca8d0055/Topology-Perfect-3127.log",
+      "logSha256": "d810c9a1a5145d7e6b135909c2a5bc9e379fba089efb10432a755b43a0bfa6d3"
+    },
+    {
+      "module": "Mathlib/Topology/UniformSpace/Separation.lean",
+      "queueState": "queued",
+      "transitiveImporters": 2196,
+      "diagnostic": "boundary materialization shard failed: declaration oracle failed for Mathlib/Topology/UniformSpace/Separation.lean: environment_delta_mismatch: extension state differs for Mathlib.Meta.FunProp.transitionTheoremsExt; see /Users/ptsier/projects/explicit-lean/.lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-28-1788827087392915000-92b6eff79d434731a7a6fe41ca8d0055/Topology-UniformSpace-Separation-3164-run/Topology-UniformSpace-Separation/declaration-oracle.log",
+      "familyHint": "oracle_or_other",
+      "log": ".lake/boundary-materialization/schema13-v10-campaign/schema13-v10-direct-closure-v10-allocator-pressure-resume-20260907T2230Z-pass-28-1788827087392915000-92b6eff79d434731a7a6fe41ca8d0055/Topology-UniformSpace-Separation-3164.log",
+      "logSha256": "86c1434b3eb524523078804a642d734324ad04cb78370f79ae59bc6ef0c33bf7"
+    }
+  ]
+}
