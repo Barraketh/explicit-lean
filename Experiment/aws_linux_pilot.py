@@ -34,6 +34,8 @@ STATE_ROOT = ROOT / ".lake/search-free-mathlib/aws-linux-pilot/runs"
 PROFILE, ACCOUNT_ID, REGION = "explicit-lean-pilot", "538639825139", "us-west-1"
 INSTANCE_TYPE, VOLUME_TYPE, VOLUME_SIZE_GIB = "r7i.4xlarge", "gp3", 200
 MAX_SPEND_USD, MAX_WORKER_SECONDS = Decimal("20"), 36_000
+WORKER_SAMPLER_GRACE_SECONDS = 120
+WORKER_SAMPLER_TIMEOUT_SECONDS = MAX_WORKER_SECONDS + WORKER_SAMPLER_GRACE_SECONDS
 MAX_INSTANCE_LIFETIME_SECONDS = 43_200
 REQUIRED_MEMORY_BYTES = 128 * 1024**3
 MINIMUM_GUEST_MEMORY_BYTES = 120 * 1024**3
@@ -129,6 +131,19 @@ def _utc(value: datetime) -> str:
     if value.tzinfo is None or value.utcoffset() is None:
         raise PilotError("timestamp must include an explicit timezone")
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def worker_execution_timeout_seconds(*, not_after: datetime, now: datetime) -> int:
+    """Bound the outer SSM plugin to the host lifetime and exact run cutoff."""
+    if not_after.tzinfo is None or not_after.utcoffset() is None:
+        raise GateBlocked("worker execution cutoff must include an explicit timezone")
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise GateBlocked("worker dispatch clock must include an explicit timezone")
+    remaining = (not_after.astimezone(timezone.utc) - now.astimezone(timezone.utc)).total_seconds()
+    timeout = min(MAX_INSTANCE_LIFETIME_SECONDS, int(remaining))
+    if timeout <= 0:
+        raise GateBlocked("worker execution cutoff leaves no positive SSM timeout")
+    return timeout
 
 
 def load_policy(path: Path = POLICY_PATH) -> tuple[dict[str, Any], bytes]:
@@ -372,7 +387,7 @@ def build_worker_commands(*, repo_url: str, authorization_ref: str, run_id: str,
         "python3 -B Experiment/verify_simp_boundary_manifest.py verify \"$manifest\" --repository-root . --mathlib-root .lake/packages/mathlib --expected-repository-commit \"$PILOT_COMMIT\" --expected-sha256 \"$manifest_sha\" --dependency-map \"$depmap\" --lake-path \"$lake_path\" --expected-lake-sha256 \"$lake_sha\" --lean-path \"$lean_path\" --expected-lean-sha256 \"$lean_sha\" > \"$input_root/manifest-verification.json\"",
         "printf '{\"runId\":\"%s\",\"startedAt\":\"%s\"}\\n' \"$pilot_run\" \"$(date -u +%FT%TZ)\" > \"$output_root/worker-started.json\"",
         "aws s3api put-object --bucket \"$evidence_bucket\" --key \"${evidence_prefix}worker-started.json\" --body \"$output_root/worker-started.json\" --if-none-match '*' --server-side-encryption AES256 --region " + EVIDENCE_REGION,
-        "python3 -B Experiment/linux_process_sampler.py --metrics \"$output_root/process-metrics.json\" --log \"$output_root/worker.log\" --timeout 36120 -- python3 -B Experiment/campaign_worker.py --database \"$database\" --manifest \"$manifest\" --dependency-map \"$depmap\" --output-root \"$output_root/attempts\" " + f"--worker {q['worker']} --max-modules {len(PILOT_MODULES)} --module-timeout 1800 --max-seconds {MAX_WORKER_SECONDS} --minimum-free-bytes {MINIMUM_FREE_BYTES} {modules}",
+        f"python3 -B Experiment/linux_process_sampler.py --metrics \"$output_root/process-metrics.json\" --log \"$output_root/worker.log\" --timeout {WORKER_SAMPLER_TIMEOUT_SECONDS} -- python3 -B Experiment/campaign_worker.py --database \"$database\" --manifest \"$manifest\" --dependency-map \"$depmap\" --output-root \"$output_root/attempts\" " + f"--worker {q['worker']} --max-modules {len(PILOT_MODULES)} --module-timeout 1800 --max-seconds {MAX_WORKER_SECONDS} --minimum-free-bytes {MINIMUM_FREE_BYTES} {modules}",
     ]
 
 
@@ -772,8 +787,9 @@ class PilotController:
         else: cleanup["requested"] = True
         return cleanup
 
-    def _send(self, client: AwsClient, iid: str, commands: Sequence[str], run_id: str) -> str:
-        response = client.call("ssm", "send-command", ["--document-name", "AWS-RunShellScript", "--instance-ids", iid, "--comment", f"explicit-lean-pilot {run_id} bounded-worker", "--parameters", _json({"commands": list(commands)}), "--timeout-seconds", str(MAX_WORKER_SECONDS + 120)], mutation=True); command = _obj(response.get("Command"), "SSM command"); value = command.get("CommandId")
+    def _send(self, client: AwsClient, iid: str, commands: Sequence[str], run_id: str, *, not_after: datetime) -> str:
+        execution_timeout = worker_execution_timeout_seconds(not_after=not_after, now=self.now())
+        response = client.call("ssm", "send-command", ["--document-name", "AWS-RunShellScript", "--instance-ids", iid, "--comment", f"explicit-lean-pilot {run_id} bounded-worker", "--parameters", _json({"commands": list(commands), "executionTimeout": [str(execution_timeout)]}), "--timeout-seconds", str(WORKER_SAMPLER_TIMEOUT_SECONDS)], mutation=True); command = _obj(response.get("Command"), "SSM command"); value = command.get("CommandId")
         if type(value) is not str or not value: raise PilotError("SSM send-command did not return a command ID")
         return value
 
@@ -923,7 +939,7 @@ class PilotController:
         if parse_not_after(policy, self.now()) != deadline: raise GateBlocked("run deadline changed before worker dispatch")
         state.update({"instanceId": iid, "instanceShape": shape, "remoteAuth": remote, "phase": "dispatching-worker", "dispatchAttempted": True}); _write_state(path, state); mutating = AwsClient(runner=self.runner, allow_mutations=True)
         try:
-            command_id = self._send(mutating, iid, commands, run_id); state.update({"workerCommandId": command_id, "phase": "worker-started", "workerDispatchedAt": _utc(self.now())}); _write_state(path, state); return {"schema": 2, "kind": "aws_linux_pilot_start_worker", "readOnly": False, "runId": run_id, "instanceId": iid, "workerCommandId": command_id, "phase": "worker-started", "checks": checks, "statePath": str(path)}
+            command_id = self._send(mutating, iid, commands, run_id, not_after=deadline); state.update({"workerCommandId": command_id, "phase": "worker-started", "workerDispatchedAt": _utc(self.now())}); _write_state(path, state); return {"schema": 2, "kind": "aws_linux_pilot_start_worker", "readOnly": False, "runId": run_id, "instanceId": iid, "workerCommandId": command_id, "phase": "worker-started", "checks": checks, "statePath": str(path)}
         except Exception as error:
             state.update({"phase": "dispatch-ambiguous", "manualAttention": True, "error": str(error)[:500], "stackCleanup": {"attempted": False, "retained": True, "reason": "SSM dispatch was attempted; retain Scheduler TTL and evidence"}}); _write_state(path, state); raise error if isinstance(error, PilotError) else PilotError(str(error))
 

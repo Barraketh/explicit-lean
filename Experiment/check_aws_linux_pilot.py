@@ -207,6 +207,8 @@ def test_template_and_worker_invariants() -> None:
     assert "sha256sum -c -" in joined and pilot.ELAN_URL in joined and pilot.ELAN_SHA256 in joined and "v4.1.2" not in joined and "libzstd-devel" in joined
     assert "codex login status" in joined and "campaign_budget.py check" in joined and "auth.json" not in joined and "test ! -e \"$output_root/evidence.tar.gz\"" in joined
     assert "--retry-failed" not in joined and "--if-none-match '*'" in joined and joined.count("--module ") == len(pilot.PILOT_MODULES)
+    assert f"--timeout {pilot.WORKER_SAMPLER_TIMEOUT_SECONDS} -- python3" in joined
+    assert pilot.WORKER_SAMPLER_TIMEOUT_SECONDS == pilot.MAX_WORKER_SECONDS + pilot.WORKER_SAMPLER_GRACE_SECONDS
     with tempfile.TemporaryDirectory() as directory:
         shell = Path(directory) / "worker.sh"; shell.write_text(joined + "\n", encoding="utf-8")
         assert subprocess.run(["bash", "-n", str(shell)], check=False).returncode == 0
@@ -246,7 +248,11 @@ def test_launch_stops_for_auth_then_one_worker_dispatch() -> None:
         assert session_commands and "cloud-init status --wait" in session_commands[0][-1] and "sudo -H /usr/local/bin/codex login --device-auth" in session_commands[0][-1] and "sudo -H /usr/local/bin/codex login status" in session_commands[0][-1] and "campaign_budget.py check" in session_commands[0][-1] and "auth-budget.json" in session_commands[0][-1] and "jq -e" in session_commands[0][-1]
         proof_path = Path(auth_result["remoteAuthProof"]); assert proof_path.is_file(); generated = json.loads(proof_path.read_text()); assert generated["runId"] == RUN_ID and generated["instanceId"] == "i-0123456789abcdef0"; assert pilot.validate_remote_auth_proof(proof_path, instance_id="i-0123456789abcdef0", run_id=RUN_ID, now=NOW)["codexLoginStatus"] == "verified"; require_blocked(lambda: pilot.validate_remote_auth_proof(proof_path, instance_id="i-0123456789abcdef0", run_id=RUN_ID_2, now=NOW))
         started = ctl.start_worker(run_id=RUN_ID, remote_auth_proof=proof_path, confirm_start_worker=True); assert started["phase"] == "worker-started" and started["workerCommandId"] == "cmd-1"; assert ops(fixture).count("create-stack") == 1 and ops(fixture).count("send-command") == 2 and ops(fixture).count("delete-stack") == 0
-        command = next(x for x in fixture.commands if "send-command" in x and any("bounded-worker" in part for part in x)); script = json.loads(command[command.index("--parameters") + 1])["commands"]; joined = "\n".join(script); assert "codex login status" in joined and "campaign_budget.py check" in joined
+        command = next(x for x in fixture.commands if "send-command" in x and any("bounded-worker" in part for part in x)); parameters = json.loads(command[command.index("--parameters") + 1]); script = parameters["commands"]; joined = "\n".join(script); assert "codex login status" in joined and "campaign_budget.py check" in joined
+        execution_timeout = parameters.get("executionTimeout"); assert isinstance(execution_timeout, list) and len(execution_timeout) == 1 and type(execution_timeout[0]) is str and execution_timeout[0].isdigit() and int(execution_timeout[0]) == pilot.MAX_INSTANCE_LIFETIME_SECONDS and pilot.MAX_WORKER_SECONDS < int(execution_timeout[0]) <= pilot.MAX_INSTANCE_LIFETIME_SECONDS and int(execution_timeout[0]) <= int((datetime(2026, 9, 12, 9, tzinfo=timezone.utc) - NOW).total_seconds())
+        assert command[command.index("--timeout-seconds") + 1] == str(pilot.WORKER_SAMPLER_TIMEOUT_SECONDS)
+        assert pilot.worker_execution_timeout_seconds(not_after=datetime(2026, 9, 12, 9, tzinfo=timezone.utc), now=NOW.replace(hour=22)) == 39600
+        require_blocked(lambda: pilot.worker_execution_timeout_seconds(not_after=NOW, now=NOW), "expired worker cutoff accepted")
         duplicate = ctl.start_worker(run_id=RUN_ID, remote_auth_proof=proof_path, confirm_start_worker=True); assert duplicate["idempotent"] and ops(fixture).count("send-command") == 2
 
 
