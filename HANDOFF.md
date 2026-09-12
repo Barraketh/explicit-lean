@@ -135,7 +135,9 @@ instance `i-0f897f7d7146d9acf`. Device login and independent auth probe
 `9fb6db6b-396e-4cad-8bf0-77781265411d` passed, and sole worker command
 `d354a0e4-8709-4ccc-97b1-b37b4dafedae` is running with an observed document
 execution timeout of 31,435 seconds, the positive remaining interval to the
-unchanged cutoff. The nested worker caps are unchanged. The user
+unchanged cutoff. It passed the Linux dependency/cache setup, focused Python
+suites and repaired strict boundary gate, and fresh manifest inventory is active.
+The nested worker caps are unchanged. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. The pilot report remains required before a long campaign or
 additional machines.

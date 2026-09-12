@@ -99,7 +99,9 @@ authorization `83e01f8ceba26e271fe96d1524755b5ff7d35dfb` on instance
 `i-0f897f7d7146d9acf`. Device login and independent auth probe passed; sole
 worker `d354a0e4-8709-4ccc-97b1-b37b4dafedae` is running with the document
 execution timeout set to the 31,435 seconds remaining to the unchanged cutoff.
-The nested worker caps remain unchanged. No translation result is claimed. The user
+It passed Linux dependency/cache setup, the focused Python suites and repaired
+strict boundary gate, and fresh manifest inventory is active. The nested worker
+caps remain unchanged. No translation result is claimed. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. Fresh September 12 telemetry reported ordinary Codex work
 available at 38%.
