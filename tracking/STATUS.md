@@ -81,13 +81,23 @@ declaration oracle pass locally. A seventh stack at exact authorization
 dispatch gate passed. Sole worker `dcf05b97-f81d-4f98-972f-ade0afebd3c1`
 passed Linux dependency/cache setup, the focused Python suites and the repaired
 strict boundary gate. It generated the fresh 216,029,345-byte manifest with
-SHA-256 `d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f`
-and is running its independent authenticated verification; corpus translation
-has not begun. Both shutdown mechanisms retain the exact
-`2026-09-12T11:25:00Z` cutoff. No translation result is claimed yet. The user
+SHA-256 `d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f`,
+then failed closed with `ExecutionTimedOut`/137 exactly 3,600 seconds after SSM
+execution began: the `AWS-RunShellScript` document retained its default one-hour
+execution timeout. The independent verifier was killed with an empty output and
+corpus translation never began. Recovery command
+`1af740a7-1604-4706-91fb-0796cb35e42e` uploaded and independently hash-checked
+the 10,871,427-byte AES256 evidence archive, hash, timeout record and run exit.
+The exact stack was deleted; the instance is terminated, its volume is gone and
+no AWS compute resources remain. The `2026-09-12T11:25:00Z` cutoff is unchanged.
+Fix `d7f89c4` explicitly sets the document execution timeout to the lesser of the
+12-hour host lifetime and remaining cutoff window, while preserving the nested
+10-hour worker cap. The 11 controller mocks, generated shell syntax, Python
+compilation, live document-schema check and diff validation pass. No translation
+result is claimed. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. Fresh September 12 telemetry reported ordinary Codex work
-available at 31%.
+available at 37%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 

@@ -113,11 +113,22 @@ local/remote dispatch gate passed, and its sole worker command
 `dcf05b97-f81d-4f98-972f-ade0afebd3c1` passed the Linux dependency/cache setup,
 focused Python suites and the repaired strict boundary gate. It generated the
 fresh 216,029,345-byte manifest with SHA-256
-`d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f` and is
-running the independent authenticated manifest verification; corpus translation
-has not begun. Both
-shutdown mechanisms retain the exact `2026-09-12T11:25:00Z` cutoff. No
-translation result is claimed yet. The user
+`d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f`, then the
+SSM command failed closed with `ExecutionTimedOut`/137 exactly 3,600 seconds
+after it started because the `AWS-RunShellScript` document retained its default
+one-hour execution timeout. The independent manifest verifier was killed with
+an empty output file and corpus translation never began. Recovery command
+`1af740a7-1604-4706-91fb-0796cb35e42e` uploaded a 10,871,427-byte AES256 evidence
+archive whose downloaded SHA-256 is
+`8d34ab67acc212b3688e4de4210bc958fb38cb97dc6c0680509746582e23c2b1`, plus the
+hash, timeout record and `run-exit.json`. The exact stack was deleted; the
+instance is terminated, its volume is gone, and no AWS compute resources remain.
+No translation result is claimed. The exact `2026-09-12T11:25:00Z` cutoff is
+unchanged. Narrow fix `d7f89c4` explicitly supplies a document execution timeout
+bounded by the lesser of the 12-hour host lifetime and remaining time to that
+cutoff, while the nested sampler and campaign worker retain their 10-hour-plus-
+120-second and 10-hour caps. The 11 controller mocks, generated shell syntax,
+Python compilation, live document-schema check and diff validation pass. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. The pilot report remains required before a long campaign or
 additional machines.

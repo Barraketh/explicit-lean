@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T02:00:43+00:00",
+  "updatedAt": "2026-09-12T02:32:59.033904+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,8 +16,8 @@
   },
   "deadline": "2026-09-12T11:25:00Z",
   "notAfter": "2026-09-12T11:25:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_running_until_exact_cutoff",
-  "machine": "one_us_west_1_r7i_4xlarge_pilot_running_instance_i-0e82b3e083e49db5e",
+  "deadlineStatus": "one_pilot_bounded_continuation_ready_before_exact_cutoff",
+  "machine": "none; seventh pilot stack deleted after SSM execution timeout evidence recovery",
   "budget": {
     "resetDate": "2026-09-07",
     "currentWindowAllowance": "normal account availability",
@@ -29,24 +29,24 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-12T01:15:29.282920+00:00",
-    "lastUsedPercent": 31,
+    "lastCheckedAt": "2026-09-12T02:32:59.033904+00:00",
+    "lastUsedPercent": 37,
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
     "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
-    "note": "Fresh telemetry reported ordinary usage available at 31%. The former 25%/22% project budget is obsolete. The one-pilot continuation ends at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed. The user authorized autonomous execution of the bounded experiment without further per-revision confirmation; dispatch remains fail-closed on the published revision, remote gate, AWS spend and runtime bounds."
+    "note": "Fresh telemetry reported ordinary usage available at 37%. The former 25%/22% project budget is obsolete. The one-pilot continuation ends at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed. The user authorized autonomous execution of the bounded experiment without further per-revision confirmation; dispatch remains fail-closed on the published revision, remote gate, AWS spend and runtime bounds."
   },
   "direction": {
     "userConversationDate": "2026-09-10",
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Five fail-closed setup runs exposed and fixed regional Scheduler validation, guest timer/auth proof, Python timestamp portability, the Amazon Linux curl package conflict and the strict Session Manager HOME environment. The sixth run failed closed at the strict apply-only import-isolation gate before translation and was deleted with evidence preserved. Published fix 96af00ed589481ff96d754f20836567cc084a289 preserves the gate while adapting the pinned metadata calculations into a suggestion-free observer with exact extension identity, full-observer, duplicate/missing-identity and cache-purity validation; local boundary, shared-build, differential and 41-case oracle checks passed. The seventh stack uses exact authorization 72ea005224408d2677818e722774909183c1bcca as run 20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c on instance i-0e82b3e083e49db5e. Device login, independent auth probe 987ad103-4799-4542-84a6-3fc11d87abab and every local/remote dispatch gate passed. Sole worker command dcf05b97-f81d-4f98-972f-ade0afebd3c1 passed Linux dependency/cache setup, supervisor 22, worker 33, translation-index 13, Linux-sampler 2 and the repaired strict boundary gate. It generated the fresh 216,029,345-byte manifest with SHA-256 d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f and is running the independent authenticated manifest verification; corpus translation has not begun. Both shutdown mechanisms retain the exact 2026-09-12T11:25:00Z cutoff. No translation result is claimed yet.",
+    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Five fail-closed setup runs exposed and fixed regional Scheduler validation, guest timer/auth proof, Python timestamp portability, the Amazon Linux curl package conflict and the strict Session Manager HOME environment. The sixth run failed closed at the strict apply-only import-isolation gate before translation and was deleted with evidence preserved. Published fix 96af00ed589481ff96d754f20836567cc084a289 preserves the gate while adapting the pinned metadata calculations into a suggestion-free observer with exact extension identity, full-observer, duplicate/missing-identity and cache-purity validation; local boundary, shared-build, differential and 41-case oracle checks passed. Seventh run 20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c on instance i-0e82b3e083e49db5e passed device login, every dispatch gate, Linux dependency/cache setup, the focused Python suites and the repaired strict boundary gate. It generated a fresh 216,029,345-byte manifest with SHA-256 d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f, then SSM command dcf05b97-f81d-4f98-972f-ade0afebd3c1 failed closed with ExecutionTimedOut/137 exactly 3,600 seconds after execution began because AWS-RunShellScript retained its default one-hour execution timeout. The independent verifier was killed with an empty output; corpus translation never began. Recovery command 1af740a7-1604-4706-91fb-0796cb35e42e uploaded a 10,871,427-byte AES256 evidence archive whose downloaded SHA-256 matched 8d34ab67acc212b3688e4de4210bc958fb38cb97dc6c0680509746582e23c2b1, plus the hash, timeout record and run-exit record. The exact stack was deleted; the instance is terminated, its volume is gone and no AWS compute resources remain. Published fix d7f89c4 explicitly sets AWS-RunShellScript executionTimeout to the lesser of the 12-hour host lifetime and remaining time to the unchanged 2026-09-12T11:25:00Z cutoff; the nested sampler and campaign worker retain 36,120-second and 36,000-second caps. The 11 controller mocks, generated shell syntax, Python compilation, live document-schema check and diff validation passed. No translation result is claimed.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_autonomous_bounded_pilot_worker_running",
+      "authorizationStatus": "authorized_autonomous_bounded_retry_timeout_fix_published",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -232,7 +232,7 @@
     {
       "id": "aws-pilot-preparation",
       "status": "in_progress",
-      "description": "The first request failed regional validation before resources. The second created the bounded stack, but cloud-init stopped before Codex installation because the guest systemd timer rejected its timestamp; a transport-success false auth proof was invalidated, no worker was dispatched, and the stack was deleted after about four minutes. The non-root operator, MFA waiver, 32-vCPU quota and $20 ceiling remain. The bounded guest-timer/auth-proof fix is published; explicitly identify its replacement HEAD before retrying."
+      "description": "The seventh bounded run passed the Linux setup and repaired boundary gate, generated its fresh manifest, then failed closed at the AWS-RunShellScript document's default one-hour execution timeout during independent manifest verification. Evidence was recovered and verified, the stack was deleted, and published fix d7f89c4 explicitly bounds the document execution timeout before an autonomous retry."
     },
     {
       "id": "corpus-translation",
@@ -370,7 +370,19 @@
       "checkedAt": "2026-09-12T02:00:43+00:00",
       "scope": "seventh_authorized_stack_live_worker",
       "result": "running_authenticated_manifest_verification_after_generation",
-      "detail": "Exact clean published authorization 72ea005224408d2677818e722774909183c1bcca created run 20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c and instance i-0e82b3e083e49db5e. Live identity, quota, AMI, default-tenancy r7i.4xlarge shape, network, encrypted 200 GiB gp3 storage, write-only evidence bucket, template/timer and $14.492 worst-case cost gates passed. Device login completed and independent auth probe 987ad103-4799-4542-84a6-3fc11d87abab returned Success with response code 0. Fresh local and remote campaign-budget checks returned continue at 31%. Sole worker command dcf05b97-f81d-4f98-972f-ade0afebd3c1 passed dependency installation, exact checkout, Lean 4.32.2 setup, the Mathlib cache fetch, supervisor 22, worker 33, translation-index 13, Linux-sampler 2 and the repaired strict boundary isolation/differential gate. At 2026-09-12T02:00:43Z diagnostic 9f1035cd-3afc-4d99-a315-6a7a6931c9b2 confirmed generation of the fresh 216,029,345-byte manifest with SHA-256 d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f and active independent authenticated verification against the pinned repository, Lake and Lean identities. Corpus translation has not begun. AWS Scheduler and the guest timer retain the exact 2026-09-12T11:25:00Z cutoff; no translation result is claimed yet."
+      "detail": "Exact clean published authorization 72ea005224408d2677818e722774909183c1bcca created run 20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c and instance i-0e82b3e083e49db5e. Live identity, quota, AMI, default-tenancy r7i.4xlarge shape, network, encrypted 200 GiB gp3 storage, write-only evidence bucket, template/timer and $14.492 worst-case cost gates passed. Device login completed and independent auth probe 987ad103-4799-4542-84a6-3fc11d87abab returned Success with response code 0. Fresh local and remote campaign-budget checks returned continue at 31%. Sole worker command dcf05b97-f81d-4f98-972f-ade0afebd3c1 passed dependency installation, exact checkout, Lean 4.32.2 setup, the Mathlib cache fetch, supervisor 22, worker 33, translation-index 13, Linux-sampler 2 and the repaired strict boundary isolation/differential gate. At 2026-09-12T02:00:43Z diagnostic 9f1035cd-3afc-4d99-a315-6a7a6931c9b2 confirmed generation of the fresh 216,029,345-byte manifest with SHA-256 d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f and active independent authenticated verification against the pinned repository, Lake and Lean identities. Corpus translation had not begun."
+    },
+    {
+      "checkedAt": "2026-09-12T02:27:01+00:00",
+      "scope": "seventh_authorized_stack_ssm_execution_timeout",
+      "result": "failed_closed_evidence_recovered_stack_deleted_fix_reviewing",
+      "detail": "SSM command dcf05b97-f81d-4f98-972f-ade0afebd3c1 reached terminal ExecutionTimedOut with response code 137 at 2026-09-12T02:21:33.635Z, exactly 3,600 seconds after execution began. The AWS-RunShellScript document executionTimeout parameter was omitted and retained its one-hour default; the CLI delivery timeout did not extend document execution. No child verifier or campaign worker remained. The fresh 216,029,345-byte manifest was present with SHA-256 d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f, but manifest-verification.json was empty and corpus translation never began. Recovery command 1af740a7-1604-4706-91fb-0796cb35e42e uploaded four versioned objects: a 10,871,427-byte AES256 evidence archive, its hash, execution-timeout.json and run-exit.json. Streaming the stored archive back produced SHA-256 8d34ab67acc212b3688e4de4210bc958fb38cb97dc6c0680509746582e23c2b1, matching evidence-sha256.txt; run-exit.json records originalExitCode 137 and evidenceUploadFailed false. The exact CloudFormation stack was deleted; instance i-0e82b3e083e49db5e is terminated, volume vol-0e641feb9fa1845bb no longer exists, and tagged active-instance and volume queries are empty."
+    },
+    {
+      "checkedAt": "2026-09-12T02:32:59.033904+00:00",
+      "scope": "ssm_document_execution_timeout_fix_review",
+      "result": "passed_published_ready_for_bounded_retry",
+      "detail": "Luna Max implemented narrow fix d7f89c4 under two-file ownership and coordinating review corrected the outer timeout boundary: AWS-RunShellScript executionTimeout is now the lesser of the 43,200-second host lifetime and the positive remaining interval to the exact notAfter cutoff. The nested process sampler remains capped at 36,120 seconds and campaign_worker at 36,000 seconds, so preflight time no longer consumes the worker allowance and no runtime bound is widened. Live AWS get-document confirmed the parameter default is 3,600 seconds and maximum 172,800. Eleven controller mocks, generated worker shell syntax, Python compilation, JSON validation, git diff validation and campaign_budget.py check passed. Fresh ordinary usage was available at 37%; no credit was bought or redeemed."
     }
   ],
   "historicalAutomation": {
@@ -408,8 +420,8 @@
     "declarationOracleFailClosedCases": 26,
     "productionDispatchRun": true,
     "awsProvisioningAttempted": true,
-    "awsResourcesCurrentlyProvisioned": true,
+    "awsResourcesCurrentlyProvisioned": false,
     "workerDispatchRun": true,
-    "awsResourcesProvisioned": true
+    "awsResourcesProvisioned": false
   }
 }
