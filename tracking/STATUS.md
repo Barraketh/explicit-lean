@@ -122,12 +122,19 @@ closed. Verifier tests and a focused real-evidence replay pass. The AWS worker
 will also preserve verifier stderr without masking failure. The user authorized
 one replacement run under the unchanged one-host, one-worker, 15-module, $20,
 12-hour-host and 10-hour-worker constraints, with exact cutoff
-`2026-09-13T00:00:00Z`. Fresh ordinary Codex work is available at 29%.
+`2026-09-13T00:00:00Z`. Published authorization
+`9b9e639445a63577b68355114218b4140509bacd` created replacement run
+`20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1` on
+`i-0f9698935a4ccb630`. Device login and independent auth probe
+`31fe1534-0659-40d9-81af-0e89947f4b6f` passed. Sole worker
+`856f68e7-1804-4409-b9bf-149d9e4fe000` is running with the 36,120-second
+delivery cap and a 42,197-second document timeout bounded by the exact cutoff.
+Fresh ordinary Codex work was available at 30% immediately before dispatch.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 
-Publish the reviewed verifier fix and run the authorized replacement pilot.
-Then prioritize `Mathlib.Logic.Relation`, `Mathlib.Data.Nat.Init` and
+Monitor the replacement pilot through terminal evidence and teardown. Then
+prioritize `Mathlib.Logic.Relation`, `Mathlib.Data.Nat.Init` and
 `Mathlib.Logic.IsEmpty.Basic`, and cold-certify their translated dependency
 slice. Reusable-call provenance and whole-tree acceptance remain separate gates;
 readability work follows complete explicit coverage.

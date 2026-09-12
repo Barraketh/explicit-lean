@@ -164,7 +164,14 @@ encrypted archive and a direct append-only upload without masking exit status.
 The previous continuation ended at its recorded absolute cutoff. The user has
 now authorized one replacement run under the same one-host, one-worker, 15-
 module, $20, 12-hour-host and 10-hour-worker constraints, with exact new cutoff
-`2026-09-13T00:00:00Z`. Do not extend or bypass it or add another host. The
+`2026-09-13T00:00:00Z`. Published authorization
+`9b9e639445a63577b68355114218b4140509bacd` created run
+`20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1` on instance
+`i-0f9698935a4ccb630`. Device login and independent auth probe
+`31fe1534-0659-40d9-81af-0e89947f4b6f` passed. Sole worker command
+`856f68e7-1804-4409-b9bf-149d9e4fe000` is running with delivery timeout 36,120
+seconds and document execution timeout 42,197 seconds, exactly bounded by the
+remaining cutoff window. Do not extend or bypass it or add another host. The
 original campaign-specific 25%/22% usage policy remains obsolete by explicit
 user direction. Fresh telemetry showed ordinary account availability at 29%;
 unknown or actually rate-limited availability stops dispatch, and credits must

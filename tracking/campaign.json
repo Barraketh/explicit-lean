@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "bounded_pilot_replacement_preparation",
+  "phase": "bounded_pilot_replacement_running",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T12:09:00+00:00",
+  "updatedAt": "2026-09-12T12:16:42+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,8 +16,8 @@
   },
   "deadline": "2026-09-13T00:00:00Z",
   "notAfter": "2026-09-13T00:00:00Z",
-  "deadlineStatus": "one_replacement_pilot_authorized_pending_published_fix_and_launch",
-  "machine": "none",
+  "deadlineStatus": "one_replacement_pilot_running_until_exact_cutoff",
+  "machine": "one_us_west_1_r7i_4xlarge_replacement_running_instance_i-0f9698935a4ccb630",
   "budget": {
     "resetDate": "2026-09-07",
     "currentWindowAllowance": "normal account availability",
@@ -29,24 +29,24 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-12T12:09:53.499783+00:00",
-    "lastUsedPercent": 29,
+    "lastCheckedAt": "2026-09-12T12:16:41.546288+00:00",
+    "lastUsedPercent": 30,
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
     "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
-    "note": "Fresh telemetry reports ordinary usage available at 29%. The former 25%/22% project budget is obsolete. The user authorized one replacement pilot under the same $20, one-host, one-worker, 15-module, 12-hour-host and 10-hour-worker envelope, ending at the exact new top-level deadline/notAfter boundary. No credit was bought or redeemed."
+    "note": "Fresh telemetry reported ordinary usage available at 30% immediately before replacement dispatch. The former 25%/22% project budget is obsolete. One replacement pilot is running under the same $20, one-host, one-worker, 15-module, 12-hour-host and 10-hour-worker envelope, ending at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed."
   },
   "direction": {
     "userConversationDate": "2026-09-10",
     "nextMilestone": "Publish the diagnosed manifest-verifier fix and run the authorized one-host replacement pilot, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The eighth run is closed with hash-verified evidence and no remaining compute or volume. Focused reproduction against its preserved manifest proved that fresh source/evidence data match, but the independent verifier omitted the producer's sole narrow missing-execution recovery for checked all-nonproof quoted owners and therefore rejected Mathlib/Tactic/DeriveEncodable.lean occurrence 8a18ca2cc5877278. The verifier now invokes that shared recovery using only fresh occurrence, declaration and execution evidence; malformed, mixed, proof-owned, unquoted, absent and incomplete cases remain fail-closed. Thirty-four verifier tests, a focused real preserved-evidence replay, Python compilation and diff validation pass. The AWS worker now preserves verifier stderr in the encrypted archive and direct append-only S3 upload without masking failure. Fresh ordinary Codex usage is available at 29%, explicit-lean-pilot resolves to the intended non-root operator, and no AWS compute or volume is active. The user authorized one replacement run under the same bounded envelope with exact cutoff 2026-09-13T00:00:00Z; publication and live launch gates remain before provisioning.",
+    "readiness": "The eighth run's verifier defect is fixed and published at 9b9e639445a63577b68355114218b4140509bacd with 34 verifier tests, a focused real preserved-evidence replay, Python compilation, strict negative cases and diagnostic-preservation checks passing. The exact published authorization created replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 on default-tenancy r7i.4xlarge instance i-0f9698935a4ccb630. Current identity, quota, AMI, network, encrypted evidence bucket, zero-preexisting-host, template, exact 2026-09-13T00:00:00Z cutoff and $14.492 worst-case cost gates passed. Device login and independent auth probe 31fe1534-0659-40d9-81af-0e89947f4b6f succeeded. Fresh local and remote campaign-budget checks returned continue at 30%. Sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 is running with delivery timeout 36,120 seconds and AWS-RunShellScript executionTimeout 42,197 seconds, exactly the positive remaining interval to the immutable cutoff. No translation result is claimed yet.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_autonomous_replacement_pending_published_ref_and_launch",
+      "authorizationStatus": "authorized_autonomous_replacement_worker_running",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -176,8 +176,8 @@
   "blockers": [
     {
       "id": "bounded-run-policy",
-      "status": "in_progress",
-      "detail": "The prior continuation ended cleanly at 2026-09-12T11:25:00Z and all prior invocation authorizations/nonces remain exhausted. The user authorized one replacement under the same bounded envelope with exact new cutoff 2026-09-13T00:00:00Z. Publish the reviewed verifier/diagnostic fix and identify the resulting clean full HEAD before launching; do not add another host or extend the cutoff."
+      "status": "resolved",
+      "detail": "Published full authorization 9b9e639445a63577b68355114218b4140509bacd launched the one replacement run with exact cutoff 2026-09-13T00:00:00Z. All prior invocation authorizations/nonces remain exhausted. Do not add another host, reuse a nonce, or extend the cutoff."
     },
     {
       "id": "aws-launch-identity-and-quota",
@@ -213,8 +213,8 @@
   },
   "nextActions": [
     "Read HANDOFF.md and the portable snapshot; confirm branch, local evidence availability and absence of active producers before editing.",
-    "Publish the narrow independent manifest-verifier recovery fix and stderr preservation after focused review; use the resulting clean full HEAD as the replacement authorization ref.",
-    "Run the one authorized replacement host with fresh platform-specific inputs and receipts, without extending the exact 2026-09-13T00:00:00Z cutoff.",
+    "Monitor replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 through terminal evidence verification and exact teardown without extending the 2026-09-13T00:00:00Z cutoff.",
+    "Classify every pilot outcome as resource, semantic, unsupported, or successful without weakening validation.",
     "Fix foundational semantic failures and cold-certify a translated dependency slice with stock Mathlib fallback excluded.",
     "Expand measured dependency-ordered coverage, integrate reusable provenance, then complete whole-tree acceptance before readability work."
   ],
@@ -232,7 +232,7 @@
     {
       "id": "aws-pilot-preparation",
       "status": "in_progress",
-      "description": "The eighth run's versioned evidence was hash-verified and its resources were removed. Focused local reproduction found and fixed the verifier's omitted shared recovery for five missing-execution records with checked all-nonproof quoted owners; all other paths remain fail-closed. Future verifier stderr is preserved without masking exit status. One replacement run is authorized and awaiting publication/live gates."
+      "description": "The eighth run's versioned evidence was hash-verified and its verifier defect was fixed under strict tests. Published authorization 9b9e639445a63577b68355114218b4140509bacd created replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 on instance i-0f9698935a4ccb630. Device auth and every local/remote launch gate passed; sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 is running under the exact cutoff."
     },
     {
       "id": "corpus-translation",
@@ -401,6 +401,12 @@
       "scope": "eighth_verifier_root_cause_fix_review_and_replacement_authorization",
       "result": "passed_publication_pending",
       "detail": "Structural inspection of the preserved 216,029,345-byte manifest passed in 5.2 seconds. Focused real source/evidence recomputation reproduced the first terminal mismatch at Mathlib/Tactic/DeriveEncodable.lean occurrence 8a18ca2cc5877278: fresh missing_execution evidence exactly matched the manifest and the shared scope recovery authenticated nonempty all-nonproof quoted owners as reusable_executable/caller_dependent/materialize, while the verifier had omitted that branch and expected unresolved/unknown. Luna Max implemented a two-file verifier/test fix that invokes the existing recovery only with fresh occurrence, declaration and execution evidence. Positive and malformed/mixed/proof/unquoted/absent/incomplete negative cases pass; 34 verifier tests, focused real preserved-evidence replay, Python compilation and diff validation pass. A separate Luna Max change preserves verifier stderr in the run-scoped encrypted archive and direct append-only upload without teeing or masking the original exit. Eleven AWS controller mocks, generated shell syntax and Python compilation pass. Fresh Codex usage is available at 29%; explicit-lean-pilot is the intended non-root operator and tagged active compute/volume queries are empty. The user authorized one replacement run under the unchanged bounded envelope with exact cutoff 2026-09-13T00:00:00Z. No credit was bought or redeemed."
+    },
+    {
+      "checkedAt": "2026-09-12T12:16:42+00:00",
+      "scope": "replacement_authorized_stack_auth_and_worker_dispatch",
+      "result": "running_all_dispatch_gates_passed",
+      "detail": "Clean published authorization 9b9e639445a63577b68355114218b4140509bacd created run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 and default-tenancy r7i.4xlarge instance i-0f9698935a4ccb630. Live non-root identity, 32-vCPU quota, current Amazon Linux AMI, network, 128 GiB shape, encrypted 200 GiB gp3 root volume, append-only versioned evidence bucket, zero preexisting active host, template/timer, exact 2026-09-13T00:00:00Z cutoff and $14.492 worst-case cost gates passed. Device login completed and independent auth probe 31fe1534-0659-40d9-81af-0e89947f4b6f returned Success/0 with fresh remote budget decision continue. Fresh local usage was 30%. Sole worker command 856f68e7-1804-4409-b9bf-149d9e4fe000 is InProgress with TimeoutSeconds 36,120 and AWS-RunShellScript executionTimeout 42,197 seconds, exactly the remaining cutoff interval at dispatch. No translation result is claimed yet."
     }
   ],
   "historicalAutomation": {
@@ -442,7 +448,7 @@
     "declarationOracleFailClosedCases": 26,
     "productionDispatchRun": true,
     "awsProvisioningAttempted": true,
-    "awsResourcesCurrentlyProvisioned": false,
+    "awsResourcesCurrentlyProvisioned": true,
     "workerDispatchRun": true,
     "awsResourcesProvisioned": true
   }
