@@ -91,10 +91,14 @@ cloning because Amazon Linux's preinstalled `curl-minimal` conflicts with
 installing full `curl`. A fifth stack passed that point and cloned the exact
 revision, then failed before toolchain setup because Session Manager supplied
 no `HOME` under strict shell checking. Both stacks were deleted and their
-instances and volumes are gone. A narrow explicit root-`HOME` fix passes focused
-local review. The user authorized autonomous bounded retries without further
-per-revision confirmation. The pilot report remains required before a long
-campaign or additional machines.
+instances and volumes are gone. A sixth stack pinned to `e4e55a5` is now active:
+boot, device login, all dispatch gates, dependency installation and exact
+cloning passed, and Lean toolchain installation began. It remains one worker on
+instance `i-0d38e287a8657a472`, with both AWS and guest shutdown fixed at
+`2026-09-12T11:25:00Z`. No translation result is claimed yet. The user
+authorized autonomous bounded retries without further per-revision
+confirmation. The pilot report remains required before a long campaign or
+additional machines.
 
 Before launch, close the publication gate. The exact one-pilot continuation is
 recorded in both top-level tracker boundaries and remains fail-closed at its

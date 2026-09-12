@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T00:20:44+00:00",
+  "updatedAt": "2026-09-12T00:26:47+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,8 +16,8 @@
   },
   "deadline": "2026-09-12T11:25:00Z",
   "notAfter": "2026-09-12T11:25:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_autonomous_worker_environment_fix_retry_pending",
-  "machine": "local_mac_for_review_one_us_west_1_r7i_4xlarge_pilot_authorized_no_resources_currently_provisioned",
+  "deadlineStatus": "one_pilot_bounded_continuation_running_until_exact_cutoff",
+  "machine": "one_us_west_1_r7i_4xlarge_pilot_running_instance_i-0d38e287a8657a472",
   "budget": {
     "resetDate": "2026-09-07",
     "currentWindowAllowance": "normal account availability",
@@ -41,12 +41,12 @@
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Successive fail-closed runs exposed and fixed regional Scheduler validation, guest timer/auth proof, Python timestamp portability and the Amazon Linux curl package conflict. The fifth run passed those gates, installed dependencies and cloned the exact revision, then failed before toolchain setup because the strict Session Manager worker environment had no HOME variable. No translation ran. The stack was deleted, and fresh instance/volume queries confirm no resources remain. A narrow explicit root-HOME fix is under review before an autonomous clean-revision retry.",
+    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Five fail-closed setup runs exposed and fixed regional Scheduler validation, guest timer/auth proof, Python timestamp portability, the Amazon Linux curl package conflict and the strict Session Manager HOME environment. The sixth run 20260912T002137Z-6d659f3d8b5f80e344b4cb0c571ddbc8 is active on instance i-0d38e287a8657a472 at published authorization e4e55a5196edf71b09e41f9e45761149856a793e. It passed boot, auth, remote/local gates, dependency installation and exact cloning; Lean toolchain installation is in progress. One worker only; exact cutoff 2026-09-12T11:25:00Z remains enforced by AWS Scheduler and the independent guest timer.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_autonomous_bounded_retry_worker_environment_fix_pending",
+      "authorizationStatus": "authorized_autonomous_bounded_pilot_worker_running",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -353,6 +353,12 @@
       "scope": "fifth_authorized_stack_worker_home_environment_gate",
       "result": "failed_after_clone_before_toolchain_cleaned_up_fix_reviewed",
       "detail": "Published authorization df6ad4b98034b19de28bb6ce8b7d5a27e63e1c0c created run 20260912T001332Z-fabc6618457ce692bd79a8a303d3cb60 on instance i-03c39a933913f9d3e. Boot, auth proof, remote/local budget gates, dependency installation and the exact pinned clone passed. The sole worker command 632ca205-d7f4-4c3a-abc2-0c7e7f7eb626 then failed before elan toolchain setup because AWS-RunShellScript did not define HOME while strict unset-variable checking was active. No Lean build or translation ran. The stack was deleted; the instance is terminated and attached-volume query is empty. Luna Max now establishes HOME=/root immediately after strict shell mode and tests that it precedes every HOME expansion. Controller mocks, generated worker shell syntax, Python compilation and diff validation pass."
+    },
+    {
+      "checkedAt": "2026-09-12T00:26:47+00:00",
+      "scope": "sixth_authorized_stack_live_worker_preflight",
+      "result": "running_toolchain_installation",
+      "detail": "Published authorization e4e55a5196edf71b09e41f9e45761149856a793e created run 20260912T002137Z-6d659f3d8b5f80e344b4cb0c571ddbc8 on instance i-0d38e287a8657a472. Auth probe e788863d-5b00-44e8-b007-63840954d4ff and all local/remote dispatch gates passed; sole worker command 4a9312df-3129-49f0-b2f4-706b7c6612cb is active. Read-only process diagnostic a7994590-830e-4af4-a253-a1b1269f007c confirmed dependency installation and exact cloning passed and elan is installing leanprover/lean4:v4.32.2. Its ListBucket check was denied as intended because the instance role has conditional write-only evidence access. No translation result is claimed yet. AWS Scheduler and the independent guest timer retain the exact 2026-09-12T11:25:00Z cutoff."
     }
   ],
   "historicalAutomation": {
@@ -384,10 +390,10 @@
     "liveAwsReadOnlyLaunchGates": "passed",
     "linuxProcessSamplerIntegrationRun": false,
     "leanBuildRun": false,
-    "productionDispatchRun": false,
+    "productionDispatchRun": true,
     "awsProvisioningAttempted": true,
-    "awsResourcesCurrentlyProvisioned": false,
-    "workerDispatchRun": false,
-    "awsResourcesProvisioned": false
+    "awsResourcesCurrentlyProvisioned": true,
+    "workerDispatchRun": true,
+    "awsResourcesProvisioned": true
   }
 }
