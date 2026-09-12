@@ -320,7 +320,8 @@ def build_worker_commands(*, repo_url: str, authorization_ref: str, run_id: str,
     modules = " ".join(f"--module {shlex.quote(x)}" for x in PILOT_MODULES)
     return [
         "set -Eeuo pipefail",
-        "dnf install -y git curl gcc gcc-c++ make gmp-devel libffi-devel zstd libzstd-devel sqlite jq python3 tar gzip openssl-devel awscli-2",
+        "dnf install -y git gcc gcc-c++ make gmp-devel libffi-devel zstd libzstd-devel sqlite jq python3 tar gzip openssl-devel awscli-2",
+        "test -x \"$(command -v curl)\"",
         "test \"$(uname -s)\" = Linux", "test \"$(uname -m)\" = x86_64",
         f"test \"$(awk '/^MemTotal:/ {{printf \"%.0f\", $2 * 1024}}' /proc/meminfo)\" -ge {MINIMUM_GUEST_MEMORY_BYTES}",
         f"test \"$(awk '/^MemAvailable:/ {{printf \"%.0f\", $2 * 1024}}' /proc/meminfo)\" -ge {MINIMUM_AVAILABLE_MEMORY_BYTES}",

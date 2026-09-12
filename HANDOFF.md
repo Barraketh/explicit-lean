@@ -85,10 +85,14 @@ proof; it was deleted before worker dispatch. A third bounded stack then booted
 successfully and completed device login, but the hardened remote gate emitted
 no proof because Amazon Linux Python rejected the valid trailing-`Z` campaign
 deadline. No worker was dispatched; the stack was deleted after about fourteen
-minutes and the instance and volume are gone. A narrow portable timestamp
-parser fix passes focused local review. The user authorized autonomous bounded
-retries without further per-revision confirmation. The pilot report remains
-required before a long campaign or additional machines.
+minutes and the instance and volume are gone. A fourth stack passed boot,
+device login and every dispatch gate, but its sole worker command failed before
+cloning because Amazon Linux's preinstalled `curl-minimal` conflicts with
+installing full `curl`. That stack was deleted and its instance and volume are
+gone. A narrow worker bootstrap fix passes focused local review. The user
+authorized autonomous bounded retries without further per-revision
+confirmation. The pilot report remains required before a long campaign or
+additional machines.
 
 Before launch, close the publication gate. The exact one-pilot continuation is
 recorded in both top-level tracker boundaries and remains fail-closed at its

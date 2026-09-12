@@ -55,10 +55,13 @@ worker dispatch. A third stack booted cleanly and completed device login, but
 the independent remote gate correctly emitted no proof because Amazon Linux
 Python rejected the tracker's valid trailing-`Z` deadline. No worker was
 dispatched. The third stack was deleted after about fourteen minutes; the
-instance is terminated and its volume is gone. A narrow portable timestamp
-parser fix and regression test pass local review. The user authorized
-autonomous bounded retries without further per-revision confirmation. Fresh
-September 11 telemetry reported ordinary Codex work available at 25%.
+instance is terminated and its volume is gone. A fourth stack passed boot,
+device login and every dispatch gate, but its sole worker command failed before
+cloning because Amazon Linux's preinstalled `curl-minimal` conflicts with full
+`curl`. That stack was deleted and its instance and volume are gone. A narrow
+worker bootstrap fix passes local review. The user authorized autonomous
+bounded retries without further per-revision confirmation. Fresh September 11
+telemetry reported ordinary Codex work available at 25%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 

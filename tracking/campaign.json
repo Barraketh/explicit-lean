@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-11T23:59:57+00:00",
+  "updatedAt": "2026-09-12T00:12:34+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,7 +16,7 @@
   },
   "deadline": "2026-09-12T11:25:00Z",
   "notAfter": "2026-09-12T11:25:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_autonomous_portability_fix_retry_pending",
+  "deadlineStatus": "one_pilot_bounded_continuation_autonomous_worker_bootstrap_fix_retry_pending",
   "machine": "local_mac_for_review_one_us_west_1_r7i_4xlarge_pilot_authorized_no_resources_currently_provisioned",
   "budget": {
     "resetDate": "2026-09-07",
@@ -41,12 +41,12 @@
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. The first CloudFormation request failed regional validation before resource creation. The second exposed and then fixed the guest timer and false transport-success auth proof. The third booted successfully and completed Codex device login, but the hardened remote gate correctly refused dispatch because Amazon Linux Python did not accept a trailing Z timestamp. No worker started. That stack was deleted, and fresh EC2/volume queries confirmed no resources remain. A narrow portable timestamp-parser fix is under review before an autonomous clean-revision retry.",
+    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Three successive fail-closed runs exposed and fixed regional Scheduler validation, guest timer/auth proof, and Amazon Linux Python timestamp portability. The fourth run booted, authenticated and passed every independent dispatch gate, but its sole worker command failed immediately before cloning because Amazon Linux's preinstalled curl-minimal conflicts with explicitly installing full curl. No translation ran. The stack was deleted, and fresh instance/volume queries confirm no resources remain. A narrow worker-package fix is under review before an autonomous clean-revision retry.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_autonomous_bounded_retry_portability_fix_pending",
+      "authorizationStatus": "authorized_autonomous_bounded_retry_worker_bootstrap_fix_pending",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -341,6 +341,12 @@
       "scope": "third_authorized_stack_remote_budget_portability_gate",
       "result": "failed_closed_cleaned_up_no_worker_fix_reviewed",
       "detail": "Authorization 80f4aa5be8426fc4a2c4f4ae22691f3385e3fc51 created the bounded stack, instance i-06601d7e79d7d1cc2 and run 20260911T234545Z-d13ce289b3d6e69ca1f977257603323a. Cloud-init, the independent shutdown timer, exact run/deadline files, pinned clean checkout and Codex device login passed. The hardened auth probe 449cba1d-e750-4c13-b154-d7529ecd9e17 returned code 3 and emitted no proof because Amazon Linux Python rejected the valid 2026-09-12T11:25:00Z campaign boundary. Diagnostic 8bc2d891-97e6-4669-8f75-9bd34fdfdc21 confirmed decision=unknown_usage and no other failed gate. No worker was dispatched. The stack was deleted after about fourteen minutes; the instance is terminated and attached-volume query is empty. Luna Max added a narrow terminal-Z normalization with focused regression coverage; coordinating checks passed campaign budget, Python compilation and diff validation."
+    },
+    {
+      "checkedAt": "2026-09-12T00:12:34+00:00",
+      "scope": "fourth_authorized_stack_worker_bootstrap_package_gate",
+      "result": "failed_before_clone_cleaned_up_fix_reviewed",
+      "detail": "Published authorization 532095c4de2234c28405bf8f4f7c1948540de1b7 created run 20260912T000142Z-ca023a88c01b2eed2829fc84c3fcb04e on instance i-08cb10425565bda2f. Cloud-init, timer, pinned checkout, device login, independent auth probe 9e644a20-a0ba-4bab-828c-7d02995b8109 and fresh remote/local campaign gates passed. The sole worker command b77477c0-a97e-49ee-9dd2-fa7ebde24ebc then failed immediately because dnf would not replace preinstalled curl-minimal with conflicting full curl. No clone, Lean build or translation ran. The stack was deleted; the instance is terminated and attached-volume query is empty. Luna Max removed the redundant curl package request, added an executable availability check and a regression assertion excluding both curl providers from the install list. Controller mocks, generated worker shell syntax, Python compilation and diff validation pass."
     }
   ],
   "historicalAutomation": {
