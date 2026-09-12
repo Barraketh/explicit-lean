@@ -136,8 +136,13 @@ instance `i-0f897f7d7146d9acf`. Device login and independent auth probe
 `d354a0e4-8709-4ccc-97b1-b37b4dafedae` is running with an observed document
 execution timeout of 31,435 seconds, the positive remaining interval to the
 unchanged cutoff. It passed the Linux dependency/cache setup, focused Python
-suites and repaired strict boundary gate, and fresh manifest inventory is active.
-The nested worker caps are unchanged. The user
+suites and repaired strict boundary gate. Diagnostic
+`7b08b7bd-94c5-4494-92e3-914f6c7bf0fc` at `2026-09-12T03:19:16Z`
+confirmed generation of a fresh 216,029,345-byte manifest with SHA-256
+`45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a` and
+active independent authenticated verification against the pinned repository,
+Lake and Lean identities. Corpus translation has not begun yet. The nested
+worker caps are unchanged. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. The pilot report remains required before a long campaign or
 additional machines.

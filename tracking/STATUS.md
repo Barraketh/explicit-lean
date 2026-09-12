@@ -100,8 +100,12 @@ authorization `83e01f8ceba26e271fe96d1524755b5ff7d35dfb` on instance
 worker `d354a0e4-8709-4ccc-97b1-b37b4dafedae` is running with the document
 execution timeout set to the 31,435 seconds remaining to the unchanged cutoff.
 It passed Linux dependency/cache setup, the focused Python suites and repaired
-strict boundary gate, and fresh manifest inventory is active. The nested worker
-caps remain unchanged. No translation result is claimed. The user
+strict boundary gate. Diagnostic `7b08b7bd-94c5-4494-92e3-914f6c7bf0fc` at
+`2026-09-12T03:19:16Z` confirmed generation of a fresh 216,029,345-byte manifest
+with SHA-256 `45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a`
+and active independent authenticated verification against the pinned repository,
+Lake and Lean identities. Corpus translation has not begun yet. The nested
+worker caps remain unchanged. No translation result is claimed. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. Fresh September 12 telemetry reported ordinary Codex work
 available at 38%.
