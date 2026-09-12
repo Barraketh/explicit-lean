@@ -13,9 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCATION_PROBE = "Experiment/SimpEngineBoundaryProbe.lean"
 APPLY_PROBE = "Experiment/SimpEngineBoundaryApply.lean"
 TRUST_PROBE = "Experiment/SimpEngineBoundaryTrust.lean"
+METADATA_PROBE = "Experiment/SimpEngineBoundaryMetadataDifferential.lean"
 APPLY_ROOT_MODULE = "ExplicitLean.SimpEngine.Boundary.Tactic"
 APPLY_SOURCE_MODULES = (
     "ExplicitLean.SimpEngine.Boundary.Apply",
+    "ExplicitLean.SimpEngine.Boundary.ModuleDataObservation",
     "ExplicitLean.SimpEngine.Boundary.Selector",
     "ExplicitLean.SimpEngine.Boundary.Tactic",
 )
@@ -185,7 +187,15 @@ def main() -> None:
     trust_output = compile_probe(dylib, TRUST_PROBE)
     if trust_output.count("SIMP_ENGINE_BOUNDARY_TRUST") != 1:
         raise RuntimeError(f"missing declaration-trust marker\n{trust_output}")
-    print("boundary prototype: isolated apply, location matrix, and trust: ok")
+    metadata_output = compile_probe(dylib, METADATA_PROBE)
+    metadata_marker = (
+        "BOUNDARY_METADATA_DIFFERENTIAL "
+        "symbolFrequency=true sineQuaNon=true fullObserver=true "
+        "missingRejected=true duplicateRejected=true cachePure=true"
+    )
+    if metadata_output.count(metadata_marker) != 1:
+        raise RuntimeError(f"missing metadata differential marker\n{metadata_output}")
+    print("boundary prototype: isolated apply, location matrix, trust, and metadata: ok")
 
 
 if __name__ == "__main__":
