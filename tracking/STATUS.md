@@ -74,8 +74,8 @@ observer now reproduces the pinned suggestion calculations without importing
 their broad Grind/simplifier closure, while exact extension identity, full
 metadata comparison and cache-purity checks remain fail-closed. The unchanged
 strict boundary probe, shared build, pinned differential probe and 41-case
-declaration oracle pass locally. A seventh stack at exact authorization
-`72ea005224408d2677818e722774909183c1bcca` is active as run
+declaration oracle pass locally. The seventh stack at exact authorization
+`72ea005224408d2677818e722774909183c1bcca` ran as
 `20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c` on
 `i-0e82b3e083e49db5e`. Device login, the independent auth proof and every
 dispatch gate passed. Sole worker `dcf05b97-f81d-4f98-972f-ade0afebd3c1`
@@ -94,28 +94,36 @@ Fix `d7f89c4` explicitly sets the document execution timeout to the lesser of th
 12-hour host lifetime and remaining cutoff window, while preserving the nested
 10-hour worker cap. The 11 controller mocks, generated shell syntax, Python
 compilation, live document-schema check and diff validation pass. Eighth run
-`20260912T023459Z-fe6336ea78d3eb918011662c49e8d838` is active at exact published
-authorization `83e01f8ceba26e271fe96d1524755b5ff7d35dfb` on instance
-`i-0f897f7d7146d9acf`. Device login and independent auth probe passed; sole
-worker `d354a0e4-8709-4ccc-97b1-b37b4dafedae` is running with the document
-execution timeout set to the 31,435 seconds remaining to the unchanged cutoff.
-It passed Linux dependency/cache setup, the focused Python suites and repaired
-strict boundary gate. Diagnostic `7b08b7bd-94c5-4494-92e3-914f6c7bf0fc` at
-`2026-09-12T03:19:16Z` confirmed generation of a fresh 216,029,345-byte manifest
-with SHA-256 `45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a`
-and active independent authenticated verification against the pinned repository,
-Lake and Lean identities. Corpus translation has not begun yet. The nested
-worker caps remain unchanged. No translation result is claimed. The user
-authorized autonomous bounded retries without further per-revision
-confirmation. Fresh September 12 telemetry reported ordinary Codex work
-available at 38%.
+`20260912T023459Z-fe6336ea78d3eb918011662c49e8d838`, at exact published
+authorization `83e01f8ceba26e271fe96d1524755b5ff7d35dfb`, is terminal. Device login,
+the independent auth probe, Linux dependency/cache setup, focused Python suites
+and repaired strict boundary gate passed. It generated a fresh 216,029,345-byte
+manifest with SHA-256
+`45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a`.
+Independent verification returned nonzero before writing its result:
+`manifest-verification.json` is zero bytes, worker
+`d354a0e4-8709-4ccc-97b1-b37b4dafedae` ended `Failed`/1 at
+`2026-09-12T08:35:15.189Z`, and corpus translation never began. SSM retained
+only the beginning of the verifier's progress stream, so its precise terminal
+diagnostic was not preserved there. The downloaded 10,871,274-byte AES256
+evidence archive has SHA-256
+`34562944df116d2a8d164fa1c00ab7606ac7a923b2fce203ca3474398a4f94f9`, matching
+its uploaded hash record; `run-exit.json` records original exit 1 and successful
+evidence upload. The cutoff scheduler terminated instance
+`i-0f897f7d7146d9acf` at `2026-09-12T11:25:01Z`; its volume is gone, the exact
+stack is deleted, and tagged active-instance and volume queries are empty. No
+translation result is claimed. The one-pilot authorization is exhausted; a new
+host or longer campaign requires new authorization. Fresh September 12
+telemetry reported ordinary Codex work available at 38% before dispatch.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 
-After the pilot, prioritize `Mathlib.Logic.Relation`, `Mathlib.Data.Nat.Init`
-and `Mathlib.Logic.IsEmpty.Basic`, then cold-certify their translated dependency
-slice. Reusable-call provenance and whole-tree acceptance remain separate gates.
-Readability work follows complete explicit coverage.
+Next, diagnose the independent verifier's nonzero exit from the preserved
+manifest and local code before modifying translation behavior. Then prioritize
+`Mathlib.Logic.Relation`, `Mathlib.Data.Nat.Init` and
+`Mathlib.Logic.IsEmpty.Basic`, and cold-certify their translated dependency
+slice. Reusable-call provenance and whole-tree acceptance remain separate gates;
+readability work follows complete explicit coverage.
 
 ## Evidence and reporting caveats
 

@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "handoff_and_bounded_pilot_preparation",
+  "phase": "handoff_and_bounded_pilot_complete",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T10:41:48+00:00",
+  "updatedAt": "2026-09-12T11:31:57+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,8 +16,8 @@
   },
   "deadline": "2026-09-12T11:25:00Z",
   "notAfter": "2026-09-12T11:25:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_running_until_exact_cutoff",
-  "machine": "one_us_west_1_r7i_4xlarge_pilot_running_instance_i-0f897f7d7146d9acf",
+  "deadlineStatus": "one_pilot_bounded_continuation_closed_at_exact_cutoff",
+  "machine": "none",
   "budget": {
     "resetDate": "2026-09-07",
     "currentWindowAllowance": "normal account availability",
@@ -25,7 +25,7 @@
     "formerPercentagePolicy": "The September 7 campaign-specific 25% maximum and 22% dispatch stop were explicitly retired by the user on September 11.",
     "usageSource": "codex app-server account/rateLimits/read",
     "unknownUsageAfterReset": "stop",
-    "paidResourcesAuthorized": true,
+    "paidResourcesAuthorized": false,
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
@@ -34,19 +34,19 @@
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
     "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
-    "note": "Fresh telemetry reported ordinary usage available at 38%. The former 25%/22% project budget is obsolete. The one-pilot continuation ends at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed. The user authorized autonomous execution of the bounded experiment without further per-revision confirmation; dispatch remains fail-closed on the published revision, remote gate, AWS spend and runtime bounds."
+    "note": "Fresh telemetry reported ordinary usage available at 38% before the final dispatch. The former 25%/22% project budget is obsolete. The one-pilot continuation ended at the exact top-level deadline/notAfter boundary and no additional paid resource is authorized. No credit was bought or redeemed."
   },
   "direction": {
     "userConversationDate": "2026-09-10",
-    "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
+    "nextMilestone": "Diagnose the bounded Linux pilot's independent manifest-verifier rejection from preserved evidence, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Five fail-closed setup runs exposed and fixed regional Scheduler validation, guest timer/auth proof, Python timestamp portability, the Amazon Linux curl package conflict and the strict Session Manager HOME environment. The sixth run failed closed at the strict apply-only import-isolation gate before translation and was deleted with evidence preserved. Published fix 96af00ed589481ff96d754f20836567cc084a289 preserves the gate while adapting the pinned metadata calculations into a suggestion-free observer with exact extension identity, full-observer, duplicate/missing-identity and cache-purity validation; local boundary, shared-build, differential and 41-case oracle checks passed. Seventh run 20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c on instance i-0e82b3e083e49db5e passed device login, every dispatch gate, Linux dependency/cache setup, the focused Python suites and the repaired strict boundary gate. It generated a fresh 216,029,345-byte manifest with SHA-256 d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f, then SSM command dcf05b97-f81d-4f98-972f-ade0afebd3c1 failed closed with ExecutionTimedOut/137 exactly 3,600 seconds after execution began because AWS-RunShellScript retained its default one-hour execution timeout. The independent verifier was killed with an empty output; corpus translation never began. Recovery command 1af740a7-1604-4706-91fb-0796cb35e42e uploaded a 10,871,427-byte AES256 evidence archive whose downloaded SHA-256 matched 8d34ab67acc212b3688e4de4210bc958fb38cb97dc6c0680509746582e23c2b1, plus the hash, timeout record and run-exit record. The exact stack was deleted; the instance is terminated, its volume is gone. Published fix d7f89c4 explicitly sets AWS-RunShellScript executionTimeout to the lesser of the 12-hour host lifetime and remaining time to the unchanged 2026-09-12T11:25:00Z cutoff; the nested sampler and campaign worker retain 36,120-second and 36,000-second caps. The 11 controller mocks, generated shell syntax, Python compilation, live document-schema check and diff validation passed. Eighth run 20260912T023459Z-fe6336ea78d3eb918011662c49e8d838 is active at exact published authorization 83e01f8ceba26e271fe96d1524755b5ff7d35dfb on instance i-0f897f7d7146d9acf. Device login and independent auth probe 9fb6db6b-396e-4cad-8bf0-77781265411d passed. Sole worker d354a0e4-8709-4ccc-97b1-b37b4dafedae is running with AWS-RunShellScript executionTimeout 31,435 seconds. Diagnostic 6fb93a9b-34c1-4aee-b875-3e4828d9df20 confirmed that Linux dependency/cache setup, the focused Python suites and repaired strict boundary gate passed and fresh manifest inventory is active. Delivery and nested runtime caps are unchanged. No translation result is claimed.",
+    "readiness": "The authorized one-host pilot is complete. Eighth run 20260912T023459Z-fe6336ea78d3eb918011662c49e8d838 passed device auth, Linux setup, focused Python suites and the strict boundary gate, and generated a fresh 216,029,345-byte manifest with SHA-256 45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a. Independent verification returned nonzero before writing manifest-verification.json; worker d354a0e4-8709-4ccc-97b1-b37b4dafedae ended Failed/1 at 2026-09-12T08:35:15.189Z and corpus translation never began. SSM retained only the start of the verifier progress stream, so the precise final diagnostic is unavailable. The downloaded 10,871,274-byte versioned AES256 evidence archive has SHA-256 34562944df116d2a8d164fa1c00ab7606ac7a923b2fce203ca3474398a4f94f9, matching evidence-sha256.txt; run-exit.json records originalExitCode 1 and evidenceUploadFailed false. The cutoff scheduler terminated instance i-0f897f7d7146d9acf at 2026-09-12T11:25:01Z, volume vol-01a0c2644b4a45292 no longer exists, the exact stack was deleted, and fresh tagged active-instance and volume queries are empty. No translation result is claimed and no additional paid resource is authorized.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_autonomous_bounded_retry_worker_running",
+      "authorizationStatus": "completed_terminal_failure_evidence_preserved_stack_deleted",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -176,8 +176,8 @@
   "blockers": [
     {
       "id": "bounded-run-policy",
-      "status": "open",
-      "detail": "The one-pilot continuation and hardened fix are published. Explicitly identify the clean replacement HEAD by full hash before retrying. The superseded e5c86887d311853eb4013d1582e79c68f4d47535 and c0414c3f107cffb0c7afa1b43f97b517e0d6c7da authorizations must not be reused."
+      "status": "resolved",
+      "detail": "The one-pilot continuation ended at its exact 2026-09-12T11:25:00Z cutoff. The final host terminated, its volume is gone, and the exact stack was deleted. No further paid resource is authorized; all prior invocation authorizations and nonces are exhausted and must not be reused."
     },
     {
       "id": "aws-launch-identity-and-quota",
@@ -213,8 +213,8 @@
   },
   "nextActions": [
     "Read HANDOFF.md and the portable snapshot; confirm branch, local evidence availability and absence of active producers before editing.",
-    "Prepare the reproducible one-worker Linux pilot and bounded launch plan using the 15 suggested modules. Resolve the expired scheduling policy and cloud launch parameters before provisioning or dispatch.",
-    "Run the pilot with fresh platform-specific tooling and receipts; measure memory, elapsed time, resource stops and semantic outcomes.",
+    "Diagnose the independent manifest verifier's nonzero exit from the preserved eighth-run manifest and the pinned local verifier without weakening authentication or semantic checks.",
+    "Do not provision another AWS host unless the user supplies a new bounded authorization; the recorded one-pilot continuation is closed.",
     "Fix foundational semantic failures and cold-certify a translated dependency slice with stock Mathlib fallback excluded.",
     "Expand measured dependency-ordered coverage, integrate reusable provenance, then complete whole-tree acceptance before readability work."
   ],
@@ -231,8 +231,8 @@
     },
     {
       "id": "aws-pilot-preparation",
-      "status": "in_progress",
-      "description": "The seventh bounded run failed closed at the AWS-RunShellScript document's default one-hour execution timeout; evidence was recovered and the stack deleted. Published fix d7f89c4 explicitly bounds document execution. Eighth bounded run 20260912T023459Z-fe6336ea78d3eb918011662c49e8d838 is active on one r7i.4xlarge with device auth and every dispatch gate passed; its fresh manifest is generated and independent authenticated verification is active."
+      "status": "completed",
+      "description": "Eighth bounded run 20260912T023459Z-fe6336ea78d3eb918011662c49e8d838 passed Linux setup and strict boundary preflight, generated the fresh manifest, then failed closed in independent verification before corpus translation. Versioned AES256 evidence was downloaded and hash-verified. The cutoff terminated the instance, its volume is gone, the stack is deleted, and no active tagged compute or volume remains."
     },
     {
       "id": "corpus-translation",
@@ -389,6 +389,12 @@
       "scope": "eighth_authorized_stack_live_worker",
       "result": "monitoring_authentication_expired_worker_last_seen_healthy_in_manifest_verification",
       "detail": "Exact clean published authorization 83e01f8ceba26e271fe96d1524755b5ff7d35dfb created run 20260912T023459Z-fe6336ea78d3eb918011662c49e8d838 on default-tenancy r7i.4xlarge instance i-0f897f7d7146d9acf with encrypted 200 GiB gp3 volume vol-01a0c2644b4a45292. Live identity, quota, AMI, network, evidence bucket, exact cutoff and $14.492 worst-case cost gates passed. Device login and independent auth probe 9fb6db6b-396e-4cad-8bf0-77781265411d succeeded. Fresh local and remote campaign checks returned continue at 38%. Sole worker command d354a0e4-8709-4ccc-97b1-b37b4dafedae is InProgress; AWS reports TimeoutSeconds 36,120 and AWS-RunShellScript executionTimeout 31,435 seconds, exactly the positive remaining interval to the immutable 2026-09-12T11:25:00Z cutoff at dispatch. Diagnostic 7b08b7bd-94c5-4494-92e3-914f6c7bf0fc at 2026-09-12T03:19:16Z confirmed the Linux dependency/cache setup, focused Python suites and repaired strict boundary isolation/differential gate passed, and generation of a fresh 216,029,345-byte manifest with SHA-256 45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a. Independent authenticated verification against the pinned repository, Lake and Lean identities remained active at the last successful check. At 2026-09-12T08:18:13Z the local explicit-lean-pilot AWS login expired; the already-dispatched remote worker is not thereby stopped. The independently provisioned AWS Scheduler termination and guest systemd poweroff remain set for the immutable 2026-09-12T11:25:00Z cutoff, with instance-initiated shutdown set to terminate and root-volume DeleteOnTermination true, so the paid host has fail-safe teardown even while local monitoring is unavailable. Reauthentication is still required to inspect evidence and verify/delete the residual CloudFormation stack. A new aws login flow is waiting, but the Mac is locked and must be unlocked to complete it. Corpus translation has not been observed yet."
+    },
+    {
+      "checkedAt": "2026-09-12T11:31:57+00:00",
+      "scope": "eighth_authorized_stack_terminal_evidence_and_teardown",
+      "result": "failed_closed_before_translation_evidence_verified_stack_deleted",
+      "detail": "After fresh explicit-lean-pilot login, SSM command d354a0e4-8709-4ccc-97b1-b37b4dafedae was terminal Failed with response code 1 from 2026-09-12T02:41:05.189Z to 2026-09-12T08:35:15.189Z. Linux setup, focused Python suites, strict boundary preflight and fresh manifest generation passed; the 216,029,345-byte manifest has SHA-256 45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a. Independent verification returned nonzero before writing output, leaving manifest-verification.json at zero bytes, and corpus translation never began. SSM preserved only the beginning of the verifier progress stream, so the exact final diagnostic is unavailable. Three versioned AES256 objects were preserved under the exact run prefix. Downloading version PlINYgD_Qm4gtgmJf4d0hIa6BDkrUF98 produced a 10,871,274-byte evidence archive with SHA-256 34562944df116d2a8d164fa1c00ab7606ac7a923b2fce203ca3474398a4f94f9, exactly matching evidence-sha256.txt version LtNxpwhcF0._RKKcegDqJr46oR7bnSfj. run-exit.json version dp5VzIND3UAkoG4lkDY7nwIn3xJPOZK6 records originalExitCode 1 and evidenceUploadFailed false. The independent cutoff terminated instance i-0f897f7d7146d9acf at 2026-09-12T11:25:01Z, volume vol-01a0c2644b4a45292 no longer exists, CloudFormation stack explicit-lean-pilot-83e01f8ceba26e271fe96d1524755b5ff7d35dfb reached DELETE_COMPLETE, and fresh tagged active-instance and volume queries are empty. The versioned S3 evidence remains. No translation result is claimed and the one-pilot authorization is closed."
     }
   ],
   "historicalAutomation": {
@@ -401,11 +407,11 @@
     "policy": "Preserve the existing 12 GiB disk and host-memory reserves for local runs. Check fresh telemetry; no automatic evidence cleanup."
   },
   "documentationValidation": {
-    "date": "2026-09-11",
+    "date": "2026-09-12",
     "localMarkdownLinks": "passed",
     "jsonCrossDocumentInvariants": "passed",
     "archiveSha256": "verified",
-    "budgetChecks": "continue_with_materialized_not_after",
+    "budgetChecks": "pilot_closed_at_exact_not_after",
     "campaignStatusTests": 9,
     "supervisorTests": 22,
     "workerTests": 33,
@@ -426,7 +432,7 @@
     "declarationOracleFailClosedCases": 26,
     "productionDispatchRun": true,
     "awsProvisioningAttempted": true,
-    "awsResourcesCurrentlyProvisioned": true,
+    "awsResourcesCurrentlyProvisioned": false,
     "workerDispatchRun": true,
     "awsResourcesProvisioned": true
   }

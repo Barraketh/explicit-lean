@@ -55,10 +55,11 @@ merge needed for that supervisor. Its old `.lake` loader scripts are historical.
    15 proposed pilot modules: five prior successes, five memory stops, and five
    foundational semantic/unsupported failures. Reproduction of a known semantic
    failure is a useful baseline, not a successful translation.
-5. Prepare the bounded Linux pilot described below. Do not restart the old
-   six-hour supervisor or September 8 automation as a startup step.
+5. Review the terminal Linux-pilot evidence described below. Do not restart the
+   old six-hour supervisor or September 8 automation as a startup step, and do
+   not provision another host without a new bounded authorization.
 
-## Next deliverable: a reproducible bounded Linux pilot
+## Bounded Linux pilot outcome and next deliverable
 
 The user authorized one AWS pilot in account `538639825139`, region `us-west-1`,
 with a **$20 all-in ceiling**. The selected bounds are one single-purpose,
@@ -105,8 +106,8 @@ observer now carries pinned suggestion algorithms directly without importing
 the broad suggestion/Grind closure, while exact extension identities, full
 metadata comparison and cache-purity checks remain fail-closed. The unchanged
 strict boundary probe, full shared build, a pinned differential probe and the
-41-case declaration oracle pass locally. A seventh bounded stack at exact
-authorization `72ea005224408d2677818e722774909183c1bcca` is active as run
+41-case declaration oracle pass locally. The seventh bounded stack at exact
+authorization `72ea005224408d2677818e722774909183c1bcca` ran as
 `20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c` on instance
 `i-0e82b3e083e49db5e`; device login, the independent auth proof and every
 local/remote dispatch gate passed, and its sole worker command
@@ -129,34 +130,36 @@ bounded by the lesser of the 12-hour host lifetime and remaining time to that
 cutoff, while the nested sampler and campaign worker retain their 10-hour-plus-
 120-second and 10-hour caps. The 11 controller mocks, generated shell syntax,
 Python compilation, live document-schema check and diff validation pass. An
-eighth bounded run `20260912T023459Z-fe6336ea78d3eb918011662c49e8d838` is active
-at exact published authorization `83e01f8ceba26e271fe96d1524755b5ff7d35dfb` on
-instance `i-0f897f7d7146d9acf`. Device login and independent auth probe
-`9fb6db6b-396e-4cad-8bf0-77781265411d` passed, and sole worker command
-`d354a0e4-8709-4ccc-97b1-b37b4dafedae` is running with an observed document
-execution timeout of 31,435 seconds, the positive remaining interval to the
-unchanged cutoff. It passed the Linux dependency/cache setup, focused Python
-suites and repaired strict boundary gate. Diagnostic
-`7b08b7bd-94c5-4494-92e3-914f6c7bf0fc` at `2026-09-12T03:19:16Z`
-confirmed generation of a fresh 216,029,345-byte manifest with SHA-256
-`45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a` and
-active independent authenticated verification against the pinned repository,
-Lake and Lean identities. Corpus translation has not begun yet. The nested
-worker caps are unchanged. The user
-authorized autonomous bounded retries without further per-revision
-confirmation. The pilot report remains required before a long campaign or
-additional machines.
+eighth bounded run `20260912T023459Z-fe6336ea78d3eb918011662c49e8d838`, at exact
+published authorization `83e01f8ceba26e271fe96d1524755b5ff7d35dfb`, is
+terminal. Device login, independent auth probe
+`9fb6db6b-396e-4cad-8bf0-77781265411d`, Linux setup, the focused Python suites
+and the repaired strict boundary gate passed. It generated a fresh 216,029,345-
+byte manifest with SHA-256
+`45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a`.
+Independent verification then returned nonzero before writing its result:
+`manifest-verification.json` is zero bytes, worker command
+`d354a0e4-8709-4ccc-97b1-b37b4dafedae` ended `Failed`/1 at
+`2026-09-12T08:35:15.189Z`, and corpus translation never began. SSM retained
+only the beginning of the verifier's progress stream, so its precise final
+diagnostic is not present in the terminal command record. The exit trap uploaded
+three versioned AES256 objects. The downloaded 10,871,274-byte evidence archive
+has SHA-256 `34562944df116d2a8d164fa1c00ab7606ac7a923b2fce203ca3474398a4f94f9`,
+exactly matching `evidence-sha256.txt`; `run-exit.json` records
+`originalExitCode=1` and `evidenceUploadFailed=false`. The cutoff scheduler
+terminated instance `i-0f897f7d7146d9acf` at `2026-09-12T11:25:01Z`, volume
+`vol-01a0c2644b4a45292` no longer exists, the exact stack was deleted, and fresh
+tagged active-instance and volume queries are empty. No translation result is
+claimed. The one-pilot authorization is exhausted. Diagnose and fix the
+verifier rejection from preserved evidence under local constraints; a new AWS
+host or longer campaign requires new authorization.
 
-Before launch, close the publication gate. The exact one-pilot continuation is
-recorded in both top-level tracker boundaries and remains fail-closed at its
-absolute cutoff. Do not work around the guard or extend that time. The original
-campaign-specific 25%/22% usage policy is obsolete by explicit user direction.
-Fresh telemetry must still show ordinary account availability; unknown or
-actually rate-limited availability stops dispatch, and credits must never be
-bought or redeemed. The user's autonomous-run instruction removes the prior
-per-revision confirmation step but does not relax any technical, cost or runtime
-gate. Preparing and reviewing the pilot can proceed without paid resources. Do
-not use the older `explicit-lean-cloud` host.
+The exact one-pilot continuation ended at its recorded absolute cutoff; do not
+extend or bypass it. The original campaign-specific 25%/22% usage policy remains
+obsolete by explicit user direction. Fresh telemetry must still show ordinary
+account availability before costly work; unknown or actually rate-limited
+availability stops dispatch, and credits must never be bought or redeemed. No
+additional paid resource is authorized. Do not use `explicit-lean-cloud`.
 The Codex usage allowance and the AWS spending limit are separate budgets.
 
 On the selected Linux host, recreate the pinned dependencies and native tools.
