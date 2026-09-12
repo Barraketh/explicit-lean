@@ -100,8 +100,13 @@ import-isolation gate found a transitive path through
 `Lean.Meta.Tactic.Simp.Rewrite`. Its evidence upload succeeded; the stack was
 deleted, instance `i-0d38e287a8657a472` is terminated, and its volume is gone.
 No AWS compute resources are currently provisioned and no translation result
-is claimed. The unexpected architectural dependency is under review without
-weakening the isolation or semantic-validation requirements. The user
+is claimed. The architectural fix is published at `96af00e`: the metadata
+observer now carries pinned suggestion algorithms directly without importing
+the broad suggestion/Grind closure, while exact extension identities, full
+metadata comparison and cache-purity checks remain fail-closed. The unchanged
+strict boundary probe, full shared build, a pinned differential probe and the
+41-case declaration oracle pass locally. A fresh Linux rerun is the next step;
+the user
 authorized autonomous bounded retries without further per-revision
 confirmation. The pilot report remains required before a long campaign or
 additional machines.

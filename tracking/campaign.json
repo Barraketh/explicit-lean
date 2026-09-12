@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T00:34:13+00:00",
+  "updatedAt": "2026-09-12T01:15:35+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,7 +16,7 @@
   },
   "deadline": "2026-09-12T11:25:00Z",
   "notAfter": "2026-09-12T11:25:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_architectural_gate_review_until_exact_cutoff",
+  "deadlineStatus": "one_pilot_bounded_continuation_ready_to_relaunch_until_exact_cutoff",
   "machine": "no_aws_compute_resources_currently_provisioned",
   "budget": {
     "resetDate": "2026-09-07",
@@ -29,24 +29,24 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-12T00:13:44.293575+00:00",
-    "lastUsedPercent": 26,
+    "lastCheckedAt": "2026-09-12T01:15:29.282920+00:00",
+    "lastUsedPercent": 31,
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
     "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
-    "note": "Fresh telemetry reported ordinary usage available at 26%. The former 25%/22% project budget is obsolete. The one-pilot continuation ends at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed. The user authorized autonomous execution of the bounded experiment without further per-revision confirmation; dispatch remains fail-closed on the published revision, remote gate, AWS spend and runtime bounds."
+    "note": "Fresh telemetry reported ordinary usage available at 31%. The former 25%/22% project budget is obsolete. The one-pilot continuation ends at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed. The user authorized autonomous execution of the bounded experiment without further per-revision confirmation; dispatch remains fail-closed on the published revision, remote gate, AWS spend and runtime bounds."
   },
   "direction": {
     "userConversationDate": "2026-09-10",
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Five fail-closed setup runs exposed and fixed regional Scheduler validation, guest timer/auth proof, Python timestamp portability, the Amazon Linux curl package conflict and the strict Session Manager HOME environment. The sixth run 20260912T002137Z-6d659f3d8b5f80e344b4cb0c571ddbc8 at published authorization e4e55a5196edf71b09e41f9e45761149856a793e passed boot, auth, remote/local gates, dependency installation, exact cloning, Lean 4.32.2 installation, Mathlib cache fetch and the focused Python suites. It then failed closed before corpus translation because the strict apply-only import-isolation gate reached Lean.Meta.Tactic.Simp.Rewrite transitively through ModuleDataObservation and Mathlib library-suggestion modules. Evidence upload succeeded. The stack was deleted, instance i-0d38e287a8657a472 is terminated, its volume is gone and no AWS compute resources are currently provisioned. The architectural dependency is under review without weakening isolation or semantic validation; the exact 2026-09-12T11:25:00Z cutoff remains unchanged.",
+    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Five fail-closed setup runs exposed and fixed regional Scheduler validation, guest timer/auth proof, Python timestamp portability, the Amazon Linux curl package conflict and the strict Session Manager HOME environment. The sixth run 20260912T002137Z-6d659f3d8b5f80e344b4cb0c571ddbc8 at published authorization e4e55a5196edf71b09e41f9e45761149856a793e passed boot, auth, remote/local gates, dependency installation, exact cloning, Lean 4.32.2 installation, Mathlib cache fetch and the focused Python suites. It then failed closed before corpus translation because the strict apply-only import-isolation gate reached Lean.Meta.Tactic.Simp.Rewrite transitively through ModuleDataObservation and Mathlib library-suggestion modules. Evidence upload succeeded and all resources were deleted. Published fix 96af00ed589481ff96d754f20836567cc084a289 preserves the strict gate while adapting the pinned metadata calculations into a suggestion-free observer with exact extension identity, full-observer, duplicate/missing-identity and cache-purity validation. The unchanged boundary probe, shared build, differential metadata probe and 41-case declaration oracle pass locally. No AWS compute resources are currently provisioned; the next step is a fresh Linux rerun before the unchanged 2026-09-12T11:25:00Z cutoff.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_autonomous_bounded_pilot_architectural_gate_fix_pending",
+      "authorizationStatus": "authorized_autonomous_bounded_pilot_fix_published_ready_to_relaunch",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -359,6 +359,12 @@
       "scope": "sixth_authorized_stack_apply_import_isolation_gate",
       "result": "failed_closed_before_translation_cleaned_up_architectural_review_pending",
       "detail": "Published authorization e4e55a5196edf71b09e41f9e45761149856a793e created run 20260912T002137Z-6d659f3d8b5f80e344b4cb0c571ddbc8 on instance i-0d38e287a8657a472. Auth probe e788863d-5b00-44e8-b007-63840954d4ff and all local/remote dispatch gates passed; sole worker command 4a9312df-3129-49f0-b2f4-706b7c6612cb installed dependencies and Lean 4.32.2, cloned the exact revision, fetched and decompressed 8,639 cached artifacts, and passed the campaign budget plus supervisor 22, worker 33, translation-index 13 and Linux-sampler 2 checks. It then failed closed before manifest creation or corpus translation because Experiment/check_simp_engine_boundary.py found that the apply-only import closure reaches Lean.Meta.Tactic.Simp.Rewrite through ExplicitLean.SimpEngine.Boundary.ModuleDataObservation and Mathlib library-suggestion imports. S3 run-exit.json records originalExitCode=1 and evidenceUploadFailed=false. Diagnostic 40676a41-31fe-476a-acb1-dc1c9d7a0c43 captured the failure. The stack was deleted; instance i-0d38e287a8657a472 is terminated and its attached-volume query is empty. The strict isolation and semantic gates remain in force while the unexpected architectural dependency is reviewed."
+    },
+    {
+      "checkedAt": "2026-09-12T01:15:35+00:00",
+      "scope": "apply_import_isolation_architectural_fix_review",
+      "result": "published_fix_ready_for_fresh_linux_rerun",
+      "detail": "Published revision 96af00ed589481ff96d754f20836567cc084a289 removes the two broad Lean.LibrarySuggestions imports from ModuleDataObservation while preserving their pinned Lean 4.32.2 relevant-constant, deny-list, frequency and trigger calculations locally. Unsafe extension-state casts require exact unique names, pinned indices and main-only mode; the full observer now rejects missing and duplicate derived extensions. The worker boundary preflight retains its original transitive simplifier-import rejection and now also scans ModuleDataObservation directly and compiles a full-Boundary differential probe. Local checks passed: ExplicitLean:shared 64-job build, isolated apply/location/trust/metadata boundary probe, exact symbol-frequency and Sine-Qua-Non differential, missing/duplicate identity rejection, suggestion-cache purity, Python compilation, diff validation, and the declaration oracle's 15 accepted-equivalence plus 26 fail-closed cases. Fresh ordinary usage is available at 31%; no credits were bought or redeemed and no AWS resources are currently provisioned."
     }
   ],
   "historicalAutomation": {
@@ -390,6 +396,10 @@
     "liveAwsReadOnlyLaunchGates": "passed",
     "linuxProcessSamplerIntegrationRun": false,
     "leanBuildRun": false,
+    "focusedLeanBoundaryBuild": true,
+    "boundaryMetadataDifferential": "passed_full_observer_missing_duplicate_and_cache_purity",
+    "declarationOracleAcceptedCases": 15,
+    "declarationOracleFailClosedCases": 26,
     "productionDispatchRun": true,
     "awsProvisioningAttempted": true,
     "awsResourcesCurrentlyProvisioned": false,

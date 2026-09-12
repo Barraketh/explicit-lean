@@ -69,12 +69,17 @@ gate found a transitive path through `ModuleDataObservation` and Mathlib's
 library-suggestion machinery to `Lean.Meta.Tactic.Simp.Rewrite`. Evidence upload
 succeeded. The sixth stack was deleted, instance `i-0d38e287a8657a472` is
 terminated, its volume is gone, and no AWS compute resources are currently
-provisioned. The architectural dependency is under review without weakening
-the isolation or semantic gates. The exact `2026-09-12T11:25:00Z` cutoff
-remains unchanged. No translation result is claimed yet. The user
+provisioned. The architectural fix is published at `96af00e`: the metadata
+observer now reproduces the pinned suggestion calculations without importing
+their broad Grind/simplifier closure, while exact extension identity, full
+metadata comparison and cache-purity checks remain fail-closed. The unchanged
+strict boundary probe, shared build, pinned differential probe and 41-case
+declaration oracle pass locally. A fresh Linux rerun is next. The exact
+`2026-09-12T11:25:00Z` cutoff remains unchanged. No translation result is
+claimed yet. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. Fresh September 12 telemetry reported ordinary Codex work
-available at 26%.
+available at 31%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 
