@@ -80,8 +80,10 @@ declaration oracle pass locally. A seventh stack at exact authorization
 `i-0e82b3e083e49db5e`. Device login, the independent auth proof and every
 dispatch gate passed. Sole worker `dcf05b97-f81d-4f98-972f-ade0afebd3c1`
 passed Linux dependency/cache setup, the focused Python suites and the repaired
-strict boundary gate, and is building the fresh authenticated manifest. Corpus
-translation has not begun. Both shutdown mechanisms retain the exact
+strict boundary gate. It generated the fresh 216,029,345-byte manifest with
+SHA-256 `d09cd2daf8b7f11e61f96a6d2bd9c85e3268b0421a3b576ccdc352d3ed29473f`
+and is running its independent authenticated verification; corpus translation
+has not begun. Both shutdown mechanisms retain the exact
 `2026-09-12T11:25:00Z` cutoff. No translation result is claimed yet. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. Fresh September 12 telemetry reported ordinary Codex work
