@@ -78,8 +78,10 @@ declaration oracle pass locally. A seventh stack at exact authorization
 `72ea005224408d2677818e722774909183c1bcca` is active as run
 `20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c` on
 `i-0e82b3e083e49db5e`. Device login, the independent auth proof and every
-dispatch gate passed; sole worker `dcf05b97-f81d-4f98-972f-ade0afebd3c1` is
-running. Both shutdown mechanisms retain the exact
+dispatch gate passed. Sole worker `dcf05b97-f81d-4f98-972f-ade0afebd3c1`
+passed Linux dependency/cache setup, the focused Python suites and the repaired
+strict boundary gate, and is building the fresh authenticated manifest. Corpus
+translation has not begun. Both shutdown mechanisms retain the exact
 `2026-09-12T11:25:00Z` cutoff. No translation result is claimed yet. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. Fresh September 12 telemetry reported ordinary Codex work
