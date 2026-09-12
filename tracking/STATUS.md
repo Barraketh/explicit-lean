@@ -61,11 +61,17 @@ cloning because Amazon Linux's preinstalled `curl-minimal` conflicts with full
 `curl`. A fifth stack passed package setup and cloned the exact revision, then
 failed before toolchain setup because Session Manager supplied no `HOME` under
 strict shell checking. Both stacks were deleted and their instances and volumes
-are gone. A sixth stack pinned to `e4e55a5` is active on
-`i-0d38e287a8657a472`: boot, device login, all dispatch gates, dependency
-installation and exact cloning passed, and Lean toolchain installation began.
-The single worker and both shutdown mechanisms retain the exact
-`2026-09-12T11:25:00Z` cutoff. No translation result is claimed yet. The user
+are gone. A sixth stack pinned to `e4e55a5` passed boot, device login, all
+dispatch gates, dependency installation, exact cloning, Lean 4.32.2
+installation, the Mathlib cache fetch and the focused Python suites. It then
+failed closed before corpus translation: the strict apply-only import-isolation
+gate found a transitive path through `ModuleDataObservation` and Mathlib's
+library-suggestion machinery to `Lean.Meta.Tactic.Simp.Rewrite`. Evidence upload
+succeeded. The sixth stack was deleted, instance `i-0d38e287a8657a472` is
+terminated, its volume is gone, and no AWS compute resources are currently
+provisioned. The architectural dependency is under review without weakening
+the isolation or semantic gates. The exact `2026-09-12T11:25:00Z` cutoff
+remains unchanged. No translation result is claimed yet. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. Fresh September 12 telemetry reported ordinary Codex work
 available at 26%.

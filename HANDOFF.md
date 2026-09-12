@@ -91,11 +91,17 @@ cloning because Amazon Linux's preinstalled `curl-minimal` conflicts with
 installing full `curl`. A fifth stack passed that point and cloned the exact
 revision, then failed before toolchain setup because Session Manager supplied
 no `HOME` under strict shell checking. Both stacks were deleted and their
-instances and volumes are gone. A sixth stack pinned to `e4e55a5` is now active:
-boot, device login, all dispatch gates, dependency installation and exact
-cloning passed, and Lean toolchain installation began. It remains one worker on
-instance `i-0d38e287a8657a472`, with both AWS and guest shutdown fixed at
-`2026-09-12T11:25:00Z`. No translation result is claimed yet. The user
+instances and volumes are gone. A sixth stack pinned to `e4e55a5` passed boot,
+device login, all dispatch gates, dependency installation, exact cloning, Lean
+4.32.2 installation, the Mathlib cache fetch and the focused Python suites. It
+then failed closed before corpus translation because the strict apply-only
+import-isolation gate found a transitive path through
+`ModuleDataObservation` and Mathlib's library-suggestion machinery to
+`Lean.Meta.Tactic.Simp.Rewrite`. Its evidence upload succeeded; the stack was
+deleted, instance `i-0d38e287a8657a472` is terminated, and its volume is gone.
+No AWS compute resources are currently provisioned and no translation result
+is claimed. The unexpected architectural dependency is under review without
+weakening the isolation or semantic-validation requirements. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. The pilot report remains required before a long campaign or
 additional machines.
