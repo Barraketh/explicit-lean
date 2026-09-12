@@ -3,7 +3,7 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 
-from campaign_budget import evaluate
+from campaign_budget import _campaign_end, _parse_iso8601, evaluate
 
 RESET = int(datetime(2026, 9, 7, 7, tzinfo=timezone.utc).timestamp())
 NOW = datetime(2026, 9, 1, tzinfo=timezone.utc)
@@ -20,6 +20,10 @@ def snapshot(used=1, resets=RESET):
 
 
 def main():
+    zulu = "2026-09-08T00:00:00Z"
+    assert _parse_iso8601(zulu) == datetime(2026, 9, 8, tzinfo=timezone.utc)
+    assert _campaign_end({"deadline": zulu}) == datetime(2026, 9, 8, tzinfo=timezone.utc)
+    assert evaluate({"deadline": zulu}, snapshot(1), NOW)["canDispatch"]
     # The legacy percentage fields are intentionally ignored. Account
     # availability, not the former 25% project allowance, controls dispatch.
     for percent in [0, 18, 22, 24, 25, 98, 99]:

@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-11T23:43:03+00:00",
+  "updatedAt": "2026-09-11T23:59:57+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,8 +16,8 @@
   },
   "deadline": "2026-09-12T11:25:00Z",
   "notAfter": "2026-09-12T11:25:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_boot_auth_fix_published_hash_confirmation_pending",
-  "machine": "local_mac_for_preparation_one_us_west_1_r7i_4xlarge_pilot_authorized_not_provisioned",
+  "deadlineStatus": "one_pilot_bounded_continuation_autonomous_portability_fix_retry_pending",
+  "machine": "local_mac_for_review_one_us_west_1_r7i_4xlarge_pilot_authorized_no_resources_currently_provisioned",
   "budget": {
     "resetDate": "2026-09-07",
     "currentWindowAllowance": "normal account availability",
@@ -34,19 +34,19 @@
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
     "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
-    "note": "Fresh telemetry reported ordinary usage available at 25%. The former 25%/22% project budget is obsolete. The one-pilot continuation ends at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed. AWS dispatch remains blocked until the clean authorization commit is published and explicitly identified."
+    "note": "Fresh telemetry reported ordinary usage available at 25%. The former 25%/22% project budget is obsolete. The one-pilot continuation ends at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed. The user authorized autonomous execution of the bounded experiment without further per-revision confirmation; dispatch remains fail-closed on the published revision, remote gate, AWS spend and runtime bounds."
   },
   "direction": {
     "userConversationDate": "2026-09-10",
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized a reproducible one-host pilot in account 538639825139/us-west-1 with a $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. The first CloudFormation request failed regional validation before resource creation. The second created the bounded stack, but guest setup failed on the systemd timer timestamp before Codex installation. Its apparent auth proof was explicitly invalidated because Session Manager transport success did not prove remote command success. The stack was manually deleted after about four minutes; fresh EC2/volume queries confirmed none remain and the worker never started. The hardened guest-timer/auth-proof fix is published. Explicitly identify its clean replacement HEAD before retrying. Neither superseded authorization may be reused.",
+    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. The first CloudFormation request failed regional validation before resource creation. The second exposed and then fixed the guest timer and false transport-success auth proof. The third booted successfully and completed Codex device login, but the hardened remote gate correctly refused dispatch because Amazon Linux Python did not accept a trailing Z timestamp. No worker started. That stack was deleted, and fresh EC2/volume queries confirmed no resources remain. A narrow portable timestamp-parser fix is under review before an autonomous clean-revision retry.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_window_boot_auth_fix_published_hash_confirmation_pending",
+      "authorizationStatus": "authorized_autonomous_bounded_retry_portability_fix_pending",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -335,6 +335,12 @@
       "scope": "guest_timer_and_verified_auth_proof_fix_review",
       "result": "passed_publication_pending",
       "detail": "Luna Max changed the guest timer to derive a systemd-compatible space-separated UTC calendar from the same CloudFormation NotAfter, with the marker only after timer activation. Auth now requires an independent, run-bound SSM post-check with terminal Success and ResponseCode 0; transport success alone emits no proof. The post-check verifies cloud-init, active timer, exact run/deadline, pinned Codex login and checkout, and fresh campaign budget. InvocationDoesNotExist is the only transient poll retry. Eleven controller mocks, all existing focused suites, generated shell syntax, YAML/invariants, AWS ValidateTemplate and diff validation passed. Amazon Linux 2023 systemd-analyze accepted the exact 2026-09-12 11:25:00 UTC value. Fresh ordinary Codex usage was available at 25%. No AWS resources remain and no launch retry occurred."
+    },
+    {
+      "checkedAt": "2026-09-11T23:59:57+00:00",
+      "scope": "third_authorized_stack_remote_budget_portability_gate",
+      "result": "failed_closed_cleaned_up_no_worker_fix_reviewed",
+      "detail": "Authorization 80f4aa5be8426fc4a2c4f4ae22691f3385e3fc51 created the bounded stack, instance i-06601d7e79d7d1cc2 and run 20260911T234545Z-d13ce289b3d6e69ca1f977257603323a. Cloud-init, the independent shutdown timer, exact run/deadline files, pinned clean checkout and Codex device login passed. The hardened auth probe 449cba1d-e750-4c13-b154-d7529ecd9e17 returned code 3 and emitted no proof because Amazon Linux Python rejected the valid 2026-09-12T11:25:00Z campaign boundary. Diagnostic 8bc2d891-97e6-4669-8f75-9bd34fdfdc21 confirmed decision=unknown_usage and no other failed gate. No worker was dispatched. The stack was deleted after about fourteen minutes; the instance is terminated and attached-volume query is empty. Luna Max added a narrow terminal-Z normalization with focused regression coverage; coordinating checks passed campaign budget, Python compilation and diff validation."
     }
   ],
   "historicalAutomation": {

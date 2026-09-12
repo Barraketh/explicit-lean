@@ -37,7 +37,7 @@ The bounded AWS/Linux pilot is authorized for account `538639825139` in
 `r7i.4xlarge`-class machine, one worker and 15 modules spanning successes,
 resource stops and semantic failures. The chosen bounds are a 10-hour worker
 and a 12-hour instance lifetime; the estimated bounded subtotal is $14.492.
-No AWS compute resources have been provisioned. A dedicated
+No AWS compute resources are currently provisioned. A dedicated
 `explicit-lean-operator` IAM user has console login, temporary
 `AdministratorAccess` and no access keys. Its password was changed, the invalid
 temporary password was removed from Keychain, and the user explicitly chose to
@@ -49,13 +49,16 @@ exact `2026-09-12T11:25:00Z` cutoff. The first CloudFormation request failed
 regional schedule-property validation and auto-deleted before creating any
 resource;
 fresh EC2 and volume queries confirmed nothing remains. Its exact authorization
-hash is superseded. A second bounded stack was created, but guest setup stopped
-before Codex installation because systemd rejected the backup-timer timestamp.
-A Session Manager transport-success false auth proof was invalidated before any
-worker dispatch, and the stack was deleted after about four minutes; no pilot
-resources currently remain. The clean guest-timer/auth-proof fix is published;
-explicitly identify its replacement HEAD before retrying. Fresh September 11
-telemetry reported ordinary Codex work available at 25%.
+hash is superseded. A second bounded stack exposed a rejected guest timer
+timestamp and a false transport-success auth proof; it was deleted before
+worker dispatch. A third stack booted cleanly and completed device login, but
+the independent remote gate correctly emitted no proof because Amazon Linux
+Python rejected the tracker's valid trailing-`Z` deadline. No worker was
+dispatched. The third stack was deleted after about fourteen minutes; the
+instance is terminated and its volume is gone. A narrow portable timestamp
+parser fix and regression test pass local review. The user authorized
+autonomous bounded retries without further per-revision confirmation. Fresh
+September 11 telemetry reported ordinary Codex work available at 25%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 

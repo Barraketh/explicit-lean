@@ -80,12 +80,15 @@ used. AWS closed quota case `178915936800175` and raised the region's On-Demand
 Standard quota to 32 vCPUs, above the 16 required. The replacement exact cutoff
 is `2026-09-12T11:25:00Z`. The first CloudFormation request failed regional
 schedule-property validation and created no resources. A second bounded stack
-was created, but guest setup stopped before Codex installation because systemd
-rejected the backup-timer timestamp. A transport-success false auth proof was
-invalidated before worker dispatch, and the stack was deleted after about four
-minutes; no pilot resources currently remain. The clean guest-timer/auth-proof
-fix is published; explicitly identify its replacement HEAD before retrying. The
-pilot report remains required before a long campaign or additional machines.
+exposed a rejected guest timer timestamp and a false transport-success auth
+proof; it was deleted before worker dispatch. A third bounded stack then booted
+successfully and completed device login, but the hardened remote gate emitted
+no proof because Amazon Linux Python rejected the valid trailing-`Z` campaign
+deadline. No worker was dispatched; the stack was deleted after about fourteen
+minutes and the instance and volume are gone. A narrow portable timestamp
+parser fix passes focused local review. The user authorized autonomous bounded
+retries without further per-revision confirmation. The pilot report remains
+required before a long campaign or additional machines.
 
 Before launch, close the publication gate. The exact one-pilot continuation is
 recorded in both top-level tracker boundaries and remains fail-closed at its
@@ -93,8 +96,10 @@ absolute cutoff. Do not work around the guard or extend that time. The original
 campaign-specific 25%/22% usage policy is obsolete by explicit user direction.
 Fresh telemetry must still show ordinary account availability; unknown or
 actually rate-limited availability stops dispatch, and credits must never be
-bought or redeemed. Preparing and reviewing the pilot can proceed without paid
-resources. Do not use the older `explicit-lean-cloud` host.
+bought or redeemed. The user's autonomous-run instruction removes the prior
+per-revision confirmation step but does not relax any technical, cost or runtime
+gate. Preparing and reviewing the pilot can proceed without paid resources. Do
+not use the older `explicit-lean-cloud` host.
 The Codex usage allowance and the AWS spending limit are separate budgets.
 
 On the selected Linux host, recreate the pinned dependencies and native tools.

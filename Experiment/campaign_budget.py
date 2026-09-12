@@ -91,6 +91,12 @@ def _integer(value: object, label: str) -> int:
     return value
 
 
+def _parse_iso8601(value: str) -> datetime:
+    """Parse ISO-8601 on Python versions whose fromisoformat lacks ``Z``."""
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    return datetime.fromisoformat(normalized)
+
+
 def _campaign_end(policy: dict[str, Any]) -> datetime:
     """Return the earliest explicit campaign deadline/not-after boundary."""
     if not isinstance(policy, dict):
@@ -102,7 +108,7 @@ def _campaign_end(policy: dict[str, Any]) -> datetime:
             continue
         if not isinstance(value, str):
             raise ValueError(f"{name} must be an ISO-8601 string")
-        end = datetime.fromisoformat(value)
+        end = _parse_iso8601(value)
         if end.tzinfo is None:
             raise ValueError(f"{name} must include a timezone")
         ends.append(end)
