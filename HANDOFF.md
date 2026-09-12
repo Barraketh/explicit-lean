@@ -171,7 +171,13 @@ module, $20, 12-hour-host and 10-hour-worker constraints, with exact new cutoff
 `31fe1534-0659-40d9-81af-0e89947f4b6f` passed. Sole worker command
 `856f68e7-1804-4409-b9bf-149d9e4fe000` is running with delivery timeout 36,120
 seconds and document execution timeout 42,197 seconds, exactly bounded by the
-remaining cutoff window. Do not extend or bypass it or add another host. The
+remaining cutoff window. Linux setup, the focused Python suites and the strict
+boundary preflight passed. The worker generated a fresh 216,029,345-byte
+manifest with SHA-256
+`bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce` and a
+3,261,577-byte dependency map; independent authenticated verification is now
+active. Corpus translation has not begun. Do not extend or bypass the cutoff or
+add another host. The
 original campaign-specific 25%/22% usage policy remains obsolete by explicit
 user direction. Fresh telemetry showed ordinary account availability at 29%;
 unknown or actually rate-limited availability stops dispatch, and credits must

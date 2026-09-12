@@ -129,7 +129,12 @@ one replacement run under the unchanged one-host, one-worker, 15-module, $20,
 `31fe1534-0659-40d9-81af-0e89947f4b6f` passed. Sole worker
 `856f68e7-1804-4409-b9bf-149d9e4fe000` is running with the 36,120-second
 delivery cap and a 42,197-second document timeout bounded by the exact cutoff.
-Fresh ordinary Codex work was available at 30% immediately before dispatch.
+Linux setup, focused Python suites and the strict boundary preflight passed. A
+fresh 216,029,345-byte manifest with SHA-256
+`bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce` and a
+3,261,577-byte dependency map are complete; independent authenticated
+verification is active. Corpus translation has not begun. Fresh ordinary Codex
+work was available at 30% immediately before dispatch.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 

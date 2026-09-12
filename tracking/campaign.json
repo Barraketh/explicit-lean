@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T12:16:42+00:00",
+  "updatedAt": "2026-09-12T13:02:26+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -41,7 +41,7 @@
     "nextMilestone": "Publish the diagnosed manifest-verifier fix and run the authorized one-host replacement pilot, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The eighth run's verifier defect is fixed and published at 9b9e639445a63577b68355114218b4140509bacd with 34 verifier tests, a focused real preserved-evidence replay, Python compilation, strict negative cases and diagnostic-preservation checks passing. The exact published authorization created replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 on default-tenancy r7i.4xlarge instance i-0f9698935a4ccb630. Current identity, quota, AMI, network, encrypted evidence bucket, zero-preexisting-host, template, exact 2026-09-13T00:00:00Z cutoff and $14.492 worst-case cost gates passed. Device login and independent auth probe 31fe1534-0659-40d9-81af-0e89947f4b6f succeeded. Fresh local and remote campaign-budget checks returned continue at 30%. Sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 is running with delivery timeout 36,120 seconds and AWS-RunShellScript executionTimeout 42,197 seconds, exactly the positive remaining interval to the immutable cutoff. No translation result is claimed yet.",
+    "readiness": "The eighth run's verifier defect is fixed and published at 9b9e639445a63577b68355114218b4140509bacd with 34 verifier tests, a focused real preserved-evidence replay, Python compilation, strict negative cases and diagnostic-preservation checks passing. The exact published authorization created replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 on default-tenancy r7i.4xlarge instance i-0f9698935a4ccb630. Current identity, quota, AMI, network, encrypted evidence bucket, zero-preexisting-host, template, exact 2026-09-13T00:00:00Z cutoff and $14.492 worst-case cost gates passed. Device login and independent auth probe 31fe1534-0659-40d9-81af-0e89947f4b6f succeeded. Fresh local and remote campaign-budget checks returned continue at 30%. Sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 passed Linux setup, focused Python suites and strict boundary preflight, generated a fresh 216,029,345-byte manifest with SHA-256 bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce and a 3,261,577-byte dependency map, and is now in independent authenticated verification. Corpus translation has not begun and no translation result is claimed yet.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
@@ -232,7 +232,7 @@
     {
       "id": "aws-pilot-preparation",
       "status": "in_progress",
-      "description": "The eighth run's versioned evidence was hash-verified and its verifier defect was fixed under strict tests. Published authorization 9b9e639445a63577b68355114218b4140509bacd created replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 on instance i-0f9698935a4ccb630. Device auth and every local/remote launch gate passed; sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 is running under the exact cutoff."
+      "description": "The eighth run's versioned evidence was hash-verified and its verifier defect was fixed under strict tests. Published authorization 9b9e639445a63577b68355114218b4140509bacd created replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 on instance i-0f9698935a4ccb630. Device auth and every local/remote launch gate passed. Sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 passed Linux setup, focused Python suites and strict boundary preflight, generated the fresh manifest and dependency map, and is in independent authenticated verification under the exact cutoff."
     },
     {
       "id": "corpus-translation",
@@ -407,6 +407,12 @@
       "scope": "replacement_authorized_stack_auth_and_worker_dispatch",
       "result": "running_all_dispatch_gates_passed",
       "detail": "Clean published authorization 9b9e639445a63577b68355114218b4140509bacd created run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 and default-tenancy r7i.4xlarge instance i-0f9698935a4ccb630. Live non-root identity, 32-vCPU quota, current Amazon Linux AMI, network, 128 GiB shape, encrypted 200 GiB gp3 root volume, append-only versioned evidence bucket, zero preexisting active host, template/timer, exact 2026-09-13T00:00:00Z cutoff and $14.492 worst-case cost gates passed. Device login completed and independent auth probe 31fe1534-0659-40d9-81af-0e89947f4b6f returned Success/0 with fresh remote budget decision continue. Fresh local usage was 30%. Sole worker command 856f68e7-1804-4409-b9bf-149d9e4fe000 is InProgress with TimeoutSeconds 36,120 and AWS-RunShellScript executionTimeout 42,197 seconds, exactly the remaining cutoff interval at dispatch. No translation result is claimed yet."
+    },
+    {
+      "checkedAt": "2026-09-12T13:02:26+00:00",
+      "scope": "replacement_linux_preflight_and_manifest_generation",
+      "result": "passed_manifest_generated_authenticated_verification_running",
+      "detail": "Read-only process inspection confirmed sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 passed Linux dependency/cache setup, the focused Python suites and strict boundary preflight. It generated a fresh 216,029,345-byte manifest with SHA-256 bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce and a 3,261,577-byte dependency map under the fresh run namespace. Independent strict verification is active against published repository 9b9e639445a63577b68355114218b4140509bacd and pinned Linux Lake/Lean executable hashes. The host and EC2 status checks are healthy. Corpus translation has not begun and no translation result is claimed."
     }
   ],
   "historicalAutomation": {
