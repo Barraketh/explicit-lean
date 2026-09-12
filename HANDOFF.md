@@ -150,16 +150,25 @@ exactly matching `evidence-sha256.txt`; `run-exit.json` records
 terminated instance `i-0f897f7d7146d9acf` at `2026-09-12T11:25:01Z`, volume
 `vol-01a0c2644b4a45292` no longer exists, the exact stack was deleted, and fresh
 tagged active-instance and volume queries are empty. No translation result is
-claimed. The one-pilot authorization is exhausted. Diagnose and fix the
-verifier rejection from preserved evidence under local constraints; a new AWS
-host or longer campaign requires new authorization.
+claimed. Focused local reproduction found the exact defect: the producer's sole
+narrow recovery for a missing temporary execution with checked all-nonproof
+quoted owners classified five records as reusable caller-dependent execution,
+but the verifier omitted that shared recovery and rejected the first record in
+`Mathlib/Tactic/DeriveEncodable.lean`. The verifier now applies the same shared
+recovery only to fresh declarations and fresh execution evidence; malformed,
+mixed, proof-owned, unquoted and incomplete cases remain fail-closed. The
+34 verifier tests, a focused real-evidence replay, Python compilation and diff
+validation pass. The AWS worker now also preserves verifier stderr in both the
+encrypted archive and a direct append-only upload without masking exit status.
 
-The exact one-pilot continuation ended at its recorded absolute cutoff; do not
-extend or bypass it. The original campaign-specific 25%/22% usage policy remains
-obsolete by explicit user direction. Fresh telemetry must still show ordinary
-account availability before costly work; unknown or actually rate-limited
-availability stops dispatch, and credits must never be bought or redeemed. No
-additional paid resource is authorized. Do not use `explicit-lean-cloud`.
+The previous continuation ended at its recorded absolute cutoff. The user has
+now authorized one replacement run under the same one-host, one-worker, 15-
+module, $20, 12-hour-host and 10-hour-worker constraints, with exact new cutoff
+`2026-09-13T00:00:00Z`. Do not extend or bypass it or add another host. The
+original campaign-specific 25%/22% usage policy remains obsolete by explicit
+user direction. Fresh telemetry showed ordinary account availability at 29%;
+unknown or actually rate-limited availability stops dispatch, and credits must
+never be bought or redeemed. Do not use `explicit-lean-cloud`.
 The Codex usage allowance and the AWS spending limit are separate budgets.
 
 On the selected Linux host, recreate the pinned dependencies and native tools.

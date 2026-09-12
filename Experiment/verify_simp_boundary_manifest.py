@@ -1506,6 +1506,24 @@ def _fresh_scope_and_declarations(
                     expected_dimensions = ("direct_executable", "generated_computational" if generated else "computational", "materialize", "temporary source instrumentation observed executions whose final caller declarations are all non-proof-valued")
                 elif status == "mixed_execution_classification":
                     expected_dimensions = ("unresolved" if quoted else "direct_executable", "mixed", "unresolved", "executions resolved to both proof and non-proof declarations; scope action fails closed")
+                elif status == "missing_execution":
+                    # Reuse the producer's sole narrowly authenticated recovery
+                    # path, but give it only fresh scope declarations and fresh
+                    # execution evidence.  Manifest dimensions remain checked
+                    # below, so this cannot turn forged manifest data into an
+                    # accepted classification.
+                    fresh_result = {
+                        "occurrence": fresh_occurrence,
+                        "declarations": expected_declarations,
+                        "executionEvidence": fresh_evidence,
+                    }
+                    if scope.reclassify_missing_quoted_execution(fresh_result):
+                        expected_dimensions = tuple(
+                            fresh_result[field]
+                            for field in ("executionRole", "declarationKind", "action", "reason")
+                        )
+                    else:
+                        expected_dimensions = ("unresolved" if quoted else "direct_executable", "unknown", "unresolved", "selected source occurrence did not execute in the temporary probe copy; scope action fails closed")
                 else:
                     expected_dimensions = ("unresolved" if quoted else "direct_executable", "unknown", "unresolved", "selected source occurrence did not execute in the temporary probe copy; scope action fails closed")
             actual_dimensions = tuple(manifest_occurrence[field] for field in ("executionRole", "declarationKind", "action", "reason"))

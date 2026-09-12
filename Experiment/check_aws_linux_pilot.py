@@ -207,6 +207,11 @@ def test_template_and_worker_invariants() -> None:
     assert "sha256sum -c -" in joined and pilot.ELAN_URL in joined and pilot.ELAN_SHA256 in joined and "v4.1.2" not in joined and "libzstd-devel" in joined
     assert "codex login status" in joined and "campaign_budget.py check" in joined and "auth.json" not in joined and "test ! -e \"$output_root/evidence.tar.gz\"" in joined
     assert "--retry-failed" not in joined and "--if-none-match '*'" in joined and joined.count("--module ") == len(pilot.PILOT_MODULES)
+    verifier = next(command for command in commands if "verify_simp_boundary_manifest.py verify" in command)
+    assert verifier.endswith('> "$input_root/manifest-verification.json" 2> "$input_root/manifest-verification.stderr"')
+    assert "tee" not in verifier
+    assert '"$input_root/manifest-verification.stderr"' in next(command for command in commands if command.startswith("  tar -czf "))
+    assert 'for file in "$input_root/manifest-verification.stderr" "$output_root/evidence.tar.gz"' in joined
     assert f"--timeout {pilot.WORKER_SAMPLER_TIMEOUT_SECONDS} -- python3" in joined
     assert pilot.WORKER_SAMPLER_TIMEOUT_SECONDS == pilot.MAX_WORKER_SECONDS + pilot.WORKER_SAMPLER_GRACE_SECONDS
     with tempfile.TemporaryDirectory() as directory:

@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "handoff_and_bounded_pilot_complete",
+  "phase": "bounded_pilot_replacement_preparation",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T11:31:57+00:00",
+  "updatedAt": "2026-09-12T12:09:00+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -14,9 +14,9 @@
     "sha256": "a6ed38284491583e0bb02db966876f93516a35da63c8aea620c3e1c4df9ca589",
     "scope": "Original tracker preserved byte-for-byte. Its pending actions, active owners, old counts and prototype statuses are historical, not current dispatch instructions."
   },
-  "deadline": "2026-09-12T11:25:00Z",
-  "notAfter": "2026-09-12T11:25:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_closed_at_exact_cutoff",
+  "deadline": "2026-09-13T00:00:00Z",
+  "notAfter": "2026-09-13T00:00:00Z",
+  "deadlineStatus": "one_replacement_pilot_authorized_pending_published_fix_and_launch",
   "machine": "none",
   "budget": {
     "resetDate": "2026-09-07",
@@ -25,28 +25,28 @@
     "formerPercentagePolicy": "The September 7 campaign-specific 25% maximum and 22% dispatch stop were explicitly retired by the user on September 11.",
     "usageSource": "codex app-server account/rateLimits/read",
     "unknownUsageAfterReset": "stop",
-    "paidResourcesAuthorized": false,
+    "paidResourcesAuthorized": true,
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-12T02:41:04.193783+00:00",
-    "lastUsedPercent": 38,
+    "lastCheckedAt": "2026-09-12T12:09:53.499783+00:00",
+    "lastUsedPercent": 29,
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
     "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
-    "note": "Fresh telemetry reported ordinary usage available at 38% before the final dispatch. The former 25%/22% project budget is obsolete. The one-pilot continuation ended at the exact top-level deadline/notAfter boundary and no additional paid resource is authorized. No credit was bought or redeemed."
+    "note": "Fresh telemetry reports ordinary usage available at 29%. The former 25%/22% project budget is obsolete. The user authorized one replacement pilot under the same $20, one-host, one-worker, 15-module, 12-hour-host and 10-hour-worker envelope, ending at the exact new top-level deadline/notAfter boundary. No credit was bought or redeemed."
   },
   "direction": {
     "userConversationDate": "2026-09-10",
-    "nextMilestone": "Diagnose the bounded Linux pilot's independent manifest-verifier rejection from preserved evidence, then fix foundational semantic failures and certify a translated dependency slice.",
+    "nextMilestone": "Publish the diagnosed manifest-verifier fix and run the authorized one-host replacement pilot, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The authorized one-host pilot is complete. Eighth run 20260912T023459Z-fe6336ea78d3eb918011662c49e8d838 passed device auth, Linux setup, focused Python suites and the strict boundary gate, and generated a fresh 216,029,345-byte manifest with SHA-256 45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a. Independent verification returned nonzero before writing manifest-verification.json; worker d354a0e4-8709-4ccc-97b1-b37b4dafedae ended Failed/1 at 2026-09-12T08:35:15.189Z and corpus translation never began. SSM retained only the start of the verifier progress stream, so the precise final diagnostic is unavailable. The downloaded 10,871,274-byte versioned AES256 evidence archive has SHA-256 34562944df116d2a8d164fa1c00ab7606ac7a923b2fce203ca3474398a4f94f9, matching evidence-sha256.txt; run-exit.json records originalExitCode 1 and evidenceUploadFailed false. The cutoff scheduler terminated instance i-0f897f7d7146d9acf at 2026-09-12T11:25:01Z, volume vol-01a0c2644b4a45292 no longer exists, the exact stack was deleted, and fresh tagged active-instance and volume queries are empty. No translation result is claimed and no additional paid resource is authorized.",
+    "readiness": "The eighth run is closed with hash-verified evidence and no remaining compute or volume. Focused reproduction against its preserved manifest proved that fresh source/evidence data match, but the independent verifier omitted the producer's sole narrow missing-execution recovery for checked all-nonproof quoted owners and therefore rejected Mathlib/Tactic/DeriveEncodable.lean occurrence 8a18ca2cc5877278. The verifier now invokes that shared recovery using only fresh occurrence, declaration and execution evidence; malformed, mixed, proof-owned, unquoted, absent and incomplete cases remain fail-closed. Thirty-four verifier tests, a focused real preserved-evidence replay, Python compilation and diff validation pass. The AWS worker now preserves verifier stderr in the encrypted archive and direct append-only S3 upload without masking failure. Fresh ordinary Codex usage is available at 29%, explicit-lean-pilot resolves to the intended non-root operator, and no AWS compute or volume is active. The user authorized one replacement run under the same bounded envelope with exact cutoff 2026-09-13T00:00:00Z; publication and live launch gates remain before provisioning.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "completed_terminal_failure_evidence_preserved_stack_deleted",
+      "authorizationStatus": "authorized_autonomous_replacement_pending_published_ref_and_launch",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -176,8 +176,8 @@
   "blockers": [
     {
       "id": "bounded-run-policy",
-      "status": "resolved",
-      "detail": "The one-pilot continuation ended at its exact 2026-09-12T11:25:00Z cutoff. The final host terminated, its volume is gone, and the exact stack was deleted. No further paid resource is authorized; all prior invocation authorizations and nonces are exhausted and must not be reused."
+      "status": "in_progress",
+      "detail": "The prior continuation ended cleanly at 2026-09-12T11:25:00Z and all prior invocation authorizations/nonces remain exhausted. The user authorized one replacement under the same bounded envelope with exact new cutoff 2026-09-13T00:00:00Z. Publish the reviewed verifier/diagnostic fix and identify the resulting clean full HEAD before launching; do not add another host or extend the cutoff."
     },
     {
       "id": "aws-launch-identity-and-quota",
@@ -213,8 +213,8 @@
   },
   "nextActions": [
     "Read HANDOFF.md and the portable snapshot; confirm branch, local evidence availability and absence of active producers before editing.",
-    "Diagnose the independent manifest verifier's nonzero exit from the preserved eighth-run manifest and the pinned local verifier without weakening authentication or semantic checks.",
-    "Do not provision another AWS host unless the user supplies a new bounded authorization; the recorded one-pilot continuation is closed.",
+    "Publish the narrow independent manifest-verifier recovery fix and stderr preservation after focused review; use the resulting clean full HEAD as the replacement authorization ref.",
+    "Run the one authorized replacement host with fresh platform-specific inputs and receipts, without extending the exact 2026-09-13T00:00:00Z cutoff.",
     "Fix foundational semantic failures and cold-certify a translated dependency slice with stock Mathlib fallback excluded.",
     "Expand measured dependency-ordered coverage, integrate reusable provenance, then complete whole-tree acceptance before readability work."
   ],
@@ -231,8 +231,8 @@
     },
     {
       "id": "aws-pilot-preparation",
-      "status": "completed",
-      "description": "Eighth bounded run 20260912T023459Z-fe6336ea78d3eb918011662c49e8d838 passed Linux setup and strict boundary preflight, generated the fresh manifest, then failed closed in independent verification before corpus translation. Versioned AES256 evidence was downloaded and hash-verified. The cutoff terminated the instance, its volume is gone, the stack is deleted, and no active tagged compute or volume remains."
+      "status": "in_progress",
+      "description": "The eighth run's versioned evidence was hash-verified and its resources were removed. Focused local reproduction found and fixed the verifier's omitted shared recovery for five missing-execution records with checked all-nonproof quoted owners; all other paths remain fail-closed. Future verifier stderr is preserved without masking exit status. One replacement run is authorized and awaiting publication/live gates."
     },
     {
       "id": "corpus-translation",
@@ -395,6 +395,12 @@
       "scope": "eighth_authorized_stack_terminal_evidence_and_teardown",
       "result": "failed_closed_before_translation_evidence_verified_stack_deleted",
       "detail": "After fresh explicit-lean-pilot login, SSM command d354a0e4-8709-4ccc-97b1-b37b4dafedae was terminal Failed with response code 1 from 2026-09-12T02:41:05.189Z to 2026-09-12T08:35:15.189Z. Linux setup, focused Python suites, strict boundary preflight and fresh manifest generation passed; the 216,029,345-byte manifest has SHA-256 45c3b5b8903972b0d594c600c33804db32c11c6c764abb114ed4c5a162a32a6a. Independent verification returned nonzero before writing output, leaving manifest-verification.json at zero bytes, and corpus translation never began. SSM preserved only the beginning of the verifier progress stream, so the exact final diagnostic is unavailable. Three versioned AES256 objects were preserved under the exact run prefix. Downloading version PlINYgD_Qm4gtgmJf4d0hIa6BDkrUF98 produced a 10,871,274-byte evidence archive with SHA-256 34562944df116d2a8d164fa1c00ab7606ac7a923b2fce203ca3474398a4f94f9, exactly matching evidence-sha256.txt version LtNxpwhcF0._RKKcegDqJr46oR7bnSfj. run-exit.json version dp5VzIND3UAkoG4lkDY7nwIn3xJPOZK6 records originalExitCode 1 and evidenceUploadFailed false. The independent cutoff terminated instance i-0f897f7d7146d9acf at 2026-09-12T11:25:01Z, volume vol-01a0c2644b4a45292 no longer exists, CloudFormation stack explicit-lean-pilot-83e01f8ceba26e271fe96d1524755b5ff7d35dfb reached DELETE_COMPLETE, and fresh tagged active-instance and volume queries are empty. The versioned S3 evidence remains. No translation result is claimed and the one-pilot authorization is closed."
+    },
+    {
+      "checkedAt": "2026-09-12T12:09:00+00:00",
+      "scope": "eighth_verifier_root_cause_fix_review_and_replacement_authorization",
+      "result": "passed_publication_pending",
+      "detail": "Structural inspection of the preserved 216,029,345-byte manifest passed in 5.2 seconds. Focused real source/evidence recomputation reproduced the first terminal mismatch at Mathlib/Tactic/DeriveEncodable.lean occurrence 8a18ca2cc5877278: fresh missing_execution evidence exactly matched the manifest and the shared scope recovery authenticated nonempty all-nonproof quoted owners as reusable_executable/caller_dependent/materialize, while the verifier had omitted that branch and expected unresolved/unknown. Luna Max implemented a two-file verifier/test fix that invokes the existing recovery only with fresh occurrence, declaration and execution evidence. Positive and malformed/mixed/proof/unquoted/absent/incomplete negative cases pass; 34 verifier tests, focused real preserved-evidence replay, Python compilation and diff validation pass. A separate Luna Max change preserves verifier stderr in the run-scoped encrypted archive and direct append-only upload without teeing or masking the original exit. Eleven AWS controller mocks, generated shell syntax and Python compilation pass. Fresh Codex usage is available at 29%; explicit-lean-pilot is the intended non-root operator and tagged active compute/volume queries are empty. The user authorized one replacement run under the unchanged bounded envelope with exact cutoff 2026-09-13T00:00:00Z. No credit was bought or redeemed."
     }
   ],
   "historicalAutomation": {
@@ -411,13 +417,17 @@
     "localMarkdownLinks": "passed",
     "jsonCrossDocumentInvariants": "passed",
     "archiveSha256": "verified",
-    "budgetChecks": "pilot_closed_at_exact_not_after",
+    "budgetChecks": "replacement_authorized_with_materialized_not_after",
     "campaignStatusTests": 9,
     "supervisorTests": 22,
     "workerTests": 33,
     "translationIndexTests": 13,
     "linuxProcessSamplerTests": 2,
     "awsLinuxPilotTests": 11,
+    "manifestVerifierTests": 34,
+    "preservedManifestStructuralInspection": "passed",
+    "preservedDeriveEncodableEvidenceReplay": "passed",
+    "verifierStderrPreservation": "passed_generated_shell_and_mock_checks",
     "generatedWorkerShellSyntax": "passed",
     "cloudInitShellSyntax": "passed",
     "amazonLinuxSystemdCalendarValidation": "passed",

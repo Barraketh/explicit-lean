@@ -112,15 +112,22 @@ its uploaded hash record; `run-exit.json` records original exit 1 and successful
 evidence upload. The cutoff scheduler terminated instance
 `i-0f897f7d7146d9acf` at `2026-09-12T11:25:01Z`; its volume is gone, the exact
 stack is deleted, and tagged active-instance and volume queries are empty. No
-translation result is claimed. The one-pilot authorization is exhausted; a new
-host or longer campaign requires new authorization. Fresh September 12
-telemetry reported ordinary Codex work available at 38% before dispatch.
+translation result is claimed. Focused local reproduction identified the exact
+verifier defect: five records use the producer's narrow all-nonproof quoted-
+owner recovery for missing temporary execution, while the verifier omitted the
+same shared recovery and rejected the first `Mathlib/Tactic/DeriveEncodable`
+record. The narrow fix uses only fresh declarations and fresh execution evidence
+and leaves malformed, mixed, proof-owned, unquoted and incomplete cases fail-
+closed. Verifier tests and a focused real-evidence replay pass. The AWS worker
+will also preserve verifier stderr without masking failure. The user authorized
+one replacement run under the unchanged one-host, one-worker, 15-module, $20,
+12-hour-host and 10-hour-worker constraints, with exact cutoff
+`2026-09-13T00:00:00Z`. Fresh ordinary Codex work is available at 29%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 
-Next, diagnose the independent verifier's nonzero exit from the preserved
-manifest and local code before modifying translation behavior. Then prioritize
-`Mathlib.Logic.Relation`, `Mathlib.Data.Nat.Init` and
+Publish the reviewed verifier fix and run the authorized replacement pilot.
+Then prioritize `Mathlib.Logic.Relation`, `Mathlib.Data.Nat.Init` and
 `Mathlib.Logic.IsEmpty.Basic`, and cold-certify their translated dependency
 slice. Reusable-call provenance and whole-tree acceptance remain separate gates;
 readability work follows complete explicit coverage.

@@ -270,6 +270,177 @@ class ManifestVerifierTests(unittest.TestCase):
         }
         self.write(); self.rejects("executionCount")
 
+    def _missing_execution_result(
+        self,
+        *,
+        ancestors: list[str] | None = None,
+        declarations: list[dict[str, object]] | None = None,
+        status: str = "missing_execution",
+    ) -> dict[str, object]:
+        occurrence = {
+            "startByte": 0,
+            "endByte": 4,
+            "kind": "simp",
+            "source": "simp",
+            "ancestors": ancestors if ancestors is not None else [
+                "Lean.Parser.Term.quot",
+                "Lean.Parser.Tactic.simp",
+            ],
+        }
+        owners = declarations if declarations is not None else [{
+            "module": "Mathlib.A",
+            "name": "a",
+            "startByte": 0,
+            "endByte": len(self.source),
+            "selectionStartByte": 0,
+            "selectionEndByte": 10,
+            "isProof": False,
+        }]
+        return {
+            "occurrence": occurrence,
+            "declarations": owners,
+            "executionEvidence": {
+                "status": status,
+                "executionCount": 0,
+                "callers": [],
+                "module": None,
+                "scheduling": verifier.scope.SCOPE_PROBE_SCHEDULING,
+            },
+        }
+
+    def test_missing_quoted_execution_recovery_is_narrow_and_fail_closed(self) -> None:
+        expected_reason = (
+            "temporary execution was missing, but checked enclosing declarations "
+            "are all non-proof-valued; quoted syntax is reusable caller-driven "
+            "execution"
+        )
+        accepted = self._missing_execution_result()
+        self.assertTrue(verifier.scope.reclassify_missing_quoted_execution(accepted))
+        self.assertEqual(
+            tuple(accepted[field] for field in (
+                "executionRole", "declarationKind", "action", "reason"
+            )),
+            (
+                "reusable_executable", "caller_dependent", "materialize",
+                expected_reason,
+            ),
+        )
+
+        cases = {
+            "no evidence": self._missing_execution_result(),
+            "malformed owner": self._missing_execution_result(
+                declarations=[{"module": "Mathlib.A"}]
+            ),
+            "mixed owners": self._missing_execution_result(
+                declarations=[
+                    *self._missing_execution_result()["declarations"],
+                    {
+                        "module": "Mathlib.A",
+                        "name": "proof_owner",
+                        "startByte": 0,
+                        "endByte": len(self.source),
+                        "selectionStartByte": 0,
+                        "selectionEndByte": 10,
+                        "isProof": True,
+                    },
+                ]
+            ),
+            "proof owner": self._missing_execution_result(
+                declarations=[{
+                    "module": "Mathlib.A",
+                    "name": "proof_owner",
+                    "startByte": 0,
+                    "endByte": len(self.source),
+                    "selectionStartByte": 0,
+                    "selectionEndByte": 10,
+                    "isProof": True,
+                }]
+            ),
+            "unquoted": self._missing_execution_result(
+                ancestors=["Lean.Parser.Tactic.simp"]
+            ),
+            "incomplete evidence": self._missing_execution_result(
+                status="incomplete_execution_evidence"
+            ),
+        }
+        cases["no evidence"].pop("executionEvidence")
+        for label, result in cases.items():
+            with self.subTest(label=label):
+                self.assertFalse(
+                    verifier.scope.reclassify_missing_quoted_execution(result)
+                )
+                self.assertNotIn("executionRole", result)
+
+    def test_scope_recomputation_matches_missing_quoted_recovery_dimensions(self) -> None:
+        occurrence = copy.deepcopy(self.manifest["modules"][0]["occurrences"][0])
+        occurrence["ancestors"] = [
+            "Lean.Parser.Term.quot",
+            "Lean.Parser.Tactic.simp",
+        ]
+        occurrence["scopePaths"][0]["ancestors"] = list(occurrence["ancestors"])
+        occurrence["declarations"][0]["isProof"] = False
+        occurrence["executionRole"] = "reusable_executable"
+        occurrence["declarationKind"] = "caller_dependent"
+        occurrence["action"] = "materialize"
+        occurrence["reason"] = (
+            "temporary execution was missing, but checked enclosing declarations "
+            "are all non-proof-valued; quoted syntax is reusable caller-driven "
+            "execution"
+        )
+        occurrence["executionEvidence"] = {
+            "status": "missing_execution",
+            "executionCount": 0,
+            "callers": [],
+            "module": None,
+            "scheduling": verifier.scope.SCOPE_PROBE_SCHEDULING,
+        }
+        self.manifest["modules"][0]["occurrences"] = [occurrence]
+        fresh_occurrence = copy.deepcopy(occurrence)
+        fresh_occurrence["module"] = self.manifest["modules"][0]["compiledModule"]
+        fresh_declarations = copy.deepcopy(occurrence["declarations"])
+        fresh_evidence = copy.deepcopy(occurrence["executionEvidence"])
+        compiled = self.manifest["modules"][0]["compiledModule"]
+        with patch.object(verifier, "_scope_recompute_root", return_value=self.repository), \
+                patch.object(verifier, "_freshness_snapshot", return_value={}), \
+                patch.object(verifier, "_assert_fresh"), \
+                patch.object(
+                    verifier.scope,
+                    "load_records_with_fallbacks",
+                    return_value=({compiled: [fresh_occurrence]}, {compiled: fresh_declarations}, []),
+                ), \
+                patch.object(
+                    verifier.scope,
+                    "resolve_execution_evidence",
+                    return_value={occurrence["id"]: fresh_evidence},
+                ), \
+                patch.object(
+                    verifier.scope,
+                    "reclassify_missing_quoted_execution",
+                    wraps=verifier.scope.reclassify_missing_quoted_execution,
+                ) as reclassify:
+            verifier._fresh_scope_and_declarations(
+                self.path,
+                self.manifest,
+                self.repository,
+                self.mathlib,
+                1,
+            )
+
+        reclassify.assert_called_once()
+        result = reclassify.call_args.args[0]
+        self.assertIs(result["occurrence"], fresh_occurrence)
+        self.assertIsNot(result["declarations"], occurrence["declarations"])
+        self.assertEqual(result["declarations"], fresh_declarations)
+        self.assertIs(result["executionEvidence"], fresh_evidence)
+        self.assertEqual(
+            tuple(result[field] for field in (
+                "executionRole", "declarationKind", "action", "reason"
+            )),
+            tuple(occurrence[field] for field in (
+                "executionRole", "declarationKind", "action", "reason"
+            )),
+        )
+
     def test_unnamed_example_proof_may_use_valid_execution_evidence(self) -> None:
         occurrence = self.manifest["modules"][0]["occurrences"][0]
         occurrence["commandKind"] = "Lean.Parser.Command.example"

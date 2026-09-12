@@ -1,19 +1,12 @@
 # Bounded AWS/Linux pilot
 
-The user authorized a single bounded pilot in AWS account `538639825139`, region
-`us-west-1`, with a $20 all-in ceiling and delegated the runtime choice. The
-selected bounds are a 10-hour worker and a 12-hour absolute instance lifetime.
-The first launch request failed CloudFormation's regional early validation and
-created no resources. The second created the correct stack, but guest setup
-stopped before Codex installation because systemd rejected the timer timestamp.
-Session Manager transport success then produced an unverified local auth proof;
-coordinating review invalidated it before worker dispatch and deleted the stack.
-No pilot resources currently remain. Both authorization refs
-`e5c86887d311853eb4013d1582e79c68f4d47535` and
-`c0414c3f107cffb0c7afa1b43f97b517e0d6c7da` are superseded and must not be
-reused. The clean guest-timer/auth-proof fix is published; explicitly identify
-its replacement HEAD before retrying. The replacement exact cutoff is
-`2026-09-12T11:25:00Z`.
+The user authorized one replacement bounded pilot in AWS account `538639825139`,
+region `us-west-1`, with the same $20 all-in ceiling. The selected bounds remain
+a 10-hour worker and a 12-hour absolute instance lifetime. Earlier authorization
+refs and invocation nonces are exhausted and must not be reused. The prior host
+terminated at its exact cutoff, its volume is gone, its stack was deleted, and
+no pilot resources currently remain. The replacement exact cutoff is
+`2026-09-13T00:00:00Z`.
 
 The pilot is exactly one single-purpose, default-tenancy Linux x86-64 host with
 at least 128 GiB of RAM, one worker, one attempt for each of the 15 recorded
@@ -24,9 +17,10 @@ authorized because its surcharge is outside the recorded cost bound.
 ## Authorization and cost gate
 
 The approved envelope and exact cutoff are recorded in the policy. After that
-change is committed and published, the user must identify that full commit as
-the authorization ref. The full hash is supplied as a launch argument
-rather than written into its own commit, which would be a circular reference.
+change is committed and published, use the resulting clean full commit as the
+authorization ref under the user's autonomous replacement-run instruction.
+The full hash is supplied as a launch argument rather than written into its own
+commit, which would be a circular reference.
 The controller verifies that it is the clean local `HEAD` and is reachable from
 the exact public HTTPS origin before any mutation, then records it in AWS tags,
 the fresh manifest and run receipts. Query the selected region's
