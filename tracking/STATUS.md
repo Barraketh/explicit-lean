@@ -93,11 +93,16 @@ no AWS compute resources remain. The `2026-09-12T11:25:00Z` cutoff is unchanged.
 Fix `d7f89c4` explicitly sets the document execution timeout to the lesser of the
 12-hour host lifetime and remaining cutoff window, while preserving the nested
 10-hour worker cap. The 11 controller mocks, generated shell syntax, Python
-compilation, live document-schema check and diff validation pass. No translation
-result is claimed. The user
+compilation, live document-schema check and diff validation pass. Eighth run
+`20260912T023459Z-fe6336ea78d3eb918011662c49e8d838` is active at exact published
+authorization `83e01f8ceba26e271fe96d1524755b5ff7d35dfb` on instance
+`i-0f897f7d7146d9acf`. Device login and independent auth probe passed; sole
+worker `d354a0e4-8709-4ccc-97b1-b37b4dafedae` is running with the document
+execution timeout set to the 31,435 seconds remaining to the unchanged cutoff.
+The nested worker caps remain unchanged. No translation result is claimed. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. Fresh September 12 telemetry reported ordinary Codex work
-available at 37%.
+available at 38%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 

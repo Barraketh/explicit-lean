@@ -128,7 +128,14 @@ unchanged. Narrow fix `d7f89c4` explicitly supplies a document execution timeout
 bounded by the lesser of the 12-hour host lifetime and remaining time to that
 cutoff, while the nested sampler and campaign worker retain their 10-hour-plus-
 120-second and 10-hour caps. The 11 controller mocks, generated shell syntax,
-Python compilation, live document-schema check and diff validation pass. The user
+Python compilation, live document-schema check and diff validation pass. An
+eighth bounded run `20260912T023459Z-fe6336ea78d3eb918011662c49e8d838` is active
+at exact published authorization `83e01f8ceba26e271fe96d1524755b5ff7d35dfb` on
+instance `i-0f897f7d7146d9acf`. Device login and independent auth probe
+`9fb6db6b-396e-4cad-8bf0-77781265411d` passed, and sole worker command
+`d354a0e4-8709-4ccc-97b1-b37b4dafedae` is running with an observed document
+execution timeout of 31,435 seconds, the positive remaining interval to the
+unchanged cutoff. The nested worker caps are unchanged. The user
 authorized autonomous bounded retries without further per-revision
 confirmation. The pilot report remains required before a long campaign or
 additional machines.
