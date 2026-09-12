@@ -320,6 +320,7 @@ def build_worker_commands(*, repo_url: str, authorization_ref: str, run_id: str,
     modules = " ".join(f"--module {shlex.quote(x)}" for x in PILOT_MODULES)
     return [
         "set -Eeuo pipefail",
+        "export HOME=/root",
         "dnf install -y git gcc gcc-c++ make gmp-devel libffi-devel zstd libzstd-devel sqlite jq python3 tar gzip openssl-devel awscli-2",
         "test -x \"$(command -v curl)\"",
         "test \"$(uname -s)\" = Linux", "test \"$(uname -m)\" = x86_64",

@@ -88,11 +88,13 @@ deadline. No worker was dispatched; the stack was deleted after about fourteen
 minutes and the instance and volume are gone. A fourth stack passed boot,
 device login and every dispatch gate, but its sole worker command failed before
 cloning because Amazon Linux's preinstalled `curl-minimal` conflicts with
-installing full `curl`. That stack was deleted and its instance and volume are
-gone. A narrow worker bootstrap fix passes focused local review. The user
-authorized autonomous bounded retries without further per-revision
-confirmation. The pilot report remains required before a long campaign or
-additional machines.
+installing full `curl`. A fifth stack passed that point and cloned the exact
+revision, then failed before toolchain setup because Session Manager supplied
+no `HOME` under strict shell checking. Both stacks were deleted and their
+instances and volumes are gone. A narrow explicit root-`HOME` fix passes focused
+local review. The user authorized autonomous bounded retries without further
+per-revision confirmation. The pilot report remains required before a long
+campaign or additional machines.
 
 Before launch, close the publication gate. The exact one-pilot continuation is
 recorded in both top-level tracker boundaries and remains fail-closed at its

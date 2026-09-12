@@ -58,10 +58,13 @@ dispatched. The third stack was deleted after about fourteen minutes; the
 instance is terminated and its volume is gone. A fourth stack passed boot,
 device login and every dispatch gate, but its sole worker command failed before
 cloning because Amazon Linux's preinstalled `curl-minimal` conflicts with full
-`curl`. That stack was deleted and its instance and volume are gone. A narrow
-worker bootstrap fix passes local review. The user authorized autonomous
-bounded retries without further per-revision confirmation. Fresh September 11
-telemetry reported ordinary Codex work available at 25%.
+`curl`. A fifth stack passed package setup and cloned the exact revision, then
+failed before toolchain setup because Session Manager supplied no `HOME` under
+strict shell checking. Both stacks were deleted and their instances and volumes
+are gone. A narrow explicit root-`HOME` fix passes local review. The user
+authorized autonomous bounded retries without further per-revision
+confirmation. Fresh September 12 telemetry reported ordinary Codex work
+available at 26%.
 The user retired the former campaign-specific 25%/22% policy; unknown
 availability or an actual rate-limit/spend stop still halts dispatch.
 
