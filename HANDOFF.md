@@ -161,28 +161,61 @@ mixed, proof-owned, unquoted and incomplete cases remain fail-closed. The
 validation pass. The AWS worker now also preserves verifier stderr in both the
 encrypted archive and a direct append-only upload without masking exit status.
 
-The previous continuation ended at its recorded absolute cutoff. The user has
-now authorized one replacement run under the same one-host, one-worker, 15-
-module, $20, 12-hour-host and 10-hour-worker constraints, with exact new cutoff
-`2026-09-13T00:00:00Z`. Published authorization
+The authorized replacement run is terminal and failed closed before corpus
+translation. Published authorization
 `9b9e639445a63577b68355114218b4140509bacd` created run
 `20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1` on instance
-`i-0f9698935a4ccb630`. Device login and independent auth probe
-`31fe1534-0659-40d9-81af-0e89947f4b6f` passed. Sole worker command
-`856f68e7-1804-4409-b9bf-149d9e4fe000` is running with delivery timeout 36,120
-seconds and document execution timeout 42,197 seconds, exactly bounded by the
-remaining cutoff window. Linux setup, the focused Python suites and the strict
-boundary preflight passed. The worker generated a fresh 216,029,345-byte
-manifest with SHA-256
-`bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce` and a
-3,261,577-byte dependency map; independent authenticated verification is now
-active. Corpus translation has not begun. Do not extend or bypass the cutoff or
-add another host. The
-original campaign-specific 25%/22% usage policy remains obsolete by explicit
-user direction. Fresh telemetry showed ordinary account availability at 29%;
-unknown or actually rate-limited availability stops dispatch, and credits must
-never be bought or redeemed. Do not use `explicit-lean-cloud`.
-The Codex usage allowance and the AWS spending limit are separate budgets.
+`i-0f9698935a4ccb630`; device login, independent auth probe
+`31fe1534-0659-40d9-81af-0e89947f4b6f`, Linux setup, focused Python suites,
+strict boundary preflight and fresh manifest generation passed. The manifest is
+216,029,345 bytes with SHA-256
+`bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce` and its
+dependency map is 3,261,577 bytes. Independent verification ran for 5h50m22s;
+worker `856f68e7-1804-4409-b9bf-149d9e4fe000` ended `Failed`/1 at
+`2026-09-12T18:07:04.813Z`. Every module's freshly recomputed occurrence list
+matched before the final inventory provenance check failed: the fresh
+header-import pass reported 560 full-frontend fallbacks while the manifest
+recorded 216 (75 common, 485 fresh-only, 141 manifest-only).
+`manifest-verification.json` is zero bytes and corpus translation never began.
+
+The repaired stderr path preserved the exact terminal diagnostic. Four
+versioned AES256 S3 objects remain under the exact run prefix. Downloaded
+`evidence.tar.gz` version `41Hn.SeqtgbTLg1oW6XxY6Y_YibQHlIl` is 10,877,575
+bytes with SHA-256
+`0a1435d6bedfb5130df6c0ebbac39da72f7ec67994d00683ccfdf3f9f2e2fa47`, exactly
+matching `evidence-sha256.txt`; `run-exit.json` records
+`originalExitCode=1`, `evidenceUploadFailed=false` and upload at
+`2026-09-12T18:07:04Z`. Direct stderr version
+`lTGSlheqr9MFane307EpSObONgwnKu0b` is 35,339 bytes with SHA-256
+`712b4615adfa6880a880a4ff4a5e66e23b2788bf3625ac218b96529c67d67cf8`.
+The exact instance was terminated, volume `vol-0524b323969ba9add` no longer
+exists, the exact CloudFormation stack was deleted, and the active
+`r7i.4xlarge` query is empty. The versioned S3 evidence was not deleted.
+
+Focused local diagnosis found a producer/verifier protocol mismatch, not source
+drift: the producer uses one aggregate-Mathlib `--defer-full-fallback` pass and
+then an isolated `--full-fallback-only` child for each deferred source, whereas
+the verifier used direct per-header imports. The bounded local fix makes the
+verifier replay the producer protocol while retaining exact fallback-set
+equality, fresh bounded processes, dependency-map/source/environment/TOCTOU
+checks, and fail-closed rejection of malformed, duplicate, unresolved, extra
+or unrequested markers. The 36 verifier tests, inventory-header controls,
+Python compilation, tracker tests and diff validation pass. A real known
+fallback source emitted the expected deferred marker followed by the isolated
+full marker and occurrence records. A complete local verifier replay was not
+run because only 3.88 GB was available, below the unchanged strict 12 GiB
+reserve.
+
+The one replacement authorization is closed; no further AWS host is
+authorized. The local fix is reviewed but not yet published. Any additional
+run requires new explicit authorization and a new permitted cutoff; do not
+extend or bypass the unchanged `2026-09-13T00:00:00Z` boundary or reuse an old
+nonce.
+The original campaign-specific 25%/22% usage policy remains obsolete by
+explicit user direction, but unknown or actually rate-limited availability
+still stops costly dispatch. Never buy or redeem credits and do not use
+`explicit-lean-cloud`. The Codex usage allowance and AWS spending limit are
+separate budgets.
 
 On the selected Linux host, recreate the pinned dependencies and native tools.
 Do not copy Mac runtime artifacts or relabel Mac receipts as Linux evidence.

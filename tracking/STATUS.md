@@ -119,27 +119,46 @@ same shared recovery and rejected the first `Mathlib/Tactic/DeriveEncodable`
 record. The narrow fix uses only fresh declarations and fresh execution evidence
 and leaves malformed, mixed, proof-owned, unquoted and incomplete cases fail-
 closed. Verifier tests and a focused real-evidence replay pass. The AWS worker
-will also preserve verifier stderr without masking failure. The user authorized
-one replacement run under the unchanged one-host, one-worker, 15-module, $20,
-12-hour-host and 10-hour-worker constraints, with exact cutoff
-`2026-09-13T00:00:00Z`. Published authorization
-`9b9e639445a63577b68355114218b4140509bacd` created replacement run
-`20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1` on
-`i-0f9698935a4ccb630`. Device login and independent auth probe
-`31fe1534-0659-40d9-81af-0e89947f4b6f` passed. Sole worker
-`856f68e7-1804-4409-b9bf-149d9e4fe000` is running with the 36,120-second
-delivery cap and a 42,197-second document timeout bounded by the exact cutoff.
-Linux setup, focused Python suites and the strict boundary preflight passed. A
-fresh 216,029,345-byte manifest with SHA-256
-`bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce` and a
-3,261,577-byte dependency map are complete; independent authenticated
-verification is active. Corpus translation has not begun. Fresh ordinary Codex
-work was available at 30% immediately before dispatch.
-The user retired the former campaign-specific 25%/22% policy; unknown
-availability or an actual rate-limit/spend stop still halts dispatch.
+also preserves verifier stderr without masking failure.
 
-Monitor the replacement pilot through terminal evidence and teardown. Then
-prioritize `Mathlib.Logic.Relation`, `Mathlib.Data.Nat.Init` and
+The authorized replacement run
+`20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1` is terminal and failed
+closed before translation. Device login, auth proof, Linux setup, focused
+Python suites, strict boundary preflight and fresh manifest generation passed.
+The 216,029,345-byte manifest has SHA-256
+`bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce`.
+Independent verification ran 5h50m22s and then failed its final inventory
+fallback-provenance comparison: all per-module occurrence lists matched, but
+the fresh header-import pass marked 560 full-frontend fallbacks while the
+manifest recorded 216 (75 common). The verifier wrote no result and corpus
+translation never began. Worker `856f68e7-1804-4409-b9bf-149d9e4fe000`
+ended `Failed`/1 at `2026-09-12T18:07:04.813Z`.
+
+Four versioned AES256 S3 objects were preserved. The downloaded 10,877,575-byte
+archive version `41Hn.SeqtgbTLg1oW6XxY6Y_YibQHlIl` has SHA-256
+`0a1435d6bedfb5130df6c0ebbac39da72f7ec67994d00683ccfdf3f9f2e2fa47`, matching
+its uploaded hash; `run-exit.json` records original exit 1 and successful
+evidence upload. Direct stderr version `lTGSlheqr9MFane307EpSObONgwnKu0b`
+preserves the exact diagnostic. Instance `i-0f9698935a4ccb630` is terminated,
+volume `vol-0524b323969ba9add` is gone, the exact stack is deleted and no active
+`r7i.4xlarge` remains. Versioned S3 evidence remains. The replacement
+authorization is closed; another AWS host requires new authorization and no
+old nonce may be reused.
+
+Local diagnosis found the exact protocol mismatch: the producer uses an
+aggregate-Mathlib deferred pass followed by one isolated fallback child per
+deferred source, while the verifier used direct per-header imports. The bounded
+fix now replays the producer protocol while preserving exact fallback equality,
+fresh input/environment/TOCTOU checks and fail-closed marker validation. The 36
+verifier tests, inventory-header controls, Python compilation, tracker tests and
+diff validation pass; a known real fallback source also exercised the expected
+deferred/isolated markers. A complete local verifier replay was not run because
+available memory was 3.88 GB, below the unchanged strict 12 GiB reserve. The fix
+is reviewed but not yet published. A further cloud run now requires explicit
+authorization for a new permitted cutoff and host.
+
+After that gate is published and rerun, prioritize
+`Mathlib.Logic.Relation`, `Mathlib.Data.Nat.Init` and
 `Mathlib.Logic.IsEmpty.Basic`, and cold-certify their translated dependency
 slice. Reusable-call provenance and whole-tree acceptance remain separate gates;
 readability work follows complete explicit coverage.

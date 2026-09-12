@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "bounded_pilot_replacement_running",
+  "phase": "replacement_terminal_local_verifier_fix_reviewed",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T13:02:26+00:00",
+  "updatedAt": "2026-09-12T18:44:46+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,8 +16,8 @@
   },
   "deadline": "2026-09-13T00:00:00Z",
   "notAfter": "2026-09-13T00:00:00Z",
-  "deadlineStatus": "one_replacement_pilot_running_until_exact_cutoff",
-  "machine": "one_us_west_1_r7i_4xlarge_replacement_running_instance_i-0f9698935a4ccb630",
+  "deadlineStatus": "replacement_pilot_terminal_before_exact_cutoff_authorization_closed",
+  "machine": "no_active_aws_compute_replacement_instance_terminated",
   "budget": {
     "resetDate": "2026-09-07",
     "currentWindowAllowance": "normal account availability",
@@ -29,24 +29,24 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-12T12:16:41.546288+00:00",
-    "lastUsedPercent": 30,
+    "lastCheckedAt": "2026-09-12T18:23:10+00:00",
+    "lastUsedPercent": 64,
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
     "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
-    "note": "Fresh telemetry reported ordinary usage available at 30% immediately before replacement dispatch. The former 25%/22% project budget is obsolete. One replacement pilot is running under the same $20, one-host, one-worker, 15-module, 12-hour-host and 10-hour-worker envelope, ending at the exact top-level deadline/notAfter boundary. No credit was bought or redeemed."
+    "note": "Fresh post-terminal telemetry reported ordinary usage available at 64%. The former 25%/22% project budget is obsolete. The one authorized replacement pilot is terminal and its compute, volume and stack are deleted. No further host is authorized. Reset credits exist but must not be redeemed. No credit was bought or redeemed."
   },
   "direction": {
     "userConversationDate": "2026-09-10",
-    "nextMilestone": "Publish the diagnosed manifest-verifier fix and run the authorized one-host replacement pilot, then fix foundational semantic failures and certify a translated dependency slice.",
+    "nextMilestone": "Publish the reviewed strict inventory-fallback protocol fix, then obtain explicit authorization for a new cutoff and host before any further AWS run.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The eighth run's verifier defect is fixed and published at 9b9e639445a63577b68355114218b4140509bacd with 34 verifier tests, a focused real preserved-evidence replay, Python compilation, strict negative cases and diagnostic-preservation checks passing. The exact published authorization created replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 on default-tenancy r7i.4xlarge instance i-0f9698935a4ccb630. Current identity, quota, AMI, network, encrypted evidence bucket, zero-preexisting-host, template, exact 2026-09-13T00:00:00Z cutoff and $14.492 worst-case cost gates passed. Device login and independent auth probe 31fe1534-0659-40d9-81af-0e89947f4b6f succeeded. Fresh local and remote campaign-budget checks returned continue at 30%. Sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 passed Linux setup, focused Python suites and strict boundary preflight, generated a fresh 216,029,345-byte manifest with SHA-256 bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce and a 3,261,577-byte dependency map, and is now in independent authenticated verification. Corpus translation has not begun and no translation result is claimed yet.",
+    "readiness": "Replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 is terminal Failed/1 before translation. Linux setup, focused checks, strict boundary preflight and fresh 216,029,345-byte manifest generation passed. Independent verification ran 5h50m22s and all per-module occurrence lists matched, then the inventory fallback-provenance check failed: fresh header-import recomputation marked 560 full-frontend fallbacks while the manifest recorded 216, with 75 common. The zero-byte verifier result and exact 35,339-byte stderr were preserved. Four versioned AES256 S3 objects remain; the downloaded 10,877,575-byte archive SHA-256 0a1435d6bedfb5130df6c0ebbac39da72f7ec67994d00683ccfdf3f9f2e2fa47 matches its uploaded hash and run-exit records originalExitCode 1 with successful evidence upload. Instance i-0f9698935a4ccb630 is terminated, volume vol-0524b323969ba9add is gone, the exact stack is deleted and no active r7i.4xlarge remains. Corpus translation never began. Local diagnosis proved a producer/verifier protocol mismatch: aggregate deferred-plus-isolated fallback versus direct header imports. The reviewed bounded fix preserves exact fallback equality and fail-closed source/environment/marker checks; 36 verifier tests, inventory-header controls, Python compilation and diff validation pass. A complete local replay was not run because available memory was below the unchanged 12 GiB reserve. No additional AWS host is authorized.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_autonomous_replacement_worker_running",
+      "authorizationStatus": "replacement_terminal_closed_no_further_host_authorized",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -177,12 +177,17 @@
     {
       "id": "bounded-run-policy",
       "status": "resolved",
-      "detail": "Published full authorization 9b9e639445a63577b68355114218b4140509bacd launched the one replacement run with exact cutoff 2026-09-13T00:00:00Z. All prior invocation authorizations/nonces remain exhausted. Do not add another host, reuse a nonce, or extend the cutoff."
+      "detail": "Published full authorization 9b9e639445a63577b68355114218b4140509bacd was consumed by the now-terminal replacement run. Its instance, volume and stack are deleted. All invocation authorizations/nonces are exhausted. Do not add another host, reuse a nonce, or extend the cutoff without new user authorization."
     },
     {
       "id": "aws-launch-identity-and-quota",
       "status": "resolved",
       "detail": "explicit-lean-pilot resolves to arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator; the user explicitly waived MFA. default and softmax remain root sessions and must not be used. AWS closed request c5fd28c3aaa34b40898ffab61a5fefc6HXVHEjzY and raised the us-west-1 On-Demand Standard quota to 32 vCPUs, above the 16 required."
+    },
+    {
+      "id": "replacement-inventory-fallback-reproducibility",
+      "status": "resolved_local_fix_reviewed_publication_pending",
+      "detail": "The replacement verifier authenticated every fresh per-module occurrence list, then failed closed because its header-import recomputation marked 560 full-frontend fallbacks while the producer manifest recorded 216, with only 75 common. Local diagnosis proved the verifier used a different frontend protocol. The reviewed bounded fix replays the producer's aggregate deferred pass plus exactly one isolated child per fallback and retains exact fallback equality, source/occurrence/environment/TOCTOU checks and strict malformed/duplicate/unresolved/extra/unrequested marker rejection. It is not yet published or cloud-replayed."
     },
     {
       "id": "resource-throughput",
@@ -213,7 +218,8 @@
   },
   "nextActions": [
     "Read HANDOFF.md and the portable snapshot; confirm branch, local evidence availability and absence of active producers before editing.",
-    "Monitor replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 through terminal evidence verification and exact teardown without extending the 2026-09-13T00:00:00Z cutoff.",
+    "Publish the reviewed producer-compatible inventory-fallback verifier fix after the completed focused checks; do not claim a complete local replay because the strict 12 GiB memory reserve blocked it.",
+    "Obtain new explicit user authorization before provisioning another AWS host; do not reuse an old nonce or extend the unchanged 2026-09-13T00:00:00Z boundary.",
     "Classify every pilot outcome as resource, semantic, unsupported, or successful without weakening validation.",
     "Fix foundational semantic failures and cold-certify a translated dependency slice with stock Mathlib fallback excluded.",
     "Expand measured dependency-ordered coverage, integrate reusable provenance, then complete whole-tree acceptance before readability work."
@@ -231,8 +237,8 @@
     },
     {
       "id": "aws-pilot-preparation",
-      "status": "in_progress",
-      "description": "The eighth run's versioned evidence was hash-verified and its verifier defect was fixed under strict tests. Published authorization 9b9e639445a63577b68355114218b4140509bacd created replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 on instance i-0f9698935a4ccb630. Device auth and every local/remote launch gate passed. Sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 passed Linux setup, focused Python suites and strict boundary preflight, generated the fresh manifest and dependency map, and is in independent authenticated verification under the exact cutoff."
+      "status": "completed_failed_closed",
+      "description": "Replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 completed terminal Failed/1 before translation after strict preflight and fresh manifest generation. Versioned encrypted evidence and exact stderr are preserved and hash-verified; instance, volume and stack are deleted. The producer/verifier inventory-fallback protocol mismatch is locally fixed and reviewed but not yet published or cloud-replayed."
     },
     {
       "id": "corpus-translation",
@@ -413,6 +419,24 @@
       "scope": "replacement_linux_preflight_and_manifest_generation",
       "result": "passed_manifest_generated_authenticated_verification_running",
       "detail": "Read-only process inspection confirmed sole worker 856f68e7-1804-4409-b9bf-149d9e4fe000 passed Linux dependency/cache setup, the focused Python suites and strict boundary preflight. It generated a fresh 216,029,345-byte manifest with SHA-256 bcba399da7d3b69456b5b51593e7c44efc825cb95c37bee9738edf4915f681ce and a 3,261,577-byte dependency map under the fresh run namespace. Independent strict verification is active against published repository 9b9e639445a63577b68355114218b4140509bacd and pinned Linux Lake/Lean executable hashes. The host and EC2 status checks are healthy. Corpus translation has not begun and no translation result is claimed."
+    },
+    {
+      "checkedAt": "2026-09-12T18:14:12+00:00",
+      "scope": "replacement_terminal_evidence_fallback_failure_and_teardown",
+      "result": "failed_closed_before_translation_evidence_verified_stack_deleted",
+      "detail": "Worker 856f68e7-1804-4409-b9bf-149d9e4fe000 ran from 2026-09-12T12:16:42.813Z to 2026-09-12T18:07:04.813Z and ended Failed/1 after 5h50m22s. Setup, focused checks, strict boundary preflight and fresh manifest generation passed. Independent verification matched every module's fresh occurrence list, then failed the inventory fallback-provenance comparison: fresh header-import recomputation reported 560 fallbacks and the manifest recorded 216, with intersection 75, fresh-only 485 and manifest-only 141. manifest-verification.json is zero bytes and translation never began. Four versioned AES256 S3 objects remain. Downloaded evidence archive version 41Hn.SeqtgbTLg1oW6XxY6Y_YibQHlIl is 10,877,575 bytes with SHA-256 0a1435d6bedfb5130df6c0ebbac39da72f7ec67994d00683ccfdf3f9f2e2fa47, matching evidence-sha256.txt version 4h5tuS_Ar1RJ.Ul2dQQN2DtVMAcYGWBf. run-exit version yeGSU1_oZz1JRyae_bPFfjBoZ.h7jHEW records originalExitCode 1 and evidenceUploadFailed false. Direct stderr version lTGSlheqr9MFane307EpSObONgwnKu0b is 35,339 bytes with SHA-256 712b4615adfa6880a880a4ff4a5e66e23b2788bf3625ac218b96529c67d67cf8 and preserves the exact diagnostic. Instance i-0f9698935a4ccb630 is terminated, volume vol-0524b323969ba9add no longer exists, the exact CloudFormation stack is deleted and the active r7i.4xlarge query is empty. Versioned S3 evidence was retained; the replacement authorization is closed."
+    },
+    {
+      "checkedAt": "2026-09-12T18:23:10+00:00",
+      "scope": "post_terminal_codex_usage_refresh",
+      "result": "passed_ordinary_work_available",
+      "detail": "Fresh account telemetry reported 64% used with ordinary Codex work allowed and no spend control. Reset credits are present but were not and must not be redeemed. This availability permits bounded local diagnosis only; it does not authorize another AWS host."
+    },
+    {
+      "checkedAt": "2026-09-12T18:44:46+00:00",
+      "scope": "replacement_inventory_fallback_protocol_fix_review",
+      "result": "passed_focused_local_checks_publication_pending",
+      "detail": "Luna Max diagnosed and implemented a two-file bounded fix under strict ownership. The producer uses aggregate Mathlib with --defer-full-fallback and one isolated --full-fallback-only child per deferred source; the verifier had instead used direct --header-imports, so its fallback set was not comparable even though occurrence lists matched. The fix canonicalizes the verifier to the producer protocol while preserving dependency-map batching, source/path/hash/environment/TOCTOU checks, exact fallback-set equality and fail-closed malformed, duplicate, unresolved, extra or unrequested marker handling. Coordinating review found no scope or validation weakening. Verifier tests passed 36, inventory-header controls passed, Python compilation, campaign-status tests 9, JSON validation and diff validation passed. A known real Mathlib fallback source emitted the expected deferred marker and isolated full marker with occurrence records. Direct invocation of the complete verifier helper was not run because local available memory was 3.88 GB, below the unchanged strict 12 GiB reserve; no full-manifest replay is claimed."
     }
   ],
   "historicalAutomation": {
@@ -429,17 +453,20 @@
     "localMarkdownLinks": "passed",
     "jsonCrossDocumentInvariants": "passed",
     "archiveSha256": "verified",
-    "budgetChecks": "replacement_authorized_with_materialized_not_after",
+    "budgetChecks": "replacement_authorization_consumed_and_closed_no_further_host_authorized",
     "campaignStatusTests": 9,
     "supervisorTests": 22,
     "workerTests": 33,
     "translationIndexTests": 13,
     "linuxProcessSamplerTests": 2,
     "awsLinuxPilotTests": 11,
-    "manifestVerifierTests": 34,
+    "manifestVerifierTests": 36,
+    "inventoryFallbackProtocolFix": "passed_focused_tests_real_marker_probe_full_local_replay_blocked_by_strict_memory_reserve",
     "preservedManifestStructuralInspection": "passed",
     "preservedDeriveEncodableEvidenceReplay": "passed",
     "verifierStderrPreservation": "passed_generated_shell_and_mock_checks",
+    "replacementTerminalEvidenceSha256": "0a1435d6bedfb5130df6c0ebbac39da72f7ec67994d00683ccfdf3f9f2e2fa47",
+    "replacementDirectStderrSha256": "712b4615adfa6880a880a4ff4a5e66e23b2788bf3625ac218b96529c67d67cf8",
     "generatedWorkerShellSyntax": "passed",
     "cloudInitShellSyntax": "passed",
     "amazonLinuxSystemdCalendarValidation": "passed",
@@ -454,7 +481,7 @@
     "declarationOracleFailClosedCases": 26,
     "productionDispatchRun": true,
     "awsProvisioningAttempted": true,
-    "awsResourcesCurrentlyProvisioned": true,
+    "awsResourcesCurrentlyProvisioned": false,
     "workerDispatchRun": true,
     "awsResourcesProvisioned": true
   }
