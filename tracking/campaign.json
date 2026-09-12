@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T01:15:35+00:00",
+  "updatedAt": "2026-09-12T01:22:03+00:00",
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -16,8 +16,8 @@
   },
   "deadline": "2026-09-12T11:25:00Z",
   "notAfter": "2026-09-12T11:25:00Z",
-  "deadlineStatus": "one_pilot_bounded_continuation_ready_to_relaunch_until_exact_cutoff",
-  "machine": "no_aws_compute_resources_currently_provisioned",
+  "deadlineStatus": "one_pilot_bounded_continuation_running_until_exact_cutoff",
+  "machine": "one_us_west_1_r7i_4xlarge_pilot_running_instance_i-0e82b3e083e49db5e",
   "budget": {
     "resetDate": "2026-09-07",
     "currentWindowAllowance": "normal account availability",
@@ -41,12 +41,12 @@
     "nextMilestone": "Prepare a reproducible bounded AWS/Linux pilot, initially one 128 GiB machine and one worker, then fix foundational semantic failures and certify a translated dependency slice.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
-    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Five fail-closed setup runs exposed and fixed regional Scheduler validation, guest timer/auth proof, Python timestamp portability, the Amazon Linux curl package conflict and the strict Session Manager HOME environment. The sixth run 20260912T002137Z-6d659f3d8b5f80e344b4cb0c571ddbc8 at published authorization e4e55a5196edf71b09e41f9e45761149856a793e passed boot, auth, remote/local gates, dependency installation, exact cloning, Lean 4.32.2 installation, Mathlib cache fetch and the focused Python suites. It then failed closed before corpus translation because the strict apply-only import-isolation gate reached Lean.Meta.Tactic.Simp.Rewrite transitively through ModuleDataObservation and Mathlib library-suggestion modules. Evidence upload succeeded and all resources were deleted. Published fix 96af00ed589481ff96d754f20836567cc084a289 preserves the strict gate while adapting the pinned metadata calculations into a suggestion-free observer with exact extension identity, full-observer, duplicate/missing-identity and cache-purity validation. The unchanged boundary probe, shared build, differential metadata probe and 41-case declaration oracle pass locally. No AWS compute resources are currently provisioned; the next step is a fresh Linux rerun before the unchanged 2026-09-12T11:25:00Z cutoff.",
+    "readiness": "The user authorized autonomous execution of the reproducible one-host pilot in account 538639825139/us-west-1 within the $20 all-in ceiling, 12-hour instance lifetime and 10-hour worker. Five fail-closed setup runs exposed and fixed regional Scheduler validation, guest timer/auth proof, Python timestamp portability, the Amazon Linux curl package conflict and the strict Session Manager HOME environment. The sixth run failed closed at the strict apply-only import-isolation gate before translation and was deleted with evidence preserved. Published fix 96af00ed589481ff96d754f20836567cc084a289 preserves the gate while adapting the pinned metadata calculations into a suggestion-free observer with exact extension identity, full-observer, duplicate/missing-identity and cache-purity validation; local boundary, shared-build, differential and 41-case oracle checks passed. The seventh stack uses exact authorization 72ea005224408d2677818e722774909183c1bcca as run 20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c on instance i-0e82b3e083e49db5e. Device login, independent auth probe 987ad103-4799-4542-84a6-3fc11d87abab and every local/remote dispatch gate passed. Sole worker command dcf05b97-f81d-4f98-972f-ade0afebd3c1 is running; both shutdown mechanisms retain the exact 2026-09-12T11:25:00Z cutoff. No translation result is claimed yet.",
     "pilotPreparation": {
       "procedure": "tracking/AWS-LINUX-PILOT.md",
       "policy": "tracking/aws-linux-pilot-policy.json",
       "processSampler": "Experiment/linux_process_sampler.py",
-      "authorizationStatus": "authorized_autonomous_bounded_pilot_fix_published_ready_to_relaunch",
+      "authorizationStatus": "authorized_autonomous_bounded_pilot_worker_running",
       "awsAccountId": "538639825139",
       "region": "us-west-1",
       "maximumSpendUsd": 20,
@@ -365,6 +365,12 @@
       "scope": "apply_import_isolation_architectural_fix_review",
       "result": "published_fix_ready_for_fresh_linux_rerun",
       "detail": "Published revision 96af00ed589481ff96d754f20836567cc084a289 removes the two broad Lean.LibrarySuggestions imports from ModuleDataObservation while preserving their pinned Lean 4.32.2 relevant-constant, deny-list, frequency and trigger calculations locally. Unsafe extension-state casts require exact unique names, pinned indices and main-only mode; the full observer now rejects missing and duplicate derived extensions. The worker boundary preflight retains its original transitive simplifier-import rejection and now also scans ModuleDataObservation directly and compiles a full-Boundary differential probe. Local checks passed: ExplicitLean:shared 64-job build, isolated apply/location/trust/metadata boundary probe, exact symbol-frequency and Sine-Qua-Non differential, missing/duplicate identity rejection, suggestion-cache purity, Python compilation, diff validation, and the declaration oracle's 15 accepted-equivalence plus 26 fail-closed cases. Fresh ordinary usage is available at 31%; no credits were bought or redeemed and no AWS resources are currently provisioned."
+    },
+    {
+      "checkedAt": "2026-09-12T01:22:03+00:00",
+      "scope": "seventh_authorized_stack_live_worker",
+      "result": "running_after_verified_auth_and_dispatch_gates",
+      "detail": "Exact clean published authorization 72ea005224408d2677818e722774909183c1bcca created run 20260912T011632Z-7bacaae91f731d6284e3a7a5d879481c and instance i-0e82b3e083e49db5e. Live identity, quota, AMI, default-tenancy r7i.4xlarge shape, network, encrypted 200 GiB gp3 storage, write-only evidence bucket, template/timer and $14.492 worst-case cost gates passed. Device login completed and independent auth probe 987ad103-4799-4542-84a6-3fc11d87abab returned Success with response code 0. Fresh local and remote campaign-budget checks returned continue at 31%. The sole worker command dcf05b97-f81d-4f98-972f-ade0afebd3c1 is InProgress. AWS Scheduler and the guest timer retain the exact 2026-09-12T11:25:00Z cutoff; no translation result is claimed yet."
     }
   ],
   "historicalAutomation": {
@@ -402,7 +408,7 @@
     "declarationOracleFailClosedCases": 26,
     "productionDispatchRun": true,
     "awsProvisioningAttempted": true,
-    "awsResourcesCurrentlyProvisioned": false,
+    "awsResourcesCurrentlyProvisioned": true,
     "workerDispatchRun": true,
     "awsResourcesProvisioned": true
   }
