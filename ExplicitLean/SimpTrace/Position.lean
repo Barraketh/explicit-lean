@@ -18,9 +18,14 @@ Everything is then validated: navigating each step's `pos` in the running term
 must reach `before`, replacing it must yield the next running term, and the
 final running term must equal simp's actual result.  A failure is a hard error.
 -/
-import Lean
-import ExplicitLean.SimpTrace.Types
-import ExplicitLean.SimpTrace.Recorder
+
+module
+
+public meta import Lean
+public meta import ExplicitLean.SimpTrace.Types
+public meta import ExplicitLean.SimpTrace.Recorder
+
+public meta section
 
 
 namespace ExplicitLean.SimpTrace
@@ -136,14 +141,11 @@ def abstractSimpFVars (target : Expr) (simpFVars : Array FVarId) (depth : Nat) :
     let n := simpFVars.size
     if depth > n then target
     else
-      let scope := simpFVars.extract (n - depth) n  -- outermost-first
-      target.replace fun e =>
-        match e with
-        | .fvar fid =>
-          match scope.findIdx? (· == fid) with
-          | some d => some (.bvar (depth - 1 - d))
-          | none => none
-        | _ => none
+      -- `Expr.abstract` assigns `bvar (k-1-i)` to `xs[i]`, and unlike
+      -- `Expr.replace` it accounts for binders inside `target`, so a variable
+      -- occurring under a nested binder gets the right de Bruijn index.
+      let scope := (simpFVars.extract (n - depth) n).map Expr.fvar  -- outermost-first
+      target.abstract scope
 
 /--
 Find every position in `e` whose subterm equals `target` after abstracting
@@ -229,10 +231,12 @@ def reduceHere? (e : Expr) : MetaM (Option Expr) := do
   -- Projection.
   if e.isProj then
     if let some e' ← reduceProj? e then return some e'
-  -- Delta unfolding of the head constant.
+  -- Delta unfolding of the head constant.  `unfoldDefinition?` yields the
+  -- definition applied to the arguments, so beta-reduce as `Simp.unfold?` does;
+  -- otherwise the result never matches a recorded subterm.
   if let .const .. := e.getAppFn then
     if let some e' ← withDefault <| unfoldDefinition? e then
-      return some e'
+      return some e'.headBeta
   return none
 
 /--

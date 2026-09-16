@@ -5,7 +5,12 @@ Trace data model for `simp_trace`, mirroring `tracking/SIMP-TRACE-SPEC.md`
 This module is recorder machinery, not product code: it names `Lean.Meta.Simp`
 types on purpose.  Nothing here is imported by translated Mathlib source.
 -/
-import Lean
+
+module
+
+public meta import Lean
+
+public meta section
 
 namespace ExplicitLean.SimpTrace
 

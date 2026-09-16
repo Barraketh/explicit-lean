@@ -14,10 +14,15 @@ apply the same results with the same `applySimpResult*` helpers.
 
 Recorder machinery only.  This module is never imported by translated source.
 -/
-import Lean
-import ExplicitLean.SimpTrace.Types
-import ExplicitLean.SimpTrace.Recorder
-import ExplicitLean.SimpTrace.Position
+
+module
+
+public meta import Lean
+public meta import ExplicitLean.SimpTrace.Types
+public meta import ExplicitLean.SimpTrace.Recorder
+public meta import ExplicitLean.SimpTrace.Position
+
+public meta section
 
 namespace ExplicitLean.SimpTrace
 

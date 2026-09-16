@@ -6,8 +6,13 @@ the side-condition sub-runs the discharger performed.
 Recorder machinery only.  Positions are *not* computed here; see
 `ExplicitLean/SimpTrace/Position.lean`.
 -/
-import Lean
-import ExplicitLean.SimpTrace.Types
+
+module
+
+public meta import Lean
+public meta import ExplicitLean.SimpTrace.Types
+
+public meta section
 
 namespace ExplicitLean.SimpTrace
 
@@ -95,8 +100,10 @@ private def captureCtx : MetaM (LocalContext × LocalInstances × Array (FVarId 
   let lctx ← getLCtx
   let mut kinds : Array (FVarId × Bool) := #[]
   for decl in lctx do
-    unless decl.isImplementationDetail do
-      kinds := kinds.push (decl.fvarId, ← isProof decl.toExpr)
+    -- Include implementation-detail declarations: simp marks some of the
+    -- locals it introduces for binder descent that way, and omitting them
+    -- leaves their free variables unabstractable in recorded subterms.
+    kinds := kinds.push (decl.fvarId, ← isProof decl.toExpr)
   return (lctx, (← getLocalInstances), kinds)
 
 /-- Attribute a `Simp.Result` produced by a procedure whose name we do not know
