@@ -137,6 +137,18 @@ class ManifestVerifierTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, needle):
             self.verify()
 
+    def inventory_record(self) -> str:
+        return json.dumps({
+            "file": str(self.source_path.resolve()),
+            "kind": "simp",
+            "startByte": self.source.index(b"simp"),
+            "endByte": self.source.index(b"simp") + 4,
+            "line": 1,
+            "column": self.source.index(b"simp"),
+            "syntaxKind": "Lean.Parser.Tactic.simp",
+            "source": "simp",
+        })
+
     def test_valid_fixture_and_self_hash(self) -> None:
         self.verify()
         occurrence = self.manifest["modules"][0]["occurrences"][0]
@@ -539,26 +551,141 @@ class ManifestVerifierTests(unittest.TestCase):
         self.write(); self.rejects("scope declaration list is empty")
 
     def test_inventory_fallback_mismatch_is_rejected(self) -> None:
-        output = json.dumps({
-            "file": str(self.source_path),
-            "kind": "simp",
-            "startByte": self.source.index(b"simp"),
-            "endByte": self.source.index(b"simp") + 4,
-            "line": 1,
-            "column": self.source.index(b"simp"),
-            "syntaxKind": "Lean.Parser.Tactic.simp",
-            "source": "simp",
-        })
-        result = SimpleNamespace(returncode=0, stdout="SIMP_ENGINE_INVENTORY_FULL_FALLBACK file=" + str(self.source_path) + "\n" + output + "\n")
-        with patch("subprocess.run", return_value=result), patch.object(
-            verifier, "run_process", return_value=result
-        ), patch.object(verifier, "_freshness_snapshot", return_value={}):
+        path = str(self.source_path.resolve())
+        fast = f"SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file={path}\n"
+        fallback = f"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={path}\n{self.inventory_record()}\n"
+        results = [SimpleNamespace(returncode=0, stdout=fast),
+                   SimpleNamespace(returncode=0, stdout=fallback)]
+        with patch.object(verifier, "run_process", side_effect=results), patch.object(
+            verifier, "_freshness_snapshot", return_value={}
+        ):
             with self.assertRaisesRegex(RuntimeError, "fallback set differs"):
                 verifier.recompute_inventory(
                     self.path,
                     mathlib_root=self.mathlib,
                     repository_root=self.repository,
                 )
+
+    def test_inventory_deferred_fallback_protocol_accepts_exact_set(self) -> None:
+        path = str(self.source_path.resolve())
+        self.manifest["fullFrontendFallbacks"] = ["Mathlib/A.lean"]
+        self.write()
+        fast = f"SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file={path}\n"
+        fallback = f"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={path}\n{self.inventory_record()}\n"
+        results = [SimpleNamespace(returncode=0, stdout=fast),
+                   SimpleNamespace(returncode=0, stdout=fallback)]
+        with patch.object(verifier, "run_process", side_effect=results) as run, patch.object(
+            verifier, "_freshness_snapshot", return_value={}
+        ):
+            verifier.recompute_inventory(
+                self.path,
+                mathlib_root=self.mathlib,
+                repository_root=self.repository,
+            )
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands[0][3], "--defer-full-fallback")
+        self.assertEqual(commands[0][4:], [path])
+        self.assertEqual(commands[1][3:5], ["--full-fallback-only", path])
+
+    def test_inventory_evidence_uses_stdout_and_keeps_stderr_diagnostic_separate(self) -> None:
+        results = [SimpleNamespace(
+            returncode=0,
+            stdout=self.inventory_record(),
+            stderr="diagnostic JSON-looking text: {not inventory}\n",
+        )]
+        with patch.object(verifier, "run_process", side_effect=results) as run, patch.object(
+            verifier, "_freshness_snapshot", return_value={}
+        ):
+            verifier.recompute_inventory(
+                self.path,
+                mathlib_root=self.mathlib,
+                repository_root=self.repository,
+            )
+        self.assertEqual(run.call_args.kwargs["stdout"], subprocess.PIPE)
+        self.assertEqual(run.call_args.kwargs["stderr"], subprocess.PIPE)
+
+    def test_inventory_failure_reports_bounded_stderr_diagnostic(self) -> None:
+        result = SimpleNamespace(
+            returncode=1,
+            stdout="partial machine output\n",
+            stderr="diagnostic from Lean\n",
+        )
+        with patch.object(verifier, "run_process", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "stderr:\\ndiagnostic from Lean"):
+                verifier._run_fresh_inventory_batches(
+                    [self.source_path], repository=self.repository, timeout=60
+                )
+
+    def test_inventory_records_reject_unrequested_or_invalid_sources(self) -> None:
+        extra = str((self.root / "Mathlib" / "B.lean").resolve())
+        cases = [
+            (json.dumps({"file": extra}) + "\n", "named an unrequested source"),
+            (json.dumps({"file": "relative.lean"}) + "\n", "invalid source path"),
+            (json.dumps({"file": 7}) + "\n", "invalid source path"),
+        ]
+        for output, needle in cases:
+            with self.subTest(needle=needle):
+                result = SimpleNamespace(returncode=0, stdout=output, stderr="")
+                with patch.object(verifier, "run_process", return_value=result), patch.object(
+                    verifier, "_freshness_snapshot", return_value={}
+                ):
+                    with self.assertRaisesRegex(RuntimeError, needle):
+                        verifier.recompute_inventory(
+                            self.path,
+                            mathlib_root=self.mathlib,
+                            repository_root=self.repository,
+                        )
+
+    def test_inventory_fallback_markers_fail_closed(self) -> None:
+        path = str(self.source_path.resolve())
+        extra = str((self.root / "Mathlib" / "B.lean").resolve())
+        deferred = f"SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file={path}\n"
+        full = f"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={path}\n"
+        cases = [
+            (
+                "missing full marker",
+                [deferred, ""],
+                "did not emit exactly one full fallback marker",
+            ),
+            (
+                "duplicate deferred marker",
+                [deferred + deferred],
+                "deferred the same source more than once",
+            ),
+            (
+                "duplicate full marker",
+                [deferred, full + full],
+                "duplicate full fallback marker",
+            ),
+            (
+                "unrequested deferred marker",
+                [f"SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file={extra}\n"],
+                "deferred an unrequested source",
+            ),
+            (
+                "unrequested full marker",
+                [deferred, f"SIMP_ENGINE_INVENTORY_FULL_FALLBACK file={extra}\n"],
+                "fallback named an unrequested source",
+            ),
+            (
+                "malformed deferred marker",
+                ["SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK\n"],
+                "malformed deferred fallback marker",
+            ),
+            (
+                "full marker in fast pass",
+                [full],
+                "deferred fast pass",
+            ),
+        ]
+        for label, outputs, needle in cases:
+            with self.subTest(label=label):
+                results = [SimpleNamespace(returncode=0, stdout=value) for value in outputs]
+                with patch.object(verifier, "run_process", side_effect=results):
+                    with self.assertRaisesRegex(RuntimeError, needle):
+                        verifier._run_fresh_inventory_batches(
+                            [self.source_path], repository=self.repository, timeout=60
+                        )
 
     def test_fresh_inventory_is_split_into_bounded_processes(self) -> None:
         paths = [self.root / f"Module{i}.lean" for i in range(129)]
@@ -571,8 +698,9 @@ class ManifestVerifierTests(unittest.TestCase):
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual([len(command[4:]) for command in commands], [1] * 129)
         self.assertTrue(all(
-            command[3] == "--header-imports" for command in commands
+            command[3] == "--defer-full-fallback" for command in commands
         ))
+        self.assertTrue(all("--header-imports" not in command for command in commands))
 
     def test_fresh_inventory_batches_follow_transitive_import_closure(self) -> None:
         modules = ["Mathlib/A.lean", "Mathlib/B.lean", "Mathlib/C.lean", "Mathlib/D.lean"]

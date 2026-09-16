@@ -42,17 +42,21 @@ HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
 MANUAL_OVERRIDE_SCHEMA = 1
-# Header-import inventory retains the imported environment for every source in
-# one invocation.  A file-count bound therefore does not bound RSS: the first
-# 32-file batch reached a 1,556-module import closure on a 64GB Mac.  The
-# dependency-map bound below limits the union of transitive Mathlib modules in
-# each fresh child.  A child whose own closure exceeds this bound is still run
-# alone (there is no sound way to split one source's imports).
+# Keep the fresh inventory's dependency-map closure bound even though the
+# inventory protocol uses one aggregate Mathlib environment per child.  The
+# bound keeps the source batch topology bounded and authenticated, and a child
+# whose own closure exceeds it is still run alone (there is no sound way to
+# split one source's imports).
 FRESH_INVENTORY_MAX_IMPORT_MODULES = 512
 # Keep enough headroom for the verifier, the desktop, and the next child.  A
 # strict run that cannot maintain this reserve is a failed verification, never
 # a partial acceptance.
 FRESH_INVENTORY_MIN_FREE_MEMORY_BYTES = 12 * 1024**3
+
+INVENTORY_FULL_FALLBACK_MARKER = "SIMP_ENGINE_INVENTORY_FULL_FALLBACK file="
+INVENTORY_DEFERRED_FALLBACK_MARKER = "SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file="
+INVENTORY_FULL_FALLBACK_TOKEN = "SIMP_ENGINE_INVENTORY_FULL_FALLBACK"
+INVENTORY_DEFERRED_FALLBACK_TOKEN = "SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK"
 
 TOP_LEVEL_FIELDS = frozenset(
     {
@@ -1101,6 +1105,47 @@ def _inventory_memory_guard(_pid: int) -> str | None:
     return None
 
 
+def _inventory_marker_path(line: str, marker: str, *, context: str) -> Path:
+    """Decode one inventory marker, rejecting ambiguous source identities."""
+    raw_path = line[len(marker):]
+    if not raw_path or raw_path != raw_path.strip() or "\x00" in raw_path:
+        raise _error("recompute", f"{context} has a malformed inventory marker")
+    path = Path(raw_path)
+    if not path.is_absolute():
+        raise _error(
+            "recompute",
+            f"{context} inventory marker must name an absolute source: {raw_path!r}",
+        )
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _error(
+            "recompute", f"{context} inventory marker has an invalid source path"
+        ) from exc
+
+
+def _parse_inventory_output(
+    output: str, *, context: str,
+) -> tuple[list[Path], list[Path]]:
+    """Parse deferred/full markers without accepting ambiguous lines."""
+    if not isinstance(output, str):
+        raise _error("recompute", f"{context} returned non-text inventory output")
+    deferred: list[Path] = []
+    full: list[Path] = []
+    for line in output.splitlines():
+        if line.startswith(INVENTORY_FULL_FALLBACK_TOKEN):
+            if not line.startswith(INVENTORY_FULL_FALLBACK_MARKER):
+                raise _error("recompute", f"{context} has a malformed full fallback marker")
+            full.append(_inventory_marker_path(line, INVENTORY_FULL_FALLBACK_MARKER, context=context))
+        elif line.startswith(INVENTORY_DEFERRED_FALLBACK_TOKEN):
+            if not line.startswith(INVENTORY_DEFERRED_FALLBACK_MARKER):
+                raise _error("recompute", f"{context} has a malformed deferred fallback marker")
+            deferred.append(_inventory_marker_path(line, INVENTORY_DEFERRED_FALLBACK_MARKER, context=context))
+        elif line.lstrip().startswith(INVENTORY_FULL_FALLBACK_TOKEN) or line.lstrip().startswith(INVENTORY_DEFERRED_FALLBACK_TOKEN):
+            raise _error("recompute", f"{context} has a malformed fallback marker")
+    return deferred, full
+
+
 def _run_fresh_inventory_batches(
     source_paths: list[Path], *, repository: Path, timeout: int,
     lake_path: Path | None = None, expected_lake_sha256: str | None = None,
@@ -1108,19 +1153,20 @@ def _run_fresh_inventory_batches(
     dependency_map: str | Path | Mapping[str, Any] | None = None,
     max_import_modules: int = FRESH_INVENTORY_MAX_IMPORT_MODULES,
 ) -> list[str]:
-    """Run the independent header-import inventory in bounded fresh processes.
+    """Run the producer-compatible inventory in bounded fresh processes.
 
-    ``lean_toolchain_cache.py --header-imports`` creates one import environment
-    for each requested source and keeps those environments alive until the
-    child exits.  Grouping by source count consequently gives no useful memory
-    bound.  When a source-bound header dependency map is supplied, batches are
-    formed by the union of each source's transitive Mathlib closure.  The map
-    is a scheduling input only: every requested module must be present, every
+    Each fast child uses the aggregate Mathlib environment and defers parser
+    recoveries.  Every deferred source is then run exactly once in its own
+    ``--full-fallback-only`` child.  A source-bound dependency map remains a
+    scheduling input only: every requested module must be present, every
     source hash is checked against the live file, and no inventory result is
     read from it.  A missing map deliberately selects singleton children.
     """
     if max_import_modules <= 0:
         raise _error("recompute", "max_import_modules must be positive")
+    source_paths = [path.resolve() for path in source_paths]
+    if len(set(source_paths)) != len(source_paths):
+        raise _error("recompute", "duplicate source path in inventory request")
     dependency_map_identity: tuple[Path, tuple[int, int, int, int], bytes] | None = None
     if module_names is not None and len(module_names) != len(source_paths):
         raise _error("recompute", "module name count does not match source paths")
@@ -1153,7 +1199,6 @@ def _run_fresh_inventory_batches(
         sys.executable,
         str(repository / "Experiment" / "lean_toolchain_cache.py"),
         "inventory",
-        "--header-imports",
     ]
     if lake_path is not None and expected_lake_sha256 is not None:
         _assert_pinned_lake(lake_path, expected_lake_sha256)
@@ -1161,21 +1206,95 @@ def _run_fresh_inventory_batches(
     else:
         environment = nullcontext()
     outputs: list[str] = []
+    seen_deferred: set[Path] = set()
+
+    def run_inventory(command: list[str], label: str) -> str:
+        result = run_process(
+            command, cwd=repository, text=True, stdout=subprocess.PIPE,
+            # The Lean tool's stdout is the authenticated machine protocol;
+            # diagnostics must not be mistaken for inventory records.
+            stderr=subprocess.PIPE, timeout=timeout, check=False,
+            resource_guard=_inventory_memory_guard,
+        )
+        if result.returncode:
+            output = result.stdout if isinstance(result.stdout, str) else ""
+            raw_diagnostic = getattr(result, "stderr", "")
+            diagnostic = raw_diagnostic if isinstance(raw_diagnostic, str) else ""
+            details = []
+            if diagnostic:
+                details.append(f"stderr:\n{diagnostic[-4000:]}")
+            if output:
+                details.append(f"stdout:\n{output[-4000:]}")
+            raise _error(
+                "recompute",
+                f"{label} failed with status {result.returncode}:\n"
+                + "\n".join(details),
+            )
+        if not isinstance(result.stdout, str):
+            raise _error("recompute", f"{label} returned non-text inventory output")
+        return result.stdout
+
     with environment:
         for batch_index, batch in enumerate(batches, start=1):
-            command = [*command_prefix, *(str(path) for path in batch)]
-            result = run_process(
-                command, cwd=repository, text=True, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, timeout=timeout, check=False,
-                resource_guard=_inventory_memory_guard,
+            batch_paths = [path.resolve() for path in batch]
+            requested = set(batch_paths)
+            fast_output = run_inventory(
+                [
+                    *command_prefix,
+                    "--defer-full-fallback",
+                    *(str(path) for path in batch_paths),
+                ],
+                f"inventory batch {batch_index}",
             )
-            if result.returncode:
+            fast_deferred, fast_fallbacks = _parse_inventory_output(
+                fast_output, context=f"inventory batch {batch_index}"
+            )
+            if fast_fallbacks:
+                if any(path not in requested for path in fast_fallbacks):
+                    raise _error("recompute", "inventory fallback named an unrequested source")
                 raise _error(
                     "recompute",
-                    f"inventory batch {batch_index} failed with status "
-                    f"{result.returncode}:\n{result.stdout[-4000:]}",
+                    f"inventory batch {batch_index} emitted a full fallback marker during the deferred fast pass",
                 )
-            outputs.append(result.stdout)
+            for deferred_path in fast_deferred:
+                if deferred_path not in requested:
+                    raise _error("recompute", "inventory deferred an unrequested source")
+                if deferred_path in seen_deferred:
+                    raise _error("recompute", f"inventory deferred the same source more than once: {deferred_path}")
+                seen_deferred.add(deferred_path)
+            outputs.append(fast_output)
+
+            for deferred_path in fast_deferred:
+                fallback_output = run_inventory(
+                    [*command_prefix, "--full-fallback-only", str(deferred_path)],
+                    f"isolated inventory fallback for {deferred_path}",
+                )
+                child_deferred, child_fallbacks = _parse_inventory_output(
+                    fallback_output, context="isolated inventory fallback"
+                )
+                if child_deferred:
+                    if len(child_deferred) != len(set(child_deferred)):
+                        raise _error("recompute", "inventory emitted a duplicate deferred fallback marker")
+                    if any(path not in requested for path in child_deferred):
+                        raise _error("recompute", "inventory deferred an unrequested source")
+                    raise _error(
+                        "recompute",
+                        f"isolated inventory fallback left source deferred: {child_deferred[0]}",
+                    )
+                if len(child_fallbacks) != len(set(child_fallbacks)):
+                    raise _error("recompute", "inventory emitted a duplicate full fallback marker")
+                for fallback_path in child_fallbacks:
+                    if fallback_path == deferred_path:
+                        continue
+                    if fallback_path not in requested:
+                        raise _error("recompute", "inventory fallback named an unrequested source")
+                    raise _error("recompute", "isolated inventory fallback named a different source")
+                if len(child_fallbacks) != 1:
+                    raise _error(
+                        "recompute",
+                        f"isolated inventory fallback did not emit exactly one full fallback marker for {deferred_path}",
+                    )
+                outputs.append(fallback_output)
     if dependency_map_identity is not None:
         map_path, identity, raw = dependency_map_identity
         try:
@@ -1228,25 +1347,41 @@ def recompute_inventory(
     deferred: set[str] = set()
     by_path = {str(p.resolve()): module["module"] for p, module in zip(source_paths, manifest["modules"])}
     for output in outputs:
+        deferred_paths, fallback_paths = _parse_inventory_output(
+            output, context="inventory output"
+        )
+        for marker_path in fallback_paths:
+            fallback = by_path.get(str(marker_path))
+            if fallback is None:
+                raise _error("recompute", "inventory fallback named an unrequested source")
+            if fallback in fallbacks:
+                raise _error("recompute", f"inventory emitted a duplicate full fallback marker: {fallback}")
+            fallbacks.add(fallback)
+        for marker_path in deferred_paths:
+            deferred_module = by_path.get(str(marker_path))
+            if deferred_module is None:
+                raise _error("recompute", "inventory deferred an unrequested source")
+            if deferred_module in deferred:
+                raise _error("recompute", f"inventory deferred the same source more than once: {deferred_module}")
+            deferred.add(deferred_module)
         for line in output.splitlines():
-            if line.startswith("SIMP_ENGINE_INVENTORY_FULL_FALLBACK file="):
-                fallback = by_path.get(str(Path(line.split("=", 1)[1]).resolve()))
-                if fallback is None:
-                    raise _error("recompute", "inventory fallback named an unrequested source")
-                fallbacks.add(fallback)
-                continue
-            if line.startswith("SIMP_ENGINE_INVENTORY_DEFERRED_FALLBACK file="):
-                deferred_path = line.split("=", 1)[1]
-                deferred_module = by_path.get(str(Path(deferred_path).resolve()))
-                if deferred_module is None:
-                    raise _error("recompute", "inventory deferred an unrequested source")
-                deferred.add(deferred_module)
+            if line.startswith(INVENTORY_FULL_FALLBACK_TOKEN) or line.startswith(INVENTORY_DEFERRED_FALLBACK_TOKEN):
                 continue
             if not line.startswith("{"):
                 continue
-            record = json.loads(line); module = by_path.get(str(Path(record.get("file", "")).resolve()))
+            record = json.loads(line)
+            if not isinstance(record, dict) or not isinstance(record.get("file"), str):
+                raise _error("recompute", "inventory record has an invalid source path")
+            record_path = Path(record["file"])
+            if not record_path.is_absolute() or "\x00" in record["file"]:
+                raise _error("recompute", "inventory record has an invalid source path")
+            try:
+                record_identity = str(record_path.resolve())
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise _error("recompute", "inventory record has an invalid source path") from exc
+            module = by_path.get(record_identity)
             if module is None:
-                continue
+                raise _error("recompute", "inventory record named an unrequested source")
             actual.setdefault(module, []).append((
                 int(record["line"]), int(record["column"]), record["syntaxKind"],
                 record["kind"], int(record["startByte"]), int(record["endByte"]),
@@ -1259,10 +1394,15 @@ def recompute_inventory(
         ) for o in module["occurrences"])
         if sorted(actual.get(module["module"], [])) != expected:
             raise _error("recompute", f"fresh syntax inventory differs for {module['module']}")
+    if deferred != fallbacks:
+        missing = sorted(deferred - fallbacks)
+        extra = sorted(fallbacks - deferred)
+        raise _error(
+            "recompute",
+            f"inventory fallback markers are unresolved: missing={missing}, extra={extra}",
+        )
     if fallbacks != set(manifest["fullFrontendFallbacks"]):
         raise _error("recompute", f"inventory fallback set differs: {sorted(fallbacks)} != {sorted(manifest['fullFrontendFallbacks'])}")
-    if deferred:
-        raise _error("recompute", f"inventory left deferred fallbacks unresolved: {sorted(deferred)}")
     _assert_fresh(before, path, manifest, repository, mathlib, "inventory subprocess", manifest_snapshot=snapshot, lake_path=lake_path, lean_path=lean_path, expected_lake_sha256=expected_lake_sha256, expected_lean_sha256=expected_lean_sha256)
 
 
@@ -1600,7 +1740,7 @@ def main() -> None:
         command.add_argument("--expected-repository-commit")
         command.add_argument(
             "--dependency-map", type=Path,
-            help="fresh source-bound header map used only to bound inventory child closures",
+            help="fresh source-bound map used only to bound inventory child closures",
         )
         command.add_argument("--timeout", type=int, default=3600)
         if name == "verify":

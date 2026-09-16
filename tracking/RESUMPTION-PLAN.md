@@ -1,0 +1,65 @@
+# Local verifier resumption plan
+
+This plan covers the current bounded local batch. It does not authorize AWS
+compute, `explicit-lean-cloud`, dispatch past the closed
+`2026-09-13T00:00:00Z` campaign boundary, or reuse an AWS/campaign invocation
+nonce. A fresh nonce and output directory are allowed for a future admitted
+local fixture or replay check after resource gates pass.
+
+## Phase 1: validate and publish the pending protocol fix
+
+The pending changes in `Experiment/verify_simp_boundary_manifest.py`,
+`Experiment/test_verify_simp_boundary_manifest.py`, and
+`tracking/campaign.json` replay the producer's aggregate
+`--defer-full-fallback` pass followed by one isolated
+`--full-fallback-only` child per deferred source. They retain exact fallback
+set equality, source and dependency-map identity checks, freshness/TOCTOU
+checks, and fail-closed malformed, duplicate, unresolved, extra, and
+unrequested marker handling.
+
+Completed validation: 39 verifier tests; 9 inventory-header controls passed on
+2026-09-16 in the earlier producer probe before the final Python-only channel
+change (they were not rerun); campaign status 9, supervisor 22, worker 33, and
+translation-index 13 tests; Python compilation; and `git diff --check`. The
+coordinator should review this diff and commit the named tracked files plus
+this plan. The `.lake` resume summary is ignored generated output and is not a
+commit target.
+
+## Phase 2: assess a full fresh local verifier replay
+
+Before starting, re-authenticate the immutable input identities and confirm
+that no producer or worker owns the output namespace. Use a fresh output
+directory and fresh local nonce; never reuse an AWS/campaign nonce. The
+preserved inputs currently hash as:
+
+| Input | SHA-256 |
+| --- | --- |
+| `schema13-isolated-closed-manifest-v10.json` | `6d33d5eae0abdf7203040dcf24fccbbf5b9d8b999fe028841cb31c50a07b4dd3` |
+| `index-header-dependency-map.json` | `eba4654477f16d81f870bf3b2cd15d0d9fe886357384d10f5e8a5f374ab95448` |
+| `schema13-v10-handoff-scope-20260908T0640Z.json` | `ef724074c7ea36f1774ef56d13b1f2cff71ce827811810c1588a62b9df8bb2bf` |
+
+The filesystem has roughly 101,481,976 KiB free, above the 12 GiB disk
+reserve, but fresh available memory is 1,598,865,408 bytes, below the strict
+12,884,901,888-byte verifier reserve. Do not launch the replay under this
+telemetry; no complete local verification is claimed. Recheck resources before
+any later attempt and stop closed if the reserve is unavailable.
+
+The preserved historical manifest is immutable evidence. An offline structural
+inspection against the current checkout correctly rejected its old
+`implementationHashes` because the pending verifier source differs; this is a
+stale-input identity mismatch, not evidence that the historical manifest was
+repaired or accepted against the new code. A fresh manifest must be generated
+and authenticated after publication before replay.
+
+## Phase 3: bounded foundational proof preparation
+
+This preparation can proceed independently of a full corpus verifier replay.
+The first active target is the source-pinned `Mathlib.Data.Nat.Init`
+`Nat.leRec_self` manual override in `Experiment/simp_manual_overrides.json`.
+`Mathlib.Logic.IsEmpty.Basic` is a possible later target if its evidence stays
+narrow; defer `Mathlib.Logic.Relation` because its runtime schema and replay
+complexity need a separate design decision. Preserve kernel-checked
+declarations, computational semantics, original tactic comments, and all
+independent acceptance checks. Acceptance remains gated by the full verifier
+checks and unchanged disk/memory reserves. Record each result as resource,
+semantic, unsupported, or successful before considering importer expansion.

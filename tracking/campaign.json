@@ -5,7 +5,15 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-12T18:44:46+00:00",
+  "updatedAt": "2026-09-16T01:09:02+00:00",
+  "resumeStatus": {
+    "review": "pending",
+    "commit": "pending_coordinator",
+    "natLeRecSelf": "ongoing_parallel_preparation_excluded_from_batch_1",
+    "fullLocalVerifierReplay": "blocked_memory_reserve",
+    "inventoryHeaderControls": "passed_2026-09-16_before_final_python_channel_change_not_rerun",
+    "cloudDispatch": "closed_no_new_host_or_campaign_nonce_reuse"
+  },
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
   "evidenceSnapshot": "tracking/handoff-snapshot.json",
@@ -436,7 +444,13 @@
       "checkedAt": "2026-09-12T18:44:46+00:00",
       "scope": "replacement_inventory_fallback_protocol_fix_review",
       "result": "passed_focused_local_checks_publication_pending",
-      "detail": "Luna Max diagnosed and implemented a two-file bounded fix under strict ownership. The producer uses aggregate Mathlib with --defer-full-fallback and one isolated --full-fallback-only child per deferred source; the verifier had instead used direct --header-imports, so its fallback set was not comparable even though occurrence lists matched. The fix canonicalizes the verifier to the producer protocol while preserving dependency-map batching, source/path/hash/environment/TOCTOU checks, exact fallback-set equality and fail-closed malformed, duplicate, unresolved, extra or unrequested marker handling. Coordinating review found no scope or validation weakening. Verifier tests passed 36, inventory-header controls passed, Python compilation, campaign-status tests 9, JSON validation and diff validation passed. A known real Mathlib fallback source emitted the expected deferred marker and isolated full marker with occurrence records. Direct invocation of the complete verifier helper was not run because local available memory was 3.88 GB, below the unchanged strict 12 GiB reserve; no full-manifest replay is claimed."
+      "detail": "Luna Max diagnosed and implemented a two-file bounded fix under strict ownership. The producer uses aggregate Mathlib with --defer-full-fallback and one isolated --full-fallback-only child per deferred source; the verifier had instead used direct --header-imports, so its fallback set was not comparable even though occurrence lists matched. The fix canonicalizes the verifier to the producer protocol while preserving dependency-map batching, source/path/hash/environment/TOCTOU checks, exact fallback-set equality and fail-closed malformed, duplicate, unresolved, extra or unrequested marker handling. Coordinating review found no scope or validation weakening. The follow-up keeps machine evidence on stdout, bounds stderr diagnostics on failures, and rejects unrequested or invalid JSON source records. Verifier tests passed 39, inventory-header controls passed, Python compilation, campaign-status tests 9, JSON validation and diff validation passed. A known real Mathlib fallback source emitted the expected deferred marker and isolated full marker with occurrence records. Direct invocation of the complete verifier helper was not run because local available memory was 3.88 GB, below the unchanged strict 12 GiB reserve; no full-manifest replay is claimed."
+    },
+    {
+      "checkedAt": "2026-09-16T01:00:35+00:00",
+      "scope": "batch_1_local_verifier_resume_assessment",
+      "result": "passed_focused_checks_full_replay_blocked_by_memory_reserve",
+      "detail": "Fresh input identities were rehashed: canonical manifest 6d33d5eae0abdf7203040dcf24fccbbf5b9d8b999fe028841cb31c50a07b4dd3, dependency map eba4654477f16d81f870bf3b2cd15d0d9fe886357384d10f5e8a5f374ab95448, and handoff scope ef724074c7ea36f1774ef56d13b1f2cff71ce827811810c1588a62b9df8bb2bf. Focused verifier tests 39 passed after the channel change; inventory-header controls 9 passed in the earlier producer probe and were not rerun because they launch Lean below the strict memory reserve. Campaign-status 9, supervisor 22, worker 33, translation-index 13, Python compilation, and diff validation passed. Disk has 101481976 KiB available, above the 12 GiB reserve; fresh available memory is 1598865408 bytes, below the strict 12884901888-byte reserve, so no complete local replay was launched or claimed. No live producer, worker, verifier, or campaign supervisor process owns the output namespace; historical PID/fixture lock files are stale metadata."
     }
   ],
   "historicalAutomation": {
@@ -446,7 +460,37 @@
   "storage": {
     "minimumFreeBytes": 12884901888,
     "minimumFreeMemoryBytes": 12884901888,
-    "policy": "Preserve the existing 12 GiB disk and host-memory reserves for local runs. Check fresh telemetry; no automatic evidence cleanup."
+    "policy": "Preserve the existing 12 GiB disk and host-memory reserves for local runs. Check fresh telemetry; no automatic evidence cleanup.",
+    "latestCleanup": {
+      "completedAt": "2026-09-13T01:49:04+00:00",
+      "status": "completed_preserving_active_and_dirty_state",
+      "lakeKiBBefore": 78083620,
+      "lakeKiBAfter": 49800788,
+      "logicalReclaimedKiB": 28282832,
+      "filesystemAvailableKiBBefore": 22215064,
+      "filesystemAvailableKiBAfter": 43391224,
+      "filesystemAvailableGainKiB": 21176160,
+      "removedCleanRegisteredWorktrees": 23,
+      "preserved": [
+        ".lake/search-free-mathlib/translation-index.sqlite3",
+        ".lake/week-2026-08-31/schema13-isolated-closed-manifest-v10.json",
+        ".lake/week-2026-08-31/index-header-dependency-map.json",
+        ".lake/week-2026-08-31/schema13-v10-handoff-scope-20260908T0640Z.json",
+        ".lake/aws-linux-pilot/terminal-evidence",
+        ".lake/packages",
+        ".lake/build",
+        "all dirty registered worktrees and frozen evidence directories"
+      ],
+      "validation": {
+        "translationIndexQuickCheck": "ok",
+        "canonicalManifestSha256": "6d33d5eae0abdf7203040dcf24fccbbf5b9d8b999fe028841cb31c50a07b4dd3",
+        "headerMapSha256": "eba4654477f16d81f870bf3b2cd15d0d9fe886357384d10f5e8a5f374ab95448",
+        "handoffScopeSha256": "ef724074c7ea36f1774ef56d13b1f2cff71ce827811810c1588a62b9df8bb2bf",
+        "gitConnectivity": "passed",
+        "staleWorktreeMetadata": "pruned"
+      },
+      "notes": "Removed unreferenced reproducible diagnostics, clean branch-reachable historical worktrees, superseded schema 3-9 and overlay manifests, and obsolete schema-10 inputs. Dirty snapshots, frozen evidence, current resumability inputs, canonical evidence, dependency caches and build outputs were not removed."
+    }
   },
   "documentationValidation": {
     "date": "2026-09-12",
@@ -460,8 +504,8 @@
     "translationIndexTests": 13,
     "linuxProcessSamplerTests": 2,
     "awsLinuxPilotTests": 11,
-    "manifestVerifierTests": 36,
-    "inventoryFallbackProtocolFix": "passed_focused_tests_real_marker_probe_full_local_replay_blocked_by_strict_memory_reserve",
+    "manifestVerifierTests": 39,
+    "inventoryFallbackProtocolFix": "passed_focused_tests_real_marker_probe_stderr_separation_full_local_replay_blocked_by_strict_memory_reserve",
     "preservedManifestStructuralInspection": "passed",
     "preservedDeriveEncodableEvidenceReplay": "passed",
     "verifierStderrPreservation": "passed_generated_shell_and_mock_checks",
