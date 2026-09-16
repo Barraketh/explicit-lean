@@ -1,10 +1,11 @@
 # Local verifier resumption plan
 
-This plan covers the current bounded local batch. It does not authorize AWS
-compute, `explicit-lean-cloud`, dispatch past the closed
-`2026-09-13T00:00:00Z` campaign boundary, or reuse an AWS/campaign invocation
-nonce. A fresh nonce and output directory are allowed for a future admitted
-local fixture or replay check after resource gates pass.
+This plan covers the current bounded local batch and the separately recorded
+AWS preparation below. The local phases do not authorize
+`explicit-lean-cloud`, dispatch past an applicable absolute cutoff, or reuse
+an AWS/campaign invocation nonce. A fresh nonce and output directory are
+allowed for a future admitted local fixture or replay check after resource
+gates pass.
 
 ## Phase 1: validate and publish the protocol fix
 
@@ -80,3 +81,27 @@ failed because its initial replacement re-cased `n`; the replacement was then
 corrected. Corrected composition, declaration-oracle, cold-dependency, and
 full-checker Lean phases remain unrun because fresh memory is below reserve.
 This is no module or tree acceptance, and coverage counts remain unchanged.
+
+## Approved AWS run preparation
+
+The user has now approved one fresh bounded AWS run: account `538639825139`,
+`us-west-1`, one default-tenancy `r7i.4xlarge`-class Linux host with at least
+128 GiB, one worker for at most 10 hours, a 12-hour host lifetime, and a $20
+all-in cap. The final absolute cutoff is `2026-09-16T13:30:00Z`, materialized
+from the fresh `2026-09-16T01:38:54Z` UTC clock with a small dispatch buffer
+inside the 12-hour host bound. The prior September 13 authorization remains
+closed and is retained as historical policy data. Do not provision until the
+coordinator approves and publishes a clean full commit; do not reuse an old
+AWS/campaign nonce or dispatch beyond the cutoff. Fresh local fixture nonces
+remain permitted after resource admission.
+
+The candidate checkout is HEAD
+`fed986f781b2d60da3c200fbe95b6a51503b33fa`, two commits ahead of the public
+branch and dirty from parallel override work, so it is not a launch ref.
+The only permitted profile is the non-root `explicit-lean-pilot`; fresh STS
+identity and all read-only AWS gates passed at 01:38:54Z. Live pricing is
+EC2 $1.176/hour, gp3 $0.096/GB-month, public IPv4 $0.005/hour, subtotal
+$14.492 and headroom $5.508. The controller template and live policy gates
+pass; publication of a clean full commit, coordinator approval, and a fresh
+run nonce remain outstanding. If those gates are not ready before this
+cutoff, stop without provisioning; do not extend the cutoff.

@@ -4,6 +4,23 @@ Handoff updated September 10, 2026. Working branch:
 `codex/search-free-mathlib-2026-08-31`. Reviewed implementation: `ee30955`;
 later documentation commits do not constitute new translation evidence.
 
+Current cloud preparation: the user approved one fresh bounded AWS run in
+account `538639825139`/`us-west-1` using one default-tenancy `r7i.4xlarge`-class
+Linux host, one worker capped at 10 hours, a 12-hour host lifetime, and a $20
+all-in ceiling. The promoted authorization cutoff is
+`2026-09-16T13:30:00Z`, prepared from the `2026-09-16T01:38:54Z` UTC clock;
+the active bounds are in `tracking/aws-linux-pilot-policy.json` under
+`authorization`. The prior closed authorization and
+`2026-09-13T00:00:00Z` cutoff remain preserved under
+`historicalClosedAuthorization` as historical evidence.
+No provisioning or budget mutation has occurred. The candidate checkout is
+currently unpushed and dirty at full HEAD
+`fed986f781b2d60da3c200fbe95b6a51503b33fa`. Fresh STS identity, quota,
+pricing, network, storage, evidence-bucket and zero-active-resource gates now
+pass through `explicit-lean-pilot`; use neither `default` nor `softmax`. Do
+not launch until a clean full commit is published, the coordinator approves
+it, and a fresh run nonce is generated before the immutable cutoff.
+
 ## Objective and what works
 
 Replace every executable source `simp` / `simp only` in pinned Mathlib with

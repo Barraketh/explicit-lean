@@ -1,5 +1,35 @@
 # Bounded AWS/Linux pilot
 
+## New approved run preparation (2026-09-16)
+
+The user has approved one fresh AWS run under the same bounded envelope:
+account `538639825139`, region `us-west-1`, one default-tenancy
+`r7i.4xlarge`-class Linux host with at least 128 GiB, one worker for at most
+10 hours, a 12-hour host lifetime, and a $20 all-in ceiling. The promoted
+absolute cutoff is `2026-09-16T13:30:00Z`, materialized from the fresh UTC
+clock at `2026-09-16T01:38:54Z`; it must never be extended. The active bounds
+are in `tracking/aws-linux-pilot-policy.json` under `authorization`. The prior
+closed September 13 window is preserved under `historicalClosedAuthorization`
+as historical evidence.
+
+Preparation is not provisioning. The current checkout is at candidate HEAD
+`fed986f781b2d60da3c200fbe95b6a51503b33fa`, is ahead of the public branch,
+and has shared dirty changes. The coordinator must first commit and publish a
+clean full 40-hex ref, then refresh all live gates immediately before launch.
+The fresh non-root `explicit-lean-pilot` STS identity and read-only gates
+passed at 2026-09-16T01:38:54Z; `default` and `softmax` must not be used. Until
+coordinator approval of the published ref, no stack, instance, volume, worker,
+nonce, or budget change may be created. No credentials or runtime auth state
+may be copied.
+
+Live Pricing API values at 2026-09-16T01:38:54Z are EC2 $1.176/hour, gp3
+$0.096/GB-month, and public IPv4 $0.005/hour; the 12-hour bounded subtotal is
+$14.492 with $5.508 headroom under the $20 ceiling. Refresh pricing and all
+read-only gates immediately before launch. The controller's existing gates
+remain mandatory: non-root account identity, quota, instance shape and
+offering, network, encrypted versioned evidence bucket, zero active pilot
+resources, exact cutoff, and clean published commit.
+
 The user authorized one replacement bounded pilot in AWS account `538639825139`,
 region `us-west-1`, with the same $20 all-in ceiling. The selected bounds remain
 a 10-hour worker and a 12-hour absolute instance lifetime. Earlier authorization

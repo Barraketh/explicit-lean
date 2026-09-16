@@ -5,15 +5,40 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T01:22:00+00:00",
+  "updatedAt": "2026-09-16T01:38:54+00:00",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "5968c71_local_not_pushed_nat_atomic_commit_with_plan_pending",
     "natLeRecSelf": "committed_with_this_plan_update_runtime_acceptance_pending_unpushed",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
     "inventoryHeaderControls": "passed_2026-09-16_before_final_python_channel_change_not_rerun",
-    "cloudDispatch": "closed_no_new_host_or_campaign_nonce_reuse",
+    "cloudDispatch": "authorization_promoted_live_gates_passed_pending_clean_published_ref",
     "natOverrideChecks": "lightweight_passed_corrected_stdin_probe_passed_no_module_oracle_cold_acceptance"
+  },
+  "cloudPreparation": {
+    "status": "user_approved_one_aws_run_promoted_live_gates_passed_pending_clean_published_commit",
+    "provider": "aws",
+    "account": "538639825139",
+    "region": "us-west-1",
+    "instanceType": "r7i.4xlarge",
+    "minimumMemoryBytes": 137438953472,
+    "maximumSpendUsd": 20,
+    "maximumInstanceLifetimeSeconds": 43200,
+    "maximumWorkerRuntimeSeconds": 36000,
+    "proposedNotAfter": "2026-09-16T13:30:00Z",
+    "candidateCheckoutHead": "fed986f781b2d60da3c200fbe95b6a51503b33fa",
+    "preparedAt": "2026-09-16T01:38:54Z",
+    "publicationGate": "Require a clean full 40-hex commit published on the exact HTTPS origin before launch; candidate HEAD is currently unpushed and dirty state exists in the shared checkout.",
+    "livePreflight": "Passed read-only identity, quota, r7i.4xlarge shape/offering, AMI, network, encrypted versioned evidence bucket, and zero active pilot-resource gates at 2026-09-16T01:38:54Z; refresh immediately before launch.",
+    "awsSession": "authenticated_explicit_lean_pilot_identity_verified",
+    "pricing": "live_us_west_1_verified_ec2_1.176_per_hour_gp3_0.096_per_gb_month_ipv4_0.005_per_hour_subtotal_14.492_headroom_5.508_at_2026-09-16T01:38:54Z",
+    "controllerPlan": "read_only_live_gates_passed; plan remains blocked only by required full clean published authorization ref",
+    "localDiskAvailableKiB": 100258636,
+    "localMemoryAvailableBytes": 6208372736,
+    "localMemoryReserveBytes": 12884901888,
+    "authorizationPromotion": "policy.authorization and tracker deadline/notAfter promoted atomically; old closed cutoff is retained in historicalClosedWindow and policy historicalClosedAuthorization",
+    "priorClosedAuthorizationPreserved": true,
+    "noProvisioningPerformed": true
   },
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
@@ -23,9 +48,14 @@
     "sha256": "a6ed38284491583e0bb02db966876f93516a35da63c8aea620c3e1c4df9ca589",
     "scope": "Original tracker preserved byte-for-byte. Its pending actions, active owners, old counts and prototype statuses are historical, not current dispatch instructions."
   },
-  "deadline": "2026-09-13T00:00:00Z",
-  "notAfter": "2026-09-13T00:00:00Z",
-  "deadlineStatus": "replacement_pilot_terminal_before_exact_cutoff_authorization_closed",
+  "deadline": "2026-09-16T13:30:00Z",
+  "notAfter": "2026-09-16T13:30:00Z",
+  "historicalClosedWindow": {
+    "deadline": "2026-09-13T00:00:00Z",
+    "notAfter": "2026-09-13T00:00:00Z",
+    "status": "replacement_pilot_terminal_before_exact_cutoff_authorization_closed"
+  },
+  "deadlineStatus": "fresh_single_run_authorization_promoted_live_gates_passed_publication_pending_never_extend",
   "machine": "no_active_aws_compute_replacement_instance_terminated",
   "budget": {
     "resetDate": "2026-09-07",
@@ -47,7 +77,7 @@
   },
   "direction": {
     "userConversationDate": "2026-09-10",
-    "nextMilestone": "Publish the reviewed strict inventory-fallback protocol fix, then obtain explicit authorization for a new cutoff and host before any further AWS run.",
+    "nextMilestone": "Publish a clean reviewed commit, refresh non-root AWS live gates after reauthentication, then launch at most one approved host under the proposed cutoff; no extension or second host.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
     "readiness": "Replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 is terminal Failed/1 before translation. Linux setup, focused checks, strict boundary preflight and fresh 216,029,345-byte manifest generation passed. Independent verification ran 5h50m22s and all per-module occurrence lists matched, then the inventory fallback-provenance check failed: fresh header-import recomputation marked 560 full-frontend fallbacks while the manifest recorded 216, with 75 common. The zero-byte verifier result and exact 35,339-byte stderr were preserved. Four versioned AES256 S3 objects remain; the downloaded 10,877,575-byte archive SHA-256 0a1435d6bedfb5130df6c0ebbac39da72f7ec67994d00683ccfdf3f9f2e2fa47 matches its uploaded hash and run-exit records originalExitCode 1 with successful evidence upload. Instance i-0f9698935a4ccb630 is terminated, volume vol-0524b323969ba9add is gone, the exact stack is deleted and no active r7i.4xlarge remains. Corpus translation never began. Local diagnosis proved a producer/verifier protocol mismatch: aggregate deferred-plus-isolated fallback versus direct header imports. The reviewed bounded fix preserves exact fallback equality and fail-closed source/environment/marker checks; 36 verifier tests, inventory-header controls, Python compilation and diff validation pass. A complete local replay was not run because available memory was below the unchanged 12 GiB reserve. No additional AWS host is authorized.",
@@ -458,6 +488,18 @@
       "scope": "batch_1_protocol_fix_commit_and_nat_override_status",
       "result": "protocol_review_complete_nat_runtime_acceptance_blocked",
       "detail": "Reviewed protocol verifier fix is committed locally as 5968c71 and is not pushed; the ignored .lake resume summary is not a commit target. Independent review approved the parallel Nat.leRec_self override, which is committed together with this plan/tracker update; remote publication remains unpushed and runtime admission remains pending. The source-pinned occurrence 7063e52927a3778e uses Nat source SHA-256 6eac43b5c217af7e02be819026cdbba38b24810659d1fc1dc7d90d6f78c7d3e3; the override database has 17 entries across 15 modules with SHA-256 03cca0e6e35be3da7110855269767808f7b877f4eeb32ba142a80a836655e349. Lightweight AST/cardinality/source-range/hash/render/duplicate/missing/path checks and a corrected exact-theorem stdin Lean probe passed. An earlier focused composition ran before fresh resource admission and failed because its initial replacement re-cased n; that replacement was corrected. Corrected composition, declaration oracle, cold validation and full-checker Lean phase remain unrun because fresh memory is below the strict reserve. No module/tree acceptance or coverage count advanced."
+    },
+    {
+      "checkedAt": "2026-09-16T01:24:20+00:00",
+      "scope": "approved_aws_run_preparation_read_only_preflight",
+      "result": "prepared_launch_blocked_expired_nonroot_session_unpublished_dirty_checkout",
+      "detail": "The user approved one fresh default-tenancy r7i.4xlarge-class Linux host in account 538639825139/us-west-1, one worker capped at 10 hours, a 12-hour host lifetime, and a $20 all-in ceiling. A fresh absolute cutoff of 2026-09-16T13:20:00Z was proposed from the 2026-09-16T01:24:20Z UTC clock and must not be extended. Candidate HEAD fed986f781b2d60da3c200fbe95b6a51503b33fa is unpushed and the shared checkout is dirty, so no launch ref exists. Read-only explicit-lean-pilot checks fail closed because the AWS CLI session is expired; identity, quota, shape, active-resource, storage, evidence-bucket and live-pricing gates remain unverified and the prior price snapshot is stale. Controller template/mock gates pass. No provisioning, nonce dispatch, budget mutation, credential copying, or credit redemption occurred. Launch requires coordinator-approved clean publication, a fresh run nonce, authentic aws login, refreshed live all-in pricing, and all mandatory gates before the exact cutoff; otherwise stop without provisioning."
+    },
+    {
+      "checkedAt": "2026-09-16T01:38:54+00:00",
+      "scope": "aws_reauthentication_live_read_only_preflight_and_authorization_promotion",
+      "result": "authenticated_all_live_gates_passed_authorization_promoted_publication_pending",
+      "detail": "The fresh explicit-lean-pilot login completed and STS confirmed the designated non-root principal arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator. Read-only gates passed: On-Demand Standard quota 32 vCPUs versus 16 required; r7i.4xlarge is 131072 MiB x86_64; Amazon Linux AMI ami-0a0512cc1f10345ce is available; default VPC/subnet offering is us-west-1a; the versioned, encrypted, bucket-owner-enforced evidence bucket is valid; and zero active pilot hosts exist. Live Pricing API values are EC2 $1.176/hour, gp3 $0.096/GB-month, public IPv4 $0.005/hour, bounded subtotal $14.492, headroom $5.508. Policy authorization and tracker deadline/notAfter are promoted to 2026-09-16T13:30:00Z from this fresh UTC clock; the old 2026-09-13T00:00:00Z window remains historical. No provisioning or nonce dispatch occurred. Launch still requires coordinator-reviewed clean publication and one fresh run nonce before the immutable cutoff."
     }
   ],
   "historicalAutomation": {
