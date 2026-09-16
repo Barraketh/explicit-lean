@@ -179,6 +179,90 @@ where
         (if arrow then arrows + 1 else arrows)
     return acc
 
+/-! ### Stale `before` terms
+
+A `post` procedure can fire on the expression as simp *first saw it*, after
+simp has already rewritten that expression's subterms (simp keeps the original
+around and rebuilds).  The recorded `before` is then stale with respect to the
+running term, which already carries the child rewrites.
+
+We refresh a recorded `before` by applying, in order, the replacements we have
+already replayed, exactly as simp's own rebuild would have.
+-/
+
+/-- Apply `old := new` everywhere in `e`. -/
+def substAll (e old new : Expr) : Expr :=
+  if old == new then e
+  else e.replace fun s => if s == old then some new else none
+
+/-- Refresh a stale recorded subterm by replaying the earlier replacements. -/
+def refresh (target : Expr) (applied : Array (Expr × Expr)) : Expr :=
+  applied.foldl (fun acc (old, new) => substAll acc old new) target
+
+/-! ### Recovering invisible definitional steps
+
+simp performs beta/eta/proj/iota/zeta reduction and delta unfolding in
+`Simp.simpLoop`'s `reduceStep`, which runs *outside* `Simp.Methods`.  A
+`Methods` wrapper therefore cannot observe those steps directly, and they are
+the steps the spec calls `beta`/`eta`/`proj`/`unfold`/`change`.
+
+Rather than fork simp's traversal, we recover them from the running term: when
+a recorded `before` cannot be found, we look for a position whose subterm
+*reduces* (definitionally, with the same configuration simp used) to something
+that makes the recorded step applicable, and emit the bridging definitional step
+before it.  Nothing is guessed: the emitted step is validated like any other.
+-/
+
+/-- A bridging definitional step recovered from the running term. -/
+structure Bridge where
+  pos    : Pos
+  before : Expr
+  after  : Expr
+  deriving Inhabited
+
+/-- One definitional reduction at the head of `e`, or `none`.  These are the
+reductions `Simp.reduceStep` performs outside `Methods`. -/
+def reduceHere? (e : Expr) : MetaM (Option Expr) := do
+  -- Beta.
+  if e.isApp && e.getAppFn.isLambda then
+    return some e.headBeta
+  -- Projection.
+  if e.isProj then
+    if let some e' ← reduceProj? e then return some e'
+  -- Delta unfolding of the head constant.
+  if let .const .. := e.getAppFn then
+    if let some e' ← withDefault <| unfoldDefinition? e then
+      return some e'
+  return none
+
+/--
+Find a single definitional reduction in `running` that makes `target` appear.
+We try each position, reduce its subterm, and accept the first reduction that
+yields a running term in which `target` occurs.
+-/
+partial def findBridge? (running target : Expr) (simpFVars : Array FVarId) :
+    MetaM (Option Bridge) :=
+  go running #[]
+where
+  go (e : Expr) (pos : Pos) : MetaM (Option Bridge) := do
+    if let some e' ← reduceHere? e then
+      let candidate := (replaceAt? running pos e').getD running
+      if !(findOccurrences candidate target simpFVars).isEmpty then
+        return some { pos, before := e, after := e' }
+    let children : Array (Nat × Expr) :=
+      match e with
+      | .app f a => #[(0, f), (1, a)]
+      | .lam _ t b _ => #[(0, t), (1, b)]
+      | .forallE _ t b _ => #[(0, t), (1, b)]
+      | .letE _ t v b _ => #[(0, t), (1, v), (2, b)]
+      | .mdata _ b => #[(0, b)]
+      | .proj _ _ b => #[(0, b)]
+      | _ => #[]
+    for (i, c) in children do
+      if let some br ← go c (pos.push i) then
+        return some br
+    return none
+
 /-! ### Trace assembly -/
 
 /-- One solved step: a position plus the raw firing it came from. -/
@@ -186,6 +270,18 @@ structure SolvedStep where
   pos : Pos
   raw : RawStep
   deriving Inhabited
+
+/-- Repeatedly bridge definitional gaps until `target` is reachable, up to a
+small bound so a non-converging search fails loudly rather than hanging. -/
+partial def collectBridges (running target : Expr) (simpFVars : Array FVarId)
+    (ctxDepth : Nat) (fuel : Nat := 32) : MetaM (Array Bridge) := do
+  if fuel == 0 then return #[]
+  if !(findOccurrences running target simpFVars ctxDepth).isEmpty then return #[]
+  match ← findBridge? running target simpFVars with
+  | none => return #[]
+  | some br =>
+    let some next := replaceAt? running br.pos br.after | return #[br]
+    return #[br] ++ (← collectBridges next target simpFVars ctxDepth (fuel - 1))
 
 /--
 Solve positions for `raws` against the location's pre-term `pre`, returning the
@@ -197,6 +293,8 @@ def solvePositions (baseLCtx : LocalContext) (pre : Expr) (raws : Array RawStep)
     MetaM (Array SolvedStep × Expr) := do
   let mut running := pre
   let mut solved : Array SolvedStep := #[]
+  -- Replacements already replayed, oldest first, used to refresh stale terms.
+  let mut applied : Array (Expr × Expr) := #[]
   for raw in raws do
     -- Free variables simp introduced for binders it descended under: those in
     -- the firing's local context but not in the location's own context, in
@@ -210,16 +308,49 @@ def solvePositions (baseLCtx : LocalContext) (pre : Expr) (raws : Array RawStep)
     -- firing happened under an implication whose antecedent simp assumed, so a
     -- match must lie in the consequent of that many implications.
     let ctxDepth := (introduced.filter fun (_, isPrf) => isPrf).size
-    let occs := findOccurrences running raw.before simpFVars ctxDepth
+    -- The recorded `before` may predate child rewrites simp has already made.
+    -- Refresh it against what we have already replayed, then search.
+    let refreshed := refresh raw.before applied
+    let occs :=
+      let direct := findOccurrences running raw.before simpFVars ctxDepth
+      if direct.isEmpty then
+        findOccurrences running refreshed simpFVars ctxDepth
+      else direct
+    let effectiveBefore :=
+      if (findOccurrences running raw.before simpFVars ctxDepth).isEmpty then
+        refreshed
+      else raw.before
+    let mut occs := occs
+    let mut effectiveBefore := effectiveBefore
+    if occs.isEmpty then
+      -- The recorded step may sit behind a definitional reduction simp made in
+      -- `reduceStep`, outside `Methods`.  Recover that step and emit it.
+      let bridges ← collectBridges running effectiveBefore simpFVars ctxDepth
+      for br in bridges do
+        let some next := replaceAt? running br.pos br.after
+          | throwError "simp_trace: bridge replacement failed at {br.pos}"
+        let bridgeRaw : RawStep := { raw with
+          before := br.before
+          after := br.after
+          provenance := Provenance.defeq
+          side := #[] }
+        solved := solved.push { pos := br.pos, raw := bridgeRaw }
+        applied := applied.push (br.before, br.after)
+        running := next
+      occs := findOccurrences running effectiveBefore simpFVars ctxDepth
+      if occs.isEmpty then
+        let refreshed2 := refresh raw.before applied
+        occs := findOccurrences running refreshed2 simpFVars ctxDepth
+        if !occs.isEmpty then effectiveBefore := refreshed2
     if occs.isEmpty then
       -- The firing acted on a term simp had already rewritten away, or on an
       -- instantiation we cannot reconstruct.  Never drop a step silently.
       throwError "simp_trace: cannot locate recorded subterm in running term\n\
-        before: {raw.before}\nrunning: {running}"
+        before: {raw.before}\nafter:   {raw.after}\nrunning: {running}"
     for occ in occs do
       -- Validation, per the task: navigating `pos` must reach `before` (in its
       -- abstracted, open form), and replacing it must yield the next term.
-      let expected := abstractSimpFVars raw.before simpFVars occ.numBinders
+      let expected := abstractSimpFVars effectiveBefore simpFVars occ.numBinders
       let some (sub, _) := navigate? running occ.pos
         | throwError "simp_trace: position navigation failed at {occ.pos}"
       unless sub == expected do
@@ -228,8 +359,9 @@ def solvePositions (baseLCtx : LocalContext) (pre : Expr) (raws : Array RawStep)
       let replacement := abstractSimpFVars raw.after simpFVars occ.numBinders
       let some next := replaceAt? running occ.pos replacement
         | throwError "simp_trace: position replacement failed at {occ.pos}"
-      solved := solved.push { pos := occ.pos, raw }
+      solved := solved.push { pos := occ.pos, raw := { raw with before := effectiveBefore } }
       running := next
+      applied := applied.push (effectiveBefore, raw.after)
   return (solved, running)
 
 end ExplicitLean.SimpTrace

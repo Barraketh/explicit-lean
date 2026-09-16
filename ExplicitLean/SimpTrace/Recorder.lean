@@ -117,29 +117,30 @@ private def classify (before after : Expr) (usedBefore usedAfter : Simp.UsedSimp
     | o => .thm o false
 
 /--
-Identify which simp theorem rewrote `before` to `after`, by re-running stock
-`Simp.rewrite?` over the same theorem sets in the same order.  We use this only
+Identify which simp theorem rewrote `before` to `after`, by probing the
+candidate theorems individually with stock `Simp.tryTheorem?`.  We use this only
 when `usedTheorems` did not grow (the lemma had already fired earlier in the
-run), so no attribution is lost to caching.
+run), so no attribution is lost to simp's caching.
+
+Probing one theorem at a time is what lets us name the exact origin:
+`Simp.rewrite?` reports only the resulting expression.
 -/
 def reattribute? (before after : Expr) (post : Bool) :
     Simp.SimpM (Option (Origin × Bool)) := do
   for thms in (← readThe Simp.Context).simpTheorems do
     let tree := if post then thms.post else thms.pre
-    let r? ← try
-        Simp.rewrite? before tree thms.erased
-          (tag := "reattribute") (rflOnly := false)
-      catch _ => pure none
-    if let some r := r? then
-      if r.expr == after then
-        -- `rewrite?` does not report which theorem matched, so consult the last
-        -- origin it registered.
-        let used := (← get).usedTheorems.toArray
-        if h : used.size > 0 then
-          let o := used[used.size - 1]!
-          match o with
-          | .decl _ _ inv => return some (o, inv)
-          | _ => return some (o, false)
+    let candidates ← Simp.withSimpIndexConfig <| tree.getMatchWithExtra before
+    let candidates := candidates.insertionSort fun a b => a.1.priority > b.1.priority
+    for (thm, numExtraArgs) in candidates do
+      if thms.erased.contains thm.origin then continue
+      let r? ← try
+          Simp.tryTheoremWithExtraArgs? before thm numExtraArgs
+        catch _ => pure none
+      if let some r := r? then
+        if r.expr == after then
+          match thm.origin with
+          | .decl n p inv => return some (.decl n p inv, inv)
+          | o => return some (o, false)
   return none
 
 /-- Instrument a `Simproc` so each firing is recorded. -/
