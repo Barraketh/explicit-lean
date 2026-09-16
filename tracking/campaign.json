@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T05:29:05Z",
+  "updatedAt": "2026-09-16T05:38:56Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -309,7 +309,7 @@
     {
       "id": "replay-first-principles-fixes",
       "status": "in_progress",
-      "description": "Context fix committed f6a5086; exact original stock/probe regression passed on isolated AWS production library. Multi-helper record/replay and initial rejection controls passed; final expectation correction pending rerun. Imported auxiliary support now shares existing local proof/cache validation with separate environment/serialization adapters; latest refactor build and compatibility pending. Earlier realization-group bad_alloc and encoded-context/aux fixture setup failures are unresolved, not accepted. Fresh Luna high validator owns bounded isolated AWS checks concurrently with untouched main pilot. No module/tree acceptance."
+      "description": "Context fix f6a5086 and full encoded-roundtrip/local-context checks pass on isolated AWS. Shared auxiliary validator compiles; multi-helper record/replay and rejection controls pass. Imported auxiliary runtime and existing compatibility remain pending; platform-specific library paths in old checkers are being corrected. Main pilot untouched; no module/tree acceptance."
     }
   ],
   "activeChecks": [
@@ -552,6 +552,12 @@
       "result": "passed_production_library",
       "detail": "Exact original LocalContext fixture SHA2568d226486a204941062f6c2c06e24dc3e67eceb25b78dd2fb3a6c4550998f41ce passes stock+boundary probe with equivalent=true on isolated production library; Boundary.lean SHA2568a8990760c8aa7b8fdbe242c144f9bbb8930c59114d0c1c0e3d4e2370e77fd95. SSM c1cf4fa9-f050-4c91-8be4-5902cd724fac Success/0. Historical same source failed before fix. Full encoded roundtrip, codec runtime fixtures and module acceptance remain pending; temporary diagnostic/abbreviation runs are excluded.",
       "checkedAt": "2026-09-16T04:59:18Z"
+    },
+    {
+      "checkedAt": "2026-09-16T05:38:56Z",
+      "scope": "replay_context_encoded_roundtrip",
+      "result": "passed_isolated_aws",
+      "detail": "SSM5387f723-96de-4af4-a590-5b8023fd676b Success/0 with context checker SHA256b64ad056f5e454212b594bb52547d105a461419cd425c63b9f4230f2f4ed116e and production Boundary SHA2568a8990760c8aa7b8fdbe242c144f9bbb8930c59114d0c1c0e3d4e2370e77fd95. Both encoded stock-recording/replay and local-context probes passed. Generated helper public import corrected without changing original def/class/implicit-instance regression. No module/tree acceptance."
     }
   ],
   "historicalAutomation": {
