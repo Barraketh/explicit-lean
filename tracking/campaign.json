@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "aws_run_closed_69_module_milestone_incomplete",
+  "phase": "direction_change_no_simp_family_readable_generator_planned",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T10:08:47Z",
+  "updatedAt": "2026-09-16T22:58:33Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -103,8 +103,8 @@
     "note": "Ordinary account work available; no spend stop. One existing authorized AWS host only, immutable cutoff 2026-09-16T13:30:00Z. No credits bought or redeemed."
   },
   "direction": {
-    "userConversationDate": "2026-09-10",
-    "nextMilestone": "Monitor the single dispatched worker to terminal evidence/teardown under the immutable cutoff; claim no translation result until evidence and independent verification are complete.",
+    "userConversationDate": "2026-09-16",
+    "nextMilestone": "Readable generator: translate the 91 calls of the 7-target cone (Logic.Basic, Logic.ExistsUnique, Logic.Function.Basic, Logic.Function.Defs, Logic.IsEmpty.Basic, Logic.Nontrivial.Defs, Data.Option.Basic) into ordinary rw/exact/change Lean, validated by module build and declaration oracle, with originals preserved as comments and no simp-family token.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
     "readiness": "Replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 is terminal Failed/1 before translation. Linux setup, focused checks, strict boundary preflight and fresh 216,029,345-byte manifest generation passed. Independent verification ran 5h50m22s and all per-module occurrence lists matched, then the inventory fallback-provenance check failed: fresh header-import recomputation marked 560 full-frontend fallbacks while the manifest recorded 216, with 75 common. The zero-byte verifier result and exact 35,339-byte stderr were preserved. Four versioned AES256 S3 objects remain; the downloaded 10,877,575-byte archive SHA-256 0a1435d6bedfb5130df6c0ebbac39da72f7ec67994d00683ccfdf3f9f2e2fa47 matches its uploaded hash and run-exit records originalExitCode 1 with successful evidence upload. Instance i-0f9698935a4ccb630 is terminated, volume vol-0524b323969ba9add is gone, the exact stack is deleted and no active r7i.4xlarge remains. Corpus translation never began. Local diagnosis proved a producer/verifier protocol mismatch: aggregate deferred-plus-isolated fallback versus direct header imports. The reviewed bounded fix preserves exact fallback equality and fail-closed source/environment/marker checks; 36 verifier tests, inventory-header controls, Python compilation and diff validation pass. A complete local replay was not run because available memory was below the unchanged 12 GiB reserve. No additional AWS host is authorized.",
@@ -130,7 +130,8 @@
       "locallyReviewedAt": "2026-09-11T18:28:51.442818+00:00"
     },
     "originalLocalOnlyPolicy": "Superseded only for the single recorded bounded pilot after all launch gates close. No long campaign or second host is authorized. Do not use explicit-lean-cloud implicitly.",
-    "memoryCleanupPriority": "Optional small follow-up; measured about 559 MiB steady-state RSS reduction, with unchanged 1.42 GiB initial parsing peak. Do not make extensive memory optimization a prerequisite."
+    "memoryCleanupPriority": "Optional small follow-up; measured about 559 MiB steady-state RSS reduction, with unchanged 1.42 GiB initial parsing peak. Do not make extensive memory optimization a prerequisite.",
+    "superseded": "The prior milestone (69-module cold certification of encoded artifacts) is closed as moot on 2026-09-16; see productRule."
   },
   "coverage": {
     "currentCorpusTotal": 83627,
@@ -283,11 +284,13 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Await the pending user decision on bounded generated-file EOF length allowances. No allowance has been applied or compiled.",
-    "Obtain new user authorization before any new AWS host or experiment. The one authorized run is terminal and its resources are deleted; no replacement or worker redispatch is authorized.",
-    "If the style decision and required compute authorization are resolved, complete authenticated regeneration, fresh 69-module cold certification, and the final consumer check with unchanged selector/oracle/import/metadata checks.",
-    "After all 69 modules compile and certify together, stop and finalize handoff as requested. Current milestone remains incomplete at 42 cold certificates; all seven targets individually passed.",
-    "Future investigation may compare the preserved fresh inventory for Mathlib/CategoryTheory/Types/Basic.lean to diagnose the main-run verifier failure. Do not alter frozen evidence or treat provisional manifest trust as acceptance."
+    "Rewrite the two dsimp overrides (Unitization 1734864b48394331, EpiMono 3251bc59333b0c31) with unfold/change/rw; verify by module build and declaration oracle; add a simp-family lint to manual_overlay.py.",
+    "Implement PLAN.md step 3: (a) trace capture in the boundary recorder via Simp.Methods pre/post hooks logging (kind, position, name, direction, side-conditions), including definitional steps, simproc equations and nested side-condition traces; (b) a positional replay tactic (working name explicit_rw) that rewrites at a recorded position, under binders, by re-matching; (c) a readability post-pass collapsing top-level steps to rw/exact/change that must re-elaborate to the same goal. No delaborated-proof-term fallback.",
+    "Apply trace capture and positional replay to the 91 calls of the seven-module cone as the first real target; record per-call outcomes (replayed, collapsed, unresolved) in campaign.json as progress, not as a gate.",
+    "Add a source-level simp-family lint over generated regions and wire it into the module acceptance check alongside the declaration oracle.",
+    "Restart translation on the 7-target cone with readable output; reuse the existing dependency map and translated import root. Expand in dependency order afterwards.",
+    "Obtain new user authorization before any new AWS host or experiment. The one authorized run is terminal and its resources are deleted.",
+    "Future investigation may compare the preserved fresh inventory for Mathlib/CategoryTheory/Types/Basic.lean to diagnose the main-run verifier failure. Do not alter frozen evidence."
   ],
   "work": [
     {
@@ -308,12 +311,12 @@
     {
       "id": "corpus-translation",
       "status": "in_progress",
-      "description": "529 v10 successful module reports; accepted whole-tree coverage remains zero."
+      "description": "529 v10 successful module reports and 42 cold receipts are recorder evidence only under the 2026-09-16 rule; accepted whole-tree coverage remains zero. Translation restarts with the readable generator."
     },
     {
       "id": "readability",
-      "status": "pending",
-      "description": "Begins after complete explicit coverage."
+      "status": "merged_into_product",
+      "description": "Retired as a separate phase on 2026-09-16: readability is part of every accepted translation."
     },
     {
       "id": "personal-simp-replay-review",
@@ -334,6 +337,21 @@
       "id": "translated-isempty-option-cone-2026-09-16",
       "status": "blocked_pending_user_style_decision",
       "description": "69 modules, 91 calls in seven targets. All seven targets individually passed (90 replayed + one explicit); latest full cold run certified 42 modules before ExistsUnique failed strict metadata comparison due to generated line-length warnings. Formatter committed 2a1d30c with focused Python and Linux syntax/value checks. Bounded EOF file-length allowance decision pending. Whole-tree acceptance unchanged at zero. Stop and hand off after this cone compiles and certifies together."
+    },
+    {
+      "id": "override-compliance-dsimp",
+      "status": "pending",
+      "description": "Two of 21 manual overrides use dsimp (Unitization 1734864b48394331, EpiMono 3251bc59333b0c31). Rewrite with unfold/change/rw and verify."
+    },
+    {
+      "id": "trace-capture-and-positional-replay",
+      "status": "planned",
+      "description": "Record simp's chosen steps as (kind, position, name, direction, side-conditions) by hooking Simp.Methods; replay them with a search-free positional rewrite tactic that re-matches lemmas by ordinary elaboration; collapse to rw/exact/change where a post-pass re-elaborates to the same goal; hand-write the rest. Both components are required regardless of corpus distribution; the seven-module cone (91 calls) is the first target, with per-call outcomes tracked as progress."
+    },
+    {
+      "id": "sixty-nine-module-cold-certification",
+      "status": "closed_moot",
+      "description": "42 of 69 cold receipts produced for encoded artifacts before the ExistsUnique line-length failure; closed on 2026-09-16 because encoded artifacts are no longer the product."
     }
   ],
   "activeChecks": [
@@ -803,5 +821,63 @@
     "awsResourcesCurrentlyProvisioned": false,
     "workerDispatchRun": true,
     "awsResourcesProvisioned": true
+  },
+  "productRule": {
+    "decidedAt": "2026-09-16",
+    "rule": "no simp family",
+    "allowed": [
+      "rw",
+      "exact",
+      "refine",
+      "apply",
+      "change",
+      "show",
+      "unfold",
+      "intro",
+      "rintro",
+      "constructor",
+      "rcases",
+      "obtain",
+      "calc",
+      "ordinary elaboration with implicit arguments and instance synthesis"
+    ],
+    "forbidden": [
+      "simp",
+      "simp only",
+      "simp?",
+      "simpa",
+      "simp_all",
+      "simp_rw",
+      "simp_arith",
+      "dsimp",
+      "dsimp only",
+      "field_simp",
+      "norm_num",
+      "push_cast",
+      "norm_cast",
+      "any tactic built on Lean.Meta.Simp"
+    ],
+    "retiredAsProduct": [
+      "simp_engine_boundary_select artifacts",
+      "expression-DAG payloads",
+      "generated-token formatter",
+      "linter.style.longFile allowance",
+      "69-module cold certification of DAG artifacts"
+    ],
+    "retainedAsInternal": [
+      "boundary recorder as pre/post-state oracle",
+      "Simp.Stats and rewrite trace as generator input",
+      "archived module reports as evidence of stock behaviour"
+    ],
+    "modelOutput": "Experiment/simp_manual_overrides.json",
+    "authority": "AGENTS.md governing rule; PLAN.md direction change; WEEKLY.md criteria 3 and 6 rewritten",
+    "generatorTiers": [
+      "positional replay of the recorded step trace (explicit_rw / conv enter)",
+      "readability post-pass to rw/exact/change when it re-elaborates identically",
+      "unresolved -> manual override"
+    ],
+    "excludedFallback": "exact of the delaborated simp proof term (unreadable; equivalent to the retired DAG)",
+    "design": "record simp's steps, not its output: (lemma|hypothesis|unfold|simproc-equation, position, direction, side-condition subtrace); replay positionally with re-matching",
+    "recorderGap": "the boundary recorder currently captures Simp.Result and stats only; it does not hook Simp.Methods and never sees positions"
   }
 }

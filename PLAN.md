@@ -1,11 +1,111 @@
 # Boundary design and historical roadmap
 
-> Reference material, not the current startup plan. Read [HANDOFF.md](HANDOFF.md)
-> first. The goal and semantic principles below explain the design; the original
-> implementation-status sections, counts, schemas and proposed experiments are
-> historical. Current state is in [tracking/STATUS.md](tracking/STATUS.md).
-> The user's current instructions and the acceptance criteria in
+> Reference material, not the current startup plan. Read [AGENTS.md](AGENTS.md)
+> and [HANDOFF.md](HANDOFF.md) first. **On September 16, 2026 the user retired
+> the machine-oriented boundary artifact as the product**; see the direction
+> change and current plan immediately below. The semantic principles further
+> down still describe the recorder/oracle machinery, but the sections on the
+> artifact wire format and generated source shape no longer describe the
+> deliverable. Implementation-status sections, counts, schemas and proposed
+> experiments are historical. Current state is in
+> [tracking/STATUS.md](tracking/STATUS.md). The acceptance criteria in
 > [WEEKLY.md](WEEKLY.md) supersede conflicting older implementation choices.
+
+## Direction change and current plan (September 16, 2026)
+
+The user reviewed the generated `Mathlib.Logic.IsEmpty.Basic` (135 source lines
+rendered as 7,113 lines of escaped expression-DAG payloads) and rejected it:
+the goal is to remove simp, not to forbid elaboration. The rule is now
+**"no simp family"**; the full statement is in [AGENTS.md](AGENTS.md). Its
+consequences:
+
+- The decoding rule below ("never invokes the term elaborator, typeclass
+  synthesis, coercion insertion") was an over-interpretation of acceptance
+  criterion 3 and is withdrawn as a requirement on the product. It may remain
+  a property of the internal oracle.
+- The 69-module cold-certification milestone, the generated-token formatter
+  and the pending `linter.style.longFile` allowance decision are closed as
+  moot. No allowance is granted; no DAG artifact is to be compiled into the
+  translated tree as a deliverable.
+- The 529 archived module reports and the fresh cone receipts remain evidence
+  of what stock simp did at each call. They are inputs to the generator below,
+  not translations.
+
+### Plan
+
+1. **Documents and rule** (this change): AGENTS.md, WEEKLY.md criteria 3 and 6,
+   HANDOFF.md, this section, tracking documents and `campaign.json`.
+2. **Bring the override database into compliance.** Two of 21 entries use
+   `dsimp`: `Mathlib/Algebra/Algebra/Subalgebra/Unitization.lean`
+   (`1734864b48394331`, `dsimp [starAlgHom]`) and
+   `Mathlib/Algebra/Category/Grp/EpiMono.lean` (`3251bc59333b0c31`,
+   `dsimp only [tau, Equiv.coe_trans, Function.comp_apply]`). Rewrite them with
+   `unfold`/`change`/`rw`, verify with the module build and declaration
+   oracle, and add a simp-family lint to `manual_overlay.py` so no such entry
+   can be admitted again.
+3. **Capture simp's step trace and replay it positionally.** simp's search
+   chooses, at each subterm, which lemma to apply; once chosen, every step is
+   determined by (lemma or hypothesis, direction, position in the term,
+   side-condition proofs). Record exactly that, then replay it with no search.
+   - **Trace capture.** Extend the boundary recorder to wrap simp's
+     `pre`/`post` methods (`Simp.Methods`) and log each fired step as
+     `(kind, position, name, direction, side-conditions)`, where `position` is
+     a `SubExpr.Pos`-style path including binder crossings. Three step kinds
+     are not lemma rewrites and must be logged explicitly or later positions
+     drift: **definitional steps** (beta/eta, reducible unfolding, instance
+     projection, `Nat.succ n` to `n + 1`) as "unfold/reduce at position";
+     **simproc steps** as the concrete equation they produced (replayed by
+     `rfl`/`decide`, never by the simproc); **side conditions** as nested
+     traces of the same shape (assumption, `decide`, or a recursive simp run).
+     Also log the location (`⊢`, `at h`, `at *`), contextual hypotheses
+     introduced under implications, closing steps (`rfl`, `True.intro`,
+     hypothesis), and any metavariable assignments.
+   - **Positional replay tactic.** Add an ordinary tactic (working name
+     `explicit_rw`) taking `[foo at [2, x, 1], ← bar at [1], unfold f at [1, 2],
+     ...]` that navigates to each position, including under binders, and
+     rewrites there via congruence. It re-matches the lemma's left side
+     against the subterm at that position, so implicits, universes and
+     instances are recovered by ordinary elaboration and never stored.
+     `conv => enter [...]; rw [...]` is the existing-Lean reference behaviour
+     and an acceptable interim renderer. Nothing in this tactic may call
+     `Lean.Meta.Simp`.
+   - **Rendering.** The generated source is the step list in that syntax, the
+     original call as a comment above it. A **readability post-pass** may
+     collapse steps: consecutive top-level rewrites become plain `rw [...]`,
+     a single closing lemma becomes `exact`, definitional-only steps become
+     `change`/`unfold`. The post-pass must re-elaborate to the same goal; if
+     it does not, keep the positional form.
+   - **Unresolved.** A call whose trace cannot be replayed (metavariables
+     assigned mid-run, dependent-type positions needing casts, simproc
+     results that are not small equations) stays in the inventory as
+     unresolved and is hand-written into `Experiment/simp_manual_overrides.json`.
+   There is deliberately **no** "`exact` the delaborated simp proof term"
+   option: that term is the expression DAG spelled in Lean syntax. Recording
+   the *output* is what produced the DAG; this step records the *steps*.
+   Trace capture and the positional replay tactic are required regardless of
+   how the corpus distributes, so build them first; the seven-module cone in
+   step 5 is their first real target, not a gating study. Report per-call
+   outcomes (replayed, collapsed, unresolved) as ordinary progress tracking.
+4. **Validate each candidate the way overrides are validated today:** compile
+   the module inside the translated import root, run the declaration oracle
+   from `Experiment/SimpEngineDeclarationOracle.lean`, keep the original call
+   as an adjacent comment, and add a source-level lint that rejects any
+   simp-family token in generated regions. The boundary recorder's paired-state
+   comparison may be used as an additional oracle but is not required.
+5. **Restart on the same 7-target cone** (`Logic.Basic`, `Logic.ExistsUnique`,
+   `Logic.Function.Basic`, `Logic.Function.Defs`, `Logic.IsEmpty.Basic`,
+   `Logic.Nontrivial.Defs`, `Data.Option.Basic`; 91 calls) so the dependency
+   map, translated import root and cold-certification tooling are reused with
+   readable output. Then expand in dependency order, accounting for every
+   occurrence and never hiding failures.
+6. **Whole-tree acceptance is unchanged** apart from the rewritten criteria:
+   translated dependency closure, zero remaining executable target calls,
+   preserved original comments, statement/computational equivalence, and final
+   trust checks.
+
+Open items carried forward: the reusable/exported-tactic scope question in
+`campaign.json`, and the `simpa`/`simp_all`/`simp_rw`/`dsimp` occurrences that
+become targets after the `simp`/`simp only` milestone.
 
 The existing schema-27 implementation is retained as legacy evidence. Its
 frozen contract in [SIMP_ENGINE_COVERAGE.md](SIMP_ENGINE_COVERAGE.md) does not
@@ -25,9 +125,11 @@ correctness boundary is:
 > Reproduce the semantically observable output of each `simp` call, without
 > reproducing the internal simplifier execution.
 
-The replacement tactic is called `simp_engine_apply`. It may initially consume a
-machine-oriented boundary artifact. Making that argument maximally readable
-Lean source is a later presentation step.
+Historical note: the first implementation replaced each call with a tactic
+consuming a machine-oriented boundary artifact, deferring readability to a
+later presentation step. That approach was retired on September 16, 2026 (see
+above). The replacement is now ordinary Lean source; the artifact machinery is
+internal.
 
 The first closure target is the pinned Mathlib corpus and toolchain recorded in
 `lake-manifest.json` and `lean-toolchain`. It includes parsed
@@ -468,7 +570,12 @@ must perform the definitional-equality checks specified above.
 
 ### Generated source shape
 
-The target form is conceptually:
+> Superseded on September 16, 2026. The forms below describe the retired
+> artifact-consuming tactic. The current target form is ordinary Lean such as
+> `rw [not_nonempty_iff, nonempty_prop]` or `change ...; exact ...`, with the
+> original call preserved as a comment. See the direction change at the top.
+
+The historical target form was conceptually:
 
 ```lean
 by

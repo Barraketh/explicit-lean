@@ -31,16 +31,23 @@ on September 7.
    Keep source ownership distinct from execution-module identity.
 2. Retain original calls as comments adjacent to replacements, including nested
    calls consumed by an outer replacement. Preserve source provenance.
-3. Generated alternatives do not invoke the simplifier, simprocs, dischargers,
-   or tactic search. Kernel checking, deterministic reductions, and checked
-   transports are permitted. Never introduce sorry/admit or new axioms.
+3. Generated alternatives contain no simp-family tactic: no `simp`,
+   `simp only`, `simpa`, `simp_all`, `simp_rw`, `dsimp`, `field_simp`,
+   `norm_num`, `push_cast`, `norm_cast`, nor anything else built on
+   `Lean.Meta.Simp`. Ordinary elaboration (`rw`, `exact`, `change`, `unfold`,
+   implicit arguments, instance synthesis) is permitted and expected. Never
+   introduce sorry/admit or new axioms. (Rewritten September 16, 2026; the
+   earlier wording was misread as forbidding the elaborator.)
 4. Preserve public theorem statements and computational meaning. Validate the
    translated dependency tree, not only isolated files against stock imports.
    Explicitly justify any special equivalence policy for rewritten metaprograms.
 5. A final complete build, remaining-call audit, and semantic/trust checks must
    agree with the durable occurrence index and immutable report manifest.
-6. After complete explicit coverage, improve readability using measured common
-   patterns and canonical forms. Do not conceal unsupported calls behind wrappers.
+6. Generated replacements are ordinary readable Lean of the kind in
+   `Experiment/simp_manual_overrides.json`. Readability is part of each
+   accepted translation, not a later phase; encoded payloads or opaque replay
+   artifacts are not accepted translations. Do not conceal unsupported calls
+   behind wrappers. (Rewritten September 16, 2026.)
 
 ## Execution and budget
 

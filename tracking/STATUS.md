@@ -1,5 +1,11 @@
 # Search-free Mathlib status
 
+**September 16, 2026:** the machine-oriented boundary artifact was retired as
+the product under the rule "no simp family" (see [AGENTS.md](../AGENTS.md) and
+[PLAN.md](../PLAN.md)). The counts below remain valid as recorder evidence, but
+none of the 529 reports or the 42 cold receipts is a translation under the
+current rule. Accepted whole-tree modules/calls: 0 / 0.
+
 Reviewed September 10, 2026, at code commit `ee30955`. Start with
 [HANDOFF.md](../HANDOFF.md) for the next agent's first steps.
 

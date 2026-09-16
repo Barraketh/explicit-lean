@@ -1,9 +1,23 @@
 # Start here: search-free Mathlib
 
-**September 16 continuation:** read [the current handoff](tracking/HANDOFF-2026-09-16.md)
-and `tracking/campaign.json` first. They record the latest fixes, partial cold
-certification, pending style-budget decision, evidence backups, and AWS cutoff.
-The September 10 body below contains historical state superseded by that update.
+**September 16 direction change (read first):** the user reviewed the
+generated `IsEmpty.Basic` (135 source lines rendered as 7,113 lines of encoded
+expression-DAG payloads) and retired the machine-oriented boundary artifact as
+the product. The rule is now **"no simp family"**: generated code must be
+ordinary Lean (`rw`, `exact`, `change`, `unfold`, implicit arguments and
+instance synthesis are fine); `simp`, `dsimp`, `simpa`, `simp_all`, `simp_rw`,
+`norm_num`, `field_simp`, `push_cast`, `norm_cast` and anything else built on
+`Lean.Meta.Simp` are forbidden. The full rule is in [AGENTS.md](AGENTS.md) and
+the plan is in [PLAN.md](PLAN.md#direction-change-and-current-plan-september-16-2026).
+Consequences: the 69-module cold certification, the generated-token formatter
+and the `linter.style.longFile` allowance decision are closed as moot; the
+recorder and its reports are retained as oracle inputs, not translations;
+two `dsimp` overrides must be rewritten. Whole-tree acceptance remains zero.
+
+The earlier [September 16 continuation handoff](tracking/HANDOFF-2026-09-16.md)
+and `tracking/campaign.json` record the fixes, partial cold certification,
+evidence backups and the closed AWS run. Everything below in this file is
+historical state describing the retired approach.
 
 Handoff updated September 10, 2026. Working branch:
 `codex/search-free-mathlib-2026-08-31`. Reviewed implementation: `ee30955`;

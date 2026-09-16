@@ -1,10 +1,43 @@
 # Search-free Mathlib campaign
 
-Start with `HANDOFF.md`, then `tracking/campaign.json`. They contain the current
-September 10 direction and evidence. `WEEKLY.md` preserves the original
-acceptance criteria; its September 8 schedule and launch sequence are historical.
-`tracking/archive/` and the implementation sections of `PLAN.md` are history,
-not current work assignments. Later explicit user instructions take precedence.
+Read the governing rule below, then `HANDOFF.md`, then
+`tracking/campaign.json`. `WEEKLY.md` holds the acceptance criteria (criteria 3
+and 6 were rewritten on September 16, 2026); its September 8 schedule and launch
+sequence are historical. `tracking/archive/` and the implementation sections of
+`PLAN.md` are history, not current work assignments. Later explicit user
+instructions take precedence.
+
+## Governing rule (September 16, 2026)
+
+The deliverable removes the **simp family** from pinned Mathlib. It does not
+remove elaboration. This rule supersedes every earlier reading of "search-free"
+that forbade the elaborator, implicit arguments or instance synthesis.
+
+- **Generated and override code must be ordinary Lean** that a Mathlib reviewer
+  would accept: `rw`, `exact`, `refine`, `apply`, `change`, `show`, `unfold`,
+  `intro`, `rintro`, `constructor`, `rcases`, `obtain`, `calc`, explicit lemma
+  applications, and so on. Implicit arguments, unification, coercions and
+  typeclass synthesis are handled by the elaborator as in any Mathlib proof.
+  The 21 entries in `Experiment/simp_manual_overrides.json` are the model.
+- **Forbidden in generated or override code:** `simp`, `simp only`, `simp?`,
+  `simpa`, `simp_all`, `simp_rw`, `simp_arith`, `dsimp`, `dsimp only`,
+  `field_simp`, `norm_num`, `push_cast`, `norm_cast`, and any other tactic or
+  term elaborator implemented on top of `Lean.Meta.Simp`. `dsimp` is the same
+  engine restricted to definitional steps; use `unfold`, `change` or `show`
+  instead. Other tactics (`ring`, `omega`, `decide`, ...) are neither targets nor
+  forbidden unless they invoke the simplifier.
+- **Replacement targets:** every executable source `simp` / `simp only` remains
+  the first milestone. The rest of the family (`simpa`, `simp_all`, `simp_rw`,
+  `dsimp`, ...) is the eventual target set under the same rule.
+- **Readability is part of the deliverable, not a later phase.** Do not ship
+  pre-elaborated expression DAGs, encoded payloads or opaque replay artifacts
+  as translated source. The boundary recorder (`simp_engine_boundary_select`,
+  `ExplicitLean/SimpEngine/Boundary*`) is retained only as internal machinery:
+  an oracle for the pre/post state of each call and a source of the ordered
+  rewrites simp used.
+- Original calls stay as adjacent comments. No `sorry`/`admit`, no new axioms,
+  no weakened validation. Unresolved calls stay visibly unresolved.
+
 
 - Prepare the agreed bounded AWS/Linux pilot. The user authorized only one
   `r7i.4xlarge`-class host in account 538639825139/us-west-1, within a $20
@@ -23,7 +56,8 @@ not current work assignments. Later explicit user instructions take precedence.
 - Keep iteration fast: cache immutable inputs/results, compile affected modules
   and required dependents, and reserve full rebuilds for acceptance milestones.
 - Preserve original replaced tactics as comments. No sorry/admit, new axioms,
-  hidden simplifier replay, or mislabelled unobserved coverage.
+  hidden simplifier replay, simp-family tactics in generated code, or
+  mislabelled unobserved coverage.
 - Preserve kernel-checked theorem statements and computational semantics.
   Existing architecture may change; validation must not be weakened merely to
   make a failing case pass.
