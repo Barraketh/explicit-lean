@@ -14,9 +14,9 @@ unsafe def main (args : List String) : IO UInt32 := do
     initSearchPath (← findSysroot)
     let nonce ← ExplicitLean.SimpEngine.CommandAudit.runNonce
     let source ← IO.FS.readFile file
-    -- `capture` passes the shared package-plus-verification options to
+    -- `capture` passes the shared package-plus-async parser options to
     -- `runFrontend` without modifying them.
-    let options := ExplicitLean.SimpEngine.verificationFrontendOptions
+    let options := ExplicitLean.SimpEngine.mathlibParserOptions
     let captured ← ExplicitLean.SimpEngine.CommandAudit.capture source options file moduleName.toName
       (oleanFileName? := output?)
     ExplicitLean.SimpEngine.CommandAudit.emit captured "standalone" nonce

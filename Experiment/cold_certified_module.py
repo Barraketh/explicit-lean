@@ -38,11 +38,10 @@ SCHEMA = 1
 BRIDGE_MARKER = "SIMP_ENGINE_COLD_BRIDGE_ORACLE_V2 "
 STAGES = ("ordinary-stock", "ordinary-applied", "audited-stock", "audited-applied", "bridge")
 FAMILIES = ("ordinary-stock", "ordinary-applied", "audited-stock", "audited-applied", "bridge-stock", "bridge-applied")
-# Same pinned options as both native tools. A drift that changes output fails
-# the whole-family comparison; callers also bind tool/runtime identities.
-PLAIN_OPTIONS = (*inventory.MATHLIB_PACKAGE_OPTION_ARGUMENTS,
-                 "-Dweak.linter.unusedVariables=false", "-Dweak.linter.unusedSimpArgs=false",
-                 "-Dweak.linter.unreachableTactic=false", "-DmaxHeartbeats=0", "-DElab.async=true")
+# Same package-plus-async parser options as both native cold tools.  The
+# verification-only linter and heartbeat controls belong to overlay tooling;
+# including them here changes the selector fingerprint of ordinary sources.
+PLAIN_OPTIONS = (*inventory.MATHLIB_PACKAGE_OPTION_ARGUMENTS, "-DElab.async=true")
 InputFile = base.InputFile
 Certification = base.Certification
 CertificationError = base.CertificationError

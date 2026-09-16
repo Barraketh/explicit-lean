@@ -19,6 +19,7 @@ import tempfile
 
 import boundary_protocol as protocol
 import check_simp_engine_boundary_scope as scope
+import simp_engine_inventory as inventory
 from process_runner import run_process
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -217,9 +218,9 @@ def self_test() -> Path:
         ("PartialOutput", False, "import Lean\n", '#eval IO.print "partial-output"\ntheorem sample : True := by simp\n', (1, 0, 0, 0)),
     ]
     good = None
-    options = ["-DautoImplicit=false", "-DmaxSynthPendingDepth=3",
-               "-Dweak.linter.unusedVariables=false", "-Dweak.linter.unusedSimpArgs=false",
-               "-Dweak.linter.unreachableTactic=false", "-DmaxHeartbeats=0"]
+    # Match the native command-audit consumer's mathlibParserOptions exactly;
+    # verification-only linter/heartbeat controls alter frontend fingerprints.
+    options = [*inventory.MATHLIB_PACKAGE_OPTION_ARGUMENTS, "-DElab.async=true"]
     for name, module_mode, header, body, expected_counts in fixtures:
         module = "CommandAuditFixture." + name
         check = f'''run_cmd
