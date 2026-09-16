@@ -22,6 +22,7 @@ import Lean
 import ExplicitLean.SimpTrace.Types
 import ExplicitLean.SimpTrace.Recorder
 
+
 namespace ExplicitLean.SimpTrace
 
 open Lean Meta
@@ -101,64 +102,82 @@ partial def navigate? (e : Expr) (pos : Pos) (binders : Array Expr := #[]) :
 
 /-! ### Occurrence search
 
-We search the running term for subterms that, after instantiating the enclosing
-binders with fresh free variables, are structurally equal to `before`.  Rather
-than guess simp's free variables we compare *modulo* the binder instantiation:
-we abstract `before`'s free variables that do not occur in the running term's
-own local context and match them positionally against the binders crossed.
+We must compare a recorded subterm, which simp observed with its enclosing
+binders instantiated as *free* variables, against the running term, where those
+binders are still `bvar`s.
+
+Rather than guess which free variables simp used, we abstract them out of the
+recorded subterm: any free variable in `before` that is **not** present in the
+location's own local context (the one the tactic started in) must have been
+introduced by simp when it descended under a binder.  Replacing each such
+variable by the `bvar` for its binder depth turns the recorded subterm back into
+the open form that appears in the running term.
+
+`depth` is the number of binders crossed to reach the candidate position, and
+simp introduces its locals outermost-first, so the fvar introduced at binder
+depth `d` (0-based, outermost first) corresponds to `bvar (depth - 1 - d)`.
 -/
 
 /-- A candidate occurrence: its position and the number of binders crossed. -/
 structure Occurrence where
-  pos      : Pos
+  pos : Pos
   numBinders : Nat
   deriving Inhabited, Repr
 
 /--
-Find every position in `e` whose subterm equals `target` once the binders
-crossed on the way are instantiated with `fvars` (the free variables simp had in
-scope at the firing, innermost last).
-
-`fvarsOf` supplies, for a given binder depth, the free variable simp used.  We
-do not know that mapping a priori, so `matchSub` instantiates loose bound
-variables with the *innermost* `n` entries of `fvars` in order, which is exactly
-what `Meta.lambdaTelescope`-style traversal produces.
+Abstract the simp-introduced free variables of `target`, given the free
+variables introduced on the way to a position at binder `depth`.  `simpFVars`
+lists them outermost-first.
 -/
-partial def findOccurrences (e target : Expr) (fvars : Array Expr) : Array Occurrence :=
-  (go e #[] 0).fst
-where
-  /-- Returns (occurrences, whether this node matched). -/
-  go (e : Expr) (pos : Pos) (depth : Nat) : Array Occurrence × Bool :=
-    let inst := instantiateBinders e depth
-    if inst == target then
-      (#[{ pos, numBinders := depth }], true)
-    else Id.run do
-      let mut acc : Array Occurrence := #[]
-      let children : Array (Nat × Expr × Bool) :=
-        match e with
-        | .app f a => #[(0, f, false), (1, a, false)]
-        | .lam _ t b _ => #[(0, t, false), (1, b, true)]
-        | .forallE _ t b _ => #[(0, t, false), (1, b, true)]
-        | .letE _ t v b _ => #[(0, t, false), (1, v, false), (2, b, true)]
-        | .mdata _ b => #[(0, b, false)]
-        | .proj _ _ b => #[(0, b, false)]
-        | _ => #[]
-      for (i, c, bin) in children do
-        let (sub, _) := go c (pos.push i) (if bin then depth + 1 else depth)
-        acc := acc ++ sub
-      return (acc, false)
-
-  /-- Instantiate the `depth` loose bound variables with the innermost `depth`
-  entries of `fvars`. -/
-  instantiateBinders (e : Expr) (depth : Nat) : Expr :=
-    if depth == 0 || !e.hasLooseBVars then e
+def abstractSimpFVars (target : Expr) (simpFVars : Array FVarId) (depth : Nat) : Expr :=
+  if simpFVars.isEmpty || depth == 0 then target
+  else
+    -- Only the innermost `depth` binders are in scope at this position.
+    let n := simpFVars.size
+    if depth > n then target
     else
-      let n := fvars.size
-      if depth > n then e
-      else
-        -- `instantiate` expects the substitution for bvar 0 first.
-        let sub := (Array.range depth).map fun k => fvars[n - 1 - k]!
-        e.instantiate sub
+      let scope := simpFVars.extract (n - depth) n  -- outermost-first
+      target.replace fun e =>
+        match e with
+        | .fvar fid =>
+          match scope.findIdx? (· == fid) with
+          | some d => some (.bvar (depth - 1 - d))
+          | none => none
+        | _ => none
+
+/--
+Find every position in `e` whose subterm equals `target` after abstracting
+simp's binder variables.  Returns positions in pre-order; a matched node is not
+searched further, since its subterms were rewritten as part of it.
+-/
+partial def findOccurrences (e target : Expr) (simpFVars : Array FVarId)
+    (ctxDepth : Nat := 0) : Array Occurrence :=
+  go e #[] 0 0
+where
+  go (e : Expr) (pos : Pos) (depth : Nat) (arrows : Nat) : Array Occurrence := Id.run do
+    -- A firing made under `ctxDepth` contextual hypotheses can only have
+    -- happened in the consequent of at least that many implications, so a
+    -- shallower position is not a real occurrence.
+    if arrows >= ctxDepth && e == abstractSimpFVars target simpFVars depth then
+      return #[{ pos, numBinders := depth }]
+    -- (index, child, crosses a term binder, crosses an implication arrow)
+    let isArrow := e.isArrow
+    let children : Array (Nat × Expr × Bool × Bool) :=
+      match e with
+      | .app f a => #[(0, f, false, false), (1, a, false, false)]
+      | .lam _ t b _ => #[(0, t, false, false), (1, b, true, false)]
+      | .forallE _ t b _ =>
+        #[(0, t, false, false), (1, b, !isArrow, isArrow)]
+      | .letE _ t v b _ =>
+        #[(0, t, false, false), (1, v, false, false), (2, b, true, false)]
+      | .mdata _ b => #[(0, b, false, false)]
+      | .proj _ _ b => #[(0, b, false, false)]
+      | _ => #[]
+    let mut acc : Array Occurrence := #[]
+    for (i, c, bin, arrow) in children do
+      acc := acc ++ go c (pos.push i) (if bin then depth + 1 else depth)
+        (if arrow then arrows + 1 else arrows)
+    return acc
 
 /-! ### Trace assembly -/
 
@@ -174,24 +193,41 @@ solved steps and the final running term.  Fails loudly when a recorded `before`
 cannot be located, when the replacement does not reproduce the expected running
 term, or when the final term does not match simp's actual result.
 -/
-def solvePositions (pre : Expr) (raws : Array RawStep) : MetaM (Array SolvedStep × Expr) := do
+def solvePositions (baseLCtx : LocalContext) (pre : Expr) (raws : Array RawStep) :
+    MetaM (Array SolvedStep × Expr) := do
   let mut running := pre
   let mut solved : Array SolvedStep := #[]
   for raw in raws do
-    let fvars := raw.lctx.getFVars
-    let occs := findOccurrences running raw.before fvars
+    -- Free variables simp introduced for binders it descended under: those in
+    -- the firing's local context but not in the location's own context, in
+    -- declaration order (outermost first).
+    -- Term binders simp descended under: simp-introduced locals that are not
+    -- proofs.  Proof locals come from `+contextual` and bind no term position.
+    let introduced := raw.fvarKinds.filter fun (fid, _) => !(baseLCtx.contains fid)
+    let simpFVars : Array FVarId :=
+      (introduced.filter fun (_, isPrf) => !isPrf).map (·.1)
+    -- Contextual hypotheses in scope at this firing.  Their presence means the
+    -- firing happened under an implication whose antecedent simp assumed, so a
+    -- match must lie in the consequent of that many implications.
+    let ctxDepth := (introduced.filter fun (_, isPrf) => isPrf).size
+    let occs := findOccurrences running raw.before simpFVars ctxDepth
     if occs.isEmpty then
       -- The firing acted on a term simp had already rewritten away, or on an
-      -- instantiation we cannot see.  Never drop it silently.
+      -- instantiation we cannot reconstruct.  Never drop a step silently.
       throwError "simp_trace: cannot locate recorded subterm in running term\n\
         before: {raw.before}\nrunning: {running}"
     for occ in occs do
-      -- Validate: navigating `pos` must reach `before`.
+      -- Validation, per the task: navigating `pos` must reach `before` (in its
+      -- abstracted, open form), and replacing it must yield the next term.
+      let expected := abstractSimpFVars raw.before simpFVars occ.numBinders
       let some (sub, _) := navigate? running occ.pos
-        | throwError "simp_trace: position navigation failed"
-      let some next := replaceAt? running occ.pos raw.after
-        | throwError "simp_trace: position replacement failed"
-      let _ := sub
+        | throwError "simp_trace: position navigation failed at {occ.pos}"
+      unless sub == expected do
+        throwError "simp_trace: validation failed: subterm at {occ.pos} is\n\
+          {sub}\nbut the recorded step's `before` is\n{expected}"
+      let replacement := abstractSimpFVars raw.after simpFVars occ.numBinders
+      let some next := replaceAt? running occ.pos replacement
+        | throwError "simp_trace: position replacement failed at {occ.pos}"
       solved := solved.push { pos := occ.pos, raw }
       running := next
   return (solved, running)

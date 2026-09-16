@@ -101,20 +101,23 @@ partial def toStep (counters : IO.Ref Counters) (s : SolvedStep) : MetaM Step :=
   let side ← raw.side.mapM (toSide counters)
   match raw.provenance with
   | .thm origin inv =>
-    let name ← originName origin raw.lctx raw.localInsts
+    -- A simproc registers its declaration name in `usedTheorems` just as a
+    -- lemma does; the spec wants those recorded as `eq`, not `rw`.
+    if let .decl declName _ _ := origin then
+      if ← Simp.isSimproc declName then
+        return ← mkEqStep counters raw s.pos beforePP afterPP (some declName) side
+    let (name, rev) ← originName origin raw.lctx raw.localInsts
     return { kind := "rw", pos := s.pos, name? := some name,
-             dir? := some (if inv then "rev" else "fwd"),
+             dir? := some (if inv || rev then "rev" else "fwd"),
              before? := some beforePP, after? := some afterPP, side }
   | .proc name? =>
     -- A simproc-computed equation.  Confirm the replay tactic really proves it.
-    let by_ ← withLCtx raw.lctx raw.localInsts <| scratchCheckEq raw.before raw.after
-    if by_ == "unknown" then
-      counters.modify fun c => { c with unknownEq := c.unknownEq + 1 }
-    return { kind := "eq", pos := s.pos,
-             lhs? := some beforePP, rhs? := some afterPP,
-             by_? := some by_,
-             source? := some (name?.map toString |>.getD "simproc"),
-             before? := some beforePP, after? := some afterPP, side }
+    return ← mkEqStep counters raw s.pos beforePP afterPP name? side
+  | .unattributed =>
+    -- The recorder saw a change it could not attribute to a lemma or simproc.
+    -- Per the task, never drop a step silently: fail loudly.
+    throwError "simp_trace: unattributed simp step (no recordable kind)\n\
+      before: {beforePP}\nafter:  {afterPP}"
   | .defeq =>
     if isBeta raw.before raw.after then
       return { kind := "beta", pos := s.pos,
@@ -134,18 +137,47 @@ partial def toStep (counters : IO.Ref Counters) (s : SolvedStep) : MetaM Step :=
       return { kind := "change", pos := s.pos, to? := some toPP,
                before? := some beforePP, after? := some afterPP }
 where
-  /-- Name a rewrite origin, resolving local hypotheses to their user names. -/
+  /-- Build an `eq` step, verifying in a scratch check which ordinary tactic
+  actually proves the equation the simproc produced. -/
+  mkEqStep (counters : IO.Ref Counters) (raw : RawStep) (pos : Pos)
+      (beforePP afterPP : String) (source? : Option Name)
+      (side : Array SideTrace) : MetaM Step := do
+    let by_ ← withLCtx raw.lctx raw.localInsts <|
+      scratchCheckEq raw.before raw.after
+    if by_ == "unknown" then
+      counters.modify fun c => { c with unknownEq := c.unknownEq + 1 }
+    return { kind := "eq", pos,
+             lhs? := some beforePP, rhs? := some afterPP,
+             by_? := some by_,
+             source? := some ((source?.map toString).getD "simproc"),
+             before? := some beforePP, after? := some afterPP, side }
+
+  /-- Name a rewrite origin, resolving local hypotheses to their user names.
+  Returns the name and whether the syntax carried a `←`. -/
   originName (o : Origin) (lctx : LocalContext) (insts : LocalInstances) :
-      MetaM String := do
+      MetaM (String × Bool) := do
     match o with
-    | .decl n _ _ => return n.toString
+    | .decl n _ _ => return (n.toString, false)
     | .fvar fvarId =>
       withLCtx lctx insts do
         match lctx.find? fvarId with
-        | some d => return d.userName.toString
-        | none => return fvarId.name.toString
-    | .stx _ ref => return ref.prettyPrint.pretty
-    | .other n => return n.toString
+        | some d =>
+          -- `+contextual` introduces inaccessible antecedent hypotheses; give
+          -- them the stable name the matching `intro_ctx` step uses.
+          let n := d.userName
+          if n.isInaccessibleUserName || n.hasMacroScopes then
+            return (s!"ctx:{d.index}", false)
+          else return (n.toString, false)
+        | none => return (fvarId.name.toString, false)
+    | .stx _ ref =>
+      -- `simp [← h]` records the argument syntax; strip the arrow into `dir`.
+      let txt := ref.prettyPrint.pretty.trimAscii.toString
+      if txt.startsWith "←" then
+        return (txt.drop 1 |>.trimAscii.toString, true)
+      else if txt.startsWith "<-" then
+        return (txt.drop 2 |>.trimAscii.toString, true)
+      else return (txt, false)
+    | .other n => return (n.toString, false)
 
   /-- The head constant that was delta-unfolded, when that is what happened. -/
   unfoldedConstant? (before after : Expr) : Option Name :=
@@ -157,7 +189,7 @@ where
     let goalPP ← ppExpr r.goal
     -- Nested steps were recorded against the side goal; solve their positions
     -- against that goal exactly as we do for a top-level location.
-    let (solved, _) ← solvePositions r.goal r.steps
+    let (solved, _) ← solvePositions (← getLCtx) r.goal r.steps
     let steps ← solved.mapM (toStep counters)
     return { goal := goalPP.pretty, steps,
              close := r.by_.map fun b => { by_ := b } }
@@ -207,7 +239,7 @@ def tracedSimp (e : Expr) (ctx : Simp.Context) (simprocs : Simp.SimprocsArray)
 def buildLocation (counters : IO.Ref Counters) (hyp? : Option String)
     (pre : Expr) (result : Simp.Result) (raws : Array RawStep)
     (closed : Bool) : MetaM LocationTrace := do
-  let (solved, running) ← solvePositions pre raws
+  let (solved, running) ← solvePositions (← getLCtx) pre raws
   -- Validation: the replayed running term must be simp's actual result.
   unless running == result.expr do
     throwError "simp_trace: replayed term does not match simp's result\n\

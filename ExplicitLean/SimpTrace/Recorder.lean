@@ -20,6 +20,10 @@ inductive Provenance where
   /-- A simproc or other non-lemma procedure produced the result. `name?` is the
   procedure we could attribute it to, when we could. -/
   | proc (name? : Option Name)
+  /-- A firing we could not attribute to any origin: the recorder saw a change
+  but `usedTheorems` did not grow because the same lemma had already been
+  recorded earlier in the run. -/
+  | unattributed
   /-- Definitional machinery (`dsimp` layer: beta/eta/unfold/proj). -/
   | defeq
   deriving Inhabited
@@ -34,6 +38,11 @@ structure RawStep where
   /-- Local context at the firing, so binder-bound names pretty-print. -/
   lctx       : LocalContext
   localInsts : LocalInstances
+  /-- Free variables in `lctx`, in declaration order, tagged with whether they
+  are proofs.  Proof locals are the hypotheses `+contextual` introduces for the
+  antecedent of an implication; they are not term binders of the running term,
+  so position solving must not count them as binder crossings. -/
+  fvarKinds  : Array (FVarId × Bool) := #[]
   /-- Side-condition sub-runs performed while this step's lemma was matched. -/
   side       : Array RawSide := #[]
 
@@ -82,8 +91,13 @@ def RecorderState.note (s : RecorderState) (msg : String) : RecorderState :=
 
 /-- Capture the current local context so a recorded subterm can be
 pretty-printed later with its binders in scope. -/
-private def captureCtx : MetaM (LocalContext × LocalInstances) := do
-  return ((← getLCtx), (← getLocalInstances))
+private def captureCtx : MetaM (LocalContext × LocalInstances × Array (FVarId × Bool)) := do
+  let lctx ← getLCtx
+  let mut kinds : Array (FVarId × Bool) := #[]
+  for decl in lctx do
+    unless decl.isImplementationDetail do
+      kinds := kinds.push (decl.fvarId, ← isProof decl.toExpr)
+  return (lctx, (← getLocalInstances), kinds)
 
 /-- Attribute a `Simp.Result` produced by a procedure whose name we do not know
 directly.  `usedTheorems` grows by exactly the theorems the procedure used, so a
@@ -92,12 +106,41 @@ private def classify (before after : Expr) (usedBefore usedAfter : Simp.UsedSimp
     : Provenance :=
   -- A lemma firing registers its origin in `usedTheorems`.
   let newOnes := usedAfter.toArray.filter fun o => !usedBefore.contains o
-  if h : newOnes.size = 1 then
-    match newOnes[0] with
+  -- `+contextual` registers the antecedent hypothesis alongside the lemma that
+  -- actually fired, so a single firing can add more than one origin.  The
+  -- rewrite we are recording is the last origin registered.
+  if newOnes.isEmpty then
+    if before == after then .defeq else .unattributed
+  else
+    match newOnes[newOnes.size - 1]! with
     | .decl n p inv => .thm (.decl n p inv) inv
     | o => .thm o false
-  else
-    if before == after then .defeq else .proc none
+
+/--
+Identify which simp theorem rewrote `before` to `after`, by re-running stock
+`Simp.rewrite?` over the same theorem sets in the same order.  We use this only
+when `usedTheorems` did not grow (the lemma had already fired earlier in the
+run), so no attribution is lost to caching.
+-/
+def reattribute? (before after : Expr) (post : Bool) :
+    Simp.SimpM (Option (Origin × Bool)) := do
+  for thms in (← readThe Simp.Context).simpTheorems do
+    let tree := if post then thms.post else thms.pre
+    let r? ← try
+        Simp.rewrite? before tree thms.erased
+          (tag := "reattribute") (rflOnly := false)
+      catch _ => pure none
+    if let some r := r? then
+      if r.expr == after then
+        -- `rewrite?` does not report which theorem matched, so consult the last
+        -- origin it registered.
+        let used := (← get).usedTheorems.toArray
+        if h : used.size > 0 then
+          let o := used[used.size - 1]!
+          match o with
+          | .decl _ _ inv => return some (o, inv)
+          | _ => return some (o, false)
+  return none
 
 /-- Instrument a `Simproc` so each firing is recorded. -/
 def instrument (ref : RecorderRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc :=
@@ -109,13 +152,16 @@ def instrument (ref : RecorderRef) (tag : String) (p : Simp.Simproc) : Simp.Simp
       -- Only a genuine change is a step.  `Simp.Step.continue none` and
       -- results equal to the input carry no rewriting.
       unless r.expr == e do
-        let (lctx, localInsts) ← captureCtx
-        let prov := classify e r.expr usedBefore usedAfter
+        let (lctx, localInsts, fvarKinds) ← captureCtx
+        let mut prov := classify e r.expr usedBefore usedAfter
+        if let .unattributed := prov then
+          if let some (o, inv) ← reattribute? e r.expr (tag == "post") then
+            prov := .thm o inv
         let side := (← ref.get).pendingSide
         ref.modify fun (s : RecorderState) =>
           RecorderState.push { s with pendingSide := #[] }
             { provenance := prov, before := e, after := r.expr,
-              lctx, localInsts, side }
+              lctx, localInsts, fvarKinds, side }
     match stepResult with
     | .done r => record r
     | .visit r => record r
@@ -131,11 +177,11 @@ def instrumentD (ref : RecorderRef) (p : Simp.DSimproc) : Simp.DSimproc :=
     let stepResult ← p e
     let record (e' : Expr) : Simp.SimpM Unit := do
       unless e' == e do
-        let (lctx, localInsts) ← captureCtx
+        let (lctx, localInsts, fvarKinds) ← captureCtx
         ref.modify fun (s : RecorderState) =>
           RecorderState.push s
             { provenance := .defeq, before := e, after := e',
-              lctx, localInsts }
+              lctx, localInsts, fvarKinds }
     match stepResult with
     | .done e' => record e'
     | .visit e' => record e'
