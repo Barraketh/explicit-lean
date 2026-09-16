@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T04:59:18Z",
+  "updatedAt": "2026-09-16T05:29:05Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -268,8 +268,8 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Implement and review the three personal-review fixes in parallel with Luna high, then run focused stock/capture/encoded replay and rejection controls in an isolated workspace. Commit reviewed changes separately; preserve the existing pilot and all acceptance gates.",
-    "In parallel, design bounded imported multi-helper ordering and imported auxiliary-cache representations before implementing codec extensions; do not merely remove guards.",
+    "Compile the latest shared auxiliary validation refactor in the existing isolated AWS snapshot; run new multi-helper, imported-auxiliary and context roundtrip regressions plus existing realization/local-cache compatibility. Route concrete diagnostics to Luna high owners, review changes and commit named files only after passing checks.",
+    "Keep one proof/cache validation implementation for local and imported paths; preserve their distinct environment and descriptor adapters and exact rejection checks. Distinguish test harness failures and resource caps from semantic regressions.",
     "Continue monitoring the existing sole authorized AWS run through its immutable 2026-09-16T13:30:00Z cutoff. Preserve terminal evidence and clean up the exact resources; no second host or worker redispatch.",
     "Use the manifest provisionally for development as authorized by the user, while keeping independent authentication as an acceptance requirement.",
     "Retry affected cases and validate the committed Nat.leRec_self override at module/declaration/downstream scope when resources permit. No whole-tree acceptance is established.",
@@ -309,7 +309,7 @@
     {
       "id": "replay-first-principles-fixes",
       "status": "in_progress",
-      "description": "Luna high implemented three reviewed fixes. Production shared library builds on isolated AWS snapshot. Exact original context regression now passes stock/probe (SSM c1cf4fa9-f050-4c91-8be4-5902cd724fac); context fix ready for separate commit. Encoded context and codec fixture harness repairs/validation continue; no module or tree acceptance."
+      "description": "Context fix committed f6a5086; exact original stock/probe regression passed on isolated AWS production library. Multi-helper record/replay and initial rejection controls passed; final expectation correction pending rerun. Imported auxiliary support now shares existing local proof/cache validation with separate environment/serialization adapters; latest refactor build and compatibility pending. Earlier realization-group bad_alloc and encoded-context/aux fixture setup failures are unresolved, not accepted. Fresh Luna high validator owns bounded isolated AWS checks concurrently with untouched main pilot. No module/tree acceptance."
     }
   ],
   "activeChecks": [
