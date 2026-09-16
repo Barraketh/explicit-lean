@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "replacement_terminal_local_verifier_fix_reviewed",
+  "phase": "bounded_aws_pilot_worker_active",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T01:38:54+00:00",
+  "updatedAt": "2026-09-16T01:48:02+00:00",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "5968c71_local_not_pushed_nat_atomic_commit_with_plan_pending",
@@ -16,7 +16,7 @@
     "natOverrideChecks": "lightweight_passed_corrected_stdin_probe_passed_no_module_oracle_cold_acceptance"
   },
   "cloudPreparation": {
-    "status": "user_approved_one_aws_run_promoted_live_gates_passed_pending_clean_published_commit",
+    "status": "single_worker_dispatched_monitoring_exact_run_until_cutoff_or_terminal_teardown",
     "provider": "aws",
     "account": "538639825139",
     "region": "us-west-1",
@@ -37,8 +37,16 @@
     "localMemoryAvailableBytes": 6208372736,
     "localMemoryReserveBytes": 12884901888,
     "authorizationPromotion": "policy.authorization and tracker deadline/notAfter promoted atomically; old closed cutoff is retained in historicalClosedWindow and policy historicalClosedAuthorization",
+    "runId": "20260916T014201Z-a38ca0ed7740f01e72adebc45720898a",
+    "instanceId": "i-05bfce721923eb190",
+    "workerCommandId": "64b1d21b-111f-4231-938f-0ed933663d58",
+    "workerDispatchedAt": "2026-09-16T01:48:02Z",
+    "workerStatus": "accepted_single_dispatch_no_result_claimed",
+    "evidencePrefix": ".lake/search-free-mathlib/aws-linux-pilot/runs/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a/",
+    "statePath": ".lake/search-free-mathlib/aws-linux-pilot/runs/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a.json",
+    "monitoring": "monitor-bounded-mathlib-linux-experiment every 15 minutes, quiet unless meaningful change; exact run only, no redispatch, second host, or cutoff extension",
     "priorClosedAuthorizationPreserved": true,
-    "noProvisioningPerformed": true
+    "noProvisioningPerformed": false
   },
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
@@ -77,7 +85,7 @@
   },
   "direction": {
     "userConversationDate": "2026-09-10",
-    "nextMilestone": "Publish a clean reviewed commit, refresh non-root AWS live gates after reauthentication, then launch at most one approved host under the proposed cutoff; no extension or second host.",
+    "nextMilestone": "Monitor the single dispatched worker to terminal evidence/teardown under the immutable cutoff; claim no translation result until evidence and independent verification are complete.",
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
     "readiness": "Replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 is terminal Failed/1 before translation. Linux setup, focused checks, strict boundary preflight and fresh 216,029,345-byte manifest generation passed. Independent verification ran 5h50m22s and all per-module occurrence lists matched, then the inventory fallback-provenance check failed: fresh header-import recomputation marked 560 full-frontend fallbacks while the manifest recorded 216, with 75 common. The zero-byte verifier result and exact 35,339-byte stderr were preserved. Four versioned AES256 S3 objects remain; the downloaded 10,877,575-byte archive SHA-256 0a1435d6bedfb5130df6c0ebbac39da72f7ec67994d00683ccfdf3f9f2e2fa47 matches its uploaded hash and run-exit records originalExitCode 1 with successful evidence upload. Instance i-0f9698935a4ccb630 is terminated, volume vol-0524b323969ba9add is gone, the exact stack is deleted and no active r7i.4xlarge remains. Corpus translation never began. Local diagnosis proved a producer/verifier protocol mismatch: aggregate deferred-plus-isolated fallback versus direct header imports. The reviewed bounded fix preserves exact fallback equality and fail-closed source/environment/marker checks; 36 verifier tests, inventory-header controls, Python compilation and diff validation pass. A complete local replay was not run because available memory was below the unchanged 12 GiB reserve. No additional AWS host is authorized.",
@@ -500,6 +508,12 @@
       "scope": "aws_reauthentication_live_read_only_preflight_and_authorization_promotion",
       "result": "authenticated_all_live_gates_passed_authorization_promoted_publication_pending",
       "detail": "The fresh explicit-lean-pilot login completed and STS confirmed the designated non-root principal arn:aws:iam::538639825139:user/explicit-lean/explicit-lean-operator. Read-only gates passed: On-Demand Standard quota 32 vCPUs versus 16 required; r7i.4xlarge is 131072 MiB x86_64; Amazon Linux AMI ami-0a0512cc1f10345ce is available; default VPC/subnet offering is us-west-1a; the versioned, encrypted, bucket-owner-enforced evidence bucket is valid; and zero active pilot hosts exist. Live Pricing API values are EC2 $1.176/hour, gp3 $0.096/GB-month, public IPv4 $0.005/hour, bounded subtotal $14.492, headroom $5.508. Policy authorization and tracker deadline/notAfter are promoted to 2026-09-16T13:30:00Z from this fresh UTC clock; the old 2026-09-13T00:00:00Z window remains historical. No provisioning or nonce dispatch occurred. Launch still requires coordinator-reviewed clean publication and one fresh run nonce before the immutable cutoff."
+    },
+    {
+      "checkedAt": "2026-09-16T01:48:02+00:00",
+      "scope": "single_worker_dispatch_exact_published_run",
+      "result": "worker_started_monitoring_no_result_claimed",
+      "detail": "The sole worker was accepted after rechecking the clean published authorization ref 5145cfbff9ba1b2e99648c04691f8b92265f41a3, account identity, quota, live pricing, exact cutoff, source/environment pins, remote auth proof and budget continue decision. Run 20260916T014201Z-a38ca0ed7740f01e72adebc45720898a uses instance i-05bfce721923eb190 and worker command 64b1d21b-111f-4231-938f-0ed933663d58, dispatched at 2026-09-16T01:48:02Z with immutable notAfter 2026-09-16T13:30:00Z. State receipt is .lake/search-free-mathlib/aws-linux-pilot/runs/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a.json; evidence prefix is aws-linux-pilot/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a/. No translation, verification result, coverage advancement, or terminal outcome is claimed. Monitoring is via monitor-bounded-mathlib-linux-experiment every 15 minutes; no redispatch, second host, or cutoff extension."
     }
   ],
   "historicalAutomation": {

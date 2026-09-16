@@ -13,13 +13,15 @@ the active bounds are in `tracking/aws-linux-pilot-policy.json` under
 `authorization`. The prior closed authorization and
 `2026-09-13T00:00:00Z` cutoff remain preserved under
 `historicalClosedAuthorization` as historical evidence.
-No provisioning or budget mutation has occurred. The candidate checkout is
-currently unpushed and dirty at full HEAD
-`fed986f781b2d60da3c200fbe95b6a51503b33fa`. Fresh STS identity, quota,
-pricing, network, storage, evidence-bucket and zero-active-resource gates now
-pass through `explicit-lean-pilot`; use neither `default` nor `softmax`. Do
-not launch until a clean full commit is published, the coordinator approves
-it, and a fresh run nonce is generated before the immutable cutoff.
+The single host is provisioned and the sole worker was dispatched at
+`2026-09-16T01:48:02Z`: run
+`20260916T014201Z-a38ca0ed7740f01e72adebc45720898a`, instance
+`i-05bfce721923eb190`, worker command
+`64b1d21b-111f-4231-938f-0ed933663d58`. Fresh STS identity, quota, pricing,
+network, storage, evidence-bucket and zero-active-resource gates passed
+through `explicit-lean-pilot`; use neither `default` nor `softmax`. The
+worker is monitored through the exact cutoff; no result or coverage advance is
+claimed and no second host or redispatch is permitted.
 
 ## Objective and what works
 

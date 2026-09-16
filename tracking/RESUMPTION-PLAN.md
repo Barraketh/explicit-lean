@@ -95,13 +95,19 @@ coordinator approves and publishes a clean full commit; do not reuse an old
 AWS/campaign nonce or dispatch beyond the cutoff. Fresh local fixture nonces
 remain permitted after resource admission.
 
-The candidate checkout is HEAD
-`fed986f781b2d60da3c200fbe95b6a51503b33fa`, two commits ahead of the public
-branch and dirty from parallel override work, so it is not a launch ref.
+The candidate checkout used by the worker is the clean published ref
+`5145cfbff9ba1b2e99648c04691f8b92265f41a3`; the prepublication shared
+checkout was HEAD `fed986f781b2d60da3c200fbe95b6a51503b33fa`.
 The only permitted profile is the non-root `explicit-lean-pilot`; fresh STS
 identity and all read-only AWS gates passed at 01:38:54Z. Live pricing is
 EC2 $1.176/hour, gp3 $0.096/GB-month, public IPv4 $0.005/hour, subtotal
 $14.492 and headroom $5.508. The controller template and live policy gates
-pass; publication of a clean full commit, coordinator approval, and a fresh
-run nonce remain outstanding. If those gates are not ready before this
-cutoff, stop without provisioning; do not extend the cutoff.
+pass. The sole worker was dispatched at `2026-09-16T01:48:02Z` as command
+`64b1d21b-111f-4231-938f-0ed933663d58` on instance
+`i-05bfce721923eb190` for run
+`20260916T014201Z-a38ca0ed7740f01e72adebc45720898a`. State receipt:
+`.lake/search-free-mathlib/aws-linux-pilot/runs/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a.json`.
+No translation, verifier result, coverage advancement, or terminal outcome is
+claimed. Heartbeat `monitor-bounded-mathlib-linux-experiment` checks every 15
+minutes and remains quiet unless the exact run changes; no redispatch, second
+host, or cutoff extension is permitted.

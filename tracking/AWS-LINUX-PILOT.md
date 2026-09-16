@@ -12,15 +12,18 @@ are in `tracking/aws-linux-pilot-policy.json` under `authorization`. The prior
 closed September 13 window is preserved under `historicalClosedAuthorization`
 as historical evidence.
 
-Preparation is not provisioning. The current checkout is at candidate HEAD
+Preparation is not provisioning. The current checkout was at candidate HEAD
 `fed986f781b2d60da3c200fbe95b6a51503b33fa`, is ahead of the public branch,
 and has shared dirty changes. The coordinator must first commit and publish a
 clean full 40-hex ref, then refresh all live gates immediately before launch.
 The fresh non-root `explicit-lean-pilot` STS identity and read-only gates
 passed at 2026-09-16T01:38:54Z; `default` and `softmax` must not be used. Until
-coordinator approval of the published ref, no stack, instance, volume, worker,
-nonce, or budget change may be created. No credentials or runtime auth state
-may be copied.
+coordinator approval of the published ref was completed before provisioning.
+The single stack/instance is now active for the exact run
+`20260916T014201Z-a38ca0ed7740f01e72adebc45720898a`; its sole worker command
+`64b1d21b-111f-4231-938f-0ed933663d58` was accepted at 01:48:02Z. No second
+host, redispatch, or cutoff extension is permitted. No credentials or runtime
+auth state may be copied.
 
 Live Pricing API values at 2026-09-16T01:38:54Z are EC2 $1.176/hour, gp3
 $0.096/GB-month, and public IPv4 $0.005/hour; the 12-hour bounded subtotal is
@@ -29,6 +32,14 @@ read-only gates immediately before launch. The controller's existing gates
 remain mandatory: non-root account identity, quota, instance shape and
 offering, network, encrypted versioned evidence bucket, zero active pilot
 resources, exact cutoff, and clean published commit.
+
+The run state receipt is
+`.lake/search-free-mathlib/aws-linux-pilot/runs/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a.json`.
+The evidence prefix is
+`aws-linux-pilot/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a/`.
+Translation and verification results remain unobserved; heartbeat
+`monitor-bounded-mathlib-linux-experiment` checks the exact run every 15
+minutes and remains quiet unless a meaningful change occurs.
 
 The user authorized one replacement bounded pilot in AWS account `538639825139`,
 region `us-west-1`, with the same $20 all-in ceiling. The selected bounds remain
