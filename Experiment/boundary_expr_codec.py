@@ -12,6 +12,39 @@ from typing import Any
 EXPR_DAG_VERSION = "expr_dag_v1"
 
 
+def lean_json_compress(value: object) -> str:
+    """Compact JSON matching Lean Json.compress for Python JSON values.
+
+    Lean keeps printable Unicode raw and uses ``\\uXXXX`` for all controls
+    below U+0020 except quote, backslash, newline, and carriage return.
+    Scan emitted escapes so literal backslash-plus-letter sequences stay
+    distinct from Python's short control escapes.
+    """
+    encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    result: list[str] = []
+    index = 0
+    controls = {"b": "0008", "t": "0009", "f": "000c"}
+    while index < len(encoded):
+        if encoded[index] != "\\":
+            result.append(encoded[index])
+            index += 1
+            continue
+        run_end = index
+        while run_end < len(encoded) and encoded[run_end] == "\\":
+            run_end += 1
+        run_length = run_end - index
+        result.append("\\" * (run_length - run_length % 2))
+        index += run_length - run_length % 2
+        if (run_length % 2 and index + 1 < len(encoded)
+                and encoded[index + 1] in controls):
+            result.append("\\u" + controls[encoded[index + 1]])
+            index += 2
+        elif run_length % 2:
+            result.append("\\")
+            index += 1
+    return "".join(result)
+
+
 def _nat(value: Any) -> bool:
     return type(value) is int and value >= 0
 
@@ -707,12 +740,41 @@ def validate_realization_payload(source: object, expected_anchor: object,
 
     def descriptor(value: object, owner: object, root: object) -> tuple[list, list]:
         if not (isinstance(value, list) and len(value) == 6 and isinstance(value[0], str)
-                and value[0] in {"completed_realization_v1", "completed_realization_v2"}
+                and value[0] in {"completed_realization_v1", "completed_realization_v2",
+                                 "completed_realization_v3"}
                 and value[1] is True and value[2] == owner and value[3] == root
                 and isinstance(value[4], list) and value[4] and isinstance(value[5], list)):
             reject("invalid completed group descriptor")
         key(owner); key(root)
-        expression_validator = validate_struct_expr_dag if value[0] == "completed_realization_v2" else validate_expr_dag
+        expression_validator = validate_struct_expr_dag if value[0] in {"completed_realization_v2", "completed_realization_v3"} else validate_expr_dag
+        metadata_len = 5 if value[0] == "completed_realization_v3" else 4
+
+        def metadata_check(meta: object) -> None:
+            if not (isinstance(meta, list) and len(meta) == metadata_len and isinstance(meta[3], list)):
+                reject("invalid member metadata")
+            match_state(meta[0]); equation_state(meta[1]); sparse_state(meta[2])
+            seen_exts = set()
+            for ext in meta[3]:
+                if not (isinstance(ext, list) and len(ext) == 2 and isinstance(ext[1], str)
+                        and len(ext[1]) % 2 == 0 and re.fullmatch(r"[0-9a-f]+", ext[1])):
+                    reject("invalid persistent metadata bytes")
+                k = key(ext[0])
+                if k in seen_exts:
+                    reject("duplicate persistent metadata")
+                seen_exts.add(k)
+            if metadata_len == 5:
+                aux = meta[4]
+                if not (isinstance(aux, list) and len(aux) == 2 and
+                        isinstance(aux[0], list) and isinstance(aux[1], list)):
+                    reject("invalid imported auxiliary metadata")
+                if len(aux[0]) > 4096:
+                    reject("imported auxiliary entry limit")
+                if len(lean_json_compress(aux).encode("utf-8")) > 16 * 1024 * 1024:
+                    reject("imported auxiliary metadata exceeds bound")
+                used = _checked_auxiliary_validator(aux[1], label, require_sorted=True)(aux[0])
+                if used != set(range(len(aux[1]))):
+                    reject("unused imported checked proof")
+
         def members(entries: list, public: bool) -> list:
             result = []
             signatures = {}
@@ -726,17 +788,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
                     reject("nested branch signature mismatch")
                 if tree[2] is not None:
                     meta = tree[2]
-                    if not (isinstance(meta, list) and len(meta) == 4 and isinstance(meta[3], list)):
-                        reject("invalid nested metadata")
-                    match_state(meta[0]); equation_state(meta[1]); sparse_state(meta[2]); seen_exts = set()
-                    for ext in meta[3]:
-                        if not (isinstance(ext, list) and len(ext) == 2 and isinstance(ext[1], str)
-                                and len(ext[1]) % 2 == 0 and re.fullmatch(r"[0-9a-f]+", ext[1])):
-                            reject("invalid nested persistent bytes")
-                        k = key(ext[0])
-                        if k in seen_exts:
-                            reject("duplicate nested extension")
-                        seen_exts.add(k)
+                    metadata_check(meta)
                 child_names = []
                 for child in tree[3]:
                     if not (isinstance(child, list) and child and isinstance(child[0], list)
@@ -750,7 +802,8 @@ def validate_realization_payload(source: object, expected_anchor: object,
                 if not (isinstance(entry, list) and len(entry) == 3 and isinstance(entry[0], list)):
                     reject("invalid group member")
                 sig, meta, tree = entry
-                if not sig or sig[0] not in {"theorem", "definition", "public-proof-interface"}:
+                if not sig or (not isinstance(sig[0], str) or
+                               sig[0] not in {"theorem", "definition", "public-proof-interface"}):
                     reject("unsupported declaration signature")
                 expected_size = {"theorem": 5, "definition": 7, "public-proof-interface": 4}[sig[0]]
                 if len(sig) != expected_size or (public != (sig[0] == "public-proof-interface")):
@@ -765,17 +818,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
                             and _nat(hints[1]) and hints[1] <= 4294967295):
                         reject("invalid definition hints")
                     expression_validator(sig[6], label)
-                if not (isinstance(meta, list) and len(meta) == 4 and isinstance(meta[3], list)):
-                    reject("invalid member metadata")
-                match_state(meta[0]); equation_state(meta[1]); sparse_state(meta[2]); seen_exts = set()
-                for ext in meta[3]:
-                    if not (isinstance(ext, list) and len(ext) == 2 and isinstance(ext[1], str)
-                            and len(ext[1]) % 2 == 0 and re.fullmatch(r"[0-9a-f]+", ext[1])):
-                        reject("invalid persistent metadata bytes")
-                    k = key(ext[0])
-                    if k in seen_exts:
-                        reject("duplicate persistent metadata")
-                    seen_exts.add(k)
+                metadata_check(meta)
                 signatures[key(sig[1])] = sig
                 if not (isinstance(tree, list) and len(tree) == 4 and tree[0] == sig
                         and tree[1] is True and tree[2] == meta):
@@ -1193,7 +1236,8 @@ def validate_realization_payload(source: object, expected_anchor: object,
             if depth > 2:
                 reject("recursive producer depth unsupported")
             depths.append(depth)
-            if not (isinstance(captured, list) and captured and captured[0] == "completed_realization_v2"):
+            if not (isinstance(captured, list) and captured and
+                    captured[0] in {"completed_realization_v2", "completed_realization_v3"}):
                 reject("recursive nodes require structural descriptors")
             private, public = descriptor(captured, owner, root_name)
             if kind == "matcher":
@@ -1304,7 +1348,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
     return value
 
 
-def _checked_auxiliary_validator(proofs: object, label: str):
+def _checked_auxiliary_validator(proofs: object, label: str, require_sorted: bool = False):
     """Shared exact checked theorem table and cache-key binding validation."""
     def reject(detail):
         raise RuntimeError(f"{label}: {detail}")
@@ -1329,12 +1373,17 @@ def _checked_auxiliary_validator(proofs: object, label: str):
         if not isinstance(entries, list):
             reject("invalid local auxiliary cache")
         keys, used = set(), set()
+        first_used = []
+        previous_order = None
         for entry in entries:
             if not (isinstance(entry, list) and len(entry) == 6 and type(entry[1]) is bool
                     and type(entry[2]) is bool and _nat(entry[5]) and entry[5] < len(proofs)):
                 reject("invalid local auxiliary entry")
             validate_struct_expr_dag(entry[0], label); key(entry[3]); names(entry[4])
-            proof = proofs[entry[5]]; used.add(entry[5])
+            proof = proofs[entry[5]]
+            if entry[5] not in used:
+                first_used.append(entry[5])
+            used.add(entry[5])
             if proof[1:4] != [entry[3], entry[4], entry[0]]:
                 reject("local auxiliary checked proof binding")
             if _private_name(entry[3]) and not entry[1]:
@@ -1343,6 +1392,15 @@ def _checked_auxiliary_validator(proofs: object, label: str):
             if cache_key in keys:
                 reject("duplicate local auxiliary key")
             keys.add(cache_key)
+            if require_sorted:
+                # Lean Json.compress leaves printable Unicode scalar values raw;
+                # ensure_ascii=True would order escaped names differently.
+                order = lean_json_compress(entry[:5])
+                if previous_order is not None and order <= previous_order:
+                    reject("imported auxiliary entries are not canonical")
+                previous_order = order
+        if require_sorted and first_used != list(range(len(proofs))):
+            reject("imported auxiliary proof table is not canonical")
         return used
     return validate
 
