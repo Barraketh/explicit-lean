@@ -118,3 +118,12 @@ At `2026-09-16T02:39:50Z`, one bounded read-only SSM diagnostic (command
 inventory` and `simpEngineInventory` processes. This identifies the strict
 manifest-verification phase; it provides no result or acceptance evidence.
 Continue quiet monitoring of this exact run only.
+
+A fresh bounded diagnostic at `2026-09-16T03:39:58Z` (SSM command
+`806ec041-2f84-4dc2-9e43-0b8fab3cd4fd`) found the verifier still active with
+nested `simpEngineInventory`; the child reported about 6.36 GiB RSS and 156%
+CPU at the snapshot. The fresh manifest is valid, 216,029,345 bytes with
+83,627 occurrences, and its dependency map is 3,261,577 bytes. Verifier JSON
+and stderr remain zero bytes and worker output/translation artifacts are not
+present. Host available memory and disk were about 129.1 GB and 198.2 GB.
+This is progress evidence only; no acceptance or translation result is claimed.
