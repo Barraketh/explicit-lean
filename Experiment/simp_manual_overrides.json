@@ -150,6 +150,15 @@
       "replacement": "letI := f.hom.toAlgebra; letI := Module.compHom M f.hom; exact D.leibniz b b'",
       "source": "simp [d]",
       "startByte": 2278
+    },
+    {
+      "endByte": 6039,
+      "module": "Mathlib/Data/Nat/Init.lean",
+      "moduleSourceSha256": "6eac43b5c217af7e02be819026cdbba38b24810659d1fc1dc7d90d6f78c7d3e3",
+      "occurrence": "7063e52927a3778e",
+      "replacement": "rw [Nat.leRec] <;> apply dif_neg <;> intro h <;> exact (Nat.not_succ_le_self _) h",
+      "source": "simp [leRec, Or.by_cases, dif_neg]",
+      "startByte": 6005
     }
   ]
 }

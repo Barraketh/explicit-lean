@@ -6,9 +6,9 @@ compute, `explicit-lean-cloud`, dispatch past the closed
 nonce. A fresh nonce and output directory are allowed for a future admitted
 local fixture or replay check after resource gates pass.
 
-## Phase 1: validate and publish the pending protocol fix
+## Phase 1: validate and publish the protocol fix
 
-The pending changes in `Experiment/verify_simp_boundary_manifest.py`,
+The changes in `Experiment/verify_simp_boundary_manifest.py`,
 `Experiment/test_verify_simp_boundary_manifest.py`, and
 `tracking/campaign.json` replay the producer's aggregate
 `--defer-full-fallback` pass followed by one isolated
@@ -17,13 +17,15 @@ set equality, source and dependency-map identity checks, freshness/TOCTOU
 checks, and fail-closed malformed, duplicate, unresolved, extra, and
 unrequested marker handling.
 
+Commit `5968c71` contains the reviewed verifier fix and tracker update; the
+independent code review is complete and the commit is local and not pushed.
 Completed validation: 39 verifier tests; 9 inventory-header controls passed on
 2026-09-16 in the earlier producer probe before the final Python-only channel
 change (they were not rerun); campaign status 9, supervisor 22, worker 33, and
 translation-index 13 tests; Python compilation; and `git diff --check`. The
-coordinator should review this diff and commit the named tracked files plus
-this plan. The `.lake` resume summary is ignored generated output and is not a
-commit target.
+coordinator should include this plan as the remaining tracked Batch 1 file;
+the `.lake` resume summary is ignored generated output and is not a commit
+target.
 
 ## Phase 2: assess a full fresh local verifier replay
 
@@ -63,3 +65,18 @@ declarations, computational semantics, original tactic comments, and all
 independent acceptance checks. Acceptance remains gated by the full verifier
 checks and unchanged disk/memory reserves. Record each result as resource,
 semantic, unsupported, or successful before considering importer expansion.
+
+The Nat override and checker are committed together with this plan/tracker
+update, with independent reviewer approval complete; remote publication is
+still unpushed and runtime admission remains pending. It adds occurrence
+`7063e52927a3778e` for the pinned Nat
+source hash `6eac43b5c217af7e02be819026cdbba38b24810659d1fc1dc7d90d6f78c7d3e3`;
+the override database has 17 entries across 15 modules and hash
+`03cca0e6e35be3da7110855269767808f7b877f4eeb32ba142a80a836655e349`.
+Lightweight AST/cardinality/source-range/hash/render/duplicate/missing/path
+checks passed, and a corrected exact-theorem stdin Lean probe passed. An
+earlier focused composition was launched before fresh resource admission and
+failed because its initial replacement re-cased `n`; the replacement was then
+corrected. Corrected composition, declaration-oracle, cold-dependency, and
+full-checker Lean phases remain unrun because fresh memory is below reserve.
+This is no module or tree acceptance, and coverage counts remain unchanged.
