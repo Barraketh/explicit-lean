@@ -67,6 +67,55 @@ class ColdTreeControls(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "canonical"):
             tree.verify_plan(forged)
 
+    def test_module_hash_is_path_identity_not_source_hash(self) -> None:
+        """The corpus producer emits distinct module-path and source hashes."""
+        rows = []
+        for module, source_path in (("Mathlib/A.lean", self.source_a), ("Mathlib/B.lean", self.source_b)):
+            rows.append({"module": module,
+                         "moduleHash": hashlib.sha256(module.encode("utf-8")).hexdigest(),
+                         "sourceHash": base.sha256(source_path)})
+        manifest = {"kind": "simp_engine_boundary_manifest", "reportSchema": 2,
+                    "allowDirty": False, "allowUnresolved": False,
+                    "allowUnclassified": False, "modules": rows}
+        depmap = {row["module"]: {"sourceHash": row["sourceHash"], "dependencies": []}
+                  for row in rows}
+        depmap["Mathlib/B.lean"]["dependencies"] = ["Mathlib.A"]
+        manifest_path = self.root / "module-hash-manifest.json"
+        dependency_path = self.root / "module-hash-dependencies.json"
+        write_json(manifest_path, manifest)
+        write_json(dependency_path, depmap)
+        self.assertNotEqual(rows[0]["moduleHash"], rows[0]["sourceHash"])
+        plan = tree.build_plan(manifest_path, dependency_path, source_root=self.sources)
+        self.assertEqual(len(plan.nodes), 2)
+
+        bad_module = json.loads(json.dumps(manifest))
+        bad_module["modules"][0]["moduleHash"] = rows[0]["sourceHash"]
+        bad_module_path = self.root / "bad-module-hash.json"
+        write_json(bad_module_path, bad_module)
+        with self.assertRaisesRegex(RuntimeError, "stale module hash"):
+            tree.build_plan(bad_module_path, dependency_path, source_root=self.sources)
+
+        bad_source = json.loads(json.dumps(manifest))
+        bad_source["modules"][0]["sourceHash"] = "0" * 64
+        bad_source_path = self.root / "bad-source-hash.json"
+        write_json(bad_source_path, bad_source)
+        with self.assertRaisesRegex(RuntimeError, "source hash mismatch"):
+            tree.build_plan(bad_source_path, dependency_path, source_root=self.sources)
+
+        conflicting_alias = json.loads(json.dumps(manifest))
+        conflicting_alias["modules"][0]["sourceSha256"] = "1" * 64
+        conflicting_path = self.root / "conflicting-source-aliases.json"
+        write_json(conflicting_path, conflicting_alias)
+        with self.assertRaisesRegex(RuntimeError, "conflicting source hashes"):
+            tree.build_plan(conflicting_path, dependency_path, source_root=self.sources)
+
+        missing_source = json.loads(json.dumps(manifest))
+        missing_source["modules"][0].pop("sourceHash")
+        missing_source_path = self.root / "module-hash-without-source-hash.json"
+        write_json(missing_source_path, missing_source)
+        with self.assertRaisesRegex(RuntimeError, "no valid source hash"):
+            tree.build_plan(missing_source_path, dependency_path, source_root=self.sources)
+
     def test_rejects_dirty_unjoined_cycle_and_source_mismatch(self) -> None:
         dirty = json.loads(self.manifest.read_text())
         dirty["allowDirty"] = True

@@ -104,13 +104,32 @@ def dotted_module(module: str) -> str:
 
 
 def _hash_field(row: Mapping[str, Any], *, label: str) -> str:
-    values = [row.get(key) for key in ("sourceHash", "moduleHash", "sourceSha256")]
+    """Read the content hash aliases carried by a manifest or plan row.
+
+    ``moduleHash`` is a separate identity: the corpus producer hashes the
+    canonical module path there, while ``sourceHash``/``sourceSha256`` hash
+    the source bytes.  Treating those fields as aliases makes an otherwise
+    valid producer manifest impossible to consume.
+    """
+    values = [row.get(key) for key in ("sourceHash", "sourceSha256")]
     found = [value for value in values if value is not None]
     if not found or any(not isinstance(value, str) or len(value) != 64 or any(char not in "0123456789abcdef" for char in value) for value in found):
         raise RuntimeError(f"{label} has no valid source hash")
     if len(set(found)) != 1:
         raise RuntimeError(f"{label} has conflicting source hashes")
     return found[0]
+
+
+def _validate_module_hash(row: Mapping[str, Any], module: str, *, label: str) -> None:
+    """Validate an optional module-path hash independently of source bytes."""
+    value = row.get("moduleHash")
+    if value is None:
+        return
+    if not isinstance(value, str) or len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        raise RuntimeError(f"{label} has an invalid module hash")
+    expected = sha256_bytes(module.encode("utf-8"))
+    if value != expected:
+        raise RuntimeError(f"{label} has a stale module hash")
 
 
 def _dependency_names(raw: Any, *, label: str) -> tuple[str, ...]:
@@ -243,6 +262,7 @@ def build_plan(
         if module in manifest_rows:
             raise RuntimeError(f"manifest contains duplicate module: {module}")
         source_hash = _hash_field(raw, label=f"manifest module {module}")
+        _validate_module_hash(raw, module, label=f"manifest module {module}")
         if raw.get("unresolved") is True or raw.get("dirty") is True or raw.get("status") in {"dirty", "unresolved"}:
             raise RuntimeError(f"manifest module is dirty or unresolved: {module}")
         manifest_rows[module] = raw
@@ -259,6 +279,7 @@ def build_plan(
                 raise RuntimeError(f"dependency map contains duplicate module: {module}")
             if raw.get("module") is not None and _canonical_module(raw["module"]) != module:
                 raise RuntimeError(f"dependency map module identity mismatch for {module}")
+            _validate_module_hash(raw, module, label=f"dependency map module {module}")
             dep_rows[module] = raw
     else:
         dep_rows = {}
@@ -280,6 +301,8 @@ def build_plan(
                     raise RuntimeError(f"dependency map key/source hash mismatch for {module}")
             if isinstance(value, Mapping) and value.get("module") is not None and _canonical_module(value["module"]) != module:
                 raise RuntimeError(f"dependency map module identity mismatch for {module}")
+            if isinstance(value, Mapping):
+                _validate_module_hash(value, module, label=f"dependency map module {module}")
             dep_rows[module] = value
     if set(dep_rows) != set(manifest_rows):
         missing = sorted(set(manifest_rows) - set(dep_rows))
@@ -389,6 +412,7 @@ def verify_plan(plan: Mapping[str, Any] | TreePlan) -> TreePlan:
         if module != key or not isinstance(raw, Mapping):
             raise RuntimeError("plan module identity is invalid")
         source_hash = _hash_field(raw, label=f"plan module {module}")
+        _validate_module_hash(raw, module, label=f"plan module {module}")
         deps = _dependency_names(raw, label=f"plan module {module}")
         if any(dep not in nodes_raw for dep in deps):
             raise RuntimeError(f"plan dependency is absent: {module}")
