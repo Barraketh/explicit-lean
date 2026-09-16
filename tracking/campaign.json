@@ -879,5 +879,18 @@
     "excludedFallback": "exact of the delaborated simp proof term (unreadable; equivalent to the retired DAG)",
     "design": "record simp's steps, not its output: (lemma|hypothesis|unfold|simproc-equation, position, direction, side-condition subtrace); replay positionally with re-matching",
     "recorderGap": "the boundary recorder currently captures Simp.Result and stats only; it does not hook Simp.Methods and never sees positions"
+  },
+  "remoteWorker": {
+    "decidedAt": "2026-09-16",
+    "provider": "scaleway",
+    "instanceType": "GP1-L",
+    "hourlyUsd": 0.8932,
+    "policy": "Try locally first (Mac, 64 GiB, 10 cores). Provision only if a local job fails on resources. Turn off and delete when not needed for an extended period; re-provision on need. No standing instance.",
+    "ruledOut": {
+      "aws": "not significantly cheaper (r7i.4xlarge $1.176/hr, 13% above Scaleway at 128 GB)",
+      "vast": "cheapest but old hardware and reclaimable; user preferred Scaleway"
+    },
+    "pricingReport": "tracking/tasks/research-cloud-pricing.md",
+    "status": "not_provisioned"
   }
 }
