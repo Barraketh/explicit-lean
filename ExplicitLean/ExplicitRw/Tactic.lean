@@ -167,24 +167,21 @@ def runDefeqStep (idx : Nat) (e : Expr) (pos : Pos) (what : String)
 def unfoldConst (idx : Nat) (c : Name) (sub : Expr) : TacticM Expr := do
   unless (← getEnv).contains c do
     stepError idx m!"`unfold {c}` names a constant that does not exist."
+  -- Check the head before unfolding, so naming the wrong constant is reported as
+  -- such rather than as whatever the subterm happened to reduce to.
+  unless sub.getAppFn.constName? == some c do
+    stepError idx m!"`unfold {c}` was applied where the head constant is \
+      `{sub.getAppFn}`."
+  -- `unfoldDefinition?` fails for plain definitions under `withReducible`, so
+  -- fall back to default transparency. Both are delta steps on `c` alone.
   match ← withReducible (unfoldDefinition? sub) with
-  | some e =>
-    unless sub.getAppFn.constName? == some c do
-      stepError idx m!"`unfold {c}` was applied where the head constant is \
-        `{sub.getAppFn}`."
-    return e
+  | some e => return e
   | none =>
-    -- `unfoldDefinition?` fails for non-recursive plain definitions under
-    -- `withReducible`; retry at default transparency, still delta only.
     match ← unfoldDefinition? sub with
-    | some e =>
-      unless sub.getAppFn.constName? == some c do
-        stepError idx m!"`unfold {c}` was applied where the head constant is \
-          `{sub.getAppFn}`."
-      return e
+    | some e => return e
     | none =>
       stepError idx m!"`unfold {c}` cannot unfold the subterm at this position; \
-        its head is `{sub.getAppFn}` and it has no delta-reduction."
+        `{c}` has no delta-reduction here."
 
 /-- Eta-reduce `fun x => f x` to `f`, failing when the subterm is not an eta-redex. -/
 def etaReduce (idx : Nat) (sub : Expr) : TacticM Expr := do
