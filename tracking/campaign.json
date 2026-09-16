@@ -268,7 +268,7 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Fix the reproduced hypothesis-context mismatch in captureGoalArtifact, preserving stock context timing and all equivalence checks; validate stock/capture/encoded replay regression cases. See tracking/REPLAY-REVIEW-2026-09-16.md.",
+    "Implement and review the three personal-review fixes in parallel with Luna high, then run focused stock/capture/encoded replay and rejection controls in an isolated workspace. Commit reviewed changes separately; preserve the existing pilot and all acceptance gates.",
     "In parallel, design bounded imported multi-helper ordering and imported auxiliary-cache representations before implementing codec extensions; do not merely remove guards.",
     "Continue monitoring the existing sole authorized AWS run through its immutable 2026-09-16T13:30:00Z cutoff. Preserve terminal evidence and clean up the exact resources; no second host or worker redispatch.",
     "Use the manifest provisionally for development as authorized by the user, while keeping independent authentication as an acceptance requirement.",
@@ -305,6 +305,11 @@
       "id": "personal-simp-replay-review",
       "status": "completed_review_fix_pending",
       "description": "Primary personally compared pinned Lean simp with active boundary recorder/replay. One reproduced local-context semantic mismatch; imported multi-helper and auxiliary-cache coverage limits identified. Report tracking/REPLAY-REVIEW-2026-09-16.md. No engine source changes or coverage advance."
+    },
+    {
+      "id": "replay-first-principles-fixes",
+      "status": "in_progress",
+      "description": "User authorized implementing personal review findings. Three Luna high agents own context recording, imported multi-helper ordering, and imported auxiliary-cache effects separately. Coordinator reviews design/diffs and commits named files; compact summary files only, no transcript reads. Focused validation will use isolated resources without modifying the active pilot."
     }
   ],
   "activeChecks": [
