@@ -124,7 +124,13 @@ def elabEquation (idx : Nat) (stx : Term) : TacticM (Expr × Expr × Expr × Arr
   let (mvars, _, type') ← forallMetaTelescopeReducing type
   let proof' := mkAppN proof mvars
   let (lhs, rhs, eqProof) ← asEquation idx lemmaMsg proof' type'
-  return (lhs, rhs, eqProof, mvars)
+  -- Metavariables can also enter through elaboration of the written term itself
+  -- (an implicit argument the syntax leaves open), not only through the
+  -- telescope above. Collect both so none can escape into the goal.
+  let fromTerm := (← instantiateMVars proof).collectMVars {} |>.result
+  let fromType := (← instantiateMVars type).collectMVars {} |>.result
+  let extra := (fromTerm ++ fromType).map Expr.mvar
+  return (lhs, rhs, eqProof, mvars ++ extra)
 
 /-- Run a rewrite step at `pos` inside `e`. -/
 def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool) :
@@ -142,7 +148,7 @@ def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool) :
       let target ← instantiateMVars target
       let h ← if symm then mkEqSymm eqProof else pure eqProof
       return Replacement.eq target h)
-    (fun pfx sub => badPosError idx pos pfx sub)
+    (fun pfx child sub => badPosError idx pos pfx child sub)
 
 /-- Run a definitional step at `pos` inside `e`, using `reduce` on the subterm. -/
 def runDefeqStep (idx : Nat) (e : Expr) (pos : Pos) (what : String)
@@ -155,7 +161,7 @@ def runDefeqStep (idx : Nat) (e : Expr) (pos : Pos) (what : String)
           not definitionally equal to the original.\nBefore{indentExpr sub}\n\
           After{indentExpr newSub}"
       return Replacement.defeq newSub)
-    (fun pfx sub => badPosError idx pos pfx sub)
+    (fun pfx child sub => badPosError idx pos pfx child sub)
 
 /-- Delta-unfold exactly the constant `c` at the head of `sub`. -/
 def unfoldConst (idx : Nat) (c : Name) (sub : Expr) : TacticM Expr := do
@@ -246,7 +252,7 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
             {remaining.length} goal(s) open."
         let h ← instantiateMVars goal
         return Replacement.eq (← instantiateMVars rhs) h)
-      (fun pfx sub => badPosError idx pos pfx sub)
+      (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwRw =>
     let symm := !stx[0].isNone
     let term : Term := ⟨stx[1]⟩
@@ -308,7 +314,7 @@ def evalExplicitRw : Tactic := fun stx => do
   runSteps steps target
   unless closeStx.isNone do
     match target with
-    | none => evalTactic closeStx[1]
+    | none => evalTactic closeStx[0][1]
     | some _ =>
       throwError "explicit_rw: the `then` closing form applies to the goal, but this \
         trace rewrites a hypothesis. Write the closing tactic on the next line."

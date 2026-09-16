@@ -92,7 +92,7 @@ offending prefix and the kind of expression that could not be descended into.
 partial def rewriteAt {m : Type → Type} [Monad m] [MonadLiftT MetaM m] [MonadControlT MetaM m]
     [MonadError m] (e : Expr) (pos : Pos)
     (k : Expr → m Replacement)
-    (onBadPos : Pos → Expr → m Replacement) : m Replacement := do
+    (onBadPos : Pos → Nat → Expr → m Replacement) : m Replacement := do
   go e pos []
 where
   go (e : Expr) (rest : Pos) (seen : Pos) : m Replacement := do
@@ -113,14 +113,14 @@ where
           let newE := .app f r.newExpr
           let p? ← (congrApp f a none r.proof? : MetaM _)
           return { newExpr := newE, proof? := p? }
-        | _ => onBadPos seen' e
+        | _ => onBadPos seen i e
       | .mdata d b =>
         -- `mdata` has a single child `0`; the spec's index is consumed here.
         if i == 0 then
           let r ← go b rest' seen'
           return { newExpr := .mdata d r.newExpr, proof? := r.proof? }
         else
-          onBadPos seen' e
+          onBadPos seen i e
       | .proj s idx b =>
         if i == 0 then
           let r ← go b rest' seen'
@@ -132,7 +132,7 @@ where
               lemma this tactic does not build. Use a definitional step, or rewrite \
               at a different position."
         else
-          onBadPos seen' e
+          onBadPos seen i e
       | .lam n ty body bi =>
         match i with
         | 0 =>
@@ -153,7 +153,7 @@ where
               -- `∀ x, body x = body' x` gives `(fun x => body x) = fun x => body' x`.
               let hAll ← (mkLambdaFVars #[x] h : MetaM _)
               return { newExpr := newBody, proof? := some (← (mkFunExt hAll : MetaM _)) }
-        | _ => onBadPos seen' e
+        | _ => onBadPos seen i e
       | .forallE n ty body bi =>
         match i with
         | 0 =>
@@ -176,7 +176,7 @@ where
                   `∀` whose body is not a `Prop`; `forall_congr` does not apply."
               let hAll ← (mkLambdaFVars #[x] h : MetaM _)
               return { newExpr := newAll, proof? := some (← (mkForallCongr hAll : MetaM _)) }
-        | _ => onBadPos seen' e
+        | _ => onBadPos seen i e
       | .letE n ty val body nonDep =>
         match i with
         | 0 =>
@@ -202,8 +202,8 @@ where
             | some _ =>
               throwError "position {Pos.render seen'} rewrites the body of a `let`; \
                 only definitional steps are supported there."
-        | _ => onBadPos seen' e
-      | _ => onBadPos seen' e
+        | _ => onBadPos seen i e
+      | _ => onBadPos seen i e
 
 /-- Describe an expression's head for error messages, without pretty-printing it. -/
 def describeHead : Expr → String
@@ -221,10 +221,11 @@ def describeHead : Expr → String
   | .lit .. => "a literal (no children)"
 
 /-- The standard "no such child" failure, phrased so the trace author can fix the path. -/
-def badPosError {m : Type → Type} [Monad m] [MonadError m] (idx : Nat) (full : Pos) (prefixPos : Pos) (e : Expr) : m Replacement :=
-  stepError idx m!"position {Pos.render full} does not exist: at prefix \
-    {Pos.render prefixPos} the subterm is {describeHead e}, which has no such child.\n\
-    Subterm: {indentExpr e}"
+def badPosError {m : Type → Type} [Monad m] [MonadError m]
+    (idx : Nat) (full : Pos) (prefixPos : Pos) (child : Nat) (e : Expr) : m Replacement :=
+  stepError idx m!"position {Pos.render full} does not exist: the subterm at prefix \
+    {Pos.render prefixPos} is {describeHead e}, so it has no child {child}.\n\
+    Subterm:{indentExpr e}"
 
 /--
 Assign every still-unassigned metavariable in `mvars` by instance synthesis, and
