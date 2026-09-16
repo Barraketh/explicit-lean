@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T07:20:07Z",
+  "updatedAt": "2026-09-16T07:43:34Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -80,8 +80,8 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-16T07:16:09Z",
-    "lastUsedPercent": 66,
+    "lastCheckedAt": "2026-09-16T07:30:19Z",
+    "lastUsedPercent": 69,
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
     "telemetrySource": "Codex app get_usage_limits",
@@ -268,7 +268,7 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Complete the fresh69-module cone: Option.Basic7 and ExistsUnique8 calls pass; Logic.Basic exit139 is under a controlled128GiB virtual-address retry; Function.Basic emitted boundary_comparison_unpaired_fresh_constant plus bad_alloc and needs mixed resource/semantic diagnosis. Preserve failed64GiB evidence; no speculative engine changes.",
+    "All seven target modules in the fresh69-module cone now pass:91 canonical calls=90 replay+1 explicit Function proof. Finish exact per-report manifest/source/manual occurrence-map validation, then run the existing69-node cold certification with128GiB virtual cap and96GiB free-memory admission, one high-memory experiment at a time.",
     "Review then run the bounded IsEmpty.Basic to Data.Option.Basic translated dependency cone using fresh identities and existing cold certification. All69 modules remain in the closure, including62 provisional zero-occurrence prerequisites. Expand only after this milestone.",
     "Use measured resource admission for focused Linux checks: the 24 GiB virtual-address cap caused bad_alloc in both unchanged baseline and patched builds; unchanged assertions/timeouts passed at 64 GiB. Preserve the 12 GiB host-memory/disk reserves and authorized host limits.",
     "Continue monitoring the existing sole authorized AWS run through its immutable 2026-09-16T13:30:00Z cutoff. Preserve terminal evidence and clean up the exact resources; no second host or worker redispatch.",
@@ -319,7 +319,7 @@
     {
       "id": "translated-isempty-option-cone-2026-09-16",
       "status": "in_progress",
-      "description": "Reviewed fresh69-node inventory and seven-target materialization running on existingAWS, SSM24160a1f-6f2f-4f3b-a0f8-675df808c335 at published748a80a. Exact script a40fe8e0dcb649b28ecf2bca549295028e5045b09be1587852fafc7b4148ca2d; copied coherent privateLinux build, CPU0-7,64GiB virtual cap,12GiB memory/disk reserve, pertarget cutoff checks and7200s document cap. All69 nodes will remain in complete source/applied inventory and cold plan; production cold script under review. First setup76e2d631 failed closed beforeinventory because embeddedlist65 did not meet69assert; preserve failedreceipt. No closureacceptance."
+      "description": "Fresh69-module manifest7eb30989630cc5b71981b904917fa8ae8105a28608f7ba518bb89e1b31604d39 confirms91 calls in7 modules. All7 target modules pass, with90 replayedcalls+1 reviewed explicit Function proof; no unobserved calls. Logic.Basic needed128GiB virtual cap and peaked68.3GB RSS; Function.Basic required narrow explicit extend_apply proof after unpaired-fresh-constant abort persisted at128GiB. Cold69-node certification pending strict per-report manifest/source/overlay/occurrence join and actual-data preflight. All62 zero-occurrence prerequisites remain in plan. Whole-tree/campaign coverage unchanged."
     }
   ],
   "activeChecks": [
@@ -622,6 +622,24 @@
       "scope": "cold_cone_preparation_review",
       "result": "driver_and_dependency_inputs_reviewed_pending_all_target_successes",
       "detail": "Reviewed ignored cold driver af1b4dc8bdea9083dd88f17d65fc57ab4a06e6dcf2c97e0e659f06c16df1c0c4 plus dependency-map69-v2 dea23e7c66625b85be5937c20410e7913b5fa6f68c4276697d001f033d9f7c0a, external edges e406421b524e84722ded42cb20a21b590c135b60e7eda1cac848292cb3e38731, join proof70392d55e0421d41b8ab20b4e626ee11b3a0a6ee9ff82cfff787f00a678c576f.69nodes and260edges partition132internal+128external withoutloss; actualbuild_plan static constructionpassed, sourcehashesmatch; inertdriver controlflow passes. Productioncoldstillundispatched. Selectedsuccessfulretry reportbinding underdesign; never overwritefailedreports."
+    },
+    {
+      "checkedAt": "2026-09-16T07:43:34Z",
+      "scope": "logic_basic_resource_control_pass",
+      "result": "passed31_calls_after128GiB_virtual_cap",
+      "detail": "SSM c9e304a8-3424-4706-b320-ca7f8de3e343 uses unchanged runtime748a80a and fresh69manifest7eb309...; report41e482192dc452536621264754fbff098ceca81e2cfec9c3e02c112407ab5468 passes31 calls/47variants/0unobserved; oracle63235837414f7a87bad50bbe8708ca7fb4df881c4bfcba58efc7fd7e2c7bfe3b passes365 declarations/47extensions. Metricsf7f820ee645bb5f9e58b2abc4a082d384346fe3e9c547c2bbe5a4f416a4a0555:157.003s, peakLean68319383552B, tree69191970816B. Prior64GiBcapexit139 preserved; no engine change."
+    },
+    {
+      "checkedAt": "2026-09-16T07:43:34Z",
+      "scope": "function_basic_explicit_proof_full_module_pass",
+      "result": "passed25_canonical_calls_and_canonical_declarations",
+      "detail": "Same semantic abort persisted under128GiB in SSM5875700f-5bd2-4180-b76a-6d2454cdaad2; no bad_alloc inboundedtail. Reviewed replacement foracca7bbba4fc669d is rw [extend_def, dif_pos (exists_apply_eq_apply f a)], preserving surrounding classical/exact and originalcomment. CandidateDB937a6f597e28937b8dc14fa587f7da548c119787dc187abaa1378acfefb01f0e passed fresh SSM90baf11f-0fee-4f7a-ac05-7a54d888ae16 at748a80a runtime. Report87a2e4ad721ab31ef6481c6d184259d02634e370e0b3cfb9ee62b428dba7fc56:24observed replay+1manual,29variants,0unobserved. Ordinaryoracle2af171d19ae0bbbe1d5e7225436c0f709f18611f0086fc1badaff4d42bca792f passes358declarations; canonicaloracle451a181d4f166d695ff32982fe0fe51760969057d0f91ef75138ce1bbeb1ae52 passes358applied/359stock,1stock-onlyprivateproof,290public/51extensions underunchangedpolicy. Sourceedceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe;1modulemanifestbf640d2208874772ae6e675af8315c1120a430254cb39bb6123c75df3bc5aba7 hascompletecanonical rowequalfresh69. RawfetchedJSONs independentlyreviewed. DB21entries/17modules andcheckerreviewed; no cold/treeacceptanceyet."
+    },
+    {
+      "checkedAt": "2026-09-16T07:43:34Z",
+      "scope": "aws_authentication_refresh",
+      "result": "restored_designated_profile_account",
+      "detail": "Polling OAuthINVALID_REQUEST blockedlocalAWS access whileFunctionexperimentcontinueduntouched. Normalaws login --profile explicit-lean-pilot completed; freshSTS confirmsaccount538639825139 and designatednonroot explicit-lean-operator. No tokenscopied, alternateprofile, host, workerredispatch, credit, or cutoffchange. InvalidFunctionlaunch e448efb6 failedhashguard beforematerialization and remains unaccepted."
     }
   ],
   "historicalAutomation": {

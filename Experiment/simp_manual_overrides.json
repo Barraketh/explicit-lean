@@ -161,6 +161,15 @@
       "startByte": 6005
     },
     {
+      "endByte": 36120,
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe",
+      "occurrence": "acca7bbba4fc669d",
+      "replacement": "rw [extend_def, dif_pos (exists_apply_eq_apply f a)]",
+      "source": "simp only [extend_def, dif_pos, exists_apply_eq_apply]",
+      "startByte": 36066
+    },
+    {
       "endByte": 6823,
       "module": "Mathlib/Logic/Relation.lean",
       "moduleSourceSha256": "4023e2e4241e0bcaf297686c8d167351da1b990dfc0cc97491dbc969abaf018c",
