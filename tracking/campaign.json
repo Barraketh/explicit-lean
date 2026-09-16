@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T08:14:05Z",
+  "updatedAt": "2026-09-16T08:29:09Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -656,6 +656,12 @@
       "scope": "cold69_planner_hash_identity_fix",
       "result": "reviewed_published_pending_linux_retry",
       "detail": "Cold SSMd1ef8694-9e02-4937-b16a-12ac67759a8a prepared69bundles then failed before compilation: cold planner incorrectly treated moduleHash(name digest) as sourceHash(content digest). Immutable manifest retained. Fix8fc1fa16b27f22c6a9f0610b4976af3f69454580 validates module name hashes separately and retains sourceHash/sourceSha256 consistency and dependency byte hash checks. Six self-contained Python tests pass including malformed identity/content cases; separate actualfresh69 local build_plan produces69nodes/order. Coordinator reviewed finaldiff and published. New private fixed Linux runtime and separate fresh output namespace required; no coldacceptance yet. Exactfailedreceipt SHA3280ff22d1bc6fc10c3c77d1e7acdb7a4905731e575f444e5c564436f94d7583."
+    },
+    {
+      "checkedAt": "2026-09-16T08:29:09Z",
+      "scope": "cold69_frontend_option_parity",
+      "result": "fix_published_linux_retry_pending",
+      "detail": "Corrected-planner runtime8fc cold SSMb77e8a15-c596-49ba-9b70-80a8e7d2f177 produced37completed module receipts, then ordinary-applied Mathlib.Logic.ExistsUnique169b982dbeae7fd9 failed boundary_variant_missing. Target/local/mctx/goalCount matched; options differed expected5367831945599674614 versusactual1602334101987177386. Cold ordinary frontend omitted7Mathlib package options used by recorder/native tools. Published fix9ac3f62c6562ba47ecd536bb7b049b86f69e63c8 reuses canonical package option arguments and keeps verification controls. Independent Python check reads pinned native Lean definitions and confirms14option map parity withduplicate-name rejection. Strict selectors unchanged. Coordinator reviewed/published; newprivate Linux runtime, targeted diagnostic thenfresh69coldpending. Failure receiptb2f4f936fa787d461323693812fb6743f83a61a780cfcecbdb2eecaab31cd4b1. No fullcone acceptance; usage77%ordinaryallowed/nospendstop."
     }
   ],
   "historicalAutomation": {
