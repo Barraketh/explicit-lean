@@ -5,15 +5,15 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T06:23:24Z",
+  "updatedAt": "2026-09-16T06:47:38Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
-    "natLeRecSelf": "committed_with_this_plan_update_runtime_acceptance_pending_unpushed",
+    "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
     "inventoryHeaderControls": "passed_2026-09-16_before_final_python_channel_change_not_rerun",
-    "cloudDispatch": "authorization_promoted_live_gates_passed_pending_clean_published_ref",
-    "natOverrideChecks": "lightweight_passed_corrected_stdin_probe_passed_no_module_oracle_cold_acceptance"
+    "cloudDispatch": "one authorized worker active on existing host; no redispatch",
+    "natOverrideChecks": "AWS candidate 5 canonical calls: 4 observed replay plus 1 manual replacement; declaration oracle success 139 declarations, 47 extensions; whole-tree acceptance zero"
   },
   "cloudPreparation": {
     "status": "single_worker_dispatched_monitoring_exact_run_until_cutoff_or_terminal_teardown",
@@ -80,12 +80,12 @@
     "initialWindowResetsAt": 1788764817,
     "initialUsedPercent": 1,
     "guardCommand": "python3 Experiment/campaign_budget.py check",
-    "lastCheckedAt": "2026-09-12T18:23:10+00:00",
-    "lastUsedPercent": 64,
+    "lastCheckedAt": "2026-09-16T06:45:03Z",
+    "lastUsedPercent": 61,
     "ordinaryUsageAllowed": true,
     "lastDecision": "continue",
-    "telemetrySource": "Codex app get_usage_limits followed by campaign_budget.py check",
-    "note": "Fresh post-terminal telemetry reported ordinary usage available at 64%. The former 25%/22% project budget is obsolete. The one authorized replacement pilot is terminal and its compute, volume and stack are deleted. No further host is authorized. Reset credits exist but must not be redeemed. No credit was bought or redeemed."
+    "telemetrySource": "Codex app get_usage_limits",
+    "note": "Ordinary account work available; no spend stop. One existing authorized AWS host only, immutable cutoff 2026-09-16T13:30:00Z. No credits bought or redeemed."
   },
   "direction": {
     "userConversationDate": "2026-09-10",
@@ -268,12 +268,11 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Run the three original foundation-module baselines on the existing AWS host from the newly published replay fixes; record exact failures or full module/declaration acceptance. Diagnose and fix independent failures with Luna high while respecting file ownership and measured resource admission.",
-    "After foundation retries pass, select and validate a small translated dependency slice using only accepted predecessor translations. Then expand dependency-ordered coverage within the one authorized pilot window; report focused checks separately from whole-tree acceptance.",
+    "Finish fresh Relation full-module/declaration validation of reviewed explicit fun_eq_comp replacement; fix any new failure, review and commit named files. IsEmpty.Basic and Nat.Init module retries passed; retain exact source/overlay identities and receipts.",
+    "Review then run the bounded IsEmpty.Basic to Data.Option.Basic translated dependency cone using fresh identities and existing cold certification. All69 modules remain in the closure, including62 provisional zero-occurrence prerequisites. Expand only after this milestone.",
     "Use measured resource admission for focused Linux checks: the 24 GiB virtual-address cap caused bad_alloc in both unchanged baseline and patched builds; unchanged assertions/timeouts passed at 64 GiB. Preserve the 12 GiB host-memory/disk reserves and authorized host limits.",
     "Continue monitoring the existing sole authorized AWS run through its immutable 2026-09-16T13:30:00Z cutoff. Preserve terminal evidence and clean up the exact resources; no second host or worker redispatch.",
     "Use the manifest provisionally for development as authorized by the user, while keeping independent authentication as an acceptance requirement.",
-    "Retry affected cases and validate the committed Nat.leRec_self override at module/declaration/downstream scope when resources permit. No whole-tree acceptance is established.",
     "Expand dependency-ordered coverage and complete whole-tree acceptance before readability work."
   ],
   "work": [
@@ -304,8 +303,8 @@
     },
     {
       "id": "personal-simp-replay-review",
-      "status": "completed_review_fix_pending",
-      "description": "Primary personally compared pinned Lean simp with active boundary recorder/replay. One reproduced local-context semantic mismatch; imported multi-helper and auxiliary-cache coverage limits identified. Report tracking/REPLAY-REVIEW-2026-09-16.md. No engine source changes or coverage advance."
+      "status": "completed",
+      "description": "Primary review complete; resulting fixes implemented and validated in replay-first-principles-fixes. See tracking/REPLAY-REVIEW-2026-09-16.md."
     },
     {
       "id": "replay-first-principles-fixes",
@@ -315,7 +314,12 @@
     {
       "id": "foundation-module-retries-2026-09-16",
       "status": "in_progress",
-      "description": "User approved original-module retries after replay fixes. Luna high runner owns fresh isolated AWS reproduction of Mathlib.Logic.Relation, Mathlib.Logic.IsEmpty.Basic and Mathlib.Data.Nat.Init including Nat.leRec_self override; Luna high semantic owner diagnoses source/failure evidence in parallel. Coordinator owns architectural decisions, diff review and commits, reads only compact summaries/evidence. Start with exact published sources, fresh namespaces/nonces, 64 GiB virtual limit and 12 GiB host memory/disk reserve. Retain strict module/declaration checks; then certify a bounded translated dependency slice before expanding. Existing pilot/verifier untouched; deadline unchanged; no new acceptance claimed."
+      "description": "Fresh isolated Linux baseline at published748a80a: IsEmpty.Basic passed17 calls and89 declarations; Nat.Init passed4 replay calls plus1 manual replacement and139 declarations. Relation reproduced activation_nonempty_aux_cache at40d00689f4eea47b; reviewed explicit proof candidate now undergoing full module/declaration checks. No global authenticated coverage credit. Luna high source/runner agents communicate compact summaries and immutable evidence only; coordinator reviews diffs and commits. First Relation candidate bypassed original call but failed at next c5cb8f8547aab49 with the same cache activation diagnostic; grouped explicit-proof analysis continues."
+    },
+    {
+      "id": "translated-isempty-option-cone-2026-09-16",
+      "status": "planning",
+      "description": "Selected bounded IsEmpty.Basic to Data.Option.Basic dependency cone:69 Mathlib modules, provisional91 calls in7 modules and62 zero-occurrence prerequisites. Prepare fresh inventory, exact dependency/source identities, source materialization and existing cold_certified_tree production checks. No cone dispatch or acceptance yet; do not weaken translated-import/declaration/publication checks."
     }
   ],
   "activeChecks": [
@@ -576,6 +580,18 @@
       "scope": "replay_fixes_final_acceptance",
       "result": "passed_focused_runtime_wire_and_compatibility",
       "detail": "Production RealizationCodec SHA25609256c80d85f54e7c0a91445b2e790d7794ccf686c4290878d23d03bd2523896 shares local/imported cache proof validation. Imported aux runtime SSM51448ff5-f95e-4e4d-8caa-0edc70c4e26c Success/0 (10.904s): record/replay and erase/type/name rejection controls; final runtime checker e7f3b035e61668fdd915ed89cd69f330dfc970eb6404851dbc24a07f7a048efe. Wire-only correction e324654aa6733ae3005c0be3a76932201d8fec7fb30f59609055d5ec53be632f passed six mutations plus format/Unicode canonical controls, SSMcd73a357-e953-49d6-aad9-5f53cbe8fd3f Success/0, artifact SHA25659d0f460168f6b9712e56a04adcd87a2a41d1b52148c187fe1f9ac267855c835. Existing local aux SSMeb92cfcd-ec81-4a95-a70b-e7507e7d2b5a Success/0 (227.871s):12 modes, two record/replay examples and wire rejections; report bda4df54a169336b97404a2ceab53f3091dc7656d68a9a66f7572beb9de5bfee. Existing realization groups SSMbae7b1aa-20fa-4c42-be9d-87b259830580 Success/0 (30.7s), report82cf0f1c2e47f4b91e9dceeafd03c0bf017b6d1e276b28a621674a82fc6ebe9c. All used the same existing host and isolated snapshot, with fresh admission and 64 GiB virtual cap after baseline also failed at24 GiB. Aux peak RSS12599660 KiB, VSZ31163124 KiB. Main pilot/cutoff unchanged; module/tree acceptance remains zero."
+    },
+    {
+      "checkedAt": "2026-09-16T06:45:03Z",
+      "scope": "foundation_module_baselines",
+      "result": "isempty_nat_pass_relation_failure_reproduced_candidate_pending",
+      "detail": "SSM11a85fdf-4556-42f0-9d4a-20b5c41ccc19, isolated published748a80a snapshot. IsEmpty17/17 observed, declaration oracle success89 declarations/14 extensions; report2d4bb82186edab6d27190beb7e314b4b122b1242822ef735653fd5dd0e462b32, oracle5c30dcba0502cdc523a7fcc258835f8fb958f1141cba4da60384bfeb2e7a17df. Nat5 canonical calls=4 observed replay+1 manual replacement, oracle success139 declarations/47 extensions; reportd0a6747263faf50452fe1c3d0c0be5a5c2eef2d99c4c735723d3d84210a6cc37, oracleb50d63cc39b90a262e4695deb7891960121780f918dac154b8c23511c285ac28. Relation failed post_stock activation_nonempty_aux_cache at40d00689f4eea47b; reviewed candidate DB951a33ad39490161b0ba9298f411113ef610f10278ff3e5a784bfef89b29af04 under fresh SSM6db95c9a-313b-49dc-a462-4ccf0332c309. Candidate results provisional, distinct from authenticated campaign and cold translated-tree acceptance; coverage counters unchanged."
+    },
+    {
+      "checkedAt": "2026-09-16T06:47:38Z",
+      "scope": "relation_first_explicit_candidate",
+      "result": "failed_next_occurrence_not_accepted",
+      "detail": "SSM6db95c9a-313b-49dc-a462-4ccf0332c309 wrapper Success/0 but materializer exit1, no report. Exact DB951a33ad39490161b0ba9298f411113ef610f10278ff3e5a784bfef89b29af04 bypassed40d00689f4eea47b and failed post_stock activation_nonempty_aux_cache atc5cb8f8547aab49. Preserve raw failure. Original source/replacement checker diff reviewed; no override commit or module acceptance."
     }
   ],
   "historicalAutomation": {
