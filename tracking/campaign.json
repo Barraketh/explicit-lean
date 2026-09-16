@@ -1,22 +1,22 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "focused_cone_blocked_style_decision_main_worker_terminal",
+  "phase": "aws_run_closed_69_module_milestone_incomplete",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T09:46:35Z",
+  "updatedAt": "2026-09-16T10:08:47Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
     "inventoryHeaderControls": "passed_2026-09-16_before_final_python_channel_change_not_rerun",
-    "cloudDispatch": "Sole worker Failed rc1 at 2026-09-16T09:25:50.885Z. Exact failure cause unknown because SSM output is truncated; storage and memory stop messages are test fixtures. No restart authorized; existing host and cutoff preserved.",
+    "cloudDispatch": "Sole worker Failed rc1 during manifest verification (fresh syntax inventory mismatch in Mathlib/CategoryTheory/Types/Basic.lean). Evidence preserved. Authorized stack removed; instance terminated and volume absent. No replacement or redispatch authorized.",
     "natOverrideChecks": "AWS candidate 5 canonical calls: 4 observed replay plus 1 manual replacement; declaration oracle success 139 declarations, 47 extensions; whole-tree acceptance zero"
   },
   "cloudPreparation": {
-    "status": "main_worker_terminal_focused_cone_pending_style_decision",
+    "status": "closed_terminal_evidence_verified_resources_deleted",
     "provider": "aws",
     "account": "538639825139",
     "region": "us-west-1",
@@ -41,17 +41,31 @@
     "instanceId": "i-05bfce721923eb190",
     "workerCommandId": "64b1d21b-111f-4231-938f-0ed933663d58",
     "workerDispatchedAt": "2026-09-16T01:48:02Z",
-    "workerStatus": "terminal_failed_rc1",
+    "workerStatus": "terminal_failed_manifest_inventory_mismatch",
     "evidencePrefix": ".lake/search-free-mathlib/aws-linux-pilot/runs/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a/",
     "statePath": ".lake/search-free-mathlib/aws-linux-pilot/runs/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a.json",
-    "monitoring": "monitor-bounded-mathlib-linux-experiment every 15 minutes, quiet unless meaningful change; exact run only, no redispatch, second host, or cutoff extension",
+    "monitoring": {
+      "automationId": "monitor-bounded-mathlib-linux-experiment",
+      "status": "PAUSED",
+      "reason": "Terminal evidence verified and exact authorized resources removed"
+    },
     "priorClosedAuthorizationPreserved": true,
     "noProvisioningPerformed": false,
     "lastDiagnosticAt": "2026-09-16T03:39:58Z",
     "lastDiagnosticCommandId": "806ec041-2f84-4dc2-9e43-0b8fab3cd4fd",
-    "lastObservedPhase": "terminal_failed_cause_unknown_truncated_ssm",
-    "lastObservedStageDetail": "Terminal SSM rc1, no worker restart. Guest timer confirmed 13:30Z; memory and disk reserves available at 09:40:21Z.",
-    "workerEndedAt": "2026-09-16T09:25:50.885Z"
+    "lastObservedPhase": "closed",
+    "lastObservedStageDetail": "Full archive verified; exact stack and scheduler absent, instance terminated, original volume gone.",
+    "workerEndedAt": "2026-09-16T09:25:50.885Z",
+    "cleanup": {
+      "checkedAt": "2026-09-16T10:07:03.823861+00:00",
+      "stackName": "explicit-lean-pilot-5145cfbff9ba1b2e99648c04691f8b92265f41a3",
+      "stackState": "absent",
+      "instanceState": "terminated",
+      "volumeId": "vol-028d6607f37e4a568",
+      "volumeState": "absent",
+      "receiptSha256": "930b160be00c324a79ffa0dfc13abf1613637ff3b5dfb96de6ccb0a091ef45db",
+      "receiptS3VersionId": "RGohI570U_4J0_Rzjao4O.HeAK1N.OVD"
+    }
   },
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
@@ -269,11 +283,11 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Await the explicit user decision on bounded EOF linter.style.longFile allowances for generated proof files. The concrete IsEmpty candidate has 7,113 lines and a limit of 7,300 after all proofs. Do not infer approval from elapsed time.",
-    "If approved, delegate bounded EOF annotations and authenticated regeneration to Luna high. Complete fresh 69-module cold certification and the final dependent consumer check, keeping all oracle, selector, metadata and import checks unchanged.",
-    "After the 69-module milestone, stop development and finalize the handoff as requested. Do not expand coverage. Current state remains incomplete: 42 cold certificates, all seven targets individually passed.",
-    "Preserve the terminal main-worker logs and report its actual failure cause. Never infer that cause from test-fixture storage_stop messages in truncated SSM output. Do not restart the worker.",
-    "Preserve the existing AWS monitor and enforce the immutable 2026-09-16T13:30:00Z cutoff, $20 cap and single-host authorization."
+    "Await the pending user decision on bounded generated-file EOF length allowances. No allowance has been applied or compiled.",
+    "Obtain new user authorization before any new AWS host or experiment. The one authorized run is terminal and its resources are deleted; no replacement or worker redispatch is authorized.",
+    "If the style decision and required compute authorization are resolved, complete authenticated regeneration, fresh 69-module cold certification, and the final consumer check with unchanged selector/oracle/import/metadata checks.",
+    "After all 69 modules compile and certify together, stop and finalize handoff as requested. Current milestone remains incomplete at 42 cold certificates; all seven targets individually passed.",
+    "Future investigation may compare the preserved fresh inventory for Mathlib/CategoryTheory/Types/Basic.lean to diagnose the main-run verifier failure. Do not alter frozen evidence or treat provisional manifest trust as acceptance."
   ],
   "work": [
     {
@@ -699,6 +713,19 @@
       "versionId": "JYD6OwvdmEIk2_m41X.bekZEoewPNbjW",
       "sha256": "2b64a6f53ac09983781645e5de7665b78bea118a3743c435c2e8e66a777d72bc",
       "bytes": 402895
+    },
+    {
+      "checkedAt": "2026-09-16T10:08:47Z",
+      "scope": "authorized_aws_terminal_cleanup",
+      "result": "complete",
+      "mainRunFailure": "manifest recompute: fresh syntax inventory differs for Mathlib/CategoryTheory/Types/Basic.lean",
+      "archiveBytes": 10871376,
+      "archiveSha256": "efa80b289d6696e566802c2bc0e204ec399a1d8e9cc697c4d96ec82a4d87c9c6",
+      "archiveS3VersionId": "JehDMVnVRXu_uvhf.UtS0XyrOoNawqdT",
+      "exitCode": 1,
+      "evidenceUploadFailed": false,
+      "cleanupReceiptSha256": "930b160be00c324a79ffa0dfc13abf1613637ff3b5dfb96de6ccb0a091ef45db",
+      "wholeTreeAcceptanceAdvanced": false
     }
   ],
   "historicalAutomation": {

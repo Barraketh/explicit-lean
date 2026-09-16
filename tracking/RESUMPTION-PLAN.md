@@ -1,3 +1,22 @@
+# Current status — September 16, 10:07 UTC
+
+The authorized AWS run is closed. The sole worker failed manifest verification:
+fresh syntax inventory differs for `Mathlib/CategoryTheory/Types/Basic.lean`.
+Terminal evidence is archived and verified; the exact authorized stack and
+scheduler are absent, instance `i-05bfce721923eb190` is terminated, and volume
+`vol-028d6607f37e4a568` is gone. No replacement or restart is authorized.
+
+Use [the current handoff](HANDOFF-2026-09-16.md) and `campaign.json` for current
+work. The requested 69-module milestone is incomplete (42 cold certificates).
+Formatter commit `2a1d30c` passed focused Python and native syntax/value checks;
+bounded generated-file length allowances await the user's decision. New AWS
+experiments require fresh authorization. Once the 69 modules compile and
+certify together, stop and hand off; do not expand coverage.
+
+The plan below is historical and does not authorize new dispatches.
+
+---
+
 # Local verifier resumption plan
 
 This plan covers the current bounded local batch and the separately recorded
