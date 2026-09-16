@@ -159,6 +159,33 @@
       "replacement": "rw [Nat.leRec] <;> apply dif_neg <;> intro h <;> exact (Nat.not_succ_le_self _) h",
       "source": "simp [leRec, Or.by_cases, dif_neg]",
       "startByte": 6005
+    },
+    {
+      "endByte": 6823,
+      "module": "Mathlib/Logic/Relation.lean",
+      "moduleSourceSha256": "4023e2e4241e0bcaf297686c8d167351da1b990dfc0cc97491dbc969abaf018c",
+      "occurrence": "40d00689f4eea47b",
+      "replacement": "constructor\n  · intro h\n    rcases h with ⟨b, hfb, hby⟩\n    cases hfb\n    exact hby\n  · intro h\n    exact ⟨f x, rfl, h⟩",
+      "source": "simp [Comp]",
+      "startByte": 6812
+    },
+    {
+      "endByte": 9741,
+      "module": "Mathlib/Logic/Relation.lean",
+      "moduleSourceSha256": "4023e2e4241e0bcaf297686c8d167351da1b990dfc0cc97491dbc969abaf018c",
+      "occurrence": "9872295221928046",
+      "replacement": "exact ⟨(fun h => by rcases h with ⟨a', b', hab, hfa, hgb⟩; cases hf hfa; cases hg hgb; exact hab), (fun hab => ⟨a, b, hab, rfl, rfl⟩)⟩",
+      "source": "simp [Relation.Map, hf.eq_iff, hg.eq_iff]",
+      "startByte": 9700
+    },
+    {
+      "endByte": 9849,
+      "module": "Mathlib/Logic/Relation.lean",
+      "moduleSourceSha256": "4023e2e4241e0bcaf297686c8d167351da1b990dfc0cc97491dbc969abaf018c",
+      "occurrence": "002698477f8acd5f",
+      "replacement": "rename_i a b; exact ⟨(fun h => by rcases h with ⟨a', b', hab, ha, hb⟩; cases ha; cases hb; exact hab), (fun hab => ⟨a, b, hab, rfl, rfl⟩)⟩",
+      "source": "simp [Relation.Map]",
+      "startByte": 9830
     }
   ]
 }

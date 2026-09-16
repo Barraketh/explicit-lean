@@ -18,8 +18,13 @@ import simp_manual_overrides as overrides
 
 ROOT = Path(__file__).resolve().parents[1]
 TIMEOUT = 900
-EXPECTED_OVERRIDE_COUNT = 17
-EXPECTED_MODULE_COUNT = 15
+EXPECTED_OVERRIDE_COUNT = 20
+EXPECTED_MODULE_COUNT = 16
+REQUIRED_OVERRIDE_OCCURRENCES = frozenset({
+    "40d00689f4eea47b",
+    "9872295221928046",
+    "002698477f8acd5f",
+})
 IMPLEMENTATION_PATHS = tuple(
     ROOT / "Experiment" / name
     for name in (
@@ -102,6 +107,13 @@ def assert_expected_cardinality(entries: list[dict[str, object]]) -> None:
         raise RuntimeError(
             "manual override checker expected exactly "
             f"{EXPECTED_MODULE_COUNT} modules, found {module_count}"
+        )
+    occurrences = {str(entry["occurrence"]) for entry in entries}
+    missing = REQUIRED_OVERRIDE_OCCURRENCES - occurrences
+    if missing:
+        raise RuntimeError(
+            "manual override checker is missing required entries: "
+            + ", ".join(sorted(missing))
         )
 
 
@@ -231,7 +243,7 @@ def negative_controls(database: Path, work: Path) -> None:
     try:
         assert_expected_cardinality(overrides.load(path))
     except RuntimeError as error:
-        if "expected exactly 17 entries" not in str(error):
+        if "expected exactly 20 entries" not in str(error):
             raise
     else:
         raise RuntimeError("manual override database accepted a missing entry")
