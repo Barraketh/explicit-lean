@@ -1,0 +1,29 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "trivial"
+      },
+      "steps": [
+        {
+          "kind": "eq",
+          "pos": [
+            0,
+            1
+          ],
+          "source": "Nat.reduceAdd",
+          "by": "rfl"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

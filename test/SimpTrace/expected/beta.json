@@ -1,0 +1,27 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "trivial"
+      },
+      "steps": [
+        {
+          "kind": "beta",
+          "pos": [
+            0,
+            1
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

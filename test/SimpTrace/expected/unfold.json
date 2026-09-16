@@ -1,0 +1,28 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "trivial"
+      },
+      "steps": [
+        {
+          "kind": "unfold",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "ExplicitLean.SimpTrace.Fixtures.myId"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

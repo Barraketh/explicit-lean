@@ -1,0 +1,57 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "trivial"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "name": "ctx:3",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1,
+            0
+          ],
+          "name": "true_and",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1,
+            1
+          ],
+          "name": "ctx:4",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1
+          ],
+          "name": "implies_true",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "implies_true",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

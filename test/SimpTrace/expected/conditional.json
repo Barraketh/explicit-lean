@@ -1,0 +1,45 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "trivial"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "Nat.sub_add_cancel",
+          "dir": "fwd",
+          "side": [
+            {
+              "goal": "n ≤ m",
+              "steps": [
+                {
+                  "kind": "rw",
+                  "pos": [],
+                  "name": "h",
+                  "dir": "fwd"
+                }
+              ],
+              "close": {
+                "by": "assumption:h"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

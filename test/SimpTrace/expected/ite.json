@@ -1,0 +1,71 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "trivial"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            1
+          ],
+          "name": "h",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1
+          ],
+          "name": "h",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1,
+            0,
+            0,
+            0,
+            1
+          ],
+          "name": "eq_self",
+          "dir": "fwd"
+        },
+        {
+          "kind": "eq",
+          "pos": [
+            0,
+            1
+          ],
+          "source": "reduceIte",
+          "by": "rfl"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

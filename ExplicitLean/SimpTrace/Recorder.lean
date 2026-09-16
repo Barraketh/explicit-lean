@@ -221,6 +221,13 @@ def instrumentDischarge (ref : RecorderRef) (d : Simp.Discharge) : Simp.Discharg
     match result with
     | none => return none
     | some proof =>
+      -- The side goal and its steps carry metavariables that the lemma match
+      -- assigns; instantiate them so recorded terms are ground.
+      let e ← instantiateMVars e
+      let nested ← nested.mapM fun st => do
+        return { st with
+          before := ← instantiateMVars st.before
+          after := ← instantiateMVars st.after }
       let by_ ← describeProof proof nested
       let sideRec : RawSide := { goal := e, steps := nested, by_ }
       ref.modify fun (s : RecorderState) =>
