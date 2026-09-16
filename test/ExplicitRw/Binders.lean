@@ -69,4 +69,18 @@ theorem lambda_explicit_arg_conv (f : Nat → Nat) :
     (fun x => f x + 0) = (fun x => f x) := by
   conv => lhs; ext x; rw [Nat.add_zero (f x)]
 
+/-! ## The domain of a non-dependent arrow
+
+`implies_congr_left` rewrites `p → q` on the left without touching `q`. A
+dependent `∀ x : p, q x` is refused instead; see `test/ExplicitRw/Negative.lean`.
+-/
+
+theorem arrow_domain (p q : Prop) (h : p = q) : (p → False) = (q → False) := by
+  explicit_rw [h at [0, 1, 0]]
+  guard_target =ₛ (q → False) = (q → False)
+  rfl
+
+theorem arrow_domain_conv (p q : Prop) (h : p = q) : (p → False) = (q → False) := by
+  conv => lhs; arg 1; rw [h]
+
 end ExplicitRwTest.Binders

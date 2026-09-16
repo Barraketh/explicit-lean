@@ -287,7 +287,18 @@ def runSteps (steps : Array (TSyntax ``explicitRwStep)) (target : Target) : Tact
       let e ← match target with
         | none => instantiateMVars (← goal.getType)
         | some fvarId => instantiateMVars (← fvarId.getType)
-      let r ← runStep idx e stx
+      -- Navigation errors are raised inside `rewriteAt`, which does not know the
+      -- step index. Prefix any message that does not already carry it, so every
+      -- failure names the step it came from.
+      let r ←
+        try
+          runStep idx e stx
+        catch ex => do
+          let msg ← ex.toMessageData.toString
+          if msg.startsWith "explicit_rw:" then
+            throw ex
+          else
+            stepError idx ex.toMessageData
       let newE ← instantiateMVars r.newExpr
       match target with
       | none =>

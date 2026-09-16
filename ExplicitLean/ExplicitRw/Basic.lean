@@ -160,10 +160,24 @@ where
           let r ← go ty rest' seen'
           match r.proof? with
           | none => return { newExpr := .forallE n r.newExpr body bi, proof? := none }
-          | some _ =>
-            throwError "position {Pos.render seen'} rewrites the domain of a \
-              `∀`/`→`; rebuilding that needs `implies_congr`-style casts for a \
-              dependent body. Only definitional steps are supported there."
+          | some h =>
+            -- A non-dependent arrow `p → q` is safe: `implies_congr_left` rewrites
+            -- the domain without touching `q`. A genuinely dependent `∀ x : p, q x`
+            -- would need to transport `q` along the domain equality, which is a
+            -- cast this tactic deliberately does not build.
+            if body.hasLooseBVars then
+              throwError "position {Pos.render seen'} rewrites the domain of a \
+                dependent `∀`, whose body mentions the bound variable; rebuilding \
+                that needs a cast of the body along the domain equality, which \
+                `explicit_rw` does not build. Only definitional steps are supported \
+                there."
+            unless ← (isProp ty : MetaM _) do
+              throwError "position {Pos.render seen'} rewrites the domain of an \
+                arrow whose domain is not a `Prop`; `implies_congr_left` does not \
+                apply."
+            -- `q` is not determined by `h`, so name it explicitly.
+            let p ← (mkAppOptM ``implies_congr_left #[none, none, body, h] : MetaM _)
+            return { newExpr := .forallE n r.newExpr body bi, proof? := some p }
         | 1 =>
           withLocalDecl n bi ty fun x => do
             let r ← go (body.instantiate1 x) rest' seen'

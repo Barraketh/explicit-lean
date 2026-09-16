@@ -112,6 +112,21 @@ error: explicit_rw: step 1: `unfold ExplicitRwTest.Negative.double` was applied 
 example (a : Nat) : a + a = a + a := by
   explicit_rw [unfold double at [0, 1]]
 
+/-! ## The domain of a *dependent* `∀` is refused
+
+Rewriting `p` in `∀ x : p, q x` would need the body transported along the domain
+equality. `explicit_rw` does not build that cast, so it refuses rather than
+producing an ill-typed term.
+-/
+
+/--
+error: explicit_rw: step 1: position [0, 1, 0] rewrites the domain of a dependent `∀`, whose body mentions the bound variable; rebuilding that needs a cast of the body along the domain equality, which `explicit_rw` does not build. Only definitional steps are supported there.
+-/
+#guard_msgs in
+example (p q : Prop) (r : p → Prop) (h : p = q) :
+    (∀ x : p, r x) = (∀ x : p, r x) := by
+  explicit_rw [h at [0, 1, 0]]
+
 /-! ## `at *` is refused: positions are relative to one location -/
 
 /--
