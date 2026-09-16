@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T08:05:08Z",
+  "updatedAt": "2026-09-16T08:14:05Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -650,6 +650,12 @@
       "scope": "cold69_actual_artifact_preflight",
       "result": "passed_full_cold_authorized",
       "detail": "Exact first Python heredoc from driver55edb8952897f031f0eb0f459257cc15fab9ca3aefa8ba3ed0b1f98d8e91cb29 passed against actual AWS artifacts in SSMaae86f4f-8d66-4483-9790-c65288d784d9, producing69-module/7-target bundle map ac2682ef5f5b9d95a6b6e61affbf383a5f85b1e145c9b60eb7c17bd555c610c2. Narrow native auditor build fc9f9e7c-245f-4d91-bef9-f0fe016599e4 passed at748a80a; Linux ELF SHA5da177aa8caea5d6c70de50582aa199bdf1b0f92b8d327c35571c9d6584ba024. Coordinator reviewed compact receipt92a8da680628769b161a0b8f2c705d787403620f48f01b013af6fa6db04d5885 and authorized full cold69 plus final consumer smoke, subject to fresh96GiB memory/12GiB disk and existing cutoff. Usage ordinaryAllowedtrue74%used/no stop. No cold acceptance yet. Stop after milestone and handoff; no coverage expansion."
+    },
+    {
+      "checkedAt": "2026-09-16T08:14:05Z",
+      "scope": "cold69_planner_hash_identity_fix",
+      "result": "reviewed_published_pending_linux_retry",
+      "detail": "Cold SSMd1ef8694-9e02-4937-b16a-12ac67759a8a prepared69bundles then failed before compilation: cold planner incorrectly treated moduleHash(name digest) as sourceHash(content digest). Immutable manifest retained. Fix8fc1fa16b27f22c6a9f0610b4976af3f69454580 validates module name hashes separately and retains sourceHash/sourceSha256 consistency and dependency byte hash checks. Six self-contained Python tests pass including malformed identity/content cases; separate actualfresh69 local build_plan produces69nodes/order. Coordinator reviewed finaldiff and published. New private fixed Linux runtime and separate fresh output namespace required; no coldacceptance yet. Exactfailedreceipt SHA3280ff22d1bc6fc10c3c77d1e7acdb7a4905731e575f444e5c564436f94d7583."
     }
   ],
   "historicalAutomation": {
