@@ -1,22 +1,22 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "bounded_aws_pilot_worker_active",
+  "phase": "focused_cone_blocked_style_decision_main_worker_terminal",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T09:25:23Z",
+  "updatedAt": "2026-09-16T09:46:35Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
     "inventoryHeaderControls": "passed_2026-09-16_before_final_python_channel_change_not_rerun",
-    "cloudDispatch": "one authorized worker active on existing host; no redispatch",
+    "cloudDispatch": "Sole worker Failed rc1 at 2026-09-16T09:25:50.885Z. Exact failure cause unknown because SSM output is truncated; storage and memory stop messages are test fixtures. No restart authorized; existing host and cutoff preserved.",
     "natOverrideChecks": "AWS candidate 5 canonical calls: 4 observed replay plus 1 manual replacement; declaration oracle success 139 declarations, 47 extensions; whole-tree acceptance zero"
   },
   "cloudPreparation": {
-    "status": "single_worker_dispatched_monitoring_exact_run_until_cutoff_or_terminal_teardown",
+    "status": "main_worker_terminal_focused_cone_pending_style_decision",
     "provider": "aws",
     "account": "538639825139",
     "region": "us-west-1",
@@ -41,7 +41,7 @@
     "instanceId": "i-05bfce721923eb190",
     "workerCommandId": "64b1d21b-111f-4231-938f-0ed933663d58",
     "workerDispatchedAt": "2026-09-16T01:48:02Z",
-    "workerStatus": "manifest_verification_active_no_result_claimed",
+    "workerStatus": "terminal_failed_rc1",
     "evidencePrefix": ".lake/search-free-mathlib/aws-linux-pilot/runs/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a/",
     "statePath": ".lake/search-free-mathlib/aws-linux-pilot/runs/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a.json",
     "monitoring": "monitor-bounded-mathlib-linux-experiment every 15 minutes, quiet unless meaningful change; exact run only, no redispatch, second host, or cutoff extension",
@@ -49,8 +49,9 @@
     "noProvisioningPerformed": false,
     "lastDiagnosticAt": "2026-09-16T03:39:58Z",
     "lastDiagnosticCommandId": "806ec041-2f84-4dc2-9e43-0b8fab3cd4fd",
-    "lastObservedPhase": "strict_manifest_verification_active_nested_inventory",
-    "lastObservedStageDetail": "Fresh bounded SSM metadata diagnostic at 03:39:58Z observed verify_simp_boundary_manifest.py active (parent RSS 1,149,104 KiB) with simpEngineInventory active (child RSS 6,665,824 KiB, 156% CPU). Fresh manifest is valid, 216029345 bytes, occurrenceCount 83627; dependency map is 3261577 bytes. manifest-verification.json and stderr remain zero bytes; no worker output or translation artifact exists, so no result or acceptance is claimed."
+    "lastObservedPhase": "terminal_failed_cause_unknown_truncated_ssm",
+    "lastObservedStageDetail": "Terminal SSM rc1, no worker restart. Guest timer confirmed 13:30Z; memory and disk reserves available at 09:40:21Z.",
+    "workerEndedAt": "2026-09-16T09:25:50.885Z"
   },
   "entryPoint": "HANDOFF.md",
   "statusDocument": "tracking/STATUS.md",
@@ -268,11 +269,11 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Await the explicit user decision on bounded EOF linter.style.longFile allowances for generated proof files. IsEmpty candidate has7113lines andlimit7300 afterallproofs; noallowancehasbeenimplemented/compiled. Do not inferapprovalfromelapsedtime.",
-    "Finish review and boundednative syntax/valuechecks of generated-token string-gap formatter; keepself-containedPythoncontrols andaccurateprovenance. Oldwholefileprototype isunsuitableforlargeFunctionoutput.",
-    "Ifuserapprovesstyleallowance, implementonlyboundedEOFannotations afterallproofcommands, regenerateauthenticatedderivedsourceevidence, and completefresh69coldcertificationplusfinalconsumercheck. Keepalloracle/selector/metadata/importchecks unchanged.",
-    "After69milestone, STOPdevelopmentandcommithandoff asrequested; no coverageexpansion. Ifblocked, clearlyreportincompleteandpreservependingdecision.",
-    "PreserveexistingAWSmainworker andmonitor, enforceimmutable2026-09-16T13:30:00Zcutoff andexisting$20/onehost/oneworkerbounds. Evidencebackups verified; nohostorworkerredispatch."
+    "Await the explicit user decision on bounded EOF linter.style.longFile allowances for generated proof files. The concrete IsEmpty candidate has 7,113 lines and a limit of 7,300 after all proofs. Do not infer approval from elapsed time.",
+    "If approved, delegate bounded EOF annotations and authenticated regeneration to Luna high. Complete fresh 69-module cold certification and the final dependent consumer check, keeping all oracle, selector, metadata and import checks unchanged.",
+    "After the 69-module milestone, stop development and finalize the handoff as requested. Do not expand coverage. Current state remains incomplete: 42 cold certificates, all seven targets individually passed.",
+    "Preserve the terminal main-worker logs and report its actual failure cause. Never infer that cause from test-fixture storage_stop messages in truncated SSM output. Do not restart the worker.",
+    "Preserve the existing AWS monitor and enforce the immutable 2026-09-16T13:30:00Z cutoff, $20 cap and single-host authorization."
   ],
   "work": [
     {
@@ -317,8 +318,8 @@
     },
     {
       "id": "translated-isempty-option-cone-2026-09-16",
-      "status": "in_progress",
-      "description": "Fresh69-module manifest7eb30989630cc5b71981b904917fa8ae8105a28608f7ba518bb89e1b31604d39 confirms91 calls in7 modules. All7 target modules pass, with90 replayedcalls+1 reviewed explicit Function proof; no unobserved calls. Logic.Basic needed128GiB virtual cap and peaked68.3GB RSS; Function.Basic required narrow explicit extend_apply proof after unpaired-fresh-constant abort persisted at128GiB. Cold69-node certification pending strict per-report manifest/source/overlay/occurrence join and actual-data preflight. All62 zero-occurrence prerequisites remain in plan. Whole-tree/campaign coverage unchanged."
+      "status": "blocked_pending_user_style_decision",
+      "description": "69 modules, 91 calls in seven targets. All seven targets individually passed (90 replayed + one explicit); latest full cold run certified 42 modules before ExistsUnique failed strict metadata comparison due to generated line-length warnings. Formatter committed 2a1d30c with focused Python and Linux syntax/value checks. Bounded EOF file-length allowance decision pending. Whole-tree acceptance unchanged at zero. Stop and hand off after this cone compiles and certifies together."
     }
   ],
   "activeChecks": [
@@ -681,6 +682,23 @@
       "scope": "generated_formatting_style_decision_and_evidence_backup",
       "result": "awaiting_user_style_limit_exception",
       "detail": "Fourshorttargetprototypesfit1500lines; exactIsEmpty658077B expands7111linesat100cols. ConcreteignoredEOFcandidate9d09ac355f5522df57a909f85b24caa7ab7b8143867a1e318220de6aea8de365 appendsset_optionlinter.style.longFile7300 afterallproofs, producing7113lines whilepreserving278decodedliterals/originalcomments/earlieroptions. AsyncuserquestionpendingbecauseAGENTS prohibitsweakeningvalidation; nopermissioninferred,nocandidateLeanrun,nostyleallowanceproductionchange. RendererPythoncontrols improved afterreview; nativeprobe pending. Existing partialevidence archivedS3/local: localfocusedf0ca5d3e3b9119b5bcbb0a0124eabf852aae6869cd57e003163807327de3d2ba; coldv4d6f16f93ed311ae1b03935ab21ac36bc66048505329201e83bd2e6c023851caa; formatter91a5d80080cec6e29c630d14066eb5202d3bfc1228749499c6ab4f1f41cae38e. Fullkeys/versionsincurrenthandoff. At09:07:07ZmainworkerInProgress/hostrunning, AWSandguestterminationtimers13:30Zverified. Freshordinaryusage85%allowed/nospendstop."
+    },
+    {
+      "checkedAt": "2026-09-16T09:43:40Z",
+      "scope": "generated_boundary_formatter",
+      "result": "focused_checks_passed_full_cone_pending",
+      "commit": "2a1d30c",
+      "detail": "Self-contained Python formatter controls and four historical-v8 report re-renders passed. Reviewed fixes preserve indentation and fail closed at an unsafe string-gap boundary. AWS native syntax/value probe v4 passed, SSM decbc62a-ce65-40ba-bfda-e16b23d1be70, rc0. Only its large-string equality example uses maxRecDepth 4096; production options unchanged. Probe SHA f7681bcec74f520ab6ff3d5a2c7e19b12cd6be883558254d5817e83b708dca78. Receipt SHA bbf5e391c2642b2b540d6ea53a72008c546c91570b97f2bfbdeaf0a218022761, 2324 bytes. Not full-module or cone acceptance."
+    },
+    {
+      "checkedAt": "2026-09-16T09:46:35Z",
+      "scope": "native_probe_handoff_archive",
+      "result": "verified",
+      "s3Bucket": "explicit-lean-reports-538639825139-us-east-1",
+      "s3Key": "aws-linux-pilot/20260916T014201Z-a38ca0ed7740f01e72adebc45720898a/foundation-batch-20260916T063022Z/native-probes-v2/native-probes-v2.tar.gz",
+      "versionId": "JYD6OwvdmEIk2_m41X.bekZEoewPNbjW",
+      "sha256": "2b64a6f53ac09983781645e5de7665b78bea118a3743c435c2e8e66a777d72bc",
+      "bytes": 402895
     }
   ],
   "historicalAutomation": {
