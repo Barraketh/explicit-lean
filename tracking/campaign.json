@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T05:50:09Z",
+  "updatedAt": "2026-09-16T06:11:40Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -268,8 +268,8 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Compile the latest shared auxiliary validation refactor in the existing isolated AWS snapshot; run new multi-helper, imported-auxiliary and context roundtrip regressions plus existing realization/local-cache compatibility. Route concrete diagnostics to Luna high owners, review changes and commit named files only after passing checks.",
-    "Keep one proof/cache validation implementation for local and imported paths; preserve their distinct environment and descriptor adapters and exact rejection checks. Distinguish test harness failures and resource caps from semantic regressions.",
+    "Retry affected manifest entries provisionally using the committed replay fixes; keep fresh producer-side auxiliary reconstruction, module/declaration comparison and downstream acceptance explicit. The focused regressions do not establish full Mathlib coverage.",
+    "Use measured resource admission for focused Linux checks: the 24 GiB virtual-address cap caused bad_alloc in both unchanged baseline and patched builds; unchanged assertions/timeouts passed at 64 GiB. Preserve the 12 GiB host-memory/disk reserves and authorized host limits.",
     "Continue monitoring the existing sole authorized AWS run through its immutable 2026-09-16T13:30:00Z cutoff. Preserve terminal evidence and clean up the exact resources; no second host or worker redispatch.",
     "Use the manifest provisionally for development as authorized by the user, while keeping independent authentication as an acceptance requirement.",
     "Retry affected cases and validate the committed Nat.leRec_self override at module/declaration/downstream scope when resources permit. No whole-tree acceptance is established.",
@@ -308,8 +308,8 @@
     },
     {
       "id": "replay-first-principles-fixes",
-      "status": "in_progress",
-      "description": "Context fix f6a5086 and full encoded-roundtrip/local-context checks pass on isolated AWS. Shared auxiliary validator compiles; multi-helper record/replay and rejection controls pass. Imported auxiliary runtime and existing compatibility remain pending; platform-specific library paths in old checkers are being corrected. Main pilot untouched; no module/tree acceptance."
+      "status": "completed",
+      "description": "Reviewed fixes committed: f6a5086 matches stock local-context timing; 4ae57bf covers encoded context replay; e813e53 supports ordered multiple imported helpers; a407a01 authenticates imported auxiliary-cache witnesses through one shared validator with local/imported adapters. Shared build, context, multi-helper, imported auxiliary runtime/wire controls and existing mixed/local-aux/realization-group compatibility pass on isolated AWS. Imported auxiliary acceptance covers authentic completed cache activation with controlled auxiliary injection, not fresh producer-side auxiliary reconstruction. No module/tree acceptance or campaign coverage advancement."
     }
   ],
   "activeChecks": [
@@ -564,6 +564,12 @@
       "scope": "replay_shared_build_and_multi_helper_compatibility",
       "result": "passed_build_multi_helper_and_mixed_controls",
       "detail": "Isolated AWS corrected shared build79a05338-7517-4cbf-99c0-175a581c7291 Success/0, RealizationCodec SHA25609256c80d85f54e7c0a91445b2e790d7794ccf686c4290878d23d03bd2523896. New multi-helper SSM5da2ed70-c452-4fd1-a12e-9d127dd4b8ec Success/0 including record/replay/swapped/missing/snapshot controls. Portable existing mixed SSMa20ef98e-a244-47db-97d8-80307e518160 Success/0 with23 controls. Existing local-cache timeout180s and realization-group bad_alloc/timeout300s under24GiB caps are unresolved; baseline comparison pending. No module/tree acceptance."
+    },
+    {
+      "checkedAt": "2026-09-16T06:11:40Z",
+      "scope": "replay_fixes_final_acceptance",
+      "result": "passed_focused_runtime_wire_and_compatibility",
+      "detail": "Production RealizationCodec SHA25609256c80d85f54e7c0a91445b2e790d7794ccf686c4290878d23d03bd2523896 shares local/imported cache proof validation. Imported aux runtime SSM51448ff5-f95e-4e4d-8caa-0edc70c4e26c Success/0 (10.904s): record/replay and erase/type/name rejection controls; final runtime checker e7f3b035e61668fdd915ed89cd69f330dfc970eb6404851dbc24a07f7a048efe. Wire-only correction e324654aa6733ae3005c0be3a76932201d8fec7fb30f59609055d5ec53be632f passed six mutations plus format/Unicode canonical controls, SSMcd73a357-e953-49d6-aad9-5f53cbe8fd3f Success/0, artifact SHA25659d0f460168f6b9712e56a04adcd87a2a41d1b52148c187fe1f9ac267855c835. Existing local aux SSMeb92cfcd-ec81-4a95-a70b-e7507e7d2b5a Success/0 (227.871s):12 modes, two record/replay examples and wire rejections; report bda4df54a169336b97404a2ceab53f3091dc7656d68a9a66f7572beb9de5bfee. Existing realization groups SSMbae7b1aa-20fa-4c42-be9d-87b259830580 Success/0 (30.7s), report82cf0f1c2e47f4b91e9dceeafd03c0bf017b6d1e276b28a621674a82fc6ebe9c. All used the same existing host and isolated snapshot, with fresh admission and 64 GiB virtual cap after baseline also failed at24 GiB. Aux peak RSS12599660 KiB, VSZ31163124 KiB. Main pilot/cutoff unchanged; module/tree acceptance remains zero."
     }
   ],
   "historicalAutomation": {

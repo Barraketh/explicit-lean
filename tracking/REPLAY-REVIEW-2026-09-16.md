@@ -133,3 +133,28 @@ source was changed during this review.
 
 The current authorized pilot and its immutable cutoff remain unchanged. This
 review does not authorize another host, worker dispatch or campaign extension.
+
+## Fix completion, September 16
+
+The confirmed context mismatch is fixed in `f6a5086`, with encoded replay
+regressions in `4ae57bf`. Ordered imported multi-helper support is committed in
+`e813e53`; authenticated imported auxiliary-cache support is in `a407a01`.
+Local and imported auxiliary caches now use one proof/cache validation worker,
+with separate adapters for their descriptor formats. Both paths remain active;
+"local" means declarations in the current Lean module, not a machine-local
+alternative engine.
+
+The isolated AWS shared build, original context probe, encoded context replay,
+multi-helper controls, imported auxiliary runtime and six wire-mutation controls,
+and existing mixed/local-auxiliary/realization-group suites pass. Exact commands,
+source hashes and report hashes are recorded in `campaign.json`. The initial
+24 GiB virtual-memory cap caused allocation failures even on the unchanged
+baseline; the unchanged checks passed at 64 GiB. The auxiliary run peaked at
+12,599,660 KiB resident and 31,163,124 KiB virtual memory.
+
+The imported auxiliary fixture authenticates an existing completed imported
+cache with controlled auxiliary entries. It does not establish fresh
+producer-side reconstruction or acceptance of the original failing Mathlib
+modules. Those module retries, declaration comparisons and whole-tree acceptance
+remain subsequent work. No campaign coverage count advanced, and the sole
+authorized pilot and its cutoff were unchanged.
