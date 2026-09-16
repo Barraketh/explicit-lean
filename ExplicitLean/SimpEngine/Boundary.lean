@@ -2354,29 +2354,34 @@ private def captureGoalArtifact (basis : PreBoundaryBasis) (simpStx : Syntax)
     throwError "+suggestions requires using simp? instead of simp"
   dischargeWrapper.with fun discharge? =>
     withLoopChecking r do
-      let mut current := goal
-      let mut locals : Array LocalArtifact := #[]
-      let mut stats : Simp.Stats := {}
-      for fvarId in selection.fvarIds do
-        let (transformation, nextStats) ← current.withContext do
+      -- Stock `simpGoal` keeps the reader context from the original goal while
+      -- simplifying each selected hypothesis.  The goal itself is updated
+      -- only for proof-free replacement and target processing; re-entering
+      -- `current` for the next hypothesis can expose instances too early.
+      goal.withContext do
+        let mut current := goal
+        let mut locals : Array LocalArtifact := #[]
+        let mut stats : Simp.Stats := {}
+        for fvarId in selection.fvarIds do
           let decl ← fvarId.getDecl
           let localCtx := ctx.setSimpTheorems <|
             ctx.simpTheorems.eraseTheorem (.fvar decl.fvarId)
-          captureTransformation basis s!"local:{decl.userName}" decl.type localCtx
-            simprocs discharge? stats preservedFreshTheorems
-        stats := nextStats
-        locals := locals.push { fvarId, transformation }
-        if transformation.result.isFalse then
-          return { locals }
-        if transformation.proof?.isNone then
-          current ← current.withContext do
-            current.replaceLocalDeclDefEq fvarId transformation.result
-      if selection.simplifyTarget then
-        let (targetArtifact, _) ← current.withContext do
-          captureTransformation basis "target" (← current.getType) ctx simprocs
-            discharge? stats preservedFreshTheorems
-        return { locals, target? := some targetArtifact }
-      return { locals }
+          let (transformation, nextStats) ←
+            captureTransformation basis s!"local:{decl.userName}" decl.type localCtx
+              simprocs discharge? stats preservedFreshTheorems
+          stats := nextStats
+          locals := locals.push { fvarId, transformation }
+          if transformation.result.isFalse then
+            return { locals }
+          if transformation.proof?.isNone then
+            current ← current.withContext do
+              current.replaceLocalDeclDefEq fvarId transformation.result
+        if selection.simplifyTarget then
+          let (targetArtifact, _) ← current.withContext do
+            captureTransformation basis "target" (← current.getType) ctx simprocs
+              discharge? stats preservedFreshTheorems
+          return { locals, target? := some targetArtifact }
+        return { locals }
 
 /-- Encode the captured kernel expression directly. No source parser, term
     elaborator, instance search, or universe inference runs during decoding. -/

@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T04:00:23Z",
+  "updatedAt": "2026-09-16T04:59:18Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -309,7 +309,7 @@
     {
       "id": "replay-first-principles-fixes",
       "status": "in_progress",
-      "description": "User authorized implementing personal review findings. Three Luna high agents own context recording, imported multi-helper ordering, and imported auxiliary-cache effects separately. Coordinator reviews design/diffs and commits named files; compact summary files only, no transcript reads. Focused validation will use isolated resources without modifying the active pilot."
+      "description": "Luna high implemented three reviewed fixes. Production shared library builds on isolated AWS snapshot. Exact original context regression now passes stock/probe (SSM c1cf4fa9-f050-4c91-8be4-5902cd724fac); context fix ready for separate commit. Encoded context and codec fixture harness repairs/validation continue; no module or tree acceptance."
     }
   ],
   "activeChecks": [
@@ -546,6 +546,12 @@
       "scope": "personal_simp_replay_review",
       "result": "one_reproduced_mismatch_two_explicit_coverage_limits",
       "detail": "Existing authorized host, isolated fresh temporary fixtures, SSM 94b03f3f-7a73-4d90-8e5d-3aa64b6bd254. Stock local-context fixture succeeds; boundary probe fails comparison. False closure and helper fixture probes pass. No encoded-roundtrip or module acceptance claimed. Pilot unchanged. See tracking/REPLAY-REVIEW-2026-09-16.md."
+    },
+    {
+      "scope": "replay_context_original_regression",
+      "result": "passed_production_library",
+      "detail": "Exact original LocalContext fixture SHA2568d226486a204941062f6c2c06e24dc3e67eceb25b78dd2fb3a6c4550998f41ce passes stock+boundary probe with equivalent=true on isolated production library; Boundary.lean SHA2568a8990760c8aa7b8fdbe242c144f9bbb8930c59114d0c1c0e3d4e2370e77fd95. SSM c1cf4fa9-f050-4c91-8be4-5902cd724fac Success/0. Historical same source failed before fix. Full encoded roundtrip, codec runtime fixtures and module acceptance remain pending; temporary diagnostic/abbreviation runs are excluded.",
+      "checkedAt": "2026-09-16T04:59:18Z"
     }
   ],
   "historicalAutomation": {
