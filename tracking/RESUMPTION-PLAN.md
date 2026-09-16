@@ -111,3 +111,10 @@ No translation, verifier result, coverage advancement, or terminal outcome is
 claimed. Heartbeat `monitor-bounded-mathlib-linux-experiment` checks every 15
 minutes and remains quiet unless the exact run changes; no redispatch, second
 host, or cutoff extension is permitted.
+
+At `2026-09-16T02:39:50Z`, one bounded read-only SSM diagnostic (command
+`bbf6cf19-bebe-4812-8982-dea978bdb6eb`) found the sole worker still active in
+`verify_simp_boundary_manifest.py`, with nested `lean_toolchain_cache.py
+inventory` and `simpEngineInventory` processes. This identifies the strict
+manifest-verification phase; it provides no result or acceptance evidence.
+Continue quiet monitoring of this exact run only.
