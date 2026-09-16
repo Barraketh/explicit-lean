@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import json
 import tempfile
+from typing import Optional
 
 import boundary_materialize_shard as materializer
 import boundary_protocol as protocol
@@ -15,6 +16,21 @@ import check_simp_engine_boundary_source as formatter
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = "Mathlib.Data.List.ModifyLast"
 ORIGINAL = "simp only [nil_append, modifyLast.go]"
+
+
+def shared_library_path() -> Path:
+    """Resolve and validate the platform-specific shared boundary library."""
+    value = formatter.query_json_string(
+        formatter.run(["lake", "query", "ExplicitLean:shared", "--json"]),
+        "lake query ExplicitLean:shared",
+    )
+    path = Path(value)
+    if not path.is_absolute():
+        path = ROOT / path
+    path = path.resolve()
+    if path.suffix not in {".so", ".dylib"} or not path.is_file():
+        raise RuntimeError(f"shared boundary library is not a .so/.dylib file: {path}")
+    return path
 
 MARKER = "SINGLE_CHILD_STOCK "
 PROBE = r'''
@@ -163,12 +179,13 @@ def source_text():
 
 
 
-def input_hashes():
+def input_hashes(shared_library: Optional[Path] = None):
+    shared_library = shared_library or shared_library_path()
     paths = list((ROOT / "ExplicitLean").rglob("*.lean"))
     paths += list((ROOT / "Experiment").glob("*.py"))
     paths += [ROOT / "lean-toolchain", ROOT / "lake-manifest.json",
               ROOT / ".lake/packages/mathlib/Mathlib/Data/List/ModifyLast.lean",
-              ROOT / ".lake/build/lib/libexplicitLean_ExplicitLean.dylib"]
+              shared_library]
     paths += [p for p in (ROOT / ".lake/build/lib/lean/ExplicitLean").rglob("*")
               if p.is_file() and p.suffix in {".olean", ".private", ".server", ".ir"}]
     paths += [Path(subprocess.check_output(["lake", "env", "which", "lean"], cwd=ROOT, text=True).strip())]
@@ -181,14 +198,15 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="recursive-", dir=parent))
     print(work, flush=True)
     original = source_text()
-    before = input_hashes()
+    shared_library = shared_library_path()
+    before = input_hashes(shared_library)
     runs = []
 
     def run(label, text, recording=False, expected=None):
         path = materializer._copy_at_module_root(work / label, "Mathlib/Data/List/ModifyLast.lean", text.encode())
         env, nonce = (protocol.recording_subprocess_environment() if recording else protocol.replay_subprocess_environment())
         code, output, elapsed = materializer._compile_copy(path,
-            str(ROOT / ".lake/build/lib/libexplicitLean_ExplicitLean.dylib"), 240, env=env)
+            str(shared_library), 240, env=env)
         log = work / f"{label}.log"
         log.write_text(output)
         check = protocol.check_recording_abort_markers if recording else protocol.check_replay_abort_markers
@@ -289,7 +307,7 @@ def main():
                   "    exact modifyLast.go_concat f a (hd :: tl) r\n\nend List\n")
         text = before_cached + "private theorem modifyLast.go_concat_cached" + cached
         run("cached-" + mode, text, expected=detail)
-    after = input_hashes()
+    after = input_hashes(shared_library)
     assert before == after, "runtime/source inputs changed during recursive controls"
     archive = work / "evidence"
     archive.mkdir()

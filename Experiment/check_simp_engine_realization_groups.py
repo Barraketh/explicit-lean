@@ -9,6 +9,7 @@ import tempfile
 import boundary_materialize_shard as materializer
 import boundary_protocol as protocol
 import check_simp_engine_boundary_source as source
+import check_simp_engine_recursive_realizations as recursive
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = "Experiment.RealizationGroups"
@@ -102,7 +103,7 @@ def main():
     parent.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="controls-", dir=parent))
     print(work, flush=True)
-    dylib = str(ROOT / ".lake/build/lib/libexplicitLean_ExplicitLean.dylib")
+    dylib = str(recursive.shared_library_path())
     records = []
 
     def compile_case(label, text, recording=False, expected=None):

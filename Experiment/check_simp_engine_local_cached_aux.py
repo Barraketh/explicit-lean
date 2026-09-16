@@ -11,6 +11,7 @@ import tempfile
 import boundary_protocol as protocol
 from boundary_expr_codec import validate_realization_payload
 import check_simp_engine_boundary_source as source
+import check_simp_engine_recursive_realizations as recursive
 from process_runner import run_process
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -121,7 +122,7 @@ def main():
     parent.mkdir(exist_ok=True, parents=True)
     work = Path(tempfile.mkdtemp(prefix="controls-", dir=parent)); print(work,flush=True)
     records=[]
-    dylib=ROOT/".lake/build/lib/libexplicitLean_ExplicitLean.dylib"
+    dylib=recursive.shared_library_path()
     owned=[ROOT/"ExplicitLean/SimpEngine/Boundary/RealizationCodec.lean",ROOT/"Experiment/boundary_expr_codec.py",
            ROOT/"Experiment/boundary_protocol.py",Path(__file__),dylib]
     extra_path=ROOT/".lake/packages/mathlib/Mathlib/AlgebraicTopology/ExtraDegeneracy.lean"

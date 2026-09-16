@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T05:38:56Z",
+  "updatedAt": "2026-09-16T05:50:09Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -558,6 +558,12 @@
       "scope": "replay_context_encoded_roundtrip",
       "result": "passed_isolated_aws",
       "detail": "SSM5387f723-96de-4af4-a590-5b8023fd676b Success/0 with context checker SHA256b64ad056f5e454212b594bb52547d105a461419cd425c63b9f4230f2f4ed116e and production Boundary SHA2568a8990760c8aa7b8fdbe242c144f9bbb8930c59114d0c1c0e3d4e2370e77fd95. Both encoded stock-recording/replay and local-context probes passed. Generated helper public import corrected without changing original def/class/implicit-instance regression. No module/tree acceptance."
+    },
+    {
+      "checkedAt": "2026-09-16T05:50:09Z",
+      "scope": "replay_shared_build_and_multi_helper_compatibility",
+      "result": "passed_build_multi_helper_and_mixed_controls",
+      "detail": "Isolated AWS corrected shared build79a05338-7517-4cbf-99c0-175a581c7291 Success/0, RealizationCodec SHA25609256c80d85f54e7c0a91445b2e790d7794ccf686c4290878d23d03bd2523896. New multi-helper SSM5da2ed70-c452-4fd1-a12e-9d127dd4b8ec Success/0 including record/replay/swapped/missing/snapshot controls. Portable existing mixed SSMa20ef98e-a244-47db-97d8-80307e518160 Success/0 with23 controls. Existing local-cache timeout180s and realization-group bad_alloc/timeout300s under24GiB caps are unresolved; baseline comparison pending. No module/tree acceptance."
     }
   ],
   "historicalAutomation": {
