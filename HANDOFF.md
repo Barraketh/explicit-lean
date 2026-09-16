@@ -1,5 +1,10 @@
 # Start here: search-free Mathlib
 
+**September 16 continuation:** read [the current handoff](tracking/HANDOFF-2026-09-16.md)
+and `tracking/campaign.json` first. They record the latest fixes, partial cold
+certification, pending style-budget decision, evidence backups, and AWS cutoff.
+The September 10 body below contains historical state superseded by that update.
+
 Handoff updated September 10, 2026. Working branch:
 `codex/search-free-mathlib-2026-08-31`. Reviewed implementation: `ee30955`;
 later documentation commits do not constitute new translation evidence.

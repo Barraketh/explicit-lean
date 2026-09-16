@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T09:03:19Z",
+  "updatedAt": "2026-09-16T09:25:23Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -268,10 +268,11 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Run the reviewed 69-module cold certification after successful actual-artifact preflight; require all69 publications and translated-root resolutions, then final consumer smoke and evidence preservation.",
-    "After the 69-module milestone, STOP development and prepare a committed handoff for another agent, as explicitly requested by the user. Record reproducible evidence, remaining work, blockers, and AWS resource/shutdown obligations. Do not expand coverage in this session.",
-    "Keep the sole authorized AWS host and worker within their existing limits and immutable 2026-09-16T13:30:00Z cutoff; preserve evidence and verify cleanup. No second host or worker redispatch.",
-    "Keep provisional module/cold-cone evidence separate from global campaign authentication and whole-Mathlib acceptance."
+    "Await the explicit user decision on bounded EOF linter.style.longFile allowances for generated proof files. IsEmpty candidate has7113lines andlimit7300 afterallproofs; noallowancehasbeenimplemented/compiled. Do not inferapprovalfromelapsedtime.",
+    "Finish review and boundednative syntax/valuechecks of generated-token string-gap formatter; keepself-containedPythoncontrols andaccurateprovenance. Oldwholefileprototype isunsuitableforlargeFunctionoutput.",
+    "Ifuserapprovesstyleallowance, implementonlyboundedEOFannotations afterallproofcommands, regenerateauthenticatedderivedsourceevidence, and completefresh69coldcertificationplusfinalconsumercheck. Keepalloracle/selector/metadata/importchecks unchanged.",
+    "After69milestone, STOPdevelopmentandcommithandoff asrequested; no coverageexpansion. Ifblocked, clearlyreportincompleteandpreservependingdecision.",
+    "PreserveexistingAWSmainworker andmonitor, enforceimmutable2026-09-16T13:30:00Zcutoff andexisting$20/onehost/oneworkerbounds. Evidencebackups verified; nohostorworkerredispatch."
   ],
   "work": [
     {
@@ -674,6 +675,12 @@
       "scope": "cold69_v4_serialized_lint_failure",
       "result": "42_partial_checkpoints_generated_formatting_under_review",
       "detail": "Fullv4bf461fde-24dc-4872-bf7b-9399bb627723 produced42freshcheckpoint/receipt files then failed ExistsUnique bridge oracle: stockmissing Lean.Linter.lintLogExt. Ordinaryandstandaloneauditstages passed; optionselector mismatchresolved. Exact210072B bridge log7958db7d036eae36acfccbce7a0ab55c1fca0acfd1007eae16272b60e1a5ad96 contains16generatedlongLine warnings absentstock. Appliedsource127792B e58c9e9537fb2226f2e71def653c6438e5f3cca6884bcdbde59223fd71f48d48, stock7181B b4d81b4a50a7a4675d2b0a619ab10b57720499ffb13e2f7694834dd6a32a5f23. Nooracleallowlisting orlinter suppression authorized. Investigateformatting preservingdecodedpayloadstrings/originalcomments; partialcountsnotcompletecone. Evidencebackup andfreshAWSoperationalstatus inparallel. Stopafter69milestone+handoff remainsuserinstruction."
+    },
+    {
+      "checkedAt": "2026-09-16T09:25:23Z",
+      "scope": "generated_formatting_style_decision_and_evidence_backup",
+      "result": "awaiting_user_style_limit_exception",
+      "detail": "Fourshorttargetprototypesfit1500lines; exactIsEmpty658077B expands7111linesat100cols. ConcreteignoredEOFcandidate9d09ac355f5522df57a909f85b24caa7ab7b8143867a1e318220de6aea8de365 appendsset_optionlinter.style.longFile7300 afterallproofs, producing7113lines whilepreserving278decodedliterals/originalcomments/earlieroptions. AsyncuserquestionpendingbecauseAGENTS prohibitsweakeningvalidation; nopermissioninferred,nocandidateLeanrun,nostyleallowanceproductionchange. RendererPythoncontrols improved afterreview; nativeprobe pending. Existing partialevidence archivedS3/local: localfocusedf0ca5d3e3b9119b5bcbb0a0124eabf852aae6869cd57e003163807327de3d2ba; coldv4d6f16f93ed311ae1b03935ab21ac36bc66048505329201e83bd2e6c023851caa; formatter91a5d80080cec6e29c630d14066eb5202d3bfc1228749499c6ab4f1f41cae38e. Fullkeys/versionsincurrenthandoff. At09:07:07ZmainworkerInProgress/hostrunning, AWSandguestterminationtimers13:30Zverified. Freshordinaryusage85%allowed/nospendstop."
     }
   ],
   "historicalAutomation": {
