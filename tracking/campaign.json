@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T03:39:58+00:00",
+  "updatedAt": "2026-09-16T04:00:23Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -268,12 +268,12 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Read HANDOFF.md and the portable snapshot; confirm branch, local evidence availability and absence of active producers before editing.",
-    "Use the published verifier fix to require a fresh authenticated manifest before any replay; do not reuse frozen evidence or claim a complete local replay.",
-    "Obtain new explicit user authorization before provisioning another AWS host; do not reuse an old nonce or extend the unchanged 2026-09-13T00:00:00Z boundary.",
-    "Classify every pilot outcome as resource, semantic, unsupported, or successful without weakening validation.",
-    "Stage the reviewer-approved Nat.leRec_self override, then admit its corrected composition, declaration-oracle, cold, and downstream checks only when the strict memory reserve is available; no module or tree acceptance is claimed yet.",
-    "Expand measured dependency-ordered coverage, integrate reusable provenance, then complete whole-tree acceptance before readability work."
+    "Fix the reproduced hypothesis-context mismatch in captureGoalArtifact, preserving stock context timing and all equivalence checks; validate stock/capture/encoded replay regression cases. See tracking/REPLAY-REVIEW-2026-09-16.md.",
+    "In parallel, design bounded imported multi-helper ordering and imported auxiliary-cache representations before implementing codec extensions; do not merely remove guards.",
+    "Continue monitoring the existing sole authorized AWS run through its immutable 2026-09-16T13:30:00Z cutoff. Preserve terminal evidence and clean up the exact resources; no second host or worker redispatch.",
+    "Use the manifest provisionally for development as authorized by the user, while keeping independent authentication as an acceptance requirement.",
+    "Retry affected cases and validate the committed Nat.leRec_self override at module/declaration/downstream scope when resources permit. No whole-tree acceptance is established.",
+    "Expand dependency-ordered coverage and complete whole-tree acceptance before readability work."
   ],
   "work": [
     {
@@ -300,6 +300,11 @@
       "id": "readability",
       "status": "pending",
       "description": "Begins after complete explicit coverage."
+    },
+    {
+      "id": "personal-simp-replay-review",
+      "status": "completed_review_fix_pending",
+      "description": "Primary personally compared pinned Lean simp with active boundary recorder/replay. One reproduced local-context semantic mismatch; imported multi-helper and auxiliary-cache coverage limits identified. Report tracking/REPLAY-REVIEW-2026-09-16.md. No engine source changes or coverage advance."
     }
   ],
   "activeChecks": [
@@ -530,6 +535,12 @@
       "scope": "single_worker_progress_diagnostic",
       "result": "manifest_verification_active_no_result_claimed",
       "detail": "One bounded read-only SSM diagnostic command 806ec041-2f84-4dc2-9e43-0b8fab3cd4fd returned Success on the exact host. The worker command remains InProgress with ResponseCode -1. Host memory available was 129097469952 bytes and disk available 198168625152 bytes. The fresh manifest is valid at 216029345 bytes with occurrenceCount 83627 and the dependency map is 3261577 bytes. verify_simp_boundary_manifest.py remains active with nested simpEngineInventory; verifier JSON/stderr and worker output artifacts are still absent or zero bytes. No translation, coverage advancement, acceptance, restart, redispatch, host change, or cutoff extension is claimed or authorized."
+    },
+    {
+      "checkedAt": "2026-09-16T04:00:23Z",
+      "scope": "personal_simp_replay_review",
+      "result": "one_reproduced_mismatch_two_explicit_coverage_limits",
+      "detail": "Existing authorized host, isolated fresh temporary fixtures, SSM 94b03f3f-7a73-4d90-8e5d-3aa64b6bd254. Stock local-context fixture succeeds; boundary probe fails comparison. False closure and helper fixture probes pass. No encoded-roundtrip or module acceptance claimed. Pilot unchanged. See tracking/REPLAY-REVIEW-2026-09-16.md."
     }
   ],
   "historicalAutomation": {
