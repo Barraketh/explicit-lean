@@ -27,6 +27,7 @@ import boundary_materialize_shard as materializer
 import boundary_protocol as protocol
 import certified_module as base
 import check_simp_engine_command_audit as audit
+import simp_engine_inventory as inventory
 import process_runner
 from translated_imports import ImportEnvironment
 
@@ -39,7 +40,7 @@ STAGES = ("ordinary-stock", "ordinary-applied", "audited-stock", "audited-applie
 FAMILIES = ("ordinary-stock", "ordinary-applied", "audited-stock", "audited-applied", "bridge-stock", "bridge-applied")
 # Same pinned options as both native tools. A drift that changes output fails
 # the whole-family comparison; callers also bind tool/runtime identities.
-PLAIN_OPTIONS = ("-DautoImplicit=false", "-DmaxSynthPendingDepth=3",
+PLAIN_OPTIONS = (*inventory.MATHLIB_PACKAGE_OPTION_ARGUMENTS,
                  "-Dweak.linter.unusedVariables=false", "-Dweak.linter.unusedSimpArgs=false",
                  "-Dweak.linter.unreachableTactic=false", "-DmaxHeartbeats=0", "-DElab.async=true")
 InputFile = base.InputFile
