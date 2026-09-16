@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T08:29:09Z",
+  "updatedAt": "2026-09-16T09:03:19Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -662,6 +662,18 @@
       "scope": "cold69_frontend_option_parity",
       "result": "fix_published_linux_retry_pending",
       "detail": "Corrected-planner runtime8fc cold SSMb77e8a15-c596-49ba-9b70-80a8e7d2f177 produced37completed module receipts, then ordinary-applied Mathlib.Logic.ExistsUnique169b982dbeae7fd9 failed boundary_variant_missing. Target/local/mctx/goalCount matched; options differed expected5367831945599674614 versusactual1602334101987177386. Cold ordinary frontend omitted7Mathlib package options used by recorder/native tools. Published fix9ac3f62c6562ba47ecd536bb7b049b86f69e63c8 reuses canonical package option arguments and keeps verification controls. Independent Python check reads pinned native Lean definitions and confirms14option map parity withduplicate-name rejection. Strict selectors unchanged. Coordinator reviewed/published; newprivate Linux runtime, targeted diagnostic thenfresh69coldpending. Failure receiptb2f4f936fa787d461323693812fb6743f83a61a780cfcecbdb2eecaab31cd4b1. No fullcone acceptance; usage77%ordinaryallowed/nospendstop."
+    },
+    {
+      "checkedAt": "2026-09-16T08:52:50Z",
+      "scope": "cold69_effective_options_and_v4_retry",
+      "result": "native_controls_passed_full_cold_running",
+      "detail": "Fourway diagnostic c22d7324-f3ea-40f5-89c1-809f2435384a report11ee3174dbb7539891cd7a7dea99cb184d3dbe7ddc18730dcdfc8e4a35ee1c8f showed directcold extra effective maxHeartbeats=0,linter.unusedSimpArgs=false,linter.unusedVariables=false; dynlibmade nodifference. Oracle alreadyused mathlibParserOptions, auditor used verification extras. Published4e23da34724179c9ca06c914612da434c18a5774 aligns ordinarycold+standaloneaudit+oracle tocanonicalpackage+async options; independentPython parity10options passes. Linux setup39effa90-7c53-4e2e-bb66-b7c6e550c3b3 verifiedclean4e23 and rebuiltauditorfd41e45641a4bc95e7d00606e24d08b1e7157f6f0f91c415312f05261da5b71a; nativeauditselftestpassed. Coordinatorreviewed rawmaps, diff, setupreceipt; fullcoldSSMbf461fde-24dc-4872-bf7b-9399bb627723 dispatched withreviewedv4driver ea6dd75ffa927b2a98bc2acd176eacb8adf6f8922f4b96d23a71e0cb88b34be0, freshoutputs,126206279680B memoryavailable,193601396736B diskfree. No completecertificate yet;81%ordinaryusageallowed. Mainworker untouched."
+    },
+    {
+      "checkedAt": "2026-09-16T09:03:19Z",
+      "scope": "cold69_v4_serialized_lint_failure",
+      "result": "42_partial_checkpoints_generated_formatting_under_review",
+      "detail": "Fullv4bf461fde-24dc-4872-bf7b-9399bb627723 produced42freshcheckpoint/receipt files then failed ExistsUnique bridge oracle: stockmissing Lean.Linter.lintLogExt. Ordinaryandstandaloneauditstages passed; optionselector mismatchresolved. Exact210072B bridge log7958db7d036eae36acfccbce7a0ab55c1fca0acfd1007eae16272b60e1a5ad96 contains16generatedlongLine warnings absentstock. Appliedsource127792B e58c9e9537fb2226f2e71def653c6438e5f3cca6884bcdbde59223fd71f48d48, stock7181B b4d81b4a50a7a4675d2b0a619ab10b57720499ffb13e2f7694834dd6a32a5f23. Nooracleallowlisting orlinter suppression authorized. Investigateformatting preservingdecodedpayloadstrings/originalcomments; partialcountsnotcompletecone. Evidencebackup andfreshAWSoperationalstatus inparallel. Stopafter69milestone+handoff remainsuserinstruction."
     }
   ],
   "historicalAutomation": {
