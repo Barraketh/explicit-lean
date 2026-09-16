@@ -442,6 +442,143 @@ def lean_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+GENERATED_LINE_WIDTH = 100
+
+
+def _generated_string_spans(line: str) -> list[tuple[int, int]]:
+    """Return quoted-string spans in one renderer-owned generated line."""
+    spans = []
+    index = 0
+    while index < len(line):
+        if line[index] != '"':
+            index += 1
+            continue
+        start = index
+        index += 1
+        escaped = False
+        while index < len(line):
+            char = line[index]
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                index += 1
+                spans.append((start, index))
+                break
+            index += 1
+        else:
+            raise RuntimeError("generated renderer produced an unterminated string")
+    return spans
+
+
+def _generated_string_cut(raw_body: str, start: int, limit: int) -> int:
+    """Choose an escape-safe gap boundary, scanning only this chunk."""
+    index = start
+    boundary = None
+    maximum = min(start + limit, len(raw_body))
+    while index < len(raw_body) and index <= maximum:
+        if index > start:
+            if raw_body[index] not in " \t\r\n":
+                boundary = index
+        elif start == 0:
+            boundary = index
+        if raw_body[index] != "\\":
+            index += 1
+        else:
+            if index + 1 >= len(raw_body):
+                raise RuntimeError("generated renderer produced an unterminated escape")
+            if raw_body[index + 1] == "u":
+                if index + 6 > len(raw_body) or any(
+                    digit not in "0123456789abcdefABCDEF"
+                    for digit in raw_body[index + 2 : index + 6]
+                ):
+                    raise RuntimeError("generated renderer produced a malformed unicode escape")
+                index += 6
+            else:
+                index += 2
+        if index <= maximum and index < len(raw_body) and raw_body[index] not in " \t\r\n":
+            boundary = index
+    if boundary is not None and boundary > start:
+        return boundary
+    raise RuntimeError("generated renderer cannot place a safe string gap")
+
+
+def _format_generated_line(line: str, continuation_indent: str = "  ") -> str:
+    """Wrap one renderer-owned line without changing decoded string payloads."""
+    if len(continuation_indent) >= GENERATED_LINE_WIDTH - 3:
+        raise RuntimeError("generated renderer continuation indentation leaves no line budget")
+    spans = _generated_string_spans(line)
+    if not spans:
+        raise RuntimeError("generated line has no string token to format")
+    lines: list[str] = []
+    current = ""
+    position = 0
+
+    def append_outside(text: str) -> None:
+        nonlocal current
+        if not current:
+            leading_end = len(text) - len(text.lstrip(" \t"))
+            current = text[:leading_end]
+            text = text[leading_end:]
+        for token in text.split(" "):
+            if not token:
+                if not current or not current.endswith(" "):
+                    current += " "
+                continue
+            separator = "" if not current or current.endswith(" ") else " "
+            if len(current) + len(separator) + len(token) > GENERATED_LINE_WIDTH:
+                lines.append(current.rstrip())
+                current = continuation_indent
+                separator = ""
+            if len(current) + len(separator) + len(token) > GENERATED_LINE_WIDTH:
+                raise RuntimeError("generated renderer has an unbreakable syntax token")
+            current += separator + token
+
+    for start, end in spans:
+        append_outside(line[position:start])
+        raw = line[start:end]
+        if len(current) + len(raw) <= GENERATED_LINE_WIDTH:
+            current += raw
+            position = end
+            continue
+        if current.strip():
+            lines.append(current.rstrip())
+            current = continuation_indent
+        body = raw[1:-1]
+        if not body:
+            current += raw
+            position = end
+            continue
+        current += '"'
+        body_start = 0
+        while body_start < len(body):
+            # Reserve space for the gap marker or closing quote. A three
+            # column cushion leaves room for the branch's terminal syntax.
+            room = GENERATED_LINE_WIDTH - len(current) - 3
+            if room <= 0:
+                raise RuntimeError("generated renderer cannot place a string gap at this indentation")
+            if len(body) - body_start <= room:
+                current += body[body_start:] + '"'
+                body_start = len(body)
+                break
+            cut = _generated_string_cut(body, body_start, room)
+            current += body[body_start:cut]
+            if cut < len(body):
+                current += "\\"
+                lines.append(current.rstrip())
+                current = continuation_indent
+            else:
+                current += '"'
+            body_start = cut
+        position = end
+    append_outside(line[position:])
+    lines.append(current.rstrip())
+    if any(len(item) > GENERATED_LINE_WIDTH for item in lines):
+        raise RuntimeError("generated renderer exceeded the long-line budget")
+    return "\n".join(lines)
+
+
 def format_selector_values(report: dict[str, object]) -> str:
     selector = report["selector"]
     if not isinstance(selector, dict):
@@ -475,7 +612,7 @@ def format_artifact_header(report: dict[str, object]) -> str:
         raise RuntimeError(f"artifact occurrence must be a nonempty string: {report!r}")
     if not isinstance(module, str) or not module:
         raise RuntimeError(f"artifact module must be a nonempty string: {report!r}")
-    return (
+    raw = (
         "(artifact_kind := "
         f"{lean_string(ARTIFACT_KIND)} artifact_schema := {ARTIFACT_SCHEMA} "
         f"selector_schema := {SELECTOR_SCHEMA} "
@@ -483,6 +620,7 @@ def format_artifact_header(report: dict[str, object]) -> str:
         f"{lean_string(SEMANTIC_CONTRACT)} occurrence_id := {lean_string(occurrence)} "
         f"recorded_module := {lean_string(module)})"
     )
+    return _format_generated_line(raw)
 
 
 def format_variant_outcome(
@@ -573,7 +711,7 @@ def format_report_variants(
     # variant and fails while parsing its expected string literal.
     parts = ["(simp_engine_boundary_select"]
     parts.append(format_artifact_header(reports[0]))
-    for report in reports:
+    for index, report in enumerate(reports):
         branch = (
             continuation_indent
             + "| "
@@ -584,8 +722,12 @@ def format_report_variants(
         if report["status"] == "success":
             branch += " @@ " + format_stock_generator(report)
         branch += " => " + format_variant_outcome(report, artifact_indent)
-        parts.append(branch)
-    return "\n".join(parts) + ")"
+        if index == len(reports) - 1:
+            # Keep the closing delimiter inside the renderer-owned token
+            # stream so it is included in the 100-column budget.
+            branch += ")"
+        parts.append(_format_generated_line(branch, continuation_indent))
+    return "\n".join(parts)
 
 
 def header_fixture_source(
