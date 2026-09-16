@@ -193,13 +193,28 @@ def etaReduce (idx : Nat) (sub : Expr) : TacticM Expr := do
     stepError idx m!"`eta` at this position: the subterm is not an eta-redex."
   return r
 
-/-- Reduce a structure projection applied to a constructor application. -/
+/--
+Reduce a structure projection applied to a constructor application, or a
+projection-function application. This is projection reduction only: it refuses a
+subterm that is not headed by a projection, so a `proj` step can never stand in
+for an arbitrary `whnf`.
+-/
 def projReduce (idx : Nat) (sub : Expr) : TacticM Expr := do
-  match ← withReducible (whnfCore sub) with
-  | r =>
-    if r == sub then
-      stepError idx m!"`proj` at this position: the subterm does not reduce."
-    return r
+  let isProjLike ←
+    match sub with
+    | .proj .. => pure true
+    | _ =>
+      match sub.getAppFn with
+      | .const c _ => pure ((← getEnv).getProjectionFnInfo? c).isSome
+      | _ => pure false
+  unless isProjLike do
+    stepError idx m!"`proj` at this position: the subterm is not a projection; \
+      its head is `{sub.getAppFn}`."
+  let r ← withReducible (whnfCore sub)
+  if r == sub then
+    stepError idx m!"`proj` at this position: the projection does not reduce; \
+      its argument is not a constructor application."
+  return r
 
 /-- Apply one parsed step to the current expression. -/
 def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Replacement := do
@@ -211,7 +226,9 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
     runDefeqStep idx e pos s!"`unfold {c}`" (unfoldConst idx c)
   | ``explicitRwRed =>
     let pos := parsePos stx[1]
-    let kind := stx[0].getAtomVal
+    -- The alternation wraps the keyword in a `token.<kw>` node, so the atom
+    -- itself is one level down.
+    let kind := stx[0][0].getAtomVal
     match kind with
     | "beta" => runDefeqStep idx e pos "`beta`" fun sub => do
         let r := sub.headBeta
@@ -219,7 +236,8 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
           stepError idx m!"`beta` at this position: the subterm is not a beta-redex."
         return r
     | "eta" => runDefeqStep idx e pos "`eta`" (etaReduce idx)
-    | _ => runDefeqStep idx e pos "`proj`" (projReduce idx)
+    | "proj" => runDefeqStep idx e pos "`proj`" (projReduce idx)
+    | k => throwError "explicit_rw: internal error: unknown reduction keyword `{k}`"
   | ``explicitRwChange =>
     let pos := parsePos stx[2]
     let target : Term := ⟨stx[1]⟩
