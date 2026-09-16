@@ -1051,8 +1051,10 @@ def validate_realization_payload(source: object, expected_anchor: object,
                     or any(modes[i] != modes[index] for i in node[4])):
                 reject("sequence child mode or order mismatch")
         private, public, fresh, reachable = [], [], [], set()
-        helper_count = 0
         registrations = set()
+        registration_owners = {}
+        helper_snapshots = []
+        registration_indices = []
         for step_index, step in enumerate(steps):
             if not (isinstance(step, list) and step and isinstance(step[0], str)):
                 reject("invalid sequence step")
@@ -1063,6 +1065,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
                 if registration_key in registrations or step[1] in value[1]:
                     reject("registration overlap")
                 registrations.add(registration_key)
+                registration_indices.append((registration_key, step_index))
                 try:
                     registration = json.loads(step[2])
                 except (ValueError, RecursionError) as error:
@@ -1073,6 +1076,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
                         and type(registration[5]) is bool):
                     reject("invalid active registration fields")
                 owner = registration[1]; key(owner)
+                registration_owners[registration_key] = key(owner)
                 if step[1][:-1] != owner or _private_name(step[1]) or step[1][-1][0] != "s":
                     reject("active registration owner or name")
                 suffix = step[1][-1][1]
@@ -1080,6 +1084,7 @@ def validate_realization_payload(source: object, expected_anchor: object,
                     reject("active registration equation suffix")
                 signature = registration[3]
                 if not (isinstance(signature, list) and len(signature) in {4, 5}
+                        and isinstance(signature[0], str)
                         and signature[0] in {"theorem", "public-proof-interface"}
                         and len(signature) == (5 if signature[0] == "theorem" else 4)
                         and signature[1] == step[1]):
@@ -1113,12 +1118,13 @@ def validate_realization_payload(source: object, expected_anchor: object,
                 root_name = nodes[root][2]
                 is_fresh = not modes[root]
             elif step[0] == "helper":
-                helper_count += 1
                 if not (len(step) == 5 and type(step[3]) is bool):
                     reject("invalid sequence helper")
                 root_name = step[1]; key(root_name)
                 bundle = validate_local_theorems_payload(step[2], root_name, label)
                 equation_state(step[4])
+                snapshot_map = {key(entry[0]): key(entry[1]) for entry in step[4]}
+                helper_snapshots.append((step_index, snapshot_map))
                 if (len(bundle[2]) != 1 or bundle[2][0][0] != root_name
                         or any(root_name in descriptor(n[5], n[1], n[2])[0] for n in nodes)):
                     reject("sequence helper is not independent singleton")
@@ -1135,7 +1141,28 @@ def validate_realization_payload(source: object, expected_anchor: object,
             public.extend(name for name in public_names if name not in public)
             if is_fresh:
                 fresh.extend(new_members)
-        if (helper_count > 1 or len(reachable) != len(nodes) or private != value[1]
+        for registration_name, registration_index in registration_indices:
+            first_observer = None
+            last_nonobserver = None
+            observed = False
+            for helper_index, snapshot_map in helper_snapshots:
+                if registration_name in snapshot_map:
+                    if snapshot_map[registration_name] != registration_owners[registration_name]:
+                        reject("helper equation snapshot owner mismatch")
+                    if first_observer is None:
+                        first_observer = helper_index
+                    observed = True
+                elif observed:
+                    reject("nonmonotone helper equation snapshots")
+                else:
+                    last_nonobserver = helper_index
+            if first_observer is None:
+                if any(registration_index <= helper_index for helper_index, _ in helper_snapshots):
+                    reject("registration order mismatch")
+            elif ((last_nonobserver is not None and registration_index <= last_nonobserver)
+                  or registration_index >= first_observer):
+                reject("registration order mismatch")
+        if (len(reachable) != len(nodes) or private != value[1]
                 or public != value[2] or fresh != value[3] or not fresh or len(fresh) >= len(private)):
             reject("sequence cover or delta mismatch")
         return value

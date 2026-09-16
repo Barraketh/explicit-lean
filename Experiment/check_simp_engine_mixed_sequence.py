@@ -117,7 +117,8 @@ def main():
     work = Path(tempfile.mkdtemp(prefix=args.case + "-", dir=parent))
     print(work, flush=True)
     (work / "driver.py").write_bytes(Path(__file__).read_bytes())
-    inputs = recursive.input_hashes()
+    shared_library = recursive.shared_library_path()
+    inputs = recursive.input_hashes(shared_library)
     original_path = ROOT / ".lake/packages/mathlib" / module
     inputs[str(original_path.resolve())] = hashlib.sha256(original_path.read_bytes()).hexdigest()
     (work / "inputs-before.json").write_text(json.dumps(inputs, indent=2) + "\n")
@@ -128,7 +129,7 @@ def main():
         path = materializer._copy_at_module_root(work / label, module, text.encode())
         env, nonce = (protocol.recording_subprocess_environment() if recording else protocol.replay_subprocess_environment())
         code, output, elapsed = materializer._compile_copy(path,
-            str(ROOT / ".lake/build/lib/libexplicitLean_ExplicitLean.dylib"), 360, env=env)
+            str(shared_library), 360, env=env)
         log = work / (label + ".log"); log.write_text(output)
         check = protocol.check_recording_abort_markers if recording else protocol.check_replay_abort_markers
         failure = None
@@ -256,7 +257,7 @@ def main():
                 assert early_obs[0][field] == stock[field], field
             late = copy.deepcopy(payload)
             late[12][1], late[12][2] = late[12][2], late[12][1]
-            run("registration-after-helper", render_payload(late), expected="boundary_sequence_helper_equation_snapshot")
+            run("registration-after-helper", render_payload(late), expected="boundary_sequence_registration_order")
             for label, change in [
                 ("registration-tag", lambda r: r.__setitem__(4, not r[4])),
                 ("registration-owner", lambda r: r.__setitem__(1, [["s", "Nat"]])),
@@ -286,7 +287,7 @@ def main():
             else:
                 text = text.replace(line, indent + "mutate_mixed_state " + json.dumps(label) + "\n" + line)
             run(label, text, expected=expected)
-    after = recursive.input_hashes()
+    after = recursive.input_hashes(shared_library)
     after[str(original_path.resolve())] = hashlib.sha256(original_path.read_bytes()).hexdigest()
     assert inputs == after, "source/runtime changed during controls"
     (work / "inputs-after.json").write_text(json.dumps(after, indent=2) + "\n")

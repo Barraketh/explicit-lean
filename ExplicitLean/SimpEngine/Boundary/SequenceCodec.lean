@@ -78,6 +78,21 @@ private def sequenceStepJson : SequenceStep → Json
       .arr #[.str "helper", encodeBoundaryName name, .str source, .bool publicMember, equations]
   | .registration name source => .arr #[.str "registration", encodeBoundaryName name, .str source]
 
+private def equationStateEntries (state : Json) : MetaM (Array (Name × Name)) := do
+  let .arr entries := state | throwError "boundary_sequence_helper_equation_snapshot"
+  let mut result := #[]
+  for entry in entries do
+    let .arr #[key, owner] := entry | throwError "boundary_sequence_helper_equation_snapshot"
+    let name ← ofExcept (decodeBoundaryName key)
+    let owner ← ofExcept (decodeBoundaryName owner)
+    if name.isAnonymous || owner.isAnonymous || result.any (·.1 == name) then
+      throwError "boundary_sequence_helper_equation_snapshot"
+    result := result.push (name, owner)
+  return result
+
+private def equationStateContains (state : Json) (name : Name) : MetaM Bool := do
+  return (← equationStateEntries state).any (·.1 == name)
+
 private def sequenceJson (sequence : RealizationSequence) : Json :=
   .arr #[.str "boundary_realization_sequence_v1", nameArrayJson sequence.added,
     nameArrayJson sequence.publicAdded, nameArrayJson sequence.fresh,
@@ -138,7 +153,6 @@ def encodeBoundaryRealizationSequence? (before stock : Environment) (checkedBefo
     return some sequence
   let added ← branchDelta before stock
   if !(added.any checkedBefore.contains && added.any (!checkedBefore.contains ·)) then return none
-  if helpers.size > 1 then throwError "boundary_sequence_multiple_helpers_unsupported"
   let publicAdded ← branchDelta before stock true
   let fresh := added.filter (!checkedBefore.contains ·)
   unless fresh.qsort Name.quickLt == declarations.qsort Name.quickLt do
@@ -197,24 +211,30 @@ def encodeBoundaryRealizationSequence? (before stock : Environment) (checkedBefo
   let afterMap := (eqnsExt.getState stock).mapInv
   unless beforeMap.toArray.all (fun (name, owner) => afterMap.find? name == some owner) do
     throwError "boundary_sequence_changed_prior_equation_mapping"
-  let mut registrations := #[]
+  let mut registrations : Array (Nat × SequenceStep) := #[]
   for (name, owner) in afterMap.toArray.qsort (fun a b => Name.quickLt a.1 b.1) do
     if (beforeMap.find? name).isSome || nodes.any (·.key == name) then continue
     let source := (← activeRegistrationSignature before owner name).compress
-    registrations := registrations.push (SequenceStep.registration name source)
-  -- Imported cached activations preserve the caller's base extensions. These
-  -- disjoint, absent-key insertions commute with them, but not with creation of
-  -- a helper whose async snapshot observes the map. Canonically place them just
-  -- before the sole helper (or after roots when there is no helper).
+    -- The helper's async equation snapshot records which imported mappings
+    -- were visible when that helper was declared. Place each registration before
+    -- the first helper that observed it; unseen mappings remain after all steps.
+    let mut position := steps.size
+    for index in [:steps.size] do
+      if position == steps.size then
+        match steps[index]! with
+        | .helper _ _ _ equations =>
+          if ← equationStateContains equations name then position := index
+        | _ => pure ()
+    registrations := registrations.push (position, .registration name source)
   if !registrations.isEmpty then
-    let mut inserted := false
     let mut ordered := #[]
-    for step in steps do
-      if let .helper .. := step then
-        ordered := ordered ++ registrations
-        inserted := true
-      ordered := ordered.push step
-    steps := if inserted then ordered else ordered ++ registrations
+    for index in [:steps.size] do
+      for (position, registration) in registrations do
+        if position == index then ordered := ordered.push registration
+      ordered := ordered.push steps[index]!
+    for (position, registration) in registrations do
+      if position == steps.size then ordered := ordered.push registration
+    steps := ordered
   let sequence : RealizationSequence := {
     added, publicAdded, fresh, nodes, cached, steps
     matchBefore := boundaryMatchStateJson (Match.matchEqnsExt.getState before)
@@ -292,15 +312,19 @@ private def parseSequence (expectedAnchor : Name) (source : String) : MetaM Real
   let mut seen := #[]
   let mut seenPublic := #[]
   let mut seenFresh := #[]
-  let mut helperCount := 0
   let mut registrations : Array Name := #[]
+  let mut registrationOwners : Array (Name × Name) := #[]
+  let mut helperSnapshots : Array (Nat × Array (Name × Name)) := #[]
+  let mut registrationIndices : Array (Name × Nat) := #[]
   for value in stepValues do
     if let .arr #[.str "registration", name, .str payload] := value then
       let name ← ofExcept (decodeBoundaryName name)
       if added.contains name || registrations.contains name then
         throwError "boundary_sequence_registration_overlap"
-      discard <| authenticateActiveRegistration (← getEnv) name payload
+      let owner ← authenticateActiveRegistration (← getEnv) name payload
       registrations := registrations.push name
+      registrationOwners := registrationOwners.push (name, owner)
+      registrationIndices := registrationIndices.push (name, steps.size)
       steps := steps.push (.registration name payload)
       continue
     let (step, key, members, publicMembers, isFresh) ← match value with
@@ -313,13 +337,14 @@ private def parseSequence (expectedAnchor : Name) (source : String) : MetaM Real
       reachable := reachable.push index
       pure (SequenceStep.group index, node.key, members, publicMembers, !cached[index]!)
     | .arr #[.str "helper", name, .str payload, .bool publicMember, equations] => do
-      helperCount := helperCount + 1
+      let snapshotEntries ← equationStateEntries equations
       let name ← ofExcept (decodeBoundaryName name)
       unless (← boundaryLocalTheoremNames name payload) == #[name] do
         throwError "boundary_sequence_invalid_helper"
       for node in nodes do
         let (members, _) ← descriptorNames node.owner node.key node.descriptor
         if members.contains name then throwError "boundary_sequence_helper_realization_overlap"
+      helperSnapshots := helperSnapshots.push (steps.size, snapshotEntries)
       pure (SequenceStep.helper name payload publicMember equations, name, #[name],
         if publicMember then #[name] else #[], true)
     | _ => throwError "boundary_sequence_invalid_step"
@@ -332,7 +357,31 @@ private def parseSequence (expectedAnchor : Name) (source : String) : MetaM Real
     seenPublic := seenPublic ++ publicMembers.filter (!seenPublic.contains ·)
     if isFresh then seenFresh := seenFresh ++ newMembers
     steps := steps.push step
-  if helperCount > 1 then throwError "boundary_sequence_multiple_helpers_unsupported"
+  for (name, registrationIndex) in registrationIndices do
+    let some registrationOwner := (registrationOwners.find? (·.1 == name)).map (·.2)
+      | throwError "boundary_sequence_registration_owner"
+    let mut firstObserver : Option Nat := none
+    let mut lastNonObserver : Option Nat := none
+    let mut observed := false
+    for (helperIndex, snapshotEntries) in helperSnapshots do
+      if let some (_, snapshotOwner) := snapshotEntries.find? (·.1 == name) then
+        unless snapshotOwner == registrationOwner do
+          throwError "boundary_sequence_helper_equation_snapshot_owner"
+        if firstObserver.isNone then firstObserver := some helperIndex
+        observed := true
+      else
+        if observed then throwError "boundary_sequence_helper_equation_snapshot_order"
+        lastNonObserver := some helperIndex
+    match firstObserver with
+    | some helperIndex =>
+      let priorOrder : Bool := match lastNonObserver with
+        | some index => decide (registrationIndex > index)
+        | none => true
+      unless priorOrder && decide (registrationIndex < helperIndex) do
+        throwError "boundary_sequence_registration_order"
+    | none =>
+      unless helperSnapshots.all (fun (helperIndex, _) => decide (registrationIndex > helperIndex)) do
+        throwError "boundary_sequence_registration_order"
   for i in (List.range nodes.size).reverse do
     if reachable.contains i then
       for child in nodes[i]!.children do
