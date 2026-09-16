@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-16T06:11:40Z",
+  "updatedAt": "2026-09-16T06:23:24Z",
   "resumeStatus": {
     "review": "complete_independent_code_and_nat_review",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
@@ -268,7 +268,8 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Retry affected manifest entries provisionally using the committed replay fixes; keep fresh producer-side auxiliary reconstruction, module/declaration comparison and downstream acceptance explicit. The focused regressions do not establish full Mathlib coverage.",
+    "Run the three original foundation-module baselines on the existing AWS host from the newly published replay fixes; record exact failures or full module/declaration acceptance. Diagnose and fix independent failures with Luna high while respecting file ownership and measured resource admission.",
+    "After foundation retries pass, select and validate a small translated dependency slice using only accepted predecessor translations. Then expand dependency-ordered coverage within the one authorized pilot window; report focused checks separately from whole-tree acceptance.",
     "Use measured resource admission for focused Linux checks: the 24 GiB virtual-address cap caused bad_alloc in both unchanged baseline and patched builds; unchanged assertions/timeouts passed at 64 GiB. Preserve the 12 GiB host-memory/disk reserves and authorized host limits.",
     "Continue monitoring the existing sole authorized AWS run through its immutable 2026-09-16T13:30:00Z cutoff. Preserve terminal evidence and clean up the exact resources; no second host or worker redispatch.",
     "Use the manifest provisionally for development as authorized by the user, while keeping independent authentication as an acceptance requirement.",
@@ -310,6 +311,11 @@
       "id": "replay-first-principles-fixes",
       "status": "completed",
       "description": "Reviewed fixes committed: f6a5086 matches stock local-context timing; 4ae57bf covers encoded context replay; e813e53 supports ordered multiple imported helpers; a407a01 authenticates imported auxiliary-cache witnesses through one shared validator with local/imported adapters. Shared build, context, multi-helper, imported auxiliary runtime/wire controls and existing mixed/local-aux/realization-group compatibility pass on isolated AWS. Imported auxiliary acceptance covers authentic completed cache activation with controlled auxiliary injection, not fresh producer-side auxiliary reconstruction. No module/tree acceptance or campaign coverage advancement."
+    },
+    {
+      "id": "foundation-module-retries-2026-09-16",
+      "status": "in_progress",
+      "description": "User approved original-module retries after replay fixes. Luna high runner owns fresh isolated AWS reproduction of Mathlib.Logic.Relation, Mathlib.Logic.IsEmpty.Basic and Mathlib.Data.Nat.Init including Nat.leRec_self override; Luna high semantic owner diagnoses source/failure evidence in parallel. Coordinator owns architectural decisions, diff review and commits, reads only compact summaries/evidence. Start with exact published sources, fresh namespaces/nonces, 64 GiB virtual limit and 12 GiB host memory/disk reserve. Retain strict module/declaration checks; then certify a bounded translated dependency slice before expanding. Existing pilot/verifier untouched; deadline unchanged; no new acceptance claimed."
     }
   ],
   "activeChecks": [
