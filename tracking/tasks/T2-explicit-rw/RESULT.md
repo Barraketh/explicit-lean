@@ -3,10 +3,9 @@
 Status: **complete**, all checks pass. Rounds 1-3: 7/7, 7/7, 3/3.
 `explicit_rw` replays a simp trace positionally with no search (design and
 syntax: `ExplicitLean/ExplicitRw/Tactic.lean`). Nothing in it reaches
-`Lean.Meta.Simp`. For what a *trace* can introduce the guarantee is a
-**conditional**, which is what is actually true: no trace written in this syntax
-can introduce a simp-family tactic, *provided its file declares no term
-elaborators* (see Round 3 item 1).
+`Lean.Meta.Simp`. What a *trace* can introduce is a **conditional** guarantee,
+which is what is actually true: no trace in this syntax can introduce a
+simp-family tactic, *provided its file declares no term elaborators* (Round 3.1).
 
 ## Round 3 fixes
 1. *(major)* Both previous guard layers keyed on **syntax**, so a term elaborator
