@@ -15,7 +15,12 @@ One trace per executed simp call. JSON object:
   "locations": [ { "loc": "goal" | {"hyp": "<user name>"},
                    "pre": "<pp of the location before>", "post": "<pp after, or null if closed>",
                    "steps": [ STEP, ... ],
-                   "close": null | {"by": "rfl" | "true_intro" | "assumption:<name>" | "absurd:<hyp name>" | "decide"} } ] }
+                   "close": null | {"by": "rfl" | "true_intro" | "assumption:<name>" | "absurd:<hyp name>" | "decide" | "nofun"} } ] }
+```
+`"nofun"` closes a goal of the form `c₁ ... = c₂ ... → False` (distinct constructors) or
+any goal refutable by empty pattern matching; replay is `exact nofun`. It is the close
+form for `reduceCtorEq`-style side conditions.
+```
 ```
 
 `STEP` is one of:
