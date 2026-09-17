@@ -260,6 +260,12 @@ def render_site(site: S.Site, trace: dict | None) -> dict:
         )
     long = S.overlong(lines)
     if long:
+        # A step whose own text exceeds the budget cannot be broken: the syntax
+        # admits a line break only between steps. `set_option
+        # linter.style.longLine false in` before the declaration is the remedy
+        # if such a line ever has to ship, but that linter is a Mathlib CI
+        # option and is not enabled by `lake env lean`, so the harness reports
+        # the case instead of emitting an option nothing here checks.
         record["long_line_waiver"] = True
         record["long_lines"] = long
     record["status"] = "rendered"
@@ -368,6 +374,12 @@ def attribute(record: dict, message: str) -> tuple[str, str]:
         return (
             "t1",
             "a trace field was spliced as syntax the tactic's grammar does not admit",
+        )
+    if "was applied where the head constant is" in low:
+        return (
+            "t1",
+            "the recorded position does not hold the constant the step unfolds, so "
+            "the position is wrong",
         )
     if "explicit_rw:" in low and "not implemented" in low:
         return ("t2", "the tactic recognises the step kind but does not implement it")
