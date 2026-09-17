@@ -17,10 +17,14 @@ malformed metadata.
 | --- | --- |
 | `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 265 checks |
 | structural fixture compile with T2 `lake env lean` | PASS |
-| fresh seven-module replay gate | PASS; 91 identity, 59 replayed, 21 compile_failed, 2 render_failed, 4 structurally_refused, 5 unresolved |
+| fresh seven-module replay gate | PASS; 91 identity, 59 replayed, 5 unresolved, 6 render_failed, 0 structurally_refused, 21 compile_failed |
 | `git diff --check` | PASS |
 
-The reviewed seven-module run accepted all 91 identities. Former
+The authoritative fresh report is `/private/tmp/t6-seven-review2/report.json`.
+It accepted all 91 identities, with totals of 59 replayed, 5 unresolved, 6
+render_failed, 0 structurally_refused, and 21 compile_failed (91 total). The
+earlier 2 render_failed + 4 structurally_refused split was a stale/older
+classification and is superseded by that report. Former
 multi-invocation sites with complete, replayable traces (including
 `Function/Defs.lean:139` and the replayable `Logic/Basic.lean` leaves) now
 render structurally; trace-side unresolved and compile defects remain visibly
