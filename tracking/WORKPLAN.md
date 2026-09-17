@@ -6,14 +6,16 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | Task | Scope | Depends on | Status | Branch | Review |
 | --- | --- | --- | --- | --- | --- |
 | T0-remote-host | On demand only: Scaleway GP1-L (32 vCPU, 128 GB, $0.89/hr). Provision only when a local job fails on resources; delete when idle for an extended period and re-provision later | a local resource failure | deferred (user decision 2026-09-16) | | |
-| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | R4 fixed; implementing `congr` kind, then review round 5 | task/T1-trace-capture | R1-R4 fixed |
-| T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | review round 6 running | task/T2-explicit-rw | R1-R5 fixed; R6 pending; `congr` kind still to implement |
+| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | review round 5 running | task/T1-trace-capture | R1-R4 fixed; 46/46 corpus calls trace |
+| T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 6 in progress | task/T2-explicit-rw | R6: 1 critical (`eq` slot admits sorry), 3 major, 2 minor; recursive side proofs and `congr` kind pending |
 | T3-compliance | Rewrite two `dsimp` overrides; simp-family lint for overrides and generated regions | none | **merged** (af33e32) | task/T3-compliance | R3: NO DEFECTS |
 | T4-pipeline | Per-module driver: capture traces for a module, render `explicit_rw` source with original comment, build, oracle | T1, T2 | planned | | |
 | T5-cone | Run T4 on the seven-module cone (91 calls); record per-call outcomes | T0, T4 | planned | | |
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
 
 Log (newest first):
+
+- 2026-09-16: T1: `congr` kind implemented for cast transports; user `@[congr]` theorems recorded as `rw` with `source: "congr"` and `intros` side traces (spec 2e73661); all 46 calls across five modules trace clean. T2 round 6: critical `eq`-slot `sorryAx` acceptance (false theorem compiles); decision: one strict elaboration helper for all sites plus runner-enforced `#print axioms`; also recursive closed side-proof grammar (`intro h; explicit_rw [...] then rfl`) for implication-shaped side conditions.
 
 - 2026-09-16: T1 round 4 fixed: the panic's root cause was a mis-ported `subst` loop in `tryAutoCongrTheoremT?`, not the binder path; `dsimpT` re-ported verbatim; 46/46 calls across five modules trace, zero panics/validation failures; Function/Basic 19 calls, 3.84s vs stock 2.62s. Six calls unresolved because dependent congruence transports had no representation: spec gains a `congr` step kind (replay via `mkCongrSimp?`, which is not simp), T1 implementing it now; T2 gets it next round. T2 round 5 fixed plus a self-found `sorryAx` acceptance hole; round 6 review auditing every elaboration site.
 
