@@ -22,17 +22,14 @@ REVIEW-1/2 fixes in `Experiment/pipeline/`:
 
 | command | result |
 | --- | --- |
-| `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 240 checks, 2 s |
+| `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 241 checks, 5 s |
 | focused marker/lint repros and `git diff --check` | PASS |
 
-T1 is clean at `30fb849` and T2 is clean at `8b57c4a`; the focused real-module
-run left both statuses and T1 shared outputs unchanged. The six-module harness
-is deferred because T1's committed finalizer still verifies hard-coded trace
-paths and rejects T4's staged raw-root paths (`traced source differs from
-deterministic transform`). The parameterized deterministic-transform follow-up
-must land before identity/replay counts are reported. Focused lifecycle mocks
-cover the five-path CLI, raw-v1/final-v2 separation, repeat-run isolation, and
-missing-final fail-closed behavior.
+T1/main is clean at `6313029` and T2 is clean at `8b57c4a`; the fresh run left
+both statuses and T1 shared outputs unchanged. All seven configured modules
+passed identity (`91/91` sites, `renderAttempted=true`). Replay totals were
+`56 replayed`, `1 unresolved`, `18 render_failed`, and `16 compile_failed`.
+The bounded `OptionBasicTraced` mapping added the requested seventh module.
 
 Known limitations: per-branch `<;>` calls remain explicitly refused pending the
 later per-branch rendering task; T1 currently has two newly visible attributed
