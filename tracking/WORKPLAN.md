@@ -6,7 +6,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | Task | Scope | Depends on | Status | Branch | Review |
 | --- | --- | --- | --- | --- | --- |
 | T0-remote-host | On demand only: Scaleway GP1-L (32 vCPU, 128 GB, $0.89/hr). Provision only when a local job fails on resources; delete when idle for an extended period and re-provision later | a local resource failure | deferred (user decision 2026-09-16) | | |
-| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 7 in progress | task/T1-trace-capture | R7: 4 critical (quantified locals unresolved and validator blind to them; `exists_prop_congr` false positive from arg order; `of_eq_true` mapped to rfl; 4 Logic/Basic crashes), 2 major, 2 minor |
+| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 8 in progress | task/T1-trace-capture | R8: 3 critical (`True`/`¬False` side goals wrongly classified; `Ne` lemmas rejected; side-step positions outer-relative), 2 major, 3 minor |
 | T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 7 in progress | task/T2-explicit-rw | R7: 0 critical/major, 3 minor, 1 trivial; integration gate 5/5 traces replay |
 | T3-compliance | Rewrite two `dsimp` overrides; simp-family lint for overrides and generated regions | none | **merged** (af33e32) | task/T3-compliance | R3: NO DEFECTS |
 | T4-pipeline | Per-module driver: capture traces for a module, render `explicit_rw` source with original comment, build, oracle | T1, T2 | planned | | |
@@ -14,6 +14,8 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
 
 Log (newest first):
+
+- 2026-09-16: T1 round 8: Logic/Basic's 12 classified lines are 6 sites: 6 genuine dependent-proof transports, 6 false positives (side goals `True`/`¬False` never inspected). Also `Ne`-stated lemmas always rejected, side-trace positions outer-relative, `args` with `⋯`, two `; simp` sites untransplanted. Fix dispatched with structural guards (checker validates side positions; args re-elaborated from text; site-count check on traced copies).
 
 - 2026-09-16: T1 round 7: fidelity clean (25 goals byte-identical; Logic/Basic 42 calls, 1.33x wall) but quantified/conditional local hypotheses unresolved with the validator passing them as "none", `exists_prop_congr` false positive from reversed args, `of_eq_true` misdescribed as rfl, and 4 `unexpected bound variable` crashes. Decision: "none" is never a pass; every origin resolves or the call is classified. Fix dispatched with T2's `to`/pre-post findings folded in.
 
