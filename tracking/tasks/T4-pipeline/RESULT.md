@@ -25,12 +25,14 @@ REVIEW-1/2 fixes in `Experiment/pipeline/`:
 | `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 240 checks, 2 s |
 | focused marker/lint repros and `git diff --check` | PASS |
 
-The six-module harness was not rerun: the fixed explicit-path T1 finalizer CLI
-is not committed on the available T1 tip, so only focused lifecycle mocks ran.
-Those mocks verify shared T1 output/status preservation, raw-v1/final-v2
-separation, repeat-run isolation, and missing-final fail-closed behavior. No
-six-module result is claimed here; the prior clean baseline is not current
-evidence.
+T1 is clean at `30fb849` and T2 is clean at `8b57c4a`; the focused real-module
+run left both statuses and T1 shared outputs unchanged. The six-module harness
+is deferred because T1's committed finalizer still verifies hard-coded trace
+paths and rejects T4's staged raw-root paths (`traced source differs from
+deterministic transform`). The parameterized deterministic-transform follow-up
+must land before identity/replay counts are reported. Focused lifecycle mocks
+cover the five-path CLI, raw-v1/final-v2 separation, repeat-run isolation, and
+missing-final fail-closed behavior.
 
 Known limitations: per-branch `<;>` calls remain explicitly refused pending the
 later per-branch rendering task; T1 currently has two newly visible attributed
