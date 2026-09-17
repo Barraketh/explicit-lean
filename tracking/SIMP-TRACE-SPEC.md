@@ -1,5 +1,7 @@
 # simp trace format v1 (interface between trace capture and positional replay)
 
+Amended 2026-09-16 after review round 3 of T1: `iota` kind, `prop` flag on
+`rw` steps, `omega` side close, classified `unresolved:` outcomes.
 Amended 2026-09-16 after review round 1 of T1/T2: `zeta` kind, `true_intro` and
 `absurd:<hyp>` close forms (replacing `trivial`/`eq_self`), local-hypothesis
 reference object. Schema id stays `simp-trace-v1` because nothing has shipped.
@@ -23,13 +25,20 @@ One trace per executed simp call. JSON object:
    "before": "<pp of subterm>", "after": "<pp of subterm>"}`
   Rewrite exactly the subterm at `pos` with the equation or iff `name` (a global
   constant, or a local hypothesis in scope at that position, including binder
-  variables introduced by the path). `side` holds, for each hypothesis of a
+  variables introduced by the path). If `name` is Prop-valued rather than an
+  equation (simp uses `p` as `p = True` and `¬p` as `p = False`), the step
+  carries `"prop": "true"` or `"prop": "false"` and replay rewrites with
+  `eq_true name` / `eq_false name` respectively. `side` holds, for each hypothesis of a
   conditional lemma, how it was discharged: a nested trace object with the same
-  `steps`/`close` shape.
+  `steps`/`close` shape. A side trace's `close.by` may additionally be `"omega"`
+  when the user-supplied discharger was `omega`; any other non-simp discharger
+  is recorded as `{"by": "unresolved:<discharger text>"}` and the whole call is
+  reported unresolved (classified, not a generic abort).
 - `{"kind":"unfold", "pos": POS, "name": "<constant>", "before": ..., "after": ...}`
   Delta-unfold one constant at that position (definitional).
-- `{"kind":"beta"|"eta"|"proj"|"zeta", "pos": POS, "before": ..., "after": ...}` Definitional
-  reductions simp performs silently (`zeta` = `let x := v; b` to `b[v/x]`).
+- `{"kind":"beta"|"eta"|"proj"|"zeta"|"iota", "pos": POS, "before": ..., "after": ...}` Definitional
+  reductions simp performs silently (`zeta` = `let x := v; b` to `b[v/x]`;
+  `iota` = matcher/recursor application to a constructor, reduced one step).
 - `{"kind":"change", "pos": POS, "to": "<pp.all term>", "before": ...}` Last-resort
   definitional replacement when no named kind applies; replay checks defeq.
 - `{"kind":"eq", "pos": POS, "lhs": "<pp>", "rhs": "<pp>", "by": "rfl"|"decide",
