@@ -49,9 +49,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
   `first` dispatch or goal fingerprints. Non-tail continuations may be copied
   only when simp-free and scope/order preserving; otherwise refuse the site.
   T1 must emit the specified ordinals before T4 implementation begins.
-- **T7 declaration-oracle design:** an independent read-only lane is defining
-  the smallest fail-closed post-compile oracle adapter for whole-module and
-  per-site harness runs. T4 remains untouched until review 2 completes.
+- **T7 declaration-oracle design: COMPLETE.** Commit `3615686` specifies a
+  source-pair gate with a stock companion carrying the same ExplicitRw import.
+  Reuse the existing oracle and strict parser unchanged; `replayed` requires
+  compile plus oracle success. Whole-module failures remain module-scoped and
+  per-site attribution requires an isolated successful compile. Implement only
+  after T4's current merge gate passes.
 
 After a slot completes, reuse it immediately for the next independent review or
 fix. The coordinator alone integrates accepted branches and updates this plan.
