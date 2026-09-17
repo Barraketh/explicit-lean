@@ -139,19 +139,23 @@ def wrap_step_list(head: str, steps: list[str], tail: str, indent: str,
     break without changing meaning. A single step longer than the budget cannot
     be broken; the caller is told so via `overlong`.
     """
-    single = head + ", ".join(steps) + tail
-    if len(indent) + len(single) <= MAX_LINE or len(steps) <= 1:
-        return [indent + single]
+    single = indent + head + ", ".join(steps) + tail
+    if len(single) <= MAX_LINE or len(steps) <= 1:
+        return [single]
 
     lines: list[str] = []
     current = head
     first = True
     for i, step in enumerate(steps):
-        piece = step + ("," if i < len(steps) - 1 else "")
-        candidate = current + ("" if first else " ") + piece
+        last = i == len(steps) - 1
+        piece = step + ("" if last else ",")
         prefix = indent if not lines else continuation
-        if not first and len(prefix) + len(candidate) > MAX_LINE:
-            lines.append((indent if not lines else continuation) + current)
+        candidate = current + ("" if first else " ") + piece
+        # The final piece carries the tail (`]`, a `then` closer, an `at h`
+        # clause), which must fit on the same line as the step it follows.
+        width = len(prefix) + len(candidate) + (len(tail) if last else 0)
+        if not first and width > MAX_LINE:
+            lines.append(prefix + current)
             current = piece
         else:
             current = candidate

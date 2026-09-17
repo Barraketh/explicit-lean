@@ -61,8 +61,10 @@ MODULES = {
 }
 
 # `lake env lean` diagnostics: `<file>:<line>:<col>: <severity>: <message>`.
+# A message body runs on until the next diagnostic header, which is where
+# `explicit_rw` prints the expected and actual subterms, so the report keeps it.
 DIAG_RE = re.compile(r"^(?P<file>[^\s:][^:]*):(?P<line>\d+):(?P<col>\d+): "
-                     r"(?P<sev>error|warning): (?P<msg>.*)$")
+                     r"(?P<sev>error|warning): (?P<msg>.*)$", re.M)
 
 COMPILE_TIMEOUT = 30 * 60  # The coordination protocol's escalation threshold.
 
@@ -313,19 +315,24 @@ def compile_in_t2(t2: pathlib.Path, path: pathlib.Path
                   ) -> tuple[int, list[dict], float]:
     """Compile one file in the T2 worktree and return its errors."""
     code, out, err, secs = run(["lake", "env", "lean", str(path)], t2)
+    text = out + err
+    matches = list(DIAG_RE.finditer(text))
     diagnostics = []
-    for match in DIAG_RE.finditer(out + err):
+    for i, match in enumerate(matches):
         if match.group("sev") != "error":
             continue
+        # The message runs to the next diagnostic header, which is where
+        # `explicit_rw` prints the expected and the actual subterm.
+        stop = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[match.start("msg") : stop].strip()
         diagnostics.append(
             {
                 "line": int(match.group("line")),
                 "column": int(match.group("col")),
                 "message": match.group("msg").strip(),
+                "body": " ".join(body.split())[:600],
             }
         )
-    # A diagnostic's message can run over several lines; attach the tail of the
-    # output to the last error so the report keeps the explanation.
     return code, diagnostics, secs
 
 
@@ -446,8 +453,11 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
             else:
                 rec["status"] = "compile_failed"
                 rec["error"] = pdiags[0]["message"] if pdiags else "(no diagnostic)"
+                rec["error_body"] = pdiags[0].get("body", "") if pdiags else ""
                 rec["error_line"] = pdiags[0]["line"] if pdiags else None
-                rec["attribution"], rec["detail"] = attribute(rec, rec["error"])
+                rec["attribution"], rec["detail"] = attribute(
+                    rec, rec.get("error_body") or rec["error"]
+                )
 
     for rec in records:
         rec.pop("lines", None)
