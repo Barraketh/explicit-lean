@@ -9,21 +9,22 @@
       },
       "steps": [
         {
-          "kind": "rw",
-          "pos": [
-            0,
-            1,
-            1
-          ],
-          "name": "add_zero",
-          "dir": "fwd"
-        },
-        {
           "kind": "zeta",
           "pos": [
             0,
             1
           ]
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1,
+            0,
+            1
+          ],
+          "name": "add_zero",
+          "dir": "fwd"
         },
         {
           "kind": "rw",

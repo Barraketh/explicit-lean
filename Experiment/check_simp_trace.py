@@ -35,9 +35,12 @@ EXPECTED_DIR = ROOT / "test" / "SimpTrace" / "expected"
 KNOWN_KINDS = {"rw", "unfold", "beta", "eta", "proj", "zeta", "change", "eq",
                "intro_ctx"}
 
-# Close forms the amended spec defines. `assumption:` and `absurd:` are prefixes.
-CLOSE_EXACT = {"rfl", "true_intro", "decide"}
-CLOSE_PREFIXES = ("assumption:", "absurd:")
+# Close forms the amended spec defines.  `omega` is a side-condition-only form
+# (a user-supplied `omega` discharger); `assumption:`, `absurd:` and
+# `unresolved:` are prefixes.  `unresolved:` is the spec's classified outcome:
+# the call still leaves stock simp's goal state and reports one error line.
+CLOSE_EXACT = {"rfl", "true_intro", "decide", "omega"}
+CLOSE_PREFIXES = ("assumption:", "absurd:", "unresolved:")
 
 
 def check_close(path: str, close, messages: list[str]) -> None:
@@ -77,7 +80,8 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         if kind not in KNOWN_KINDS:
             fail(messages, f"{where}: unknown step kind {kind!r}")
 
-        for field in ("kind", "pos", "name", "dir", "source", "by", "local"):
+        for field in ("kind", "pos", "name", "dir", "source", "by", "local",
+                      "prop"):
             if field in want:
                 if got.get(field) != want[field]:
                     fail(
@@ -85,7 +89,7 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                         f"{where}.{field}: expected {want[field]!r}, "
                         f"got {got.get(field)!r}",
                     )
-            elif field in got and field in ("name", "dir", "source"):
+            elif field in got and field in ("name", "dir", "source", "prop"):
                 fail(messages, f"{where}: unexpected {field}={got[field]!r}")
 
         # A `rw` step must name a lemma and a direction; an `eq` step must name
@@ -98,10 +102,24 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         if kind == "eq":
             if not got.get("source"):
                 fail(messages, f"{where}: `eq` step without a source")
-            if got.get("by") not in ("rfl", "decide", "unknown"):
-                fail(messages, f"{where}: `eq` step with by={got.get('by')!r}")
+            by = got.get("by")
+            if by not in ("rfl", "decide") and not (
+                isinstance(by, str) and by.startswith("unresolved:")
+            ):
+                fail(messages, f"{where}: `eq` step with by={by!r}")
         if kind == "unfold" and not got.get("name"):
             fail(messages, f"{where}: `unfold` step without a constant name")
+
+        # The amended spec's `prop` flag: present only on `rw`, and only with
+        # the two values replay knows how to act on (`eq_true` / `eq_false`).
+        prop = got.get("prop")
+        if prop is not None:
+            if kind != "rw":
+                fail(messages, f"{where}: `prop` flag on a {kind!r} step")
+            if prop not in ("true", "false"):
+                fail(messages, f"{where}: `prop` flag with value {prop!r}")
+        if kind == "intro_ctx" and not got.get("name"):
+            fail(messages, f"{where}: `intro_ctx` step without a hypothesis name")
 
         local = got.get("local")
         if local is not None:

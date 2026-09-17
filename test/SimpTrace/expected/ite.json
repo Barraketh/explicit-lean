@@ -9,55 +9,41 @@
       },
       "steps": [
         {
-          "kind": "rw",
-          "pos": [
-            0,
-            1,
-            0,
-            0,
-            0,
-            1,
-            0,
-            1
-          ],
-          "name": "h",
-          "dir": "fwd"
-        },
-        {
-          "kind": "rw",
-          "pos": [
-            0,
-            1,
-            0,
-            0,
-            1,
-            0,
-            1
-          ],
-          "name": "h",
-          "dir": "fwd"
-        },
-        {
-          "kind": "rw",
-          "pos": [
-            0,
-            1,
-            0,
-            0,
-            0,
-            1
-          ],
-          "name": "eq_self",
-          "dir": "fwd"
-        },
-        {
           "kind": "eq",
           "pos": [
             0,
             1
           ],
           "source": "reduceIte",
-          "by": "rfl"
+          "by": "unresolved:not provable by rfl or decide",
+          "side": [
+            {
+              "goal": "n = 3",
+              "close": {
+                "by": "true_intro"
+              },
+              "steps": [
+                {
+                  "kind": "rw",
+                  "pos": [
+                    0,
+                    1
+                  ],
+                  "name": "h",
+                  "dir": "fwd"
+                },
+                {
+                  "kind": "rw",
+                  "pos": [
+                    0,
+                    1
+                  ],
+                  "name": "eq_self",
+                  "dir": "fwd"
+                }
+              ]
+            }
+          ]
         },
         {
           "kind": "rw",

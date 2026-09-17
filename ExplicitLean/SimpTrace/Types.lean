@@ -33,7 +33,8 @@ inductive LocalRef where
 
 /-- How a location (goal or hypothesis) was closed, if it was. -/
 structure CloseInfo where
-  /-- `rfl`, `trivial`, `assumption:<name>`, `eq_self` or `decide`. -/
+  /-- `rfl`, `true_intro`, `assumption:<name>`, `absurd:<hyp>`, `decide`, or —
+  for a side condition — `omega` or a classified `unresolved:<text>`. -/
   by_ : String
   deriving Inhabited, Repr
 
@@ -47,6 +48,11 @@ structure Step where
   name?   : Option String := none
   /-- `"fwd"` or `"rev"` for `rw`. -/
   dir?    : Option String := none
+  /-- The amended spec's `prop` flag: `"true"` when the named lemma is
+  Prop-valued and simp used it as `P = True`, `"false"` when as `P = False`.
+  Absent when the lemma really is an equation or an iff.  Replay rewrites with
+  `eq_true name` / `eq_false name` respectively. -/
+  prop?   : Option String := none
   /-- For a local-hypothesis reference: the spec's `local` object.  Either an
   ordinary local (`userName`/`inaccessible`/`ctxIndex`) or a hypothesis
   introduced by contextual simp (`contextual`/`ctxIndex`).  The two namespaces
@@ -150,6 +156,7 @@ partial def Step.toJson (s : Step) : String :=
     ("pos", some (posJson s.pos)),
     ("name", s.name?.map str),
     ("dir", s.dir?.map str),
+    ("prop", s.prop?.map str),
     ("local", s.local?.map LocalRef.toJson),
     ("args", if s.args.isEmpty then none else some (strArray s.args)),
     ("lhs", s.lhs?.map str),

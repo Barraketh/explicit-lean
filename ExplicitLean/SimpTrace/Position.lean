@@ -1,32 +1,26 @@
 /-
-Position solving and self-validation.
+Structural navigation and the replay **validator**.
 
-simp's `Methods` see a subterm but not its position, and simp rebuilds terms
-bottom-up, so positions cannot be read off the traversal.  We therefore take
-approach (b) from the task: record `(before, after)` pairs during the run and
-recover positions afterwards by replaying the recorded replacements against a
-running term that starts at the location's pre-state.
+The position-reconstruction machinery this module used to hold — `findBridge?`,
+`findBridgeChain?`, `reducibleSites`, the stale-term `refresh`, `abstractSimpFVars`
+and `findOccurrences` — is **deleted**.  Positions now come out of the forked
+traversal exactly (`ExplicitLean/SimpTrace/Traversal.lean`), so nothing here
+searches: three review rounds showed the search was the source of the critical
+defects (REVIEW-3 C2's exponential chain search, C1's unattributed firings and
+M4's leaked `_fvar` in a bridge target).
 
-For each recorded step we search the running term for an occurrence of `before`
-(structurally, up to the loose-bvar instantiation described below), replace it
-by `after`, and emit one step per occurrence in a deterministic (pre-order)
-order.  Emitting one step per occurrence is correct because simp's cache
-rewrites identical subterms identically: if the running term contains `before`
-at several positions, simp replaced all of them with `after`.
-
-Everything is then validated: navigating each step's `pos` in the running term
-must reach `before`, replacing it must yield the next running term, and the
-final running term must equal simp's actual result.  A failure is a hard error.
+What survives is the safety net the task asks for: after the traversal, replay
+the recorded steps structurally from the pre-state term — navigate `pos`, check
+the subterm equals `before`, substitute `after` — and require the final term to
+equal simp's result.  A mismatch is a hard, loud failure.
 -/
 
 module
 
 public meta import Lean
 public meta import ExplicitLean.SimpTrace.Types
-public meta import ExplicitLean.SimpTrace.Recorder
 
 public meta section
-
 
 namespace ExplicitLean.SimpTrace
 
@@ -37,11 +31,6 @@ open Lean Meta
 Child indices follow the spec: `app f a` has 0 = f, 1 = a; `lam`/`forallE` have
 0 = binder type, 1 = body; `letE` has 0 = type, 1 = value, 2 = body; `mdata` and
 `proj` have child 0.
-
-Recorded subterms were observed inside binders, where simp had instantiated the
-bound variables as free variables.  The running term still has loose bound
-variables under those binders.  We therefore navigate with a *binder stack* of
-the free variables simp introduced and compare after instantiating.
 -/
 
 /-- Descend one child.  Returns `none` for an out-of-range index. -/
@@ -60,7 +49,17 @@ def childAt? (e : Expr) (i : Nat) : Option Expr :=
   | .proj _ _ b, 0 => some b
   | _, _ => none
 
-/-- Does descending into child `i` of `e` cross a binder? -/
+/-- Does descending into child `i` of `e` cross a binder *node* — one that
+raises the de Bruijn level inside the subterm?
+
+Every `lam`/`forallE` body and every `letE` body does, including a
+**non-dependent** `forallE` (an arrow `p → q`): although simp introduces no term
+variable for it, the `Expr` node is still a binder, so `Expr.abstract` and
+`Expr.instantiate` count it.  This is the difference between the two depths the
+validator needs: `binderNodes` (this one) says how far the de Bruijn indices are
+shifted, while the traversal's own binder stack says how many *term variables*
+are actually in scope.  Conflating them shifts every index below an arrow, which
+is what made a rewrite under `∀ y, y = a' → y = x` fail validation. -/
 def crossesBinder (e : Expr) (i : Nat) : Bool :=
   match e, i with
   | .lam .., 1 => true
@@ -91,321 +90,72 @@ partial def replaceAt? (e : Expr) (pos : Pos) (repl : Expr) : Option Expr := do
     | .proj s i' _, 0 => some (.proj s i' sub')
     | _, _ => none
 
-/-- Navigate to `pos`, returning the subterm with the binders it sits under
-instantiated by the given free variables (innermost last). -/
-partial def navigate? (e : Expr) (pos : Pos) (binders : Array Expr := #[]) :
-    Option (Expr × Array Expr) := do
+/-- Navigate to `pos`, returning the subterm and the number of binder *nodes*
+crossed to reach it.  Returns `none` for a position the term does not have. -/
+partial def navigate? (e : Expr) (pos : Pos) (depth : Nat := 0) :
+    Option (Expr × Nat) := do
   if pos.size = 0 then
-    return (e, binders)
+    return (e, depth)
   else
     let i := pos[0]!
     let rest := pos.extract 1 pos.size
     let sub ← childAt? e i
-    -- Binder instantiation happens in `findOccurrences`/`checkAt`, which know
-    -- which free variables simp used; here we only track the count.
-    navigate? sub rest (if crossesBinder e i then binders.push default else binders)
+    navigate? sub rest (if crossesBinder e i then depth + 1 else depth)
 
-/-! ### Occurrence search
+/-! ### Open and closed subterms
 
-We must compare a recorded subterm, which simp observed with its enclosing
-binders instantiated as *free* variables, against the running term, where those
-binders are still `bvar`s.
+The traversal observes a subterm with its enclosing binders instantiated as
+*free* variables (simp introduces one local per binder it descends under),
+while the running term still has loose `bvar`s there.  The events carry the
+local context they were observed in, so the validator abstracts exactly the
+free variables that are not in the location's own context, innermost last.
 
-Rather than guess which free variables simp used, we abstract them out of the
-recorded subterm: any free variable in `before` that is **not** present in the
-location's own local context (the one the tactic started in) must have been
-introduced by simp when it descended under a binder.  Replacing each such
-variable by the `bvar` for its binder depth turns the recorded subterm back into
-the open form that appears in the running term.
-
-`depth` is the number of binders crossed to reach the candidate position, and
-simp introduces its locals outermost-first, so the fvar introduced at binder
-depth `d` (0-based, outermost first) corresponds to `bvar (depth - 1 - d)`.
+`Expr.abstract` is used rather than `Expr.replace`: it accounts for binders
+*inside* the subterm, so a variable occurring under a nested binder gets the
+right de Bruijn index.  (`Expr.replace` does not, and getting this wrong was
+review round 1's shadowed-binder defect.)
 -/
-
-/-- A candidate occurrence: its position and the number of binders crossed. -/
-structure Occurrence where
-  pos : Pos
-  numBinders : Nat
-  deriving Inhabited, Repr
 
 /--
-Abstract the simp-introduced free variables of `target`, given the free
-variables introduced on the way to a position at binder `depth`.  `simpFVars`
-lists them outermost-first.
+Abstract the traversal-introduced free variables of `target` so it matches the
+open subterm sitting at a position under `binderNodes` binder nodes.
+
+`simpFVars` are the free variables the traversal substituted for the *term*
+binders it descended under, outermost first.  `binderNodes` is how many binder
+`Expr` nodes the position path crossed, which can be larger: a non-dependent
+arrow is a binder node that binds no term variable.
+
+`Expr.abstract xs` assigns `bvar (xs.size - 1 - i)` to `xs[i]`, i.e. it assumes
+the variables are the innermost `xs.size` binders.  When binder nodes that bind
+nothing sit *below* the term binders (exactly the arrow case), the real indices
+are shifted up by the number of such nodes, so we pad the scope with that many
+dummy slots at the inner end.
+
+`Expr.abstract` is used rather than `Expr.replace`: it accounts for binders
+*inside* `target`, so a variable occurring under a nested binder gets the right
+de Bruijn index.  (`Expr.replace` does not, and getting that wrong was review
+round 1's shadowed-binder defect.)
 -/
-def abstractSimpFVars (target : Expr) (simpFVars : Array FVarId) (depth : Nat) : Expr :=
-  if simpFVars.isEmpty || depth == 0 then target
+def abstractSimpFVars (target : Expr) (simpFVars : Array FVarId)
+    (binderNodes : Nat) : Expr :=
+  if simpFVars.isEmpty then target
   else
-    -- Only the innermost `depth` binders are in scope at this position.
     let n := simpFVars.size
-    if depth > n then target
+    -- Term binders in scope, outermost first, capped at the nodes crossed.
+    let depth := min n binderNodes
+    if depth == 0 then target
     else
-      -- `Expr.abstract` assigns `bvar (k-1-i)` to `xs[i]`, and unlike
-      -- `Expr.replace` it accounts for binders inside `target`, so a variable
-      -- occurring under a nested binder gets the right de Bruijn index.
-      let scope := (simpFVars.extract (n - depth) n).map Expr.fvar  -- outermost-first
-      target.abstract scope
-
-/--
-Find every position in `e` whose subterm equals `target` after abstracting
-simp's binder variables.  Returns positions in pre-order; a matched node is not
-searched further, since its subterms were rewritten as part of it.
--/
-partial def findOccurrences (e target : Expr) (simpFVars : Array FVarId)
-    (ctxDepth : Nat := 0) : Array Occurrence :=
-  go e #[] 0 0
-where
-  go (e : Expr) (pos : Pos) (depth : Nat) (arrows : Nat) : Array Occurrence := Id.run do
-    -- A firing made under `ctxDepth` contextual hypotheses can only have
-    -- happened in the consequent of at least that many implications, so a
-    -- shallower position is not a real occurrence.
-    if arrows >= ctxDepth && e == abstractSimpFVars target simpFVars depth then
-      return #[{ pos, numBinders := depth }]
-    -- (index, child, crosses a term binder, crosses an implication arrow)
-    let isArrow := e.isArrow
-    let children : Array (Nat × Expr × Bool × Bool) :=
-      match e with
-      | .app f a => #[(0, f, false, false), (1, a, false, false)]
-      | .lam _ t b _ => #[(0, t, false, false), (1, b, true, false)]
-      | .forallE _ t b _ =>
-        #[(0, t, false, false), (1, b, !isArrow, isArrow)]
-      | .letE _ t v b _ =>
-        #[(0, t, false, false), (1, v, false, false), (2, b, true, false)]
-      | .mdata _ b => #[(0, b, false, false)]
-      | .proj _ _ b => #[(0, b, false, false)]
-      | _ => #[]
-    let mut acc : Array Occurrence := #[]
-    for (i, c, bin, arrow) in children do
-      acc := acc ++ go c (pos.push i) (if bin then depth + 1 else depth)
-        (if arrow then arrows + 1 else arrows)
-    return acc
-
-/-! ### Stale `before` terms
-
-A `post` procedure can fire on the expression as simp *first saw it*, after
-simp has already rewritten that expression's subterms (simp keeps the original
-around and rebuilds).  The recorded `before` is then stale with respect to the
-running term, which already carries the child rewrites.
-
-We refresh a recorded `before` by applying, in order, the replacements we have
-already replayed, exactly as simp's own rebuild would have.
--/
-
-/-- Apply `old := new` everywhere in `e`. -/
-def substAll (e old new : Expr) : Expr :=
-  if old == new then e
-  else e.replace fun s => if s == old then some new else none
-
-/-- Refresh a stale recorded subterm by replaying the earlier replacements. -/
-def refresh (target : Expr) (applied : Array (Expr × Expr)) : Expr :=
-  applied.foldl (fun acc (old, new) => substAll acc old new) target
-
-/-! ### Recovering invisible definitional steps
-
-simp performs beta/eta/proj/iota/zeta reduction and delta unfolding in
-`Simp.simpLoop`'s `reduceStep`, which runs *outside* `Simp.Methods`.  A
-`Methods` wrapper therefore cannot observe those steps directly, and they are
-the steps the spec calls `beta`/`eta`/`proj`/`unfold`/`change`.
-
-Rather than fork simp's traversal, we recover them from the running term: when
-a recorded `before` cannot be found, we look for a position whose subterm
-*reduces* (definitionally, with the same configuration simp used) to something
-that makes the recorded step applicable, and emit the bridging definitional step
-before it.  Nothing is guessed: the emitted step is validated like any other.
--/
-
-/-- A bridging definitional step recovered from the running term. -/
-structure Bridge where
-  pos    : Pos
-  before : Expr
-  after  : Expr
-  deriving Inhabited
-
-/-- One definitional reduction at the head of `e`, or `none`.  These are the
-reductions `Simp.reduceStep` performs outside `Methods`. -/
-def reduceHere? (e : Expr) : MetaM (Option Expr) := do
-  -- A subterm taken from under a binder carries loose bound variables.  `whnf`
-  -- and `unfoldDefinition?` panic on those, so only the syntactic reductions
-  -- (beta, zeta) are safe there; anything needing the elaborator is skipped.
-  let loose := e.hasLooseBVars
-  -- Beta.
-  if e.isApp && e.getAppFn.isLambda then
-    return some e.headBeta
-  -- Zeta: `let x := v; b` becomes `b[v/x]`.
-  if let .letE _ _ v b _ := e then
-    return some (b.instantiate1 v)
-  if loose then return none
-  -- Projection.
-  if e.isProj then
-    if let some e' ← reduceProj? e then return some e'
-  -- Delta unfolding of the head constant.  `unfoldDefinition?` yields the
-  -- definition applied to the arguments, so beta-reduce as `Simp.unfold?` does;
-  -- otherwise the result never matches a recorded subterm.
-  if let .const .. := e.getAppFn then
-    if let some e' ← withDefault <| unfoldDefinition? e then
-      return some e'.headBeta
-  return none
-
-/-- Every position in `e` at which a definitional reduction applies, with the
-reduced subterm.  Pre-order, so outermost reductions are tried first. -/
-partial def reducibleSites (e : Expr) : MetaM (Array (Pos × Expr × Expr)) := do
-  go e #[]
-where
-  go (e : Expr) (pos : Pos) : MetaM (Array (Pos × Expr × Expr)) := do
-    let mut acc : Array (Pos × Expr × Expr) := #[]
-    if let some e' ← reduceHere? e then
-      acc := acc.push (pos, e, e')
-    let children : Array (Nat × Expr) :=
-      match e with
-      | .app f a => #[(0, f), (1, a)]
-      | .lam _ t b _ => #[(0, t), (1, b)]
-      | .forallE _ t b _ => #[(0, t), (1, b)]
-      | .letE _ t v b _ => #[(0, t), (1, v), (2, b)]
-      | .mdata _ b => #[(0, b)]
-      | .proj _ _ b => #[(0, b)]
-      | _ => #[]
-    for (i, c) in children do
-      acc := acc ++ (← go c (pos.push i))
-    return acc
-
-/--
-Find a *sequence* of definitional reductions that makes `target` reachable in
-`running`, or `none`.
-
-A single-reduction probe is not enough.  Mathlib routinely stacks
-`@[reducible]`/`abbrev` definitions, so exposing a recorded subterm can need
-several delta steps composed at the same position (`g3 n` to `g2 n` to `g1 n` to
-`n`), interleaved with beta/zeta/proj.  We therefore search breadth-first over
-reduction sequences, bounded by `fuel`, and return the whole chain in order so
-each link is emitted as its own step.
--/
-partial def findBridgeChain? (running target : Expr) (simpFVars : Array FVarId)
-    (ctxDepth : Nat) (fuel : Nat) : MetaM (Option (Array Bridge)) := do
-  -- Frontier of (term, reductions taken to reach it).  Breadth-first keeps the
-  -- chain shortest, so we never emit reductions simp did not need.
-  let mut frontier : Array (Expr × Array Bridge) := #[(running, #[])]
-  let mut seen : Array Expr := #[running]
-  for _ in [0:fuel] do
-    let mut next : Array (Expr × Array Bridge) := #[]
-    for (term, chain) in frontier do
-      for (pos, before, after) in ← reducibleSites term do
-        let some candidate := replaceAt? term pos after | continue
-        let chain' := chain.push { pos, before, after }
-        if !(findOccurrences candidate target simpFVars ctxDepth).isEmpty then
-          return some chain'
-        unless seen.contains candidate do
-          seen := seen.push candidate
-          next := next.push (candidate, chain')
-    if next.isEmpty then return none
-    frontier := next
-  return none
-
-/-! ### Trace assembly -/
-
-/-- One solved step: a position plus the raw firing it came from. -/
-structure SolvedStep where
-  pos : Pos
-  raw : RawStep
-  deriving Inhabited
-
-/-- Bridge the definitional gap to `target`, returning the reductions in order.
-Exhausting the bound throws a distinct error: returning an empty result would
-surface later as "cannot locate recorded subterm" and send a reader looking for
-a missing term rather than a non-converging reduction. -/
-def collectBridges (running target : Expr) (simpFVars : Array FVarId)
-    (ctxDepth : Nat) (fuel : Nat := 32) : MetaM (Array Bridge) := do
-  if !(findOccurrences running target simpFVars ctxDepth).isEmpty then return #[]
-  match ← findBridgeChain? running target simpFVars ctxDepth fuel with
-  | some chain => return chain
-  | none =>
-    throwError "simp_trace: no sequence of at most {fuel} definitional \
-      reductions reaches the recorded subterm\n\
-      target:  {target}\nrunning: {running}"
-
-/--
-Solve positions for `raws` against the location's pre-term `pre`, returning the
-solved steps and the final running term.  Fails loudly when a recorded `before`
-cannot be located, when the replacement does not reproduce the expected running
-term, or when the final term does not match simp's actual result.
--/
-def solvePositions (baseLCtx : LocalContext) (pre : Expr) (raws : Array RawStep) :
-    MetaM (Array SolvedStep × Expr) := do
-  let mut running := pre
-  let mut solved : Array SolvedStep := #[]
-  -- Replacements already replayed, oldest first, used to refresh stale terms.
-  let mut applied : Array (Expr × Expr) := #[]
-  for raw in raws do
-    -- Free variables simp introduced for binders it descended under: those in
-    -- the firing's local context but not in the location's own context, in
-    -- declaration order (outermost first).
-    -- Term binders simp descended under: simp-introduced locals that are not
-    -- proofs.  Proof locals come from `+contextual` and bind no term position.
-    let introduced := raw.fvarKinds.filter fun (fid, _) => !(baseLCtx.contains fid)
-    let simpFVars : Array FVarId :=
-      (introduced.filter fun (_, isPrf) => !isPrf).map (·.1)
-    -- Contextual hypotheses in scope at this firing.  Their presence means the
-    -- firing happened under an implication whose antecedent simp assumed, so a
-    -- match must lie in the consequent of that many implications.
-    let contextualFVars := (introduced.filter fun (_, isPrf) => isPrf).map (·.1)
-    let ctxDepth := contextualFVars.size
-    let raw := { raw with contextualFVars }
-    -- The recorded `before` may predate child rewrites simp has already made.
-    -- Refresh it against what we have already replayed, then search.
-    let refreshed := refresh raw.before applied
-    let direct := findOccurrences running raw.before simpFVars ctxDepth
-    -- A refreshed term equal to the step's own `after` would make the step a
-    -- no-op: the replayed child rewrites already produced the result, so the
-    -- real firing is elsewhere (typically behind a definitional reduction).
-    let refreshUsable := refreshed != raw.after
-    let occs :=
-      if direct.isEmpty && refreshUsable then
-        findOccurrences running refreshed simpFVars ctxDepth
-      else direct
-    let effectiveBefore :=
-      if direct.isEmpty && refreshUsable then refreshed else raw.before
-    let mut occs := occs
-    let mut effectiveBefore := effectiveBefore
-    if occs.isEmpty then
-      -- The recorded step may sit behind a definitional reduction simp made in
-      -- `reduceStep`, outside `Methods`.  Recover that step and emit it.
-      let bridges ← collectBridges running effectiveBefore simpFVars ctxDepth
-      for br in bridges do
-        let some next := replaceAt? running br.pos br.after
-          | throwError "simp_trace: bridge replacement failed at {br.pos}"
-        let bridgeRaw : RawStep := { raw with
-          before := br.before
-          after := br.after
-          provenance := Provenance.defeq
-          side := #[] }
-        solved := solved.push { pos := br.pos, raw := bridgeRaw }
-        applied := applied.push (br.before, br.after)
-        running := next
-      occs := findOccurrences running effectiveBefore simpFVars ctxDepth
-      if occs.isEmpty then
-        let refreshed2 := refresh raw.before applied
-        occs := findOccurrences running refreshed2 simpFVars ctxDepth
-        if !occs.isEmpty then effectiveBefore := refreshed2
-    if occs.isEmpty then
-      -- The firing acted on a term simp had already rewritten away, or on an
-      -- instantiation we cannot reconstruct.  Never drop a step silently.
-      throwError "simp_trace: cannot locate recorded subterm in running term\n\
-        before: {raw.before}\nafter:   {raw.after}\nrunning: {running}"
-    for occ in occs do
-      -- Validation, per the task: navigating `pos` must reach `before` (in its
-      -- abstracted, open form), and replacing it must yield the next term.
-      let expected := abstractSimpFVars effectiveBefore simpFVars occ.numBinders
-      let some (sub, _) := navigate? running occ.pos
-        | throwError "simp_trace: position navigation failed at {occ.pos}"
-      unless sub == expected do
-        throwError "simp_trace: validation failed: subterm at {occ.pos} is\n\
-          {sub}\nbut the recorded step's `before` is\n{expected}"
-      let replacement := abstractSimpFVars raw.after simpFVars occ.numBinders
-      let some next := replaceAt? running occ.pos replacement
-        | throwError "simp_trace: position replacement failed at {occ.pos}"
-      solved := solved.push { pos := occ.pos, raw := { raw with before := effectiveBefore } }
-      running := next
-      applied := applied.push (effectiveBefore, raw.after)
-  return (solved, running)
+      let scope := (simpFVars.extract (n - depth) n).map Expr.fvar
+      -- Binder nodes that bind no term variable, sitting inside the term
+      -- binders: they shift every index up by one each.
+      let padding := binderNodes - depth
+      if padding == 0 then
+        target.abstract scope
+      else
+        -- `mkFVar` on fresh, unused ids: they occur nowhere in `target`, so they
+        -- only consume de Bruijn slots, which is exactly the shift we need.
+        let pad := (Array.range padding).map fun i =>
+          Expr.fvar ⟨Name.mkSimple s!"_simpTracePad{i}"⟩
+        target.abstract (scope ++ pad)
 
 end ExplicitLean.SimpTrace

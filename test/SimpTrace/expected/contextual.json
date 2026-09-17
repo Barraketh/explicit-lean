@@ -9,6 +9,11 @@
       },
       "steps": [
         {
+          "kind": "intro_ctx",
+          "pos": [],
+          "name": "a✝"
+        },
+        {
           "kind": "rw",
           "pos": [
             1,
@@ -21,7 +26,8 @@
           "local": {
             "contextual": true,
             "ctxIndex": 3
-          }
+          },
+          "prop": "true"
         },
         {
           "kind": "rw",
@@ -31,6 +37,13 @@
           ],
           "name": "true_and",
           "dir": "fwd"
+        },
+        {
+          "kind": "intro_ctx",
+          "pos": [
+            1
+          ],
+          "name": "a✝"
         },
         {
           "kind": "rw",
@@ -43,7 +56,8 @@
           "local": {
             "contextual": true,
             "ctxIndex": 4
-          }
+          },
+          "prop": "true"
         },
         {
           "kind": "rw",
