@@ -37,11 +37,11 @@ terse completion notices, then makes merge and next-dispatch decisions.
   injected trace clause inside the comment. Fix top-level comment boundaries,
   preserve the comment after the instrumented call, and require actual emitted
   v2 output before review 13.
-- **T1 v2 review 13: one MAJOR, fix/interface batch running.** The call boundary
-  is fixed, but a second comment masker misreads `--` inside syntax quotations
-  while counting generated clauses. Replace rescanning with the deterministic
-  transform edit ledger and exact generated-file comparison. The same batch
-  adds the explicit-path, non-mutating raw-v1 to final-v2 CLI needed by T4.
+- **T1 v2 review 14: NO DEFECTS; merged.** Deterministic transform-ledger
+  verification replaces generated-source rescanning, including syntax-quote
+  comment cases. The explicit-path finalizer leaves raw v1 untouched and writes
+  final v2 only to its output directory. Main integration build, identity tests
+  and 84/84 transcription pass.
 - **T4 review 3: NO DEFECTS in incremental scope.** Marker/lint/source
   preservation attacks and 194 checks pass at `7db88a8`. Do not merge yet: the
   protocol requires a final full merge-gate review, including the six-module
@@ -67,6 +67,10 @@ terse completion notices, then makes merge and next-dispatch decisions.
   finalizer CLI that reads raw v1 from T4's run directory and writes v2 to a
   separate run-local directory. T4 rewrites staged trace paths, compiles in the
   T1 environment, invokes that CLI, then validates the v2 bijection.
+- **T4 lifecycle implementation complete; review 6 running.** Commits
+  `69cbe98`/`c51eabb` implement the run-local stage/raw/final flow and 240
+  focused checks pass. A fresh reviewer is running the real six-module gate
+  against accepted T1/T2 tips before the merge decision.
 - **Post-cone SQLite ledger:** after the 91-site pipeline compiles reliably and
   before whole-corpus scaling, replace loose manifest/trace discovery with a
   SQLite execution ledger. Keep original sources and generated Lean as files;
