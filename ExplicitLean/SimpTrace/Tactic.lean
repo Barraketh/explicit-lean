@@ -272,7 +272,10 @@ partial def sideToTrace (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
   let c := r.evCtx
   let goalPP ← ppIn c r.goal
   let steps ← r.events.filterMapM (eventToStep ur contextualFVars)
-  return { goal := goalPP, steps,
+  -- Antecedents an implication-shaped congruence hypothesis introduced before
+  -- its steps.  Pretty-printed so a generator can `intro` them by name.
+  let intros := r.intros
+  return { goal := goalPP, steps, intros,
            close := r.by_.map fun b => { by_ := b } }
 
 end

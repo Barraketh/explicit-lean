@@ -125,6 +125,16 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         # *relative to that argument*.  A nested step whose position is not
         # relative would send a replayer to the wrong subterm, so the nesting is
         # checked recursively here, exactly as for the top level.
+        # A `rw` with `"source": "congr"` is a user `@[congr]` theorem (spec
+        # 2e73661): it must carry one `side` per hypothesis, or replay has
+        # nothing to prove the theorem's arguments with.
+        if kind == "rw" and got.get("source") == "congr" and not got.get("side"):
+            fail(
+                messages,
+                f"{where}: `rw` from a user congruence theorem "
+                f"{got.get('name')!r} carries no `side` sub-traces",
+            )
+
         if kind == "congr":
             if not isinstance(got.get("arg"), int):
                 fail(messages, f"{where}: `congr` step without an integer `arg`")
@@ -205,6 +215,19 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                         f"{side_path}.close: expected {ws.get('close')!r}, "
                         f"got {gs.get('close')!r}",
                     )
+                # `intros` (spec 2e73661): the antecedents an implication-shaped
+                # congruence hypothesis introduces before its steps. Each must be
+                # a non-empty name a generator can `intro`.
+                got_intros = gs.get("intros", [])
+                if got_intros != ws.get("intros", []):
+                    fail(
+                        messages,
+                        f"{side_path}.intros: expected {ws.get('intros', [])!r}, "
+                        f"got {got_intros!r}",
+                    )
+                for n in got_intros:
+                    if not isinstance(n, str) or not n:
+                        fail(messages, f"{side_path}.intros: {n!r} is not a name")
                 check_steps(side_path, gs.get("steps", []), ws.get("steps", []), messages)
 
 

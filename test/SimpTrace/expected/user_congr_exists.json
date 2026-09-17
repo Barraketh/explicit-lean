@@ -1,0 +1,71 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "exists_prop_congr",
+          "dir": "fwd",
+          "source": "congr",
+          "side": [
+            {
+              "goal": "r = r",
+              "close": {
+                "by": "rfl"
+              },
+              "intros": [
+                "h"
+              ],
+              "steps": []
+            },
+            {
+              "goal": "p = q",
+              "close": null,
+              "steps": [
+                {
+                  "kind": "rw",
+                  "pos": [],
+                  "name": "hpq",
+                  "dir": "fwd"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "exists_prop",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1
+          ],
+          "name": "exists_prop",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

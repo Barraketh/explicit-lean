@@ -90,6 +90,9 @@ structure SideTrace where
   goal  : String
   steps : Array Step := #[]
   close : Option CloseInfo := none
+  /-- Antecedents introduced before the steps, for an implication-shaped
+  congruence hypothesis (`c → x = u`); spec 2e73661.  Empty otherwise. -/
+  intros : Array String := #[]
 
 end
 
@@ -189,6 +192,7 @@ partial def Step.toJson (s : Step) : String :=
 partial def SideTrace.toJson (t : SideTrace) : String :=
   obj #[
     ("goal", some (str t.goal)),
+    ("intros", if t.intros.isEmpty then none else some (strArray t.intros)),
     ("steps", some ("[" ++ String.intercalate ","
       (t.steps.toList.map Step.toJson) ++ "]")),
     ("close", some (match t.close with

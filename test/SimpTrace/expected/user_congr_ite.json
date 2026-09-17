@@ -1,0 +1,78 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "ite_congr",
+          "dir": "fwd",
+          "source": "congr",
+          "side": [
+            {
+              "goal": "p = q",
+              "close": null,
+              "steps": [
+                {
+                  "kind": "rw",
+                  "pos": [],
+                  "name": "hpq",
+                  "dir": "fwd"
+                }
+              ]
+            },
+            {
+              "goal": "a = b",
+              "close": null,
+              "intros": [
+                "a✝"
+              ],
+              "steps": [
+                {
+                  "kind": "rw",
+                  "pos": [],
+                  "name": "hb",
+                  "dir": "fwd",
+                  "side": [
+                    {
+                      "goal": "q",
+                      "close": {
+                        "by": "assumption:a"
+                      },
+                      "steps": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "goal": "a = a",
+              "close": {
+                "by": "rfl"
+              },
+              "intros": [
+                "a✝"
+              ],
+              "steps": []
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

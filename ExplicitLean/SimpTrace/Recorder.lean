@@ -206,7 +206,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
       for pa in proofArgs do
         let ty ← instantiateMVars (← inferType pa)
         match ← assumptionName? pa with
-        | some by_ => sides := sides.push (SideRec.mk ty #[] (some by_) evCtx)
+        | some by_ => sides := sides.push (SideRec.mk ty #[] (some by_) evCtx #[])
         | none =>
           -- The condition's proof is a term no close form describes — a
           -- `noConfusion` elimination under a binder, say.  Naming it
@@ -216,7 +216,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
           unnamed := unnamed.push txt
           sides := sides.push
             (SideRec.mk ty #[] (some s!"unresolved:condition proof not a \
-              hypothesis or a recorded discharge") evCtx)
+              hypothesis or a recorded discharge") evCtx #[])
     for u in unnamed do
       ref.modify (·.markUnresolved
         s!"simproc:{(src?.map toString).getD declName.toString} side condition \
@@ -328,7 +328,7 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         -- condition; naming the `ite` there would misdescribe the side goal.
         let divertedSide : Array SideRec :=
           if diverted.isEmpty then #[]
-          else #[SideRec.mk (divertedGoal?.getD e) diverted (some "true_intro") evCtx]
+          else #[SideRec.mk (divertedGoal?.getD e) diverted (some "true_intro") evCtx #[]]
         let news := newOrigins usedBefore usedAfter
         -- `+contextual` registers the antecedent hypothesis alongside the
         -- lemma that fired, so a single firing can add more than one origin;
@@ -486,7 +486,7 @@ def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
       let (by_, kept, unresolved?) ← describeProof proof nested dischargerText?
       if let some reason := unresolved? then
         ref.modify (·.markUnresolved reason)
-      let rec_ : SideRec := .mk e kept (some by_) evCtx
+      let rec_ : SideRec := .mk e kept (some by_) evCtx #[]
       ref.modify fun s => { s with pendingSide := s.pendingSide.push rec_ }
       return some proof
 

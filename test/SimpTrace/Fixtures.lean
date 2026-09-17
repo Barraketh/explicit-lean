@@ -231,4 +231,37 @@ example {α β γ : Type} (h₁ : α = β) (h₂ : β = γ) (f : α → α) (a :
     cast h₂ (cast h₁ (f a)) = cast h₂ (cast h₁ a) := by
   simp_trace [hfa] =>trace "test/SimpTrace/out/congr_nested_cast.json"
 
+/-! ### User `@[congr]` theorems (spec 2e73661)
+
+A congruence theorem registered with `@[congr]` and fired through
+`trySimpCongrTheorem?` is an ordinary `rw` step naming that theorem, with
+`"source": "congr"` and one `side` sub-trace per hypothesis **in order**.  A
+hypothesis of implication shape (`c → x = u`) introduces its antecedents first;
+their display names are the side trace's `intros`.  Replay is
+`rw [ite_congr h₁ h₂ h₃]` with each `hᵢ` proved by its side trace.
+
+This is distinct from the `congr` *kind* above, which is for the auto-generated
+`mkCongrSimp?` path with a `CongrArgKind.cast` dependent. -/
+
+/-- `ite_congr` with a contextual hypothesis in a branch: the `then` branch's
+hypothesis is `q → a = b`, so its side trace carries `intros`. -/
+example (p q : Prop) [Decidable p] [Decidable q] (a b : Nat)
+    (hpq : p = q) (hb : q → a = b) :
+    (if p then a else a) = (if q then b else a) := by
+  simp_trace +contextual [hpq, hb] =>trace "test/SimpTrace/out/user_congr_ite.json"
+
+/-- `dite_congr`: both branches take the condition as a hypothesis, so both
+side traces carry `intros`. -/
+example (p q : Prop) [Decidable p] [Decidable q] (hpq : p = q)
+    (f : p → Nat) (g : ¬p → Nat) (f' : q → Nat) (g' : ¬q → Nat)
+    (hf : ∀ h : q, f (hpq ▸ h) = f' h) (hg : ∀ h : ¬q, g (hpq ▸ h) = g' h) :
+    dite p f g = dite q f' g' := by
+  simp_trace +contextual [hpq, hf, hg]
+    =>trace "test/SimpTrace/out/user_congr_dite.json"
+
+/-- `exists_prop_congr`: the body hypothesis is under the existential's
+antecedent, so its side trace carries that antecedent in `intros`. -/
+example (p q r : Prop) (hpq : p = q) : (∃ _ : p, r) = (∃ _ : q, r) := by
+  simp_trace [hpq] =>trace "test/SimpTrace/out/user_congr_exists.json"
+
 end ExplicitLean.SimpTrace.Fixtures

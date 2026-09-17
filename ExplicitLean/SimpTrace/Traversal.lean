@@ -109,17 +109,21 @@ inductive Event where
 was discharged, and the closing form (`rfl` / `true_intro` / `assumption:<n>` /
 `absurd:<h>` / `decide` / `omega` / `unresolved:<text>`). -/
 inductive SideRec where
+  /-- `intros` are the antecedents introduced before the steps, for an
+  implication-shaped congruence hypothesis (`c → x = u`); spec 2e73661. -/
   | mk (goal : Expr) (events : Array Event) (by_ : Option String) (ctx : EvCtx)
+       (intros : Array String)
 
 end
 
 instance : Inhabited Event := ⟨Event.introCtx #[] default {}⟩
-instance : Inhabited SideRec := ⟨SideRec.mk default #[] none {}⟩
+instance : Inhabited SideRec := ⟨SideRec.mk default #[] none {} #[]⟩
 
-def SideRec.goal : SideRec → Expr | SideRec.mk g _ _ _ => g
-def SideRec.events : SideRec → Array Event | SideRec.mk _ e _ _ => e
-def SideRec.by_ : SideRec → Option String | SideRec.mk _ _ b _ => b
-def SideRec.evCtx : SideRec → EvCtx | SideRec.mk _ _ _ c => c
+def SideRec.goal : SideRec → Expr | SideRec.mk g _ _ _ _ => g
+def SideRec.events : SideRec → Array Event | SideRec.mk _ e _ _ _ => e
+def SideRec.by_ : SideRec → Option String | SideRec.mk _ _ b _ _ => b
+def SideRec.evCtx : SideRec → EvCtx | SideRec.mk _ _ _ c _ => c
+def SideRec.intros : SideRec → Array String | SideRec.mk _ _ _ _ i => i
 
 /-- Re-root an event's position under `base`.  Used to place events captured
 relative to a subterm back at their absolute positions. -/
@@ -981,47 +985,24 @@ partial def congrDefaultT (ref : TraceRef) (pos : Pos) (e : Expr) :
 
 /-- SOURCE: Main.lean:552-583 `Simp.processCongrHypothesis`.
 
-A congruence *hypothesis* simplifies a subterm the congruence theorem names.
-`isDefEq lhs e` has already run when we get here, so the hypothesis's `lhs` is
-instantiated to an actual argument of the congruence application: we find which
-one (`hypArgPos?`) and hand `simpT` that argument's exact position.  This is
-what makes `if_congr`-style congruence theorems — `ite`, `dite` and the rest —
-trace at the condition's own position rather than at the whole application's.
+Per spec 2e73661 a *user* congruence theorem is an ordinary `rw` step naming the
+theorem, with one `side` sub-trace per hypothesis in order.  This function
+therefore records each hypothesis's own rewrites into a frame and hands the
+caller a `SideRec` rooted at that hypothesis's goal, rather than logging the
+rewrites at absolute positions.
 
-`hypArgs` is the argument array of the (possibly truncated) application `e` and
-`hypNumArgs` its length, so `argPos` can be applied directly.  When the
-hypothesis's `lhs` is not one of those arguments (a congruence theorem that
-simplifies under its own binders, so the subterm is not a child of `e`), there
-is no position in the spec's convention for it: the call is then marked
-unresolved with a classified reason rather than logged at a wrong position. -/
-partial def processCongrHypothesisT (ref : TraceRef) (pos : Pos)
-    (hypArgs : Array Expr) (hypNumArgs : Nat) (thmName : Name)
-    (h : Expr) (hType : Expr) : SimpM Bool :=
-  -- A congruence theorem's `rhs` transports every argument that depends on the
-  -- subterm its hypothesis rewrote: `ite_congr`/`dite_congr` rewrite an `ite`'s
-  -- condition and carry the `Decidable` instance and each branch's binder type
-  -- with it.  Those transported arguments have no position of their own, so the
-  -- hypothesis's own rewrites are diverted and the whole node's change is
-  -- recorded once, by the caller, as a `change` (REVIEW-4 `:848`, `:929`).
-  withDivertedEvents ref do
+A hypothesis of implication shape (`c → x = u`) introduces its antecedents
+first; their names go in the side trace's `intros`, and the steps that follow
+prove the consequent.  `forallTelescopeReducing` gives exactly those antecedents
+as `xs`, so the two agree by construction. -/
+partial def processCongrHypothesisT (ref : TraceRef) (thmName : Name)
+    (h : Expr) (hType : Expr) : SimpM (Bool × Option SideRec) := do
+  let _ := thmName
   forallTelescopeReducing hType fun xs hType => withNewLemmasT ref xs do
     let lhs ← instantiateMVars hType.appFn!.appArg!
-    -- Locate `lhs` among the congruence application's arguments.
-    let mut argPos? : Option Pos := none
-    if xs.isEmpty then
-      for i in [0:hypArgs.size] do
-        if hypArgs[i]! == lhs then
-          argPos? := some (argPos pos hypNumArgs i)
-          break
-    let hpos ← match argPos? with
-      | some p => pure p
-      | none =>
-        ref.modify (·.markUnresolved
-          s!"congruence theorem `{thmName}` rewrote a subterm that is not a \
-child of the application; the node's whole change is recorded as one `change` \
-step rather than as the individual rewrites")
-        pure pos
-    let r ← simpT ref hpos lhs
+    -- The hypothesis's steps are relative to its own left-hand side, which is
+    -- what the side trace's goal names, so the sub-run starts at the root.
+    let (r, evs) ← captureEvents ref (simpT ref #[] lhs)
     let rhs := hType.appArg!
     rhs.withApp fun m zs => do
       let val ← mkLambdaFVars zs r.expr
@@ -1033,9 +1014,25 @@ step rather than as the individual rewrites")
         catch _ => Simp.throwCongrHypothesisFailed
       unless (← isDefEq h (← mkLambdaFVars xs proof)) do
         Simp.throwCongrHypothesisFailed
-      return r.proof?.isSome || (xs.size > 0 && lhs != r.expr)
+      let progress := r.proof?.isSome || (xs.size > 0 && lhs != r.expr)
+      -- The side goal is the equation this hypothesis establishes.
+      let goal ← instantiateMVars (← mkEq lhs r.expr)
+      -- The antecedents' *display* names.  Never `eraseMacroScopes`: for an
+      -- inaccessible antecedent that yields a plain name which usually denotes a
+      -- different, accessible local in the same context — the hazard REVIEW-2
+      -- found for `name`.  `ppExpr` gives the `a✝` form a generator can bind.
+      let intros ← xs.mapM fun x => do
+        pure (← ppExpr x).pretty
+      let side : SideRec :=
+        .mk goal evs (if evs.isEmpty then some "rfl" else none)
+          (← captureEvCtx ref) intros
+      return (progress, some side)
 
-/-- SOURCE: Main.lean:586-635 `Simp.trySimpCongrTheorem?`, position-threaded. -/
+/-- SOURCE: Main.lean:586-635 `Simp.trySimpCongrTheorem?`, position-threaded.
+
+A user congruence theorem fires as one `rw` step naming the theorem, with
+`"source": "congr"` and one `side` per hypothesis in order (spec 2e73661).
+Replay is `rw [ite_congr h₁ h₂ h₃]` with each `hᵢ` proved by its side trace. -/
 partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
     (c : SimpCongrTheorem) (e : Expr) : SimpM (Option Simp.Result) :=
   withNewMCtxDepth do Simp.withParent e do
@@ -1059,14 +1056,15 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
       extraArgs := args[numArgs...*].toArray
     if (← Simp.withSimpMetaConfig <| isDefEq lhs e) then
       let mut modified := false
+      let mut sides : Array SideRec := #[]
       for i in c.hypothesesPos do
         let h := xs[i]!
         let hType ← instantiateMVars (← inferType h)
         let hType ← if thmHasBinderNameHint then hType.resolveBinderNameHint else pure hType
         try
-          if (← processCongrHypothesisT ref pos e.getAppArgs e.getAppNumArgs
-                 c.theoremName h hType) then
-            modified := true
+          let (progress, side?) ← processCongrHypothesisT ref c.theoremName h hType
+          if progress then modified := true
+          if let some side := side? then sides := sides.push side
         catch _ =>
           return none
       unless modified do
@@ -1080,12 +1078,15 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
         catch _ => return none
       if (← hasAssignableMVar proof <||> hasAssignableMVar eNew) then
         return none
-      -- The congruence theorem rewrote its hypotheses' subterms *and*
-      -- transported everything depending on them.  Neither half is separately
-      -- addressable in the spec's convention, so the node's whole change is
-      -- recorded once here, as a `change` at this position.
+      -- One `rw` naming the theorem, carrying its hypotheses as `side` traces.
+      -- The side goals now instantiate to their final forms, so re-read them.
       unless eNew == e do
-        ref.modify (·.push (.defeq pos .change none e eNew (← captureEvCtx ref)))
+        let sidesFinal ← sides.mapM fun sd => do
+          pure (SideRec.mk (← instantiateMVars sd.goal) sd.events sd.by_
+            sd.evCtx sd.intros)
+        ref.modify (·.push
+          (.rw pos (.decl c.theoremName true false) false none e eNew
+            (← captureEvCtx ref) #[] sidesFinal (some `congr)))
       congrArgsT ref pos { expr := eNew, proof? := proof } extraArgs
         origNumArgs numArgs
     else
