@@ -3,9 +3,13 @@
 
 Run with ``python3 -B Experiment/check_simp_family_lint.py`` (or from within
 ``Experiment/``).  The suite covers positives for every forbidden token,
-negatives for lookalike identifiers and the ``@[simps]`` attribute, comment and
-string handling, the fixed override database, and the loader's rejection of a
+negatives for lookalike identifiers and attribute syntax, comment and string
+handling, the fixed override database, and the loader's rejection of a
 violating entry.
+
+The fast suite takes well under a second.  ``--sweep`` additionally runs the
+whole-corpus assertion over every pinned Mathlib file (~8.3k files, a couple of
+minutes), which is the regression test for the round-2 attribute defects.
 """
 
 from __future__ import annotations
@@ -26,6 +30,11 @@ import simp_manual_overrides as manual  # noqa: E402
 
 
 DATABASE = HERE / "simp_manual_overrides.json"
+MATHLIB = HERE.parents[0] / ".lake" / "packages" / "mathlib" / "Mathlib"
+
+#: Set by ``--sweep`` on the command line.  The corpus sweep is slow, so it is
+#: opt-in and the default suite stays fast.
+RUN_SWEEP = False
 
 
 class PositiveChecks(unittest.TestCase):
@@ -314,6 +323,101 @@ class ApiChecks(unittest.TestCase):
             self.assertEqual(lint.main([str(dirty), "--quiet"]), 1)
 
 
+class AttributeSpellingChecks(unittest.TestCase):
+    """The 11 real Mathlib attribute spellings reported in review round 2.
+
+    Round 1 decided attribute context with a backward character scan that
+    aborted on any unexpected character, so an attribute list containing
+    ``(``, ``=``, ``>``, ``<-`` or a string flagged the token after it, and any
+    modifier in front of the ``attribute`` keyword defeated the command check.
+    Detection is now structural (match brackets backwards), and each spelling
+    below is pinned so the class of defect cannot come back one spelling at a
+    time.
+    """
+
+    #: Defect 1: `@[...]` lists whose contents broke the character scan.
+    BRACKET_SPELLINGS = (
+        "@[simp <-, push_cast] theorem t : a = a := rfl",
+        "@[simp ←, push_cast] theorem t : a = a := rfl",
+        "@[push <-, simp] theorem t : a = a := rfl",
+        "@[push ←, simp] theorem t : a = a := rfl",
+        "@[grind =>, simp] lemma t : a = a := rfl",
+        "@[simp, grind =, norm_cast] theorem t : a = a := rfl",
+        "@[aesop (rule_sets := [finiteness]) safe apply, simp] theorem t : a = a := rfl",
+        '@[deprecated "use X" (since := "2026-02-21"), norm_cast] theorem t : a = a := rfl',
+        "@[to_dual self (reorder := f g, hf hg), simp] theorem t : a = a := rfl",
+    )
+
+    #: Defect 2: prefixes in front of the `attribute` command keyword.
+    COMMAND_SPELLINGS = (
+        "local attribute [simp] foo",
+        "scoped attribute [simp] foo",
+        "scoped[Pointwise] attribute [simp] Set.image_smul",
+        "scoped[AddConstMapClass] attribute [simp] map_add_const",
+        "open Foo in attribute [simp] foo",
+        "open Foo Bar in attribute [simp] foo",
+        "variable {x : Nat} in attribute [simp] foo",
+        "private attribute [simp] foo",
+        "protected attribute [simp] foo",
+    )
+
+    def test_bracket_attribute_spellings_are_clean(self) -> None:
+        for snippet in self.BRACKET_SPELLINGS:
+            with self.subTest(snippet=snippet):
+                self.assertEqual(
+                    lint.findings(snippet),
+                    [],
+                    f"{snippet!r} is attribute syntax, not a tactic call",
+                )
+
+    def test_command_attribute_spellings_are_clean(self) -> None:
+        for snippet in self.COMMAND_SPELLINGS:
+            with self.subTest(snippet=snippet):
+                self.assertEqual(
+                    lint.findings(snippet),
+                    [],
+                    f"{snippet!r} is an attribute command, not a tactic call",
+                )
+
+    def test_nested_argument_groups_are_resolved_outwards(self) -> None:
+        # A token inside a nested group of an attribute list is still an
+        # attribute, however deep the nesting goes.
+        for snippet in (
+            "@[aesop (rule_sets := [simp]) safe apply] theorem t : a = a := rfl",
+            "@[foo (bar := (baz := simp))] theorem t : a = a := rfl",
+            "@[to_additive (attr := simp, norm_cast)] def f := 1",
+        ):
+            with self.subTest(snippet=snippet):
+                self.assertEqual(lint.findings(snippet), [])
+
+    def test_attribute_list_split_across_lines_is_clean(self) -> None:
+        self.assertEqual(lint.findings("attribute [\n  simp] foo"), [])
+        self.assertEqual(lint.findings("@[\n  simp,\n  norm_cast]\ndef f := 1"), [])
+
+    def test_prefixes_do_not_shield_a_real_tactic(self) -> None:
+        # The command-position guard must survive the widening: a keyword in
+        # the middle of an expression still does not make a tactic an
+        # attribute, and neither does an attribute line above one.
+        for snippet in (
+            "exact foo attribute [simp]",
+            "local attribute [simp] foo\nexample : True := by\n  simp",
+            "scoped[NS] attribute [simp] foo\nexample : True := by\n  simp",
+            "open Foo in attribute [simp] foo\nexample : True := by\n  simp",
+        ):
+            with self.subTest(snippet=snippet):
+                self.assertTrue(
+                    lint.has_simp_family(snippet),
+                    f"{snippet!r} contains a real simp tactic",
+                )
+
+    def test_attribute_on_a_declaration_proved_by_simp(self) -> None:
+        # Only the tactic is a finding, never the attribute in front of it.
+        results = lint.findings("@[simp] lemma l : a = a := by simp")
+        self.assertEqual([(i.token, i.column) for i in results], [("simp", 31)])
+        results = lint.findings("@[simp] theorem t : a = a := by simp only [x]")
+        self.assertEqual([(i.token, i.column) for i in results], [("simp", 33)])
+
+
 class WholeFileChecks(unittest.TestCase):
     """Whole-file runs, including the reviewer's round-1 reproduction."""
 
@@ -402,6 +506,107 @@ example : True := by
             self.assertEqual(lint.main([str(path), "--quiet"]), 0)
 
 
+class CorpusSweepChecks(unittest.TestCase):
+    """Whole-corpus assertion over every pinned Mathlib file.
+
+    Review round 2 found the 18 attribute-derived false positives by sweeping
+    the corpus, so the corpus is the regression test.  It is slow (~8.3k files,
+    a couple of minutes), so it only runs under ``--sweep``; the fast suite
+    stays well under a second.
+    """
+
+    def setUp(self) -> None:
+        if not RUN_SWEEP:
+            self.skipTest("corpus sweep is opt-in; pass --sweep to run it")
+        if not MATHLIB.is_dir():
+            self.skipTest("pinned Mathlib checkout is not available")
+
+    def test_no_finding_lies_inside_an_attribute_list(self) -> None:
+        """Zero attribute-derived findings across the whole pinned corpus.
+
+        A finding is attribute-derived when its token sits inside an attribute
+        list, decided by the same structural check the lint uses.  Round 2
+        counted 18 such findings; there must now be none.
+        """
+
+        offenders: list[str] = []
+        files = 0
+        total = 0
+        for path in sorted(MATHLIB.rglob("*.lean")):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            files += 1
+            results = lint.findings(text)
+            if not results:
+                continue
+            total += len(results)
+            masked = lint._mask(text)
+            lines = text.splitlines()
+            for item in results:
+                if lint._in_attribute_list(masked, item.offset):
+                    offenders.append(
+                        f"{path.relative_to(MATHLIB)}:{item.line}: "
+                        f"{lines[item.line - 1].strip()[:72]}"
+                    )
+        self.assertGreater(files, 8000, "corpus looks unexpectedly small")
+        self.assertGreater(total, 0, "corpus should contain real simp calls")
+        self.assertEqual(
+            offenders,
+            [],
+            f"{len(offenders)} attribute-derived finding(s):\n"
+            + "\n".join(offenders[:40]),
+        )
+
+    def test_known_round_two_occurrences_are_clean(self) -> None:
+        """The exact 18 occurrences review round 2 listed are not flagged.
+
+        Pinned by file and text so that a future regression names the case,
+        not just a count.  Files that have moved upstream are skipped rather
+        than failing, since the corpus is pinned but not owned by this task.
+        """
+
+        expected = {
+            "Algebra/AddConstMap/Basic.lean": 1,
+            "Algebra/Group/Pointwise/Set/Scalar.lean": 1,
+            "Algebra/Homology/HomologicalComplex.lean": 1,
+            "Algebra/Order/Kleene.lean": 1,
+            "Analysis/Normed/Group/Defs.lean": 1,
+            "Data/ENNReal/Inv.lean": 2,
+            "Data/Finset/Range.lean": 1,
+            "Data/Finset/SDiff.lean": 1,
+            "GroupTheory/SpecificGroups/KleinFour.lean": 2,
+            "Tactic/Zify.lean": 1,
+            "Topology/Instances/Rat.lean": 2,
+            "Topology/IsLocalHomeomorph.lean": 2,
+            "Topology/MetricSpace/Pseudo/Defs.lean": 1,
+            "Topology/Order/OrderClosed.lean": 1,
+        }
+        self.assertEqual(sum(expected.values()), 18)
+        checked = 0
+        for relative, count in sorted(expected.items()):
+            path = MATHLIB / relative
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            masked = lint._mask(text)
+            attribute_findings = [
+                item
+                for item in lint.findings(text)
+                if lint._in_attribute_list(masked, item.offset)
+            ]
+            with self.subTest(module=relative):
+                self.assertEqual(
+                    attribute_findings,
+                    [],
+                    f"{relative} still reports attribute syntax "
+                    f"(round 2 counted {count} here)",
+                )
+            checked += 1
+        self.assertGreater(checked, 0, "none of the pinned modules were found")
+
+
 class DatabaseChecks(unittest.TestCase):
     """The shipped override database is clean and the loader enforces the rule."""
 
@@ -450,4 +655,7 @@ class DatabaseChecks(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if "--sweep" in sys.argv:
+        sys.argv.remove("--sweep")
+        RUN_SWEEP = True
     unittest.main(verbosity=2)

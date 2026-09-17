@@ -78,6 +78,13 @@ _IDENT_START = re.compile(r"[A-Za-z_À-ɏΑ-ω]")
 # The `(attr := ...)` configuration used by `@[to_additive (attr := simp)]`.
 _ATTR_ASSIGN = re.compile(r"\(\s*attr\s*:=")
 
+#: Modifiers Lean allows in front of the `attribute` command keyword.
+_COMMAND_PREFIX_KEYWORDS = frozenset({"local", "scoped", "private", "protected"})
+
+#: How far out to resolve nested groups when deciding attribute context.
+#: Attribute lists in pinned Mathlib nest at most three deep.
+_MAX_BRACKET_DEPTH = 16
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -208,90 +215,125 @@ def _tokens(masked: str) -> Iterable[tuple[str, int]]:
         yield masked[start:index], start
 
 
+#: Closing delimiters mapped to their openers, for the backward matcher.
+_CLOSERS = {"]": "[", ")": "(", "}": "{"}
+_OPENERS = frozenset(_CLOSERS.values())
+
+
+def _enclosing_bracket(masked: str, offset: int) -> int | None:
+    """Return the index of the bracket that directly encloses ``offset``.
+
+    Walks backwards matching delimiters, so any content may appear inside a
+    nested group.  ``masked`` has comments and string literals blanked out
+    already, so delimiters inside them cannot unbalance the scan.  Returns
+    ``None`` when ``offset`` is not inside any bracket.
+    """
+
+    stack: list[str] = []
+    probe = offset - 1
+    while probe >= 0:
+        char = masked[probe]
+        if char in _CLOSERS:
+            stack.append(_CLOSERS[char])
+        elif char in _OPENERS:
+            if not stack:
+                return probe
+            if stack[-1] != char:
+                # Unbalanced source; give up rather than guess.
+                return None
+            stack.pop()
+        probe -= 1
+    return None
+
+
 def _in_attribute_list(masked: str, offset: int) -> bool:
     """True when ``offset`` sits inside an attribute list.
 
     Generated Mathlib files keep their original attributes, which are
-    declaration syntax rather than tactic calls.  The forms recognised here
-    are the ones that actually occur in pinned Mathlib:
+    declaration syntax rather than tactic calls, so an attribute is never a
+    finding.  Detection is structural: find the bracket group that directly
+    encloses the token by matching delimiters backwards, then ask whether that
+    group is an attribute list.  Because the matcher never inspects the
+    characters *between* delimiters, arbitrary attribute arguments are handled,
+    including the real pinned-Mathlib spellings
 
-    * ``@[simp]``, ``@[simp, norm_cast]``, ``@[local simp]``, ``@[simps]``
-    * ``attribute [simp] foo``, ``attribute [local simp] foo``,
-      ``attribute [scoped simp] foo`` and ``attribute [-simp] foo`` -- the
-      last one *removes* the attribute, so flagging it would be doubly wrong
-    * ``(attr := simp)``, as used by ``@[to_additive (attr := simp)]``
+    * ``@[simp <-, push_cast]``, ``@[grind =>, simp]``, ``@[simp, grind =]``
+    * ``@[aesop (rule_sets := [finiteness]) safe apply, simp]``
+    * ``@[deprecated "use X" (since := "..."), norm_cast]``
+    * ``@[to_dual self (reorder := f g, hf hg), simp]``
 
-    The scan walks backwards from the token over the rest of the list,
-    tracking bracket depth so nested argument lists such as
-    ``@[simps apply_coe, simp]`` are handled, and stops at any character that
-    cannot appear in one.
+    A group counts as an attribute list when it is a ``[...]`` opened by ``@``
+    or by the ``attribute`` command keyword, or a ``(...)`` opened by the
+    ``(attr := ...)`` configuration.  Nested groups are resolved outwards, so
+    the ``simp`` in ``@[aesop (rule_sets := [x]) safe, simp]`` is recognised
+    whether it sits at the top level of the attribute list or inside one of
+    its argument groups.
     """
 
-    # `(attr := simp)` and `(attr := simp, norm_cast)`: look back for the
-    # `attr :=` marker inside the enclosing parentheses.
-    depth = 0
-    probe = offset - 1
-    while probe >= 0:
-        char = masked[probe]
-        if char == ")":
-            depth += 1
-        elif char == "(":
-            if depth == 0:
-                if _ATTR_ASSIGN.match(masked, probe):
-                    return True
-                break
-            depth -= 1
-        elif char in " \t\n,:=" or _IDENT_BODY.match(char) or char == ".":
-            pass
-        else:
-            break
-        probe -= 1
-
-    depth = 0
-    probe = offset - 1
-    while probe >= 0:
-        char = masked[probe]
-        if char == "]":
-            depth += 1
-        elif char == "[":
-            if depth == 0:
-                return _opens_attribute_list(masked, probe)
-            depth -= 1
-        elif char in " \t\n,-" or _IDENT_BODY.match(char) or char == ".":
-            # `-` carries the `@[-simp]` / `attribute [-simp]` removal form.
-            pass
-        else:
+    probe: int | None = offset
+    # Resolve outwards: a token inside a nested argument group is still inside
+    # the attribute list that contains that group.
+    for _ in range(_MAX_BRACKET_DEPTH):
+        bracket = _enclosing_bracket(masked, probe)
+        if bracket is None:
             return False
-        probe -= 1
+        char = masked[bracket]
+        if char == "[" and _opens_attribute_list(masked, bracket):
+            return True
+        if char == "(" and _ATTR_ASSIGN.match(masked, bracket):
+            return True
+        probe = bracket
     return False
 
 
 def _opens_attribute_list(masked: str, bracket: int) -> bool:
     """True when the ``[`` at ``bracket`` opens an attribute list.
 
-    That is either ``@[`` directly, or a ``[`` preceded by the ``attribute``
-    command keyword (with optional modifiers already consumed by the caller).
+    Either ``@[`` directly, or a ``[`` preceded by the ``attribute`` command
+    keyword.  The keyword may carry the modifiers Lean allows in front of it --
+    ``local``, ``scoped``, ``scoped[NS]`` -- and any ``... in`` prefix such as
+    ``open Foo in``, all on the same command.
     """
 
     probe = bracket - 1
-    if probe >= 0 and masked[probe] == "@":
-        return True
     while probe >= 0 and masked[probe] in " \t\n":
         probe -= 1
+    if probe >= 0 and masked[probe] == "@":
+        return True
     if probe < 0:
         return False
     stop = probe + 1
     while probe >= 0 and _IDENT_BODY.match(masked[probe]):
         probe -= 1
-    word = masked[probe + 1 : stop]
-    if word != "attribute":
+    if masked[probe + 1 : stop] != "attribute":
         return False
-    # `attribute` must be a command head, i.e. start a line rather than sit in
-    # the middle of an expression such as `foo attribute [x]`.
-    scan = probe
-    while scan >= 0 and masked[scan] in " \t":
-        scan -= 1
-    return scan < 0 or masked[scan] == "\n"
+    return _is_command_position(masked, probe + 1)
+
+
+def _is_command_position(masked: str, start: int) -> bool:
+    """True when the keyword at ``start`` heads a command.
+
+    The keyword heads a command when what precedes it on the logical line is
+    only command prefixes: ``local``, ``scoped``, ``scoped[NS]``, or anything
+    ending in ``in`` (``open Foo in``, ``variable ... in``).  This keeps the
+    round-1 guard that a keyword sitting mid-expression -- as in
+    ``exact foo attribute [simp]`` -- does not shield a real tactic.
+    """
+
+    prefix = masked[:start]
+    line_start = prefix.rfind("\n") + 1
+    before = prefix[line_start:].strip()
+    if not before:
+        return True
+    # `scoped[Pointwise]` and friends: drop bracket groups so the words remain.
+    before = re.sub(r"\[[^\[\]]*\]", "", before).strip()
+    if not before:
+        return True
+    words = before.split()
+    if words[-1] == "in":
+        # `open Foo in`, `variable {x} in`, ... -- a genuine command prefix.
+        return True
+    return all(word in _COMMAND_PREFIX_KEYWORDS for word in words)
 
 
 def _line_column(source: str, offset: int) -> tuple[int, int]:
