@@ -68,4 +68,37 @@ accepted only when the trace rewrites the goal.
 theorem closing_form (a b : Nat) (h : a = b) : a + 0 = b := by
   explicit_rw [h at [0, 1, 0, 1]] then rfl
 
+/-! ## The closing forms, one fixture per spec `close` value
+
+The spec's close set is `rfl | true_intro | assumption:<name> | absurd:<hyp> |
+decide`. Every one of them renders through this closed enumeration; the three
+that name something route through `exact <term>`.
+-/
+
+/-- spec `{"by":"rfl"}`. -/
+theorem close_rfl (a b : Nat) (h : a = b) : a + 0 = b := by
+  explicit_rw [h at [0, 1, 0, 1]] then rfl
+
+/-- spec `{"by":"decide"}`. `decide` needs a closed goal, as Lean's own
+`decide` does; a generator must emit it only for goals with no free variables. -/
+theorem close_decide : (2 + 3) + 1 = 6 := by
+  explicit_rw [eq (2 + 3 = 5) by rfl at [0, 1, 0, 1]] then decide
+
+/-- spec `{"by":"true_intro"}`. -/
+theorem close_true_intro (p : Prop) (hp : p = True) : p := by
+  explicit_rw [hp at []] then exact True.intro
+
+/-- spec `{"by":"assumption:hb"}` — rendered as `exact <name>`, which names the
+same hypothesis the trace recorded instead of searching for one. -/
+theorem close_assumption (a b : Nat) (h : a = b) (hb : b + 0 = b) : a + 0 = b := by
+  explicit_rw [h at [0, 1, 0, 1]] then exact hb
+
+/-- spec `{"by":"absurd:hp"}` — a dotted projection on a hypothesis. This form
+arises after rewriting a *hypothesis* to `False`, and `then` applies to the goal,
+so the closer goes on the next line. -/
+theorem close_absurd (p : Prop) (q : Prop) (hq : p = False) (hp : p) : q := by
+  explicit_rw [hq at []] at hp
+  guard_hyp hp :ₛ False
+  exact hp.elim
+
 end ExplicitRwTest.Basic

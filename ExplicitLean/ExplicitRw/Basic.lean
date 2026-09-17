@@ -233,7 +233,10 @@ where
           -- explicit `zeta` step.
           withLetDecl n ty val fun x => do
             let r ← go (body.instantiate1 x) rest' seen'
-            let newE ← (mkLetFVars #[x] r.newExpr : MetaM _)
+            -- `usedLetOnly := false`: keep the binder even when the rewritten
+            -- body no longer mentions it, so that a `let` is removed only by an
+            -- explicit `zeta` step and later recorded positions stay valid.
+            let newE ← (mkLetFVars (usedLetOnly := false) #[x] r.newExpr : MetaM _)
             match r.proof? with
             | none => return { newExpr := newE, proof? := none }
             | some h =>

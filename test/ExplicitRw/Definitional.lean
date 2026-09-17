@@ -160,6 +160,16 @@ theorem let_body_no_capture (a b c : Nat) (h : c = b) :
   guard_target =ₛ (let y : Nat := a; y + (b + a)) = a + (b + a)
   rfl
 
+set_option linter.unusedVariables false in
+/-- A `let` whose body never mentions the bound variable still survives a body
+rewrite: `mkLetFVars (usedLetOnly := false)` keeps the binder, so only an
+explicit `zeta` step removes it. -/
+theorem let_body_unused_binder (a : Nat) (h : a = 7) :
+    (let y : Nat := 7; a + 1) = 8 := by
+  explicit_rw [h at [0, 1, 2, 0, 1]]
+  guard_target =ₛ (let y : Nat := 7; 7 + 1) = 8
+  rfl
+
 /-! ## The `zeta` step: the only step that destroys a `let` -/
 
 theorem zeta_step (a : Nat) : (let y : Nat := 7; a + y) = a + 7 := by

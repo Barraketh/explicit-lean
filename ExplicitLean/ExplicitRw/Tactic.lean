@@ -75,22 +75,140 @@ equation, an `exact` closer — is rejected if it contains a `by` block.
 ## No simp
 
 Nothing in this tactic calls, imports for use, or expands to `Lean.Meta.Simp` or
-any simp-family tactic, and no trace written in this syntax can introduce one:
-the two tactic slots are closed enumerations, and every term the tactic
-elaborates is refused if it elaborates a tactic block, however that block got
-there (written, via `macro`/`notation`, or via a custom term elaborator).
-`Experiment/check_no_simp_family.py` enforces the former.
+any simp-family tactic; `Experiment/check_no_simp_family.py` enforces that.
+
+For what a *trace* can introduce, the guarantee is deliberately stated as a
+conditional, because that is what is true. The two tactic slots are closed
+enumerations and every term is parsed in the whitelist grammar above, so no
+tactic — simp-family or otherwise — can be written into a trace. What the
+grammar cannot see is an identifier bound to a custom term elaborator, which is
+indistinguishable from an ordinary constant at parse time and can run the
+simplifier in `MetaM` without producing any `by` syntax. So:
+
+> No trace written in this syntax can introduce a simp-family tactic, **provided
+> the file it lives in declares no term elaborators** (`elab`, `macro`,
+> `syntax`, `@[term_elab]`).
+
+That proviso holds for generated Mathlib files by construction — a translated
+file has no business declaring elaborators — and is to be enforced generator-side
+by a lint (T4), not from inside this tactic. The synthetic-metavariable check in
+`checkNoPendingTactic` remains as defence in depth for anything that slips past
+the grammar.
 -/
 
 namespace ExplicitLean.ExplicitRw
 
 open Lean Elab Tactic Meta
 
+/-!
+## The whitelisted term grammar
+
+Every term a trace hands to `explicit_rw` — a rewrite lemma with its explicit
+arguments, an `eq` equation, a `change` target, an `exact` closer — is parsed in
+the `explicitRwTerm` category below rather than as a general Lean `term`.
+
+This is a **whitelist enforced by the parser**, which is the point. Guarding a
+general `term` means enumerating the shapes that can run tactics and hoping the
+enumeration is complete; it is not. A `by` block is easy to spot, but a term
+elaborator declared with `elab` can build its proof by calling the simplifier in
+`MetaM` directly, producing neither `by` syntax nor a synthetic metavariable, so
+nothing is left for a syntactic or a metavariable-based guard to see. A grammar
+has no such escape: what it does not admit never reaches an elaborator at all.
+
+Admitted: identifiers (dotted, optionally `@`-prefixed, including projection
+suffixes such as `h.elim`), application of whitelisted terms, `_`, numeric and
+string literals, parentheses, and type ascriptions `(t : T)` whose type is built
+from the same grammar plus the binder-free connectives needed to *state* an
+equation (`=`, `↔`, `¬`, `∧`, `∨`, `→`) and typed `∀`/`∃`/`fun` binders.
+
+Not admitted, deliberately: `by`, `match`, `let`, `do`, `⟨…⟩` anonymous
+constructors, `show … from`, `‹_›`, and `▸`.
+
+**Residual hole, stated honestly.** A bare identifier can be bound to a custom
+term elaborator via `@[term_elab]`, and that is indistinguishable from an
+ordinary constant at parse time. `explicit_rw` cannot close this from the
+inside. It is closed generator-side, by the simp-family lint together with a ban
+on `elab`/`macro`/`syntax` declarations inside generated regions — a T4 concern,
+not implemented here. So the guarantee this tactic offers is: no trace written
+in this syntax can introduce a simp-family tactic, *provided* the file it lives
+in declares no term elaborators.
+-/
+
+/-- A whitelisted term: see the grammar note above. -/
+declare_syntax_cat explicitRwTerm
+
+/--
+A whitelisted *type*: the whitelisted terms plus the binder-free connectives and
+the typed binders needed to state an equation or an iff.
+-/
+declare_syntax_cat explicitRwType
+
+/-- An identifier, optionally `@`-prefixed; dotted names and `.field` included. -/
+syntax:max (name := explicitRwTermIdent) ("@")? ident : explicitRwTerm
+/-- A placeholder for an argument the position determines. -/
+syntax:max (name := explicitRwTermHole) "_" : explicitRwTerm
+/-- A numeric literal. -/
+syntax:max (name := explicitRwTermNum) num : explicitRwTerm
+/-- A string literal. -/
+syntax:max (name := explicitRwTermStr) str : explicitRwTerm
+/-- Arithmetic and comparison operators, needed to state the equations that
+simproc steps compute (`eq (2 + 3 = 5) by rfl`) and the targets of `change`.
+These are ordinary notations over whitelisted operands, not an escape: the
+operands are themselves whitelisted, so no new term shape is admitted. -/
+syntax:65 (name := explicitRwTermAdd) explicitRwTerm:65 " + " explicitRwTerm:66 : explicitRwTerm
+@[inherit_doc explicitRwTermAdd]
+syntax:65 (name := explicitRwTermSub) explicitRwTerm:65 " - " explicitRwTerm:66 : explicitRwTerm
+@[inherit_doc explicitRwTermAdd]
+syntax:70 (name := explicitRwTermMul) explicitRwTerm:70 " * " explicitRwTerm:71 : explicitRwTerm
+@[inherit_doc explicitRwTermAdd]
+syntax:70 (name := explicitRwTermDiv) explicitRwTerm:70 " / " explicitRwTerm:71 : explicitRwTerm
+@[inherit_doc explicitRwTermAdd]
+syntax:70 (name := explicitRwTermMod) explicitRwTerm:70 " % " explicitRwTerm:71 : explicitRwTerm
+@[inherit_doc explicitRwTermAdd]
+syntax:75 (name := explicitRwTermPow) explicitRwTerm:76 " ^ " explicitRwTerm:75 : explicitRwTerm
+
+/-- Application, left-associated as usual. -/
+syntax:10 (name := explicitRwTermApp) explicitRwTerm:10 explicitRwTerm:max : explicitRwTerm
+/-- Parentheses. -/
+syntax:max (name := explicitRwTermParen) "(" explicitRwTerm ")" : explicitRwTerm
+/-- A type ascription, whose type is itself whitelisted. -/
+syntax:max (name := explicitRwTermAscr) "(" explicitRwTerm " : " explicitRwType ")" : explicitRwTerm
+
+/-- Any whitelisted term is a whitelisted type. -/
+syntax:max (name := explicitRwTypeTerm) explicitRwTerm : explicitRwType
+/-- Parentheses. -/
+syntax:max (name := explicitRwTypeParen) "(" explicitRwType ")" : explicitRwType
+/-- Equality. -/
+syntax:50 (name := explicitRwTypeEq) explicitRwType:51 " = " explicitRwType:51 : explicitRwType
+/-- Iff. -/
+syntax:20 (name := explicitRwTypeIff) explicitRwType:21 " ↔ " explicitRwType:21 : explicitRwType
+/-- Negation. -/
+syntax:max (name := explicitRwTypeNot) "¬" explicitRwType:40 : explicitRwType
+/-- Conjunction. -/
+syntax:35 (name := explicitRwTypeAnd) explicitRwType:36 " ∧ " explicitRwType:35 : explicitRwType
+/-- Disjunction. -/
+syntax:30 (name := explicitRwTypeOr) explicitRwType:31 " ∨ " explicitRwType:30 : explicitRwType
+/-- Implication. -/
+syntax:25 (name := explicitRwTypeArrow) explicitRwType:26 " → " explicitRwType:25 : explicitRwType
+/-- Comparisons, for the equations a simproc step states. -/
+syntax:50 (name := explicitRwTypeLe) explicitRwType:51 " ≤ " explicitRwType:51 : explicitRwType
+@[inherit_doc explicitRwTypeLe]
+syntax:50 (name := explicitRwTypeLt) explicitRwType:51 " < " explicitRwType:51 : explicitRwType
+@[inherit_doc explicitRwTypeLe]
+syntax:50 (name := explicitRwTypeNe) explicitRwType:51 " ≠ " explicitRwType:51 : explicitRwType
+
+/-- A typed `∀` binder. -/
+syntax:max (name := explicitRwTypeForall) "∀ " "(" ident " : " explicitRwType ")" ", " explicitRwType : explicitRwType
+/-- A typed `∃` binder. -/
+syntax:max (name := explicitRwTypeExists) "∃ " "(" ident " : " explicitRwType ")" ", " explicitRwType : explicitRwType
+/-- A typed `fun` binder. -/
+syntax:max (name := explicitRwTypeFun) "fun " "(" ident " : " explicitRwType ")" " => " explicitRwType : explicitRwType
+
 /-- `at [0, 1, 1]` — the position a step applies at. `at []` is the whole location. -/
 syntax explicitRwPos := " at " "[" num,* "]"
 
 /-- A lemma rewrite, forwards or backwards: `foo a b at [1]`, `← bar at []`. -/
-syntax explicitRwRw := ("← ")? term explicitRwPos
+syntax explicitRwRw := ("← ")? explicitRwTerm explicitRwPos
 
 /-- `unfold f at [1]` — delta-unfold one constant, definitionally. -/
 syntax explicitRwUnfold := "unfold " ident explicitRwPos
@@ -118,7 +236,7 @@ lemma called `intro_ctx`.
 syntax explicitRwIntroCtx := &"intro_ctx " ident explicitRwPos
 
 /-- `change t at [1]` — last-resort definitional replacement, checked by defeq. -/
-syntax explicitRwChange := "change " term explicitRwPos
+syntax explicitRwChange := "change " explicitRwTerm explicitRwPos
 
 /--
 The closers a trace may use, as a **closed enumeration**. `explicit_rw` is
@@ -139,14 +257,14 @@ finding a *different* hypothesis than the one the trace recorded; the spec write
 `@[refl]` lemmas. It is not `simp`-backed and performs no simplification.
 -/
 syntax explicitRwCloser :=
-  &"rfl" <|> &"decide" <|> (&"exact " term)
+  &"rfl" <|> &"decide" <|> (&"exact " explicitRwTerm)
 
 /--
 `eq (2 + 3 = 5) by rfl at [1]` — a simproc-computed equation, proved by an
 ordinary tactic. The spec's `by` field is exactly `rfl | decide`, so only those
 two are accepted; see `explicitRwCloser` for why this is not a `tacticSeq`.
 -/
-syntax explicitRwEq := &"eq " term " by " (&"rfl" <|> &"decide") explicitRwPos
+syntax explicitRwEq := &"eq " explicitRwType " by " (&"rfl" <|> &"decide") explicitRwPos
 
 /-- One step of an `explicit_rw` trace. -/
 syntax explicitRwStep :=
@@ -166,6 +284,82 @@ syntax (name := explicitRw) "explicit_rw " "[" explicitRwStep,* "]"
   (Lean.Parser.Tactic.location)? (explicitRwClose)? : tactic
 
 namespace Impl
+
+/--
+Translate a whitelisted term or type into ordinary Lean syntax.
+
+The whitelist is a syntactic restriction only: once a term has been shown to be
+inside the grammar, it is elaborated exactly as the corresponding ordinary term
+would be, so implicits, universes, instances and coercions behave as in any
+Lean proof. This function is total on the grammar; an unrecognised node is an
+internal error, never a silent pass-through to a general `term`.
+-/
+partial def toTerm (stx : Syntax) : TacticM Term := do
+  match stx.getKind with
+  | ``explicitRwTermIdent =>
+    let id : Term := ⟨stx[1]⟩
+    if stx[0].isNone then return id else `(@$id)
+  | ``explicitRwTermHole => `(_)
+  | ``explicitRwTermNum => return ⟨stx[0]⟩
+  | ``explicitRwTermStr => return ⟨stx[0]⟩
+  | ``explicitRwTermAdd => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a + $b)
+  | ``explicitRwTermSub => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a - $b)
+  | ``explicitRwTermMul => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a * $b)
+  | ``explicitRwTermDiv => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a / $b)
+  | ``explicitRwTermMod => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a % $b)
+  | ``explicitRwTermPow => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a ^ $b)
+  | ``explicitRwTypeLe => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a ≤ $b)
+  | ``explicitRwTypeLt => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a < $b)
+  | ``explicitRwTypeNe => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a ≠ $b)
+  | ``explicitRwTermApp =>
+    let f ← toTerm stx[0]
+    let a ← toTerm stx[1]
+    `($f $a)
+  | ``explicitRwTermParen =>
+    let t ← toTerm stx[1]
+    `(($t))
+  | ``explicitRwTermAscr =>
+    let t ← toTerm stx[1]
+    let ty ← toTerm stx[3]
+    `(($t : $ty))
+  | ``explicitRwTypeTerm => toTerm stx[0]
+  | ``explicitRwTypeParen =>
+    let t ← toTerm stx[1]
+    `(($t))
+  | ``explicitRwTypeEq =>
+    let a ← toTerm stx[0]; let b ← toTerm stx[2]
+    `($a = $b)
+  | ``explicitRwTypeIff =>
+    let a ← toTerm stx[0]; let b ← toTerm stx[2]
+    `($a ↔ $b)
+  | ``explicitRwTypeNot =>
+    let a ← toTerm stx[1]
+    `(¬ $a)
+  | ``explicitRwTypeAnd =>
+    let a ← toTerm stx[0]; let b ← toTerm stx[2]
+    `($a ∧ $b)
+  | ``explicitRwTypeOr =>
+    let a ← toTerm stx[0]; let b ← toTerm stx[2]
+    `($a ∨ $b)
+  | ``explicitRwTypeArrow =>
+    let a ← toTerm stx[0]; let b ← toTerm stx[2]
+    `($a → $b)
+  | ``explicitRwTypeForall =>
+    let x : Ident := ⟨stx[2]⟩
+    let ty ← toTerm stx[4]; let body ← toTerm stx[7]
+    `(∀ ($x : $ty), $body)
+  | ``explicitRwTypeExists =>
+    let x : TSyntax ``Lean.binderIdent := ⟨stx[2]⟩
+    let ty ← toTerm stx[4]; let body ← toTerm stx[7]
+    `(∃ ($x : $ty), $body)
+  | ``explicitRwTypeFun =>
+    let x : Ident := ⟨stx[2]⟩
+    let ty ← toTerm stx[4]; let body ← toTerm stx[7]
+    `(fun ($x : $ty) => $body)
+  | k =>
+    throwError "explicit_rw: internal error: unhandled whitelisted node `{k}`"
+
+
 
 /-- Parse the child-index list out of an `explicitRwPos` node. -/
 def parsePos (stx : Syntax) : Pos :=
@@ -462,7 +656,7 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
       cannot be replayed; hand-write the proof instead."
   | ``explicitRwChange =>
     let pos := parsePos stx[2]
-    let target : Term := ⟨stx[1]⟩
+    let target ← toTerm stx[1]
     checkNoTacticBlock s!"the `change` term of this step" (some idx) target
     runDefeqStep idx e pos m!"`change {target}`" fun sub => do
       let ty ← inferType sub
@@ -474,7 +668,7 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
       instantiateMVars newSub
   | ``explicitRwEq =>
     let pos := parsePos stx[4]
-    let eqStx : Term := ⟨stx[1]⟩
+    let eqStx ← toTerm stx[1]
     checkNoTacticBlock s!"the `eq` equation of this step" (some idx) eqStx
     -- The `by` slot is the closed keyword `rfl` or `decide`, never a tacticSeq.
     let byKind := stx[3][0].getAtomVal
@@ -508,7 +702,7 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
       (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwRw =>
     let symm := !stx[0].isNone
-    let term : Term := ⟨stx[1]⟩
+    let term ← toTerm stx[1]
     let pos := parsePos stx[2]
     runRwStep idx e pos term symm
   | k => throwError "explicit_rw: internal error: unexpected step kind `{k}`"
@@ -566,7 +760,7 @@ def runCloser (stx : Syntax) : TacticM Unit := do
   | "rfl" => evalTactic (← `(tactic| rfl))
   | "decide" => evalTactic (← `(tactic| decide))
   | "exact" =>
-    let t : Term := ⟨stx[0][1]⟩
+    let t ← toTerm stx[0][1]
     checkNoTacticBlock "the closing `exact` term" none t
     let goal ← getMainGoal
     goal.withContext do

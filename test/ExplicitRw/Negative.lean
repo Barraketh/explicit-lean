@@ -127,32 +127,16 @@ example (p q : Prop) (r : p → Prop) (h : p = q) :
     (∀ x : p, r x) = (∀ x : p, r x) := by
   explicit_rw [h at [0, 1, 0]]
 
-/-! ## Product rule: no tactic block may be smuggled into a trace
+/-! ## Product rule: terms are parsed in a whitelist grammar
 
-`then` and `eq ... by` are closed enumerations, so a forbidden tactic there is
-rejected by the **parser**, before elaboration. Parse errors cannot be captured
-by `#guard_msgs` (parsing fails before the command runs), so those four cases
-live in `test/ExplicitRw/RejectedSyntax/`, which
+Every term a trace hands to `explicit_rw` is parsed in the `explicitRwTerm`
+category, which admits identifiers, applications, literals, parentheses and
+ascriptions and nothing else. A `by` block, a macro expanding to one, and a term
+elaborator that runs the simplifier in `MetaM` are all rejected by the
+**parser**, before any elaborator runs. Parse errors cannot be pinned with
+`#guard_msgs`, so those cases live in `test/ExplicitRw/RejectedSyntax/`, which
 `Experiment/check_explicit_rw.py` compiles and requires to fail.
-
-The `exact` closer takes a term, which *can* parse while containing `by`, so
-that one is refused at elaboration and is pinned here.
 -/
-
-/--
-error: explicit_rw: the closing `exact` term contains a `by` block. `explicit_rw` is product code, so a trace may not embed a tactic block: it would let a tactic forbidden by the governing rule run inside the product tactic, where a lint over this module could not see it. Write a closed term, or prove the lemma separately and name it.
--/
-#guard_msgs in
-example (a b : Nat) (h : a = b) : a + 0 = b := by
-  explicit_rw [h at [0, 1, 0, 1]] then exact (by simp)
-
--- A `by` block inside a lemma term is refused the same way.
-/--
-error: explicit_rw: step 1: the lemma term of this step contains a `by` block. `explicit_rw` is product code, so a trace may not embed a tactic block: it would let a tactic forbidden by the governing rule run inside the product tactic, where a lint over this module could not see it. Write a closed term, or prove the lemma separately and name it.
--/
-#guard_msgs in
-example (a : Nat) : a + 0 = a := by
-  explicit_rw [(by simp : a + 0 = a) at []]
 
 /-! ## A stale position
 
@@ -221,31 +205,6 @@ error: explicit_rw: step 1: position [0, 1, 1] rewrites the value of a `let`; on
 #guard_msgs in
 example (a b : Nat) (h : a = b) : (let y : Nat := a; y + 1) = b + 1 := by
   explicit_rw [h at [0, 1, 1]]
-
-/-! ## A macro or term elaborator expanding to `by` is refused
-
-The guard is semantic: a `by` block registers a synthetic metavariable whose
-recorded syntax is the block, whatever produced it. A syntax walk over the
-written term alone would miss a macro, so both layers run.
--/
-
-macro "SmuggleSimp" : term => `(by simp)
-
-/--
-error: explicit_rw: the closing `exact` term contains a `by` block. `explicit_rw` is product code, so a trace may not embed a tactic block: it would let a tactic forbidden by the governing rule run inside the product tactic, where a lint over this module could not see it. Write a closed term, or prove the lemma separately and name it.
--/
-#guard_msgs in
-example (a b : Nat) (h : a = b) : a + 0 = b := by
-  explicit_rw [h at [0, 1, 0, 1]] then exact SmuggleSimp
-
--- Even a harmless `by` is refused: the rule is about tactics in terms, not
--- about which tactic it happens to be.
-/--
-error: explicit_rw: the closing `exact` term contains a `by` block. `explicit_rw` is product code, so a trace may not embed a tactic block: it would let a tactic forbidden by the governing rule run inside the product tactic, where a lint over this module could not see it. Write a closed term, or prove the lemma separately and name it.
--/
-#guard_msgs in
-example (a b : Nat) (h : a = b) : a + 0 = b := by
-  explicit_rw [h at [0, 1, 0, 1]] then exact (id (by rfl))
 
 /-! ## `zeta` applied where there is no `let` -/
 
