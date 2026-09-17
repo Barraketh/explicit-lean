@@ -1,5 +1,7 @@
 # simp trace format v1 (interface between trace capture and positional replay)
 
+Amended 2026-09-16 after T1 round 4: `congr` step kind for dependent
+congruence transports; `ctxIndex` semantics clarified.
 Amended 2026-09-16 after review round 3 of T1: `iota` kind, `prop` flag on
 `rw` steps, `omega` side close, classified `unresolved:` outcomes.
 Amended 2026-09-16 after review round 1 of T1/T2: `zeta` kind, `true_intro` and
@@ -55,13 +57,26 @@ form for `reduceCtorEq`-style side conditions.
   with that lemma as `name`, the discharged condition as a `side` sub-trace,
   and `"source": "<simproc name>"` for provenance. A simproc proof that is
   neither is a classified `unresolved:simproc:<name>` outcome.
+- `{"kind":"congr", "pos": POS, "arg": <i>, "steps": [STEP, ...], "before": ..., "after": ...}`
+  Dependent congruence: the subterm at `pos` is an application `f a₀ ... aₙ` whose
+  argument `i` is rewritten by the nested `steps` (positions relative to that
+  argument), and later arguments that depend on it are transported by the
+  auto-generated congruence theorem for `f` (`Lean.Meta.mkCongrSimp?`, which
+  lives in `Lean.Meta.CongrTheorems`, not in the simplifier, and is what
+  `conv => congr` uses). Replay must not call simp; it obtains the congruence
+  theorem, proves the argument equation from the nested steps, and applies it.
+  Use this kind only when plain positional rewriting would need casts (a
+  `CongrArgKind.cast` dependent); ordinary arguments stay plain `rw` steps.
 - `{"kind":"intro_ctx", "pos": POS, "name": "<hyp name>"}` Contextual simp made the
   antecedent of an implication at `pos` available as a hypothesis for later steps.
 
 Local hypothesis references: when `name` is a local hypothesis rather than a
 global constant, the step also carries
 `"local": {"userName": "<name>", "inaccessible": true|false, "ctxIndex": <n>}`
-where `ctxIndex` is the hypothesis's index in the local context at that point.
+where `ctxIndex` is the hypothesis's `LocalDecl.index` in the local context at
+that point. It identifies the declaration; it is not a `rename_i` argument. A
+generator derives `rename_i` names from the order of inaccessible declarations
+in the context.
 Hypotheses introduced by contextual simp use `{"contextual": true, "ctxIndex": <n>}`
 instead; the two namespaces never collide. A replay generator names an
 inaccessible hypothesis with `rename_i` before using it.
