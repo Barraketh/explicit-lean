@@ -55,6 +55,9 @@ terse completion notices, then makes merge and next-dispatch decisions.
   compile plus oracle success. Whole-module failures remain module-scoped and
   per-site attribution requires an isolated successful compile. Implement only
   after T4's current merge gate passes.
+- **T5 cone preflight:** independent read-only work is reconciling the corrected
+  six-module denominator with the 91-call headline, inventorying
+  `Data.Option.Basic`, and specifying the translated-import-root build order.
 
 After a slot completes, reuse it immediately for the next independent review or
 fix. The coordinator alone integrates accepted branches and updates this plan.
