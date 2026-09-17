@@ -63,6 +63,29 @@ structure DischargeDerivation where
   provenance : String
   deriving Inhabited, Repr
 
+/-! ### Direct source-argument identity
+
+The source argument is registered once, before stock simp elaboration.  The
+metadata below is deliberately not an elaborated term: `head?` is only the
+declaration/local identity observed at registration time.  `startChar` and
+`endChar` are Unicode-scalar source positions (end exclusive); the internal
+byte range is retained only for joining `Origin.stx`, so repeated argument text
+remains distinguishable. -/
+structure SourceArg where
+  argId      : Nat
+  startChar  : Nat
+  endChar    : Nat
+  direction  : String
+  kind       : String
+  head?      : Option String := none
+  /-- Internal elaborated identity; omitted by the wire representation. -/
+  headName?  : Option Name := none
+  headLocal  : Bool := false
+  /-- Parser byte range used only for the in-memory `Origin.stx` join. -/
+  startByte  : Nat := 0
+  endByte    : Nat := 0
+  deriving Inhabited, Repr
+
 /-! A deliberately small, term-free recipe for the two common conditional
 simprocs.  The selected theorem is named by the rendered `rw` step; this
 record carries only the operational facts needed to audit that selection. -/
@@ -77,7 +100,11 @@ structure SimprocDerivation where
 structure RuleDerivation where
   origin : String
   source? : Option String := none
-  sourceArg? : Option Nat := none
+  /-- Direct site-local identity of the source argument that registered this
+  theorem.  This is never inferred from theorem-table order. -/
+  argId? : Option Nat := none
+  /-- Direction written at the source argument, when this is a source rule. -/
+  direction? : Option String := none
   preprocess : Array String := #[]
   redex : Pos := #[]
   extraArgs : Nat := 0
@@ -168,6 +195,8 @@ structure CallTrace where
   module     : String
   occurrence : String
   call       : String
+  /-- Source arguments registered for this exact call. -/
+  sourceArgs : Array SourceArg := #[]
   locations  : Array LocationTrace := #[]
   deriving Inhabited
 
@@ -231,7 +260,8 @@ def RuleDerivation.toJson (d : RuleDerivation) : String :=
   obj #[
     ("origin", some (str d.origin)),
     ("source", d.source?.map str),
-    ("sourceArg", d.sourceArg?.map toString),
+    ("argId", d.argId?.map toString),
+    ("direction", d.direction?.map str),
     ("preprocess", if d.preprocess.isEmpty then none else some (strArray d.preprocess)),
     ("redex", some (posJson d.redex)),
     ("extraArgs", some (toString d.extraArgs)),
@@ -304,6 +334,14 @@ def CallTrace.toJson (t : CallTrace) : String :=
     ("module", some (str t.module)),
     ("occurrence", some (str t.occurrence)),
     ("call", some (str t.call)),
+    ("sourceArgs", some ("[" ++ String.intercalate ","
+      (t.sourceArgs.toList.map fun a => obj #[
+        ("argId", some (toString a.argId)),
+        ("startChar", some (toString a.startChar)),
+        ("endChar", some (toString a.endChar)),
+        ("direction", some (str a.direction)),
+        ("kind", some (str a.kind)),
+        ("head", a.head?.map str)]) ++ "]")),
     ("locations", some ("[" ++ String.intercalate ","
       (t.locations.toList.map LocationTrace.toJson) ++ "]"))]
 

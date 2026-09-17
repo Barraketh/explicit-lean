@@ -290,33 +290,23 @@ def originLabel (o : Origin) : String :=
   | .stx _ _ => "source"
   | .other n => "other:" ++ n.toString
 
-def sourceHeadName? (o : Origin) : Option Name :=
-  match o with
-  | .stx _ ref =>
-    let text := ref.prettyPrint.pretty.trimAscii.toString
-    let dropChars (s : String) (n : Nat) := String.ofList (s.toList.drop n)
-    let takeToken (s : String) := String.ofList
-      (s.toList.takeWhile fun c => c != ' ' && c != '\t' && c != '(')
-    let text := if text.startsWith "←" then (dropChars text 1).trimAscii.toString
-      else if text.startsWith "<-" then (dropChars text 2).trimAscii.toString else text
-    let token := takeToken text
-    let token := if token.startsWith "@" then dropChars token 1 else token
-    let token := if token.startsWith "_root_." then dropChars token 7 else token
-    let parts := token.splitOn "."
-    if parts.any String.isEmpty then none
-    else some (parts.foldl (fun n p => Name.str n p) Name.anonymous)
-  | _ => none
+/-! ### Direct source-argument lookup
 
-def sourceArgOrdinal? (o : Origin) : Simp.SimpM (Option Nat) := do
-  let .stx id _ := o | return none
-  let mut n := 0
-  for thms in (← readThe Simp.Context).simpTheorems do
-    for thm in thms.pre.values ++ thms.post.values do
-      match thm.origin with
-      | .stx id' _ =>
-        if id' == id then return some n
-        n := n + 1
-      | _ => pure ()
+`Origin.stx` retains the parser node passed to stock argument elaboration.  We
+match that node against the source side table by its canonical source range.
+The table was populated before `mkSimpContext`; this lookup therefore does not
+walk, count, or otherwise depend on the theorem table.  One source argument can
+produce several `SimpTheorem`s (for example conjunction projections), and every
+one carries the same `Origin.stx` range and hence the same direct `argId`. -/
+def sourceArgInfo? (ref : TraceRef) (o : Origin) : Simp.SimpM (Option SourceArg) := do
+  let .stx _ originStx := o | return none
+  let some start := originStx.getPos? (canonicalOnly := true) | return none
+  let some stop := originStx.getTailPos? (canonicalOnly := true) | return none
+  let start := start.byteIdx
+  let stop := stop.byteIdx
+  let st ← ref.get
+  for arg in st.sourceArgs do
+    if arg.startByte == start && arg.endByte == stop then return some arg
   return none
 
 def originalType? (o : Origin) : Simp.SimpM (Option Expr) := do
@@ -328,16 +318,17 @@ def originalType? (o : Origin) : Simp.SimpM (Option Expr) := do
 /-- Name the construction combinator used to turn the source theorem into the
 indexed equation.  The source type is the authoritative input: generated aux
 lemma bodies are intentionally not decompiled. -/
-def preprocessOperations (o : Origin) (processedType : Expr) : Simp.SimpM (Array String) := do
+def preprocessOperations (ref : TraceRef) (sourceOrigin : Origin)
+    (constructionOrigin : Origin) (processedType : Expr) : Simp.SimpM (Array String) := do
   let mut out : Array String := #[]
-  let reverse := match o with
-    | .decl _ _ inv => inv
-    | .stx _ ref =>
-      let t := ref.prettyPrint.pretty.trimAscii.toString
-      t.startsWith "←" || t.startsWith "<-"
-    | _ => false
+  let reverse ← match sourceOrigin with
+    | .decl _ _ inv => pure inv
+    | .stx .. =>
+      let info? ← sourceArgInfo? ref sourceOrigin
+      pure ((info?.map (·.direction == "rev")).getD false)
+    | _ => pure false
   if reverse then out := out.push "reverse"
-  match ← originalType? o with
+  match ← originalType? constructionOrigin with
   | none => return out.push "processed"
   | some original =>
     let op ← forallTelescopeReducing original fun _ body => do
@@ -404,15 +395,24 @@ def derivationFor (_ref : TraceRef) (o : Origin) (constructionOrigin : Origin)
     (processedType : Expr)
     (redex : Pos) (extraArgs : Nat) (binders : Array BinderDerivation)
     (discharge : Array DischargeDerivation) : Simp.SimpM RuleDerivation := do
-  let sourceArgOrdinal ← sourceArgOrdinal? o
+  let sourceArg? ← sourceArgInfo? _ref o
   let sourceKind := match o with
     | .stx _ _ => some "simp-argument"
     | .decl _ _ _ => none
     | .fvar _ => some "local-evidence"
     | .other _ => none
-  let preprocess ← preprocessOperations constructionOrigin processedType
-  return ⟨originLabel constructionOrigin, sourceKind, sourceArgOrdinal, preprocess,
-    redex, extraArgs, binders, discharge, none⟩
+  let preprocess ← preprocessOperations _ref o constructionOrigin processedType
+  let origin := originLabel constructionOrigin
+  let result : RuleDerivation := { origin := origin }
+  let result := { result with source? := sourceKind }
+  let result := { result with argId? := sourceArg?.map (fun a : SourceArg => a.argId) }
+  let result := { result with direction? := sourceArg?.map (fun a : SourceArg => a.direction) }
+  let result := { result with preprocess := preprocess }
+  let result := { result with redex := redex }
+  let result := { result with extraArgs := extraArgs }
+  let result := { result with binders := binders }
+  let result := { result with discharge := discharge }
+  return result
 
 /-- A copy of `Simp.tryTheoremCore` with event-time provenance capture. -/
 def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
@@ -454,6 +454,7 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     let redexPos := pos ++ Array.replicate numExtraArgs 0
     let (resolvedConstructionOrigin, _, _, _) ← resolveStxOrigin thm.origin
     let env ← getEnv
+    let sourceInfo? ← sourceArgInfo? ref thm.origin
     let constructionOrigin := match resolvedConstructionOrigin with
       | .stx .. =>
         -- A source simp argument is stored as an already-applied theorem
@@ -462,12 +463,20 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
         -- without decompiling the resulting `Simp.Result.proof?`.
         match val.getAppFn with
         | .const n _ => if env.find? n |>.isSome then .decl n true false else
-            match sourceHeadName? thm.origin with
-            | some n => if env.find? n |>.isSome then .decl n true false else thm.origin
+            match sourceInfo? with
+            | some info => if !info.headLocal then
+                match info.headName? with
+                | some n => if env.find? n |>.isSome then .decl n true false else thm.origin
+                | none => thm.origin
+              else thm.origin
             | none => thm.origin
         | _ =>
-          match sourceHeadName? thm.origin with
-          | some n => if env.find? n |>.isSome then .decl n true false else thm.origin
+          match sourceInfo? with
+          | some info => if !info.headLocal then
+              match info.headName? with
+              | some n => if env.find? n |>.isSome then .decl n true false else thm.origin
+              | none => thm.origin
+            else thm.origin
           | none => thm.origin
       | o => o
     let derivation ← derivationFor ref thm.origin constructionOrigin type redexPos
@@ -1335,9 +1344,9 @@ def mkRecordingMethods (ref : TraceRef) (simprocs : Simp.SimprocsArray)
 and the events logged at their exact positions. -/
 def runTraced (e : Expr) (ctx : Simp.Context) (simprocs : Simp.SimprocsArray)
     (discharge? : Option Simp.Discharge) (dischargerText? : Option String)
-    (stats : Simp.Stats) :
+    (stats : Simp.Stats) (sourceArgs : Array SourceArg := #[]) :
     MetaM (Simp.Result × Simp.Stats × Array Event × Array String) := do
-  let ref : TraceRef ← ST.mkRef ({} : TraceState)
+  let ref : TraceRef ← ST.mkRef ({ sourceArgs } : TraceState)
   let methods := mkRecordingMethods ref simprocs discharge? dischargerText?
   let (r, s) ← Simp.SimpM.run ctx { stats with } methods <|
     Simp.withCatchingRuntimeEx <| simpT ref #[] e

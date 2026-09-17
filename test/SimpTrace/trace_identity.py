@@ -33,6 +33,104 @@ class Edit:
     replacement: str
 
 
+def _source_args(source: str, site: Site) -> list[dict[str, Any]]:
+    """Record source argument spans from the original bytes.
+
+    This is a shallow delimiter walk over the already identified call range;
+    it never consumes elaborated terms or parses trace output.  The resulting
+    slices are the authoritative bytes copied into the source/manifest.  Lean
+    assigns the same IDs from its parser argument list and joins them to
+    `Origin.stx` by the exact range.
+    """
+    # Slice the original source directly.  ``callText`` is retained as the
+    # exact site payload, but argument identity never parses a later trace
+    # call string or a pretty-printed term.
+    text = source[site.startChar:site.endChar]
+    left = text.find("[")
+    if left < 0:
+        return []
+    depth = 0
+    right = -1
+    quoted = False
+    i = left
+    while i < len(text):
+        ch = text[i]
+        if quoted:
+            if ch == "\\":
+                i += 2
+                continue
+            quoted = ch != '"'
+        elif ch == '"':
+            quoted = True
+        elif ch in "([{⟨":
+            depth += 1
+        elif ch in ")]⟩":
+            depth -= 1
+            if depth == 0:
+                right = i
+                break
+        i += 1
+    if right < 0:
+        raise ValueError(f"unterminated simp argument list at site {site.siteOrdinal}")
+    body = text[left + 1:right]
+    pieces: list[tuple[int, int]] = []
+    start, depth, quoted, i = 0, 0, False, 0
+    while i <= len(body):
+        boundary = i == len(body)
+        if boundary:
+            stop = i
+        else:
+            ch = body[i]
+            if quoted:
+                if ch == "\\":
+                    i += 2
+                    continue
+                quoted = ch != '"'
+            elif ch == '"':
+                quoted = True
+            elif ch in "([{⟨":
+                depth += 1
+            elif ch in ")]⟩":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                stop = i
+                boundary = True
+        if not boundary:
+            i += 1
+            continue
+        raw_start = start
+        while raw_start < stop and body[raw_start].isspace():
+            raw_start += 1
+        raw_stop = stop
+        while raw_stop > raw_start and body[raw_stop - 1].isspace():
+            raw_stop -= 1
+        if raw_start < raw_stop:
+            pieces.append((raw_start, raw_stop))
+        start = stop + 1
+        i = start
+    result: list[dict[str, Any]] = []
+    for arg_id, (a, b) in enumerate(pieces):
+        arg = body[a:b]
+        reverse = arg.startswith("←") or arg.startswith("<-")
+        # This is only term-free source metadata, not elaboration: accept
+        # Unicode/inaccessible identifier spelling and quoted names without
+        # attempting to resolve or pretty-print the term.
+        head = re.match(
+            r"(?:←|<-)?\s*(?:@|_root_\.)?"
+            r"((?:[^\W\d]|_)[\w✝']*(?:\.[\w✝']+)*|«[^»]+»(?:\.[\w✝']+)*)",
+            arg,
+        )
+        result.append({
+            "argId": arg_id,
+            "startChar": site.startChar + left + 1 + a,
+            "endChar": site.startChar + left + 1 + b,
+            "direction": "rev" if reverse else "fwd",
+            "kind": "simp-lemma",
+            "head": head.group(1) if head else None,
+        })
+    return result
+
+
 def _mask_attributes(source: str) -> str:
     chars = list(source)
     i = 0
@@ -184,8 +282,29 @@ def manifest(module_path: str, source: str, sites: list[Site]) -> dict[str, Any]
         "modulePath": module_path,
         "sites": [{"siteOrdinal": s.siteOrdinal,
                     "startChar": s.startChar, "endChar": s.endChar,
-                    "callText": s.callText} for s in sites],
+                    "callText": s.callText,
+                    "sourceArgs": _source_args(source, s)} for s in sites],
     }
+
+
+def validate_source_args(value: dict[str, Any], source: str) -> None:
+    """Fail closed if a source-argument span escapes its exact call range."""
+    for site in value.get("sites", []):
+        start, end = site["startChar"], site["endChar"]
+        args = site.get("sourceArgs", [])
+        ids = [a.get("argId") for a in args]
+        if ids != list(range(len(args))):
+            raise ValueError("source argument IDs are not site-local and contiguous")
+        for arg in args:
+            a, b = arg.get("startChar"), arg.get("endChar")
+            if not isinstance(a, int) or not isinstance(b, int) or not (start <= a < b <= end):
+                raise ValueError("source argument span escapes its call range")
+            if not source[a:b].strip():
+                raise ValueError("source argument span has no source bytes")
+        expected = _source_args(source, Site(site["siteOrdinal"], start, end,
+                                             0, 0, site["callText"]))
+        if args != expected:
+            raise ValueError(f"source argument bytes mismatch at site {site['siteOrdinal']}")
 
 
 def _trace_clause_path(trace_root: str, traced_name: str, site_ordinal: int) -> str:

@@ -14,7 +14,8 @@ import re
 import sys
 
 from trace_identity import (DEFAULT_TRACE_ROOT, find_sites, manifest,
-                            validate_invocations, verify_transform,
+                            validate_invocations, validate_source_args,
+                            verify_transform,
                             _trace_clause_path)
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -36,6 +37,7 @@ def finalize_paths(traced_path: pathlib.Path, manifest_path: pathlib.Path,
     sites = find_sites(source)
     if value != manifest(module_path, source, sites):
         raise ValueError("manifest/source range or callText mismatch")
+    validate_source_args(value, source)
     traced = traced_path.read_text(encoding="utf-8")
     # Explicit-path mode authenticates the staged clauses against the raw
     # directory itself. Legacy module mode deliberately retains its committed
@@ -93,7 +95,8 @@ def finalize_paths(traced_path: pathlib.Path, manifest_path: pathlib.Path,
             final = {"schema": "simp-trace-v2", "modulePath": module_path,
                      "site": {"siteOrdinal": s["siteOrdinal"],
                               "startChar": s["startChar"], "endChar": s["endChar"],
-                              "callText": s["callText"]},
+                              "callText": s["callText"],
+                              "sourceArgs": s.get("sourceArgs", [])},
                      "occurrence": raw["occurrence"],
                      "invocation": invocation, "invocations": total,
                      "locations": raw.get("locations", [])}

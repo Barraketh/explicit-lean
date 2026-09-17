@@ -173,6 +173,10 @@ def Event.strip (base : Pos) : Event → Event
 
 /-- Mutable trace state for one traced `simp` run. -/
 structure TraceState where
+  /-- The source arguments of the current simp call.  This side table is
+  populated from the parser syntax before stock `mkSimpContext` elaborates
+  arguments; origins are matched by source range, never by theorem order. -/
+  sourceArgs : Array SourceArg := #[]
   /-- Events of the location currently being simplified. -/
   events : Array Event := #[]
   /-- One frame per active discharger nesting level. -/

@@ -1,0 +1,32 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "pos": [
+            0,
+            1
+          ],
+          "name": "ExplicitLean.SimpTrace.T22.EqWitness.eq",
+          "args": [
+            "H"
+          ],
+          "kind": "rw",
+          "dir": "fwd"
+        },
+        {
+          "pos": [],
+          "name": "eq_self",
+          "kind": "rw",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

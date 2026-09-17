@@ -11,7 +11,8 @@ import tempfile
 
 sys.path.insert(0, __import__("pathlib").Path(__file__).resolve().parent.as_posix())
 from trace_identity import (find_sites, manifest, transform, transform_with_ledger,
-                            validate_invocations, verify_transform)  # noqa: E402
+                            validate_invocations, validate_source_args,
+                            verify_transform)  # noqa: E402
 from finalize_traces import finalize_paths  # noqa: E402
 
 
@@ -62,6 +63,29 @@ def main() -> int:
     assert verify_transform(unicode, "UnicodeFixture", traced, find_sites(unicode)) == ledger
     m = manifest("Mathlib/Test/UnicodeFixture.lean", unicode, sites)
     assert m["sites"][0]["callText"] == "simp [p]"
+    validate_source_args(m, unicode)
+    identity_source = "example : True := by simp [← foo, heq_comm (a := a), h]\n"
+    identity_manifest = manifest("Mathlib/Test/Args.lean", identity_source,
+                                 find_sites(identity_source))
+    args = identity_manifest["sites"][0]["sourceArgs"]
+    assert [a["argId"] for a in args] == [0, 1, 2]
+    assert all(a["kind"] == "simp-lemma" for a in args)
+    assert [a["head"] for a in args] == ["foo", "heq_comm", "h"]
+    assert args[0]["direction"] == "rev"
+    assert identity_source[args[1]["startChar"]:args[1]["endChar"]] == "heq_comm (a := a)"
+    validate_source_args(identity_manifest, identity_source)
+    unicode_source = "example : True := by simp [hα, ← «quoted lemma»]\n"
+    unicode_args = manifest("Mathlib/Test/UnicodeArgs.lean", unicode_source,
+                            find_sites(unicode_source))["sites"][0]["sourceArgs"]
+    assert [a["head"] for a in unicode_args] == ["hα", "«quoted lemma»"]
+    forged_manifest = json.loads(json.dumps(identity_manifest))
+    forged_manifest["sites"][0]["sourceArgs"][1]["endChar"] += 1
+    try:
+        validate_source_args(forged_manifest, identity_source)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("accepted a source argument span outside its syntax")
     forged = traced.replace("=>trace", "-- =>trace", 1)
     try:
         verify_transform(unicode, "UnicodeFixture", forged, find_sites(unicode))
@@ -111,7 +135,8 @@ def main() -> int:
         result = json.loads((out_dir / raw.name).read_text(encoding="utf-8"))
         assert result["schema"] == "simp-trace-v2"
         assert result["site"] == {"siteOrdinal": 0, "startChar": 21,
-                                   "endChar": 25, "callText": "simp"}
+                                   "endChar": 25, "callText": "simp",
+                                   "sourceArgs": []}
         assert result["invocation"] == 0 and result["invocations"] == 1
         wrong_stage = root / "wrong-stage"
         wrong_stage.mkdir()

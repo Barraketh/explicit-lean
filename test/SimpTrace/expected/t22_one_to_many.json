@@ -1,0 +1,37 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "pos": [
+            0,
+            1
+          ],
+          "name": "h",
+          "kind": "rw",
+          "dir": "fwd"
+        },
+        {
+          "pos": [
+            1
+          ],
+          "name": "h",
+          "kind": "rw",
+          "dir": "fwd"
+        },
+        {
+          "pos": [],
+          "name": "and_self",
+          "kind": "rw",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

@@ -15,6 +15,7 @@ not depend on, and pretty-printing is not stable enough to pin in a fixture.
 Run from the repository root:
 
     python3 -B Experiment/check_simp_trace.py
+    python3 -B Experiment/check_simp_trace.py --allow-suffixed-invocations
 
 Exit status is 0 when every fixture matches, 1 otherwise.
 """
@@ -816,6 +817,8 @@ def main() -> int:
 
     messages: list[str] = []
     checked = 0
+    allow_suffixed = "--allow-suffixed-invocations" in sys.argv[1:]
+    validated_suffixed = 0
 
     # Compile the positive fixtures first: this both regenerates the traces the
     # comparison below reads and makes a nonzero exit a hard failure.
@@ -846,6 +849,26 @@ def main() -> int:
     # cannot be added without an expectation.
     for actual_path in sorted(OUT_DIR.glob("*.json")):
         if not (EXPECTED_DIR / actual_path.name).is_file():
+            suffix = re.fullmatch(r"(.+)\.[0-9]+", actual_path.stem)
+            if (allow_suffixed and suffix is not None
+                    and (EXPECTED_DIR / f"{suffix.group(1)}.json").is_file()):
+                # A suffixed invocation is another trace, not an unchecked
+                # artifact.  Validate it against the canonical skeleton so
+                # schema, locations, step kinds, positions, local refs, side
+                # traces, and close forms receive the same checks.  The
+                # explicit flag only acknowledges the known filename shape;
+                # it does not waive structural validation.
+                try:
+                    actual = json.loads(actual_path.read_text(encoding="utf-8"))
+                    expected = json.loads(
+                        (EXPECTED_DIR / f"{suffix.group(1)}.json")
+                        .read_text(encoding="utf-8")
+                    )
+                    check_trace(actual_path.name, actual, expected, messages)
+                except json.JSONDecodeError as exc:
+                    fail(messages, f"{actual_path.name}: produced trace is not valid JSON: {exc}")
+                validated_suffixed += 1
+                continue
             fail(
                 messages,
                 f"{actual_path.name}: trace has no expected skeleton in "
@@ -862,6 +885,9 @@ def main() -> int:
         print(f"\n{len(messages)} problem(s) across {checked} checked trace(s)")
         return 1
 
+    if validated_suffixed:
+        print(f"INFO: explicitly validated and allowed {validated_suffixed} "
+              "suffixed invocation output(s); canonical skeletons were checked")
     print(f"OK: {checked} simp_trace fixture(s) match their expected skeletons, "
           f"and out-of-root paths (including through symlinks) are refused")
     return 0

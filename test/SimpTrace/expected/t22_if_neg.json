@@ -1,0 +1,45 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "pos": [
+            0,
+            1
+          ],
+          "name": "ite_cond_eq_false",
+          "args": [
+            "True",
+            "False"
+          ],
+          "kind": "rw",
+          "source": "reduceIte",
+          "dir": "fwd",
+          "side": [
+            {
+              "goal": "False = False",
+              "pre": "False = False",
+              "post": "False = False",
+              "close": {
+                "by": "rfl"
+              },
+              "steps": []
+            }
+          ]
+        },
+        {
+          "pos": [],
+          "name": "iff_self",
+          "kind": "rw",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

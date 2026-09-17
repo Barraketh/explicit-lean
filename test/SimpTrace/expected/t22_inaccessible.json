@@ -1,0 +1,34 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "pos": [
+            0,
+            1
+          ],
+          "name": "a✝",
+          "kind": "rw",
+          "local": {
+            "userName": "a._@._internal.0.test.SimpTrace.T22SourceArgIdentity.2021293401._hygCtx._hyg.19",
+            "inaccessible": true,
+            "ctxIndex": 3
+          },
+          "dir": "fwd"
+        },
+        {
+          "pos": [],
+          "name": "eq_self",
+          "kind": "rw",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

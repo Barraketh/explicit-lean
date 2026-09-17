@@ -356,6 +356,79 @@ def toSimpSyntax (stx : Syntax) : Syntax :=
   Syntax.node (SourceInfo.fromRef stx) ``Parser.Tactic.simp
     #[simpTk, stx[1], stx[2], stx[3], stx[4], stx[5]]
 
+/-! ### Source argument registration
+
+Stock `mkSimpContext` keeps the original `Syntax` in every `Origin.stx`, but
+its private `elabSimpArgs` result is not exposed.  Register the source facts
+from the parser nodes before invoking stock elaboration.  IDs are assigned in
+the source argument list (site-local), and origins are joined later by their
+exact source range.  This is intentionally not theorem-table enumeration and
+does not retain an elaborated term. -/
+
+def scalarOffsetOfByte (source : String) (byteIdx : Nat) : Nat :=
+  Id.run do
+    let mut pos : String.Pos.Raw := 0
+    let mut scalarIdx := 0
+    while pos.byteIdx < byteIdx && !pos.atEnd source do
+      pos := pos.next source
+      scalarIdx := scalarIdx + 1
+    return scalarIdx
+
+def firstIdent? (stx : Syntax) : Option Syntax := Id.run do
+  for child in stx.topDown do
+    match child with
+    | .ident .. => return some child
+    | _ => pure ()
+  return none
+
+def sourceIdentText (stx : Syntax) : String :=
+  match stx with
+  | .ident _ rawVal _ _ => rawVal.toString
+  | _ => stx.getId.toString
+
+def sourceHeadIdentity? (term : Syntax) : TacticM (Option (String × Option Name × Bool)) := do
+  let some head := firstIdent? term | return none
+  -- Resolve only this source head, never the complete argument.  The local
+  -- probe is diagnostic-free and gives us the local-vs-declaration bit before
+  -- stock simp elaborates the argument.  Full-term re-elaboration is
+  -- intentionally forbidden here: projections such as `(h c).1` contain
+  -- synthetic field identifiers that emit diagnostics despite being accepted
+  -- by stock simp.
+  let localExpr? ← runTermElab (Lean.Elab.Term.isLocalIdent? head)
+  if localExpr?.isSome then
+    -- A hygienic local identifier can carry a generated Name in Syntax.  The
+    -- raw token is the stable source identity; the local probe still
+    -- records that it is local and verifies the token resolved in this scope.
+    return some (sourceIdentText head, none, true)
+  let resolved? ← try
+      pure (some (← runTermElab (Lean.resolveGlobalConstNoOverload head)))
+    catch _ => pure none
+  pure (some (sourceIdentText head, resolved?, false))
+
+def registerSourceArgs (stx : Syntax) : TacticM (Array SourceArg) := do
+  if stx[4].isNone then return #[]
+  let source := (← getFileMap).source
+  let mut result : Array SourceArg := #[]
+  for (arg, i) in stx[4][1].getSepArgs.zipIdx do
+    let some start := arg.getPos? (canonicalOnly := true) | continue
+    let some stop := arg.getTailPos? (canonicalOnly := true) | continue
+    let startByte := start.byteIdx
+    let endByte := stop.byteIdx
+    let isLemma := arg.getKind == ``Parser.Tactic.simpLemma
+    let term := if isLemma then arg[2] else arg
+    let headInfo? ← if isLemma then sourceHeadIdentity? term else pure none
+    let head? := headInfo?.map (·.1)
+    let headName? := headInfo?.map (fun h => h.2.1) |>.join
+    let headLocal := headInfo?.map (fun h => h.2.2) |>.getD false
+    let direction := if isLemma && !arg[1].isNone then "rev" else "fwd"
+    let kind := if isLemma then "simp-lemma" else arg.getKind.toString
+    result := result.push {
+      argId := i, startChar := scalarOffsetOfByte source startByte,
+      endChar := scalarOffsetOfByte source endByte,
+      startByte, endByte,
+      direction, kind, head?, headName?, headLocal }
+  return result
+
 /-! ### Locations -/
 
 /-- The set of locations `simp_trace` will visit, mirroring `expandOptLocation`. -/
@@ -950,6 +1023,7 @@ def dischargerText? (stx : Syntax) : Option String :=
 @[tactic simpTrace]
 def evalSimpTrace : Tactic := fun stx => withMainContext do
   let simpStx := toSimpSyntax stx
+  let sourceArgs ← registerSourceArgs stx
   let selection ← elabSelection stx
   let r@{ ctx, simprocs, dischargeWrapper, .. } ←
     mkSimpContext simpStx (eraseLocal := false)
@@ -980,7 +1054,7 @@ def evalSimpTrace : Tactic := fun stx => withMainContext do
         let hctx := ctx.setSimpTheorems <|
           ctx.simpTheorems.eraseTheorem (.fvar localDecl.fvarId)
         let (res, stats', events, unres) ←
-          runTraced type hctx simprocs discharge? dtext? stats
+          runTraced type hctx simprocs discharge? dtext? stats sourceArgs
         stats := stats'
         for u in unres do ur.modify (·.add u)
         let hypName := localDecl.userName.toString
@@ -1012,7 +1086,7 @@ def evalSimpTrace : Tactic := fun stx => withMainContext do
           mvarIdNew.checkNotAssigned `simp_trace
           let target ← instantiateMVars (← mvarIdNew.getType)
           let (res, _, events, unres) ←
-            runTraced target ctx simprocs discharge? dtext? stats
+            runTraced target ctx simprocs discharge? dtext? stats sourceArgs
           for u in unres do ur.modify (·.add u)
           if res.expr.isTrue then
             match res.proof? with
@@ -1046,6 +1120,7 @@ def evalSimpTrace : Tactic := fun stx => withMainContext do
     module := (← getEnv).mainModule.toString
     occurrence := toString ((← getRef).getPos?.getD 0)
     call := stx.prettyPrint.pretty.trimAscii.toString
+    sourceArgs := sourceArgs
     locations := ← locsRef.get }
   let json := trace.toJson
   match outPath? stx with
