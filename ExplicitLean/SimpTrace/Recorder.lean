@@ -274,6 +274,241 @@ def propFlag? (o : Origin) (after : Expr) (lctx : LocalContext)
   else if after.isFalse then return some false
   else return none
 
+/-! ### T16 operational theorem matching
+
+The stock matcher below is copied at the small boundary where it constructs a
+theorem rewrite.  It deliberately records only binder ordinals and provenance
+classes.  The assigned metavariables are used to construct the stock result,
+but are never inspected for serialization.  `Simp.Result.proof?` remains an
+internal parity oracle only and is not consulted by this path.
+-/
+
+def originLabel (o : Origin) : String :=
+  match o with
+  | .decl n _ _ => "decl:" ++ n.toString
+  | .fvar f => "local:" ++ f.name.toString
+  | .stx _ _ => "source"
+  | .other n => "other:" ++ n.toString
+
+def sourceHeadName? (o : Origin) : Option Name :=
+  match o with
+  | .stx _ ref =>
+    let text := ref.prettyPrint.pretty.trimAscii.toString
+    let dropChars (s : String) (n : Nat) := String.ofList (s.toList.drop n)
+    let takeToken (s : String) := String.ofList
+      (s.toList.takeWhile fun c => c != ' ' && c != '\t' && c != '(')
+    let text := if text.startsWith "←" then (dropChars text 1).trimAscii.toString
+      else if text.startsWith "<-" then (dropChars text 2).trimAscii.toString else text
+    let token := takeToken text
+    let token := if token.startsWith "@" then dropChars token 1 else token
+    let token := if token.startsWith "_root_." then dropChars token 7 else token
+    let parts := token.splitOn "."
+    if parts.any String.isEmpty then none
+    else some (parts.foldl (fun n p => Name.str n p) Name.anonymous)
+  | _ => none
+
+def sourceArgOrdinal? (o : Origin) : Simp.SimpM (Option Nat) := do
+  let .stx id _ := o | return none
+  let mut n := 0
+  for thms in (← readThe Simp.Context).simpTheorems do
+    for thm in thms.pre.values ++ thms.post.values do
+      match thm.origin with
+      | .stx id' _ =>
+        if id' == id then return some n
+        n := n + 1
+      | _ => pure ()
+  return none
+
+def originalType? (o : Origin) : Simp.SimpM (Option Expr) := do
+  match o with
+  | .decl n _ _ => return (← getEnv).find? n |>.map (·.type)
+  | .fvar f => return (← getLCtx).find? f |>.map (·.type)
+  | _ => return none
+
+/-- Name the construction combinator used to turn the source theorem into the
+indexed equation.  The source type is the authoritative input: generated aux
+lemma bodies are intentionally not decompiled. -/
+def preprocessOperations (o : Origin) (processedType : Expr) : Simp.SimpM (Array String) := do
+  let mut out : Array String := #[]
+  let reverse := match o with
+    | .decl _ _ inv => inv
+    | .stx _ ref =>
+      let t := ref.prettyPrint.pretty.trimAscii.toString
+      t.startsWith "←" || t.startsWith "<-"
+    | _ => false
+  if reverse then out := out.push "reverse"
+  match ← originalType? o with
+  | none => return out.push "processed"
+  | some original =>
+    let op ← forallTelescopeReducing original fun _ body => do
+      let body ← whnfR body
+      if body.isEq then
+        return "direct_eq"
+      if body.isAppOf ``Iff then
+        return "iff_propext"
+      if body.not?.isSome then
+        return "not_to_false"
+      if let some (left, right) := body.and? then
+        let lhs := processedType.appFn!.appArg!
+        if lhs == left then
+          return "conjunction_left"
+        if lhs == right then
+          return "conjunction_right"
+        return "conjunction_projection"
+      return "prop_to_true"
+    return out.push op
+
+def synthInstanceOperational (thmId : Origin) (x type : Expr) : Simp.SimpM Bool := do
+  match (← trySynthInstance type) with
+  | LOption.some val =>
+    if ← withReducibleAndInstances <| isDefEq x val then
+      return true
+    trace[Meta.Tactic.simp.discharge] "{← ppOrigin thmId}, failed to assign instance"
+    return false
+  | _ =>
+    trace[Meta.Tactic.simp.discharge] "{← ppOrigin thmId}, failed to synthesize instance"
+    return false
+
+/-- Mirror stock `synthesizeArgs`, retaining only why each binder was filled. -/
+def synthesizeArgsOperational (thmId : Origin) (bis : Array BinderInfo)
+    (xs : Array Expr) : Simp.SimpM (Bool × Array BinderDerivation × Array DischargeDerivation) := do
+  let mut binders : Array BinderDerivation := #[]
+  let mut discharges : Array DischargeDerivation := #[]
+  let skipAssignedInstances := tactic.skipAssignedInstances.get (← getOptions)
+  for x in xs, bi in bis do
+    let i := binders.size
+    let type ← inferType x
+    let initial ← instantiateMVars x
+    if !skipAssignedInstances && bi.isInstImplicit then
+      unless ← synthInstanceOperational thmId x type do
+        return (false, binders, discharges)
+      binders := binders.push ⟨i, "instance"⟩
+      continue
+    if initial.isMVar then
+      if (← isClass? type).isSome then
+        if ← synthInstanceOperational thmId x type then
+          binders := binders.push ⟨i, "instance"⟩
+          continue
+      if ← isProp type then
+        unless ← Simp.discharge?' thmId x type do
+          return (false, binders, discharges)
+        -- The discharger's nested recorder frame is attached by the wrapper;
+        -- only its ordinal and success provenance belong in this summary.
+        binders := binders.push ⟨i, "discharge"⟩
+        discharges := discharges.push ⟨i, "configured-or-default"⟩
+        continue
+    binders := binders.push ⟨i, "matched"⟩
+  return (true, binders, discharges)
+
+def derivationFor (_ref : TraceRef) (o : Origin) (constructionOrigin : Origin)
+    (processedType : Expr)
+    (redex : Pos) (extraArgs : Nat) (binders : Array BinderDerivation)
+    (discharge : Array DischargeDerivation) : Simp.SimpM RuleDerivation := do
+  let sourceArg? ← sourceArgOrdinal? o
+  let source? := match o with
+    | .stx _ _ => some "simp-argument"
+    | .decl _ _ _ => none
+    | .fvar _ => some "local-evidence"
+    | .other _ => none
+  let preprocess ← preprocessOperations constructionOrigin processedType
+  return ⟨originLabel constructionOrigin, source?, sourceArg?, preprocess, redex, extraArgs,
+    binders, discharge⟩
+
+/-- A copy of `Simp.tryTheoremCore` with event-time provenance capture. -/
+def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
+    (thm : SimpTheorem) (numExtraArgs : Nat) (rflOnly : Bool) :
+    Simp.SimpM (Option (Simp.Result × RuleDerivation × Pos × Expr × Expr)) := do
+  withNewMCtxDepth do
+    let val ← thm.getValue
+    let type ← inferType val
+    let (xs, bis, type) ← forallMetaTelescopeReducing type
+    let type ← whnf (← instantiateMVars type)
+    let lhs := type.appFn!.appArg!
+    if rflOnly && !(thm.rfl || (backward.defeqAttrib.useBackward.get (← getOptions) && thm.backwardRfl)) then
+      return none
+    let mut extraArgs : Array Expr := #[]
+    let mut core := e
+    for _ in *...numExtraArgs do
+      extraArgs := extraArgs.push core.appArg!
+      core := core.appFn!
+    extraArgs := extraArgs.reverse
+    unless ← Simp.withSimpMetaConfig <| isDefEq lhs core do
+      return none
+    let (ok, binders, discharges) ← synthesizeArgsOperational thm.origin bis xs
+    unless ok do return none
+    let proof ← instantiateMVars (mkAppN val xs)
+    if ← hasAssignableMVar proof then return none
+    let rhs := (← instantiateMVars type).appArg!
+    if (← instantiateMVars core) == rhs then return none
+    if thm.perm && !(← acLt rhs core .reduceSimpleOnly) then return none
+    if ← hasAssignableMVar rhs then return none
+    let rhs ← if type.hasBinderNameHint then rhs.resolveBinderNameHint else pure rhs
+    let implicitDefEq := thm.rfl ||
+      (thm.backwardRfl && backward.defeqAttrib.useBackward.get (← getOptions))
+    let proof? := if implicitDefEq && (← Simp.getConfig).implicitDefEqProofs
+      then none else some proof
+    let coreResult : Simp.Result := { expr := rhs, proof? }
+    let result ← coreResult.addExtraArgs extraArgs
+    let pos := (← ref.get).pos
+    let redexPos := pos ++ Array.replicate numExtraArgs 0
+    let (resolvedConstructionOrigin, _, _, _) ← resolveStxOrigin thm.origin
+    let env ← getEnv
+    let constructionOrigin := match resolvedConstructionOrigin with
+      | .stx .. =>
+        -- A source simp argument is stored as an already-applied theorem
+        -- expression.  Its head declaration is the construction input; using
+        -- that declaration's source type recovers the preprocessing operation
+        -- without decompiling the resulting `Simp.Result.proof?`.
+        match val.getAppFn with
+        | .const n _ => if env.find? n |>.isSome then .decl n true false else
+            match sourceHeadName? thm.origin with
+            | some n => if env.find? n |>.isSome then .decl n true false else thm.origin
+            | none => thm.origin
+        | _ =>
+          match sourceHeadName? thm.origin with
+          | some n => if env.find? n |>.isSome then .decl n true false else thm.origin
+          | none => thm.origin
+      | o => o
+    let derivation ← derivationFor ref thm.origin constructionOrigin type redexPos
+      numExtraArgs binders discharges
+    Simp.recordSimpTheorem thm.origin
+    return some (result, derivation, redexPos, core, rhs)
+
+def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
+    (tree : SimpTheoremTree) (erased : PHashSet Origin) (rflOnly : Bool) :
+    Simp.SimpM (Option Simp.Result) := do
+  let candidates ← Simp.withSimpIndexConfig <| tree.getMatchWithExtra e
+  let candidates := candidates.insertionSort fun a b => a.1.priority > b.1.priority
+  for (thm, extra) in candidates do
+    if erased.contains thm.origin then continue
+    -- Keep the stock Simp accounting in lockstep; this is internal state and
+    -- is not part of the term-free derivation payload.
+    Simp.recordTriedSimpTheorem thm.origin
+    if let some (result, derivation, pos, before, after) ←
+        tryTheoremOperational? ref tag e thm extra rflOnly then
+      let evCtx ← captureEvCtx ref
+      let sides := (← ref.get).pendingSide
+      ref.modify fun s => { s with pendingSide := #[] }
+      let inv := match thm.origin with | .decl _ _ i => i | _ => false
+      let (resolved, rargs, rinv, rproj) ← resolveStxOrigin thm.origin
+      let prop? ← propFlag? resolved result.expr evCtx.lctx evCtx.insts
+      ref.modify (·.push (.rw pos thm.origin (inv != rinv) prop? before after evCtx
+        rargs sides none resolved rproj (some derivation)))
+      return some result
+  return none
+
+def rewritePreOperational (ref : TraceRef) : Simp.Simproc := fun e => do
+  for thms in (← Simp.getContext).simpTheorems do
+    if let some r ← rewriteOperational? ref "pre" e thms.pre thms.erased false then
+      return .visit r
+  return .continue
+
+def rewritePostOperational (ref : TraceRef) : Simp.Simproc := fun e => do
+  for thms in (← Simp.getContext).simpTheorems do
+    if let some r ← rewriteOperational? ref "post" e thms.post thms.erased false then
+      return .visit r
+  return .continue
+
 /-! ### Lemma-headed simproc proofs (spec amendment 408a39b)
 
 A simproc whose returned proof is an application of **one lemma** is not an `eq`
@@ -923,9 +1158,17 @@ def mkRecordingMethods (ref : TraceRef) (simprocs : Simp.SimprocsArray)
   let base := Simp.mkMethods simprocs
     (instrumentDischarge ref dischargerText? d)
     (wellBehavedDischarge := discharge?.isNone)
+  let userPre := instrument ref "pre"
+    (Simp.simpMatch >> Simp.userPreSimprocs simprocs >> Simp.simpUsingDecide)
+  let userPost := instrument ref "post"
+    (Simp.userPostSimprocs simprocs >> Simp.simpGround >> Simp.simpArith
+      >> Simp.simpUsingDecide)
   { base with
-    pre := instrument ref "pre" base.pre
-    post := instrument ref "post" base.post
+    -- The theorem phase is the fork-side operational matcher.  The remaining
+    -- stock procedures retain the existing instrumented path, so generic
+    -- simprocs remain classified/unresolved exactly as before.
+    pre := rewritePreOperational ref >> userPre
+    post := rewritePostOperational ref >> userPost
     dpre := instrumentD ref base.dpre
     dpost := instrumentD ref base.dpost }
 
