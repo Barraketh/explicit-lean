@@ -1,0 +1,7 @@
+# T1-trace-capture: merge-gate review, round 12
+
+Reviewed commit `573e6d05049846f60c037291eced548b11414384` in a clean worktree. Verdict: **MAJOR DEFECT; not merge-eligible**.
+
+The source scanner's `call_end`/`find_sites` includes an end-of-line comment in `callText` (for example `AlgebraicGeometry/Limits.lean:441` is `simp -- TODO`). `transform` therefore emits `simp_trace -- TODO =>trace ...`, leaving the `=>trace` clause inside the comment and producing no JSON. This violates exact syntax identity and causes finalization to reject a legitimate site; the same issue occurs for `simp /- ...` and is present in pinned Mathlib outside the six-module sample. The conversion count check only counts the textual clause and misses this failure.
+
+Checks run: `lake build ExplicitLean.SimpTrace` PASS; `check_transcription.py` PASS (84/84, Function.Basic 25/25); six fresh Lean runs had only expected classified exits; finalization PASS (106 v2 records, 84 sites); identity regressions PASS; `check_simp_trace.py` PASS (72 fixtures); `--report` PASS (84 sites, 106 records, 592 steps); T4 `check_pipeline.py` PASS (224 checks); `git diff --check` PASS. Fresh records independently verified as v2 with complete `0..n-1` invocation sets and common totals. Attribute, same-line, identical-call, Unicode, malformed invocation, and non-adversarial/no-hash requirements otherwise pass; T4 identity checks show matching is payload-based rather than filename-based.
