@@ -13,7 +13,9 @@ import pathlib
 import re
 import sys
 
-from trace_identity import find_sites, manifest, validate_invocations, verify_transform
+from trace_identity import (DEFAULT_TRACE_ROOT, find_sites, manifest,
+                            validate_invocations, verify_transform,
+                            _trace_clause_path)
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUT = ROOT / "test" / "SimpTrace"
@@ -22,7 +24,8 @@ RAW_RE = re.compile(r"^(?P<name>.+)_(?P<site>[0-9]+)(?:\.(?P<run>[0-9]+))?\.json
 
 def finalize_paths(traced_path: pathlib.Path, manifest_path: pathlib.Path,
                    source_path: pathlib.Path, raw_dir: pathlib.Path,
-                   out_dir: pathlib.Path) -> int:
+                   out_dir: pathlib.Path,
+                   trace_root: str | pathlib.Path | None = None) -> int:
     if not traced_path.is_file() or not manifest_path.is_file() or not source_path.is_file():
         raise ValueError("missing traced source, manifest, or original source")
     source = source_path.read_text(encoding="utf-8")
@@ -34,8 +37,19 @@ def finalize_paths(traced_path: pathlib.Path, manifest_path: pathlib.Path,
     if value != manifest(module_path, source, sites):
         raise ValueError("manifest/source range or callText mismatch")
     traced = traced_path.read_text(encoding="utf-8")
-    verify_transform(source, traced_path.stem, traced, sites)
+    # Explicit-path mode authenticates the staged clauses against the raw
+    # directory itself. Legacy module mode deliberately retains its committed
+    # relative clause root.
+    expected_root = str(raw_dir) if trace_root is None else str(trace_root)
+    verify_transform(source, traced_path.stem, traced, sites, expected_root)
     name = traced_path.stem
+    if not raw_dir.is_dir():
+        raise ValueError("raw directory does not exist")
+    if trace_root is None:
+        raw_resolved, out_resolved = raw_dir.resolve(), out_dir.resolve()
+        if (raw_resolved == out_resolved or raw_resolved in out_resolved.parents
+                or out_resolved in raw_resolved.parents):
+            raise ValueError("explicit raw and output directories must be disjoint")
     files: list[tuple[pathlib.Path, int, int]] = []
     for path in sorted(raw_dir.glob("*.json")):
         match = RAW_RE.fullmatch(path.name)
@@ -69,6 +83,9 @@ def finalize_paths(traced_path: pathlib.Path, manifest_path: pathlib.Path,
                     or not raw["call"].startswith("simp_trace")
                     or "=>trace" not in raw["call"]):
                 raise ValueError(f"raw call text is missing or malformed: {path.name}")
+            expected_clause = f'=>trace "{_trace_clause_path(expected_root, name, site)}"'
+            if expected_clause not in raw["call"]:
+                raise ValueError(f"raw call path does not match trace root: {path.name}")
             if "invocation" in raw or "invocations" in raw:
                 raise ValueError(f"raw invocation metadata is malformed: {path.name}")
             records.append({"invocation": invocation, "invocations": total})
@@ -95,7 +112,8 @@ def finalize(name: str) -> int:
     value = json.loads(manifest_path.read_text(encoding="utf-8"))
     source_path = ROOT / ".lake" / "packages" / "mathlib" / value["modulePath"]
     return finalize_paths(traced_path, manifest_path, source_path,
-                          OUT / "meas_out", OUT / "meas_out")
+                          OUT / "meas_out", OUT / "meas_out",
+                          DEFAULT_TRACE_ROOT)
 
 
 def main() -> int:
