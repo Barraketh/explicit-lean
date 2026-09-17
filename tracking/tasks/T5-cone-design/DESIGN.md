@@ -53,27 +53,36 @@ listed Mathlib imports may remain byte-identical stock dependency families, but
 must be staged under the translated root rather than resolved from a stock
 Mathlib search root.
 
-The reproducible **source-import closure is 61 modules**, including the seven
-targets and `Mathlib.Logic.Relator`. This number is for the pinned source walk
-over `public import` and `public meta import` edges after nested block and line
-comments are removed. It is not the historical **69-module runtime/driver
-cone** in the campaign tracker: that larger list includes execution/driver
-support and is a separate staging input. Nor is it a reason to claim that a
-full copy of every Mathlib artifact family is an exact source closure; full
-family staging is an optional cache/layout optimization.
+The complete compilation **source-import closure is 69 modules**, including
+the seven targets and `Mathlib.Logic.Relator`. Its pinned header walk accepts
+every import form present in the grammar/files: `import`, `meta import`,
+`public import`, `public meta import`, and `private`-prefixed variants if they
+occur. Exact import kind is retained on every edge. In particular, the plain
+imports at `Logic/Function/Defs.lean:10` and
+`Logic/Function/Basic.lean:17` are compilation inputs, not optional exports.
+The 61-module `public`/`public meta` walk is diagnostic only and must never
+drive staging or acceptance.
+
+The campaign's historical **69-module runtime/driver cone** is a separate
+artifact. Equal cardinality does not establish equal identity: if it is
+mentioned, record its source/report path, sorted-list SHA-256, and an explicit
+set comparison against this source closure. Do not silently relabel one as the
+other. Likewise, copying every Mathlib artifact family is an optional staging
+optimization, not an exact source-closure claim.
 
 The implementation must emit `manifest.json` from the actual pinned walk, not
-assume 61 (or 69). The manifest records the sorted module list, every source
-import edge (including import kind), source SHA-256, root/toolchain identity,
+assume 69. The manifest records the sorted module list, every source import
+edge (including exact import kind), source SHA-256, root/toolchain identity,
 and a SHA-256 of canonical JSON for that closure. If full stock families are
 staged, record their paths and hashes separately from `source_closure`; the
 closure manifest still describes what was resolved. Do not put a stock
 directory that contains `Mathlib/` later in `LEAN_PATH`: that is a fallback and
 violates the strict import contract.
 
-This exact command both reproduces 61 and proves the only non-target source
+This exact command both reproduces 69 and proves the only non-target source
 edge into a target is `Mathlib.Logic.Relator ->
-Mathlib.Logic.Function.Defs`:
+Mathlib.Logic.Function.Defs`. It also asserts the two concrete plain-import
+repros that distinguish the complete closure from the 61-module diagnostic:
 
 ```sh
 python3 -B - <<'PY'
@@ -109,7 +118,7 @@ def blank(s):
 def imports(m):
   p = root / ('/'.join(m.split('.')[1:]) + '.lean')
   return [(kind, name) for kind, name in re.findall(
-    r'(?m)^\s*(public(?:\s+meta)?\s+import)\s+([A-Za-z0-9_.]+)',
+    r'(?m)^\s*((?:(?:public|private)\s+)?(?:meta\s+)?import)\s+([A-Za-z0-9_.]+)',
     blank(p.read_text())) if name.startswith('Mathlib.')]
 seen = set(); todo = sorted(targets); edges = {}
 while todo:
@@ -119,9 +128,12 @@ while todo:
   todo += [name for _, name in edges[m] if name not in seen]
 cross = sorted((m, name) for m, es in edges.items() if m not in targets
                for _, name in es if name in targets)
-assert len(seen) == 61, len(seen)
+assert ('import', 'Mathlib.Tactic.Attr.Register') in edges['Mathlib.Logic.Function.Defs']
+assert ('import', 'Mathlib.Tactic.Attr.Register') in edges['Mathlib.Logic.Function.Basic']
+assert len(seen) == 69, len(seen)
 assert cross == [('Mathlib.Logic.Relator', 'Mathlib.Logic.Function.Defs')], cross
-print('source_closure_modules=61')
+print('source_closure_modules=69')
+print('plain_import_repros=Function.Defs:10,Function.Basic:17')
 print('non_target_imports_target=' + repr(cross))
 PY
 ```
