@@ -88,8 +88,15 @@ def ppArg (c : EvCtx) (e : Expr) : MetaM String :=
 /-- Pretty-print with `pp.all` for `change` steps. -/
 def ppAllIn (c : EvCtx) (e : Expr) : MetaM String :=
   withLCtx c.lctx c.insts do
-    withOptions (fun o => (o.setBool `pp.all true)) do
-      return (← ppExpr e).pretty
+    -- A `change` step's `to` is spliced into a tactic verbatim, so it must be
+    -- one line.  A wide format width stops the printer wrapping, but `pp.all`
+    -- still breaks a `let`/`have` body onto its own line structurally, so the
+    -- remaining whitespace is collapsed: whether a multi-line term parses
+    -- depends on the indentation it lands in, which a generator cannot know
+    -- (REVIEW-9 7).
+    withOptions (fun o => (o.setBool `pp.all true).set `format.width (10000 : Nat)) do
+      let txt := (← ppExpr e).pretty
+      return " ".intercalate (txt.splitOn "\n" |>.map (·.trim) |>.filter (!·.isEmpty))
 
 /-! ### Classifying an `eq` step's proving tactic -/
 

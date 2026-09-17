@@ -169,16 +169,18 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         # self-contained: no `⋯` proof elision (which cannot be elaborated at
         # all) and balanced delimiters (REVIEW-8 4).
         for i, arg in enumerate(got.get("args", []) or []):
-            if "⋯" in arg:
-                fail(messages, f"{where}.args[{i}]: {arg!r} contains an elided "
-                               f"proof `⋯`, which cannot be elaborated")
-            for opens, closes in (("(", ")"), ("[", "]"), ("{", "}"), ("⟨", "⟩")):
-                if arg.count(opens) != arg.count(closes):
-                    fail(messages, f"{where}.args[{i}]: {arg!r} has unbalanced "
-                                   f"{opens}{closes}")
+            check_writable_term(f"{where}.args[{i}]", arg, messages)
 
-        if kind == "change" and not got.get("to"):
-            fail(messages, f"{where}: `change` step without a `to` term")
+        if kind == "change":
+            to = got.get("to")
+            if not to:
+                fail(messages, f"{where}: `change` step without a `to` term")
+            else:
+                # `to` is written into the replay exactly like an `args` entry,
+                # so it needs the same guarantees: T2 emits `change <to> at
+                # [pos]`, and a `to` carrying `have` syntax or a newline does
+                # not parse there (REVIEW-9 7).
+                check_writable_term(f"{where}.to", to, messages)
 
         if kind == "unfold" and not got.get("name"):
             fail(messages, f"{where}: `unfold` step without a constant name")
@@ -316,6 +318,30 @@ def check_location_fields(path: str, loc: dict, messages: list[str]) -> None:
     for field in ("pre", "post"):
         if field not in loc:
             fail(messages, f"{path}: location has no `{field}`")
+
+
+def check_writable_term(where: str, term: str, messages: list[str]) -> None:
+    """A term the replayer writes verbatim must parse where it is spliced.
+
+    Applies to `args` entries and to a `change` step's `to`: both are pasted
+    into a tactic, so an elided proof (`⋯` does not elaborate at all), an
+    unbalanced delimiter or an embedded newline makes the emitted tactic
+    unparseable or indentation-dependent (REVIEW-8 4, REVIEW-9 7).
+    """
+    if "⋯" in term:
+        fail(messages, f"{where}: {term!r} contains an elided proof `⋯`, "
+                       f"which cannot be elaborated")
+    for opens, closes in (("(", ")"), ("[", "]"), ("{", "}"), ("⟨", "⟩")):
+        if term.count(opens) != term.count(closes):
+            fail(messages, f"{where}: {term!r} has unbalanced {opens}{closes}")
+    # A newline makes the splice depend on the surrounding indentation: the
+    # same `to` parses inside one tactic block and not another, so it is not
+    # something a generator can paste safely. `have x := a; x` itself is a
+    # perfectly good term -- verified in plain Lean -- so statement *syntax* is
+    # not the problem and is not rejected here (REVIEW-9 7).
+    if "\n" in term:
+        fail(messages, f"{where}: {term!r} contains a newline; whether it parses "
+                       f"then depends on the indentation it is spliced into")
 
 
 def check_trace(name: str, actual: dict, expected: dict, messages: list[str]) -> None:
