@@ -46,7 +46,7 @@ EXPECTED_SITES = {
     "Logic/Nontrivial/Defs.lean": 1,
     "Logic/Function/Defs.lean": 2,
     "Logic/ExistsUnique.lean": 8,
-    "Logic/Function/Basic.lean": 23,
+    "Logic/Function/Basic.lean": 25,
     "Logic/Basic.lean": 31,
 }
 
@@ -205,6 +205,46 @@ def splice_tests(f: Failures) -> None:
             "public import ExplicitLean.ExplicitRw" in S.add_import(pub),
             "the new import did not follow the `public import` spelling")
 
+    # Attributes do not hide executable tactics on the same line, while the
+    # term-level Meta API remains excluded.
+    attributed = "@[simp] lemma t : True := by simp\n"
+    f.equal("sites/attribute_with_tactic", len(S.find_sites(attributed)), 1)
+    multiline_attribute = "@[simp,\n  foo]\nlemma t : True := by simp\n"
+    f.equal("sites/multiline_attribute_with_tactic", len(S.find_sites(multiline_attribute)), 1)
+    api = "example : True := withTraceNode `x <| simp True\n"
+    f.equal("sites/meta_api_excluded", len(S.find_sites(api)), 0)
+
+    # A top-level term ascription belongs outside the replacement range.
+    ascribed = "example : Nat := (by simp : Nat)\n"
+    ascribed_sites = S.find_sites(ascribed)
+    f.equal("sites/ascription_count", len(ascribed_sites), 1)
+    if ascribed_sites:
+        f.equal("sites/ascription_call", ascribed_sites[0].text, "simp")
+        f.check("sites/ascription_preserved", ascribed[ascribed_sites[0].end :].startswith(" : Nat"),
+                "the type ascription was swallowed")
+
+    # A retained mid-line call gets a standalone marker above its enclosing
+    # line; splice must accept that two-line replacement.
+    marked = "example : True := by\n  first | rfl <;> simp [foo]\n"
+    marked_sites = S.find_sites(marked)
+    if marked_sites:
+        replacement = P.render_site(marked_sites[0], {
+            "schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+            "invocations": 2, "locations": [],
+        })
+        out = S.splice(marked, {0: replacement["lines"]}, marked_sites)
+        f.check("splice/midline_marker_standalone",
+                "-- explicit_rw: unresolved" in out and "<;> simp [foo]" in out,
+                f"marker or original missing: {out!r}")
+    else:
+        f.check("splice/midline_marker_site", False, "mid-line fixture was not detected")
+
+    # The pipeline's guard is independent of renderer behaviour: forged
+    # replacement text must not be eligible for replay.
+    forged = {"status": "rendered", "lines": ["explicit_rw [foo at []]; simp"]}
+    f.check("lint/replacement_block", bool(P.lint_replacement(forged)),
+            "forbidden simp-family token was not found in replacement")
+
 
 def diagnostic_tests(f: Failures) -> None:
     """Diagnostic parsing, and the attribution that reads it.
@@ -289,7 +329,7 @@ def invocation_tests(f: Failures) -> None:
     single = P.render_site(site, dict(trace))
     f.equal("invocations/single_renders", single["status"], "rendered")
 
-    several = P.render_site(site, {**trace, "_invocations": 3})
+    several = P.render_site(site, {**trace, "invocation": 0, "invocations": 3})
     f.equal("invocations/several_refuse", several["status"],
             "render_failed:multiple_invocations")
     f.check("invocations/refusal_counts_them", "3" in several["detail"],
@@ -300,6 +340,35 @@ def invocation_tests(f: Failures) -> None:
     f.check("invocations/marker_emitted",
             any("explicit_rw: unresolved" in line for line in several["lines"]),
             "no marker comment was emitted")
+
+    # Identical executions are still distinct; the transcriber must not
+    # collapse them by content. This aggregate is what a two-file collection
+    # produces even when both traces are byte-identical.
+    f.equal("invocations/spec_field_is_consumed",
+            P.render_site(site, {**trace, "invocations": 2})["status"],
+            "render_failed:multiple_invocations")
+
+
+def mapping_tests(f: Failures) -> None:
+    source = "import A\n\nexample : True := by\n  simp [foo]\n"
+    site_list = S.find_sites(source)
+    rec = P.render_site(site_list[0], {
+        "schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+        "locations": [{"loc": "goal", "pre": "True", "post": None,
+                       "steps": [{"kind": "rw", "pos": [], "name": "foo"}],
+                       "close": {"by": "rfl"}}],
+    })
+    start, end = P.replacement_line_range(source, site_list, [rec], 0)
+    probe = pathlib.Path("/tmp/probe.lean")
+    diagnostics = [
+        {"file": "/tmp/header.lean", "line": 1, "column": 1, "message": "header", "body": "header"},
+        {"file": "/tmp/probe.lean", "line": start, "column": 1, "message": "site", "body": "site"},
+    ]
+    f.equal("diag/in_block_selected",
+            P.diagnostic_for_probe(diagnostics, probe, start, end)["message"], "site")
+    f.check("diag/out_of_block_is_inconclusive",
+            P.diagnostic_for_probe([diagnostics[0]], probe, start, end) is None,
+            "an unrelated diagnostic was selected")
 
 
 def site_count_tests(f: Failures, t1: pathlib.Path) -> None:
@@ -403,6 +472,7 @@ def main() -> int:
     splice_tests(f)
     diagnostic_tests(f)
     invocation_tests(f)
+    mapping_tests(f)
     site_count_tests(f, t1)
     end_to_end_test(f, t1, t2)
 

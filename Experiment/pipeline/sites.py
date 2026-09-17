@@ -12,8 +12,9 @@ Splicing is whitespace-aware because Lean is. A replacement sits at the original
 call's column, and continuation lines indent deeper than the enclosing tactic
 block. A site that is not alone on its line (`ext a; simp only [...]`,
 `rcases ... <;> simp [...]`, `⟨f y, by simp [...]⟩`) cannot take a multi-line
-replacement at all, and cannot take a leading `rename_i` line either, so the
-renderer is told to keep such a site on one line.
+replacement at the call position, and cannot take a leading `rename_i` line
+there either. Retained originals may still receive a standalone marker on the
+preceding enclosing line.
 """
 
 from __future__ import annotations
@@ -51,6 +52,8 @@ class Site:
     """True when only whitespace precedes the call on its line."""
     trailing: str
     """What follows the call on its line (`⟩⟩,`, `)` and so on), preserved."""
+    line_indent: str | None = None
+    """Leading whitespace of the enclosing source line."""
 
 
 def call_end(rest: str) -> int:
@@ -73,6 +76,11 @@ def call_end(rest: str) -> int:
             return i
         elif ch == ";" and depth == 0:
             return i
+        # A top-level colon terminates a term-mode tactic ascription, e.g.
+        # ``(by simp : Nat)``.  Colons in configuration records and terms are
+        # nested and therefore remain part of the call.
+        elif ch == ":" and depth == 0:
+            return i
         elif rest[i : i + 3] == "<;>" and depth == 0:
             return i
     return len(rest)
@@ -82,23 +90,63 @@ def skip_line(line: str) -> bool:
     """Lines whose simp mentions are not tactic invocations."""
     stripped = line.lstrip()
     return (
-        "@[" in line
-        or stripped.startswith("attribute")
+        stripped.startswith("attribute")
         or "Simp.simp" in line
         or stripped.startswith("--")
         or stripped.startswith("/-")
     )
 
 
+def mask_attributes(source: str) -> str:
+    """Blank ``@[...]`` spans while preserving source positions.
+
+    Attribute entries are declaration syntax, but a declaration may carry an
+    executable tactic later on the same line (or after a multiline attribute).
+    Masking just the attribute span lets the normal tactic scan see the latter
+    without treating ``@[simp]`` as a tactic. Bracket nesting and quoted
+    strings are handled for attribute arguments used by Mathlib.
+    """
+    chars = list(source)
+    i = 0
+    while i + 1 < len(source):
+        if source[i : i + 2] != "@[":
+            i += 1
+            continue
+        start = i
+        i += 2
+        depth = 1
+        in_string = False
+        while i < len(source) and depth:
+            ch = source[i]
+            if in_string:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if ch == '"':
+                    in_string = False
+            elif ch == '"':
+                in_string = True
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+            i += 1
+        for j in range(start, min(i, len(chars))):
+            chars[j] = " "
+    return "".join(chars)
+
+
 def find_sites(source: str) -> list[Site]:
     """Every simp-family tactic site in `source`, in source order."""
     sites: list[Site] = []
+    masked_source = mask_attributes(source)
     offset = 0
     for lineno, line in enumerate(source.split("\n"), start=1):
         if skip_line(line):
             offset += len(line) + 1
             continue
-        for match in TACTIC_RE.finditer(line):
+        masked_line = masked_source[offset : offset + len(line)]
+        for match in TACTIC_RE.finditer(masked_line):
             before = line[: match.start()].rstrip()
             if before.endswith(TERM_LEVEL):
                 continue
@@ -117,6 +165,7 @@ def find_sites(source: str) -> list[Site]:
                     column=match.start(),
                     alone_on_line=before == "",
                     trailing=line[match.start() + len(text) :],
+                    line_indent=line[: len(line) - len(line.lstrip())],
                 )
             )
         offset += len(line) + 1
@@ -192,10 +241,22 @@ def splice(source: str, replacements: dict[int, list[str]],
             body = body[site.column :] if body.startswith(" " * site.column) else body
         else:
             if len(lines) > 1:
-                raise ValueError(
-                    f"site {site.index} is not alone on its line and cannot take a "
-                    f"multi-line replacement"
-                )
+                # Retained originals need a standalone marker, even when the
+                # original call follows another tactic on the line. Move only
+                # the marker lines before the complete enclosing line; this
+                # keeps `... <;> simp` syntactically intact on the next line.
+                marker_lines = lines[:-1]
+                if not all(line.lstrip().startswith("--") for line in marker_lines):
+                    raise ValueError(
+                        f"site {site.index} is not alone on its line and cannot take a "
+                        f"multi-line replacement"
+                    )
+                line_start = out.rfind("\n", 0, site.start) + 1
+                prefix = out[line_start:site.start]
+                marker = "\n".join(marker_lines)
+                body = marker + "\n" + prefix + lines[-1].lstrip()
+                out = out[:line_start] + body + out[site.end :]
+                continue
             body = lines[0].lstrip()
         out = out[: site.start] + body + out[site.end :]
     return out

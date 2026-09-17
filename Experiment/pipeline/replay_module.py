@@ -17,8 +17,9 @@ Per module, in five stages:
 3. **Splice.** Write the translated module with every site replaced and
    `import ExplicitLean.ExplicitRw` added after the existing imports.
 4. **Compile.** `lake env lean` the translated file in the T2 worktree, whose
-   build carries `ExplicitRw`; Mathlib oleans are shared. Parse the errors by
-   line and map each one back to its site.
+   build carries `ExplicitRw`; Mathlib oleans are shared. Parse diagnostics
+   and attribute isolated probes only when the source line is in their
+   replacement block.
 5. **Report.** `report.json` and `summary.md`: per site a status, the error
    text and an attribution guess, plus totals, both worktrees' commit hashes,
    and runtimes.
@@ -46,9 +47,11 @@ import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import render as R  # noqa: E402
 import sites as S  # noqa: E402
+import simp_family_lint as L  # noqa: E402
 
 # The six modules T1 has traced copies for: (Mathlib path, traced module name).
 MODULES = {
@@ -146,11 +149,11 @@ def transcribe(t1: pathlib.Path, mathlib_rel: str, traced_name: str,
     # runs once per branch, and the recorder writes the extra runs as
     # `<name>_<NN>.<k>.json`, all sharing the site's `occurrence`.
     #
-    # The suffixed files are also how a *repeated compile* of the same module
-    # accumulates, so they are deduplicated by content: identical runs are one
-    # invocation recorded twice, while distinct ones are genuinely different
-    # branches and no single tactic can replace the call in all of them.
-    by_index: dict[int, dict[str, dict]] = {}
+    # Repeated executions are retained even when their trace content is
+    # identical; no execution may be deduplicated by content.
+    # Keep every execution, including identical traces. The spec's
+    # `invocation`/`invocations` fields are metadata, not a deduplication key.
+    by_index: dict[int, list[dict]] = {}
     stale = 0
     meas = t1 / "test" / "SimpTrace" / "meas_out"
     for path in sorted(meas.glob(f"{traced_name}_*.json")):
@@ -169,19 +172,32 @@ def transcribe(t1: pathlib.Path, mathlib_rel: str, traced_name: str,
         except json.JSONDecodeError:
             log.append(f"ignored unparsable trace JSON: {path.name}")
             continue
-        # The `call` field names the file it was written to, so it differs
-        # between a base file and its suffixed re-runs even when the recorded
-        # steps are identical; compare without it.
-        parsed.pop("call", None)
-        key = json.dumps(parsed, sort_keys=True, ensure_ascii=False)
-        by_index.setdefault(int(head) - 1, {})[key] = parsed
+        by_index.setdefault(int(head) - 1, []).append(parsed)
 
     traces: dict[int, dict] = {}
-    for index, variants in by_index.items():
-        chosen = next(iter(variants.values()))
-        if len(variants) > 1:
-            chosen = dict(chosen)
-            chosen["_invocations"] = len(variants)
+    for index, executions in by_index.items():
+        # New traces may declare the total on every file. Use the maximum
+        # declaration and never under-count files actually observed.
+        declared = 0
+        for execution in executions:
+            value = execution.get("invocations")
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                declared = max(declared, value)
+            elif value is not None:
+                log.append(
+                    f"invalid invocations field for site {index + 1}: {value!r}"
+                )
+            ordinal = execution.get("invocation")
+            if ordinal is not None and (
+                not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0
+            ):
+                log.append(
+                    f"invalid invocation field for site {index + 1}: {ordinal!r}"
+                )
+        count = max(len(executions), declared)
+        chosen = dict(executions[0])
+        if count > 1:
+            chosen["_invocations"] = count
         traces[index] = chosen
     if stale:
         log.append(f"ignored {stale} trace file(s) left by an earlier compile")
@@ -221,19 +237,19 @@ def render_site(site: S.Site, trace: dict | None) -> dict:
         "alone_on_line": site.alone_on_line,
         "long_line_waiver": False,
     }
+    line_indent = site.line_indent if site.line_indent is not None else indent
 
     def keep_original(status: str, detail: str, side: str, extra: str = "") -> dict:
         record["status"] = status
         record["detail"] = detail
         record["attribution"] = side
-        if site.alone_on_line and extra:
-            record["lines"] = [indent + extra, indent + site.text]
+        if extra:
+            # A marker must remain a standalone comment even when the call is
+            # mid-line (notably after `<;>`). `splice` moves the comment to the
+            # enclosing line's start while retaining the original call below.
+            record["lines"] = [line_indent + extra, line_indent + site.text]
         else:
-            # Mid-line sites take no comment line; the marker would break the
-            # surrounding term or tactic sequence.
             record["lines"] = [site.text]
-            if extra:
-                record["marker_dropped"] = True
         return record
 
     if trace is None:
@@ -243,8 +259,18 @@ def render_site(site: S.Site, trace: dict | None) -> dict:
             "t1",
         )
 
-    invocations = trace.get("_invocations")
-    if invocations:
+    # `_invocations` is the harness aggregate for legacy per-file traces;
+    # spec-v1 traces carry `invocations` (and an ordinal `invocation`) directly.
+    invocations = trace.get("_invocations", trace.get("invocations"))
+    if invocations is not None and (
+        not isinstance(invocations, int) or isinstance(invocations, bool) or invocations < 1
+    ):
+        return keep_original(
+            "render_failed:bad_invocations",
+            f"the trace declares invalid invocations count {invocations!r}",
+            "t1",
+        )
+    if invocations and invocations > 1:
         # The call ran more than once at this site — once per branch of an
         # enclosing `<;>` or alternation — and each run has its own trace with
         # its own goal. One `explicit_rw` replaces the call in every branch, so
@@ -402,6 +428,7 @@ def compile_in_t2(t2: pathlib.Path, path: pathlib.Path
         body = text[match.start("msg") : stop].strip()
         diagnostics.append(
             {
+                "file": match.group("file"),
                 "line": int(match.group("line")),
                 "column": int(match.group("col")),
                 "message": match.group("msg").strip(),
@@ -409,6 +436,37 @@ def compile_in_t2(t2: pathlib.Path, path: pathlib.Path
             }
         )
     return code, diagnostics, secs
+
+
+def lint_replacement(record: dict) -> list[L.Finding]:
+    """Return forbidden simp-family tokens in a rendered replacement block."""
+    return L.findings("\n".join(record.get("lines") or []))
+
+
+def replacement_line_range(source: str, site_list: list[S.Site],
+                           records: list[dict], only: int) -> tuple[int, int]:
+    """Return 1-based inclusive lines occupied by one isolated replacement."""
+    site = site_list[only]
+    lines = records[only].get("lines") or [site.text]
+    start = site.line
+    import_matches = list(S.IMPORT_RE.finditer(source))
+    if import_matches and import_matches[-1].end() <= site.start:
+        start += 1
+    return start, start + len(lines) - 1
+
+
+def diagnostic_for_probe(diagnostics: list[dict], probe: pathlib.Path,
+                         line_start: int, line_end: int) -> dict | None:
+    """Choose the first diagnostic inside this probe's replacement block."""
+    probe_path = probe.resolve()
+    for diagnostic in diagnostics:
+        try:
+            diagnostic_path = pathlib.Path(diagnostic.get("file", "")).resolve()
+        except (OSError, RuntimeError):
+            continue
+        if diagnostic_path == probe_path and line_start <= diagnostic["line"] <= line_end:
+            return diagnostic
+    return None
 
 
 def attribute(record: dict, message: str) -> tuple[str, str]:
@@ -507,6 +565,14 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
 
     site_list = S.find_sites(source)
     records = [render_site(s, traces.get(s.index)) for s in site_list]
+    for rec in records:
+        findings = lint_replacement(rec)
+        if findings and rec["status"] == "rendered":
+            rec["status"] = "render_failed:simp_family_lint"
+            rec["attribution"] = "harness"
+            rec["detail"] = "replacement contains forbidden simp-family token(s): " + "; ".join(
+                finding.describe() for finding in findings
+            )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / mathlib_rel
@@ -516,8 +582,6 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
     code, diagnostics, compile_secs = compile_in_t2(t2, target)
     compile_mode = "whole_module"
 
-    # Map each error line back to a site: the site whose replacement block
-    # covers that line of the translated file.
     if code == 0:
         for rec in records:
             if rec["status"] == "rendered":
@@ -546,13 +610,27 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
                 rec["attribution"] = ""
                 rec["detail"] = ""
             else:
-                rec["status"] = "compile_failed"
-                rec["error"] = pdiags[0]["message"] if pdiags else "(no diagnostic)"
-                rec["error_body"] = pdiags[0].get("body", "") if pdiags else ""
-                rec["error_line"] = pdiags[0]["line"] if pdiags else None
-                rec["attribution"], rec["detail"] = attribute(
-                    rec, rec.get("error_body") or rec["error"]
+                line_start, line_end = replacement_line_range(
+                    source, site_list, records, rec["site"]
                 )
+                diagnostic = diagnostic_for_probe(pdiags, probe, line_start, line_end)
+                rec["probe_line_start"] = line_start
+                rec["probe_line_end"] = line_end
+                if diagnostic is None:
+                    rec["status"] = "probe_inconclusive"
+                    rec["attribution"] = "harness"
+                    rec["detail"] = (
+                        "isolated probe failed without a diagnostic inside its "
+                        f"replacement block (lines {line_start}-{line_end})"
+                    )
+                else:
+                    rec["status"] = "compile_failed"
+                    rec["error"] = diagnostic["message"]
+                    rec["error_body"] = diagnostic.get("body", "")
+                    rec["error_line"] = diagnostic["line"]
+                    rec["attribution"], rec["detail"] = attribute(
+                        rec, rec.get("error_body") or rec["error"]
+                    )
 
     for rec in records:
         rec.pop("lines", None)
@@ -575,7 +653,9 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
     }
 
 
-STATUS_ORDER = ("replayed", "unresolved", "render_failed", "compile_failed")
+STATUS_ORDER = (
+    "replayed", "unresolved", "render_failed", "compile_failed", "probe_inconclusive"
+)
 
 
 def bucket(status: str) -> str:
@@ -595,8 +675,8 @@ def summarize(report: dict) -> str:
         f"T2 `{report['t2_branch']}` at `{report['t2_commit']}`"
         f"{' (dirty)' if report['t2_dirty'] else ''}.",
         "",
-        "| module | sites | replayed | unresolved | render_failed | compile_failed | mode | s |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| module | sites | replayed | unresolved | render_failed | compile_failed | probe_inconclusive | mode | s |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     totals = {k: 0 for k in STATUS_ORDER}
     total_sites = 0
@@ -611,12 +691,13 @@ def summarize(report: dict) -> str:
         lines.append(
             f"| `{name}` | {mod['sites']} | {counts['replayed']} | "
             f"{counts['unresolved']} | {counts['render_failed']} | "
-            f"{counts['compile_failed']} | {mod['compile_mode']} | {mod['seconds']:.0f} |"
+            f"{counts['compile_failed']} | {counts['probe_inconclusive']} | "
+            f"{mod['compile_mode']} | {mod['seconds']:.0f} |"
         )
     lines.append(
         f"| **total** | **{total_sites}** | **{totals['replayed']}** | "
         f"**{totals['unresolved']}** | **{totals['render_failed']}** | "
-        f"**{totals['compile_failed']}** | | |"
+        f"**{totals['compile_failed']}** | **{totals['probe_inconclusive']}** | | |"
     )
 
     lines += ["", "## Failures, per site", ""]
