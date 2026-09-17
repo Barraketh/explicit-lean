@@ -249,18 +249,19 @@ partial def classifyProof (target : Expr) (proof : Expr) : MetaM ProofShape := d
       match decl.binderInfo with
       | .implicit | .strictImplicit | .instImplicit => continue
       | .default =>
-        -- Every explicit argument is recorded, in order: a replayer writes
-        -- `rw [name a₁ a₂ ...]` and must supply exactly what simp supplied.
-        -- A proof argument is additionally a `side` entry (it is a condition
-        -- the discharger established), and a subterm of the position is
-        -- recoverable by unification -- but recording it costs nothing and
-        -- removes the need for the replayer to re-derive it.
-        explicitArgs := explicitArgs.push arg
+        -- A replayer writes `rw [name a₁ a₂ ...]` and must supply exactly what
+        -- simp supplied, so every explicit *value* argument is recorded in
+        -- order.  A proof argument is **not** one of them: it is a condition
+        -- the discharger established and is carried as a `side` sub-trace, so
+        -- putting it in `args` would tell the replayer to write out a proof
+        -- term it is supposed to prove.
         if ← isProof arg then
           proofArgs := proofArgs.push arg
         else if isSubtermOf arg target then
+          explicitArgs := explicitArgs.push arg
           continue
         else if (← Meta.isClass? (← inferType arg)).isSome then
+          explicitArgs := explicitArgs.push arg
           -- An explicit *instance*-typed argument: synthesis may pick a
           -- different instance than simp did, so it must be in `args`. It is,
           -- above; accepting it here is now safe.

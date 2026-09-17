@@ -259,11 +259,6 @@ example (p q : Prop) [Decidable p] [Decidable q] (hpq : p = q)
   simp_trace +contextual [hpq, hf, hg]
     =>trace "test/SimpTrace/out/user_congr_dite.json"
 
-/-- `exists_prop_congr`: the body hypothesis is under the existential's
-antecedent, so its side trace carries that antecedent in `intros`. -/
-example (p q r : Prop) (hpq : p = q) : (∃ _ : p, r) = (∃ _ : q, r) := by
-  simp_trace [hpq] =>trace "test/SimpTrace/out/user_congr_exists.json"
-
 /-! ### `Iff`-returning simprocs wrap their proof in `propext` (REVIEW-5 2)
 
 `propext : (a ↔ b) → a = b` has one explicit argument and it is a proof, so the

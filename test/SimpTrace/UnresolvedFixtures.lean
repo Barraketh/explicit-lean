@@ -55,4 +55,49 @@ attribute [simp] unresTagProc
 example (k : Nat) : UnresTag k := by
   simp_trace =>trace "test/SimpTrace/out/propext_nonlemma.json"
 
+/-- `exists_prop_congr` is a user congruence theorem whose right-hand side has a
+higher-order metavariable (`?q'`, the body as a function of the antecedent) that
+unifying the conclusion does not determine — a replayer would have to prove the
+side conditions first to fix it. `rw [exists_prop_congr hpq (fun _ => rfl)]`
+fails with an application type mismatch, so the step is genuinely unreplayable
+as written, and the structural `rw` check classifies it
+`unresolved:unreplayable_rw:exists_prop_congr` rather than shipping it.
+
+`ite_congr` and `dite_congr`, by contrast, do replay and pass the check; they
+stay in `Fixtures.lean`. -/
+example (p q r : Prop) (hpq : p = q) : (∃ _ : p, r) = (∃ _ : q, r) := by
+  simp_trace [hpq] =>trace "test/SimpTrace/out/user_congr_exists.json"
+
+/-! ### The structural `rw` check catches a plumbing head the allowlist misses
+
+`isPlumbingHead` is a fast path only. Correctness rests on re-elaborating every
+emitted `rw`: `name` applied to `args`, with the rewritten side unified against
+`before` and the other side required to match `after`. `fixturePlumb` below is a
+*user-defined* plumbing head — one explicit proof argument, concluding an `Eq` —
+so no allowlist could know about it and `classifyProof` calls it the rewriting
+lemma. Its conclusion is `True = True`, which does not unify with the recorded
+`PTag k`, so the step is classified `unresolved:unreplayable_rw:fixturePlumb`
+instead of shipping as a `rw` no replayer can perform. -/
+
+def FixturePTag (n : Nat) : Prop := n = n
+
+theorem fixturePTag_iff (n : Nat) : FixturePTag n ↔ True := by
+  unfold FixturePTag; simp
+
+theorem fixturePlumb {a b : Prop} (_h : a = b) : True = True := rfl
+
+open Lean Meta Simp in
+simproc_decl fixturePlumbProc (FixturePTag _) := fun e => do
+  let_expr FixturePTag n := e | return .continue
+  let lhs := mkApp (mkConst ``FixturePTag) n
+  let inner := mkApp3 (mkConst ``propext) lhs (mkConst ``True)
+    (mkApp (mkConst ``fixturePTag_iff) n)
+  let pf := mkApp3 (mkConst ``fixturePlumb) lhs (mkConst ``True) inner
+  return .done { expr := mkConst ``True, proof? := pf }
+
+attribute [simp] fixturePlumbProc
+
+example (k : Nat) : FixturePTag k := by
+  simp_trace =>trace "test/SimpTrace/out/unreplayable_rw.json"
+
 end ExplicitLean.SimpTrace.UnresolvedFixtures

@@ -391,18 +391,166 @@ result.  On mismatch we fail loudly rather than emit a trace a replayer cannot
 follow.
 -/
 
+/-!
+### Structural check on every emitted `rw`
+
+`isPlumbingHead` is an allowlist, and an allowlist has to be *complete* to be
+correct — the wrong shape to rest on (REVIEW-6 3).  It stays as a fast path, but
+correctness rests on this check instead: for every `rw` step the validator
+re-elaborates `name` applied to `args`, unifies the appropriate side of the
+resulting statement with the recorded `before`, and requires the other side to
+equal `after` up to reducible defeq.
+
+That makes a misclassified plumbing head impossible to *ship* as a `rw`:
+`rw [propext]` or `rw [Iff.trans]` cannot pass, because `propext`'s statement
+does not unify with the subterm being rewritten.  A step that fails is
+classified `unresolved:unreplayable_rw:<name>` rather than emitted as a rewrite
+a replayer cannot perform.
+-/
+
+/-- The statement `name args` proves, as an `Eq` or `Iff` pair, with remaining
+implicit and instance arguments left as metavariables to unify. -/
+def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
+    : MetaM (Option (Expr × Expr)) := do
+  let head? : Option Expr ← match o with
+    | .decl declName _ _ =>
+      if (← getEnv).find? declName |>.isSome then
+        pure (some (← mkConstWithFreshMVarLevels declName))
+      else pure none
+    | .fvar fvarId =>
+      if (← getLCtx).contains fvarId then pure (some (mkFVar fvarId)) else pure none
+    -- A `.stx` origin that did not resolve to a local is a user-written term we
+    -- cannot reconstruct from the trace alone; a `.other` names no declaration.
+    | _ => pure none
+  let some head := head? | return none
+  -- Open the lemma's whole telescope first: implicits, instances and the
+  -- hypotheses of a conditional lemma all become metavariables, exactly as a
+  -- replayer's `rw` leaves them for unification and side goals.
+  -- **Not** the `Reducing` variant: it whnfs the body, so a Prop-valued lemma's
+  -- statement unfolds away from the form simp rewrote (`LeftTotal R` becomes
+  -- `∃ b, R a b`, `¬(a ∈ [])` becomes `False`) and no longer matches `before`.
+  let (mvars, bis, concl) ← forallMetaTelescope (← inferType head)
+  -- Then assign the recorded `args` to the **explicit** positions in order.
+  -- `mkAppN head args` would feed them to whatever binder comes first, which is
+  -- usually a universe or an implicit, silently producing a different statement
+  -- (`if 2 then ?a else ?b` for `ite_cond_eq_true 1 2`).
+  let mut i := 0
+  for mvar in mvars, bi in bis do
+    if bi == .default then
+      if h : i < args.size then
+        unless ← isDefEq mvar args[i] do return none
+        i := i + 1
+  -- More recorded arguments than the lemma has explicit binders: the `args` do
+  -- not describe this lemma, so there is nothing to check them against.
+  if i < args.size then return none
+  let concl ← instantiateMVars concl
+  -- The `prop` flag is authoritative when set: simp used this lemma as
+  -- `p = True` (or `¬p` as `p = False`) rather than as an equation, and replay
+  -- rewrites with `eq_true name` / `eq_false name`.  Checking it first matters
+  -- because a Prop-valued lemma's statement can itself unfold to an `Eq`
+  -- (`LeftTotal R` is a `∀`-statement about `∃`), which the `eq?` test below
+  -- would then read as the rewrite — the wrong pair entirely.
+  match prop? with
+  | some true => return some (concl, mkConst ``True)
+  | some false =>
+    if let some p := concl.not? then return some (p, mkConst ``False)
+    return some (concl, mkConst ``False)
+  | none =>
+    -- Read the statement as written first.  Unfolding is only a fallback, for a
+    -- conclusion hidden behind an abbreviation; applying it eagerly rewrites
+    -- `p = True` into something that no longer matches the recorded subterm.
+    if let some (_, lhs, rhs) := concl.eq? then
+      return some (lhs, rhs)
+    if let some (lhs, rhs) := concl.iff? then
+      return some (lhs, rhs)
+    let concl ← whnfR concl
+    if let some (_, lhs, rhs) := concl.eq? then
+      return some (lhs, rhs)
+    if let some (lhs, rhs) := concl.iff? then
+      -- `rw` rewrites with an iff through `propext`; both sides are `Prop`.
+      return some (lhs, rhs)
+    return none
+
+/--
+Check that a recorded `rw` step is one a replayer can actually perform: `name`
+applied to `args` rewrites `before` to `after` in the direction recorded.
+
+Returns `none` on success, or a classified reason.
+-/
+def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
+    (prop? : Option Bool) (before after : Expr) (c : EvCtx)
+    : MetaM (Option String) :=
+  withLCtx c.lctx c.insts do
+    let name := match o with
+      | .decl n _ _ => n.toString
+      | .fvar f => f.name.toString
+      | .stx _ r => r.prettyPrint.pretty.trimAscii.toString
+      | .other n => n.toString
+    try
+      withoutModifyingState do
+        let some (lhs, rhs) ← rwStatement? o args prop?
+          -- No statement to check against: a `.stx` origin that stayed a
+          -- user-written term, or a lemma the environment no longer has. The
+          -- positional check on `before`/`after` still applies; we do not claim
+          -- more than we verified.
+          | return none
+        -- `dir: "rev"` means simp used the equation right-to-left.
+        let (src, tgt) := if inv then (rhs, lhs) else (lhs, rhs)
+        -- Unify with instances resolvable: the statement's instance arguments
+        -- are metavariables here and `before` carries the concrete instance
+        -- simp used, which plain `isDefEq` at reducible transparency will not
+        -- assign.
+        -- simp applies a partially-matching lemma to extra arguments
+        -- (`Simp.Result.addExtraArgs`), so the recorded subterm can be the
+        -- lemma's LHS applied to more: `curry_uncurry`'s `curry (uncurry ?f)`
+        -- against a recorded `curry (uncurry f) a`.  Peel the same number of
+        -- trailing arguments off both sides before unifying, exactly as
+        -- `tryTheoremCore` does.
+        -- Peel only when the lemma's own left-hand side is a *rigid*
+        -- application with fewer arguments than the subterm: `curry (uncurry ?f)`
+        -- against `curry (uncurry f) a`.  A bare metavariable LHS (`?p`, as in
+        -- `eq_true_of_decide : decide p = true → p = True`) matches the whole
+        -- subterm, so peeling would strip it down to its head.
+        let peel := !src.getAppFn.isMVar && src.getAppNumArgs > 0
+          && before.getAppNumArgs > src.getAppNumArgs
+        let extra := if peel then before.getAppNumArgs - src.getAppNumArgs else 0
+        let extraArgs := before.getAppArgs.extract (before.getAppNumArgs - extra)
+                           before.getAppNumArgs
+        let beforeCore := if extra == 0 then before else
+          mkAppN before.getAppFn (before.getAppArgs.extract 0
+            (before.getAppNumArgs - extra))
+        -- Unify the rewritten side with `before`, then require the other side
+        -- to match `after`.  Instances are resolvable during unification: the
+        -- statement's are metavariables here while `before` carries the
+        -- concrete one simp used.
+        unless ← withReducibleAndInstances <| isDefEq src beforeCore do
+          return some s!"unreplayable_rw:{name}"
+        -- A conditional or higher-order lemma can leave the other side with
+        -- metavariables the conclusion alone does not determine (a congruence
+        -- theorem's `?q'`); unifying it with `after` is what fixes them, and is
+        -- also exactly what a replayer's `rw` does.
+        let tgt := mkAppN (← instantiateMVars tgt) extraArgs
+        unless ← withReducibleAndInstances <| isDefEq tgt after do
+          return some s!"unreplayable_rw:{name}"
+        return none
+    catch _ =>
+      return some s!"unreplayable_rw:{name}"
+
 /-- Replay a `congr` step's nested steps against the argument they describe.
 Positions are relative to the argument, per the spec. -/
-partial def validateNested (c : EvCtx) (nested : Array Event)
-    (argBefore argAfter : Expr) : MetaM Unit := do
+partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
+    (nested : Array Event) (argBefore argAfter : Expr) : MetaM Unit := do
   let mut running ← instantiateMVars argBefore
   for ev in nested do
     let (pos, before, after, ec) ← match ev with
-      | .rw pos _ _ _ b a ec _ _ _ _ => pure (pos, b, a, ec)
+      | .rw pos o inv prop? b a ec args _ _ _ =>
+        if let some reason ← checkRwStep o args inv prop? b a ec then
+          ur.modify (·.add reason)
+        pure (pos, b, a, ec)
       | .eq pos _ b a ec _ => pure (pos, b, a, ec)
       | .defeq pos _ _ b a ec => pure (pos, b, a, ec)
       | .congr pos _ inner b a ab aa ec =>
-        validateNested ec inner ab aa
+        validateNested ur ec inner ab aa
         pure (pos, b, a, ec)
       | .introCtx .. => continue
     let before ← instantiateMVars before
@@ -425,7 +573,8 @@ partial def validateNested (c : EvCtx) (nested : Array Event)
       reach the argument's result\nreplayed: {running}\nactual:   {argAfter}"
 
 /-- Replay `steps` structurally from `pre`, checking every position. -/
-def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit := do
+def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
+    (events : Array Event) : MetaM Unit := do
   -- Instance arguments can still be unassigned metavariables at the moment a
   -- step is recorded and get assigned later in the run, so a recorded subterm
   -- and the running term can differ only by `?m` versus its assignment.  Both
@@ -433,7 +582,12 @@ def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit :=
   let mut running ← instantiateMVars pre
   for ev in events do
     let (pos, before, after, c) ← match ev with
-      | .rw pos _ _ _ b a c _ _ _ _ => pure (pos, b, a, c)
+      | .rw pos o inv prop? b a c args _ _ _ =>
+        -- Every emitted `rw` is re-elaborated and checked against its own
+        -- `before`/`after`, so a misclassified plumbing head cannot ship.
+        if let some reason ← checkRwStep o args inv prop? b a c then
+          ur.modify (·.add reason)
+        pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
       | .defeq pos _ _ b a c => pure (pos, b, a, c)
       | .congr pos _ nested b a ab aa c =>
@@ -441,7 +595,7 @@ def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit :=
         -- whole before/after is verified below exactly like any other step, and
         -- the nested steps must independently replay the *argument* from
         -- `argBefore` to `argAfter` at positions relative to it.
-        validateNested c nested ab aa
+        validateNested ur c nested ab aa
         pure (pos, b, a, c)
       | .introCtx .. => continue
     -- The traversal observed the subterm with its enclosing binders as free
@@ -479,7 +633,7 @@ def buildLocation (ur : IO.Ref Unresolved)
     (hyp? : Option String) (pre : Expr) (result : Simp.Result)
     (events : Array Event) (closed : Bool)
     (absurdHyp? : Option String := none) : MetaM LocationTrace := do
-  validate pre result.expr events
+  validate ur pre result.expr events
   -- Hypotheses `+contextual` introduced, so their references land in the
   -- spec's separate `contextual` namespace.
   let contextualFVars : Array FVarId := events.filterMap fun ev =>

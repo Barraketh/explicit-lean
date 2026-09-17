@@ -19,8 +19,7 @@
           "source": "reduceIte",
           "args": [
             "1",
-            "2",
-            "Eq.trans (congrFun' (congrArg Eq h) 3) (eq_self 3)"
+            "2"
           ],
           "side": [
             {

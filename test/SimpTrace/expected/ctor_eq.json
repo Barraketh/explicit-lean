@@ -17,9 +17,6 @@
           "name": "eq_false_of_decide",
           "dir": "fwd",
           "source": "Nat.reduceEqDiff",
-          "args": [
-            "Eq.refl false"
-          ],
           "side": [
             {
               "goal": "false = false",

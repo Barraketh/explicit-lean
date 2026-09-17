@@ -11,15 +11,16 @@
         {
           "kind": "rw",
           "pos": [],
-          "name": "eq_true_of_decide",
+          "name": "ExplicitLean.SimpTrace.UnresolvedFixtures.fixturePlumb",
           "dir": "fwd",
+          "source": "ExplicitLean.SimpTrace.UnresolvedFixtures.fixturePlumbProc",
           "side": [
             {
-              "goal": "true = true",
-              "pre": "true = true",
+              "goal": "FixturePTag k = True",
+              "pre": "FixturePTag k = True",
               "post": null,
               "close": {
-                "by": "rfl"
+                "by": "unresolved:condition proof not a hypothesis or a recorded discharge"
               },
               "steps": []
             }
