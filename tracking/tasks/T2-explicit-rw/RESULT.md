@@ -94,7 +94,6 @@ The axiom audit is no longer a claim in this file but a step in the runner, so
 it is re-checked on every invocation rather than by the next reviewer. Each check
 was verified to *fail* when it should, including the sort fixtures against the
 pre-fix code and the escape sweep after each widening.
-
 ## Limitations and open questions
 - **Dependent positions are refused, not guessed**, each step-indexed: dependent
   function argument and `∀` domain, binder types, `let` type/value, projection
