@@ -227,38 +227,69 @@ def splice(source: str, replacements: dict[int, list[str]],
     The first replacement line carries no indentation of its own when the site
     is not alone on its line: there the call is spliced in place, mid-line.
     """
-    out = source
-    for site in sorted(sites, key=lambda s: s.start, reverse=True):
-        if site.index not in replacements:
-            continue
-        lines = replacements[site.index]
+    # Plan every edit against the original source. In particular, marker
+    # insertions use original line starts and are aggregated before any edit
+    # is applied; recomputing a line start after a later replacement shifts the
+    # original site offsets and can corrupt a second retained site on the line.
+    line_starts = [0]
+    for match in re.finditer("\n", source):
+        line_starts.append(match.end())
+    newline = "\r\n" if "\r\n" in source else "\n"
+    edits: list[tuple[int, int, str, int]] = []
+    markers: dict[int, list[tuple[int, str]]] = {}
+
+    for site in sites:
+        lines = replacements.get(site.index)
         if not lines:
             continue
+        marker_lines = [
+            line for line in lines[:-1]
+            if line.lstrip().startswith("-- explicit_rw: unresolved:")
+        ]
+        if marker_lines:
+            # Only unresolved markers are moved out of the replacement body;
+            # `-- Original simp:` comments belong to a replayed body and stay
+            # adjacent to that site's replacement.
+            if len(marker_lines) != len(lines) - 1:
+                raise ValueError(
+                    f"site {site.index} has non-marker lines before its retained original"
+                )
+            line_index = max(0, site.line - 1)
+            markers.setdefault(line_index, []).extend(
+                (site.index, marker) for marker in marker_lines
+            )
+            lines = lines[-1:]
+
         if site.alone_on_line:
-            # Drop the leading indentation of the first line: the source keeps
-            # its own, and `site.start` already sits after it.
+            # Drop the leading indentation of the first replacement line: the
+            # source keeps its original indentation at `site.start`.
             body = "\n".join(lines)
             body = body[site.column :] if body.startswith(" " * site.column) else body
         else:
             if len(lines) > 1:
-                # Retained originals need a standalone marker, even when the
-                # original call follows another tactic on the line. Move only
-                # the marker lines before the complete enclosing line; this
-                # keeps `... <;> simp` syntactically intact on the next line.
-                marker_lines = lines[:-1]
-                if not all(line.lstrip().startswith("--") for line in marker_lines):
-                    raise ValueError(
-                        f"site {site.index} is not alone on its line and cannot take a "
-                        f"multi-line replacement"
-                    )
-                line_start = out.rfind("\n", 0, site.start) + 1
-                prefix = out[line_start:site.start]
-                marker = "\n".join(marker_lines)
-                body = marker + "\n" + prefix + lines[-1].lstrip()
-                out = out[:line_start] + body + out[site.end :]
-                continue
+                raise ValueError(
+                    f"site {site.index} is not alone on its line and cannot take a "
+                    f"multi-line replacement"
+                )
             body = lines[0].lstrip()
-        out = out[: site.start] + body + out[site.end :]
+        edits.append((site.start, site.end, body, 0))
+
+    # One deterministic zero-width insertion per source line, with retained
+    # sites in source/site order. The trailing newline keeps each marker on a
+    # standalone line before the original enclosing line.
+    for line_index, entries in markers.items():
+        entries.sort(key=lambda item: item[0])
+        marker_text = newline.join(marker for _, marker in entries) + newline
+        start = line_starts[line_index] if line_index < len(line_starts) else len(source)
+        edits.append((start, start, marker_text, 1))
+
+    # Right-to-left application preserves every coordinate from the original
+    # source. For equal offsets, ordinary replacements (non-zero end) precede
+    # zero-width insertions, yielding marker-before-body at column zero.
+    edits.sort(key=lambda edit: (edit[0], edit[1], edit[3]), reverse=True)
+    out = source
+    for start, end, body, _ in edits:
+        out = out[:start] + body + out[end:]
     return out
 
 

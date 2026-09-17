@@ -245,6 +245,42 @@ def splice_tests(f: Failures) -> None:
     f.check("lint/replacement_block", bool(P.lint_replacement(forged)),
             "forbidden simp-family token was not found in replacement")
 
+    # All edits, including zero-width markers, use original coordinates. Two
+    # retained mid-line calls on one source line must each keep a recognizable
+    # marker, and a replayed neighbor must not be shifted or mangled.
+    same_line = "  exact foo <;> simp [foo] <;> simp [bar]\n"
+    same_sites = S.find_sites(same_line)
+    retained = [
+        ["  -- explicit_rw: unresolved: branch one", "  simp [foo]"],
+        ["  -- explicit_rw: unresolved: branch two", "  simp [bar]"],
+    ]
+    same_out = S.splice(same_line, {0: retained[0], 1: retained[1]}, same_sites)
+    f.equal("splice/same_line_two_markers",
+            same_out.count("-- explicit_rw: unresolved:"), 2)
+    f.check("splice/same_line_originals_intact",
+            "exact foo <;> simp [foo] <;> simp [bar]" in same_out,
+            f"same-line retained calls were corrupted: {same_out!r}")
+
+    mixed = "  exact foo <;> simp [foo] <;> simp [bar]\n"
+    mixed_sites = S.find_sites(mixed)
+    mixed_out = S.splice(mixed, {
+        0: ["explicit_rw [foo at []]"],
+        1: ["  -- explicit_rw: unresolved: retained", "  simp [bar]"],
+    }, mixed_sites)
+    f.check("splice/same_line_mixed_site",
+            "explicit_rw [foo at []]" in mixed_out
+            and "-- explicit_rw: unresolved: retained" in mixed_out
+            and "simp [bar]" in mixed_out,
+            f"mixed same-line edits were corrupted: {mixed_out!r}")
+
+    unicode = "  λx => exact foo <;> simp [foo] <;> simp [bar]\n"
+    unicode_sites = S.find_sites(unicode)
+    unicode_out = S.splice(unicode, {0: retained[0], 1: retained[1]}, unicode_sites)
+    f.check("splice/unicode_before_sites",
+            "λx => exact foo <;> simp [foo] <;> simp [bar]" in unicode_out
+            and unicode_out.count("-- explicit_rw: unresolved:") == 2,
+            f"Unicode offset handling failed: {unicode_out!r}")
+
 
 def diagnostic_tests(f: Failures) -> None:
     """Diagnostic parsing, and the attribution that reads it.
