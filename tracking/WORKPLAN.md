@@ -21,7 +21,7 @@ uncommitted work): `task/T1-trace-capture` (recorder, forked simp traversal;
 fix round 9 was in progress when the session ended; last commit "identical
 re-elaborated traces overwrite rather than accumulate"), `task/T2-explicit-rw`
 (replay tactic; round 8 fixes committed at 6dc6932+, all 9 items fixed incl. the axiom-set audit; awaiting incremental review 9; one open coordinator item: whether `zeta` steps carry a `name`, which the spec does not define),
-`task/T4-pipeline` (harness; review round 1 was in progress). T3 is merged.
+`task/T4-pipeline` (harness; review round 1 done, REVIEW-1.md at 171079f: 3 major, no critical: `@[` lines skipped hide two sites so the corpus is 84 not 82; stale diagnostics mis-charged to sites; mid-line retained originals drop the `unresolved:` marker; plus minors incl. the harness never running the simp-family lint). T3 is merged.
 Agents from this session are gone; a new session re-dispatches per
 `tracking/COORDINATION.md` (revised gate: no critical/major; incremental
 reviews; harness replay counts are the primary test).
@@ -38,7 +38,7 @@ reviews; harness replay counts are the primary test).
    incremental review 10 with the T4 harness replay table as its main input.
    Merge when no critical/major; wire `ExplicitLean.SimpTrace` (recorder only,
    not product) into the build.
-3. **T4 review round 1 and fixes.** Read REVIEW-1.md when present. Then
+3. **T4 fix round 1** (REVIEW-1.md items above), then an incremental review 2. Then
    implement the multiple-invocation rendering rule (PLAN.md step 3,
    "Rendering"), switch the harness from driving worktrees by path to the
    merged main checkout, and add the declaration oracle
