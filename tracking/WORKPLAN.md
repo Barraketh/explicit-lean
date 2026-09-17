@@ -56,6 +56,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
 - **T10 hash conformance lane: CANCELLED as unnecessary.** Ordinary fixtures
   for missing/extra/duplicate/range/invocation mistakes belong in T1/T4; no
   neutral cryptographic vector suite is needed.
+- **Fresh trace lifecycle decision:** T4 owns a fresh run-local staging, raw
+  and finalized trace tree and consumes only that tree; it never filters or
+  mutates T1's shared `meas_out`. T1 will expose a small explicit-path
+  finalizer CLI that reads raw v1 from T4's run directory and writes v2 to a
+  separate run-local directory. T4 rewrites staged trace paths, compiles in the
+  T1 environment, invokes that CLI, then validates the v2 bijection.
 - **Named `zeta` decision:** T1's local-let fvar delta is represented as an
   existing `change` step with an explicit `pp.all` `to` value. Plain `letE`
   zeta remains `zeta`. Do not broaden T2's zeta semantics or add a name-based
