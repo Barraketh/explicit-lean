@@ -435,7 +435,123 @@ def check_fixture_compiles(messages: list[str]) -> None:
             )
 
 
+# Directories the measurement modules write to, and the module that writes each.
+MEASUREMENT_DIRS = (
+    ("IsEmptyBasicTraced", ROOT / "test" / "SimpTrace" / "isempty_out", ""),
+    ("NontrivialDefsTraced", ROOT / "test" / "SimpTrace" / "meas_out",
+     "NontrivialDefsTraced_"),
+    ("FunctionDefsTraced", ROOT / "test" / "SimpTrace" / "meas_out",
+     "FunctionDefsTraced_"),
+    ("ExistsUniqueTraced", ROOT / "test" / "SimpTrace" / "meas_out",
+     "ExistsUniqueTraced_"),
+    ("FunctionBasicTraced", ROOT / "test" / "SimpTrace" / "meas_out",
+     "FunctionBasicTraced_"),
+)
+
+
+def tally(paths: list[pathlib.Path]) -> dict:
+    """Count calls, steps and kinds over a set of traces.
+
+    Steps nested inside `congr` steps and inside `side` sub-traces are counted
+    too: they are steps a replayer must perform, so leaving them out understates
+    the trace. Byte counts are the files' own sizes.
+    """
+    kinds: dict[str, int] = {}
+    steps = 0
+    per_call = []
+
+    def walk(step_list: list) -> int:
+        nonlocal steps
+        n = 0
+        for st in step_list:
+            kind = st.get("kind", "?")
+            kinds[kind] = kinds.get(kind, 0) + 1
+            steps += 1
+            n += 1
+            n += walk(st.get("steps", []))
+            for side in st.get("side", []):
+                n += walk(side.get("steps", []))
+        return n
+
+    total_bytes = 0
+    for path in paths:
+        total_bytes += path.stat().st_size
+        trace = json.loads(path.read_text(encoding="utf-8"))
+        count = 0
+        for loc in trace.get("locations", []):
+            count += walk(loc.get("steps", []))
+        per_call.append(count)
+
+    return {
+        "calls": len(paths),
+        "steps": steps,
+        "kinds": dict(sorted(kinds.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "bytes": total_bytes,
+        "min": min(per_call) if per_call else 0,
+        "max": max(per_call) if per_call else 0,
+    }
+
+
+def report() -> int:
+    """Print the measurement numbers, generated from the committed artefacts.
+
+    RESULT.md's table is transcribed from this, so the counts cannot drift from
+    what the tree actually produces -- REVIEW-5 defect 5, where four figures had
+    gone stale. Run the five measurement modules first; this reads their output.
+    """
+    missing = []
+    rows = []
+    for name, directory, prefix in MEASUREMENT_DIRS:
+        if not directory.is_dir():
+            missing.append(f"{name}: {directory.relative_to(ROOT)} does not exist")
+            continue
+        paths = sorted(p for p in directory.glob(f"{prefix}*.json"))
+        if not paths:
+            missing.append(f"{name}: no traces under {directory.relative_to(ROOT)}")
+            continue
+        rows.append((name, tally(paths)))
+
+    if missing:
+        for line in missing:
+            print(f"MISSING {line}", file=sys.stderr)
+        print(
+            "\nRun the five measurement modules first, e.g.\n"
+            "  for f in IsEmptyBasicTraced NontrivialDefsTraced FunctionDefsTraced \\\n"
+            "           ExistsUniqueTraced FunctionBasicTraced; do \\\n"
+            "    lake env lean test/SimpTrace/$f.lean; done",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("| file | calls | steps | kinds | bytes |")
+    print("| --- | --- | --- | --- | --- |")
+    totals = {"calls": 0, "steps": 0, "bytes": 0}
+    all_kinds: dict[str, int] = {}
+    for name, t in rows:
+        kinds = ", ".join(f"`{k}` {v}" for k, v in t["kinds"].items())
+        print(
+            f"| `{name}.lean` | {t['calls']} | {t['steps']} | {kinds} | "
+            f"{t['bytes']} |"
+        )
+        for key in totals:
+            totals[key] += t[key]
+        for k, v in t["kinds"].items():
+            all_kinds[k] = all_kinds.get(k, 0) + v
+    kinds = ", ".join(
+        f"`{k}` {v}"
+        for k, v in sorted(all_kinds.items(), key=lambda kv: (-kv[1], kv[0]))
+    )
+    print(
+        f"| **total** | **{totals['calls']}** | **{totals['steps']}** | {kinds} | "
+        f"**{totals['bytes']}** |"
+    )
+    return 0
+
+
 def main() -> int:
+    if "--report" in sys.argv[1:]:
+        return report()
+
     if not EXPECTED_DIR.is_dir():
         print(f"missing expected directory: {EXPECTED_DIR}", file=sys.stderr)
         return 1

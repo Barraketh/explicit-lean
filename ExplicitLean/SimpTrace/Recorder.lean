@@ -344,16 +344,14 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         { s with procGoals := s.procGoals.set! (s.procGoals.size - 1) (some e) }
       else s
     ref.modify fun s =>
-      { s with procDepth := s.procDepth + 1,
-               procEvents := s.procEvents.push #[],
+      { s with procEvents := s.procEvents.push #[],
                procGoals := s.procGoals.push none }
     let depth := (← ref.get).procEvents.size
     let stepResult ←
       try p e
       catch ex =>
         ref.modify fun s =>
-          { s with procDepth := s.procDepth - 1,
-                   procEvents := s.procEvents.take (depth - 1),
+          { s with procEvents := s.procEvents.take (depth - 1),
                    procGoals := s.procGoals.take (depth - 1) }
         throw ex
     -- Read the diverted frame and its goal, then pop both.
@@ -361,7 +359,7 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
     let ok := depth > 0 && depth <= st.procEvents.size && depth <= st.procGoals.size
     let diverted := if ok then st.procEvents.getD (depth - 1) #[] else #[]
     let divertedGoal? := if ok then st.procGoals.getD (depth - 1) none else none
-    ref.set { st with procDepth := st.procDepth - 1,
+    ref.set { st with
                       procEvents := st.procEvents.take (depth - 1),
                       procGoals := st.procGoals.take (depth - 1) }
     let usedAfter := (← get).usedTheorems
@@ -431,21 +429,18 @@ as an `eq` step rather than an anonymous `change`. -/
 def instrumentD (ref : TraceRef) (p : Simp.DSimproc) : Simp.DSimproc := fun e => do
   let usedBefore := (← get).usedTheorems
   ref.modify fun s =>
-    { s with procDepth := s.procDepth + 1,
-             procEvents := s.procEvents.push #[],
+    { s with procEvents := s.procEvents.push #[],
              procGoals := s.procGoals.push none }
   let depthD := (← ref.get).procEvents.size
   let stepResult ←
     try p e
     catch ex =>
       ref.modify fun s =>
-        { s with procDepth := s.procDepth - 1,
-                 procEvents := s.procEvents.take (depthD - 1),
+        { s with procEvents := s.procEvents.take (depthD - 1),
                  procGoals := s.procGoals.take (depthD - 1) }
       throw ex
   ref.modify fun s =>
-    { s with procDepth := s.procDepth - 1,
-             procEvents := s.procEvents.take (depthD - 1),
+    { s with procEvents := s.procEvents.take (depthD - 1),
              procGoals := s.procGoals.take (depthD - 1) }
   let usedAfter := (← get).usedTheorems
   let news := newOrigins usedBefore usedAfter

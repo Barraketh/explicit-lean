@@ -164,20 +164,15 @@ structure TraceState where
   descended under, outermost first.  Only *term* binders are pushed here:
   `+contextual`'s antecedent hypotheses bind no position in the running term. -/
   binders : Array FVarId := #[]
-  /-- Nesting depth inside a stock procedure that is running its own `simp`.
+  /-- Firings diverted away from the trace, innermost frame last.
 
   A simproc may call the opaque `Simp.simp` on a subterm of its own choosing —
   `reduceIte` does exactly this on an `ite`'s condition — and that call goes to
   *stock* `simpImpl`, not to the fork, so the firings it causes carry no
-  position of their own.  While `procDepth > 0` those firings are diverted into
-  `procEvents` rather than logged at the traversal's position, which would be
-  the enclosing node's and therefore wrong.  The simproc's own result is then
-  logged as one `eq` step at the position the traversal is actually visiting,
-  and the diverted firings become that step's `side` evidence — which is what
-  lets its `by` be checked against a *simplified* condition rather than the
-  original one. -/
-  procDepth : Nat := 0
-  /-- Firings diverted while `procDepth > 0`, innermost frame last. -/
+  position of their own.  While a frame is active those firings land in it
+  rather than at the traversal's position, which would be the enclosing node's
+  and therefore wrong.  The simproc's own result is logged instead, and the
+  diverted firings become that step's `side` evidence. -/
   procEvents : Array (Array Event) := #[]
   /-- The subterm each diverted frame's nested `simp` was started on, so the
   side trace can name its own goal.  A simproc's nested `simp` enters stock
@@ -192,7 +187,7 @@ corresponding universe rather than `IO.Ref`. -/
 abbrev TraceRef := ST.Ref IO.RealWorld TraceState
 
 /-- Push an event into the innermost active frame.  Diverted into `procEvents`
-while inside a stock procedure's own nested `simp` (see `procDepth`). -/
+while a `procEvents` frame is active (see that field). -/
 def TraceState.push (s : TraceState) (ev : Event) : TraceState :=
   if h : s.procEvents.size > 0 then
     let i := s.procEvents.size - 1
@@ -239,13 +234,11 @@ firings have no position in the fork's convention, and logging them at the
 enclosing position would be wrong.  The caller records the net change instead. -/
 @[inline] def withDivertedEvents (ref : TraceRef) (k : SimpM α) : SimpM α := do
   ref.modify fun s =>
-    { s with procDepth := s.procDepth + 1,
-             procEvents := s.procEvents.push #[],
+    { s with procEvents := s.procEvents.push #[],
              procGoals := s.procGoals.push none }
   let depth := (← ref.get).procEvents.size
   try k finally ref.modify fun s =>
-    { s with procDepth := s.procDepth - 1,
-             procEvents := s.procEvents.take (depth - 1),
+    { s with procEvents := s.procEvents.take (depth - 1),
              procGoals := s.procGoals.take (depth - 1) }
 
 /-- Run `k`, returning its result together with the events it logged, which are
