@@ -17,112 +17,139 @@ namespace ExplicitLean.SimpTrace.Fixtures
 
 /-- A top-level rewrite that closes the goal by `rfl`/`True`. -/
 example (a : Nat) : a + 0 = a := by
-  simp_trace with_trace "test/SimpTrace/out/top_level_rfl.json"
+  simp_trace =>trace "test/SimpTrace/out/top_level_rfl.json"
 
 /-- Two chained rewrites. -/
 example (a b : Nat) (h : a = b) : a + 0 = b := by
-  simp_trace [h] with_trace "test/SimpTrace/out/chained.json"
+  simp_trace [h] =>trace "test/SimpTrace/out/chained.json"
 
 /-- A `←` (reverse) rewrite. -/
 example (a b : Nat) (h : b = a) : a + 0 = b := by
-  simp_trace [← h] with_trace "test/SimpTrace/out/reverse.json"
+  simp_trace [← h] =>trace "test/SimpTrace/out/reverse.json"
 
 /-- A rewrite under a `∀` binder. -/
 example (f : Nat → Nat) : ∀ x : Nat, f x + 0 = f x := by
-  simp_trace with_trace "test/SimpTrace/out/under_forall.json"
+  simp_trace =>trace "test/SimpTrace/out/under_forall.json"
 
 /-- A rewrite under a `fun x =>` binder. -/
 example (f : Nat → Nat) : (fun x => f x + 0) = fun x => f x := by
-  simp_trace with_trace "test/SimpTrace/out/under_lambda.json"
+  simp_trace =>trace "test/SimpTrace/out/under_lambda.json"
 
 /-- A rewrite inside a hypothesis. -/
 example (a b : Nat) (h : a + 0 = b) : a = b := by
-  simp_trace at h with_trace "test/SimpTrace/out/at_hyp.json"
+  simp_trace at h =>trace "test/SimpTrace/out/at_hyp.json"
   exact h
 
 /-- `simp [h]` with a local equation. -/
 example (a b c : Nat) (h : a = b) : a + c = b + c := by
-  simp_trace [h] with_trace "test/SimpTrace/out/local_eq.json"
+  simp_trace [h] =>trace "test/SimpTrace/out/local_eq.json"
 
 /-- A conditional lemma whose side condition simp discharged: `Nat.sub_add_cancel`
 needs `n ≤ m`, which the discharger proves from the hypothesis `h`. -/
 example (m n : Nat) (h : n ≤ m) : m - n + n = m := by
-  simp_trace [Nat.sub_add_cancel, h] with_trace "test/SimpTrace/out/conditional.json"
+  simp_trace [Nat.sub_add_cancel, h] =>trace "test/SimpTrace/out/conditional.json"
 
 /-- A simproc with a condition it reduces itself (`reduceIte`). -/
 example (n : Nat) (h : n = 3) : (if n = 3 then 1 else 2) = 1 := by
-  simp_trace [h] with_trace "test/SimpTrace/out/ite.json"
+  simp_trace [h] =>trace "test/SimpTrace/out/ite.json"
 
 /-- A simproc arithmetic step. -/
 example : (2 : Nat) + 3 = 5 := by
-  simp_trace with_trace "test/SimpTrace/out/simproc.json"
+  simp_trace =>trace "test/SimpTrace/out/simproc.json"
 
 /-- A definitional step: a reducible definition unfolding. -/
 @[reducible] def myId (n : Nat) : Nat := n
 
 example (n : Nat) : myId n = n := by
-  simp_trace [myId] with_trace "test/SimpTrace/out/unfold.json"
+  simp_trace [myId] =>trace "test/SimpTrace/out/unfold.json"
 
 /-- A definitional step: beta reduction. -/
 example (f : Nat → Nat) (n : Nat) : (fun x => f x) n = f n := by
-  simp_trace with_trace "test/SimpTrace/out/beta.json"
+  simp_trace =>trace "test/SimpTrace/out/beta.json"
 
 /-- `+contextual`. -/
 example (p q : Prop) : p → (p ∧ q → q) := by
-  simp_trace +contextual with_trace "test/SimpTrace/out/contextual.json"
+  simp_trace +contextual =>trace "test/SimpTrace/out/contextual.json"
 
 /-- Every parenthesized argument form `simp` accepts must parse, or `simp_trace`
 is not substitutable for `simp`. -/
 example : (2:Nat) + 2 = 4 := by
-  simp_trace (config := { decide := true }) with_trace "test/SimpTrace/out/cfg_paren.json"
+  simp_trace (config := { decide := true }) =>trace "test/SimpTrace/out/cfg_paren.json"
 
 example (a b : Nat) (h : a = b) : a + 0 = b := by
-  simp_trace (discharger := assumption) [h] with_trace "test/SimpTrace/out/discharger.json"
+  simp_trace (discharger := assumption) [h] =>trace "test/SimpTrace/out/discharger.json"
 
 example (a b : Nat) (h : a = b) : a + 0 = b := by
-  simp_trace (disch := assumption) [h] with_trace "test/SimpTrace/out/disch.json"
+  simp_trace (disch := assumption) [h] =>trace "test/SimpTrace/out/disch.json"
 
 /-- `+decide` records the decision as an `eq` step, never an unattributed abort. -/
 example : (2:Nat) + 2 = 4 := by
-  simp_trace +decide with_trace "test/SimpTrace/out/decide.json"
+  simp_trace +decide =>trace "test/SimpTrace/out/decide.json"
 
 /-- A `-flag` form. -/
 example (a : Nat) : a + 0 = a := by
-  simp_trace -contextual with_trace "test/SimpTrace/out/minus_flag.json"
+  simp_trace -contextual =>trace "test/SimpTrace/out/minus_flag.json"
 
 /-- `[*]` and `at h ⊢`. -/
 example (a b : Nat) (h : a = b) : a + 0 = b := by
-  simp_trace [*] with_trace "test/SimpTrace/out/star_lemmas.json"
+  simp_trace [*] =>trace "test/SimpTrace/out/star_lemmas.json"
 
 example (a b : Nat) (h : a + 0 = b) : a + 0 = b := by
-  simp_trace at h ⊢ with_trace "test/SimpTrace/out/at_hyp_goal.json"
+  simp_trace at h ⊢ =>trace "test/SimpTrace/out/at_hyp_goal.json"
   exact h
 
 example (a b : Nat) (h : a + 0 = b) : b + 0 = a := by
-  simp_trace at * with_trace "test/SimpTrace/out/at_star.json"
+  simp_trace at * =>trace "test/SimpTrace/out/at_star.json"
   omega
 
 /-- A shadowed nested binder: the inner `x` shadows the outer one. -/
 example (f : Nat → Nat → Nat) :
     (fun x => (fun x => f x (x + 0)) (x + 0)) = (fun x => f x x) := by
-  simp_trace with_trace "test/SimpTrace/out/shadowed.json"
+  simp_trace =>trace "test/SimpTrace/out/shadowed.json"
 
 /-- A `let`, which simp discharges by zeta reduction. -/
 example (a : Nat) : (let y := a + 0; y + 0) = a := by
-  simp_trace with_trace "test/SimpTrace/out/zeta.json"
+  simp_trace =>trace "test/SimpTrace/out/zeta.json"
 
 /-- An inaccessible hypothesis: recorded with a `local` object carrying its
 user name and context index, never a bare `ctx:` label. -/
 example (a b : Nat) : a = b → a + 0 = b := by
   intro _
-  simp_trace [*] with_trace "test/SimpTrace/out/inaccessible.json"
+  simp_trace [*] =>trace "test/SimpTrace/out/inaccessible.json"
 
 /-- A hypothesis that simplifies to `False`, closing by absurdity. -/
 example (a : Nat) (h : a ≠ a) : False := by
-  simp_trace at h with_trace "test/SimpTrace/out/absurd.json"
+  simp_trace at h =>trace "test/SimpTrace/out/absurd.json"
+
+/-- Chained `@[reducible]` definitions: exposing the recorded subterm needs a
+*sequence* of delta steps at the same position, each recorded separately.
+Mathlib routinely stacks these, so a single-reduction probe is not enough. -/
+@[reducible] def chain1 (n : Nat) : Nat := n
+@[reducible] def chain2 (n : Nat) : Nat := chain1 n
+@[reducible] def chain3 (n : Nat) : Nat := chain2 n
+
+example (n : Nat) : chain2 n + 0 = n := by
+  simp_trace [chain2, chain1] =>trace "test/SimpTrace/out/chain2.json"
+
+example (n : Nat) : chain3 n + 0 = n := by
+  simp_trace [chain3, chain2, chain1] =>trace "test/SimpTrace/out/chain3.json"
+
+/-- An inaccessible hypothesis alongside an accessible local of the *same* base
+name.  The step must name `a✝`, never plain `a`: the latter denotes the
+accessible `a : ℕ` and would replay against the wrong hypothesis. -/
+example (a b : Nat) : a = b → a + 0 = b := by
+  intro _
+  simp_trace [*] =>trace "test/SimpTrace/out/shadow_inaccessible.json"
+
+/-- A theorem named `with_trace` must still be declarable: the clause keyword is
+non-reserved, so importing this module cannot break a Mathlib identifier. -/
+theorem with_trace (a : Nat) : a + 0 = a := by simp
+
+example (a : Nat) : a + 0 = a := by
+  simp_trace [with_trace] =>trace "test/SimpTrace/out/token_coexist.json"
 
 /-- A call that closes the goal via `True`. -/
 example : True := by
-  simp_trace with_trace "test/SimpTrace/out/closes_true.json"
+  simp_trace =>trace "test/SimpTrace/out/closes_true.json"
 
 end ExplicitLean.SimpTrace.Fixtures

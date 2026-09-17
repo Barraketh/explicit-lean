@@ -199,10 +199,62 @@ def check_trace(name: str, actual: dict, expected: dict, messages: list[str]) ->
 
 
 NEGATIVE_FIXTURE = ROOT / "test" / "SimpTrace" / "OutsideRoot.lean"
+SYMLINK_FIXTURE = ROOT / "test" / "SimpTrace" / "SymlinkEscape.lean"
+SYMLINK_DIR = ROOT / "test" / "SimpTrace" / "linkescape"
+
+
+def check_symlink_containment(messages: list[str]) -> None:
+    """A symlink under the package root must not become a write primitive.
+
+    Textual `..` collapsing does not see through a symlink, so containment has
+    to compare realpath-resolved paths. Creates the symlink, compiles a fixture
+    aimed through it, and requires refusal with no file written.
+    """
+    if not SYMLINK_FIXTURE.is_file():
+        fail(messages, f"missing symlink fixture {SYMLINK_FIXTURE.name}")
+        return
+
+    target = pathlib.Path("/tmp/simp_trace_symlink_check.json")
+    for path in (target,):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    try:
+        SYMLINK_DIR.unlink()
+    except FileNotFoundError:
+        pass
+
+    SYMLINK_DIR.symlink_to("/tmp")
+    try:
+        result = subprocess.run(
+            ["lake", "env", "lean", str(SYMLINK_FIXTURE.relative_to(ROOT))],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        output = result.stdout + result.stderr
+        if result.returncode == 0:
+            fail(messages, f"{SYMLINK_FIXTURE.name}: compiled without error; "
+                           f"a path through a symlink must be rejected")
+        if "refusing to write outside the package root" not in output:
+            fail(
+                messages,
+                f"{SYMLINK_FIXTURE.name}: expected the containment error, got:\n"
+                f"    {output.strip()[:300]}",
+            )
+        if target.exists():
+            fail(messages, f"{SYMLINK_FIXTURE.name}: wrote {target} through a symlink")
+            target.unlink()
+    finally:
+        try:
+            SYMLINK_DIR.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def check_path_containment(messages: list[str]) -> None:
-    """`with_trace` must refuse to write outside the package root.
+    """The out-clause must refuse to write outside the package root.
 
     Compiles a fixture that aims at an absolute path in /tmp and requires both
     that the compile fails with the containment error and that no file appears.
@@ -285,6 +337,7 @@ def main() -> int:
             )
 
     check_path_containment(messages)
+    check_symlink_containment(messages)
 
     if messages:
         for message in messages:
@@ -293,7 +346,7 @@ def main() -> int:
         return 1
 
     print(f"OK: {checked} simp_trace fixture(s) match their expected skeletons, "
-          f"and out-of-root paths are refused")
+          f"and out-of-root paths (including through symlinks) are refused")
     return 0
 
 

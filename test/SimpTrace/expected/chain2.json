@@ -9,20 +9,24 @@
       },
       "steps": [
         {
-          "kind": "rw",
+          "kind": "unfold",
           "pos": [
             0,
             1,
             0,
             1
           ],
-          "name": "a✝",
-          "dir": "fwd",
-          "local": {
-            "userName": "a._@._internal.0.test.SimpTrace.Fixtures.2021293418._hygCtx._hyg.21",
-            "inaccessible": true,
-            "ctxIndex": 3
-          }
+          "name": "ExplicitLean.SimpTrace.Fixtures.chain2"
+        },
+        {
+          "kind": "unfold",
+          "pos": [
+            0,
+            1,
+            0,
+            1
+          ],
+          "name": "ExplicitLean.SimpTrace.Fixtures.chain1"
         },
         {
           "kind": "rw",

@@ -9,4 +9,4 @@ import ExplicitLean.SimpTrace
 import Mathlib.Algebra.Order.Group.Nat
 
 example (a : Nat) : a + 0 = a := by
-  simp_trace with_trace "/tmp/simp_trace_escape_check.json"
+  simp_trace =>trace "/tmp/simp_trace_escape_check.json"

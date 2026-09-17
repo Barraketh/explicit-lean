@@ -28,11 +28,11 @@ theorem not_isEmpty_iff : ¬IsEmpty α ↔ Nonempty α :=
 
 @[simp]
 theorem isEmpty_Prop {p : Prop} : IsEmpty p ↔ ¬p := by
-  simp_trace only [← not_nonempty_iff, nonempty_prop] with_trace "test/SimpTrace/isempty_out/call01.json"
+  simp_trace only [← not_nonempty_iff, nonempty_prop] =>trace "test/SimpTrace/isempty_out/call01.json"
 
 @[simp]
 theorem isEmpty_pi {π : α → Sort*} : IsEmpty (∀ a, π a) ↔ ∃ a, IsEmpty (π a) := by
-  simp_trace only [← not_nonempty_iff, Classical.nonempty_pi, not_forall] with_trace "test/SimpTrace/isempty_out/call02.json"
+  simp_trace only [← not_nonempty_iff, Classical.nonempty_pi, not_forall] =>trace "test/SimpTrace/isempty_out/call02.json"
 
 theorem isEmpty_fun : IsEmpty (α → β) ↔ Nonempty α ∧ IsEmpty β := by
   rw [isEmpty_pi, ← exists_true_iff_nonempty, ← exists_and_right, true_and]
@@ -43,38 +43,38 @@ theorem nonempty_fun : Nonempty (α → β) ↔ IsEmpty α ∨ Nonempty β :=
 
 @[simp]
 theorem isEmpty_sigma {α} {E : α → Type*} : IsEmpty (Sigma E) ↔ ∀ a, IsEmpty (E a) := by
-  simp_trace only [← not_nonempty_iff, nonempty_sigma, not_exists] with_trace "test/SimpTrace/isempty_out/call03.json"
+  simp_trace only [← not_nonempty_iff, nonempty_sigma, not_exists] =>trace "test/SimpTrace/isempty_out/call03.json"
 
 @[simp]
 theorem isEmpty_psigma {α} {E : α → Sort*} : IsEmpty (PSigma E) ↔ ∀ a, IsEmpty (E a) := by
-  simp_trace only [← not_nonempty_iff, nonempty_psigma, not_exists] with_trace "test/SimpTrace/isempty_out/call04.json"
+  simp_trace only [← not_nonempty_iff, nonempty_psigma, not_exists] =>trace "test/SimpTrace/isempty_out/call04.json"
 
 theorem isEmpty_subtype (p : α → Prop) : IsEmpty (Subtype p) ↔ ∀ x, ¬p x := by
-  simp_trace only [← not_nonempty_iff, nonempty_subtype, not_exists] with_trace "test/SimpTrace/isempty_out/call05.json"
+  simp_trace only [← not_nonempty_iff, nonempty_subtype, not_exists] =>trace "test/SimpTrace/isempty_out/call05.json"
 
 @[simp]
 theorem isEmpty_prod {α β : Type*} : IsEmpty (α × β) ↔ IsEmpty α ∨ IsEmpty β := by
-  simp_trace only [← not_nonempty_iff, nonempty_prod, not_and_or] with_trace "test/SimpTrace/isempty_out/call06.json"
+  simp_trace only [← not_nonempty_iff, nonempty_prod, not_and_or] =>trace "test/SimpTrace/isempty_out/call06.json"
 
 @[simp]
 theorem isEmpty_pprod : IsEmpty (PProd α β) ↔ IsEmpty α ∨ IsEmpty β := by
-  simp_trace only [← not_nonempty_iff, nonempty_pprod, not_and_or] with_trace "test/SimpTrace/isempty_out/call07.json"
+  simp_trace only [← not_nonempty_iff, nonempty_pprod, not_and_or] =>trace "test/SimpTrace/isempty_out/call07.json"
 
 @[simp]
 theorem isEmpty_sum {α β} : IsEmpty (α ⊕ β) ↔ IsEmpty α ∧ IsEmpty β := by
-  simp_trace only [← not_nonempty_iff, nonempty_sum, not_or] with_trace "test/SimpTrace/isempty_out/call08.json"
+  simp_trace only [← not_nonempty_iff, nonempty_sum, not_or] =>trace "test/SimpTrace/isempty_out/call08.json"
 
 @[simp]
 theorem isEmpty_psum {α β} : IsEmpty (α ⊕' β) ↔ IsEmpty α ∧ IsEmpty β := by
-  simp_trace only [← not_nonempty_iff, nonempty_psum, not_or] with_trace "test/SimpTrace/isempty_out/call09.json"
+  simp_trace only [← not_nonempty_iff, nonempty_psum, not_or] =>trace "test/SimpTrace/isempty_out/call09.json"
 
 @[simp]
 theorem isEmpty_ulift {α} : IsEmpty (ULift α) ↔ IsEmpty α := by
-  simp_trace only [← not_nonempty_iff, nonempty_ulift] with_trace "test/SimpTrace/isempty_out/call10.json"
+  simp_trace only [← not_nonempty_iff, nonempty_ulift] =>trace "test/SimpTrace/isempty_out/call10.json"
 
 @[simp]
 theorem isEmpty_plift {α} : IsEmpty (PLift α) ↔ IsEmpty α := by
-  simp_trace only [← not_nonempty_iff, nonempty_plift] with_trace "test/SimpTrace/isempty_out/call11.json"
+  simp_trace only [← not_nonempty_iff, nonempty_plift] =>trace "test/SimpTrace/isempty_out/call11.json"
 
 theorem wellFounded_of_isEmpty {α} [IsEmpty α] (r : α → α → Prop) : WellFounded r :=
   ⟨isEmptyElim⟩
@@ -100,27 +100,27 @@ variable {α β : Type*} (R : α → β → Prop)
 
 @[simp]
 theorem leftTotal_empty [IsEmpty α] : LeftTotal R := by
-  simp_trace only [LeftTotal, IsEmpty.forall_iff] with_trace "test/SimpTrace/isempty_out/call12.json"
+  simp_trace only [LeftTotal, IsEmpty.forall_iff] =>trace "test/SimpTrace/isempty_out/call12.json"
 
 theorem leftTotal_iff_isEmpty_left [IsEmpty β] : LeftTotal R ↔ IsEmpty α := by
-  simp_trace only [LeftTotal, IsEmpty.exists_iff, isEmpty_iff] with_trace "test/SimpTrace/isempty_out/call13.json"
+  simp_trace only [LeftTotal, IsEmpty.exists_iff, isEmpty_iff] =>trace "test/SimpTrace/isempty_out/call13.json"
 
 @[simp]
 theorem rightTotal_empty [IsEmpty β] : RightTotal R := by
-  simp_trace only [RightTotal, IsEmpty.forall_iff] with_trace "test/SimpTrace/isempty_out/call14.json"
+  simp_trace only [RightTotal, IsEmpty.forall_iff] =>trace "test/SimpTrace/isempty_out/call14.json"
 
 theorem rightTotal_iff_isEmpty_right [IsEmpty α] : RightTotal R ↔ IsEmpty β := by
-  simp_trace only [RightTotal, IsEmpty.exists_iff, isEmpty_iff] with_trace "test/SimpTrace/isempty_out/call15.json"
+  simp_trace only [RightTotal, IsEmpty.exists_iff, isEmpty_iff] =>trace "test/SimpTrace/isempty_out/call15.json"
 
 @[simp]
 theorem biTotal_empty [IsEmpty α] [IsEmpty β] : BiTotal R :=
   ⟨leftTotal_empty R, rightTotal_empty R⟩
 
 theorem biTotal_iff_isEmpty_right [IsEmpty α] : BiTotal R ↔ IsEmpty β := by
-  simp_trace only [BiTotal, leftTotal_empty, rightTotal_iff_isEmpty_right, true_and] with_trace "test/SimpTrace/isempty_out/call16.json"
+  simp_trace only [BiTotal, leftTotal_empty, rightTotal_iff_isEmpty_right, true_and] =>trace "test/SimpTrace/isempty_out/call16.json"
 
 theorem biTotal_iff_isEmpty_left [IsEmpty β] : BiTotal R ↔ IsEmpty α := by
-  simp_trace only [BiTotal, leftTotal_iff_isEmpty_left, rightTotal_empty, and_true] with_trace "test/SimpTrace/isempty_out/call17.json"
+  simp_trace only [BiTotal, leftTotal_iff_isEmpty_left, rightTotal_empty, and_true] =>trace "test/SimpTrace/isempty_out/call17.json"
 
 theorem Function.Surjective.of_isEmpty [IsEmpty β] (f : α → β) : f.Surjective := IsEmpty.elim ‹_›
 

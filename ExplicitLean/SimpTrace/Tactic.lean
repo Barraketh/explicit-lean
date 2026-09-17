@@ -35,7 +35,7 @@ we can rebuild a genuine `simp` syntax node and hand it to stock
 `mkSimpContext`, which reads its arguments by position.
 -/
 
-/-- The out-clause, written *last* and delimited by `with_trace`.
+/-- The out-clause, written *last* and delimited by `=>trace`.
 
 Delimiter choice is what makes `simp_trace` substitutable for `simp`.  A
 *leading* `(out := ...)` makes the parser commit on the first `(` and demand
@@ -43,8 +43,11 @@ Delimiter choice is what makes `simp_trace` substitutable for `simp`.  A
 `(discharger := ...)`, `(disch := ...)`) become unwritable.  A *trailing*
 `(out := ...)` is swallowed by `optConfig` when no other argument precedes it,
 and a bare trailing `out := ...` is swallowed by the `location` parser in
-`simp_trace ... at h`.  A distinct leading keyword is unambiguous everywhere. -/
-syntax simpTraceOut := &" with_trace " str
+`simp_trace ... at h`.  A plain keyword atom would parse but is reserved
+globally on import, breaking identifiers of that name; a *non-reserved* keyword
+is swallowed by the `location` parser again.  `=>trace` is not an identifier at
+all, so it is unambiguous for the parser and invisible to the namespace. -/
+syntax simpTraceOut := " =>trace " str
 
 syntax (name := simpTrace) "simp_trace" optConfig
   (discharger)? (&" only")?
