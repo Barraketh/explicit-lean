@@ -20,7 +20,7 @@ State at handoff: main branch clean at this commit. Task branches (each in
 uncommitted work): `task/T1-trace-capture` (recorder, forked simp traversal;
 fix round 9 was in progress when the session ended; last commit "identical
 re-elaborated traces overwrite rather than accumulate"), `task/T2-explicit-rw`
-(replay tactic; round 8 fixes committed, awaiting incremental review 9),
+(replay tactic; round 8 fixes committed at 6dc6932+, all 9 items fixed incl. the axiom-set audit; awaiting incremental review 9; one open coordinator item: whether `zeta` steps carry a `name`, which the spec does not define),
 `task/T4-pipeline` (harness; review round 1 was in progress). T3 is merged.
 Agents from this session are gone; a new session re-dispatches per
 `tracking/COORDINATION.md` (revised gate: no critical/major; incremental
