@@ -441,7 +441,7 @@ def dischargerText? (stx : Syntax) : Option String :=
     let txt := stx[2].prettyPrint.pretty.trimAscii.toString
     -- "(disch := omega)" / "(discharger := omega)" -> "omega"
     let txt := if txt.startsWith "(" then txt.drop 1 |>.toString else txt
-    let txt := if txt.endsWith ")" then txt.dropRight 1 else txt
+    let txt := if txt.endsWith ")" then txt.dropEnd 1 |>.toString else txt
     match txt.splitOn ":=" with
     | _ :: rest => some ((String.intercalate ":=" rest).trimAscii.toString)
     | [] => some txt.trimAscii.toString
