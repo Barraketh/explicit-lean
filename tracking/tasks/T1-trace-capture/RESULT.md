@@ -14,8 +14,8 @@ identical to `Parser.Tactic.simp`, so a real `simp` node is rebuilt and passed t
 **Positions: approach (b), plus four corrections the task did not anticipate.** Replay recorded
 `(before, after)` pairs against a running term from the pre-state, locate `before` structurally, one step per
 occurrence in pre-order. (1) *Definitional steps are invisible to `Simp.Methods`*: beta/proj/iota/zeta and
-delta unfolding run in `simpLoop`'s `reduceStep`, outside `pre`/`post`; rather than fork simp's traversal (an
-escalation condition), the bridge search recovers them from the running term and emits
+delta unfolding run in `simpLoop`'s `reduceStep`, outside `pre`/`post`; the bridge search recovers them from
+the running term (forking was barred when this was written, and stays unattractive — see below) and emits
 `unfold`/`beta`/`proj`/`zeta`/`change`, validated like any other step. (2) *`post` fires on stale terms*:
 simp keeps the pre-rewrite parent and rebuilds, so a `post` firing's `before` can predate child rewrites
 already replayed; recorded terms are refreshed first. (3) *A refreshed term collapsing to the step's own
@@ -60,6 +60,17 @@ contradicting this file; it is now the same hard error the main trace already ra
 delimiter no longer reserves a global token (see above); (6) the two overstated claims are narrowed — goal
 state was verified to match stock simp on the reviewer's 18-form corpus and every fixture, not universally,
 and the "nothing dropped silently" claim now holds for side closes too.
+
+**Fork assessment** (user relaxation permitting a forked traversal; option (b) chosen). A fork would replace
+`Position.lean`'s reconstruction — `findBridgeChain?`, `reducibleSites`, `refresh`, `findOccurrences`, the
+no-op-match rule (~200 lines) — with an exact `SubExpr.Pos` threaded through the traversal, copying
+`simpLoop`/`simpStep`/`simpApp`/`simpLambda`/`simpForall`/`simpArrow`/`simpLet`/`simpProj`/`visitFn`/`congr`/
+`reduceStep`/`reduce`/`unfold?` and private helpers from `Simp.Main` (~480 lines) **plus**
+`simpAppUsingCongr`/`tryAutoCongrTheorem?` from `Simp.Types` (~180) — ~600-700 lines to resync each Lean
+bump. It would have prevented round-1 defects 3-4 and round-2 defect 1 outright and made round-1 defect 10
+moot, but not the other 14 (frontend, naming, path, policy). (b) because the hard part survives:
+`simpAppUsingCongr` rebuilds through congruence *lemmas*, so a fork still maps congruence-argument slots to
+child indices — the same problem, moved. Revisit if a corpus module defeats the chain search.
 
 **Files.** `ExplicitLean/SimpTrace.lean` + `SimpTrace/{Types,Recorder,Position,Tactic}.lean`;
 `test/SimpTrace/` (`Fixtures.lean`, `IsEmptyBasicTraced.lean`, `OutsideRoot.lean`, `SymlinkEscape.lean`,
