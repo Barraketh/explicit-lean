@@ -101,4 +101,30 @@ theorem iff_lemma_conv (p : Prop) (hp : p ∧ True) : p := by
   conv at hp => rw [and_true p]
   exact hp
 
+/-! ## A universe-polymorphic lemma
+
+`List.append_nil` is stated for `{α : Type u}`. The universe level is recovered
+by ordinary elaboration against the subterm at the position; nothing about it is
+stored in the trace.
+-/
+
+universe u
+
+theorem universe_polymorphic {α : Type u} (l : List α) :
+    (l ++ []).length = l.length := by
+  explicit_rw [List.append_nil l at [0, 1, 1]]
+  guard_target =ₛ l.length = l.length
+  rfl
+
+theorem universe_polymorphic_conv {α : Type u} (l : List α) :
+    (l ++ []).length = l.length := by
+  conv => lhs; arg 1; rw [List.append_nil l]
+
+/-- The same lemma at two different universes in one file, to pin that the level
+is genuinely inferred per use rather than fixed by the first elaboration. -/
+theorem universe_polymorphic_prop (l : List Prop) : (l ++ []).length = l.length := by
+  explicit_rw [List.append_nil l at [0, 1, 1]]
+  guard_target =ₛ l.length = l.length
+  rfl
+
 end ExplicitRwTest.Lemmas

@@ -127,6 +127,101 @@ example (p q : Prop) (r : p → Prop) (h : p = q) :
     (∀ x : p, r x) = (∀ x : p, r x) := by
   explicit_rw [h at [0, 1, 0]]
 
+/-! ## Product rule: no tactic block may be smuggled into a trace
+
+`then` and `eq ... by` are closed enumerations, so a forbidden tactic there is
+rejected by the **parser**, before elaboration. Parse errors cannot be captured
+by `#guard_msgs` (parsing fails before the command runs), so those four cases
+live in `test/ExplicitRw/RejectedSyntax/`, which
+`Experiment/check_explicit_rw.py` compiles and requires to fail.
+
+The `exact` closer takes a term, which *can* parse while containing `by`, so
+that one is refused at elaboration and is pinned here.
+-/
+
+/--
+error: explicit_rw: the closing `exact` term contains a `by` block. `explicit_rw` is product code, so a trace may not embed a tactic block: it would let a tactic forbidden by the governing rule run inside the product tactic, where a lint over this module could not see it. Write a closed term, or prove the lemma separately and name it.
+-/
+#guard_msgs in
+example (a b : Nat) (h : a = b) : a + 0 = b := by
+  explicit_rw [h at [0, 1, 0, 1]] then exact (by simp)
+
+-- A `by` block inside a lemma term is refused the same way.
+/--
+error: explicit_rw: step 1: the lemma term of this step contains a `by` block. `explicit_rw` is product code, so a trace may not embed a tactic block: it would let a tactic forbidden by the governing rule run inside the product tactic, where a lint over this module could not see it. Write a closed term, or prove the lemma separately and name it.
+-/
+#guard_msgs in
+example (a : Nat) : a + 0 = a := by
+  explicit_rw [(by simp : a + 0 = a) at []]
+
+/-! ## A stale position
+
+Each position is relative to the previous step's result, so a position that was
+valid before an earlier step is simply wrong afterwards.
+-/
+
+/--
+error: explicit_rw: step 2: lemma `h1` does not match the subterm at position [0, 1, 1].
+Expected
+  a
+but the subterm is
+  b
+-/
+#guard_msgs in
+example (a b : Nat) (h1 : a = b) (f : Nat → Nat) : f a = f b := by
+  explicit_rw [h1 at [0, 1, 1], h1 at [0, 1, 1]]
+
+/-! ## A `change` that is not definitionally equal
+
+The message prints the term with the pretty printer, not the parse tree.
+-/
+
+/--
+error: explicit_rw: step 1: `change (a +
+  1)` at position [0, 1] produced a term that is not definitionally equal to the original.
+Before
+  a + 0
+After
+  a + 1
+-/
+#guard_msgs in
+example (a : Nat) : a + 0 = a := by
+  explicit_rw [change (a + 1) at [0, 1]]
+
+/-! ## A dependent function argument
+
+Rebuilding `f a = f a'` where `f`'s result type mentions its argument needs a
+cast. The refusal is phrased in the tactic's own vocabulary.
+-/
+
+inductive Vec (α : Type) : Nat → Type where
+  | nil : Vec α 0
+
+def DependentP (n : Nat) (_v : Vec Nat n) : Prop := True
+
+/--
+error: explicit_rw: step 1: position [0, 1] rewrites an argument of a dependent function, whose result type mentions that argument; rebuilding the term would need a cast, which `explicit_rw` does not build. Only definitional steps are supported there.
+Function:
+  DependentP
+of type:
+  (n : Nat) → Vec Nat n → Prop
+-/
+#guard_msgs in
+example (n m : Nat) (h : n = m) (_v : Vec Nat n) : DependentP n _v := by
+  explicit_rw [h at [0, 1]]
+
+/-! ## `let` type and value positions stay refused
+
+Only the `let` *body* (child 2) is cast-free; see `Definitional.lean`.
+-/
+
+/--
+error: explicit_rw: step 1: position [0, 1, 1] rewrites the value of a `let`; only definitional steps are supported there.
+-/
+#guard_msgs in
+example (a b : Nat) (h : a = b) : (let y : Nat := a; y + 1) = b + 1 := by
+  explicit_rw [h at [0, 1, 1]]
+
 /-! ## `at *` is refused: positions are relative to one location -/
 
 /--

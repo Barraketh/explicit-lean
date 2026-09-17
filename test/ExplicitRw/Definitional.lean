@@ -79,4 +79,67 @@ theorem eq_by_decide : (2 + 3) * 2 = 10 := by
   guard_target =ₛ 5 * 2 = 10
   rfl
 
+/-! ## `proj` steps: both shapes a projection can take
+
+`(P.mk 3 4).fst` elaborates to an application of the projection *function*
+`P.fst`, which needs a delta step before it reduces; a single-field structure
+gives a raw `Expr.proj`. Both are covered, since only the first exercises the
+delta path.
+-/
+
+structure Pair where
+  fst : Nat
+  snd : Nat
+
+theorem proj_function_shape : (Pair.mk 3 4).fst = 3 := by
+  explicit_rw [proj at [0, 1]]
+  guard_target =ₛ 3 = 3
+  rfl
+
+theorem proj_function_shape_conv : (Pair.mk 3 4).fst = 3 := by
+  conv => lhs; whnf
+
+structure Box where
+  val : Nat
+
+theorem proj_raw_shape : (Box.mk 7).val = 7 := by
+  explicit_rw [proj at [0, 1]]
+  guard_target =ₛ 7 = 7
+  rfl
+
+/-! ## An `mdata` position
+
+Ordinary goals carry no `mdata`, so the node is reached here by wrapping the
+target explicitly. Navigation consumes child `0` and rebuilds the wrapper.
+-/
+
+open Lean Elab Tactic in
+/-- Wrap the goal in an `mdata` node, definitionally. -/
+elab "wrap_mdata" : tactic => do
+  let g ← getMainGoal
+  let t ← instantiateMVars (← g.getType)
+  let wrapped := Expr.mdata (KVMap.empty.insert `explicitRwTest (DataValue.ofBool true)) t
+  replaceMainGoal [← g.replaceTargetDefEq wrapped]
+
+theorem mdata_position (a b : Nat) (h : a = b) : a + 0 = b := by
+  wrap_mdata
+  -- child 0 of the `mdata` node, then the usual path into the left-hand side.
+  explicit_rw [h at [0, 0, 1, 0, 1]]
+  guard_target =ₛ b + 0 = b
+  rfl
+
+/-! ## A `let` body position (spec child 2)
+
+A `let` body needs no cast: `let x := v; b` is definitionally `b[v/x]`, so the
+proof transports unchanged. The `let` type and value positions remain refused;
+see `test/ExplicitRw/Negative.lean`.
+-/
+
+theorem let_body (a b : Nat) (h : a = b) : (let y : Nat := 7; a + y) = b + 7 := by
+  explicit_rw [h at [0, 1, 2, 0, 1]]
+  rfl
+
+theorem let_body_conv (a b : Nat) (h : a = b) : (let y : Nat := 7; a + y) = b + 7 := by
+  conv => lhs; rw [h]
+
 end ExplicitRwTest.Definitional

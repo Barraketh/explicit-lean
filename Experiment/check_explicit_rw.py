@@ -13,6 +13,7 @@ Run with `python3 -B Experiment/check_explicit_rw.py`.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
@@ -20,6 +21,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 FIXTURE_DIR = REPO / "test" / "ExplicitRw"
+REJECTED_DIR = FIXTURE_DIR / "RejectedSyntax"
 MODULE = "ExplicitLean.ExplicitRw"
 
 # Fixtures that deliberately contain failing proofs, checked via `#guard_msgs`.
@@ -87,15 +89,50 @@ def main() -> int:
             print("    " + "\n    ".join(output.splitlines()) if output else "")
             failures.append(f"{rel}: exit {code}")
 
+    # Forms that must be rejected by the *parser*. `#guard_msgs` cannot pin a
+    # parse error, because parsing fails before the command elaborates, so each
+    # of these files must fail to compile with the recorded message fragment.
+    expected_path = REJECTED_DIR / "expected.json"
+    if not expected_path.is_file():
+        print(f"check_explicit_rw: FAIL: missing {expected_path.relative_to(REPO)}")
+        return 1
+    expected: dict[str, str] = json.loads(expected_path.read_text(encoding="utf-8"))
+
+    rejected = sorted(REJECTED_DIR.glob("*.lean"))
+    if not rejected:
+        print(f"check_explicit_rw: FAIL: no files in {REJECTED_DIR.relative_to(REPO)}")
+        return 1
+    unlisted = {f.name for f in rejected} - set(expected)
+    if unlisted:
+        print(f"check_explicit_rw: FAIL: not listed in expected.json: {sorted(unlisted)}")
+        return 1
+
+    for fixture in rejected:
+        rel = fixture.relative_to(REPO)
+        fragment = expected[fixture.name]
+        code, output, elapsed = run(["lake", "env", "lean", str(rel)])
+        if code == 0:
+            print(f"  {rel} (rejected-syntax): FAIL (compiled, but must be rejected)")
+            failures.append(f"{rel}: compiled although it must be rejected")
+        elif fragment not in output:
+            print(f"  {rel} (rejected-syntax): FAIL (wrong reason)")
+            print(f"    expected to contain: {fragment}")
+            print("    " + "\n    ".join(output.splitlines()[:4]))
+            failures.append(f"{rel}: rejected for the wrong reason")
+        else:
+            print(f"  {rel} (rejected-syntax): PASS ({elapsed:.1f}s)")
+
+    total = len(fixtures) + len(rejected)
     if failures:
         print()
-        print(f"check_explicit_rw: FAIL ({len(failures)} of {len(fixtures)} fixture(s))")
+        print(f"check_explicit_rw: FAIL ({len(failures)} of {total} fixture(s))")
         for f in failures:
             print(f"  {f}")
         return 1
 
     print()
-    print(f"check_explicit_rw: PASS ({len(fixtures)} fixture(s))")
+    print(f"check_explicit_rw: PASS ({len(fixtures)} fixture(s), "
+          f"{len(rejected)} rejected-syntax case(s))")
     return 0
 
 
