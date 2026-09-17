@@ -558,7 +558,8 @@ def check_path_containment(messages: list[str]) -> None:
 # (`OutsideRoot`, `SymlinkEscape`) are checked separately and are *expected* to
 # fail, so they are not listed here.
 POSITIVE_FIXTURES = ("test/SimpTrace/Fixtures.lean",
-                     "test/SimpTrace/OptionBasicTraced.lean")
+                     "test/SimpTrace/OptionBasicTraced.lean",
+                     "test/SimpTrace/T21MissingRulePaths.lean")
 
 # Fixtures whose calls are classified `unresolved:`, so the file itself exits 1
 # by design.  Their traces are still compared against skeletons; only the exit

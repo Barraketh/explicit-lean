@@ -1,0 +1,78 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "exists_prop_congr",
+          "dir": "fwd",
+          "source": "congr",
+          "side": [
+            {
+              "goal": "True = True",
+              "pre": "True = True",
+              "post": "True = True",
+              "intros": [
+                "h"
+              ],
+              "close": {
+                "by": "rfl"
+              },
+              "steps": []
+            },
+            {
+              "goal": "p = True",
+              "pre": "p = True",
+              "post": "True = True",
+              "close": {
+                "by": "rfl"
+              },
+              "steps": [
+                {
+                  "kind": "rw",
+                  "pos": [
+                    0,
+                    1
+                  ],
+                  "name": "hp",
+                  "dir": "fwd",
+                  "local": {
+                    "userName": "hp",
+                    "inaccessible": false,
+                    "ctxIndex": 3
+                  },
+                  "prop": "true"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "exists_const",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "iff_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

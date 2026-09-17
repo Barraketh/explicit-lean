@@ -1166,6 +1166,20 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
         catch _ => return none
       if (← hasAssignableMVar proof <||> hasAssignableMVar eNew) then
         return none
+      let binders := xs.mapIdx fun i _ =>
+        if c.hypothesesPos.contains i then
+          { id := i, classification := "congruence" }
+        else if bis[i]!.isInstImplicit then
+          { id := i, classification := "instance" }
+        else
+          { id := i, classification := "matched" }
+      let derivation : RuleDerivation :=
+        { origin := "decl:" ++ c.theoremName.toString
+          source? := some "congr"
+          preprocess := #["congruence"]
+          redex := pos
+          extraArgs := extraArgs.size
+          binders := binders }
       -- One `rw` naming the theorem, carrying its hypotheses as `side` traces.
       -- The side goals now instantiate to their final forms, so re-read them.
       unless eNew == e do
@@ -1176,7 +1190,7 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
         ref.modify (·.push
           (.rw pos (.decl c.theoremName true false) false none e eNew
             (← captureEvCtx ref) #[] sidesFinal (some `congr)
-            (.decl c.theoremName true false) ""))
+            (.decl c.theoremName true false) "" (some derivation)))
       congrArgsT ref pos { expr := eNew, proof? := proof } extraArgs
         origNumArgs numArgs
     else
