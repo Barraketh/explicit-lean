@@ -6,14 +6,16 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | Task | Scope | Depends on | Status | Branch | Review |
 | --- | --- | --- | --- | --- | --- |
 | T0-remote-host | On demand only: Scaleway GP1-L (32 vCPU, 128 GB, $0.89/hr). Provision only when a local job fails on resources; delete when idle for an extended period and re-provision later | a local resource failure | deferred (user decision 2026-09-16) | | |
-| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 8 in progress | task/T1-trace-capture | R8: 3 critical (`True`/`¬False` side goals wrongly classified; `Ne` lemmas rejected; side-step positions outer-relative), 2 major, 3 minor |
-| T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 7 in progress | task/T2-explicit-rw | R7: 0 critical/major, 3 minor, 1 trivial; integration gate 5/5 traces replay |
+| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 9 in progress | task/T1-trace-capture | R9 merge gate failed: 48/78 traces replay; 4 critical (side goal recorded as subterm; `name` holds raw syntax; inaccessible tokens; off-by-one position), 3 major, 1 minor |
+| T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 8 in progress | task/T2-explicit-rw | R8: no soundness defects; 4 major in gates/docs (axiom audit, sweep slots, rename_i docs, forms table) |
 | T3-compliance | Rewrite two `dsimp` overrides; simp-family lint for overrides and generated regions | none | **merged** (af33e32) | task/T3-compliance | R3: NO DEFECTS |
-| T4-pipeline | Per-module driver: capture traces for a module, render `explicit_rw` source with original comment, build, oracle | T1, T2 | planned | | |
+| T4-pipeline | Per-module driver: transcribe, trace, render `explicit_rw` source with original comment, splice, compile in T2 worktree, per-site report attributed to a side | T1, T2 worktrees (read-only) | dispatched | task/T4-pipeline | |
 | T5-cone | Run T4 on the seven-module cone (91 calls); record per-call outcomes | T0, T4 | planned | | |
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
 
 Log (newest first):
+
+- 2026-09-16: user decision after slow convergence: merge gate is now no critical/major (minors tracked), reviews incremental after round 2, end-to-end replay is the primary test (COORDINATION.md e2ffee1). T4 pipeline harness dispatched driving the T1 and T2 worktrees read-only. T1 round 9: mechanical replay 48/78, all failures T1-side (side goal recorded as the simproc subterm, raw syntax in `name`, inaccessible tokens, one off-by-one position); fix dispatched. T2 round 8: no soundness defects; gate/doc majors in fix.
 
 - 2026-09-16: T1 round 8: Logic/Basic's 12 classified lines are 6 sites: 6 genuine dependent-proof transports, 6 false positives (side goals `True`/`¬False` never inspected). Also `Ne`-stated lemmas always rejected, side-trace positions outer-relative, `args` with `⋯`, two `; simp` sites untransplanted. Fix dispatched with structural guards (checker validates side positions; args re-elaborated from text; site-count check on traced copies).
 
