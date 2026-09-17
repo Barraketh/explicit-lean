@@ -12,6 +12,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T4-pipeline | Per-module driver: transcribe, trace, render `explicit_rw` source with original comment, splice, compile in T2 worktree, per-site report attributed to a side | T1, T2 worktrees (read-only) | implemented; review round 1 running | task/T4-pipeline | R1 pending |
 | T5-cone | Run T4 on the seven-module cone (91 calls); record per-call outcomes | T0, T4 | planned | | |
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
+| T13-cone-runner | Strict readable translated-root cone runner with closure, staging, freshness, resolution, build-order and lint gates | T5 preflight | **merged** | task/T13-cone-runner | R2 PASS at `d258d6c` for `298755b`; focused checks and one-module compile passed; full cone unrun |
 
 ## Next steps (written at session end, 2026-09-16)
 
@@ -78,8 +79,11 @@ terse completion notices, then makes merge and next-dispatch decisions.
 - **T12 Option trace running:** add the seven `Data.Option.Basic` sites to the
   accepted v2 producer, including nested term-mode and `ext` continuation
   shapes, and return exact invocation/classification counts for review.
-- **T13 cone runner queued:** implement the reviewed 69-module/134-edge strict
-  translated-root build after the next worker slot frees.
+- **T13 cone runner: ACCEPTED / MERGED.** The strict readable translated-root
+  runner through `298755b` is integrated; REVIEW-2 at `d258d6c` found no
+  critical or major defects. The focused checks, closure/order preflight and a
+  real one-module pinned Lean compile passed. The full 69-module/134-edge cone
+  compile and replay remain unrun and are not acceptance evidence.
 - **Post-cone SQLite ledger:** after the 91-site pipeline compiles reliably and
   before whole-corpus scaling, replace loose manifest/trace discovery with a
   SQLite execution ledger. Keep original sources and generated Lean as files;

@@ -5,13 +5,13 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-17T18:57:13Z",
+  "updatedAt": "2026-09-17T20:05:03Z",
   "resumeStatus": {
     "review": "T2_merged_and_integration_checked; T1_simplified_v2_mapping_running; T4_simplified_v2_mapping_running; T5_cone_pending; T10_cancelled",
     "t2": "merged_to_main_5ec2da5_and_integration_checked",
     "t1": "simplified_v2_mapping_implementation_running; module_char_ranges_call_text_ordinals_complete_invocations; no_hashes_nonces",
     "t4": "simplified_v2_mapping_bijection_running_before_render; source_preserving_replacement_gate_pending",
-    "t5": "seven_module_cone_pending_after_T1_T4_mapping_gate",
+    "t5": "strict_cone_runner_merged; seven_module_cone_pending_after_T1_T4_mapping_gate",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
@@ -109,7 +109,7 @@
   "direction": {
     "userConversationDate": "2026-09-16",
     "nextMilestone": "Finish the simplified v2 mapping implementations in T1 and T4, review their complete source-site/invocation bijection, then run the six-module gate and the T5 seven-module translated dependency tree.",
-    "activeState": "The trusted-environment contract is intentionally narrow: T1 emits module, original character range, exact call text, site ordinal and complete invocation ordinals; T4 verifies the bijection before rendering. T1 and T4 simplified implementations are running. T2 is merged and integration-checked; T5 is pending the mapping gate.",
+    "activeState": "The trusted-environment contract is intentionally narrow: T1 emits module, original character range, exact call text, site ordinal and complete invocation ordinals; T4 verifies the bijection before rendering. T1 and T4 simplified implementations are running. T2 is merged and integration-checked; the T13 strict cone runner is merged, while the T5 cone remains pending the mapping gate and actual run.",
     "designDecisions": {
       "T6": "Complete: after T4 final gate, use deterministic structural bullet expansion keyed by complete invocation ordinals; refuse unsafe non-tail continuations; do not use first-dispatch or goal fingerprints.",
       "T7": "Optional diagnostic only: the existing source-pair declaration oracle may be used for focused semantic debugging, but it is not an acceptance gate and does not require per-site hashes.",
@@ -388,6 +388,11 @@
       "id": "T4-pipeline",
       "status": "running_simplified_v2_mapping",
       "description": "T4's pipeline is running the trusted-environment v2 mapping check before rendering, then source-preserving replacement and compilation. It must consume the complete T1 site/invocation mapping; hashes, nonces and T10's neutral forgery suite are not required."
+    },
+    {
+      "id": "T13-cone-runner",
+      "status": "merged_reviewed",
+      "description": "Strict readable translated-root cone runner integrated through reviewed implementation commit 298755b and REVIEW-2 d258d6c. REVIEW-2 verified the freshness fix, focused Python/lint checks, 69-module/134-edge closure and build order, translated-import controls, and a real one-module pinned Lean compile. The full seven-module cone compile and replay were not run."
     },
     {
       "id": "T10-trace-identity-conformance",
@@ -785,6 +790,14 @@
       "evidenceUploadFailed": false,
       "cleanupReceiptSha256": "930b160be00c324a79ffa0dfc13abf1613637ff3b5dfb96de6ccb0a091ef45db",
       "wholeTreeAcceptanceAdvanced": false
+    },
+    {
+      "checkedAt": "2026-09-17T20:05:03Z",
+      "scope": "T13_readable_cone_runner_review_2_integration",
+      "result": "passed_focused_only_full_cone_unrun",
+      "implementationCommit": "298755b",
+      "reviewCommit": "d258d6c",
+      "detail": "REVIEW-2 verdict PASS with REVIEW-1 major fixed. Verified python3 -B Experiment/check_readable_cone.py (4 tests OK); python3 -m py_compile Experiment/run_readable_cone.py Experiment/check_readable_cone.py; git diff --check; python3 -B Experiment/check_simp_family_lint.py (46 tests OK, 2 skipped); python3 -B Experiment/check_no_simp_family.py (3 files scanned, PASS); discover_closure plus verify_reviewed_closure/verify_build_order (69 modules, 134 edges, kinds import 8/public import 96/public meta import 30, one Relator bridge); python3 -B Experiment/check_translated_imports.py (passed, expected conflicting stock returnCode 1 and missing audit rejection); and a real one-module pinned Lean compile with fresh output and translated-root resolution. The seven-module cone compile/replay and full-tree acceptance were not run."
     }
   ],
   "historicalAutomation": {
