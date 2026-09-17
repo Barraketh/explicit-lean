@@ -1,5 +1,9 @@
 # simp trace format v1 (interface between trace capture and positional replay)
 
+Amended 2026-09-16 after review round 1 of T1/T2: `zeta` kind, `true_intro` and
+`absurd:<hyp>` close forms (replacing `trivial`/`eq_self`), local-hypothesis
+reference object. Schema id stays `simp-trace-v1` because nothing has shipped.
+
 One trace per executed simp call. JSON object:
 
 ```
@@ -9,7 +13,7 @@ One trace per executed simp call. JSON object:
   "locations": [ { "loc": "goal" | {"hyp": "<user name>"},
                    "pre": "<pp of the location before>", "post": "<pp after, or null if closed>",
                    "steps": [ STEP, ... ],
-                   "close": null | {"by": "rfl" | "trivial" | "assumption:<name>" | "eq_self" | "decide"} } ] }
+                   "close": null | {"by": "rfl" | "true_intro" | "assumption:<name>" | "absurd:<hyp name>" | "decide"} } ] }
 ```
 
 `STEP` is one of:
@@ -24,8 +28,8 @@ One trace per executed simp call. JSON object:
   `steps`/`close` shape.
 - `{"kind":"unfold", "pos": POS, "name": "<constant>", "before": ..., "after": ...}`
   Delta-unfold one constant at that position (definitional).
-- `{"kind":"beta"|"eta"|"proj", "pos": POS, "before": ..., "after": ...}` Definitional
-  reductions simp performs silently.
+- `{"kind":"beta"|"eta"|"proj"|"zeta", "pos": POS, "before": ..., "after": ...}` Definitional
+  reductions simp performs silently (`zeta` = `let x := v; b` to `b[v/x]`).
 - `{"kind":"change", "pos": POS, "to": "<pp.all term>", "before": ...}` Last-resort
   definitional replacement when no named kind applies; replay checks defeq.
 - `{"kind":"eq", "pos": POS, "lhs": "<pp>", "rhs": "<pp>", "by": "rfl"|"decide",
@@ -33,6 +37,14 @@ One trace per executed simp call. JSON object:
   the named ordinary tactic, never with the simproc.
 - `{"kind":"intro_ctx", "pos": POS, "name": "<hyp name>"}` Contextual simp made the
   antecedent of an implication at `pos` available as a hypothesis for later steps.
+
+Local hypothesis references: when `name` is a local hypothesis rather than a
+global constant, the step also carries
+`"local": {"userName": "<name>", "inaccessible": true|false, "ctxIndex": <n>}`
+where `ctxIndex` is the hypothesis's index in the local context at that point.
+Hypotheses introduced by contextual simp use `{"contextual": true, "ctxIndex": <n>}`
+instead; the two namespaces never collide. A replay generator names an
+inaccessible hypothesis with `rename_i` before using it.
 
 `POS` is a JSON array of child indices from the root of the location, using
 Lean's `SubExpr.Pos` convention: for `app f a`, 0 = f and 1 = a; for
