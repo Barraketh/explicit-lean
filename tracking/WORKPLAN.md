@@ -6,7 +6,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | Task | Scope | Depends on | Status | Branch | Review |
 | --- | --- | --- | --- | --- | --- |
 | T0-remote-host | On demand only: Scaleway GP1-L (32 vCPU, 128 GB, $0.89/hr). Provision only when a local job fails on resources; delete when idle for an extended period and re-provision later | a local resource failure | deferred (user decision 2026-09-16) | | |
-| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 5 in progress | task/T1-trace-capture | R5: 2 critical (`simp [h]` origin lacks local/prop; `propext` accepted as lemma), 3 major, 3 minor; no goal divergence, 1.01x overhead |
+| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 6 in progress | task/T1-trace-capture | R6: 2 critical (non-ASCII hyp names dropped; explicit class args unrecorded), 3 major, 3 minor; still zero goal divergence |
 | T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 6 in progress | task/T2-explicit-rw | R6: 1 critical (`eq` slot admits sorry), 3 major, 2 minor; recursive side proofs and `congr` kind pending |
 | T3-compliance | Rewrite two `dsimp` overrides; simp-family lint for overrides and generated regions | none | **merged** (af33e32) | task/T3-compliance | R3: NO DEFECTS |
 | T4-pipeline | Per-module driver: capture traces for a module, render `explicit_rw` source with original comment, build, oracle | T1, T2 | planned | | |
@@ -14,6 +14,8 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
 
 Log (newest first):
+
+- 2026-09-16: T1 round 6: zero divergence on 20 dsimp-path goals; defects: character-whitelist name resolution (non-ASCII hypotheses), explicit class-typed args unrecorded, plumbing-head list incomplete, dsimproc firings as propositional `eq`, macro-scope erasure in closes. Spec bump e95c745: side traces carry pre/post; dsimproc firings are `change` with `source`. Fix dispatched.
 
 - 2026-09-16: T1 round 5: fidelity confirmed (no goal-state divergence, 1.01x overhead, T2 replays ordinary and user-congr traces verbatim); defects in local-hypothesis origins, `propext` misclassified as a rewriting lemma, a misplaced unresolved marker, `withInDSimp` not entered, and drifted RESULT.md counts (now to be script-generated). T2 asked to add `congr` step syntax via `mkCongrSimp?`.
 
