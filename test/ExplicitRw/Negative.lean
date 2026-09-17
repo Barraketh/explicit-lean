@@ -247,6 +247,30 @@ error: explicit_rw: step 1: `intro_ctx` is a recorded step kind that `explicit_r
 example (p q : Prop) (hq : q) : p → q := by
   explicit_rw [intro_ctx hp at [1]]
 
+/-! ## Antiquotations are named, in every slot
+
+`$x` parses in every category but means nothing in a trace. Round 6 gave it a
+plain message in the term and step slots; round 7 found the recursive
+side-proof grammar added in that same round had re-introduced "internal error",
+so these pin all three.
+-/
+
+/-- error: explicit_rw: antiquotations are not admitted in a trace step. -/
+#guard_msgs(error, drop info, drop warning) in
+example (a b : Nat) : a = b := by
+  explicit_rw [$x at [0, 1]]
+
+/-- error: explicit_rw: step 1: antiquotations are not admitted in a side proof. -/
+#guard_msgs(error, drop info, drop warning) in
+example (c : Prop) [Decidable c] (x y u : Nat) (hxu : x = u) :
+    (if c then x else y) = (if c then u else y) := by
+  explicit_rw [ite_congr at [0, 1] with [rfl, $x, intro h ; rfl]] then rfl
+
+/-- error: explicit_rw: antiquotations are not admitted in a trace step. -/
+#guard_msgs(error, drop info, drop warning) in
+example {α β : Type} (h : α = β) (f : α → α) (a : α) : cast h (f a) = cast h a := by
+  explicit_rw [congr 3 [$x at []] at [0, 1]] then rfl
+
 /-! ## `at *` is refused: positions are relative to one location -/
 
 /--

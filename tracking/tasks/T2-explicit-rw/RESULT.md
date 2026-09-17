@@ -1,25 +1,23 @@
 # T2-explicit-rw result
 
-Status: **complete**, all checks pass. Rounds 1-7: 7/7, 7/7, 3/3, 4/4, 5/5,
-6/6, 4/4. Round 7 found no critical or major defect and the integration merge
-gate passed on this side (5/5 T1 traces replay, 0 T2 mismatches).
-`explicit_rw` replays a simp trace positionally with no search (design and
-syntax: `ExplicitLean/ExplicitRw/Tactic.lean`). Nothing in it reaches
+Status: **complete**, all checks pass. Rounds 1-7: 7/7, 7/7, 3/3, 4/4, 5/5, 6/6,
+4/4. Round 7 found no critical or major defect and the integration merge gate
+passed on this side (5/5 T1 traces replay, 0 T2 mismatches).
+`explicit_rw` replays a simp trace positionally with no search (design and syntax
+in `ExplicitLean/ExplicitRw/Tactic.lean`). Nothing in it reaches
 `Lean.Meta.Simp`. What a *trace* can introduce is a **conditional** guarantee,
 which is what is actually true: no trace in this syntax can introduce a
 simp-family tactic, *provided its file declares no term elaborators* (Round 3.1).
 
-## Round 7 fixes
-No critical or major defects; all four were diagnostics or bookkeeping.
+## Round 7 fixes (all diagnostics or bookkeeping)
 1+2. *(minor)* Round 6 fixed the antiquotation wording in the term and step
    slots, but the recursive side-proof grammar added in that same round
    re-introduced "internal error" in four of six slots. The test now lives in one
-   `isAntiquot` predicate used by every dispatch fallthrough, so the two cannot
-   drift apart again. The `congr` soundness refusal compared terms differing only
-   in *implicit* arguments, printing the same term twice; both types are now
-   rendered **eagerly** under `pp.explicit` — eagerly because `MessageData`
-   resolves its context where the error is displayed, not where it is thrown, so
-   setting the option around the throw did nothing.
+   `isAntiquot` predicate used by every fallthrough, pinned by three fixtures.
+   The `congr` refusal compared terms differing only in *implicit* arguments, so
+   it printed the same term twice; both are now rendered **eagerly** under
+   `pp.explicit` — eagerly because `MessageData` resolves its context where the
+   error is displayed, not where it is thrown.
 3. *(minor, honesty)* The escape-sweep figures had **no committed artefact**:
    they came from scratch runs, two of which proved to be classifier errors
    rather than grammar defects — exactly the case where an artefact matters. The
@@ -48,12 +46,11 @@ No critical or major defects; all four were diagnostics or bookkeeping.
    and the `ℝ`/`ℂ` fixtures put those tokens only in theorem *statements*, never
    inside a step — which is why the atom bug passed the suite. Both are now real
    (`change Type` at a `Prop` position must be **refused**, verified by reverting
-   the fix and watching `Strict.lean` fail). The atoms had mapped to
-   `Real`/`Complex`, hygienic names resolving in this `prelude` module's scope
-   where they do not exist; the notation node is now rebuilt so Mathlib's
-   elaborator resolves it at the call site.
+   the fix). The atoms had mapped to `Real`/`Complex`, hygienic names resolving
+   in this `prelude` module's scope where they do not exist; the notation node is
+   now rebuilt so Mathlib's elaborator resolves it at the call site.
 5+6. *(minor)* Antiquotations named rather than "internal error"; the `change`
-   error no longer promises an underlying diagnostic that was never printed.
+   error no longer promises a diagnostic that was never printed.
 **Recursive side proofs** (item 4). `with [...]` and `then` take a closed
 *recursive* grammar: `rfl | decide | omega | nofun | exact <term> |
 intro <ids> ; <proof> |` a nested `explicit_rw`. A conditional lemma's hypothesis
@@ -61,20 +58,19 @@ is often implication-shaped — `ite_congr`/`dite_congr` give `c → x = u` — 
 no flat enumeration can discharge.
 **The `congr` step** (T1 round-5 cross-check). The spec's `congr` kind had no T2
 form, so cast-transport traces could not replay. `congr <i> [steps] at [pos]`
-rebuilds the application through `Lean.Meta.mkCongrSimp?`'s theorem, proving
-argument `i`'s equation from the nested steps; unlike `congrArg` it transports
-the arguments that *depend* on `i`. The built proof's type is checked against the
-claimed equation before use — what refuses every unsound rebuild the round-7
-reviewer constructed. Fixtures replay T1's `congr_cast`, `congr_nested_cast` and
-the `Function/Basic:390` shape.
+rebuilds the application through `Lean.Meta.mkCongrSimp?`'s theorem; unlike
+`congrArg` it transports the arguments that *depend* on `i`. The built proof's
+type is checked against the claimed equation before use — what refuses every
+unsound rebuild the round-7 reviewer constructed. Fixtures replay T1's
+`congr_cast`, `congr_nested_cast` and the `Function/Basic:390` shape.
 
 ## Rounds 1-5 fixes (each re-verified by the following reviewer)
 **Round 5**: sort productions read their keyword one node too shallow, so
 `Type`/`Type*`/`Sort*` collapsed to `Sort _`, which unifies with anything
 including `Prop`; `iota` reduced many steps where the spec says one; `ℕ ℤ ℚ ℝ ℂ`
 and `nofun` added. **Addendum**: a class-polymorphic lemma was elaborated before
-unification, so nothing fixed its instance argument and `add_zero` was stuck —
-instances are now synthesized only after the position fixes the carrier.
+unification, so `add_zero` was stuck — instances are now synthesized only after
+the position fixes the carrier.
 **Round 4**: the grammar admitted far less than Lean prints; it now covers
 conditionals, projection on parenthesised terms, untyped binders, the operators
 Mathlib pp emits, set-builder, pairs and sorts.
@@ -85,9 +81,8 @@ there" was false. Terms are now parsed in a whitelist grammar. **Residual hole,
 stated not papered over:** an identifier bound to a `@[term_elab]` elaborator is
 indistinguishable from a constant at parse time — closed generator-side, **T4**.
 **Round 2**: the `let`-body branch abstracted by *value*, destroying the `let`
-when its value was closed and capturing unrelated occurrences when it was free.
-**Round 1**: the `tacticSeq` hole in `then`/`eq … by`, now closed enumerations.
-Details in git.
+when its value was closed. **Round 1**: the `tacticSeq` hole in `then`/`eq … by`,
+now closed enumerations. Details in git.
 
 ## Files (only owned; `ExplicitLean.lean`, `lakefile.toml` untouched)
 `ExplicitLean/ExplicitRw{.lean,/Basic,/Tactic}.lean`; `test/ExplicitRw/` (7
@@ -104,15 +99,15 @@ fixtures + `RejectedSyntax/`: 13 cases; `sweep/`: probe list + README);
   `$x`, which no parser can stop); 120 benign all parse**
 - `python3 -B Experiment/check_no_simp_family.py`: PASS (3 files), 0.04 s
 
-Both gates were verified to *fail* when they should — the axiom audit on an
-injected `sorry` and on a new axiom, the sweep on an admitted escape — as were
-the sort fixtures against the pre-fix code.
+Both gates were verified to *fail* when they should: the axiom audit on an
+injected `sorry` and on a new axiom, the sweep on a planted escape (the first
+version of that check counted any error as a rejection and let the plant pass).
 ## Limitations and open questions
 - **Dependent positions are refused, not guessed**, each step-indexed: dependent
   function argument and `∀` domain, binder types, `let` type/value, projection
-  argument. A `congr` step is the way to replay one.
-- `intro_ctx` recognised but unimplemented (T1 does not emit it); `at *` refused;
-  `congr` nesting is two levels deep, which is what T1 emits.
+  argument. A `congr` step is the way to replay one. `intro_ctx` is recognised
+  but unimplemented (T1 does not emit it); `at *` is refused; `congr` nesting is
+  two levels deep, which is what T1 emits.
 - Recorded `lhs`/`rhs`/`to` must be **whitelist-dialect** terms. Rounds 4-5
   widened the grammar to what the pretty printer emits (`ℕ ℤ ℚ ℝ ℂ` included), but
   the dialect excludes `⟨…⟩`, `match`, `let`, `show … from` and big operators
