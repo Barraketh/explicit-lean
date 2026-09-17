@@ -14,18 +14,13 @@ Implemented the REVIEW-1 fixes in `Experiment/pipeline/`:
 
 | command | result |
 | --- | --- |
-| `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 189 checks, 5 s |
-| six-module harness against T1 `a066bc1c` / T2 `dbb6c703` | PASS, 84 sites, 145 s |
+| `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 194 checks, 5 s |
+| focused marker/lint repros and `git diff --check` | PASS |
 
-Harness counts: IsEmpty 15/17 replayed; Nontrivial 1/1; Function/Defs 1/2;
-ExistsUnique 8/8; Function/Basic 3/25 (13 compile failures, 6 render failures,
-1 unresolved, 2 probe-inconclusive); Logic/Basic 16/31 (3 compile failures,
-12 render failures). No site was falsely charged for an out-of-block probe
-diagnostic. The full report is under `/private/tmp/t4-round2c.Mg8yPt/`.
-
-A later rerun was intentionally not counted: T1 was being edited and its
-recorder `.olean` was absent, so the harness produced `no_trace` for all sites.
-The retry is a T1 stability blocker, not evidence of replay failure.
+The six-module harness was not rerun in this round because T1 remains dirty at
+`db97d8f` with its recorder `.olean` unavailable; no six-module result is
+claimed here. The previous clean baseline is intentionally not repeated as
+current evidence.
 
 Known limitations: per-branch `<;>` calls remain explicitly refused pending the
 later per-branch rendering task; T1 currently has two newly visible attributed
