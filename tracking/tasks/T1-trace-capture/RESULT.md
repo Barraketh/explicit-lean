@@ -11,8 +11,7 @@ Copied from Lean 4.32.2 `src/lean/Lean/Meta/Tactic/Simp/`: the traversal of **Ma
 `congr`/`congrDefault`, `processCongrHypothesis`, `trySimpCongrTheorem?`, `simpLoop`, `simpImpl`, `withNewLemmas`, `lambdaTelescopeDSimp`
 and helpers), the congruence machinery of **Types.lean** (`congrArgs`, `simpAppUsingCongr`, `tryAutoCongrTheorem?`, `mkCongr*`), and
 **Transform.lean**'s `transformWithCache` (as `dsimpT`, round 4). Each carries a `SOURCE:` comment with its upstream file and line range.
-Nine are `private` upstream; every symbol their bodies reference is public, so no `private`/`unsafe`/`@[implemented_by]` boundary had to
-be reproduced.
+Nine are `private` upstream; every symbol their bodies reference is public, so nothing was blocked.
 
 **Stock and untouched:** everything deciding *what* simp does — `Simp.Methods` from the context, `Simp.rewrite?`, `Simp.Result`, simproc
 tables, congruence lookup, `synthesizeArgs`, `mkCongrSimp?`. Two edits applied uniformly: every recursive `Simp.simp`/`Simp.dsimp` (an
@@ -36,37 +35,34 @@ recorder.**
 
 ## Measurements
 
-Pasted verbatim from `python3 -B Experiment/check_simp_trace.py --report`, run after the six modules. Nothing in this section is
-transcribed by hand — the count sentences were wrong in three consecutive rounds, so the numbers are now the tool's output and nothing
-else.
+Pasted verbatim from the tool, run after the six modules. Nothing here is transcribed by hand: the count sentences were wrong
+in three consecutive rounds.
 
 ```
 $ python3 -B Experiment/check_simp_trace.py --report
-| file | calls | steps | kinds | bytes |
-| --- | --- | --- | --- | --- |
-| `IsEmptyBasicTraced.lean` | 17 | 76 | `rw` 70, `unfold` 6 | 15250 |
-| `NontrivialDefsTraced.lean` | 1 | 6 | `rw` 6 | 1109 |
-| `FunctionDefsTraced.lean` | 2 | 15 | `rw` 11, `proj` 4 | 2479 |
-| `ExistsUniqueTraced.lean` | 8 | 29 | `rw` 23, `beta` 4, `unfold` 2 | 5601 |
-| `FunctionBasicTraced.lean` | 23 | 135 | `rw` 104, `beta` 9, `intro_ctx` 8, `proj` 8, `unfold` 4, `congr` 2 | 27305 |
-| `LogicBasicTraced.lean` | 31 | 163 | `rw` 160, `unfold` 3 | 33750 |
-| **total** | **82** | **424** | `rw` 374, `unfold` 15, `beta` 13, `proj` 12, `intro_ctx` 8, `congr` 2 | **85494** |
+| file | sites | traces | steps | kinds | bytes |
+| --- | --- | --- | --- | --- | --- |
+| `IsEmptyBasicTraced.lean` | 17 | 17 | 76 | `rw` 70, `unfold` 6 | 15250 |
+| `NontrivialDefsTraced.lean` | 1 | 1 | 6 | `rw` 6 | 1109 |
+| `FunctionDefsTraced.lean` | 2 | 3 | 17 | `rw` 13, `proj` 4 | 3013 |
+| `ExistsUniqueTraced.lean` | 8 | 8 | 29 | `rw` 23, `beta` 4, `unfold` 2 | 5601 |
+| `FunctionBasicTraced.lean` | 23 | 28 | 174 | `rw` 134, `proj` 17, `beta` 9, `intro_ctx` 8, `unfold` 4, `congr` 2 | 35049 |
+| `LogicBasicTraced.lean` | 31 | 47 | 281 | `rw` 278, `unfold` 3 | 59118 |
+| **total** | **82** | **104** | **583** | `rw` 524, `proj` 21, `unfold` 15, `beta` 13, `intro_ctx` 8, `congr` 2 | **119140** |
 ```
 
-Wall and RSS, `/usr/bin/time -l`, cold cache: IsEmpty 3.03 s / 647 MB, Nontrivial 2.82 s / 637 MB, FunctionDefs 3.02 s / 648 MB,
-ExistsUnique 2.89 s / 652 MB, FunctionBasic 3.70 s / 713 MB, LogicBasic
-4.32 s / 722 MB. `Logic/Basic` against its stock original: 4.32 s vs 2.64 s, 722 MB vs 669 MB.
+Timings are under **Checks** below; `Logic/Basic` against its stock original is 3.68 s vs 2.64 s, 720 MB vs 669 MB.
 
-**All 84 converted sites compile with zero crashes, zero validation failures and no error other than the classified lines** (82 traces;
-two sites run under `by_cases <;>` and share a file); every goal state matches stock. 16 classified lines (6 in `FunctionBasic`, 10 in
-`LogicBasic`) are all one shape: a proof term simp *transported* along a rewrite of that proof's own proposition, where the positions are
-checked but the proof identity is not. `test/SimpTrace/make_traced.py` generates the traced copies and `check_transcription.py` verifies
-every source site was converted — 84 of 84, enforced, after an earlier generator silently dropped 9.
+**All 82 sites compile with zero crashes, zero validation failures and no error other than the classified lines.** `sites` and
+`traces` differ because a site under `by_cases <;>` runs once per branch, on a different goal, and each run now has its own trace
+(round 9; previously the last branch silently overwrote the rest). Both numbers are the tool's. 24 classified lines: 12 are steps whose
+own verdict the trace now carries (`--report` groups them by reason), the rest the transported-proof shape below.
+`test/SimpTrace/make_traced.py` generates the traced copies and `check_transcription.py` verifies every source site was converted —
+82 of 82, enforced, after an earlier generator silently dropped 9.
 
-**REVIEW-3 items, all confirmed fixed by the round-4 reviewer.** C1 an unattributable firing is an `eq` step whose `by` a scratch check
-decides, never an abort; `iota` gained an emitter. C2 fixed by deleting the search: chain depths 4–30 flat, matching stock. M3 `(disch :=
-omega)` records `close:{"by":"omega"}`. M4 both Mathlib calls trace; fixing (b) exposed that a non-dependent arrow is a binder node
-binding no term variable, so `Expr.abstract`'s indices need padding. M5 Prop-valued lemmas carry `"prop"`. M6 no `#N` in any trace.
+**REVIEW-3 items, all confirmed fixed by the round-4 reviewer.** C1 an unattributable firing is an `eq` step, never an
+abort; `iota` gained an emitter. C2 fixed by deleting the search: chain depths 4–30 flat. M3 `(disch := omega)` records
+`omega`. M4 both Mathlib calls trace. M5 Prop-valued lemmas carry `prop`. M6 no `#N` in any trace.
 
 **Lemma-headed simproc proofs (spec 408a39b).** A simproc whose proof is one lemma applied is an ordinary `rw` naming that lemma, with the
 discharged condition as a `side` sub-trace and `"source"` naming the simproc. `classifyProof` is **generic, never a table of simproc
@@ -79,44 +75,27 @@ of the position, an instance, or a proof. Plumbing heads (`Eq.trans`/`Eq.mpr`/`E
 | `+decide` / `Nat.reduceEqDiff` | `eq_true_of_decide` / `eq_false_of_decide` | `rw [eq_true_of_decide (rfl : decide _ = true)]` |
 | `reduceCtorEq` | `eq_false'` | `exact eq_false' nofun` (round 4) |
 
-Each replay shape was run in ordinary Lean; the heads are `ite_cond_eq_true`/`dite_cond_eq_true`, not `if_pos`/`dif_pos`. The round-4
-reviewer confirmed `classifyProof` resisted all three fooling attempts.
-
-**Earlier fixture-skeleton changes,** each the fork being more faithful: `contextual` emits `intro_ctx` (never emitted before); `zeta`
-puts `zeta` first (verified against `trace.Debug.Meta.Tactic.simp`); `shadowed` emits three separate rewrites where the old trace merged
-two occurrences; `ite` carries the simproc's nested rewrites as `side`.
+Each replay shape was run in ordinary Lean; the round-4 reviewer confirmed `classifyProof` resisted all three fooling attempts.
 
 ## Earlier rounds (all verified fixed by later reviewers)
 
-**Round 4.** `dsimpT` became a verbatim port of `transformWithCache` (telescope collected, bodies instantiated with `instantiateRev
-fvars`, post step at the telescope root, `skipInstances`, `usedLetOnly`, per-node `Core.checkSystem`), which fixed the wrong post position
-under a `let`. The `Function/Basic:390` PANIC's root cause was `tryAutoCongrTheoremT?`: its `eq` arm pushed two `subst` entries where
-upstream pushes three, leaving loose bvars that reached stock `rewritePost`; loop and tail are now upstream's. `validate` compares with
-`eqUpToProofs` (proof irrelevance, as upstream's `isDefEq` does) and instantiates mvars on both sides; instance arguments and binder types
-are deliberately **not** weakened. `nofun` implemented from the condition's *type*. `Fixtures.lean` made a green gate, with
-unresolved-by-design cases split into `UnresolvedFixtures.lean` and the checker compiling both itself.
+**Round 4.** `dsimpT` became a verbatim port of `transformWithCache` (telescope collected and `instantiateRev`'d, post step at
+the telescope root, `skipInstances`, `usedLetOnly`, per-node `Core.checkSystem`), fixing `let` handling under every config. The
+`Function/Basic:390` PANIC's root cause was `tryAutoCongrTheoremT?` pushing two `subst` entries where upstream pushes three,
+leaving loose bvars that reached stock `rewritePost`; copied verbatim. `nofun` implemented from the condition's *type*;
+unresolved-by-design cases split into `UnresolvedFixtures.lean`.
 
-**Round 5 (`congr` kind, spec 3b17247).** `tryAutoCongrTheoremT?` captures each `CongrArgKind.eq` argument's events and, when the theorem
-transports a `CongrArgKind.cast` dependent, emits one `congr` step at the application's position carrying the argument index and its steps
-at relative positions; otherwise the events are re-rooted and stay plain `rw`. `validateNested` independently replays the argument,
-recursing through nested `congr`. Fixing this exposed that every trace-frame access indexed `[depth-1]!` under a `>= depth` guard, which
-panics when `depth` is 0 — all are now total.
+**Round 5.** `congr` kind (spec 3b17247): `tryAutoCongrTheoremT?` captures each `CongrArgKind` and emits one `congr` step at the
+application's position with nested steps at relative positions. Fixing this exposed that every trace-frame access indexed
+`[depth-1]!` under a `>= depth` guard, which panics at depth 0 — all are now total. `simp [h]` carried neither `local` nor
+`prop`; `resolveStxOrigin` supplies both from the theorem's *proof*, never the syntax's characters. `propext` was named as the
+rewriting lemma; it is plumbing, and the real lemma is the proof inside it. `dsimpT` now enters `withInDSimp`, so `dreduceIte`
+can fire.
 
-**Round 6 (user `@[congr]`, spec 2e73661).** `trySimpCongrTheoremT?` emits one `rw` naming the theorem with `"source": "congr"` and one
-`side` per hypothesis in order; an implication-shaped hypothesis carries its antecedents in `intros`, as **display** names (`a✝`), never
-`eraseMacroScopes`'d.
-
-## Rounds 5 and 6 (verified fixed by later reviewers)
-
-**Round 5.** `simp [h]` carried neither `local` nor `prop`; `resolveStxOrigin` supplies both while `name`/`dir` stay with the written
-syntax. `propext` was called the rewriting lemma and emitted `rw [propext]`; it is plumbing, and for an `Iff` simproc the lemma is the
-proof *inside* it. A `markUnresolved` beside an omitted `source` made a complete `eq` trace exit 1. `dsimpT` never entered `withInDSimp`,
-so `dreduceIte` could not fire — observable: stock reduces `Fin (if True then 3 else 4)` to `Fin 3`. `--report` generates the counts.
-
-**Round 6.** Names were classified by *characters*, so every non-ASCII name lost `local`/`prop`; the fvar is now read off the stored proof
-term. An explicit class-typed argument was accepted but dropped, so replay synthesised a different instance; every explicit value argument
-is recorded in `args`. The plumbing list was completed and `Iff.symm`/`Eq.symm` unwrapped with a direction flip. A dsimproc firing became
-a `change` with `source`. `close.by` took the erased name where `intros` took the display form. Side traces gained `pre`/`post`.
+**Round 6.** User `@[congr]` (spec 2e73661): `trySimpCongrTheoremT?` emits one `rw` naming the theorem with one `side` per
+hypothesis in order. Names were classified by *characters*, so every non-ASCII name lost `local`/`prop`. An explicit
+class-typed argument was accepted but dropped, so replay synthesised a different instance; it is recorded in `args`. A dsimproc
+firing became a `change` with `source`. `close.by` took the erased name where `intros` took the display form.
 
 ## Structural check on every emitted `rw`
 
@@ -135,72 +114,102 @@ one is determined by the other (round 7's C2).
 
 ## Round 7 fixes
 
-**C4** four stock-provable `Logic/Basic` calls crashed with `unexpected bound variable`: `eqUpToProofs` called `isProof` on a subterm with
-loose bvars under a dependent `dite`. It now descends with a real local, and a difference confined to a proof *transported* along a
-rewrite of its own proposition is classified, not fatal. **C1** every quantified or conditional local lost `local`/`prop`, because simp
-stores such a proof under a `.lam` and already applied; `proofLocal?` walks binders, applications and beta-redexes. An origin resolving to
-neither a global nor a local is classified `unresolved:origin`. **C2** `unreplayable_rw:exists_prop_congr` was my false positive: the
-check unified the sides left-to-right, stranding a higher-order `?q'` that the step's `side` traces determine. **C3** `describeProof`
-mapped any `of_eq_true` proof to `close: "rfl"`, which cannot prove an opaque goal. **M5** `Iff.mp`/`Iff.mpr` are not walked (their last
-argument proves the iff's left side); `Eq.symm`/`Iff.symm` flip `dir`. Plus T2's two: every `change` carries `to`, every location carries
-`pre`/`post`, both pinned by the checker.
+**C4** four stock-provable `Logic/Basic` calls crashed with `unexpected bound variable`: `eqUpToProofs` called `isProof` on
+subterms with loose bvars under a dependent `dite`; it now descends with a real local, and a difference confined to a
+transported proof is classified, not fatal. **C1** simp stores a quantified or conditional local's proof under a `.lam` and
+already applied, so `proofLocal?` walks binders and applications to the head fvar; an origin that is neither a global nor a
+local is classified `unresolved:origin`. **C2** a false positive on `exists_prop_congr` — the check unified the sides
+left-to-right, stranding a higher-order `?q'`; both sides are now unified together. **C3** `describeProof` mapped any
+`of_eq_true` proof to `close: "rfl"`. **M5** `Iff.mp`/`Iff.mpr` are not walked (their last argument proves the iff's left
+side); `Eq.symm`/`Iff.symm` flip `dir`. Plus T2's two: every `change` carries `to`, every location `pre`/`post`.
 
 ## Round 8 fixes
 
-**C1 (critical) — 7 of 8 classified side conditions had a spec close form.** Round 7's fix asked what the side *proof* looked like and
-never what the goal **was**, so a goal that is literally `True` or `¬False` was classified although the spec closes both. `goalCloseForm?`
-inspects the goal: `True` → `true_intro`, `¬False`/`False → _` → `nofun`, `a = a` → `rfl`, otherwise classified. The six `Logic/Basic`
-lines the reviewer showed replaying in plain Lean are gone.
+**C1** 7 of 8 classified side conditions had a spec close form: round 7's `describeProof` asked what *proved* the goal, never
+what the goal **was**, so a goal literally `True` or `¬False` was classified. `goalCloseForm?` inspects the goal first.
+**C2** every `Ne`-stated lemma was rejected — `Ne` is a definition, so `not?` returned `none` on `0 ≠ 1` and the statement
+became `(0 ≠ 1) = False`; unfolded with `whnfR` now. **C3** side-trace positions were the outer traversal's; events diverted
+into a side frame are stripped to that frame's root, and the checker gained `check_side_positions`. I also built an in-tactic
+replay of side steps against `pre` and **removed it after three attempts**: it produced false positives, and shipping a check
+that misclassifies is worse than not having it. **M4** `args` are printed with `pp.proofs` and parenthesised; the checker
+rejects any entry containing `⋯` or unbalanced delimiters. **M5** the traced copies silently dropped sites (two in
+`Logic/Basic` per the reviewer; writing the checker first found 9 across three modules) — `make_traced.py` plus
+`check_transcription.py` now enforce every site, 82 of 82. **m6–m8** the measurement section is the literal output of
+`--report`; expected skeletons carry `pre`/`post`; a resolvable origin whose *statement* cannot be read is classified
+`unreadable_rw_statement:<name>`.
 
-**C2 (critical) — every `Ne`-stated lemma was rejected.** `Ne` is a *definition*, so `concl.not?` returned `none` on `0 ≠ 1` and the
-statement became `(0 ≠ 1) = False`, which cannot unify with the recorded `before: "0 = 1"`. The `prop: false` arm now unfolds with
-`whnfR`, as the arm below it already did. `Ne` is one of Mathlib's commonest simp shapes, so this was a systematic false-positive source.
+## Round 9 fixes
 
-**C3 (critical) — side-trace positions were the outer traversal's.** A side goal is its own root, and 11 side steps carried a position
-that cannot exist in their goal — T2 rejects such a step by name. The events diverted into a side frame are rebased onto the side goal's
-root, and the checker gained `check_side_positions`, which rejects a non-empty position in a side trace whose goal is atomic. I also tried
-an in-tactic replay of side steps against `pre` and **removed it after three attempts**: it produced false positives the positional check
-does not, and shipping a check that misclassifies is worse than not having it.
+Every number is a tool's output. End-to-end replay is the primary test: T4's harness
+(`Experiment/pipeline/replay_module.py`) renders each trace and compiles it against T2.
 
-**M4 (major) — `args` were unparenthesised and could contain `⋯`.** They are terms a replayer writes, so they are now printed with
-`pp.proofs` (the default elides a proof as `⋯`, which cannot be elaborated at all) and parenthesised unless atomic. The checker rejects
-any entry containing `⋯` or unbalanced delimiters.
+| module | sites | replayed |
+| --- | --- | --- |
+| `Logic/IsEmpty/Basic.lean` | 17 | 15 |
+| `Logic/Nontrivial/Defs.lean` | 1 | 1 |
+| `Logic/Function/Defs.lean` | 2 | 1 |
+| `Logic/ExistsUnique.lean` | 8 | 8 |
+| `Logic/Function/Basic.lean` | 23 | 8 |
+| `Logic/Basic.lean` | 31 | 14 |
+| **total** | **82** | **47** |
 
-**M5 (major) — the traced copies silently dropped sites.** Two in `Logic/Basic`, as the review found — and the same generator bug hid 7
-more in two other modules. `test/SimpTrace/make_traced.py` now generates the copies and `test/SimpTrace/check_transcription.py` counts
-source sites against converted ones and fails on mismatch; both are committed, and all **84 of 84** sites convert. No traced copy contains
-a live `simp`.
+Attribution of the 35 non-replayed: **harness 16, t1 19, t2 0** (T4's first run scored 45/82, t1 21). The 16 are
+`render_failed:multiple_invocations`, which T4 attributes to its own renderer and which the per-invocation traces below make
+fixable.
 
-**m6–m8.** The measurement section is now the literal output of `--report` with its command line, because the count sentences were wrong
-three rounds running. Expected skeletons carry `pre`/`post`, so that claim is true of them and not only of the emitted traces. A
-resolvable origin whose *statement* cannot be read is classified `unreadable_rw_statement:<name>` rather than passing — round 7's "none is
-never a pass" held for origins only.
+**1. Side goals (C1).** One code path: the side goal is the lemma hypothesis's instantiated type, `pre` its pp, positions
+relative to it, and the close read off the goal **after** the recorded steps — reading the last step's `after` handed
+`goalCloseForm?` a subterm (`False`) rather than the goal (`False = False`). Two further defects surfaced from replay, both
+making a trace that elaborates rewrite the wrong thing:
 
-**Proposed spec addition.** `goalCloseForm?` covers every close the corpus needs today. If a side goal appears that is `¬p` for a
-non-`False` `p`, the spec has no form for it; `exact not_false` would be the provisional rendering, but no such goal occurs in the six
-modules, so nothing is emitted for it yet.
+- A simproc's nested `simp` calls *stock* `simpImpl`, so the fork's `withPos` never runs inside it and every diverted event
+  arrives at the frame root with `pos = []`. A constant prefix gave three rewrites of three different subterms the same
+  position; positions are now recovered from the subterm each event records, threading the goal, and refused when a subterm
+  is absent or ambiguous.
+- `assumption:<name>` renders as `exact <name>`, so the name must *prove* the goal. Stripping simp's `eq_true` wrapper to
+  find the local and then reporting the bare local gave `exact hp` against `P = True`. The wrapper is kept.
 
-**Checks, all re-run from scratch.** `lake build ExplicitLean.SimpTrace` with oleans deleted: clean, no warnings, 10.66 s, 752 MB.
-`Fixtures.lean`: **exit 0**. `UnresolvedFixtures.lean`: exits 1 by design, 4 classified lines. `python3 -B
-Experiment/check_simp_trace.py`: `OK: 65 ...`; it compiles the fixtures itself, and its assertions (a positive fixture must exit 0; a
-`congr` step's nested positions; a side trace's `intros`, `pre` and `post`; `local`/`args` where expected) were each verified to fire on a
-regression. The five measurement modules: see the table. Nothing came near 30 minutes or 40 GB.
+**2. `name` is a name (C2, C3).** `rw.name` was the pretty-printed *syntax*, so 11 sites carried whole terms (`heq_comm
+(a := a)`, `@forall_eq _ p a`, `if_neg fun h ↦ hb ⟨a, h⟩`). It now comes from the resolved origin — always a bare constant or
+a local's display name — with `dir` still from the syntax, which is what carries a leading `←`. Resolving to the head fvar
+alone would have lost the projection, so `proofLocal?` returns the path it walks (`h.2.1`, the order written). Arguments at
+*implicit* binders are dropped: they cannot be written positionally and unification recovers them.
 
-**Known limitations.** The 14 classified unresolved across 75 calls are three shapes, all gaps in what the validator can *confirm* rather
-than wrong traces:
+**3. Steps carry their own verdict.** A classified step was a compile-time `logError` only, invisible to anything reading the
+JSON, so T4's renderer emitted six steps this tactic already knew could not replay. `Step` gains `unresolved`. Confirmed with
+a scratch copy of T4's renderer honouring it: **t2 6 → 0**, all six were mine.
 
-- **A transported proof term** (8): simp rewrites a proposition and carries a proof of it along; the recorded proof still has the old
-  type. Positions are checked, proof identity is not.
-- **A side condition rewritten to `True`** (6): simp's default discharger proves it with other lemmas, whose steps are diverted and carry
-  no position, so no close form can be named honestly.
-- **`simpHaveTelescope`** dispatches to *stock* `simp` through `MonadSimp SimpM`, so its inner rewrites carry no position; the telescope
-  rewrite is one `change`. Redirecting it needs a change to that instance, outside this task's ownership.
-- `eta` is in the spec but **never emitted**: stock `reduceStep` does not perform eta reduction (its `-- TODO: eta reduction` is still
-  there in 4.32.2), so emitting it would diverge from stock simp.
-- The disabled result cache costs 1.99x on the reviewer's 200-identical-subterm pathology and **nothing measurable on real modules**. On
-  that pathology it also exhausts the default `maxSteps` where stock succeeds; raising `maxSteps` makes both succeed.
-- A Lean bump needs a re-sync; the `SOURCE:` annotations give file and line range for every copied function.
+**4. `.stx` steps were never validated (C2).** `checkRwStep` got the *written* origin, `rwStatement?` reads no statement from
+a `.stx`, and the `.stx` branch suppressed the report — so every step from `simp [h]` skipped the safety net entirely. It now
+validates against the resolved origin, applies the recorded projection, and checks explicit binders against the **left-hand
+side alone**, as `rw` does: unifying `after` too made this validator strictly more permissive than the tactic it protects, so
+`dif_pos (hc : c)` shipped and failed at replay. Classified rose 16 → 24, all of it previously-unvalidated steps.
 
-**Open questions.** 1. REVIEW-4 found a **T2-side** blocker: T2 elaborates a lemma before unifying it with the subterm, so
-class-polymorphic lemmas like `add_zero` fail with a stuck instance problem where plain `rw` succeeds. `add_zero` is the first step of
-four T1 fixtures, so T1 traces of ordinary Mathlib cannot replay until T2 resolves instances against the position.
+**5. Positions on partial applications (C4).** simp matches a lemma against a *prefix* and reapplies the rest, so
+`h : Option.map f = Option.map g` rewrites the *function* of `Option.map f (some x)`: `[0,1]` → `[0,1,0]`, with `before`
+trimmed to match. The descent is the surplus over the lemma's own LHS arity. Counting shared trailing arguments instead — my
+first attempt — cannot tell this from a lemma rewriting a whole application with an untouched argument, and broke 5
+ExistsUnique calls; the fixtures pin both shapes.
+
+**6. Measurements (M5, M6).** `--report` now prints `sites` and `traces` separately and groups every classified step by
+reason with its sites and shapes, so RESULT.md needs no hand-written reconciliation. The invented "two sites share a file"
+sentence is gone.
+
+New fixtures (72 total, none classified): `ite_cond_eq_false`, `dite_cond_eq_false`, a compound `p = False` side goal,
+`heq_comm (a := a)`, `@forall_eq _ p a`, a partial application and a two-level one.
+
+**Checks, all re-run from scratch after the last commit.** `lake build ExplicitLean.SimpTrace` with its oleans deleted: 11 s,
+0 errors. `Fixtures.lean` exit 0 (72 fixtures, none classified); `UnresolvedFixtures.lean` exit 1 by design, 4 classified
+lines. `python3 -B Experiment/check_simp_trace.py`: `OK: 72 ...`. `check_transcription.py`: OK, 82 of 82. The six modules,
+`/usr/bin/time -l`: IsEmpty 2.44 s / 646 MB, Nontrivial 2.38 s / 637 MB, FunctionDefs 2.65 s / 648 MB, ExistsUnique 2.58 s /
+651 MB, FunctionBasic 3.39 s / 712 MB, LogicBasic 3.68 s / 720 MB — nothing near 30 min or 40 GB.
+
+**Known limitations.** `simpHaveTelescope` dispatches to *stock* `simp` through `MonadSimp SimpM`, so its inner rewrites have
+no position and the whole rewrite is one `change`; redirecting it needs a change to that instance, outside this task. `eta` is
+in the spec but never emitted — stock `reduceStep` does not eta-reduce in 4.32.2, so emitting it would diverge. The disabled
+result cache costs 1.99x on a 200-identical-subterm pathology. A Lean bump needs a re-sync; the `SOURCE:` annotations give the
+file and line range for every copied function.
+
+**Open, not fixed.** 19 sites remain t1-attributed: `eq_true <lemma>` against a quantified Prop-valued lemma with no `args`
+(4), unknown free variable from `hh _`/`hf _`-style instantiation (3), `unfold Ne` where the head is `Iff` (1), inaccessible
+`h✝` rendering (1), and the `unassigned_explicit_argument` family (6) which is now honestly classified rather than shipped.
