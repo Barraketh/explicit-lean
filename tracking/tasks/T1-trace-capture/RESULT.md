@@ -38,7 +38,7 @@ remains is navigation plus the **validator**, run after every location: navigate
 substitute `after`, require the final term to equal simp's result; mismatch is a hard failure. **No search anywhere in the
 recorder.**
 
-## Measurements (macOS, Lean 4.32.2; outputs gitignored)
+## Measurements (macOS, Lean 4.32.2; outputs gitignored; wall/RSS are cold-cache upper bounds — a warm re-run is ~2.9 s)
 
 | file | calls | traced | steps | kinds | bytes | wall | peak RSS | unres. |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
