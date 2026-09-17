@@ -14,7 +14,7 @@ import json
 import pathlib
 import sys
 
-from trace_identity import find_sites, manifest, trace_clause_ordinals, transform
+from trace_identity import find_sites, manifest, transform_with_ledger, verify_transform
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MATHLIB = ROOT / ".lake" / "packages" / "mathlib" / "Mathlib"
@@ -29,10 +29,11 @@ def main() -> int:
     source_path = MATHLIB / source_rel
     source = source_path.read_text(encoding="utf-8")
     sites = find_sites(source)
-    text = transform(source, name)
-    clause_sites = trace_clause_ordinals(text, name)
-    if sorted(clause_sites) != list(range(len(sites))):
-        raise SystemExit(f"conversion mismatch: manifest={len(sites)} generated trace clauses differ")
+    text, _ = transform_with_ledger(source, name)
+    try:
+        verify_transform(source, name, text, sites)
+    except ValueError as exc:
+        raise SystemExit(f"conversion mismatch: {exc}") from exc
     manifest_value = manifest("Mathlib/" + source_rel.replace("\\", "/"), source, sites)
     (OUT / f"{name}.lean").write_text(text, encoding="utf-8")
     (OUT / f"{name}.manifest.json").write_text(

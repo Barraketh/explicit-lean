@@ -7,17 +7,20 @@
   fail-closed ordinary consistency validation. Top-level `--`/`/-` comments
   now terminate a call while delimiters inside strings, syntax data, or nested
   terms do not.
-- Reworked `make_traced.py` to derive the manifest before rewriting and replace
-  every site exactly once; `FunctionBasicTraced` is 25/25, including both
-  `@[simp]` declaration-line calls.
+- Reworked `make_traced.py` to derive the manifest before rewriting and verify
+  every replacement through a deterministic edit ledger; `FunctionBasicTraced`
+  is 25/25, including both `@[simp]` declaration-line calls.
 - Added `finalize_traces.py`, converting raw recorder files into self-contained
   `simp-trace-v2` envelopes with module/site identity, diagnostic occurrence,
   and complete invocation ordinals. Missing, extra, duplicate, range, call,
-  and invocation mistakes reject before output is consumed.
+  and invocation mistakes reject before output is consumed. Its explicit
+  `--traced-source --manifest --source --raw-dir --out-dir` interface never
+  mutates raw inputs.
 - Regenerated all six traced copies and manifests: 84 mapped sites and 106
   records. Added T9 regressions for attributes, same-line and identical calls,
   Unicode offsets, trailing comments (including nested/string data), and
-  malformed invocation sets. Conversion checks ignore commented `=>trace` text.
+  malformed invocation sets. Conversion checks use the edit ledger, so
+  commented `=>trace` text cannot count.
 
 ## Checks (2026-09-17)
 
@@ -28,13 +31,13 @@
   v2 records, 84 sites).
 - `python3 -B test/SimpTrace/test_trace_identity.py`: PASS, including malformed
   invocation and comment-boundary rejection; Function.Basic compile emitted
-  and finalized 30 v2 records.
+  and five-path finalization produced 30 v2 records without changing raw files.
 - `python3 -B Experiment/check_simp_trace.py`: PASS (72 fixtures);
   `--report`: PASS (84 sites, 106 records, 592 steps).
 - `git diff --check`: PASS.
 
 ## Remaining blockers
 
-- Consumer-side authenticated gate and replay integration remain T4 work.
+- Consumer-side identity gate and replay integration remain T4 work.
 - Existing classified replay families and named-zeta are intentionally out of
   scope for this producer batch.

@@ -22,7 +22,7 @@ import json
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from trace_identity import find_sites, manifest, trace_clause_ordinals  # noqa: E402
+from trace_identity import find_sites, manifest, verify_transform  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MATHLIB = ROOT / ".lake" / "packages" / "mathlib" / "Mathlib"
@@ -51,29 +51,14 @@ def main() -> int:
         source_text = source_path.read_text(encoding="utf-8")
         source_sites = find_sites(source_text)
         traced_text = traced_path.read_text(encoding="utf-8")
-        traced_stem = traced_path.stem
         manifest_path = traced_path.with_suffix(".manifest.json")
-        # Ignore textual lookalikes in comments; only a parser-visible clause
-        # is evidence that the site was converted.
-        clause_sites = trace_clause_ordinals(traced_text, traced_stem)
-        converted = len(clause_sites)
+        converted = 0
         remaining = len(find_sites(traced_text))
-        print(
-            f"{traced_name:28} source sites {len(source_sites):3}  "
-            f"converted {converted:3}  still stock {remaining:3}"
-        )
         if remaining:
             problems.append(
                 f"{traced_name}: {remaining} simp-family tactic site(s) were not "
                 f"converted; a traced copy must contain none"
             )
-        if converted != len(source_sites):
-            problems.append(
-                f"{traced_name}: converted {converted} but the source has "
-                f"{len(source_sites)} tactic site(s)"
-            )
-        if sorted(clause_sites) != list(range(len(source_sites))):
-            problems.append(f"{traced_name}: generated site ordinals are not a bijection")
         if not manifest_path.is_file():
             problems.append(f"{traced_name}: manifest sidecar missing")
             continue
@@ -82,8 +67,18 @@ def main() -> int:
             expected = manifest("Mathlib/" + source_rel, source_text, source_sites)
             if value != expected:
                 problems.append(f"{traced_name}: manifest does not match source")
+            else:
+                verify_transform(source_text, traced_path.stem, traced_text, source_sites)
+                converted = len(source_sites)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            problems.append(f"{traced_name}: malformed manifest: {exc}")
+            problems.append(f"{traced_name}: manifest/transform mismatch: {exc}")
+        if converted != len(source_sites):
+            problems.append(f"{traced_name}: converted {converted} but the source has "
+                            f"{len(source_sites)} tactic site(s)")
+        print(
+            f"{traced_name:28} source sites {len(source_sites):3}  "
+            f"converted {converted:3}  still stock {remaining:3}"
+        )
 
     if problems:
         for problem in problems:

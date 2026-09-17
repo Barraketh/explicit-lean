@@ -22,6 +22,16 @@ class Site:
     callText: str
 
 
+@dataclass(frozen=True)
+class Edit:
+    siteOrdinal: int
+    sourceStart: int
+    sourceEnd: int
+    outputStart: int
+    outputEnd: int
+    replacement: str
+
+
 def _mask_attributes(source: str) -> str:
     chars = list(source)
     i = 0
@@ -177,9 +187,10 @@ def manifest(module_path: str, source: str, sites: list[Site]) -> dict[str, Any]
     }
 
 
-def transform(source: str, traced_name: str) -> str:
+def transform_with_ledger(source: str, traced_name: str) -> tuple[str, list[Edit]]:
     sites = find_sites(source)
     parts: list[str] = []
+    edits: list[Edit] = []
     cursor = 0
     for site in sites:
         token = ("simp only" if site.callText.startswith("simp only") else
@@ -189,24 +200,45 @@ def transform(source: str, traced_name: str) -> str:
         replacement = head + site.callText[len(token):]
         replacement += f' =>trace "test/SimpTrace/meas_out/{traced_name}_{site.siteOrdinal + 1:02}.json"'
         parts.append(source[cursor:site.startChar])
+        output_start = sum(len(part) for part in parts)
         parts.append(replacement)
+        edits.append(Edit(site.siteOrdinal, site.startChar, site.endChar,
+                          output_start, output_start + len(replacement), replacement))
         cursor = site.endChar
     parts.append(source[cursor:])
     traced = "".join(parts)
     if "ExplicitLean.SimpTrace" not in traced:
-        traced = re.sub(r"^(public import .*)$",
-                        r"\1\npublic meta import ExplicitLean.SimpTrace",
-                        traced, count=1, flags=re.M)
-    return traced
+        match = re.search(r"^public import .*?$", traced, re.M)
+        if match:
+            insertion = "\npublic meta import ExplicitLean.SimpTrace"
+            traced = traced[:match.end()] + insertion + traced[match.end():]
+            edits = [Edit(e.siteOrdinal, e.sourceStart, e.sourceEnd,
+                          e.outputStart + (len(insertion) if e.outputStart >= match.end() else 0),
+                          e.outputEnd + (len(insertion) if e.outputStart >= match.end() else 0),
+                          e.replacement) for e in edits]
+    return traced, edits
 
 
-def trace_clause_ordinals(source: str, traced_name: str) -> list[int]:
-    """Return parser-visible generated clause ordinals, excluding comments."""
-    pattern = re.compile(
-        rf'=>trace "test/SimpTrace/meas_out/{re.escape(traced_name)}_([0-9]+)\.json"'
-    )
-    return [int(match.group(1)) - 1 for match in pattern.finditer(
-        _mask_comments(source))]
+def transform(source: str, traced_name: str) -> str:
+    """Transform source while retaining the ledger-capable public helper."""
+    return transform_with_ledger(source, traced_name)[0]
+
+
+def verify_transform(source: str, traced_name: str, traced: str,
+                     sites: list[Site]) -> list[Edit]:
+    expected, edits = transform_with_ledger(source, traced_name)
+    if traced != expected:
+        raise ValueError("traced source differs from deterministic transform")
+    if len(edits) != len(sites):
+        raise ValueError("transform edit ledger is incomplete")
+    for edit, site in zip(edits, sites):
+        if (edit.siteOrdinal != site.siteOrdinal or
+                edit.sourceStart != site.startChar or edit.sourceEnd != site.endChar or
+                source[edit.sourceStart:edit.sourceEnd] != site.callText):
+            raise ValueError(f"transform ledger source mismatch at site {site.siteOrdinal}")
+        if traced[edit.outputStart:edit.outputEnd] != edit.replacement:
+            raise ValueError(f"transform ledger output mismatch at site {site.siteOrdinal}")
+    return edits
 
 
 def validate_invocations(records: list[dict[str, Any]]) -> None:
