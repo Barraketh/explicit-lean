@@ -43,6 +43,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
   evidence. T9 is diagnosing an authenticated source-site identity contract.
   T1 must capture the two attribute-line sites and T4 must refuse missing,
   extra, duplicate or mismatched identities before either branch can advance.
+- **T9 identity decision:** adopt `simp-trace-v2`. T1 derives a canonical
+  manifest from uninstrumented source bytes and emits original UTF-8 ranges,
+  exact call/source/manifest hashes and complete invocation ordinals. T4 proves
+  the full bijection before rendering; generated-copy positions and filenames
+  are diagnostic only. Implement T1 producer and T4 consumer in parallel with
+  narrow ownership, then review each and rerun the full gate.
 - **Named `zeta` decision:** T1's local-let fvar delta is represented as an
   existing `change` step with an explicit `pp.all` `to` value. Plain `letE`
   zeta remains `zeta`. Do not broaden T2's zeta semantics or add a name-based
