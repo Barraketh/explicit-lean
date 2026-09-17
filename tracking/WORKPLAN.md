@@ -48,6 +48,9 @@ terse completion notices, then makes merge and next-dispatch decisions.
   `first` dispatch or goal fingerprints. Non-tail continuations may be copied
   only when simp-free and scope/order preserving; otherwise refuse the site.
   T1 must emit the specified ordinals before T4 implementation begins.
+- **T7 declaration-oracle design:** an independent read-only lane is defining
+  the smallest fail-closed post-compile oracle adapter for whole-module and
+  per-site harness runs. T4 remains untouched until review 2 completes.
 
 After a slot completes, reuse it immediately for the next independent review or
 fix. The coordinator alone integrates accepted branches and updates this plan.
