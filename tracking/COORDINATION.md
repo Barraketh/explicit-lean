@@ -45,8 +45,24 @@ status plus the RESULT.md path. No code, no logs.
 After RESULT.md exists the coordinator dispatches a fresh reviewer for round
 n. The reviewer re-runs checks, writes `REVIEW-<n>.md`. If it is not
 `NO DEFECTS`, the implementer fixes every item, updates RESULT.md, commits,
-and the coordinator dispatches round n+1 with a fresh reviewer. Merge happens
-only after a clean round.
+and the coordinator dispatches round n+1 with a fresh reviewer.
+
+Revised by user decision on 2026-09-16 after the loop proved slow on large
+surfaces:
+
+- **Merge gate:** a round with no critical and no major defects. Remaining
+  minors become tracked follow-up items in `tracking/WORKPLAN.md`, fixed in a
+  later task, not chased through further full rounds.
+- **Incremental rounds:** rounds 1 and 2 are full. From round 3 on, the
+  reviewer verifies the previous round's fixes by re-running their
+  reproducing commands and attacks only the changed areas and any area the
+  brief names; it does not re-run long sweeps or full corpus measurements
+  unless the brief asks. The merge-gate round is full again.
+- **End-to-end replay is the primary test.** The pipeline harness (T4)
+  renders recorder traces to `explicit_rw` source, splices them into the
+  module and compiles it. Replay counts per module, with failures attributed
+  to a side, drive fixes; adversarial reading is for soundness, product-rule
+  and validation-blindness questions.
 
 ## Escalation conditions (stop, write ESCALATION.md, report)
 
