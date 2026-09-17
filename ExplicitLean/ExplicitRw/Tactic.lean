@@ -38,7 +38,7 @@ every failure names the step index and the reason.
 | `eta at [..]`                     | eta-reduce the subterm (definitional)            |
 | `proj at [..]`                    | reduce a structure projection (definitional)     |
 | `change t at [..]`                | replace by the defeq term `t` (definitional)     |
-| `eq (lhs = rhs) by tac at [..]`   | prove the equation with `tac`, then rewrite      |
+| `eq (lhs = rhs) by rfl at [..]`   | prove the equation with `rfl`/`decide`, rewrite  |
 
 `e` is an ordinary term, so explicit arguments (`baz a b`), local hypotheses and
 side-condition proofs are written as usual and elaborated as usual: implicits,
@@ -51,14 +51,22 @@ of `Expr.app`, so `f a b` has `b` at `[1]` and `a` at `[0, 1]`.
 ## Closing form
 
 `explicit_rw [...] then rfl` runs `rfl` on the remaining goal after the last
-step; `then exact e` and `then tac` work likewise for any tactic sequence. This
-is exactly sugar for writing the tactic on the next line, kept so a rendered
-trace is a single tactic. Omit it to leave the goal open.
+step. The closer is a **closed enumeration** — `rfl`, `decide`, `trivial`,
+`assumption`, `exact <term>` — and `eq ... by` likewise accepts only `rfl` or
+`decide`. Omit the clause to leave the goal open.
+
+Neither slot is a `tacticSeq`, deliberately. A free `tacticSeq` would let a
+generated trace carry `simp` (or any forbidden tactic) *inside* the product
+tactic, where a lint scanning `ExplicitLean/ExplicitRw*` could never see it,
+because the offending text lives at the generated call site. For the same
+reason every term this tactic elaborates — a lemma, a `change` target, an `eq`
+equation, an `exact` closer — is rejected if it contains a `by` block.
 
 ## No simp
 
 Nothing in this tactic calls, imports for use, or expands to `Lean.Meta.Simp` or
-any simp-family tactic. `Experiment/check_no_simp_family.py` enforces that.
+any simp-family tactic, and no trace written in this syntax can introduce one.
+`Experiment/check_no_simp_family.py` enforces the former.
 -/
 
 namespace ExplicitLean.ExplicitRw
@@ -80,15 +88,30 @@ syntax explicitRwRed := ("beta" <|> "eta" <|> "proj") explicitRwPos
 /-- `change t at [1]` — last-resort definitional replacement, checked by defeq. -/
 syntax explicitRwChange := "change " term explicitRwPos
 
-/-- `eq (2 + 3 = 5) by rfl at [1]` — an equation proved by an ordinary tactic. -/
-syntax explicitRwEq := "eq " term " by " Lean.Parser.Tactic.tacticSeq explicitRwPos
+/--
+The closers a trace may use, as a **closed enumeration**. `explicit_rw` is
+product code, so it must not embed a free `tacticSeq`: that would let a
+generated trace carry `simp` (or any other forbidden tactic) inside the product
+tactic, where `Experiment/check_no_simp_family.py` could never see it. The
+spec's `close` field is exactly `rfl | trivial | assumption | decide`, plus
+`exact <term>` for a closing lemma application.
+-/
+syntax explicitRwCloser :=
+  "rfl" <|> "decide" <|> "trivial" <|> "assumption" <|> ("exact " term)
+
+/--
+`eq (2 + 3 = 5) by rfl at [1]` — a simproc-computed equation, proved by an
+ordinary tactic. The spec's `by` field is exactly `rfl | decide`, so only those
+two are accepted; see `explicitRwCloser` for why this is not a `tacticSeq`.
+-/
+syntax explicitRwEq := "eq " term " by " ("rfl" <|> "decide") explicitRwPos
 
 /-- One step of an `explicit_rw` trace. -/
 syntax explicitRwStep :=
   explicitRwUnfold <|> explicitRwRed <|> explicitRwChange <|> explicitRwEq <|> explicitRwRw
 
 /-- Optional closing tactic: `explicit_rw [...] then rfl`. -/
-syntax explicitRwClose := " then " Lean.Parser.Tactic.tacticSeq
+syntax explicitRwClose := " then " explicitRwCloser
 
 /--
 Replay a recorded simp trace positionally, with no search.
@@ -109,11 +132,44 @@ def parsePos (stx : Syntax) : Pos :=
 abbrev Target := Option FVarId
 
 /--
+Reject a term that smuggles a tactic block into product code.
+
+`exact <term>` is the one closer that takes a term, and a term may contain
+`by ...`, which would reopen exactly the hole that the closed closer enumeration
+closes. So the term's syntax tree is walked and any `by` block or tactic-sequence
+node is refused before elaboration.
+-/
+partial def checkNoTacticBlock (what : String) (idx? : Option Nat) (stx : Syntax) :
+    TacticM Unit := do
+  let offending? := find? stx
+  if let some kind := offending? then
+    let msg := m!"{what} contains a `{kind}` block. `explicit_rw` is product code, so a \
+      trace may not embed a tactic block: it would let a forbidden tactic (`simp`, \
+      `dsimp`, ...) run inside the product tactic where the no-simp-family lint \
+      cannot see it. Write a closed term, or prove the lemma separately and name it."
+    match idx? with
+    | some idx => stepError idx msg
+    | none => throwError "explicit_rw: {msg}"
+where
+  /-- The first `by`/tactic-sequence node in the tree, if any. -/
+  find? (s : Syntax) : Option String := Id.run do
+    let k := s.getKind
+    if k == ``Lean.Parser.Term.byTactic then
+      return some "by"
+    if k == ``Lean.Parser.Tactic.tacticSeq || k == ``Lean.Parser.Tactic.tacticSeq1Indented then
+      return some "tactic sequence"
+    for arg in s.getArgs do
+      if let some r := find? arg then
+        return some r
+    return none
+
+/--
 Elaborate a term to a proof of an equation or iff, returning `lhs`, `rhs` and a
 proof of `lhs = rhs`, together with the metavariables introduced for the
 lemma's own arguments so the caller can insist they all get assigned.
 -/
 def elabEquation (idx : Nat) (stx : Term) : TacticM (Expr × Expr × Expr × Array Expr) := do
+  checkNoTacticBlock s!"the lemma term of this step" (some idx) stx
   let lemmaMsg := m!"`{stx}`"
   let proof ← Term.withSynthesize (postpone := .no) do
     Term.elabTerm stx none
@@ -151,7 +207,7 @@ def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool) :
     (fun pfx child sub => badPosError idx pos pfx child sub)
 
 /-- Run a definitional step at `pos` inside `e`, using `reduce` on the subterm. -/
-def runDefeqStep (idx : Nat) (e : Expr) (pos : Pos) (what : String)
+def runDefeqStep (idx : Nat) (e : Expr) (pos : Pos) (what : MessageData)
     (reduce : Expr → TacticM Expr) : TacticM Replacement := do
   rewriteAt e pos
     (fun sub => do
@@ -220,25 +276,26 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
   | ``explicitRwUnfold =>
     let pos := parsePos stx[2]
     let c ← realizeGlobalConstNoOverloadWithInfo stx[1]
-    runDefeqStep idx e pos s!"`unfold {c}`" (unfoldConst idx c)
+    runDefeqStep idx e pos m!"`unfold {c}`" (unfoldConst idx c)
   | ``explicitRwRed =>
     let pos := parsePos stx[1]
     -- The alternation wraps the keyword in a `token.<kw>` node, so the atom
     -- itself is one level down.
     let kind := stx[0][0].getAtomVal
     match kind with
-    | "beta" => runDefeqStep idx e pos "`beta`" fun sub => do
+    | "beta" => runDefeqStep idx e pos m!"`beta`" fun sub => do
         let r := sub.headBeta
         if r == sub then
           stepError idx m!"`beta` at this position: the subterm is not a beta-redex."
         return r
-    | "eta" => runDefeqStep idx e pos "`eta`" (etaReduce idx)
-    | "proj" => runDefeqStep idx e pos "`proj`" (projReduce idx)
+    | "eta" => runDefeqStep idx e pos m!"`eta`" (etaReduce idx)
+    | "proj" => runDefeqStep idx e pos m!"`proj`" (projReduce idx)
     | k => throwError "explicit_rw: internal error: unknown reduction keyword `{k}`"
   | ``explicitRwChange =>
     let pos := parsePos stx[2]
     let target : Term := ⟨stx[1]⟩
-    runDefeqStep idx e pos s!"`change {target}`" fun sub => do
+    checkNoTacticBlock s!"the `change` term of this step" (some idx) target
+    runDefeqStep idx e pos m!"`change {target}`" fun sub => do
       let ty ← inferType sub
       let newSub ← Term.withSynthesize (postpone := .no) do
         Term.elabTermEnsuringType target ty
@@ -246,7 +303,9 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
   | ``explicitRwEq =>
     let pos := parsePos stx[4]
     let eqStx : Term := ⟨stx[1]⟩
-    let byStx : TSyntax ``Lean.Parser.Tactic.tacticSeq := ⟨stx[3]⟩
+    checkNoTacticBlock s!"the `eq` equation of this step" (some idx) eqStx
+    -- The `by` slot is the closed keyword `rfl` or `decide`, never a tacticSeq.
+    let byKind := stx[3][0].getAtomVal
     -- Prove the stated equation with the named ordinary tactic, then rewrite.
     rewriteAt e pos
       (fun sub => do
@@ -261,9 +320,13 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
             at position {Pos.render pos}.\nExpected{indentExpr lhs}\n\
             but the subterm is{indentExpr sub}"
         let goal ← mkFreshExprSyntheticOpaqueMVar eqType
-        let remaining ← Tactic.run goal.mvarId! (evalTactic byStx)
+        let remaining ←
+          match byKind with
+          | "rfl" => Tactic.run goal.mvarId! (evalTactic (← `(tactic| rfl)))
+          | "decide" => Tactic.run goal.mvarId! (evalTactic (← `(tactic| decide)))
+          | k => stepError idx m!"`eq ... by {k}`: only `rfl` and `decide` are accepted."
         unless remaining.isEmpty do
-          stepError idx m!"`eq {eqStx} by ...`: the closing tactic left \
+          stepError idx m!"`eq {eqStx} by {byKind}`: the tactic left \
             {remaining.length} goal(s) open."
         let h ← instantiateMVars goal
         return Replacement.eq (← instantiateMVars rhs) h)
@@ -314,6 +377,28 @@ def runSteps (steps : Array (TSyntax ``explicitRwStep)) (target : Target) : Tact
           let res ← goal.replace fvarId newProof newE
           replaceMainGoal [res.mvarId]
 
+/--
+Run the closing tactic of a `then` clause.
+
+The parser already restricts this to the closed enumeration, so this only has to
+dispatch. `exact <term>` additionally rejects a term containing a tactic block,
+which is the one way a term could reintroduce arbitrary tactics.
+-/
+def runCloser (stx : Syntax) : TacticM Unit := do
+  -- Each alternative wraps its keyword one level down: a bare keyword as
+  -- `token.<kw>`, and `exact <term>` as a `group` whose child 0 is the atom.
+  match stx[0][0].getAtomVal with
+  | "rfl" => evalTactic (← `(tactic| rfl))
+  | "decide" => evalTactic (← `(tactic| decide))
+  | "trivial" => evalTactic (← `(tactic| trivial))
+  | "assumption" => evalTactic (← `(tactic| assumption))
+  | "exact" =>
+    let t : Term := ⟨stx[0][1]⟩
+    checkNoTacticBlock "the closing `exact` term" none t
+    evalTactic (← `(tactic| exact $t))
+  | k =>
+    throwError "explicit_rw: internal error: unknown closer `{k}`"
+
 end Impl
 
 open Impl in
@@ -340,7 +425,7 @@ def evalExplicitRw : Tactic := fun stx => do
   runSteps steps target
   unless closeStx.isNone do
     match target with
-    | none => evalTactic closeStx[0][1]
+    | none => runCloser closeStx[0][1]
     | some _ =>
       throwError "explicit_rw: the `then` closing form applies to the goal, but this \
         trace rewrites a hypothesis. Write the closing tactic on the next line."
