@@ -744,6 +744,24 @@ def mkIteConditionSide (goal : Expr) (truth : Expr) (nested : Array Event)
     let rec_ : SideRec := .mk sideGoal events by_ ctx #[] sideGoal (some after)
     return some (rec_, complete)
 
+/- Peel only the application arguments beyond the fixed five arguments of an
+`ite`/`dite` core.  This is intentionally driven by the redex's application
+arity, not by a search for a matching subterm. -/
+def peelBoundedIteApplication (before after : Expr) :
+    Option (Expr × Expr × Nat) := Id.run do
+  let n := before.getAppNumArgs
+  if n < 5 then return none
+  let extra := n - 5
+  let mut coreBefore := before
+  let mut coreAfter := after
+  for _ in [0:extra] do
+    let (.app beforeFn beforeArg) := coreBefore | return none
+    let (.app afterFn afterArg) := coreAfter | return none
+    if beforeArg != afterArg then return none
+    coreBefore := beforeFn
+    coreAfter := afterFn
+  return some (coreBefore, coreAfter, extra)
+
 def emitBoundedIteStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
     (evCtx : EvCtx) (side : Array SideRec) (src : Name)
     (diverted : Array Event) (procGoal? : Option Expr) : Simp.SimpM Unit := do
@@ -753,17 +771,21 @@ def emitBoundedIteStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
   let expectedShape := if isDite then "dite" else "ite"
   let fail (reason : String) := do
     ref.modify (·.markUnresolved s!"simproc:{src}: {reason}")
+  let (coreBefore, coreAfter, extraArgs) ← match peelBoundedIteApplication e r.expr with
+    | some result => pure result
+    | none => fail "conditional core or trailing application cannot be established"; return
+  let corePos := pos ++ Array.replicate extraArgs 0
   let (condition, _selected, args) ←
     if isDite then
-      let_expr dite _ c _ _ _ ← e
-        | fail s!"{expectedShape} redex missing"; return
-      pure (c, r.expr, #[])
+      let_expr dite _ c _ _ _ ← coreBefore
+        | fail s!"{expectedShape} core missing"; return
+      pure (c, coreAfter, #[])
     else
-      let_expr ite _ c _ tb eb ← e
-        | fail s!"{expectedShape} redex missing"; return
-      if r.expr == tb then pure (c, tb, #[tb, eb])
-      else if r.expr == eb then pure (c, eb, #[tb, eb])
-      else fail "result is neither branch"; return
+      let_expr ite _ c _ tb eb ← coreBefore
+        | fail s!"{expectedShape} core missing"; return
+      if coreAfter == tb then pure (c, coreAfter, #[tb, eb])
+      else if coreAfter == eb then pure (c, coreAfter, #[tb, eb])
+      else fail "result core is neither branch"; return
   let procGoal ← match procGoal? with
     | some goal => pure goal
     | none => fail "condition trace missing"; return
@@ -787,11 +809,12 @@ def emitBoundedIteStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
   let derivation : RuleDerivation :=
     { origin := "simproc:" ++ src.toString,
       source? := some "operational",
-      redex := pos,
+      redex := corePos,
+      extraArgs := extraArgs,
       simproc? := some
-        { source := src.toString, redex := pos, branch := branch,
+        { source := src.toString, redex := corePos, extraArgs := extraArgs, branch := branch,
           constructor := constructor.toString } }
-  ref.modify (·.push (.rw pos origin false none e r.expr ctx args
+  ref.modify (·.push (.rw corePos origin false none coreBefore coreAfter ctx args
     (side.push conditionSide) source origin "" (some derivation)))
 
 /- A cached simproc origin is not added to `usedTheorems` again.  The nested

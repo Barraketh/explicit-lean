@@ -10,9 +10,11 @@ simplification/discharge trace.
 
 The focused Lean fixture is
 `test/SimpTrace/T20IteSimproc.lean`.  Plain `reduceIte` true/false, dependent
-`reduceDIte` true/false, a nested condition, a nested occurrence, and a source
-theorem condition all compile and emit `[0,1]` semantic records in the four
-basic cases.  Dependent records intentionally carry no branch/proof `args`.
+`reduceDIte` true/false, a nested condition, a nested occurrence, a source
+theorem condition, and applied function redexes all compile.  Applied records
+trim the exact shared tail, move the semantic position to `[0,1,0]`, and
+record `extraArgs: 1`; dependent records intentionally carry no branch/proof
+`args`.  The fixture also asserts refusal of a changed application tail.
 
 Focused check run:
 
@@ -25,7 +27,7 @@ git diff --check                          PASS
 T18's accepted inventory remains the baseline: 15 `reduceIte` steps at 6
 sites and 15 `reduceDIte` steps at 8 sites.  No fresh 91-site inventory was
 run in this bounded checkpoint, so no corpus coverage credit is claimed.  The
-fixture output confirms the new derivation on the basic true/false cases;
+focused observed fixtures cover 6/15 `reduceIte` and 3/15 `reduceDIte` steps;
 cached-origin nested occurrences still expose a recorder attribution gap and
 require a follow-up review before claiming all 30 steps.  Unknown simprocs
 retain the existing generic classification path.

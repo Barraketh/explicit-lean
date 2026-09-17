@@ -69,6 +69,7 @@ record carries only the operational facts needed to audit that selection. -/
 structure SimprocDerivation where
   source : String
   redex : Pos
+  extraArgs : Nat
   branch : String
   constructor : String
   deriving Inhabited, Repr
@@ -223,7 +224,8 @@ def DischargeDerivation.toJson (d : DischargeDerivation) : String :=
 
 def SimprocDerivation.toJson (d : SimprocDerivation) : String :=
   obj #[ ("source", some (str d.source)), ("redex", some (posJson d.redex)),
-    ("branch", some (str d.branch)), ("constructor", some (str d.constructor)) ]
+    ("extraArgs", some (toString d.extraArgs)), ("branch", some (str d.branch)),
+    ("constructor", some (str d.constructor)) ]
 
 def RuleDerivation.toJson (d : RuleDerivation) : String :=
   obj #[
