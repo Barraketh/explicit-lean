@@ -35,7 +35,6 @@ not pass a recorded `lhs`/`rhs`/`to` string through.
    and a forbidden tactic there is a parse error like anywhere else. The `prop`
    flag needs no tactic support: the generator renders it as `eq_true <name>` /
    `eq_false <name>`, both ordinary lemmas, and a fixture pins each.
-
 ### Rounds 1-3 (all re-verified by later reviewers)
 **Round 3** *(major)*: both guard layers keyed on syntax, so a term elaborator
 calling the simplifier in `MetaM` produced neither a `by` node nor a synthetic
