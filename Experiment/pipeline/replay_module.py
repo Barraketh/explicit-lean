@@ -57,6 +57,7 @@ import simp_family_lint as L  # noqa: E402
 
 # The six modules T1 has traced copies for: (Mathlib path, traced module name).
 MODULES = {
+    "Mathlib/Data/Option/Basic.lean": "OptionBasicTraced",
     "Mathlib/Logic/IsEmpty/Basic.lean": "IsEmptyBasicTraced",
     "Mathlib/Logic/Nontrivial/Defs.lean": "NontrivialDefsTraced",
     "Mathlib/Logic/Function/Defs.lean": "FunctionDefsTraced",

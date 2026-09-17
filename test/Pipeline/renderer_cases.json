@@ -407,9 +407,9 @@
 
  "trace_errors": [
   {
-   "name": "wrong_schema",
+   "name": "v2_missing_locations",
    "trace": {"schema": "simp-trace-v2", "locations": []},
-   "error": "bad_schema"
+   "error": "bad_trace"
   },
   {
    "name": "no_locations",

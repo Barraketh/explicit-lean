@@ -384,7 +384,9 @@ def render_trace(trace: dict) -> tuple[list[str], list[int]]:
     """
     if not isinstance(trace, dict):
         raise RenderError("bad_trace", "trace is not an object")
-    if trace.get("schema") != "simp-trace-v1":
+    # v2 wraps the same locations/steps in the source-site identity envelope;
+    # the caller has already authenticated that envelope before rendering.
+    if trace.get("schema") not in ("simp-trace-v1", "simp-trace-v2"):
         raise RenderError("bad_schema", f"schema is {trace.get('schema')!r}")
     locations = trace.get("locations")
     if not isinstance(locations, list) or not locations:

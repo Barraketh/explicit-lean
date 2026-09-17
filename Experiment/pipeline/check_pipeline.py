@@ -42,6 +42,7 @@ CASES = ROOT / "test" / "Pipeline" / "renderer_cases.json"
 # Site counts per module, cross-checked against T1's own `check_transcription.py`
 # output. Detection drift would misalign every trace in the affected module.
 EXPECTED_SITES = {
+    "Data/Option/Basic.lean": 7,
     "Logic/IsEmpty/Basic.lean": 17,
     "Logic/Nontrivial/Defs.lean": 1,
     "Logic/Function/Defs.lean": 2,
@@ -657,13 +658,12 @@ def end_to_end_test(f: Failures, t1: pathlib.Path, t2: pathlib.Path) -> None:
                 rec["original"].startswith(("simp", "dsimp")),
                 f"original is {rec['original']!r}")
 
-        # Identity rejection is fail-closed: no renderer or translated module.
+        # A clean v2 producer output authenticates and permits rendering.
         translated = out / "Mathlib" / "Logic" / "Nontrivial" / "Defs.lean"
-        f.equal("e2e/identity_rejected_v1", mod.get("identity", {}).get("identity"), "rejected")
-        f.equal("e2e/identity_render_not_attempted",
-                mod.get("identity", {}).get("renderAttempted"), False)
-        f.check("e2e/translated_not_written", not translated.is_file(),
-                "identity failure wrote a translated module")
+        f.equal("e2e/identity_accepted_v2", mod.get("identity", {}).get("identity"), "accepted")
+        f.equal("e2e/identity_render_attempted",
+                mod.get("identity", {}).get("renderAttempted"), True)
+        f.check("e2e/translated_written", translated.is_file(), "not written")
         if translated.is_file():
             text = translated.read_text(encoding="utf-8")
             f.check("e2e/import_added", "import ExplicitLean.ExplicitRw" in text,
