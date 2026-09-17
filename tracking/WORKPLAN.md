@@ -11,7 +11,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T3-compliance | Rewrite two `dsimp` overrides; simp-family lint for overrides and generated regions | none | **merged** (af33e32) | task/T3-compliance | R3: NO DEFECTS |
 | T4-pipeline | Per-module driver: transcribe, trace, render `explicit_rw` source with original comment, splice, compile in T2 worktree, per-site report attributed to a side | T1, T2 worktrees (read-only) | **merged; baseline accepted** | task/T4-pipeline | REVIEW-8 PASS at `f0b59ac`; 246 checks; 7/7 modules and 91/91 identity |
 | T5-cone | Run T4 on the seven-module cone (91 calls); record per-call outcomes | T0, T4 | planned | | |
-| T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
+| T6-structural-rendering | Deterministic structural expansion for complete multi-invocation traces; preserve safe continuations and refuse unsafe shapes | T4 | **merged; accepted** | codex/t6-structural-rendering | REVIEW-3 PASS at `0738ac7`; 265 checks; 91/91 identity; 59 replayed, 5 unresolved, 6 render_failed, 0 structurally_refused, 21 compile_failed |
 | T13-cone-runner | Strict readable translated-root cone runner with closure, staging, freshness, resolution, build-order and lint gates | T5 preflight | **merged** | task/T13-cone-runner | R2 PASS at `d258d6c` for `298755b`; focused checks and one-module compile passed; full cone unrun |
 
 ## Next steps (written at session end, 2026-09-16)
@@ -111,6 +111,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
   `first` dispatch or goal fingerprints. Non-tail continuations may be copied
   only when simp-free and scope/order preserving; otherwise refuse the site.
   T1 must emit the specified ordinals before T4 implementation begins.
+- **T6 structural rendering: ACCEPTED / MERGED.** Reviewed commits through
+  `814f274` plus REVIEW-3 `0738ac7` are integrated. The authoritative fresh
+  seven-module report has 91/91 identity sites: 59 replayed, 5 unresolved,
+  6 render_failed, 0 structurally_refused, and 21 compile_failed. The 265-check
+  pipeline suite passes; this remains partial replay evidence, not full-cone or
+  whole-tree acceptance.
 - **T7 declaration-oracle design: optional diagnostic.** The source-pair design
   remains available for focused semantic debugging, but the user clarified
   that acceptance is source-preserving translation plus compilation of the
