@@ -1101,8 +1101,8 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
 
 
 STATUS_ORDER = (
-    "replayed", "unresolved", "render_failed", "compile_failed",
-    "probe_inconclusive", "identity_failed",
+    "replayed", "unresolved", "render_failed", "structurally_refused",
+    "compile_failed", "probe_inconclusive", "identity_failed", "other",
 )
 
 
@@ -1123,8 +1123,8 @@ def summarize(report: dict) -> str:
         f"T2 `{report['t2_branch']}` at `{report['t2_commit']}`"
         f"{' (dirty)' if report['t2_dirty'] else ''}.",
         "",
-        "| module | sites | replayed | unresolved | render_failed | compile_failed | probe_inconclusive | identity_failed | mode | s |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| module | sites | replayed | unresolved | render_failed | structurally_refused | compile_failed | probe_inconclusive | identity_failed | other | mode | s |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     totals = {k: 0 for k in STATUS_ORDER}
     total_sites = 0
@@ -1139,15 +1139,17 @@ def summarize(report: dict) -> str:
         lines.append(
             f"| `{name}` | {mod['sites']} | {counts['replayed']} | "
             f"{counts['unresolved']} | {counts['render_failed']} | "
+            f"{counts['structurally_refused']} | "
             f"{counts['compile_failed']} | {counts['probe_inconclusive']} | "
-            f"{counts['identity_failed']} | "
+            f"{counts['identity_failed']} | {counts['other']} | "
             f"{mod['compile_mode']} | {mod['seconds']:.0f} |"
         )
     lines.append(
         f"| **total** | **{total_sites}** | **{totals['replayed']}** | "
         f"**{totals['unresolved']}** | **{totals['render_failed']}** | "
+        f"**{totals['structurally_refused']}** | "
         f"**{totals['compile_failed']}** | **{totals['probe_inconclusive']}** | "
-        f"**{totals['identity_failed']}** | | |"
+        f"**{totals['identity_failed']}** | **{totals['other']}** | | |"
     )
 
     lines += ["", "## Failures, per site", ""]

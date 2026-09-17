@@ -441,6 +441,39 @@ def mapping_tests(f: Failures) -> None:
             "an unrelated diagnostic was selected")
 
 
+def summary_tests(f: Failures) -> None:
+    """Summary rows expose every status and reconcile to site totals."""
+    report = {
+        "generated": "fixture", "t1_branch": "t1", "t1_commit": "abcdef0",
+        "t1_dirty": False, "t2_branch": "t2", "t2_commit": "1234567",
+        "t2_dirty": False,
+        "modules": [
+            {"module": "Mathlib/A.lean", "sites": 4, "seconds": 0,
+             "compile_mode": "per_site", "records": [
+                 {"site": 0, "line": 1, "status": "replayed"},
+                 {"site": 1, "line": 2, "status": "compile_failed"},
+                 {"site": 2, "line": 3, "status": "structurally_refused"},
+                 {"site": 3, "line": 4, "status": "unresolved:fixture"},
+             ]},
+            {"module": "Mathlib/B.lean", "sites": 2, "seconds": 0,
+             "compile_mode": "whole_module", "records": [
+                 {"site": 0, "line": 1, "status": "render_failed:fixture"},
+                 {"site": 1, "line": 2, "status": "probe_inconclusive"},
+             ]},
+        ],
+    }
+    summary = P.summarize(report)
+    f.check("summary/structural_column", "structurally_refused" in summary,
+            "structurally refused status has no explicit column")
+    total = next((line for line in summary.splitlines() if line.startswith("| **total**")), "")
+    cells = [cell.strip() for cell in total.split("|")[1:-1]]
+    # module, sites, then one cell per status bucket, followed by mode/seconds.
+    f.equal("summary/total_site_count", cells[1] if len(cells) > 1 else None, "**6**")
+    counts = [int(cell.strip("*") or "0") for cell in cells[2:2 + len(P.STATUS_ORDER)]]
+    f.equal("summary/total_reconciles", sum(counts), 6)
+    f.equal("summary/structural_count", counts[P.STATUS_ORDER.index("structurally_refused")], 1)
+
+
 def identity_tests(f: Failures) -> None:
     """The v2 source-site bijection fails closed before rendering."""
     source = (
@@ -774,6 +807,7 @@ def main() -> int:
     diagnostic_tests(f)
     invocation_tests(f)
     mapping_tests(f)
+    summary_tests(f)
     identity_tests(f)
     lifecycle_tests(f)
     publication_tests(f)
