@@ -47,8 +47,7 @@ consequences:
    chooses, at each subterm, which lemma to apply; once chosen, every step is
    determined by (lemma or hypothesis, direction, position in the term,
    side-condition proofs). Record exactly that, then replay it with no search.
-   - **Trace capture.** Extend the boundary recorder to wrap simp's
-     `pre`/`post` methods (`Simp.Methods`) and log each fired step as
+   - **Trace capture.** Instrument stock simp to log each fired step as
      `(kind, position, name, direction, side-conditions)`, where `position` is
      a `SubExpr.Pos`-style path including binder crossings. Three step kinds
      are not lemma rewrites and must be logged explicitly or later positions
@@ -57,6 +56,12 @@ consequences:
      **simproc steps** as the concrete equation they produced (replayed by
      `rfl`/`decide`, never by the simproc); **side conditions** as nested
      traces of the same shape (assumption, `decide`, or a recursive simp run).
+     The recorder may wrap `Simp.Methods` or fork simp's traversal
+     (`Simp.Main`) to thread an exact `SubExpr.Pos` through `visit`/`congr`/
+     `reduceStep`; the user permits the fork (2026-09-16) since it removes
+     the need to reconstruct positions and definitional steps after the fact.
+     Either way the in-tactic validator (replaying the recorded steps must
+     reproduce simp's result) stays as the safety net.
      Also log the location (`⊢`, `at h`, `at *`), contextual hypotheses
      introduced under implications, closing steps (`rfl`, `True.intro`,
      hypothesis), and any metavariable assignments.

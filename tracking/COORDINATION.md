@@ -54,8 +54,10 @@ only after a clean round.
   spec in `tracking/SIMP-TRACE-SPEC.md`.
 - A single Lean build or check exceeds 30 minutes or 40 GB RSS on the Mac.
 - A required check still fails after three distinct fix attempts.
-- The only path forward is forking or copying Lean's simp traversal, or
-  calling simp machinery from product code.
+- Calling simp machinery from product code. (Forking or copying Lean's simp
+  traversal inside the RECORDER is permitted as of 2026-09-16, by user
+  decision, when it makes position capture simpler or more robust than
+  post-hoc reconstruction.)
 - Anything else surprising that changes the plan.
 
 ## Product rule reminder
