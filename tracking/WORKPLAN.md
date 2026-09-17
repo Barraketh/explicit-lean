@@ -67,6 +67,16 @@ terse completion notices, then makes merge and next-dispatch decisions.
   finalizer CLI that reads raw v1 from T4's run directory and writes v2 to a
   separate run-local directory. T4 rewrites staged trace paths, compiles in the
   T1 environment, invokes that CLI, then validates the v2 bijection.
+- **Post-cone SQLite ledger:** after the 91-site pipeline compiles reliably and
+  before whole-corpus scaling, replace loose manifest/trace discovery with a
+  SQLite execution ledger. Keep original sources and generated Lean as files;
+  the database indexes source sites, recorder/schema/toolchain versions, runs,
+  invocations, ordered/nested rewrite steps, render attempts, diagnostics and
+  module-build outcomes. Recorder and renderer git commits are first-class
+  version keys so results from different implementations are never combined.
+  Extend or migrate the existing historical translation index only after a
+  schema review; do not silently mix retired encoded-artifact rows with the
+  readable-trace pipeline.
 - **Named `zeta` decision:** T1's local-let fvar delta is represented as an
   existing `change` step with an explicit `pp.all` `to` value. Plain `letE`
   zeta remains `zeta`. Do not broaden T2's zeta semantics or add a name-based
