@@ -1,74 +1,70 @@
 # T2-explicit-rw result
 
-Status: **complete**, all checks pass. Rounds 1-7: 7/7, 7/7, 3/3, 4/4, 5/5, 6/6,
-4/4. Round 7 found no critical or major defect and the integration merge gate
-passed on this side (5/5 T1 traces replay, 0 T2 mismatches).
+Status: **complete**, all checks pass. Rounds 1-8: 7/7, 7/7, 3/3, 4/4, 5/5, 6/6,
+4/4, 9/9. Rounds 7-8 found **no soundness defect in the tactic**; round 8's were
+in the checks and documentation. Round 8 also retracted round 7's two
+"T1-side" merge findings as reviewer errors, so the merge questions were all
+T2's own and are now closed.
 `explicit_rw` replays a simp trace positionally with no search (design and syntax
 in `ExplicitLean/ExplicitRw/Tactic.lean`). Nothing in it reaches
 `Lean.Meta.Simp`. What a *trace* can introduce is a **conditional** guarantee,
 which is what is actually true: no trace in this syntax can introduce a
 simp-family tactic, *provided its file declares no term elaborators* (Round 3.1).
 
-## Round 7 fixes (all diagnostics or bookkeeping)
-1+2. *(minor)* Round 6 fixed the antiquotation wording in the term and step
-   slots, but the recursive side-proof grammar added in that same round
-   re-introduced "internal error" in four of six slots. One `isAntiquot`
-   predicate now serves every fallthrough, pinned by three fixtures. The `congr`
-   refusal compared terms differing only in *implicit* arguments, printing the
-   same term twice; both are now rendered **eagerly** under `pp.explicit` —
-   eagerly because `MessageData` resolves its context where the error is
-   displayed, not where it is thrown.
-3. *(minor, honesty)* The escape-sweep figures had **no committed artefact**:
-   they came from scratch runs, two of which proved to be classifier errors
-   rather than grammar defects — exactly the case where an artefact matters. The
-   probe list now lives in `test/ExplicitRw/sweep/probes.json` and
-   `check_explicit_rw.py` runs it, so the count is produced by the check, not
-   asserted here. An escape must be stopped by the **parser**; the only two that
-   cannot be (`admit`, `$x`) are listed explicitly, so anything else surviving
-   the parser fails the run.
-4. *(trivial)* The fixture count said 6; there are 7.
+## Round 8 fixes
+1. *(major)* The axiom audit grepped for `sorryAx`, enforcing only half the
+   governing rule: a theorem depending on a freshly declared `axiom` prints that
+   axiom's name and **no** `sorryAx`, so it passed. The audit now parses every
+   report and fails unless the axiom set is within
+   `{propext, Quot.sound, Classical.choice}`, and fails if the report count does
+   not match the theorem count. Verified with the injection **inside** the
+   fixture namespace, where a real regression would sit: previously exit 0, now a
+   named failure. Round 7's verification had appended after the `end`, so the
+   file failed to compile for an unrelated reason and the gate was never
+   exercised — this file's claim that it had been verified was wrong.
+2. *(major)* Two of the six sweep slots rewrote at `[0,1]` against the goal
+   `True`, which has no children, so every probe died on the *position* before
+   its term was elaborated — four rejections credited on unrelated evidence. Each
+   slot now carries a goal with the structure its position needs, and both reject
+   `admit` **by name**. The post-parse branch now requires a non-zero exit and an
+   attributable message, and the template's trailing `trivial` — absorbed as an
+   *argument*, since application spans lines — is gone.
+3. *(major)* Inaccessible hypotheses need no new syntax: `rename_i` is ordinary
+   Lean and already worked. The convention is now documented precisely (it names
+   the last *n* inaccessibles in context order, so a generator names all of them
+   up to the one it needs) with a fixture using the **earlier** of two.
+4. *(major)* The step-forms table listed about half the forms. It now covers
+   every spec kind — `congr`, `iota`, `with [...]` and its recursive side-proof
+   grammar, the `prop` convention (`eq_true`/`eq_false`) which lived only in a
+   *test comment*, `rename_i`, and what has no form (`intro_ctx`, `at *`) with
+   the reason. A generator author should not need to read the parser.
+5. *(minor)* `zeta` with a `name`: T1 emits the field, the spec does not define
+   it, and T2 cannot consume it. **Coordinator decision** — one of the two must
+   move; no T2 change is possible without a spec amendment.
 
-## Round 6 fixes
-1. *(CRITICAL — merge blocker)* The `eq` slot elaborated with no guard, so an
-   unresolvable equation logged a *recoverable* error, returned `sorryAx`, and
-   the `by` block was abandoned **with no diagnostic**:
-   `theorem false_thm : (1 : Nat) = 2` was admitted at exit 0. This is the hole
-   round 5 fixed at the `change` site — and wrote the mechanism down — then did
-   not apply twelve lines below; guarding sites one at a time is why it survived.
-   All four sites now go through one **`elabStrict`**: error recovery off,
-   synthesize without postponing, instantiate, then reject on `sorry`, synthetic
-   sorry, leftover expression or universe metavariables, or any error logged
-   while elaborating, each step-indexed. `Strict.lean` pins one rejected fixture
-   per site, and **`check_explicit_rw.py` computes the axiom audit itself** — any
-   `sorryAx` fails the run, the gate that would have caught this.
-2-4. *(major)* The discriminating sort fixture this file claimed did not exist,
-   and the `ℝ`/`ℂ` fixtures put those tokens only in theorem *statements*, never
-   inside a step — which is why the atom bug passed the suite. Both are now real
-   (`change Type` at a `Prop` position must be **refused**, verified by reverting
-   the fix). The atoms had mapped to `Real`/`Complex`, hygienic names resolving
-   in this `prelude` module's scope where they do not exist; the notation node is
-   now rebuilt so Mathlib's elaborator resolves it at the call site.
-5+6. *(minor)* Antiquotations named rather than "internal error"; the `change`
-   error no longer promises a diagnostic that was never printed.
-**Recursive side proofs** (item 4). `with [...]` and `then` take a closed
-*recursive* grammar: `rfl | decide | omega | nofun | exact <term> |
-intro <ids> ; <proof> |` a nested `explicit_rw`. An implication-shaped hypothesis
-— `ite_congr`/`dite_congr` give `c → x = u` — needs the `intro` form.
-**The `congr` step** (T1 round-5 cross-check). The spec's `congr` kind had no T2
-form, so cast-transport traces could not replay. `congr <i> [steps] at [pos]`
-rebuilds the application through `Lean.Meta.mkCongrSimp?`'s theorem; unlike
-`congrArg` it transports the arguments that *depend* on `i`. The built proof's
-type is checked against the claimed equation before use — what refuses every
-unsound rebuild the round-7 reviewer constructed. Fixtures replay T1's
-`congr_cast`, `congr_nested_cast` and the `Function/Basic:390` shape.
-
-## Rounds 1-5 fixes (each re-verified by the following reviewer)
+## Rounds 1-7 fixes (each re-verified by the following reviewer)
+**Round 7** *(4 minor)*: round 6's antiquotation fix had not reached the
+recursive side-proof slots added in the same round — one `isAntiquot` predicate
+now serves every fallthrough. The `congr` refusal compared terms differing only
+in *implicit* arguments, printing the same term twice; both are now rendered
+eagerly under `pp.explicit`. The escape-sweep figures had no committed artefact,
+so the probe list moved into `test/ExplicitRw/sweep/probes.json` and the runner
+drives it.
+**Round 6** *(1 critical, 3 major)*: the `eq` slot elaborated with no guard, so
+an unresolvable equation logged a *recoverable* error, returned `sorryAx`, and
+the `by` block was abandoned **with no diagnostic** — `theorem false_thm :
+(1 : Nat) = 2` admitted at exit 0. That was the hole round 5 fixed at the
+`change` site and wrote the mechanism down for, then did not apply twelve lines
+below. All four sites now go through one **`elabStrict`**, pinned by one fixture
+per site. The sort fixtures were accepting-only and the `ℝ`/`ℂ` ones never put
+the token inside a step, which is why the atom bug passed; both fixed. The
+**recursive side-proof grammar** and the **`congr` step** via `mkCongrSimp?` were
+added here — the latter's `isDefEq` guard refuses every unsound rebuild since.
 **Round 5**: sort productions read their keyword one node too shallow, so
 `Type`/`Type*`/`Sort*` collapsed to `Sort _`, which unifies with anything
 including `Prop`; `iota` reduced many steps where the spec says one; `ℕ ℤ ℚ ℝ ℂ`
-and `nofun` added. **Addendum**: a class-polymorphic lemma was elaborated before
-unification, so `add_zero` was stuck — instances are now synthesized only after
-the position fixes the carrier.
+and `nofun` added; instances are now synthesized only after the position fixes
+the carrier, which unblocked `add_zero`.
 **Round 4**: the grammar admitted far less than Lean prints; it now covers
 conditionals, projection on parenthesised terms, untyped binders, the operators
 Mathlib pp emits, set-builder, pairs and sorts.
@@ -78,8 +74,8 @@ metavariable and passed — my claim that the guard caught a block "however it g
 there" was false. Terms are now parsed in a whitelist grammar. **Residual hole,
 stated not papered over:** an identifier bound to a `@[term_elab]` elaborator is
 indistinguishable from a constant at parse time — closed generator-side (**T4**).
-**Round 2**: the `let`-body branch abstracted by *value*. **Round 1**: the
-`tacticSeq` hole in `then`/`eq … by`, now closed enumerations. Details in git.
+**Rounds 1-2**: the `tacticSeq` hole in `then`/`eq … by`, now closed
+enumerations; the `let`-body branch abstracted by *value*. Details in git.
 
 ## Files (only owned; `ExplicitLean.lean`, `lakefile.toml` untouched)
 `ExplicitLean/ExplicitRw{.lean,/Basic,/Tactic}.lean`; `test/ExplicitRw/` (7
@@ -88,17 +84,25 @@ fixtures + `RejectedSyntax/`: 13 cases; `sweep/`: probe list + README);
 ## Checks (re-run from scratch; Lean 4.32.2, pinned Mathlib)
 - `lake build ExplicitLean.ExplicitRw` (clean): PASS, no warnings, ~5 s
 - `lake env lean test/ExplicitRw/<each>.lean` (7): PASS, no output, 1.6–2.5 s ea
-- `python3 -B Experiment/check_explicit_rw.py`: PASS (7 + 13 cases), ~6 min,
-  including two gates it now computes rather than this file asserting them —
-  the **axiom audit** (111 theorems, no `sorryAx`) and the **escape sweep**
-  (2 of 6 slots by default). `T2_FULL_SWEEP=1` sweeps all six: **330 escape
-  probes all rejected, 318 by the parser and 12 at elaboration (only `admit` and
-  `$x`, which no parser can stop); 120 benign all parse**
+- `python3 -B Experiment/check_explicit_rw.py`: PASS (7 + 13 cases), **~5 min**,
+  including two gates it computes rather than this file asserting them — the
+  **axiom audit** (112 theorems, all within the allowlist) and the **escape
+  sweep** (2 of 6 slots by default, ~285 s of that runtime)
+- `T2_FULL_SWEEP=1` sweeps all six slots: **330 escape probes all rejected, 318
+  by the parser and 12 at elaboration**, 120 benign all parse. That run takes
+  **~20 min**, almost all of it the sweep. The 12 are `admit` and `$x` in all six
+  slots: `admit` is a tactic with no term-level constant, so it can only arrive
+  as a bare identifier and die in `elabStrict`; `$x` cannot be excluded at parse
+  time because Lean gives every `declare_syntax_cat` an antiquotation
+  alternative. Since round 8 each is rejected **attributably** — non-zero exit
+  and a message naming this tactic or the identifier
 - `python3 -B Experiment/check_no_simp_family.py`: PASS (3 files), 0.04 s
 
 Both gates were verified to *fail* when they should: the axiom audit on an
-injected `sorry` and on a new axiom, the sweep on a planted escape (the first
-version of that check counted any error as a rejection and let the plant pass).
+injected `sorry` **and** on an `axiom` declared inside the fixture namespace
+(the placement a real regression would have — round 7's injection went after the
+`end` and failed to compile, so the gate was never exercised); the sweep on a
+planted escape.
 ## Limitations and open questions
 - **Dependent positions are refused, not guessed**, each step-indexed: dependent
   function argument and `∀` domain, binder types, `let` type/value, projection
