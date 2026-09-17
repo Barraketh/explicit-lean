@@ -42,8 +42,10 @@ intro <ids> ; <proof> |` a nested `explicit_rw` with its own closer. A
 conditional lemma's hypothesis is often implication-shaped — `ite_congr` and
 `dite_congr` give `c → x = u` — which no flat enumeration can discharge.
 Fixtures replay both. The sweep was re-run serially over 324 probes including
-the two new slots: **zero escapes, 210/210 parse-rejected**; three the classifier
-flagged were hand-checked and are parse errors too.
+the two new slots: **210/210 escapes parse-rejected, none reaching elaboration;
+114/114 benign terms parse**. An earlier classifier run flagged three escapes and
+21 benign terms; hand-checking showed all 24 were classifier errors, so that run
+was discarded rather than reported.
 **The `congr` step** (T1 round-5 cross-check). The spec's `congr` kind had no T2
 form, so cast-transport traces could not replay at all. `congr <i> [steps] at
 [pos]` rebuilds the application through `Lean.Meta.mkCongrSimp?`'s theorem,
@@ -63,9 +65,7 @@ instance argument and `add_zero` was stuck; a bare constant is now resolved
 directly and instances synthesized after the position fixes the carrier.
 **Round 4** *(4 major, sufficiency)*: the grammar admitted far less than Lean
 prints; it now covers conditionals, projection on parenthesised terms, untyped
-binders, the operators Mathlib pp emits, set-builder, pairs and sorts. Two sweep
-runs were discarded rather than reported (one against a mid-edit build, one
-grading *any* error as rejection).
+binders, the operators Mathlib pp emits, set-builder, pairs and sorts.
 **Round 3** *(major)*: both guard layers keyed on syntax, so a term elaborator
 calling the simplifier in `MetaM` produced neither a `by` node nor a synthetic
 metavariable and passed — my claim that the guard caught a block "however it got
