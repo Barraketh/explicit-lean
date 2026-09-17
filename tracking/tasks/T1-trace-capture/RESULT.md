@@ -1,95 +1,103 @@
-# T1-trace-capture: RESULT
+# T1-trace-capture: RESULT (T1b — forked traversal)
 
-**Built.** `simp_trace` runs **stock simp**, emitting `simp-trace-v1` JSON per the amended spec. It accepts
-every form `simp` accepts — `(config := ...)`, `(discharger := ...)`, `(disch := ...)`, `+decide`, `-flag`,
-`only`, `[*]`, `[← h]`, `at h ⊢`, `at *` — plus a trailing `=>trace "<path>"`; without it the JSON is logged
-as `simp-trace-json:{...}` for a driver. The delimiter took three attempts and is worth stating: a *leading*
-`(out := ...)` makes the parser commit on `(` and blocks simp's parenthesized forms; a *trailing* one is
-eaten by `optConfig`; a plain keyword atom parses but is reserved globally on import, so it breaks any
-identifier of that name; a *non-reserved* keyword is swallowed by the `location` parser after `at h`.
-`=>trace` is not an identifier at all, so it is unambiguous for the parser and invisible to the namespace —
-theorems and hypotheses named `with_trace` or `trace` compile alongside it. Other slots stay positionally
-identical to `Parser.Tactic.simp`, so a real `simp` node is rebuilt and passed to stock `mkSimpContext`.
+`simp_trace` now runs a **fork of simp's own traversal** that records positions directly. Frontend unchanged and still
+substitutable (every `simp` argument form plus a trailing `=>trace "<path>"`; without it the JSON is logged as
+`simp-trace-json:{...}`); goal-state replication still mirrors `Meta.simpGoal`.
 
-**Positions: approach (b), plus four corrections the task did not anticipate.** Replay recorded
-`(before, after)` pairs against a running term from the pre-state, locate `before` structurally, one step per
-occurrence in pre-order. (1) *Definitional steps are invisible to `Simp.Methods`*: beta/proj/iota/zeta and
-delta unfolding run in `simpLoop`'s `reduceStep`, outside `pre`/`post`; the bridge search recovers them from
-the running term (forking was barred when this was written, and stays unattractive — see below) and emits
-`unfold`/`beta`/`proj`/`zeta`/`change`, validated like any other step. (2) *`post` fires on stale terms*:
-simp keeps the pre-rewrite parent and rebuilds, so a `post` firing's `before` can predate child rewrites
-already replayed; recorded terms are refreshed first. (3) *A refreshed term collapsing to the step's own
-`after` is a no-op match* that consumes the step at the wrong position — rejecting those is what makes
-shadowed binders and `let` work. (4) *One reduction is not enough*: `findBridgeChain?` searches
-breadth-first over reduction *sequences* (bounded at 32), because Mathlib stacks `@[reducible]`/`abbrev`
-definitions and exposing a subterm can need several delta steps composed at one position; each link is
-emitted as its own step. Binder crossings use `Expr.abstract`; `Expr.replace` is **wrong** here (not
-binder-depth aware). Validation is in-tactic and fails loudly: navigating `pos` reaches `before`, replacing
-yields the next term, and the final term equals simp's actual result.
+## The fork — `ExplicitLean/SimpTrace/Traversal.lean` (1180 lines, 41 `SOURCE:` annotations)
 
-**Kinds.** `rw` (globals both directions, local hyps, `simp [h]`, `simp at h`); conditional lemmas with
-`side` sub-traces; `eq` for simprocs and `+decide` closures (`by` set only after a scratch check confirms the
-tactic proves it); `unfold`, `beta`, `proj`, `zeta`, `change`; `close` in the amended forms. Local references
-carry the spec's `local` object, contextual hypotheses in the separate namespace. **Not emitted in v1:
-`intro_ctx`, `eta`** — unexercised, both still in the checker's `KNOWN_KINDS`. Nothing is dropped silently:
-unattributable firings, unlocatable subterms, bridge-bound exhaustion and unnameable closes — in the main
-trace *and* in side conditions — each raise distinct errors.
+Copied from Lean 4.32.2 `src/lean/Lean/Meta/Tactic/Simp/`: 31 functions from **Main.lean** (`reduceStep`, `reduce`, `unfold?`,
+`reduceProjFn?`, `reduceFVar`, `dsimpImpl`, `simpProj`/`Const`/`Lambda`/`Arrow`/`Forall`/`Let`/`App`/`Step`, `visitFn`,
+`congr`/`congrDefault`, `processCongrHypothesis`, `trySimpCongrTheorem?`, `simpLoop`, `simpImpl`, `withNewLemmas`,
+`lambdaTelescopeDSimp` and their helpers) and 6 from **Types.lean** (`congrArgs`, `simpAppUsingCongr`, `tryAutoCongrTheorem?`,
+`mkCongrFun'`/`mkCongrPrefix`/`mkCongr'`). Each carries a `SOURCE:` comment with its upstream file and line range, so a Lean bump
+re-syncs by diffing. Nine are `private` upstream; every symbol their bodies reference is public, so no `private`/`unsafe`/
+`@[implemented_by]` boundary had to be reproduced — no escalation.
 
-**Round 1 fixes** — all 11 defects of REVIEW-1, each reproduced before and after. *Critical:* (1)
-parenthesized `simp` forms were unparseable — out-clause moved to a trailing delimiter; (2) `+decide`
-aborted — unattributed Prop→`True`/`False` firings now route to `mkEqStep` after reattribution fails; (3)
-shadowed binders and (4) `let` failed position solving — fixed by rejecting no-op refreshed matches and
-adding `zeta` to `reduceHere?`. *Major:* (5) cache policy mirrors stock simp
-(`wellBehavedDischarge := discharge?.isNone`); (6) writes confined to the package root or
-`SIMP_TRACE_OUT_ROOT`; (7) close forms follow the amendment, `absurd:<hyp>` names the eliminated hypothesis,
-and an unnameable close is an error rather than a guessed `rfl`; (8) `ctx:<n>` labels replaced by the spec's
-`local` object. *Minor:* (9) the bridge bound throws instead of returning empty; (10) side `close` and
-`steps` reconciled; (11) RESULT.md claims corrected.
+**Stock and untouched:** everything deciding *what* simp does — `Simp.Methods` (`pre`/`post`/`dpre`/`dpost`/`discharge?`) from
+the context, `Simp.rewrite?`, `Simp.Result`, simproc tables, congruence lookup, `synthesizeArgs`, `mkCongrSimp?`. Two edits
+applied uniformly: every recursive `Simp.simp`/`Simp.dsimp` (an `@[extern "lean_simp"]` opaque that would dispatch to *stock*
+`simpImpl` and lose positions) becomes `simpT`/`dsimpT` with the child's position; and stock `Methods` run under `withPos`, so the
+recorder reads the position of the subterm they fire on.
 
-**Round 2 fixes** — all 6 defects of REVIEW-2, each reproduced before and after. *Critical:* (1) a 2-deep
-`@[reducible]` chain aborted — `findBridge?` accepted only a reduction that *immediately* exposed the
-target, so a chain never started; replaced by the breadth-first `findBridgeChain?` above, verified at depths
-2, 3 and 4. Fixing this surfaced a second bug: `reduceHere?` called `whnf`/`unfoldDefinition?` on subterms
-carrying loose bvars, which **panics** the elaborator; it now takes only the syntactic reductions there.
-*Major:* (2) `eraseMacroScopes` turned inaccessible `a✝` into plain `a` — the name of a *different,
-accessible* local, so the trace claimed a rewrite the goal never made; `name` is now the pretty-printed form
-(`a✝`), with the raw user name and `ctxIndex` in `local`. (3) a symlink under the root defeated containment,
-since textual `..` collapsing cannot see through one; both root and target are now resolved with
-`IO.FS.realPath` before comparison. (4) side-condition `close:{"by":"unknown"}` was written silently,
-contradicting this file; it is now the same hard error the main trace already raised. *Minor:* (5) the
-delimiter no longer reserves a global token (see above); (6) the two overstated claims are narrowed — goal
-state was verified to match stock simp on the reviewer's 18-form corpus and every fixture, not universally,
-and the "nothing dropped silently" claim now holds for side closes too.
+**Threading.** `pos : Pos` is an explicit parameter on every copied function, extended per the spec (`app` 0/1, binder 0/1, `letE`
+0/1/2, `mdata`/`proj` 0). For an `n`-ary application argument `i` is at `0^(n-1-i) ++ [1]` (`argPos`/`fnPos`) — exactly the order
+`simpAppUsingCongr`'s `visit` walks, as REVIEW-3's fork note predicted. `processCongrHypothesisT` locates the argument a
+congruence *hypothesis* simplifies and hands `simpT` its position, so `ite_congr` traces at the condition. A **binder stack**
+(`EvCtx.binders`) records the fvars the traversal substituted for term binders, so the validator never infers them.
 
-**Fork assessment** (user relaxation permitting a forked traversal; option (b) chosen). A fork would replace
-`Position.lean`'s reconstruction — `findBridgeChain?`, `reducibleSites`, `refresh`, `findOccurrences`, the
-no-op-match rule (~200 lines) — with an exact `SubExpr.Pos` threaded through the traversal, copying
-`simpLoop`/`simpStep`/`simpApp`/`simpLambda`/`simpForall`/`simpArrow`/`simpLet`/`simpProj`/`visitFn`/`congr`/
-`reduceStep`/`reduce`/`unfold?` and private helpers from `Simp.Main` (~480 lines) **plus**
-`simpAppUsingCongr`/`tryAutoCongrTheorem?` from `Simp.Types` (~180) — ~600-700 lines to resync each Lean
-bump. It would have prevented round-1 defects 3-4 and round-2 defect 1 outright and made round-1 defect 10
-moot, but not the other 14 (frontend, naming, path, policy). (b) because the hard part survives:
-`simpAppUsingCongr` rebuilds through congruence *lemmas*, so a fork still maps congruence-argument slots to
-child indices — the same problem, moved. Revisit if a corpus module defeats the chain search.
+**Two deliberate departures.** (1) The result **cache is disabled**: keyed on the expression alone, reuse at a second position
+would log events nowhere or at the first — a position-exact trace and an expression-keyed cache are incompatible. (2) A simproc
+may call the opaque `Simp.simp` on a subterm of its choosing (`reduceIte` on an `ite`'s condition); that enters stock `simpImpl`
+and its firings carry no position, so they are **diverted** into a frame and attached to the simproc's `eq` step as `side`
+evidence.
 
-**Files.** `ExplicitLean/SimpTrace.lean` + `SimpTrace/{Types,Recorder,Position,Tactic}.lean`;
-`test/SimpTrace/` (`Fixtures.lean`, `IsEmptyBasicTraced.lean`, `OutsideRoot.lean`, `SymlinkEscape.lean`,
-`expected/`, `.gitignore`); `Experiment/check_simp_trace.py`; this directory. Modules use the Lean module
-system so the `module`-based Mathlib copy can import them; `ExplicitLean.lean`/`lakefile.toml` untouched.
+**Deleted.** `Position.lean` lost 327 of 404 lines: `findBridge?`, `findBridgeChain?`, `reducibleSites`, `reduceHere?`,
+`substAll`, `refresh`, `findOccurrences`, `Occurrence`, `Bridge`, `collectBridges`, `solvePositions`, the no-op-match rule. What
+remains is navigation plus the **validator**, run after every location: navigate `pos`, check the subterm equals `before`,
+substitute `after`, require the final term to equal simp's result; mismatch is a hard failure. **No search anywhere in the
+recorder.**
 
-**Checks — all rerun from scratch, all pass (macOS, Lean 4.32.2).** `lake build ExplicitLean.SimpTrace`
-(oleans deleted first): clean, 8.0 s. `lake env lean test/SimpTrace/Fixtures.lean` (30 fixtures): pass,
-3.8 s. `python3 -B Experiment/check_simp_trace.py`: `OK: 30 ... and out-of-root paths (including through
-symlinks) are refused`, 5.9 s. `lake env lean test/SimpTrace/IsEmptyBasicTraced.lean`: pass, 17/17, 2.4 s.
-All three checker assertions were verified to fail on a regression (a perturbed `pos`/`dir`; an in-root
-negative fixture; an in-root symlink fixture). REVIEW-1 and REVIEW-2 repros were all re-run after the fixes.
+## Measurements (macOS, Lean 4.32.2; outputs gitignored)
 
-**Measurement — 17 `simp only` calls of `Mathlib/Logic/IsEmpty/Basic.lean`.** Unchanged in substance: all 17
-traced, none unresolved, **76 steps, mean 4.5, range 2–6**, kinds `rw` 70 / `unfold` 6. Byte figures moved
-with the delimiter rename (it appears in each trace's `call` field): mean 883.4 B (round 1: 886), max
-1129 B (1132), **15 017 B total** (15 068) — still ~0.9 KB/call against the rejected 7,113-line DAG.
+| file | calls | traced | steps | kinds | bytes | wall | peak RSS | unres. |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IsEmptyBasicTraced.lean` | 17 | 17 | 76 | `rw` 70, `unfold` 6 | 15 045 | 4.71 s | 677 MB | 0 |
+| `NontrivialDefsTraced.lean` | 1 | 1 | 6 | `rw` 6 | 1 109 | 5.20 s | 638 MB | 0 |
+| `FunctionDefsTraced.lean` | 1 | 1 | 12 | `rw` 8, `proj` 4 | 1 878 | 5.09 s | 645 MB | 0 |
+| `ExistsUniqueTraced.lean` | 8 | 8 | 29 | `rw` 23, `beta` 4, `unfold` 2 | 5 601 | 5.33 s | 649 MB | 1 |
+| **Mathlib total** | **10** | **10** | **47** | `rw` 37, `beta` 4, `proj` 4, `unfold` 2 | **8 588** | — | — | **1** |
 
-**Limitations.** `intro_ctx`/`eta` and multi-occurrence emission are unexercised by this corpus. The bridge
-chain search is bounded at 32 reductions and throws past that. Compile fixtures from the package root
-(`out/`, `isempty_out/` gitignored; `expected/` committed). Reattribution probes theorems individually when
-`usedTheorems` did not grow: one extra match attempt per such step, worth watching on a large module.
+Every call stock simp proves traces (10/10, against REVIEW-3's 8/11); no goal stock simp closes is left open. The one unresolved
+is `ExistsUnique.lean:121` — *`exists_prop_congr` simplifies a subterm that is not a child of the application*; its trace is
+emitted and passes validation, the flag being conservative about a firing it cannot place. IsEmpty reproduces the previous kind
+tally exactly — the fork does not diverge from stock.
+
+## REVIEW-3 items (each reproduced before, re-run after)
+
+- **C1** fixed: an unattributable firing is an `eq` step whose `by` a scratch check decides, never an abort. `FINAL.lean` closes
+  (`Nat.reduceAdd`, `by:"rfl"`); `IOTA5.lean`'s `Option.getD` traces as `unfold` + **`iota`** — the kind that previously had no
+  emitter. (`IOTA2.lean:19`'s error is stock simp's own unsolved goal, verified against stock.)
+- **C2** fixed by deletion. Chain depths 4/6/8/12: **2.71/2.70/2.70/3.26 s** (was 6.8/219.4/timeout/timeout), flat against stock's
+  2.7 s. `PROJ3.lean`: **3.98 s** vs stock 4.04 s (was a 101.6 s timeout).
+- **M3** fixed: `UNK2.lean` records `close:{"by":"omega"}`. Discharger text is read by pretty-printing the node and stripping
+  delimiters, stable across its `atomic`/`patternIgnore` wrappers.
+- **M4** both fixed. (a) `Function/Defs.lean` emits the four `proj` reductions at four distinct positions in simp's order — the
+  composition the chain search exhausted its bound on. (b) `ExistsUnique.lean:115` traces; the `_fvar` leak is structurally
+  impossible now. Fixing (b) exposed a real validator bug: **a non-dependent arrow is a binder node that binds no term variable**,
+  so `Expr.abstract`'s indices need padding for it.
+- **M5** fixed: a Prop-valued lemma carries `"prop":"true"`/`"false"`, from the origin's declared type. Both lemmas REVIEW-3 named
+  carry it — `leftTotal_empty`/`rightTotal_empty` (`true`), `List.not_mem_nil` (`false`). Acting on the flag is T2's side. **M6**
+  fixed: no `#N` in any of the 57 traces — subterms come from the live traversal with binders in scope. **M7**: this file replaces
+  the overstated one.
+
+**Fixture changes** (four skeletons; each is the fork being more faithful). `contextual` now emits two **`intro_ctx`** steps
+(never emitted before); `zeta` puts `zeta` first — verified against `trace.Debug.Meta.Tactic.simp` that `reduceStep (pre)` fires
+on the `let` before any `add_zero`, so the old order was a reconstruction artifact; `shadowed` emits `beta` then three separate
+`add_zero` rewrites at exact positions where the old trace merged two occurrences; `ite` carries the simproc's nested condition
+rewrites as `side` evidence (side goal `n = 3`). The checker gained the amended spec's forms (`omega`, `unresolved:` closes,
+`prop`, `intro_ctx` naming) and was re-verified to catch a perturbed `pos`.
+
+**Checks, all re-run from scratch.** `lake build ExplicitLean.SimpTrace` with oleans deleted: clean, no warnings, 19.05 s, 736 MB.
+`Fixtures.lean` (30): pass with 1 classified unresolved, 3.62 s, 1 506 MB. `python3 -B Experiment/check_simp_trace.py`:
+`OK: 30 ...`, 12.10 s. `IsEmptyBasicTraced.lean`: pass 17/17, 4.71 s, 677 MB. The three measurement modules: see the table.
+Nothing came near 30 minutes or 40 GB.
+
+**Known limitations.**
+
+- **`ite` with a non-ground condition is unresolvable in the spec** (the one fixture unresolved). `(if n = 3 then 1 else 2) = 1`
+  given `h : n = 3` is provable by neither `rfl` nor `decide`, and not replayable by `rw` either — the `Decidable (n = 3)`
+  instance makes the motive ill-typed (verified). The step is emitted with `by:"unresolved:..."` plus side evidence. A fix needs
+  an `eq` variant carrying a lemma name (`if_pos`/`if_neg`) and its condition proof: a spec amendment, hence a coordinator
+  decision.
+- `eta` is in the spec but **never emitted**: stock `reduceStep` does not perform eta reduction (its `-- TODO: eta reduction` is
+  still there in 4.32.2), so emitting it would diverge from stock simp.
+- `simpHaveTelescope` simplifies a `have` telescope as a unit through `MonadSimp SimpM`, which dispatches to stock `simp`; a
+  change there marks the call unresolved. Unexercised by this corpus.
+- Disabling the cache costs time on heavily shared terms — not visible at this size (IsEmpty 4.71 s against the reconstruction's
+  2.4 s) but worth watching on a large module. A Lean bump needs a re-sync.
+
+**Open questions.** 1. Amend the spec for lemma-backed `eq` steps (`if_pos`-class simprocs)? Without it every `ite` on a
+hypothesis-dependent condition is unresolved — a common Mathlib shape. 2. `exists_prop_congr`-style congruence theorems simplify
+under their own binders: give the spec a position form, or is the classified unresolved the intended end state? 3. `ctxIndex` is
+`LocalDecl.index` and (per REVIEW-3) is not a `rename_i` argument; worth saying so in the spec.
