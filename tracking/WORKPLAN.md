@@ -42,9 +42,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
   step; the fixed position plus kernel-checked definitional equality is the
   portable contract. Implement after the current T1 round-10 fix to avoid
   overlapping ownership.
-- **T6 multi-invocation design:** read-only diagnosis of all 16 known sites is
-  running in an independent worktree. It must return exact shape groups and a
-  deterministic source transformation before T4 is assigned implementation.
+- **T6 multi-invocation design: COMPLETE.** Commit `b2a03c2` classifies all 16
+  sites / 38 executions into four source shapes. Decision: deterministic
+  structural bullet expansion keyed only by complete invocation ordinals; no
+  `first` dispatch or goal fingerprints. Non-tail continuations may be copied
+  only when simp-free and scope/order preserving; otherwise refuse the site.
+  T1 must emit the specified ordinals before T4 implementation begins.
 
 After a slot completes, reuse it immediately for the next independent review or
 fix. The coordinator alone integrates accepted branches and updates this plan.

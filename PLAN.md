@@ -77,13 +77,18 @@ consequences:
    - **Rendering.** The generated source is the step list in that syntax, the
      original call as a comment above it. A site executed more than once
      (`t <;> simp`, or a tactic run once per goal) renders per execution:
-     when the site is the last tactic of its block, `t` is followed by one
-     focused bullet `· explicit_rw [...]` per goal in execution order; when
-     all executions recorded identical steps, keep `<;> explicit_rw [...]`;
-     otherwise `<;> first | explicit_rw [...] | explicit_rw [...]` with a
-     comment naming the goal each alternative belongs to (`first` is an
-     ordinary combinator, not simp). The site counts as replayed only when
-     every execution replays. A **readability post-pass** may
+     require complete `invocation = 0..n-1` / `invocations = n` metadata and
+     structurally expand the smallest recognized enclosing `<;>` branch tree
+     into one focused bullet `· explicit_rw [...]` per leaf in Lean's
+     deterministic goal order. Never select traces with `first`, goal-text
+     fingerprints, filename order or proof-success search. Identical traces
+     may keep `<;> explicit_rw [...]` only when the source structure proves one
+     direct leaf per recorded ordinal. For a non-tail site, a continuation may
+     be copied into each leaf only when it is ordinary simp-free Lean and the
+     expansion preserves scope and tactic order; otherwise retain the original
+     call as structurally refused until the continuation is translated. The
+     site counts as replayed only when every ordinal is rendered exactly once
+     and the complete declaration compiles. A **readability post-pass** may
      collapse steps: consecutive top-level rewrites become plain `rw [...]`,
      a single closing lemma becomes `exact`, definitional-only steps become
      `change`/`unfold`. The post-pass must re-elaborate to the same goal; if
