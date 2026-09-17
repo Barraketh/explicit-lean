@@ -1,78 +1,88 @@
 # T2-explicit-rw result
 
-Status: **complete**, all checks pass. Rounds 1-4: 7/7, 7/7, 3/3, 4/4.
+Status: **complete**, all checks pass. Rounds 1-5: 7/7, 7/7, 3/3, 4/4, 5/5.
 `explicit_rw` replays a simp trace positionally with no search (design and
 syntax: `ExplicitLean/ExplicitRw/Tactic.lean`). Nothing in it reaches
 `Lean.Meta.Simp`. What a *trace* can introduce is a **conditional** guarantee,
 which is what is actually true: no trace in this syntax can introduce a
 simp-family tactic, *provided its file declares no term elaborators* (Round 3.1).
 
-## Round 4 fixes
-All four were **sufficiency**, not safety: the reviewer's 220-probe sweep found
-no escape. The grammar admitted far less than Lean prints, so a generator could
-not pass a recorded `lhs`/`rhs`/`to` string through.
+## Round 5 fixes
+No safety defect: 385 escape probes across 77 constructs and five slots were all
+rejected, and `then`/`with`/`eq … by` were shown closed by *hijacking*
+`omega`/`rfl`/`decide` rather than by inspection.
+1+2. *(major, one root)* The sort productions read their keyword at `stx[0]`
+   instead of `stx[0][0]`, so `Type`, `Type*` and `Sort*` all collapsed to
+   `Sort _` — an unconstrained universe metavariable that unifies with anything,
+   `Prop` included. **The fixtures that claimed to cover sorts contained no sort
+   spelling**, which is why nothing caught it. Fixing the index alone was not
+   enough: `elabTermEnsuringType` reports a sort mismatch as *recoverable* and
+   hands back `sorryAx`, which then passed the defeq check, so `change` now
+   rejects a term that failed to elaborate. The new fixtures include the
+   **discriminating** case — `change Type` at a `Prop` position must be *refused*
+   — because with `Sort _` every accepting case passes either way.
+3. *(major)* `iota` used `whnfCore`, which iterates to weak-head normal form and
+   swallows the redexes later recorded `iota` steps address, so a trace of N
+   steps would fail at step 2. It now uses `reduceRecMatcher?`, the single-step
+   primitive; a nested-matcher fixture needs two distinct `iota` steps, and the
+   recursor fixture a following `beta` that would be a no-op if `iota` had
+   normalised.
+4. *(major)* `ℕ ℤ ℚ ℝ ℂ` are lexer *tokens*, not identifiers, so they never
+   reached the category. Added as atoms, verified in all five slots.
+5. *(minor, spec)* The `nofun` close form, in both the `then` and `with [...]`
+   sets, with a fixture closing an impossible constructor equation.
 
-1-3. *(2 major, 1 minor)* The grammar now covers pretty-printer output:
-   `if _ then _ else _` (which T1's `reduceIte` already emits) and its dependent
-   form; **projection on any parenthesised term**, which the spec's `absurd:<hyp>`
-   close needs when the contradiction is an application (`(hp q).elim`) — this
-   also removes a misleading "invalid 'by' tactic" message reported for files
-   containing no `by`; untyped, unparenthesised binders; prefix `¬ - ↑ ⇑ ↥` and
-   postfix `⁻¹`; the binary operators Mathlib pp emits; set-builder, pairs, and
-   `Type`/`Prop`/`Type*`/`Sort*`. Terms and types are now **one** category —
-   splitting them only duplicated every production.
-   **Safety re-verified, not assumed.** The sweep was rebuilt as 216 probes (54
-   terms x 4 slots) and re-run against the widened grammar: **all 140 escape
-   probes still rejected at parse time, all 76 benign spellings now parse**. Two
-   earlier sweep runs were discarded rather than reported — one ran against a
-   mid-edit build, the other graded *any* error as rejection, hiding that benign
-   terms were failing to elaborate rather than to parse.
-4. *(spec)* `iota` implemented — one matcher or recursor reduction on a
-   constructor, guarded like `proj` so it cannot stand in for a general `whnf`.
-   A per-step `with [tac, ...]` clause discharges a conditional lemma's
-   hypotheses in order from the closed set `rfl | decide | omega |
-   exact <whitelisted term>`; `omega` is a decision procedure, not simp family,
-   and a forbidden tactic there is a parse error like anywhere else. The `prop`
-   flag needs no tactic support: the generator renders it as `eq_true <name>` /
-   `eq_false <name>`, both ordinary lemmas, and a fixture pins each.
-### Rounds 1-3 (all re-verified by later reviewers)
+**Addendum (T1 round-4 cross-check).** A class-polymorphic lemma was elaborated
+*before* unification with the subterm, so nothing fixed its instance argument and
+`add_zero` failed with "typeclass instance problem is stuck" — blocking many
+traces, since it opens several T1 fixtures. A bare constant is now resolved
+directly, leaving instance arguments open; the lemma's type is unified with the
+subterm's first, fixing the carrier and hence the instance path, and synthesis
+runs only then, erroring if the result is not the instance the subterm uses.
+Fixtures: `add_zero` at `ℕ` and under a binder, `mul_one` on a `Monoid` variable,
+`mul_comm` at `ℝ`.
+## Rounds 1-4 fixes (each re-verified by the following reviewer)
+**Round 4** *(4 major, sufficiency)*: the grammar admitted far less than Lean
+prints. It now covers `if _ then _ else _`, projection on any parenthesised term
+(needed by `absurd:<hyp>`), untyped binders, prefix/postfix/binary operators,
+set-builder, pairs and sorts; terms and types became one category. Safety was
+re-verified, not assumed: 216 probes re-run, all 140 escapes still rejected; two
+earlier sweep runs were discarded rather than reported (one against a mid-edit
+build, one grading *any* error as rejection). Also added `iota`, the `with [...]`
+clause, and `eq_true`/`eq_false` fixtures.
 **Round 3** *(major)*: both guard layers keyed on syntax, so a term elaborator
 calling the simplifier in `MetaM` produced neither a `by` node nor a synthetic
 metavariable and passed — my claim that the guard caught a block "however it got
 there" was false. Terms are now parsed in a whitelist grammar; the metavariable
-check remains as defence in depth. *(minors)* `usedLetOnly := false`; counts.
-**Residual hole, stated not papered over:** an identifier bound to a
-`@[term_elab]` elaborator is indistinguishable from a constant at parse time.
-Closed generator-side by the simp lint plus a ban on `elab`/`macro`/`syntax` in
-generated regions — **noted for T4, not implemented here**.
-
+check remains as defence in depth. **Residual hole, stated not papered over:** an
+identifier bound to a `@[term_elab]` elaborator is indistinguishable from a
+constant at parse time — closed generator-side by the simp lint plus a ban on
+`elab`/`macro`/`syntax` in generated regions, **noted for T4, not here**.
 **Round 2**: the `let`-body branch abstracted by *value*, destroying the `let`
-when the value was closed and capturing unrelated occurrences when it was a free
-variable — now `withLetDecl` + `mkLetFVars` by identity, with fixtures verified
-to **fail** against the old code. `zeta` became a real step kind; `intro_ctx`
-fails by name; bare `assumption` dropped (it searches).
-**Round 1**: the `tacticSeq` hole in `then`/`eq ... by` (now closed
-enumerations), `proj` delta, `change` messages, the dependent-function message,
-`import` linting, coverage claims. Details in git.
-**Addendum (T1 cross-check)**: the reported `IsEmpty` failure was **not** a
-universe defect — `not_nonempty_iff` was simply not imported, and `?m.2` was the
-`sorryAx`'s type. Level handling was implemented as directed anyway.
+when the value was closed and capturing unrelated occurrences when it was free —
+now `withLetDecl` + `mkLetFVars` by identity, with fixtures verified to **fail**
+against the old code. `zeta` became a real kind; `intro_ctx` fails by name; bare
+`assumption` dropped (it searches). **Round 1**: the `tacticSeq` hole in
+`then`/`eq … by` (now closed enumerations), `proj` delta, `change` messages, the
+dependent-function message, `import` linting, coverage claims. **Addendum (T1
+round-2)**: the `IsEmpty` failure was **not** a universe defect —
+`not_nonempty_iff` was simply not imported. Details in git.
 
 ## Files (only owned; `ExplicitLean.lean`, `lakefile.toml` untouched)
 `ExplicitLean/ExplicitRw{.lean,/Basic,/Tactic}.lean`; `test/ExplicitRw/` (6
 fixtures + `RejectedSyntax/`: 13 cases, `expected.json`, README);
 `Experiment/{check_explicit_rw,check_no_simp_family}.py`.
-
 ## Checks (re-run from scratch; Lean 4.32.2, pinned Mathlib)
-- `lake build ExplicitLean.ExplicitRw` (clean): PASS, no warnings, 5.1 s
+- `lake build ExplicitLean.ExplicitRw` (clean): PASS, no warnings, 5.4 s
 - `lake env lean test/ExplicitRw/<each>.lean` (6): PASS, no output, 1.8–2.6 s ea
-- `python3 -B Experiment/check_explicit_rw.py`: PASS (6 + 13 cases), 44.7 s
+- `python3 -B Experiment/check_explicit_rw.py`: PASS (6 + 13 cases), 41.9 s
 - `python3 -B Experiment/check_no_simp_family.py`: PASS (3 files), 0.04 s
 
-`#print axioms` on the 89 theorems of the five positive fixtures: **no
-`sorryAx`** — 59 axiom-free, 14 `Quot.sound`, 15 `propext`, 1 both. Each check
-was verified to *fail* when it should, including the `let` fixtures against the
-pre-fix code and the escape sweep against the widened grammar.
+`#print axioms` on the 100 theorems of the five positive fixtures: **no
+`sorryAx`** — 68 axiom-free, the rest `propext`/`Quot.sound`/`Classical.choice`
+(the last only in the `ℝ` fixtures, which any `Real` proof needs). Each check was
+verified to *fail* when it should, including the sort and `let` fixtures against
+the pre-fix code.
 
 ## Limitations and open questions
 - **Dependent positions are refused, not guessed**, each with a step-indexed
@@ -80,10 +90,10 @@ pre-fix code and the escape sweep against the widened grammar.
   type/value, projection argument.
 - `intro_ctx` recognised but unimplemented (T1 does not emit it); `at *` refused.
   Ordinary goals carry no `mdata`, so that fixture wraps the target.
-- Recorded `lhs`/`rhs`/`to` must be **whitelist-dialect** terms. Round 4 widened
-  the grammar to what Lean's pretty printer emits, so ordinary output passes
-  through, but the dialect excludes `⟨…⟩`, `match`, `let`, `show … from` and big
-  operators (`∑`), which a generator must re-render.
+- Recorded `lhs`/`rhs`/`to` must be **whitelist-dialect** terms. Rounds 4-5
+  widened the grammar to what the pretty printer emits (`ℕ ℤ ℚ ℝ ℂ` included), but
+  the dialect excludes `⟨…⟩`, `match`, `let`, `show … from` and big operators
+  (`∑`), which a generator must re-render.
 - Generator must emit raw child indices, **not** `conv`'s `arg n` numbering.
   `explicit_rw` also matches up to reducible defeq, succeeding where plain `rw`
   fails (`conditional_conv`); confirm before the post-pass collapses such steps.
