@@ -41,7 +41,9 @@ simp-family tactic, *provided its file declares no term elaborators* (Round 3.1)
 intro <ids> ; <proof> |` a nested `explicit_rw` with its own closer. A
 conditional lemma's hypothesis is often implication-shaped — `ite_congr` and
 `dite_congr` give `c → x = u` — which no flat enumeration can discharge.
-Fixtures replay both; forbidden tactics stay parser-rejected in the new category.
+Fixtures replay both. The sweep was re-run serially over 324 probes including
+the two new slots: **zero escapes, 210/210 parse-rejected**; three the classifier
+flagged were hand-checked and are parse errors too.
 **The `congr` step** (T1 round-5 cross-check). The spec's `congr` kind had no T2
 form, so cast-transport traces could not replay at all. `congr <i> [steps] at
 [pos]` rebuilds the application through `Lean.Meta.mkCongrSimp?`'s theorem,
@@ -95,9 +97,9 @@ was verified to *fail* when it should, including the sort fixtures against the
 pre-fix code and the escape sweep after each widening.
 
 ## Limitations and open questions
-- **Dependent positions are refused, not guessed**, each with a step-indexed
-  message: dependent function argument and `∀` domain, binder types, `let`
-  type/value, projection argument. A `congr` step is the way to replay one.
+- **Dependent positions are refused, not guessed**, each step-indexed: dependent
+  function argument and `∀` domain, binder types, `let` type/value, projection
+  argument. A `congr` step is the way to replay one.
 - `intro_ctx` recognised but unimplemented (T1 does not emit it); `at *` refused;
   `congr` nesting is two levels deep, which is what T1 emits.
 - Recorded `lhs`/`rhs`/`to` must be **whitelist-dialect** terms. Rounds 4-5
