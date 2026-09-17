@@ -206,6 +206,102 @@ def splice_tests(f: Failures) -> None:
             "the new import did not follow the `public import` spelling")
 
 
+def diagnostic_tests(f: Failures) -> None:
+    """Diagnostic parsing, and the attribution that reads it.
+
+    A real `lake env lean` transcript: two errors at the same position, the
+    first with a multi-line body. The header pattern must not match inside that
+    body — `[^:]` matches a newline, so an unanchored file group finds a
+    spurious header several lines down and truncates the body it was supposed
+    to capture, which is what made every such failure attribute to `harness`.
+    """
+    text = (
+        "/tmp/M.lean:553:21: error: explicit_rw: step 1: Application type mismatch: "
+        "The argument\n  h\nhas type\n  A\nbut is expected to have type\n  ¬?m.11\n"
+        "in the application\n  eq_false h\n"
+        "/tmp/M.lean:553:21: error: explicit_rw: step 2: position [0, 1] rewrites "
+        "the domain of a dependent `∀`.\n"
+    )
+    matches = list(P.DIAG_RE.finditer(text))
+    f.equal("diag/two_errors", len(matches), 2)
+    if len(matches) == 2:
+        f.equal("diag/second_header_line", matches[1].group("line"), "553")
+        body = text[matches[0].start("msg") : matches[1].start()]
+        f.check("diag/body_spans_to_next_header", "eq_false h" in body,
+                f"body was cut to {body!r}")
+
+    f.equal("diag/warnings_are_not_errors",
+            [m.group("sev") for m in P.DIAG_RE.finditer(
+                "/tmp/M.lean:1:1: warning: unused\n")],
+            ["warning"])
+
+    # Attribution reads the body, and each family lands on the right side.
+    for message, side in (
+        ("explicit_rw: step 2: lemma `foo` does not match the subterm at position [1].",
+         "t1"),
+        ("explicit_rw: step 1: `unfold Ne` was applied where the head constant is `Iff`.",
+         "t1"),
+        ("unknown free variable '_uniq.42'", "t1"),
+        ("Unknown identifier 'a✝'", "t1"),
+        ("explicit_rw: step 1: `intro_ctx` is not implemented", "t2"),
+        ("unexpected token '=='; expected ')'", "t1"),
+        ("explicit_rw: step 2: lemma `eq_true foo` does not match the subterm at "
+         "position [1]. Expected ∀ (f : ?m.3), P f but the subterm is P g", "t1"),
+        ("explicit_rw: step 1: Application type mismatch: The argument h has type A "
+         "but is expected to have type ¬?m.11 in the application eq_false h", "t1"),
+    ):
+        got, why = P.attribute({}, message)
+        f.equal("attribute/" + message[:34], got, side)
+        f.check("attribute/justified/" + message[:24], bool(why), "no justification")
+
+    # The two `prop` families must be told apart, since they are different T1
+    # defects with different fixes.
+    quantified = P.attribute({}, (
+        "lemma `eq_true foo` does not match the subterm at position [1]. "
+        "Expected ∀ (f : ?m.3), P f but the subterm is P g"))[1]
+    mismatched = P.attribute({}, (
+        "Application type mismatch: The argument h has type A but is expected to "
+        "have type ¬?m.11 in the application eq_false h"))[1]
+    f.check("attribute/prop_families_differ", quantified != mismatched,
+            "the two prop defects share one justification")
+    f.check("attribute/quantified_names_args", "args" in quantified,
+            f"justification does not name the missing field: {quantified!r}")
+
+
+def invocation_tests(f: Failures) -> None:
+    """A site whose call runs once per branch cannot take one tactic.
+
+    The recorder writes one JSON per invocation, so a call under `<;>` or inside
+    an alternation leaves several traces sharing one `occurrence`. Identical
+    ones are a repeated compile and collapse to one; differing ones are real
+    branches, and replacing the call with any single branch's steps would be
+    wrong in the others.
+    """
+    site = S.Site(index=0, start=0, end=10, text="simp [*]", line=1, column=2,
+                  alone_on_line=True, trailing="")
+    trace = {
+        "schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+        "locations": [{"loc": "goal", "pre": "a", "post": None,
+                       "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                  "dir": "fwd"}],
+                       "close": {"by": "rfl"}}],
+    }
+    single = P.render_site(site, dict(trace))
+    f.equal("invocations/single_renders", single["status"], "rendered")
+
+    several = P.render_site(site, {**trace, "_invocations": 3})
+    f.equal("invocations/several_refuse", several["status"],
+            "render_failed:multiple_invocations")
+    f.check("invocations/refusal_counts_them", "3" in several["detail"],
+            f"detail does not name the count: {several['detail']!r}")
+    f.check("invocations/original_kept",
+            any(site.text in line for line in several["lines"]),
+            "the original call was not kept")
+    f.check("invocations/marker_emitted",
+            any("explicit_rw: unresolved" in line for line in several["lines"]),
+            "no marker comment was emitted")
+
+
 def site_count_tests(f: Failures, t1: pathlib.Path) -> None:
     mathlib = t1 / ".lake" / "packages" / "mathlib" / "Mathlib"
     if not mathlib.is_dir():
@@ -305,6 +401,8 @@ def main() -> int:
     render_tests(f)
     layout_tests(f)
     splice_tests(f)
+    diagnostic_tests(f)
+    invocation_tests(f)
     site_count_tests(f, t1)
     end_to_end_test(f, t1, t2)
 

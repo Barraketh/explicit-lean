@@ -63,7 +63,11 @@ MODULES = {
 # `lake env lean` diagnostics: `<file>:<line>:<col>: <severity>: <message>`.
 # A message body runs on until the next diagnostic header, which is where
 # `explicit_rw` prints the expected and actual subterms, so the report keeps it.
-DIAG_RE = re.compile(r"^(?P<file>[^\s:][^:]*):(?P<line>\d+):(?P<col>\d+): "
+#
+# The file group excludes newlines as well as colons: `[^:]` matches `\n`, so
+# without that a header could be "found" mid-message, starting on a body line
+# several lines below the real one and truncating the body that precedes it.
+DIAG_RE = re.compile(r"^(?P<file>[^\s:][^:\n]*):(?P<line>\d+):(?P<col>\d+): "
                      r"(?P<sev>error|warning): (?P<msg>.*)$", re.M)
 
 COMPILE_TIMEOUT = 30 * 60  # The coordination protocol's escalation threshold.
@@ -122,16 +126,65 @@ def transcribe(t1: pathlib.Path, mathlib_rel: str, traced_name: str,
     # Compile the traced copy so the recorder writes one JSON per site. The
     # outputs land where the traced copy's own `=>trace` clauses name, inside
     # T1; they are that worktree's own gitignored measurement outputs.
+    #
+    # The recorder appends rather than replaces, so outputs from earlier
+    # compiles are still there. Deleting them would be a write into T1, so this
+    # instead records when the compile started and keeps only what the compile
+    # itself wrote.
+    compile_started = time.time()
     code, out, err, compile_secs = run(
         ["lake", "env", "lean", str(traced.relative_to(t1))], t1
     )
     log.append(f"trace compile of {traced_name}: exit {code} in {compile_secs:.1f}s")
 
-    traces: dict[int, dict] = {}
+    # One JSON per *invocation*. A site under `<;>` or inside a `rcases`
+    # alternation runs once per branch, and the recorder writes the extra runs
+    # as `<name>_<NN>.<k>.json`, all sharing the site's `occurrence`. They are
+    # collected per site so the renderer can see that a site has several, which
+    # no single `explicit_rw` can replace.
+    # One JSON per *invocation*. A site under `<;>` or inside an alternation
+    # runs once per branch, and the recorder writes the extra runs as
+    # `<name>_<NN>.<k>.json`, all sharing the site's `occurrence`.
+    #
+    # The suffixed files are also how a *repeated compile* of the same module
+    # accumulates, so they are deduplicated by content: identical runs are one
+    # invocation recorded twice, while distinct ones are genuinely different
+    # branches and no single tactic can replace the call in all of them.
+    by_index: dict[int, dict[str, dict]] = {}
+    stale = 0
     meas = t1 / "test" / "SimpTrace" / "meas_out"
     for path in sorted(meas.glob(f"{traced_name}_*.json")):
-        index = int(path.stem.rsplit("_", 1)[1]) - 1
-        traces[index] = json.loads(path.read_text(encoding="utf-8"))
+        stem = path.stem[len(traced_name) + 1 :]
+        head, _, tail = stem.partition(".")
+        if not head.isdigit() or (tail and not tail.isdigit()):
+            log.append(f"ignored unparsable trace file name: {path.name}")
+            continue
+        if path.stat().st_mtime < compile_started - 1:
+            # Left over from an earlier compile, not written by this one.
+            stale += 1
+            continue
+        raw = path.read_text(encoding="utf-8")
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            log.append(f"ignored unparsable trace JSON: {path.name}")
+            continue
+        # The `call` field names the file it was written to, so it differs
+        # between a base file and its suffixed re-runs even when the recorded
+        # steps are identical; compare without it.
+        parsed.pop("call", None)
+        key = json.dumps(parsed, sort_keys=True, ensure_ascii=False)
+        by_index.setdefault(int(head) - 1, {})[key] = parsed
+
+    traces: dict[int, dict] = {}
+    for index, variants in by_index.items():
+        chosen = next(iter(variants.values()))
+        if len(variants) > 1:
+            chosen = dict(chosen)
+            chosen["_invocations"] = len(variants)
+        traces[index] = chosen
+    if stale:
+        log.append(f"ignored {stale} trace file(s) left by an earlier compile")
     return traced, {
         "traces": traces,
         "transcription_ok": transcription_ok,
@@ -188,6 +241,22 @@ def render_site(site: S.Site, trace: dict | None) -> dict:
             "render_failed:no_trace",
             "no trace JSON was produced for this site",
             "t1",
+        )
+
+    invocations = trace.get("_invocations")
+    if invocations:
+        # The call ran more than once at this site — once per branch of an
+        # enclosing `<;>` or alternation — and each run has its own trace with
+        # its own goal. One `explicit_rw` replaces the call in every branch, so
+        # replacing it with any single branch's steps would be wrong in the
+        # others. This needs a per-branch rendering the pipeline does not do.
+        return keep_original(
+            "render_failed:multiple_invocations",
+            f"the call ran {invocations} times at this site with different steps "
+            "(one per branch), and one tactic cannot carry a different step list "
+            "per branch",
+            "harness",
+            f"-- explicit_rw: unresolved: {invocations} distinct invocations at one site",
         )
 
     reason = R.unresolved_reason(trace)
@@ -353,10 +422,24 @@ def attribute(record: dict, message: str) -> tuple[str, str]:
     """
     low = message.lower()
     if "does not match the subterm at position" in low:
+        if ("eq_true" in message or "eq_false" in message) and "Expected ∀" in message:
+            return (
+                "t1",
+                "a `prop` step names a quantified lemma and records no `args`, so "
+                "`eq_true`/`eq_false` receives the ∀ rather than an instance of it",
+            )
         return (
             "t1",
             "the tactic navigated to the recorded position and the lemma does not "
             "match there, so the position or the side-goal frame is wrong",
+        )
+    if ("eq_true" in message or "eq_false" in message) and (
+        "is expected to have type" in low
+    ):
+        return (
+            "t1",
+            "the step's `prop` flag disagrees with the statement of the fact it "
+            "names, so the wrong one of eq_true/eq_false was recorded",
         )
     if "unknown identifier" in low or "unknown constant" in low:
         return (

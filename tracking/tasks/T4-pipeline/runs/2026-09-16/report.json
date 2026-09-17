@@ -1,11 +1,11 @@
 {
- "generated": "2026-09-16T23:17:08",
+ "generated": "2026-09-16T23:27:09",
  "t1_worktree": "/Users/ptsier/projects/explicit-lean-worktrees/T1-trace-capture",
- "t1_commit": "697f16bb3a3408ca7cef14d1b8fecf60fbf0d515",
+ "t1_commit": "1d8ba00b6216b1558aabf92e4bc8137410a0013d",
  "t1_branch": "task/T1-trace-capture",
- "t1_dirty": true,
+ "t1_dirty": false,
  "t2_worktree": "/Users/ptsier/projects/explicit-lean-worktrees/T2-explicit-rw",
- "t2_commit": "0fab2ca4e044253e3cd118a2e610ace9bea6560d",
+ "t2_commit": "7ccb98b25d72c2e2ec0f25a96e18bc5e880c9cd3",
  "t2_branch": "task/T2-explicit-rw",
  "t2_dirty": true,
  "modules": [
@@ -20,7 +20,7 @@
      "line": 170,
      "column": 2,
      "message": "explicit_rw: step 2: lemma `eq_true leftTotal_empty` does not match the subterm at position [0, 1, 0, 1].",
-     "body": "explicit_rw: step 2: lemma `eq_true leftTotal_empty` does not match the subterm at position [0, 1, 0, 1]. Expected ∀ (R : ?m.6 → ?m.7 → Prop) [IsEmpty ?m.6], LeftTotal R"
+     "body": "explicit_rw: step 2: lemma `eq_true leftTotal_empty` does not match the subterm at position [0, 1, 0, 1]. Expected ∀ (R : ?m.6 → ?m.7 → Prop) [IsEmpty ?m.6], LeftTotal R but the subterm is LeftTotal R"
     },
     {
      "line": 177,
@@ -29,11 +29,11 @@
      "body": "explicit_rw: step 3: lemma `eq_true rightTotal_empty` does not match the subterm at position [0, 1, 1]. Expected ∀ (R : ?m.11 → ?m.12 → Prop) [IsEmpty ?m.12], RightTotal R but the subterm is RightTotal R"
     }
    ],
-   "whole_module_seconds": 2.02,
+   "whole_module_seconds": 2.06,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 0,
-    "compile_seconds": 2.49,
+    "compile_seconds": 2.57,
     "classified_lines": []
    },
    "trace_count": 17,
@@ -46,7 +46,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.01,
+     "compile_seconds": 2.07,
      "attribution": "",
      "detail": ""
     },
@@ -58,7 +58,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.01,
+     "compile_seconds": 2.06,
      "attribution": "",
      "detail": ""
     },
@@ -70,7 +70,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.01,
+     "compile_seconds": 2.07,
      "attribution": "",
      "detail": ""
     },
@@ -82,7 +82,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.0,
+     "compile_seconds": 2.11,
      "attribution": "",
      "detail": ""
     },
@@ -94,7 +94,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.03,
+     "compile_seconds": 2.16,
      "attribution": "",
      "detail": ""
     },
@@ -106,7 +106,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.01,
+     "compile_seconds": 2.12,
      "attribution": "",
      "detail": ""
     },
@@ -118,7 +118,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.0,
+     "compile_seconds": 2.1,
      "attribution": "",
      "detail": ""
     },
@@ -130,7 +130,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.06,
+     "compile_seconds": 2.38,
      "attribution": "",
      "detail": ""
     },
@@ -142,7 +142,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.08,
+     "compile_seconds": 2.17,
      "attribution": "",
      "detail": ""
     },
@@ -154,7 +154,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.12,
+     "compile_seconds": 2.22,
      "attribution": "",
      "detail": ""
     },
@@ -166,7 +166,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.12,
+     "compile_seconds": 2.05,
      "attribution": "",
      "detail": ""
     },
@@ -178,7 +178,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.05,
+     "compile_seconds": 2.1,
      "attribution": "",
      "detail": ""
     },
@@ -190,7 +190,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.05,
+     "compile_seconds": 2.1,
      "attribution": "",
      "detail": ""
     },
@@ -202,7 +202,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.02,
+     "compile_seconds": 2.1,
      "attribution": "",
      "detail": ""
     },
@@ -214,7 +214,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.04,
+     "compile_seconds": 2.08,
      "attribution": "",
      "detail": ""
     },
@@ -226,12 +226,12 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.04,
+     "compile_seconds": 2.12,
      "error": "explicit_rw: step 2: lemma `eq_true leftTotal_empty` does not match the subterm at position [0, 1, 0, 1].",
      "error_body": "explicit_rw: step 2: lemma `eq_true leftTotal_empty` does not match the subterm at position [0, 1, 0, 1]. Expected ∀ (R : ?m.6 → ?m.7 → Prop) [IsEmpty ?m.6], LeftTotal R but the subterm is LeftTotal R",
      "error_line": 122,
      "attribution": "t1",
-     "detail": "the tactic navigated to the recorded position and the lemma does not match there, so the position or the side-goal frame is wrong"
+     "detail": "a `prop` step names a quantified lemma and records no `args`, so `eq_true`/`eq_false` receives the ∀ rather than an instance of it"
     },
     {
      "site": 16,
@@ -241,19 +241,20 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.02,
+     "compile_seconds": 2.06,
      "error": "explicit_rw: step 3: lemma `eq_true rightTotal_empty` does not match the subterm at position [0, 1, 1].",
      "error_body": "explicit_rw: step 3: lemma `eq_true rightTotal_empty` does not match the subterm at position [0, 1, 1]. Expected ∀ (R : ?m.11 → ?m.12 → Prop) [IsEmpty ?m.12], RightTotal R but the subterm is RightTotal R",
      "error_line": 125,
      "attribution": "t1",
-     "detail": "the tactic navigated to the recorded position and the lemma does not match there, so the position or the side-goal frame is wrong"
+     "detail": "a `prop` step names a quantified lemma and records no `args`, so `eq_true`/`eq_false` receives the ∀ rather than an instance of it"
     }
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of IsEmptyBasicTraced: exit 0 in 2.5s"
+    "trace compile of IsEmptyBasicTraced: exit 0 in 2.6s",
+    "ignored 17 trace file(s) left by an earlier compile"
    ],
-   "seconds": 39.24
+   "seconds": 40.75
   },
   {
    "module": "Mathlib/Logic/Nontrivial/Defs.lean",
@@ -262,11 +263,11 @@
    "compile_mode": "whole_module",
    "whole_module_exit": 0,
    "whole_module_errors": [],
-   "whole_module_seconds": 1.99,
+   "whole_module_seconds": 2.05,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 0,
-    "compile_seconds": 2.44,
+    "compile_seconds": 2.46,
     "classified_lines": []
    },
    "trace_count": 1,
@@ -285,44 +286,24 @@
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of NontrivialDefsTraced: exit 0 in 2.4s"
+    "trace compile of NontrivialDefsTraced: exit 0 in 2.5s",
+    "ignored 5 trace file(s) left by an earlier compile"
    ],
-   "seconds": 4.47
+   "seconds": 4.55
   },
   {
    "module": "Mathlib/Logic/Function/Defs.lean",
    "traced_module": "FunctionDefsTraced",
    "sites": 2,
-   "compile_mode": "per_site",
-   "whole_module_exit": 1,
-   "whole_module_errors": [
-    {
-     "line": 146,
-     "column": 43,
-     "message": "unexpected token '=='; expected ')', ',' or ':'",
-     "body": "unexpected token '=='; expected ')', ',' or ':'"
-    },
-    {
-     "line": 146,
-     "column": 26,
-     "message": "explicit_rw: internal error: unhandled whitelisted node `missing`",
-     "body": "explicit_rw: internal error: unhandled whitelisted node `missing`"
-    },
-    {
-     "line": 146,
-     "column": 26,
-     "message": "explicit_rw: internal error: unhandled whitelisted node `missing`",
-     "body": "explicit_rw: internal error: unhandled whitelisted node `missing`"
-    }
-   ],
-   "whole_module_seconds": 2.11,
+   "compile_mode": "whole_module",
+   "whole_module_exit": 0,
+   "whole_module_errors": [],
+   "whole_module_seconds": 2.22,
    "transcription": {
     "transcription_ok": true,
-    "compile_exit": 1,
-    "compile_seconds": 2.01,
-    "classified_lines": [
-     "test/SimpTrace/FunctionDefsTraced.lean:6:0: error: object file '/Users/ptsier/projects/explicit-lean-worktrees/T1-trace-capture/.lake/build/lib/lean/ExplicitLean/SimpTrace/Recorder.olean' of module ExplicitLean.SimpTrace.Recorder does not exist"
-    ]
+    "compile_exit": 0,
+    "compile_seconds": 2.85,
+    "classified_lines": []
    },
    "trace_count": 2,
    "records": [
@@ -334,7 +315,6 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.12,
      "attribution": "",
      "detail": ""
     },
@@ -345,20 +325,18 @@
      "original": "simp [h]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.17,
-     "error": "unexpected token '=='; expected ')', ',' or ':'",
-     "error_body": "unexpected token '=='; expected ')', ',' or ':'",
-     "error_line": 140,
-     "attribution": "t1",
-     "detail": "a trace field was spliced as syntax the tactic's grammar does not admit"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     }
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of FunctionDefsTraced: exit 1 in 2.0s"
+    "trace compile of FunctionDefsTraced: exit 0 in 2.9s",
+    "ignored 3 trace file(s) left by an earlier compile"
    ],
-   "seconds": 8.44
+   "seconds": 5.11
   },
   {
    "module": "Mathlib/Logic/ExistsUnique.lean",
@@ -367,11 +345,11 @@
    "compile_mode": "whole_module",
    "whole_module_exit": 0,
    "whole_module_errors": [],
-   "whole_module_seconds": 2.16,
+   "whole_module_seconds": 2.19,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 0,
-    "compile_seconds": 2.56,
+    "compile_seconds": 2.64,
     "classified_lines": []
    },
    "trace_count": 8,
@@ -467,9 +445,10 @@
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of ExistsUniqueTraced: exit 0 in 2.6s"
+    "trace compile of ExistsUniqueTraced: exit 0 in 2.6s",
+    "ignored 8 trace file(s) left by an earlier compile"
    ],
-   "seconds": 4.75
+   "seconds": 4.86
   },
   {
    "module": "Mathlib/Logic/Function/Basic.lean",
@@ -488,7 +467,7 @@
      "line": 863,
      "column": 2,
      "message": "explicit_rw: step 1: lemma `eq_true exists_apply_eq_apply` does not match the subterm at position [].",
-     "body": "explicit_rw: step 1: lemma `eq_true exists_apply_eq_apply` does not match the subterm at position []. Expected ∀ (f : ?m.32 → ?m.33) (a' : ?m.32), ∃ a, f a = f a'"
+     "body": "explicit_rw: step 1: lemma `eq_true exists_apply_eq_apply` does not match the subterm at position []. Expected ∀ (f : ?m.32 → ?m.33) (a' : ?m.32), ∃ a, f a = f a' but the subterm is (∃ a_1, f a_1 = f a) = ?c"
     },
     {
      "line": 919,
@@ -509,11 +488,11 @@
      "body": "explicit_rw: step 6: lemma `Function.curry_uncurry` does not match the subterm at position [1, 1, 0, 0, 1]. Expected curry (uncurry ?f) but the subterm is curry (uncurry f) a"
     }
    ],
-   "whole_module_seconds": 2.59,
+   "whole_module_seconds": 2.88,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 1,
-    "compile_seconds": 3.8,
+    "compile_seconds": 3.63,
     "classified_lines": [
      "test/SimpTrace/FunctionBasicTraced.lean:665:52: error: simp_trace unresolved: side condition rewritten to `True` by lemmas whose steps carry no position",
      "test/SimpTrace/FunctionBasicTraced.lean:684:2: error: simp_trace unresolved: side condition rewritten to `True` by lemmas whose steps carry no position",
@@ -533,7 +512,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.53,
+     "compile_seconds": 2.63,
      "attribution": "",
      "detail": ""
     },
@@ -556,7 +535,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.59,
+     "compile_seconds": 2.66,
      "error": "unknown free variable `_fvar.8351.163`",
      "error_body": "unknown free variable `_fvar.8351.163`",
      "error_line": 393,
@@ -571,7 +550,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.61,
+     "compile_seconds": 2.55,
      "attribution": "",
      "detail": ""
     },
@@ -604,9 +583,9 @@
      "original": "simp [*]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "unresolved:discharged by rewriting to True, steps not recorded",
-     "detail": "the recorder classified this call as unresolved: discharged by rewriting to True, steps not recorded",
-     "attribution": "t1",
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
      "marker_dropped": true
     },
     {
@@ -628,7 +607,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.59,
+     "compile_seconds": 2.62,
      "attribution": "",
      "detail": ""
     },
@@ -639,9 +618,9 @@
      "original": "simp [*]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "unresolved:discharged by rewriting to True, steps not recorded",
-     "detail": "the recorder classified this call as unresolved: discharged by rewriting to True, steps not recorded",
-     "attribution": "t1",
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
      "marker_dropped": true
     },
     {
@@ -655,12 +634,12 @@
       "    dite_congr at [0, 1] with [explicit_rw [eq_true exists_apply_eq_apply at []], intro h ; rfl, intro h ; rfl],"
      ],
      "status": "compile_failed",
-     "compile_seconds": 2.55,
+     "compile_seconds": 2.86,
      "error": "explicit_rw: step 1: lemma `eq_true exists_apply_eq_apply` does not match the subterm at position [].",
      "error_body": "explicit_rw: step 1: lemma `eq_true exists_apply_eq_apply` does not match the subterm at position []. Expected ∀ (f : ?m.32 → ?m.33) (a' : ?m.32), ∃ a, f a = f a' but the subterm is (∃ a_1, f a_1 = f a) = ?c",
      "error_line": 850,
      "attribution": "t1",
-     "detail": "the tactic navigated to the recorded position and the lemma does not match there, so the position or the side-goal frame is wrong"
+     "detail": "a `prop` step names a quantified lemma and records no `args`, so `eq_true`/`eq_false` receives the ∀ rather than an instance of it"
     },
     {
      "site": 11,
@@ -670,7 +649,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.47,
+     "compile_seconds": 2.82,
      "attribution": "",
      "detail": ""
     },
@@ -682,7 +661,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.63,
+     "compile_seconds": 2.73,
      "attribution": "",
      "detail": ""
     },
@@ -694,7 +673,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.53,
+     "compile_seconds": 2.62,
      "error": "unknown free variable `_fvar.17365.51`",
      "error_body": "unknown free variable `_fvar.17365.51`",
      "error_line": 898,
@@ -709,7 +688,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.56,
+     "compile_seconds": 2.7,
      "error": "unknown free variable `_fvar.17774.26`",
      "error_body": "unknown free variable `_fvar.17774.26`",
      "error_line": 926,
@@ -745,9 +724,9 @@
      "original": "simp [*]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "unresolved:discharged by rewriting to True, steps not recorded",
-     "detail": "the recorder classified this call as unresolved: discharged by rewriting to True, steps not recorded",
-     "attribution": "t1",
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 4 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
      "marker_dropped": true
     },
     {
@@ -758,7 +737,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.73,
+     "compile_seconds": 2.55,
      "error": "explicit_rw: step 6: lemma `Function.curry_uncurry` does not match the subterm at position [1, 1, 0, 0, 1].",
      "error_body": "explicit_rw: step 6: lemma `Function.curry_uncurry` does not match the subterm at position [1, 1, 0, 0, 1]. Expected curry (uncurry ?f) but the subterm is curry (uncurry f) a",
      "error_line": 985,
@@ -773,7 +752,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.62,
+     "compile_seconds": 2.49,
      "attribution": "",
      "detail": ""
     },
@@ -785,7 +764,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.6,
+     "compile_seconds": 2.64,
      "attribution": "",
      "detail": ""
     },
@@ -797,7 +776,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.63,
+     "compile_seconds": 2.5,
      "attribution": "",
      "detail": ""
     },
@@ -809,16 +788,17 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.56,
+     "compile_seconds": 2.55,
      "attribution": "",
      "detail": ""
     }
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of FunctionBasicTraced: exit 1 in 3.8s"
+    "trace compile of FunctionBasicTraced: exit 1 in 3.6s",
+    "ignored 28 trace file(s) left by an earlier compile"
    ],
-   "seconds": 42.63
+   "seconds": 43.49
   },
   {
    "module": "Mathlib/Logic/Basic.lean",
@@ -831,128 +811,20 @@
      "line": 502,
      "column": 74,
      "message": "explicit_rw: step 1: lemma `eq_true cast_heq` does not match the subterm at position [].",
-     "body": "explicit_rw: step 1: lemma `eq_true cast_heq` does not match the subterm at position []. Expected ∀ (h : ?m.19 = ?m.20) (a : ?m.19), cast h a ≍ a"
-    },
-    {
-     "line": 557,
-     "column": 21,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument h"
-    },
-    {
-     "line": 557,
-     "column": 21,
-     "message": "explicit_rw: step 2: position [0, 1, 1, 0] rewrites the domain of a dependent `∀`, whose body mentions the bound variable; rebuilding that needs a cast of the body along the domain equality, which `explicit_rw` does not build. Only definitional steps are supported there.",
-     "body": "explicit_rw: step 2: position [0, 1, 1, 0] rewrites the domain of a dependent `∀`, whose body mentions the bound variable; rebuilding that needs a cast of the body along the domain equality, which `explicit_rw` does not build. Only definitional steps are supported there."
+     "body": "explicit_rw: step 1: lemma `eq_true cast_heq` does not match the subterm at position []. Expected ∀ (h : ?m.19 = ?m.20) (a : ?m.19), cast h a ≍ a but the subterm is cast e b ≍ b"
     },
     {
      "line": 927,
      "column": 2,
      "message": "explicit_rw: step 1: `unfold Ne` was applied where the head constant is `Iff`.",
      "body": "explicit_rw: step 1: `unfold Ne` was applied where the head constant is `Iff`."
-    },
-    {
-     "line": 974,
-     "column": 21,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument h"
-    },
-    {
-     "line": 974,
-     "column": 21,
-     "message": "explicit_rw: step 2: Type mismatch",
-     "body": "explicit_rw: step 2: Type mismatch h"
-    },
-    {
-     "line": 999,
-     "column": 42,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument hp"
-    },
-    {
-     "line": 999,
-     "column": 42,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument hp"
-    },
-    {
-     "line": 999,
-     "column": 42,
-     "message": "explicit_rw: step 2: Application type mismatch: The argument",
-     "body": "explicit_rw: step 2: Application type mismatch: The argument hq"
-    },
-    {
-     "line": 999,
-     "column": 42,
-     "message": "explicit_rw: step 2: Type mismatch",
-     "body": "explicit_rw: step 2: Type mismatch hp"
-    },
-    {
-     "line": 1002,
-     "column": 42,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument hp"
-    },
-    {
-     "line": 1002,
-     "column": 42,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument hp"
-    },
-    {
-     "line": 1002,
-     "column": 42,
-     "message": "explicit_rw: step 2: Application type mismatch: The argument",
-     "body": "explicit_rw: step 2: Application type mismatch: The argument hq"
-    },
-    {
-     "line": 1002,
-     "column": 42,
-     "message": "explicit_rw: step 2: Type mismatch",
-     "body": "explicit_rw: step 2: Type mismatch hp"
-    },
-    {
-     "line": 1019,
-     "column": 21,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument p"
-    },
-    {
-     "line": 1023,
-     "column": 21,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument h"
-    },
-    {
-     "line": 1023,
-     "column": 21,
-     "message": "explicit_rw: step 1: lemma `eq_false h` does not match the subterm at position [].",
-     "body": "explicit_rw: step 1: lemma `eq_false h` does not match the subterm at position []."
-    },
-    {
-     "line": 1027,
-     "column": 21,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument p"
-    },
-    {
-     "line": 1031,
-     "column": 21,
-     "message": "explicit_rw: step 1: Application type mismatch: The argument",
-     "body": "explicit_rw: step 1: Application type mismatch: The argument h"
-    },
-    {
-     "line": 1031,
-     "column": 21,
-     "message": "explicit_rw: step 2: position [1, 0, 1, 0] rewrites the domain of a dependent `∀`, whose body mentions the bound variable; rebuilding that needs a cast of the body along the domain equality, which `explicit_rw` does not build. Only definitional steps are supported there.",
-     "body": "explicit_rw: step 2: position [1, 0, 1, 0] rewrites the domain of a dependent `∀`, whose body mentions the bound variable; rebuilding that needs a cast of the body along the domain equality, which `explicit_rw` does not build. Only definitional steps are supported there."
     }
    ],
-   "whole_module_seconds": 2.64,
+   "whole_module_seconds": 2.53,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 1,
-    "compile_seconds": 3.84,
+    "compile_seconds": 3.66,
     "classified_lines": [
      "test/SimpTrace/LogicBasicTraced.lean:553:21: error: simp_trace unresolved: transported proof term at a rewritten proposition; positions checked, proof identity not",
      "test/SimpTrace/LogicBasicTraced.lean:553:21: error: simp_trace unresolved: transported proof term at a rewritten proposition; positions checked, proof identity not",
@@ -976,7 +848,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.59,
+     "compile_seconds": 2.53,
      "attribution": "",
      "detail": ""
     },
@@ -988,7 +860,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.7,
+     "compile_seconds": 2.69,
      "attribution": "",
      "detail": ""
     },
@@ -1000,7 +872,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.61,
+     "compile_seconds": 2.57,
      "attribution": "",
      "detail": ""
     },
@@ -1034,12 +906,12 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.64,
+     "compile_seconds": 2.57,
      "error": "explicit_rw: step 1: lemma `eq_true cast_heq` does not match the subterm at position [].",
      "error_body": "explicit_rw: step 1: lemma `eq_true cast_heq` does not match the subterm at position []. Expected ∀ (h : ?m.19 = ?m.20) (a : ?m.19), cast h a ≍ a but the subterm is cast e b ≍ b",
      "error_line": 498,
      "attribution": "t1",
-     "detail": "the tactic navigated to the recorded position and the lemma does not match there, so the position or the side-goal frame is wrong"
+     "detail": "a `prop` step names a quantified lemma and records no `args`, so `eq_true`/`eq_false` receives the ∀ rather than an instance of it"
     },
     {
      "site": 6,
@@ -1059,13 +931,10 @@
      "original": "simp [h]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.67,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument h",
-     "error_line": 553,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 8,
@@ -1075,7 +944,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.61,
+     "compile_seconds": 2.53,
      "attribution": "",
      "detail": ""
     },
@@ -1087,7 +956,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.63,
+     "compile_seconds": 2.52,
      "attribution": "",
      "detail": ""
     },
@@ -1110,7 +979,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.6,
+     "compile_seconds": 2.69,
      "attribution": "",
      "detail": ""
     },
@@ -1122,7 +991,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.54,
+     "compile_seconds": 2.91,
      "attribution": "",
      "detail": ""
     },
@@ -1145,7 +1014,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.62,
+     "compile_seconds": 2.83,
      "attribution": "",
      "detail": ""
     },
@@ -1168,7 +1037,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.66,
+     "compile_seconds": 2.83,
      "attribution": "",
      "detail": ""
     },
@@ -1179,9 +1048,10 @@
      "original": "simp [*, exists_prop_of_true, exists_prop_of_false]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "render_failed:inaccessible_name",
-     "detail": "rw.name 'h✝' is an inaccessible display name, which does not lex",
-     "attribution": "t1"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 18,
@@ -1191,7 +1061,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.6,
+     "compile_seconds": 2.76,
      "error": "explicit_rw: step 1: `unfold Ne` was applied where the head constant is `Iff`.",
      "error_body": "explicit_rw: step 1: `unfold Ne` was applied where the head constant is `Iff`.",
      "error_line": 920,
@@ -1205,13 +1075,10 @@
      "original": "simp [h]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.67,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument h",
-     "error_line": 963,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 20,
@@ -1220,9 +1087,9 @@
      "original": "simp [h]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "unresolved:nested simp steps could not be placed in the side goal",
-     "detail": "the recorder classified this call as unresolved: nested simp steps could not be placed in the side goal",
-     "attribution": "t1",
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
      "marker_dropped": true
     },
     {
@@ -1232,13 +1099,10 @@
      "original": "simp [hp, hq]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.62,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument hp",
-     "error_line": 988,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 4 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 22,
@@ -1247,13 +1111,10 @@
      "original": "simp [hp, hq]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.67,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument hp",
-     "error_line": 991,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 4 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 23,
@@ -1262,13 +1123,10 @@
      "original": "simp [p]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.64,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument p has type P but is expected to have type ¬?m.18 in the application eq_false p",
-     "error_line": 1008,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 24,
@@ -1277,13 +1135,10 @@
      "original": "simp [h, exists_prop_of_false, exists_prop_of_true]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.69,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument h",
-     "error_line": 1012,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 25,
@@ -1292,13 +1147,10 @@
      "original": "simp [p]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.62,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument p has type P but is expected to have type ¬?m.18 in the application eq_false p",
-     "error_line": 1016,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 26,
@@ -1307,13 +1159,10 @@
      "original": "simp [h, forall_prop_of_false, forall_prop_of_true]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.61,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument h",
-     "error_line": 1020,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 27,
@@ -1322,13 +1171,10 @@
      "original": "simp [h]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.65,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument h",
-     "error_line": 1052,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 28,
@@ -1337,13 +1183,10 @@
      "original": "simp [h]",
      "alone_on_line": false,
      "long_line_waiver": false,
-     "status": "compile_failed",
-     "compile_seconds": 2.67,
-     "error": "explicit_rw: step 1: Application type mismatch: The argument",
-     "error_body": "explicit_rw: step 1: Application type mismatch: The argument h",
-     "error_line": 1056,
-     "attribution": "t1",
-     "detail": "the recorded name and args do not apply as written, so one of the two fields carries the other's content"
+     "status": "render_failed:multiple_invocations",
+     "detail": "the call ran 2 times at this site with different steps (one per branch), and one tactic cannot carry a different step list per branch",
+     "attribution": "harness",
+     "marker_dropped": true
     },
     {
      "site": 29,
@@ -1353,7 +1196,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.64,
+     "compile_seconds": 2.65,
      "attribution": "",
      "detail": ""
     },
@@ -1365,19 +1208,20 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.61,
+     "compile_seconds": 2.68,
      "attribution": "",
      "detail": ""
     }
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of LogicBasicTraced: exit 1 in 3.8s"
+    "trace compile of LogicBasicTraced: exit 1 in 3.7s",
+    "ignored 47 trace file(s) left by an earlier compile"
    ],
-   "seconds": 67.1
+   "seconds": 41.01
   }
  ],
- "seconds": 166.68,
- "t1_dirty_after": true,
+ "seconds": 139.81,
+ "t1_dirty_after": false,
  "t2_dirty_after": true
 }
