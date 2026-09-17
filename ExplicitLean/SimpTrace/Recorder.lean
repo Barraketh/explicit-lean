@@ -466,8 +466,16 @@ where
   spec form describes it.  simp wraps a hypothesis `h : c` as `eq_true h` to
   get `c = True`, and a decidable ground condition as `eq_true_of_decide`. -/
   assumptionName? (pa : Expr) : Simp.SimpM (Option String) := do
-    let core := if pa.isAppOfArity ``eq_true 2 || pa.isAppOfArity ``eq_false 2
-      then pa.appArg! else pa
+    -- The wrapper is stripped to *find* the local, but it must be kept in what
+    -- we report: `close.by` renders as `exact <term>`, and simp wraps `hp : P`
+    -- as `eq_true hp` precisely because the side goal is `P = True`, which `hp`
+    -- alone does not prove.  Reporting the bare name here produced
+    -- `exact hp` against `P = True` -- a type mismatch at replay (REVIEW-9 1).
+    let wrapper? : Option Name :=
+      if pa.isAppOfArity ``eq_true 2 then some ``eq_true
+      else if pa.isAppOfArity ``eq_false 2 then some ``eq_false
+      else none
+    let core := if wrapper?.isSome then pa.appArg! else pa
     match core with
     | .fvar fvarId =>
       -- The *display* name, never `eraseMacroScopes`: for an inaccessible `a✝`
@@ -475,7 +483,10 @@ where
       -- a different, accessible local, so a generator emitting `exact a` picks
       -- the wrong one.  `name`, `intros` and `local` already use the display
       -- form; `close.by` must agree with them (REVIEW-6 5).
-      return some s!"assumption:{(← ppExpr (mkFVar fvarId)).pretty}"
+      let nm := (← ppExpr (mkFVar fvarId)).pretty
+      match wrapper? with
+      | some w => return some s!"assumption:{w} {nm}"
+      | none => return some s!"assumption:{nm}"
     | _ =>
       if core.isAppOf ``eq_true_of_decide || core.isAppOf ``of_decide_eq_true then
         return some "decide"
