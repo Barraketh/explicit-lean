@@ -436,7 +436,7 @@ a replayer cannot perform.
 /-- The statement `name args` proves, as an `Eq` or `Iff` pair, with remaining
 implicit and instance arguments left as metavariables to unify. -/
 def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
-    : MetaM (Option (Expr × Expr)) := do
+    (proj : String := "") : MetaM (Option (Expr × Expr × Array Expr)) := do
   let head? : Option Expr ← match o with
     | .decl declName _ _ =>
       if (← getEnv).find? declName |>.isSome then
@@ -448,6 +448,33 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
     -- cannot reconstruct from the trace alone; a `.other` names no declaration.
     | _ => pure none
   let some head := head? | return none
+  -- Apply the recorded projection, so the statement read is the conjunct the
+  -- rewrite is actually by: `simp [h.2.1]` with `h : p ∧ q ∧ r` rewrites by
+  -- `r`'s sibling, not by the whole conjunction, and validating the unprojected
+  -- hypothesis rejects a step that replays perfectly well (REVIEW-9 2).
+  let head ←
+    if proj.isEmpty then pure head else do
+      -- `(h c).1`: the hypothesis is quantified, so its binders must be
+      -- instantiated *before* the projection -- `∀ x, P x ∧ Q x` is not a
+      -- conjunction until it is applied.  Open them as metavariables, which
+      -- the recorded `args` and unification then fix, exactly as for a lemma.
+      let (pmvars, pbis, _) ← forallMetaTelescope (← inferType head)
+      -- The recorded `args` belong to *this* application (`(h c).1` records
+      -- `["c"]`), so assign them to its explicit binders here; the projected
+      -- statement below has no binders left for them.
+      let mut j := 0
+      for mvar in pmvars, bi in pbis do
+        if bi == .default then
+          if h : j < args.size then
+            unless ← isDefEq mvar args[j] do return none
+            j := j + 1
+      let applied := mkAppN head pmvars
+      proj.splitOn "." |>.foldlM (init := applied) fun acc part => do
+        match part with
+        | "" => pure acc
+        | "1" => mkAppM ``And.left #[acc]
+        | "2" => mkAppM ``And.right #[acc]
+        | _ => pure acc
   -- Open the lemma's whole telescope first: implicits, instances and the
   -- hypotheses of a conditional lemma all become metavariables, exactly as a
   -- replayer's `rw` leaves them for unification and side goals.
@@ -459,12 +486,23 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
   -- `mkAppN head args` would feed them to whatever binder comes first, which is
   -- usually a universe or an implicit, silently producing a different statement
   -- (`if 2 then ?a else ?b` for `ite_cond_eq_true 1 2`).
-  let mut i := 0
+  -- When a projection consumed the `args` above, the projected statement has
+  -- none of its own left to fill.
+  let mut i := if proj.isEmpty then 0 else args.size
+  -- The explicit binders the recorded `args` did *not* fill.  A lemma can take
+  -- an explicit argument that does not occur in its left-hand side -- `dif_pos
+  -- (hc : c)` proves the condition, and `dite c t e` mentions `c`, `t` and `e`
+  -- but never `hc` -- so unifying the statement with the subterm leaves it
+  -- unassigned and a replayer has nothing to write.  Collect them so the
+  -- caller can require them assigned (REVIEW-9 2).
+  let mut unfilled : Array Expr := #[]
   for mvar in mvars, bi in bis do
     if bi == .default then
       if h : i < args.size then
         unless ← isDefEq mvar args[i] do return none
         i := i + 1
+      else
+        unfilled := unfilled.push mvar
   -- More recorded arguments than the lemma has explicit binders: the `args` do
   -- not describe this lemma, so there is nothing to check them against.
   if i < args.size then return none
@@ -476,32 +514,43 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
   -- (`LeftTotal R` is a `∀`-statement about `∃`), which the `eq?` test below
   -- would then read as the rewrite — the wrong pair entirely.
   match prop? with
-  | some true => return some (concl, mkConst ``True)
+  | some true => return some (concl, mkConst ``True, unfilled)
   | some false =>
     -- `Ne a b` is a *definition* (`a = b → False`), so `not?` returns `none`
     -- on `0 ≠ 1` without unfolding it and the statement becomes `(0 ≠ 1) = False`,
     -- which cannot unify with the recorded `before: "0 = 1"`.  Unfold first, as
     -- the `none` arm below already does, so `a ≠ b` and `¬(a = b)` are treated
     -- the same (REVIEW-8 2).  `Ne` is one of Mathlib's commonest simp shapes.
-    if let some p := concl.not? then return some (p, mkConst ``False)
+    if let some p := concl.not? then return some (p, mkConst ``False, unfilled)
     let unfolded ← whnfR concl
-    if let some p := unfolded.not? then return some (p, mkConst ``False)
-    return some (concl, mkConst ``False)
+    if let some p := unfolded.not? then return some (p, mkConst ``False, unfilled)
+    return some (concl, mkConst ``False, unfilled)
   | none =>
     -- Read the statement as written first.  Unfolding is only a fallback, for a
     -- conclusion hidden behind an abbreviation; applying it eagerly rewrites
     -- `p = True` into something that no longer matches the recorded subterm.
     if let some (_, lhs, rhs) := concl.eq? then
-      return some (lhs, rhs)
+      return some (lhs, rhs, unfilled)
     if let some (lhs, rhs) := concl.iff? then
-      return some (lhs, rhs)
+      return some (lhs, rhs, unfilled)
     let concl ← whnfR concl
     if let some (_, lhs, rhs) := concl.eq? then
-      return some (lhs, rhs)
+      return some (lhs, rhs, unfilled)
     if let some (lhs, rhs) := concl.iff? then
       -- `rw` rewrites with an iff through `propext`; both sides are `Prop`.
-      return some (lhs, rhs)
+      return some (lhs, rhs, unfilled)
     return none
+
+/-- The origin to *validate* against: a `.stx` names no declaration, so
+`rwStatement?` cannot read a statement from it and the step went unchecked
+entirely -- which is how `dif_pos`, whose explicit condition proof `rw` cannot
+recover, shipped without ever being validated.  The resolved origin is the
+constant or local the syntax elaborated to, which is also what `name` now
+reports (REVIEW-9 2). -/
+def resolvedOrigin (o localO : Origin) : Origin :=
+  match o with
+  | .stx .. => localO
+  | _ => o
 
 /--
 Check that a recorded `rw` step is one a replayer can actually perform: `name`
@@ -511,7 +560,7 @@ Returns `none` on success, or a classified reason.
 -/
 def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
     (prop? : Option Bool) (before after : Expr) (c : EvCtx)
-    (hasSides : Bool := false) : MetaM (Option String) :=
+    (hasSides : Bool := false) (proj : String := "") : MetaM (Option String) :=
   withLCtx c.lctx c.insts do
 
     let name := match o with
@@ -521,7 +570,7 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
       | .other n => n.toString
     try
       withoutModifyingState do
-        let some (lhs, rhs) ← rwStatement? o args prop?
+        let some (lhs, rhs, unfilled) ← rwStatement? o args prop? proj
           -- No statement to read means the step cannot be verified at all.
           -- Round 7 made an unresolvable *origin* classified; this is the other
           -- half — a resolvable origin whose statement we cannot read — and
@@ -594,6 +643,36 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
         -- theorem's `?q'`); unifying it with `after` is what fixes them, and is
         -- also exactly what a replayer's `rw` does.
 
+        -- An explicit argument the recorded `args` did not supply and
+        -- unification did not determine is one a replayer has no way to write:
+        -- `dif_pos (hc : c)` takes the condition's proof explicitly, and
+        -- `dite c t e` does not mention it, so `rw [dif_pos]` leaves it
+        -- unassigned.  Such a step elaborated here but cannot replay, so it is
+        -- classified rather than shipped -- unless the step carries `side`
+        -- traces, which is exactly how a replayer discharges such an argument
+        -- (REVIEW-9 2).
+        -- A replayer's `rw [name]` unifies the lemma's *left-hand side* with
+        -- the subterm and nothing else, so an explicit argument that the LHS
+        -- does not mention stays unassigned for it even though unifying the
+        -- other side with `after` determines it here.  `dif_pos (hc : c)` is
+        -- exactly that: `dite c t e` mentions `c`, `t` and `e` but never `hc`.
+        -- Checking against `after` as well made this validator strictly more
+        -- permissive than the tactic it is meant to protect, so the step
+        -- shipped and failed at replay with "still has an unassigned
+        -- argument".  Re-check the explicit binders against the LHS alone; a
+        -- step carrying `side` traces is exempt, since discharging such an
+        -- argument is what a side trace is for (REVIEW-9 2).
+        unless hasSides do
+          let lhsOnly ← withoutModifyingState do
+            withReducibleAndInstances do
+              let some (l, r, unf) ← rwStatement? o args prop? proj | pure true
+              -- The side `rw` matches against, in the recorded direction.
+              let matched := if inv then r else l
+              if ← isDefEq matched beforeCore then
+                unf.allM fun m => return !(← instantiateMVars m).isMVar
+              else pure true
+          unless lhsOnly do
+            return some s!"unassigned_explicit_argument:{name}"
         return none
     catch _ =>
       return some s!"unreplayable_rw:{name}"
@@ -605,8 +684,9 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
   let mut running ← instantiateMVars argBefore
   for ev in nested do
     let (pos, before, after, ec) ← match ev with
-      | .rw pos o inv prop? b a ec args sides _ _ _ =>
-        if let some reason ← checkRwStep o args inv prop? b a ec (!sides.isEmpty) then
+      | .rw pos o inv prop? b a ec args sides _ lo pj =>
+        if let some reason ← checkRwStep (resolvedOrigin o lo) args inv prop? b a ec
+            (!sides.isEmpty) pj then
           ur.modify (·.add reason)
         pure (pos, b, a, ec)
       | .eq pos _ b a ec _ => pure (pos, b, a, ec)
@@ -644,10 +724,11 @@ def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
   let mut running ← instantiateMVars pre
   for ev in events do
     let (pos, before, after, c) ← match ev with
-      | .rw pos o inv prop? b a c args sides _ _ _ =>
+      | .rw pos o inv prop? b a c args sides _ lo pj =>
         -- Every emitted `rw` is re-elaborated and checked against its own
         -- `before`/`after`, so a misclassified plumbing head cannot ship.
-        if let some reason ← checkRwStep o args inv prop? b a c (!sides.isEmpty) then
+        if let some reason ← checkRwStep (resolvedOrigin o lo) args inv prop? b a c
+            (!sides.isEmpty) pj then
           ur.modify (·.add reason)
         pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)

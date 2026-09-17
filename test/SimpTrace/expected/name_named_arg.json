@@ -17,13 +17,7 @@
       1
      ],
      "name": "heq_comm",
-     "dir": "fwd",
-     "args": [
-      "α",
-      "β",
-      "a",
-      "b"
-     ]
+     "dir": "fwd"
     },
     {
      "kind": "rw",

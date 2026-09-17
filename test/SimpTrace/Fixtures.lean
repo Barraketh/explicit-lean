@@ -485,8 +485,10 @@ one) cannot fire first and `heq_comm` is the rewrite under test. -/
 example (α β : Type) (a : α) (b : β) : HEq a b ↔ HEq b a := by
   simp_trace [heq_comm (a := a) (b := b)] =>trace "test/SimpTrace/out/name_named_arg.json"
 
-/-- `@`-syntax with explicit universe/type arguments: all of them land in
-`args`, none of them in `name`. -/
+/-- `@`-syntax supplying arguments positionally.  `forall_eq`'s binders are all
+*implicit*, so none of them can be written positionally by a replayer and all
+are dropped from `args`; unification recovers them from the subterm.  What
+matters here is that `name` is the bare constant, never `@forall_eq _ p a`. -/
 example (p : Nat → Prop) (a : Nat) : (∀ x, x = a → p x) ↔ p a := by
   simp_trace [@forall_eq _ p a] =>trace "test/SimpTrace/out/name_at_explicit.json"
 

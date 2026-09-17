@@ -133,6 +133,25 @@ where
           some (.decl n true false, e.getAppArgs, inv, "")
       | _ => none
 
+/-- Keep only those recorded arguments that sit at an *explicit* binder of the
+origin's own type, in order.  Named-argument syntax can fill an implicit binder
+(`heq_comm (a := a)`), and a replayer cannot write such an argument
+positionally; unification recovers it instead. -/
+def explicitOnly (o : Origin) (args : Array Expr) : MetaM (Array Expr) := do
+  if args.isEmpty then return args
+  let type? : Option Expr ← match o with
+    | .decl declName _ _ => pure ((← getEnv).find? declName |>.map (·.type))
+    | .fvar fvarId => pure ((← getLCtx).find? fvarId |>.map (·.type))
+    | _ => pure none
+  let some type := type? | return args
+  forallTelescopeReducing type fun xs _ => do
+    let mut out : Array Expr := #[]
+    for i in [0:args.size] do
+      if h : i < xs.size then
+        let some decl ← xs[i].fvarId!.findDecl? | return args
+        if decl.binderInfo == .default then out := out.push args[i]!
+    return out
+
 /--
 Resolve an `Origin.stx` to the local hypothesis it elaborated to, when it is one.
 
@@ -156,7 +175,15 @@ def resolveStxOrigin (o : Origin) :
       if let .stx id' _ := sthm.origin then
         if id' == id then
           match proofLocal? sthm.proof with
-          | some (resolved, args, inv, proj) => return (resolved, args, inv, proj)
+          | some (resolved, args, inv, proj) =>
+            -- Keep only the arguments at *explicit* binders.  `heq_comm
+            -- (a := a) (b := b)` names two of four implicit binders, and
+            -- `getAppArgs` returns all four; recording them would tell a
+            -- replayer to write `rw [heq_comm α β a b]`, which does not
+            -- elaborate.  Implicit ones are recovered by unification, so they
+            -- are dropped (REVIEW-9 2).
+            let args ← explicitOnly resolved args
+            return (resolved, args, inv, proj)
           -- The argument elaborated to something that is not a local (a term,
           -- a global applied to arguments): leave the origin as written, and
           -- the caller classifies it — "unresolved" is never a silent pass.
