@@ -37,6 +37,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
   protocol requires a final full merge-gate review, including the six-module
   harness once T1 is clean and stable. Per-branch multiple-invocation rendering
   follows only after that final gate passes.
+- **T4 final review 4: one cross-component MAJOR.** Fresh clean-tip run sees 84
+  source sites but only 23 traces for Function.Basic's 25 sites; positional
+  filename/index mapping shifts every later trace and is not acceptance
+  evidence. T9 is diagnosing an authenticated source-site identity contract.
+  T1 must capture the two attribute-line sites and T4 must refuse missing,
+  extra, duplicate or mismatched identities before either branch can advance.
 - **Named `zeta` decision:** T1's local-let fvar delta is represented as an
   existing `change` step with an explicit `pp.all` `to` value. Plain `letE`
   zeta remains `zeta`. Do not broaden T2's zeta semantics or add a name-based
