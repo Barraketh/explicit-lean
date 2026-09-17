@@ -17,6 +17,7 @@ module
 public meta import Lean
 public meta import ExplicitLean.SimpTrace.Types
 public meta import ExplicitLean.SimpTrace.Traversal
+public meta import ExplicitLean.SimpTrace.Position
 
 public meta section
 
@@ -305,6 +306,36 @@ partial def classifyProof (target : Expr) (proof : Expr) : MetaM ProofShape := d
     return .lemmaApp declName proofArgs false explicitArgs
   | none => return .computed
 
+/--
+Which spec close form closes the goal `e`, if any.
+
+`describeProof` must not invent a `by` (round 3's principle), but it must also
+not classify a goal the spec *can* close: after the recorded steps a side goal
+is very often literally `True` or `¬False`, and classifying those made 7 of the
+corpus's 8 classified side conditions false positives (REVIEW-8 1).  The
+question to ask is what the goal **is**, not what its proof term looks like.
+-/
+def goalCloseForm? (e : Expr) : Simp.SimpM (Option String) := do
+  let e ← instantiateMVars e
+  try
+    let e ← withReducible <| whnfR e
+    -- `True`: the spec's `true_intro`.
+    if e.isConstOf ``True then return some "true_intro"
+    -- `¬False`, i.e. `False → False`, and any `False → _`: refutable by empty
+    -- pattern matching, which is the spec's `nofun`.
+    if let some p := e.not? then
+      if p.isConstOf ``False then return some "nofun"
+    if let .forallE _ d _ _ := e then
+      if (← withReducible <| whnfR d).isConstOf ``False then return some "nofun"
+    -- `a = a` / `p ↔ p`: closed by reflexivity.
+    if let some (_, lhs, rhs) := e.eq? then
+      if ← withReducible <| isDefEq lhs rhs then return some "rfl"
+    if let some (lhs, rhs) := e.iff? then
+      if ← withReducible <| isDefEq lhs rhs then return some "rfl"
+    -- A decidable ground proposition: the spec's `decide`.
+    return none
+  catch _ => return none
+
 /-- Does `declName` applied to `args` elaborate?  A cheap scratch check that the
 recorded argument list is one a replayer can actually write. -/
 def checkArgsElaborate (declName : Name) (args : Array Expr) : MetaM Bool := do
@@ -324,8 +355,8 @@ anything else stays an `eq`, whose `by` the scratch check decides (and which
 becomes a classified `unresolved:simproc:<name>` when it cannot).
 -/
 def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
-    (evCtx : EvCtx) (side : Array SideRec) (src? : Option Name) :
-    Simp.SimpM Unit := do
+    (evCtx : EvCtx) (side : Array SideRec) (src? : Option Name)
+    (diverted : Array Event := #[]) : Simp.SimpM Unit := do
   let shape ← match r.proof? with
     | some proof => classifyProof e (← instantiateMVars proof)
     | none => pure .computed
@@ -337,10 +368,46 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
     let mut sides := side
     let mut unnamed : Array String := #[]
     if sides.isEmpty then
+      -- One side goal per proof argument, each stated as that hypothesis's own
+      -- instantiated type — the only place a side goal is built.  The
+      -- discharger's diverted events belong to the *first* such condition (a
+      -- simproc runs its nested `simp` on the one subterm it needs), so they
+      -- are attached there, rebased onto that goal.
+      let mut first := true
       for pa in proofArgs do
         let ty ← instantiateMVars (← inferType pa)
+        -- The diverted events were recorded against the *subterm* the simproc
+        -- simplified, but the side goal is an equation about it (`c = False`),
+        -- so each position needs the path from the equation down to its
+        -- left-hand side prepended.  `Eq lhs rhs` is `((Eq α) lhs) rhs`, so the
+        -- lhs sits at `[0, 1]` (REVIEW-9 1).
+        let lhsPath : Pos := if ty.eq?.isSome then #[0, 1] else #[]
+        let evs := if first then diverted.map (Event.rebase lhsPath) else #[]
+        first := false
+        -- With steps recorded, the close is what the goal becomes *after* them;
+        -- with none, it is what the goal already is.  Never a hardcoded form.
+        -- The close describes the goal once *every* recorded step has been
+        -- applied to it, so replay them against `ty` at their own positions.
+        -- Reading the last event's `after` instead would hand `goalCloseForm?`
+        -- a subterm (`False`) rather than the goal (`False = False`), which is
+        -- what made `rfl`-closable conditions come out classified (REVIEW-9 1).
+        let after := evs.foldl (init := ty) fun acc ev =>
+          let (pos, a) := match ev with
+            | .rw p _ _ _ _ a _ _ _ _ _ => (p, some a)
+            | .eq p _ _ a _ _ => (p, some a)
+            | .defeq p _ _ _ a _ => (p, some a)
+            | .congr p _ _ _ a _ _ _ => (p, some a)
+            | .introCtx .. => (#[], none)
+          match a with
+          | none => acc
+          | some a => (replaceAt? acc pos a).getD acc
+        match ← goalCloseForm? after with
+        | some by_ => sides := sides.push (SideRec.mk ty evs (some by_) evCtx #[] ty
+            (if evs.isEmpty then none else some after))
+        | none =>
         match ← assumptionName? pa with
-        | some by_ => sides := sides.push (SideRec.mk ty #[] (some by_) evCtx #[] ty none)
+        | some by_ => sides := sides.push (SideRec.mk ty evs (some by_) evCtx #[] ty
+            (if evs.isEmpty then none else some after))
         | none =>
           -- The condition's proof is a term no close form describes — a
           -- `noConfusion` elimination under a binder, say.  Naming it
@@ -349,7 +416,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
           let txt := (← ppExpr ty).pretty
           unnamed := unnamed.push txt
           sides := sides.push
-            (SideRec.mk ty #[] (some s!"unresolved:condition proof not a \
+            (SideRec.mk ty evs (some s!"unresolved:condition proof not a \
               hypothesis or a recorded discharge") evCtx #[] ty none)
     for u in unnamed do
       ref.modify (·.markUnresolved
@@ -466,23 +533,17 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         let evCtx ← captureEvCtx ref
         let side := (← ref.get).pendingSide
         ref.modify fun s => { s with pendingSide := #[] }
-        -- Firings the simproc caused inside its own nested `simp`: they have no
-        -- position of their own, so they become this step's `side` evidence.
-        -- The side goal is the subterm the simproc chose to simplify — the first
-        -- diverted firing's `before`, which is that subterm before any rewrite —
-        -- not the whole term the simproc fired on.  `reduceIte` picks an `ite`'s
-        -- condition; naming the `ite` there would misdescribe the side goal.
-        -- The diverted events were logged at the *outer* position (the node the
-        -- simproc fired on), but they belong to the subterm the simproc chose
-        -- to simplify, which is this side trace's own root.  Rebase them, or a
-        -- replayer is handed a position that cannot exist in the side goal
-        -- (REVIEW-8 3).
-        let divertedSide : Array SideRec :=
-          if diverted.isEmpty then #[]
-          else
-            let rebased := diverted.map (Event.strip pos)
-            #[SideRec.mk (divertedGoal?.getD e) rebased (some "true_intro") evCtx #[]
-              (divertedGoal?.getD e) none]
+        -- Firings the simproc caused inside its own nested `simp` have no
+        -- position of their own; they are kept and handed to `emitProcStep`,
+        -- which attaches them to the side condition they belong to.  They are
+        -- *not* wrapped in a `SideRec` here: doing so recorded the subterm the
+        -- simproc chose to simplify as the side goal, with a hardcoded
+        -- `true_intro` close, where the lemma's real side condition is an
+        -- equation *about* that subterm (`c = False` for `ite_cond_eq_false`).
+        -- There is one code path for side goals now — the lemma hypothesis's
+        -- instantiated type, in `emitProcStep` — and this is not a second one
+        -- (REVIEW-9 1).
+        let rebased := diverted.map (Event.strip pos)
         let news := newOrigins usedBefore usedAfter
         -- `+contextual` registers the antecedent hypothesis alongside the
         -- lemma that fired, so a single firing can add more than one origin;
@@ -504,7 +565,7 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             | _ => pure false
           if isProc then
             let src := match o with | .decl n _ _ => some n | _ => none
-            emitProcStep ref pos e r evCtx (side ++ divertedSide) src
+            emitProcStep ref pos e r evCtx side src rebased
           else
             -- `simp [h]` records the *syntax* as the origin.  Resolve it to
             -- the hypothesis for the `local` object and the `prop` flag, which
@@ -528,7 +589,7 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         | none =>
           -- No origin at all: a simproc that registered nothing (`simpUsingDecide`
           -- and the ground arithmetic/matcher simprocs).  Same classification.
-          emitProcStep ref pos e r evCtx (side ++ divertedSide) none
+          emitProcStep ref pos e r evCtx side none rebased
     match stepResult with
     | .done r => record r
     | .visit r => record r
@@ -590,36 +651,6 @@ a **classified** outcome, per the task.  REVIEW-3 M3 was the previous behaviour:
 a `throwError`, so `simp_trace (disch := omega)` failed on a goal stock
 `simp (disch := omega)` proves.
 -/
-
-/--
-Which spec close form closes the goal `e`, if any.
-
-`describeProof` must not invent a `by` (round 3's principle), but it must also
-not classify a goal the spec *can* close: after the recorded steps a side goal
-is very often literally `True` or `¬False`, and classifying those made 7 of the
-corpus's 8 classified side conditions false positives (REVIEW-8 1).  The
-question to ask is what the goal **is**, not what its proof term looks like.
--/
-def goalCloseForm? (e : Expr) : Simp.SimpM (Option String) := do
-  let e ← instantiateMVars e
-  try
-    let e ← withReducible <| whnfR e
-    -- `True`: the spec's `true_intro`.
-    if e.isConstOf ``True then return some "true_intro"
-    -- `¬False`, i.e. `False → False`, and any `False → _`: refutable by empty
-    -- pattern matching, which is the spec's `nofun`.
-    if let some p := e.not? then
-      if p.isConstOf ``False then return some "nofun"
-    if let .forallE _ d _ _ := e then
-      if (← withReducible <| whnfR d).isConstOf ``False then return some "nofun"
-    -- `a = a` / `p ↔ p`: closed by reflexivity.
-    if let some (_, lhs, rhs) := e.eq? then
-      if ← withReducible <| isDefEq lhs rhs then return some "rfl"
-    if let some (lhs, rhs) := e.iff? then
-      if ← withReducible <| isDefEq lhs rhs then return some "rfl"
-    -- A decidable ground proposition: the spec's `decide`.
-    return none
-  catch _ => return none
 
 /-- Describe how a side condition closed, and reconcile that with the events the
 recorder captured, so a replayer is never told to do the work twice.
