@@ -861,10 +861,19 @@ def evalSimpTrace : Tactic := fun stx => withMainContext do
     let base ← resolveOutPath path
     let mut target := base
     let mut n := 1
-    while (← target.pathExists) do
-      let stem := base.toString.dropRight ".json".length
-      target := System.FilePath.mk s!"{stem}.{n}.json"
-      n := n + 1
+    let mut placed := false
+    while !placed do
+      if !(← target.pathExists) then
+        placed := true
+      else if (← IO.FS.readFile target) == json then
+        -- Lean can elaborate a declaration more than once; an identical trace
+        -- is that same invocation seen again, not another goal.  Overwrite it,
+        -- or the file count drifts between identical runs.
+        placed := true
+      else
+        let stem := base.toString.dropRight ".json".length
+        target := System.FilePath.mk s!"{stem}.{n}.json"
+        n := n + 1
     IO.FS.writeFile target json
   | none =>
     logInfo m!"simp-trace-json:{json}"
