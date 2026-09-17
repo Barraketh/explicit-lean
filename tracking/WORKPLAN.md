@@ -26,12 +26,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
 - **T2 review 9: COMPLETE.** No critical or major defects; review commit
   `dbb6c703`. T2 merged to main at `5ec2da5` and is wired through
   `ExplicitLean.lean`. Focused main-check rerun is the integration gate.
-- **T1 review-10 fix COMPLETE; review 11 running.** Commit `369fb3f`
-  propagates structured validator verdicts to exact nested side/congr `Step`
-  nodes and adds fail-closed JSON regressions. Focused checks pass; the current
-  corrected-denominator harness is 44/84 with known-bad nested replay now
-  classified unresolved. A fresh reviewer is attacking sibling/two-level
-  verdict association before the merge decision.
+- **T1 review 11: NO DEFECTS; merged.** Commit `369fb3f` propagates structured
+  validator verdicts to exact nested side/congr `Step` nodes; review
+  `0b4fd28` verified omission attacks and sibling/two-level association. T1 is
+  merged and wired through `ExplicitLean.lean`; focused main-check rerun is the
+  integration gate. Current harness baseline is 44/84 with known-bad nested
+  replay classified unresolved.
 - **T4 review 3: NO DEFECTS in incremental scope.** Marker/lint/source
   preservation attacks and 194 checks pass at `7db88a8`. Do not merge yet: the
   protocol requires a final full merge-gate review, including the six-module

@@ -1,3 +1,4 @@
 import ExplicitLean.ExplicitRw
+import ExplicitLean.SimpTrace
 import ExplicitLean.SimpEngine.Source
 import ExplicitLean.SimpEngine.Boundary
