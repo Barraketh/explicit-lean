@@ -71,6 +71,15 @@ terse completion notices, then makes merge and next-dispatch decisions.
   `69cbe98`/`c51eabb` implement the run-local stage/raw/final flow and 240
   focused checks pass. A fresh reviewer is running the real six-module gate
   against accepted T1/T2 tips before the merge decision.
+- **T4 review 6: CRITICAL integration hold; bounded interface fix running.**
+  Run-local path rewriting is correct, but T1's deterministic verifier still
+  expects the committed relative trace paths. T1 is parameterizing transform
+  verification by explicit `--raw-dir`; T4 will then rerun all six modules.
+- **T12 Option trace running:** add the seven `Data.Option.Basic` sites to the
+  accepted v2 producer, including nested term-mode and `ext` continuation
+  shapes, and return exact invocation/classification counts for review.
+- **T13 cone runner queued:** implement the reviewed 69-module/134-edge strict
+  translated-root build after the next worker slot frees.
 - **Post-cone SQLite ledger:** after the 91-site pipeline compiles reliably and
   before whole-corpus scaling, replace loose manifest/trace discovery with a
   SQLite execution ledger. Keep original sources and generated Lean as files;
