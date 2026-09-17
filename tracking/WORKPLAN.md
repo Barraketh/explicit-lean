@@ -32,6 +32,11 @@ terse completion notices, then makes merge and next-dispatch decisions.
   merged and wired through `ExplicitLean.lean`; focused main-check rerun is the
   integration gate. Current harness baseline is 44/84 with known-bad nested
   replay classified unresolved.
+- **T1 v2 review 12: one MAJOR, narrow fix dispatched.** The new site scanner
+  can include a trailing `--` or `/- ... -/` comment in `callText`, placing the
+  injected trace clause inside the comment. Fix top-level comment boundaries,
+  preserve the comment after the instrumented call, and require actual emitted
+  v2 output before review 13.
 - **T4 review 3: NO DEFECTS in incremental scope.** Marker/lint/source
   preservation attacks and 194 checks pass at `7db88a8`. Do not merge yet: the
   protocol requires a final full merge-gate review, including the six-module
