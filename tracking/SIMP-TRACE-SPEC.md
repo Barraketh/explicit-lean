@@ -1,5 +1,7 @@
 # simp trace format v1 (interface between trace capture and positional replay)
 
+Amended 2026-09-16 after T1 round 6: side traces carry `pre`/`post`; dsimproc
+firings are `change` steps with `source`.
 Amended 2026-09-16 after T1 congr implementation: user `@[congr]` theorems are
 `rw` steps with `source: "congr"` and `intros` on implication-shaped side traces.
 Amended 2026-09-16 after T1 round 4: `congr` step kind for dependent
@@ -39,7 +41,8 @@ form for `reduceCtorEq`-style side conditions.
   carries `"prop": "true"` or `"prop": "false"` and replay rewrites with
   `eq_true name` / `eq_false name` respectively. `side` holds, for each hypothesis of a
   conditional lemma, how it was discharged: a nested trace object with the same
-  `steps`/`close` shape. A side trace's `close.by` may additionally be `"omega"`
+  `steps`/`close` shape and, like a location, `pre` and `post` (pp of the
+  side goal before and after; `post` null if closed). A side trace's `close.by` may additionally be `"omega"`
   when the user-supplied discharger was `omega`; any other non-simp discharger
   is recorded as `{"by": "unresolved:<discharger text>"}` and the whole call is
   reported unresolved (classified, not a generic abort).
@@ -48,8 +51,11 @@ form for `reduceCtorEq`-style side conditions.
 - `{"kind":"beta"|"eta"|"proj"|"zeta"|"iota", "pos": POS, "before": ..., "after": ...}` Definitional
   reductions simp performs silently (`zeta` = `let x := v; b` to `b[v/x]`;
   `iota` = matcher/recursor application to a constructor, reduced one step).
-- `{"kind":"change", "pos": POS, "to": "<pp.all term>", "before": ...}` Last-resort
-  definitional replacement when no named kind applies; replay checks defeq.
+- `{"kind":"change", "pos": POS, "to": "<pp.all term>", "before": ..., "source": "<dsimproc name>" (optional)}`
+  Definitional replacement when no named kind applies, including any
+  dsimproc firing (`dreduceIte`, `Nat.reduceAdd` in dsimp mode, ...), which is
+  definitional by construction and must not be recorded as a propositional
+  `eq`; replay checks defeq.
 - `{"kind":"eq", "pos": POS, "lhs": "<pp>", "rhs": "<pp>", "by": "rfl"|"decide",
    "source": "<simproc name>"}` A simproc-computed equation whose proof is by
   kernel computation. Replay proves it with the named ordinary tactic, never
