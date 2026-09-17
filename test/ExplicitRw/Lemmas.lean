@@ -230,4 +230,28 @@ theorem instance_mul_comm_real (x y : ℝ) : x * y = y * x := by
   guard_target = (y * x = y * x)
   rfl
 
+/-! ## Recursive side proofs
+
+A conditional lemma's hypothesis is often implication-shaped — `ite_congr` and
+`dite_congr` produce `c → x = u` — so discharging it needs to introduce the
+antecedent and then prove an equation, possibly by replaying a nested trace.
+That is `intro h ; …`, which no flat enumeration of tactics can express. The
+grammar stays closed: only `rfl`, `decide`, `omega`, `nofun`,
+`exact <whitelisted term>`, `intro <ids> ; <proof>` and a nested `explicit_rw`.
+-/
+
+theorem side_ite_congr (c : Prop) [Decidable c] (x y u : Nat) (hxu : x = u) :
+    (if c then x else y) = (if c then u else y) := by
+  explicit_rw [ite_congr at [0, 1]
+    with [rfl, intro h ; exact hxu, intro h ; rfl]] then rfl
+
+theorem side_dite_congr (c : Prop) [Decidable c] (x u : c → Nat) (y : ¬c → Nat)
+    (hxu : ∀ h, x h = u h) : dite c x y = dite c u y := by
+  explicit_rw [dite_congr at [0, 1]
+    with [rfl, intro h ; exact hxu h, intro h ; rfl]] then rfl
+
+/-- A nested `explicit_rw` as the closing proof. -/
+theorem side_nested_trace (a b c : Nat) (h : a = b) (hc : b = c) : a = c := by
+  explicit_rw [h at [0, 1]] then explicit_rw [hc at [0, 1]] then rfl
+
 end ExplicitRwTest.Lemmas

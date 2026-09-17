@@ -26,7 +26,7 @@ MODULE = "ExplicitLean.ExplicitRw"
 
 # Fixtures that deliberately contain failing proofs, checked via `#guard_msgs`.
 # Listed so the report distinguishes them from the positive fixtures.
-NEGATIVE = {"Negative.lean"}
+NEGATIVE = {"Negative.lean", "Strict.lean"}
 
 # A single fixture must not run away; the task's escalation bound is 30 minutes.
 TIMEOUT_SECONDS = 30 * 60
@@ -43,6 +43,60 @@ def run(cmd: list[str], timeout: int = TIMEOUT_SECONDS) -> tuple[int, str, float
     )
     elapsed = time.monotonic() - start
     return proc.returncode, (proc.stdout + proc.stderr).strip(), elapsed
+
+
+def run_axiom_check(fixtures: list[Path]) -> tuple[int, str, float]:
+    """`#print axioms` every theorem of the positive fixtures; fail on `sorryAx`.
+
+    The fixture bodies are concatenated into one scratch file with their imports
+    hoisted, then one `#print axioms` per theorem is appended.
+    """
+    import re
+    import tempfile
+
+    positives = [f for f in fixtures if f.name not in NEGATIVE]
+    imports: list[str] = []
+    bodies: list[str] = []
+    prints: list[str] = []
+    for f in positives:
+        src = f.read_text(encoding="utf-8")
+        body_lines = []
+        for line in src.splitlines():
+            if line.startswith("import "):
+                if line not in imports:
+                    imports.append(line)
+            else:
+                body_lines.append(line)
+        bodies.append("\n".join(body_lines))
+        ns_match = re.search(r"^namespace (\S+)", src, re.M)
+        ns = ns_match.group(1) if ns_match else ""
+        for m in re.finditer(r"^theorem (\w+)", src, re.M):
+            prints.append(f"#print axioms {ns}.{m.group(1)}" if ns else
+                          f"#print axioms {m.group(1)}")
+
+    if not prints:
+        return 1, "no theorems found in the positive fixtures", 0.0
+
+    with tempfile.NamedTemporaryFile("w", suffix=".lean", delete=False,
+                                     dir=str(REPO)) as fh:
+        fh.write("\n".join(imports) + "\n")
+        fh.write("\n".join(bodies) + "\n")
+        fh.write("\n".join(prints) + "\n")
+        scratch = Path(fh.name)
+    try:
+        code, output, elapsed = run(["lake", "env", "lean",
+                                     str(scratch.relative_to(REPO))])
+        if code != 0:
+            return 1, f"the axiom-audit file failed to compile:\n{output}", elapsed
+        if "sorryAx" in output:
+            bad = [l for l in output.splitlines() if "sorryAx" in l]
+            return 1, ("a fixture theorem depends on sorryAx:\n  "
+                       + "\n  ".join(bad)), elapsed
+        checked = len(prints)
+        clean = sum(1 for l in output.splitlines() if "does not depend" in l)
+        return 0, f"{checked} theorems, no sorryAx ({clean} axiom-free)", elapsed
+    finally:
+        scratch.unlink(missing_ok=True)
 
 
 def main() -> int:
@@ -88,6 +142,20 @@ def main() -> int:
             print(f"  {rel} ({kind}): FAIL (exit {code}, {elapsed:.1f}s)")
             print("    " + "\n    ".join(output.splitlines()) if output else "")
             failures.append(f"{rel}: exit {code}")
+
+    # Every theorem in the positive fixtures must be free of `sorryAx`.
+    # A replayed proof that depends on it is a proof of nothing: round 6 found a
+    # false theorem admitted that way, through an elaboration failure that logged
+    # a recoverable error and returned `sorryAx` while the harness stayed green
+    # (the file elaborated with no output and exited 0). Asserting this here, on
+    # every run, is what makes that class of defect visible to CI rather than to
+    # the next reviewer.
+    code, output, elapsed = run_axiom_check(fixtures)
+    if code != 0:
+        print(f"check_explicit_rw: FAIL: sorryAx audit")
+        print(output)
+        return 1
+    print(f"  axiom audit: {output} ({elapsed:.1f}s)")
 
     # Forms that must be rejected by the *parser*. `#guard_msgs` cannot pin a
     # parse error, because parsing fails before the command elaborates, so each

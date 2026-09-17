@@ -14,6 +14,7 @@ import ExplicitLean.ExplicitRw
 import Mathlib.Data.Set.Basic
 import Mathlib.Algebra.Order.Group.Nat
 import Mathlib.Data.Real.Basic
+import Mathlib.Data.Complex.Basic
 
 namespace ExplicitRwTest.Grammar
 
@@ -178,15 +179,22 @@ theorem numeric_int (a b : Int) (h : a = b) : a + 0 = b := by
   guard_target =ₛ b + 0 = b
   exact Int.add_zero b
 
+/-- `ℝ` **inside a step**, not merely in the statement. Round 6 found that the
+earlier fixtures put `ℝ` only in the binder, so the atom was never exercised
+through the grammar and a broken mapping passed the suite. -/
 theorem numeric_real (x y : ℝ) (h : x = y) : x + 0 = y := by
-  explicit_rw [h at [0, 1, 0, 1]]
-  guard_target =ₛ y + 0 = y
+  explicit_rw [change ((x : ℝ) + 0) at [0, 1], h at [0, 1, 0, 1]]
   exact add_zero y
 
-/-- The ascription spelling `(2 : ℝ)` inside a lemma term. -/
-theorem numeric_ascription (y : ℝ) (h : (2 : ℝ) = y) : (2 : ℝ) + 0 = y := by
-  explicit_rw [h at [0, 1, 0, 1]]
-  guard_target =ₛ y + 0 = y
+/-- The ascription spelling `(2 : ℝ)` **inside** a lemma term. -/
+theorem numeric_ascription (y : ℝ) : (2 : ℝ) * y = y * 2 := by
+  explicit_rw [mul_comm (2 : ℝ) y at [0, 1]]
+  guard_target = (y * 2 = y * 2)
+  rfl
+
+/-- `ℂ` inside a step. -/
+theorem numeric_complex (x y : ℂ) (h : x = y) : x + 0 = y := by
+  explicit_rw [change ((x : ℂ) + 0) at [0, 1], h at [0, 1, 0, 1]]
   exact add_zero y
 
 end ExplicitRwTest.Grammar
