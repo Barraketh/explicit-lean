@@ -14,6 +14,7 @@ Run with `python3 -B Experiment/check_explicit_rw.py`.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -22,6 +23,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 FIXTURE_DIR = REPO / "test" / "ExplicitRw"
 REJECTED_DIR = FIXTURE_DIR / "RejectedSyntax"
+SWEEP_DIR = FIXTURE_DIR / "sweep"
+# Slots swept by default; the rest need `T2_FULL_SWEEP=1` (see run_escape_sweep).
+SWEEP_SLOTS_DEFAULT = 2
+# The only escape probes the *parser* cannot stop; see run_escape_sweep.
+POST_PARSE_ESCAPES = {"admit", "$x"}
 MODULE = "ExplicitLean.ExplicitRw"
 
 # Fixtures that deliberately contain failing proofs, checked via `#guard_msgs`.
@@ -43,6 +49,82 @@ def run(cmd: list[str], timeout: int = TIMEOUT_SECONDS) -> tuple[int, str, float
     )
     elapsed = time.monotonic() - start
     return proc.returncode, (proc.stdout + proc.stderr).strip(), elapsed
+
+
+def run_escape_sweep(full: bool = False) -> tuple[int, str, float]:
+    """Compile one probe per (term, slot) and classify parse vs elaboration.
+
+    An `escape` term must be rejected by the *parser*; a `benign` term must
+    reach elaboration. By default only the first `SWEEP_SLOTS_DEFAULT` slots are
+    swept, because the full matrix is ~5 minutes of serial Lean; set
+    `T2_FULL_SWEEP=1` for all of them. The subset is documented in the report
+    line so the number in RESULT.md is never ambiguous about what it covers.
+    """
+    import json
+    import tempfile
+
+    spec = json.loads((SWEEP_DIR / "probes.json").read_text(encoding="utf-8"))
+    slots = dict(spec["slots"])
+    if not full:
+        slots = {k: v for k, v in list(slots.items())[:SWEEP_SLOTS_DEFAULT]}
+
+    header = ("import ExplicitLean.ExplicitRw\n"
+              "import Mathlib.Data.Set.Basic\n"
+              "set_option linter.unusedVariables false\n"
+              "example (n a b : Nat) (f g : Nat → Nat) (s t : Set Nat) (p : Prop)\n"
+              "    (h : a = b) : True := by\n")
+
+    start = time.monotonic()
+    escapes = benigns = esc_bad = ben_bad = 0
+    parse_rejected = elab_rejected = 0
+    failures: list[str] = []
+    for kind in ("escape", "benign"):
+        for term in spec[kind]:
+            for slot_name, tmpl in slots.items():
+                body = "  " + tmpl.replace("{T}", term) + "\n  trivial\n"
+                with tempfile.NamedTemporaryFile("w", suffix=".lean", delete=False,
+                                                 dir=str(REPO)) as fh:
+                    fh.write(header + body)
+                    probe = Path(fh.name)
+                try:
+                    _, out, _ = run(["lake", "env", "lean",
+                                     str(probe.relative_to(REPO))])
+                finally:
+                    probe.unlink(missing_ok=True)
+                parsed_off = any(m in out for m in (
+                    "unexpected token", "unexpected identifier", "expected token",
+                    "missing end of character literal"))
+                if kind == "escape":
+                    escapes += 1
+                    if parsed_off:
+                        parse_rejected += 1
+                    elif term in POST_PARSE_ESCAPES and out.strip():
+                        # Two probes cannot be stopped by the parser: `admit` is
+                        # a bare identifier that parses and then fails to
+                        # resolve, and `$x` is an antiquotation the tactic names
+                        # itself. They are listed explicitly so that anything
+                        # *else* surviving the parser is a failure, rather than
+                        # being waved through as "rejected somehow".
+                        elab_rejected += 1
+                    else:
+                        esc_bad += 1
+                        why = "no error at all" if not out.strip() else \
+                              "survived the parser"
+                        failures.append(f"ESCAPE {why}: {term!r} "
+                                        f"in slot {slot_name}")
+                else:
+                    benigns += 1
+                    if parsed_off:
+                        ben_bad += 1
+                        failures.append(f"BENIGN parse-rejected: {term!r} "
+                                        f"in slot {slot_name}")
+    elapsed = time.monotonic() - start
+    if failures:
+        return 1, "\n  ".join(failures[:20]), elapsed
+    scope = "all slots" if full else f"{len(slots)} of {len(spec['slots'])} slots"
+    return 0, (f"{escapes} escape probes all rejected "
+               f"({parse_rejected} by the parser, {elab_rejected} at "
+               f"elaboration), {benigns} benign all parse ({scope})"), elapsed
 
 
 def run_axiom_check(fixtures: list[Path]) -> tuple[int, str, float]:
@@ -156,6 +238,14 @@ def main() -> int:
         print(output)
         return 1
     print(f"  axiom audit: {output} ({elapsed:.1f}s)")
+
+    # The escape sweep: the artefact behind RESULT.md's escape-count claim.
+    code, output, elapsed = run_escape_sweep(full=os.environ.get("T2_FULL_SWEEP"))
+    if code != 0:
+        print("check_explicit_rw: FAIL: escape sweep")
+        print(output)
+        return 1
+    print(f"  escape sweep: {output} ({elapsed:.1f}s)")
 
     # Forms that must be rejected by the *parser*. `#guard_msgs` cannot pin a
     # parse error, because parsing fails before the command elaborates, so each

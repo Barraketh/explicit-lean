@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "Escape sweep for the whitelist grammar. Each term is spliced into every",
+    "slot that elaborates user syntax; an `escape` term must be rejected by the",
+    "PARSER, before any elaborator runs, and a `benign` term must reach",
+    "elaboration. Run by Experiment/check_explicit_rw.py.",
+    "",
+    "`escape` covers every way found so far of getting a tactic into a term:",
+    "a `by` block written directly, wrapped in an operator or a coercion,",
+    "produced by a macro, or built by a custom term elaborator; plus the",
+    "syntactic forms the whitelist excludes on principle."
+  ],
+  "slots": {
+    "exact": "explicit_rw [] then exact {T}",
+    "lemma": "explicit_rw [{T} at []]",
+    "change": "explicit_rw [change {T} at []]",
+    "eq": "explicit_rw [eq {T} by rfl at []]",
+    "sideproof": "explicit_rw [Nat.sub_add_cancel _ at [0,1] with [exact {T}]]",
+    "congrnest": "explicit_rw [congr 0 [{T} at []] at [0,1]]"
+  },
+  "escape": [
+    "by simp", "by simp_all", "by simp only []", "by dsimp", "by norm_num",
+    "by push_cast", "by norm_cast", "by simpa", "by simp_rw [Nat.add_zero]",
+    "by rfl", "by trivial", "by omega", "by decide", "by exact trivial",
+    "by { simp }", "by first | simp | rfl", "by repeat simp",
+    "by all_goals simp", "fun x => by simp", "(by simp)", "(by simp : True)",
+    "id (by simp)", "(by simp) + 1", "↑(by simp)", "-(by simp)", "¬(by simp)",
+    "((by simp), 1)", "((by simp) : Nat)", "show True from (by simp)",
+    "match n with | 0 => 1 | _ => 2", "let y := 1; y", "do pure 1",
+    "fun | 0 => 1 | _ => 2", "fun ⟨a, b⟩ => a", "‹True›", "⟨1, 2⟩",
+    "nomatch n", "nofun", "f $ x", "f <| x", "(· + 1)", "[1, 2]",
+    "s!\"x\"", "(open Nat in succ 1)", "(config := {})", "(x := 1)", "?m",
+    "h ▸ rfl", "sorry", "admit", "$x", "Σ x : Nat, Nat", "{x : Nat // x > 0}",
+    "have h : True := trivial; h", "if let some z := none then 1 else 2"
+  ],
+  "benign": [
+    "@Nat.add_zero", "Nat.add_zero n", "h.elim", "HAdd.hAdd 2 3",
+    "ite True 1 2", "(f x).1", "if True then 1 else 2", "↑n", "-n",
+    "n ∈ s", "s ⊆ t", "f ∘ g", "fun x => f x", "∀ x, p", "∃ x, p",
+    "{x | p}", "(a, b)", "Type", "Prop", "(2 : Nat)"
+  ]
+}
