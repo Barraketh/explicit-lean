@@ -1,5 +1,7 @@
 # simp trace format v1 (interface between trace capture and positional replay)
 
+Amended 2026-09-16 after T1 congr implementation: user `@[congr]` theorems are
+`rw` steps with `source: "congr"` and `intros` on implication-shaped side traces.
 Amended 2026-09-16 after T1 round 4: `congr` step kind for dependent
 congruence transports; `ctxIndex` semantics clarified.
 Amended 2026-09-16 after review round 3 of T1: `iota` kind, `prop` flag on
@@ -67,6 +69,14 @@ form for `reduceCtorEq`-style side conditions.
   theorem, proves the argument equation from the nested steps, and applies it.
   Use this kind only when plain positional rewriting would need casts (a
   `CongrArgKind.cast` dependent); ordinary arguments stay plain `rw` steps.
+  A USER congruence theorem (`@[congr]`, e.g. `ite_congr`, `dite_congr`,
+  `exists_prop_congr`, fired through `trySimpCongrTheorem?`) is not this kind:
+  it is an ordinary `rw` step whose `name` is that theorem, with
+  `"source": "congr"`, and one `side` sub-trace per hypothesis in order. A
+  hypothesis of implication shape (`c → x = u`) is a side trace that first
+  introduces its antecedents, recorded as `"intros": ["<name>", ...]` on the
+  side trace object, followed by the steps proving the consequent. Replay is
+  `rw [ite_congr h₁ h₂ h₃]` with each `hᵢ` proved by the side trace.
 - `{"kind":"intro_ctx", "pos": POS, "name": "<hyp name>"}` Contextual simp made the
   antecedent of an implication at `pos` available as a hypothesis for later steps.
 
