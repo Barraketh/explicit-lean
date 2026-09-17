@@ -5,7 +5,7 @@
       "loc": "goal",
       "closed": true,
       "close": {
-        "by": "trivial"
+        "by": "true_intro"
       },
       "steps": [
         {
@@ -19,14 +19,7 @@
           "side": [
             {
               "goal": "n ≤ m",
-              "steps": [
-                {
-                  "kind": "rw",
-                  "pos": [],
-                  "name": "h",
-                  "dir": "fwd"
-                }
-              ],
+              "steps": [],
               "close": {
                 "by": "assumption:h"
               }

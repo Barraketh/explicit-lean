@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -31,7 +32,28 @@ EXPECTED_DIR = ROOT / "test" / "SimpTrace" / "expected"
 
 # Step kinds the spec defines for v1.  An unknown kind is a hard error: a
 # trace must never carry a step the replay tactic cannot interpret.
-KNOWN_KINDS = {"rw", "unfold", "beta", "eta", "proj", "change", "eq", "intro_ctx"}
+KNOWN_KINDS = {"rw", "unfold", "beta", "eta", "proj", "zeta", "change", "eq",
+               "intro_ctx"}
+
+# Close forms the amended spec defines. `assumption:` and `absurd:` are prefixes.
+CLOSE_EXACT = {"rfl", "true_intro", "decide"}
+CLOSE_PREFIXES = ("assumption:", "absurd:")
+
+
+def check_close(path: str, close, messages: list[str]) -> None:
+    """A close form must be one the amended spec defines, and the hypothesis
+    forms must actually name a hypothesis."""
+    if close is None:
+        return
+    by = close.get("by")
+    if by in CLOSE_EXACT:
+        return
+    for prefix in CLOSE_PREFIXES:
+        if isinstance(by, str) and by.startswith(prefix):
+            if not by[len(prefix):]:
+                fail(messages, f"{path}.close: {by!r} names no hypothesis")
+            return
+    fail(messages, f"{path}.close: {by!r} is not a spec close form")
 
 
 def fail(messages: list[str], text: str) -> None:
@@ -55,7 +77,7 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         if kind not in KNOWN_KINDS:
             fail(messages, f"{where}: unknown step kind {kind!r}")
 
-        for field in ("kind", "pos", "name", "dir", "source", "by"):
+        for field in ("kind", "pos", "name", "dir", "source", "by", "local"):
             if field in want:
                 if got.get(field) != want[field]:
                     fail(
@@ -81,6 +103,25 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         if kind == "unfold" and not got.get("name"):
             fail(messages, f"{where}: `unfold` step without a constant name")
 
+        local = got.get("local")
+        if local is not None:
+            if local.get("contextual") is True:
+                if not isinstance(local.get("ctxIndex"), int):
+                    fail(messages, f"{where}.local: contextual ref without ctxIndex")
+                if "userName" in local:
+                    fail(
+                        messages,
+                        f"{where}.local: contextual ref must not carry userName "
+                        f"(the namespaces must not collide)",
+                    )
+            else:
+                if not local.get("userName"):
+                    fail(messages, f"{where}.local: ordinary ref without userName")
+                if not isinstance(local.get("inaccessible"), bool):
+                    fail(messages, f"{where}.local: ordinary ref without inaccessible")
+                if not isinstance(local.get("ctxIndex"), int):
+                    fail(messages, f"{where}.local: ordinary ref without ctxIndex")
+
         if not isinstance(got.get("pos", []), list) or not all(
             isinstance(c, int) and c >= 0 for c in got.get("pos", [])
         ):
@@ -103,6 +144,7 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                         f"{side_path}.goal: expected {ws.get('goal')!r}, "
                         f"got {gs.get('goal')!r}",
                     )
+                check_close(side_path, gs.get("close"), messages)
                 if gs.get("close") != ws.get("close"):
                     fail(
                         messages,
@@ -146,6 +188,7 @@ def check_trace(name: str, actual: dict, expected: dict, messages: list[str]) ->
                 messages,
                 f"{path}: expected closed={want.get('closed')}, got {closed}",
             )
+        check_close(path, got.get("close"), messages)
         if got.get("close") != want.get("close"):
             fail(
                 messages,
@@ -153,6 +196,48 @@ def check_trace(name: str, actual: dict, expected: dict, messages: list[str]) ->
                 f"got {got.get('close')!r}",
             )
         check_steps(path, got.get("steps", []), want.get("steps", []), messages)
+
+
+NEGATIVE_FIXTURE = ROOT / "test" / "SimpTrace" / "OutsideRoot.lean"
+
+
+def check_path_containment(messages: list[str]) -> None:
+    """`with_trace` must refuse to write outside the package root.
+
+    Compiles a fixture that aims at an absolute path in /tmp and requires both
+    that the compile fails with the containment error and that no file appears.
+    A tactic that can write anywhere is a hazard regardless of what it traces.
+    """
+    if not NEGATIVE_FIXTURE.is_file():
+        fail(messages, f"missing negative fixture {NEGATIVE_FIXTURE.name}")
+        return
+
+    target = pathlib.Path("/tmp/simp_trace_escape_check.json")
+    try:
+        target.unlink()
+    except FileNotFoundError:
+        pass
+
+    result = subprocess.run(
+        ["lake", "env", "lean", str(NEGATIVE_FIXTURE.relative_to(ROOT))],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    output = result.stdout + result.stderr
+
+    if result.returncode == 0:
+        fail(messages, f"{NEGATIVE_FIXTURE.name}: compiled without error; "
+                       f"an out-of-root path must be rejected")
+    if "refusing to write outside the package root" not in output:
+        fail(
+            messages,
+            f"{NEGATIVE_FIXTURE.name}: expected the containment error, got:\n"
+            f"    {output.strip()[:300]}",
+        )
+    if target.exists():
+        fail(messages, f"{NEGATIVE_FIXTURE.name}: wrote {target} outside the root")
+        target.unlink()
 
 
 def main() -> int:
@@ -199,13 +284,16 @@ def main() -> int:
                 f"{EXPECTED_DIR.relative_to(ROOT)}",
             )
 
+    check_path_containment(messages)
+
     if messages:
         for message in messages:
             print(f"FAIL {message}")
         print(f"\n{len(messages)} problem(s) across {checked} checked trace(s)")
         return 1
 
-    print(f"OK: {checked} simp_trace fixture(s) match their expected skeletons")
+    print(f"OK: {checked} simp_trace fixture(s) match their expected skeletons, "
+          f"and out-of-root paths are refused")
     return 0
 
 

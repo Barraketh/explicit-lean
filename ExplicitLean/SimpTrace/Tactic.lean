@@ -35,13 +35,16 @@ we can rebuild a genuine `simp` syntax node and hand it to stock
 `mkSimpContext`, which reads its arguments by position.
 -/
 
-/-- The out-clause.  It is written *last* and introduced by its own `out`
-keyword rather than an open paren, so it can never compete with `simp`'s own
-parenthesized forms (`(config := ...)`, `(discharger := ...)`, `(disch := ...)`).
-A paren-led clause makes the parser commit on `(` and demand `out`, which would
-leave `simp_trace` unable to express those forms at all — i.e. not substitutable
-for `simp`, the whole point of the tactic. -/
-syntax simpTraceOut := &" out" " := " str
+/-- The out-clause, written *last* and delimited by `with_trace`.
+
+Delimiter choice is what makes `simp_trace` substitutable for `simp`.  A
+*leading* `(out := ...)` makes the parser commit on the first `(` and demand
+`out`, so `simp`'s own parenthesized forms (`(config := ...)`,
+`(discharger := ...)`, `(disch := ...)`) become unwritable.  A *trailing*
+`(out := ...)` is swallowed by `optConfig` when no other argument precedes it,
+and a bare trailing `out := ...` is swallowed by the `location` parser in
+`simp_trace ... at h`.  A distinct leading keyword is unambiguous everywhere. -/
+syntax simpTraceOut := " with_trace " str
 
 syntax (name := simpTrace) "simp_trace" optConfig
   (discharger)? (&" only")?
@@ -464,6 +467,6 @@ where
   /-- The `(out := "...")` path, when given.  The clause is the last slot. -/
   outPath? (stx : Syntax) : Option String :=
     if stx[6].isNone then none
-    else stx[6][0][2].isStrLit?
+    else stx[6][0][1].isStrLit?
 
 end ExplicitLean.SimpTrace

@@ -11,7 +11,22 @@
         {
           "kind": "rw",
           "pos": [
+            0,
             1,
+            0,
+            1
+          ],
+          "name": "h",
+          "dir": "fwd",
+          "local": {
+            "userName": "h",
+            "inaccessible": false,
+            "ctxIndex": 3
+          }
+        },
+        {
+          "kind": "rw",
+          "pos": [
             0,
             1
           ],
@@ -20,16 +35,8 @@
         },
         {
           "kind": "rw",
-          "pos": [
-            1
-          ],
-          "name": "eq_self",
-          "dir": "fwd"
-        },
-        {
-          "kind": "rw",
           "pos": [],
-          "name": "implies_true",
+          "name": "eq_self",
           "dir": "fwd"
         }
       ]

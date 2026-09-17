@@ -9,17 +9,10 @@
       },
       "steps": [
         {
-          "kind": "beta",
-          "pos": [
-            0,
-            1
-          ]
-        },
-        {
-          "kind": "rw",
+          "kind": "eq",
           "pos": [],
-          "name": "eq_self",
-          "dir": "fwd"
+          "source": "decide",
+          "by": "decide"
         }
       ]
     }

@@ -5,7 +5,7 @@
       "loc": "goal",
       "closed": true,
       "close": {
-        "by": "trivial"
+        "by": "true_intro"
       },
       "steps": [
         {

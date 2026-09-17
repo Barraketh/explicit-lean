@@ -2,20 +2,18 @@
   "schema": "simp-trace-v1",
   "locations": [
     {
-      "loc": "goal",
+      "loc": {
+        "hyp": "h"
+      },
       "closed": true,
       "close": {
-        "by": "true_intro"
+        "by": "absurd:h"
       },
       "steps": [
         {
           "kind": "rw",
-          "pos": [
-            1,
-            0,
-            1
-          ],
-          "name": "add_zero",
+          "pos": [],
+          "name": "ne_eq",
           "dir": "fwd"
         },
         {
@@ -29,7 +27,7 @@
         {
           "kind": "rw",
           "pos": [],
-          "name": "implies_true",
+          "name": "not_true_eq_false",
           "dir": "fwd"
         }
       ]

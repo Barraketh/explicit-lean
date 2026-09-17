@@ -2,34 +2,35 @@
   "schema": "simp-trace-v1",
   "locations": [
     {
-      "loc": "goal",
-      "closed": true,
-      "close": {
-        "by": "true_intro"
+      "loc": {
+        "hyp": "h"
       },
+      "closed": false,
+      "close": null,
       "steps": [
         {
           "kind": "rw",
           "pos": [
-            1,
             0,
             1
           ],
           "name": "add_zero",
           "dir": "fwd"
-        },
+        }
+      ]
+    },
+    {
+      "loc": "goal",
+      "closed": false,
+      "close": null,
+      "steps": [
         {
           "kind": "rw",
           "pos": [
+            0,
             1
           ],
-          "name": "eq_self",
-          "dir": "fwd"
-        },
-        {
-          "kind": "rw",
-          "pos": [],
-          "name": "implies_true",
+          "name": "add_zero",
           "dir": "fwd"
         }
       ]

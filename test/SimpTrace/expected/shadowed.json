@@ -11,8 +11,28 @@
         {
           "kind": "rw",
           "pos": [
-            1,
             0,
+            1,
+            1,
+            1
+          ],
+          "name": "add_zero",
+          "dir": "fwd"
+        },
+        {
+          "kind": "beta",
+          "pos": [
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1,
+            1,
             1
           ],
           "name": "add_zero",
@@ -20,16 +40,8 @@
         },
         {
           "kind": "rw",
-          "pos": [
-            1
-          ],
-          "name": "eq_self",
-          "dir": "fwd"
-        },
-        {
-          "kind": "rw",
           "pos": [],
-          "name": "implies_true",
+          "name": "eq_self",
           "dir": "fwd"
         }
       ]
