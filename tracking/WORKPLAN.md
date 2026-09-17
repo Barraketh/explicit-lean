@@ -6,14 +6,16 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | Task | Scope | Depends on | Status | Branch | Review |
 | --- | --- | --- | --- | --- | --- |
 | T0-remote-host | On demand only: Scaleway GP1-L (32 vCPU, 128 GB, $0.89/hr). Provision only when a local job fails on resources; delete when idle for an extended period and re-provision later | a local resource failure | deferred (user decision 2026-09-16) | | |
-| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | T1b fork done; review round 4 running | task/T1-trace-capture | R1-R3 fixed; R4 pending |
-| T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | review round 5 running | task/T2-explicit-rw | R1-R4 fixed; R5 pending |
+| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 4 in progress | task/T1-trace-capture | R4: 2 critical (zeta:=false shapes; loose-bvar panic on Function/Basic), 3 major, 2 minor |
+| T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 5 in progress | task/T2-explicit-rw | R5: 4 major (sort indexing, iota one-step, ℕ tokens), 1 minor + class-polymorphic instance resolution |
 | T3-compliance | Rewrite two `dsimp` overrides; simp-family lint for overrides and generated regions | none | **merged** (af33e32) | task/T3-compliance | R3: NO DEFECTS |
 | T4-pipeline | Per-module driver: capture traces for a module, render `explicit_rw` source with original comment, build, oracle | T1, T2 | planned | | |
 | T5-cone | Run T4 on the seven-module cone (91 calls); record per-call outcomes | T0, T4 | planned | | |
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
 
 Log (newest first):
+
+- 2026-09-16: T1 round 4: fork fidelity good across 41 functions and performance fine (0.82x real module, 1.99x pathological), but `zeta := false`/`letToHave` shapes fail, a loose-bvar panic on Logic/Function/Basic.lean:390, `dsimpT` dropped three upstream behaviours, a fixture exit code was misreported, `nofun` unimplemented. T2 round 5: no safety defects (385 probes; closed-set tactics hygienic); fidelity fixes plus a class-polymorphic instance-resolution failure found by integration. Both fix rounds dispatched.
 
 - 2026-09-16: T3 review round 3 clean; merged into the working branch. T1b fork complete: 31 functions copied from Simp/Main.lean + 6 from Types.lean with `SOURCE:` annotations, reconstruction deleted, exponential chains now flat, simproc proofs classified generically (`reduceIte` -> `ite_cond_eq_true` etc. as `rw` with `side`); simp result cache disabled in the fork (watch performance). Spec: `nofun` close form for `reduceCtorEq`. T2 round 4 fixes in (grammar widened to pp output, `iota`, `with [...]`, `eq_true`/`eq_false`). Reviews running: T1 R4 (incl. fork fidelity diff and performance on Function/Basic), T2 R5.
 
