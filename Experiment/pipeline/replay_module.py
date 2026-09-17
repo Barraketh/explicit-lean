@@ -7,10 +7,9 @@
 
 Per module, in five stages:
 
-1. **Transcribe.** Reuse T1's committed traced copy of the module (or, with
-   `--regenerate`, produce one by running its `make_traced.py`), run T1's
-   `check_transcription.py`, compile the traced copy in the T1 worktree, and
-   collect one JSON trace per simp site.
+1. **Transcribe.** Reuse T1's committed traced copy and manifest, stage both in
+   a fresh T4-owned run tree, redirect generated trace paths into that tree,
+   compile with T1's Lean environment, and finalize only its raw outputs.
 2. **Render.** Translate each trace into replacement source text for its site:
    the original call preserved as a comment, a `rename_i` line when any used
    local is inaccessible, then one `explicit_rw` per location.
@@ -24,9 +23,9 @@ Per module, in five stages:
    text and an attribution guess, plus totals, both worktrees' commit hashes,
    and runtimes.
 
-Both driven worktrees are read-only: nothing is written into them, and the
-harness fails rather than compile a file it placed there. Every output lands
-under `--out`.
+Both driven worktrees are read-only: staging, raw and final outputs are owned
+by T4 under `--out`; the harness never reads or writes T1's shared meas_out.
+Every other output lands under `--out`.
 
 A site is `replayed` only when the compile that covers it reported zero errors.
 Which compile that was is recorded per module as `compile_mode`: `whole_module`
@@ -40,10 +39,13 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -76,11 +78,13 @@ DIAG_RE = re.compile(r"^(?P<file>[^\s:][^:\n]*):(?P<line>\d+):(?P<col>\d+): "
 COMPILE_TIMEOUT = 30 * 60  # The coordination protocol's escalation threshold.
 
 
-def run(cmd: list[str], cwd: pathlib.Path, timeout: int = COMPILE_TIMEOUT
+def run(cmd: list[str], cwd: pathlib.Path, timeout: int = COMPILE_TIMEOUT,
+        env: dict[str, str] | None = None
         ) -> tuple[int, str, str, float]:
     started = time.monotonic()
     proc = subprocess.run(
-        cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout
+        cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+        env=env
     )
     return proc.returncode, proc.stdout, proc.stderr, time.monotonic() - started
 
@@ -295,16 +299,36 @@ def validate_identity(module_path: str, source: str,
 # Stage 1: transcribe
 
 
-def transcribe(t1: pathlib.Path, mathlib_rel: str, traced_name: str,
-               regenerate: bool, log: list[str]) -> tuple[pathlib.Path, dict]:
-    """Ensure the traced copy exists, check it, compile it, return its traces.
+TRACE_PATH_RE = re.compile(r'(?P<prefix>=>trace\s+")(?P<path>[^"]+)(?P<suffix>")')
 
-    The traced copy and its JSON outputs live in the T1 worktree, which this
-    harness treats as read-only: by default the committed copy and the outputs
-    its compile produces under T1's own `test/SimpTrace/meas_out/` are reused.
-    `--regenerate` is refused for that reason; producing a fresh copy would
-    write into T1.
-    """
+
+def rewrite_trace_paths(source: str, raw_dir: pathlib.Path) -> str:
+    """Point generated trace clauses at this run's private raw directory."""
+    def replace(match: re.Match[str]) -> str:
+        basename = pathlib.PurePath(match.group("path")).name
+        return (match.group("prefix") + str(raw_dir / basename)
+                + match.group("suffix"))
+    return TRACE_PATH_RE.sub(replace, source)
+
+
+def make_trace_run(out_dir: pathlib.Path, traced_name: str
+                   ) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path]:
+    """Create an isolated, non-colliding T4-owned trace run tree."""
+    runs = out_dir / "trace-runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    run_root = pathlib.Path(tempfile.mkdtemp(prefix=traced_name + "-", dir=runs))
+    stage = run_root / "stage"
+    raw = run_root / "raw"
+    final = run_root / "final"
+    for directory in (stage, raw, final):
+        directory.mkdir()
+    return run_root, stage, raw, final
+
+
+def transcribe(t1: pathlib.Path, mathlib: pathlib.Path, mathlib_rel: str,
+               traced_name: str, out_dir: pathlib.Path, regenerate: bool,
+               log: list[str]) -> tuple[pathlib.Path, dict]:
+    """Compile a staged traced copy and finalize only its run-local outputs."""
     traced = t1 / "test" / "SimpTrace" / f"{traced_name}.lean"
     if regenerate:
         raise SystemExit(
@@ -313,6 +337,18 @@ def transcribe(t1: pathlib.Path, mathlib_rel: str, traced_name: str,
         )
     if not traced.is_file():
         raise SystemExit(f"traced copy missing: {traced}")
+    manifest = traced.with_suffix(".manifest.json")
+    if not manifest.is_file():
+        raise SystemExit(f"traced manifest missing: {manifest}")
+
+    run_root, stage, raw, final = make_trace_run(out_dir, traced_name)
+    staged = stage / traced.name
+    staged_manifest = stage / manifest.name
+    shutil.copy2(traced, staged)
+    shutil.copy2(manifest, staged_manifest)
+    staged.write_text(rewrite_trace_paths(staged.read_text(encoding="utf-8"), raw),
+                      encoding="utf-8")
+    log.append(f"trace run root: {run_root}")
 
     code, out, err, secs = run(
         [sys.executable, "-B", "test/SimpTrace/check_transcription.py"], t1
@@ -322,30 +358,34 @@ def transcribe(t1: pathlib.Path, mathlib_rel: str, traced_name: str,
     if not transcription_ok:
         log.append((out + err).strip()[:2000])
 
-    # Compile the traced copy so the recorder writes one JSON per site. The
-    # outputs land where the traced copy's own `=>trace` clauses name, inside
-    # T1; they are that worktree's own gitignored measurement outputs.
-    #
-    # The recorder appends rather than replaces, so outputs from earlier
-    # compiles are still there. Deleting them would be a write into T1, so this
-    # instead records when the compile started and keeps only what the compile
-    # itself wrote.
-    compile_started = time.time()
+    # Compile only the staged source. The recorder resolves its generated
+    # absolute paths beneath this run root and never touches T1's meas_out.
+    compile_env = os.environ.copy()
+    compile_env["SIMP_TRACE_OUT_ROOT"] = str(run_root)
     code, out, err, compile_secs = run(
-        ["lake", "env", "lean", str(traced.relative_to(t1))], t1
+        ["lake", "env", "lean", str(staged)], t1, env=compile_env
     )
     log.append(f"trace compile of {traced_name}: exit {code} in {compile_secs:.1f}s")
 
-    # Read every JSON produced by this compile. Filenames and numeric stems are
-    # provenance only: identity matching happens later from each v2 envelope.
+    finalizer = t1 / "test" / "SimpTrace" / "finalize_traces.py"
+    original = mathlib / mathlib_rel[len("Mathlib/"):]
+    finalize_code, finalize_out, finalize_err, finalize_secs = run(
+        [sys.executable, "-B", str(finalizer),
+         "--traced-source", str(staged),
+         "--manifest", str(staged_manifest),
+         "--source", str(original),
+         "--raw-dir", str(raw),
+         "--out-dir", str(final)],
+        t1,
+    )
+    log.append(f"trace finalization: exit {finalize_code} in {finalize_secs:.1f}s")
+    if finalize_code != 0:
+        log.append((finalize_out + finalize_err).strip()[:2000])
+
+    # Consume only finalizer output. Raw v1 files are intentionally never fed
+    # to the identity gate; a missing final file therefore fails closed.
     trace_records: list[dict] = []
-    stale = 0
-    meas = t1 / "test" / "SimpTrace" / "meas_out"
-    for path in sorted(meas.glob(f"{traced_name}_*.json")):
-        if path.stat().st_mtime < compile_started - 1:
-            # Left over from an earlier compile, not written by this one.
-            stale += 1
-            continue
+    for path in sorted(final.glob("*.json")):
         try:
             parsed = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -354,13 +394,17 @@ def transcribe(t1: pathlib.Path, mathlib_rel: str, traced_name: str,
             log.append(f"malformed trace JSON: {path.name}: {exc}")
             parsed = {"__parseError": path.name, "__parseDetail": str(exc)}
         trace_records.append(parsed)
-    if stale:
-        log.append(f"ignored {stale} trace file(s) left by an earlier compile")
-    return traced, {
+    return staged, {
         "trace_records": trace_records,
         "transcription_ok": transcription_ok,
         "compile_exit": code,
         "compile_seconds": round(compile_secs, 2),
+        "finalize_exit": finalize_code,
+        "finalize_seconds": round(finalize_secs, 2),
+        "run_root": str(run_root),
+        "stage": str(stage),
+        "raw": str(raw),
+        "final": str(final),
         "classified_lines": [
             m.group(0) for m in DIAG_RE.finditer(out + err)
         ][:50],
@@ -712,13 +756,13 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
         raise SystemExit(f"no traced copy is known for {mathlib_rel}")
     source_rel = mathlib_rel[len("Mathlib/") :]
     source_path = mathlib / source_rel
-    # Decode the exact bytes; `Path.read_text` uses universal-newline mode and
-    # could otherwise change the authenticated source hash/ranges on CRLF input.
+    # Decode the source bytes without changing character coordinates.
     source = source_path.read_bytes().decode("utf-8")
 
     log: list[str] = []
     site_list = S.find_sites(source)
-    _, transcription = transcribe(t1, mathlib_rel, traced_name, False, log)
+    _, transcription = transcribe(t1, mathlib, mathlib_rel, traced_name,
+                                  out_dir, False, log)
     identity, authenticated = validate_identity(
         mathlib_rel, source, site_list, transcription["trace_records"],
     )

@@ -470,6 +470,120 @@ def identity_tests(f: Failures) -> None:
     rejected("v1_rejected", [{**records[0], "schema": "simp-trace-v1"}], "invalidRecords")
 
 
+def lifecycle_tests(f: Failures) -> None:
+    """Run-local staging and finalization fixtures, without touching T1/T2."""
+    trace_source = 'example : True := by simp =>trace "test/SimpTrace/meas_out/Test_01.json"\n'
+    source = "example : True := by simp\n"
+    sites = S.find_sites(source)
+    module = "Mathlib/Test/Lifecycle.lean"
+    with tempfile.TemporaryDirectory(prefix="lifecycle-check-") as tmp:
+        out = pathlib.Path(tmp)
+        first = P.make_trace_run(out, "TestTraced")
+        second = P.make_trace_run(out, "TestTraced")
+        f.check("lifecycle/run_dirs_do_not_collide", first[0] != second[0],
+                "repeated runs reused one run directory")
+        for run in (first, second):
+            f.check("lifecycle/run_subdirs_exist", all(path.is_dir() for path in run[1:]),
+                    f"missing stage/raw/final under {run[0]}")
+        rewritten = P.rewrite_trace_paths(trace_source, first[2])
+        f.check("lifecycle/trace_path_redirected",
+                str(first[2] / "Test_01.json") in rewritten,
+                "generated trace path was not redirected into raw")
+        f.check("lifecycle/trace_path_preserves_ordinal",
+                "Test_01.json" in rewritten,
+                "trace basename/site ordinal was changed")
+
+        site = sites[0]
+        final_record = {
+            "schema": "simp-trace-v2", "modulePath": module,
+            "site": {"siteOrdinal": site.index, "startChar": site.start,
+                     "endChar": site.end, "callText": site.text},
+            "occurrence": "1", "invocation": 0, "invocations": 1,
+            "locations": [],
+        }
+        raw_file = first[2] / "Test_01.json"
+        final_file = first[3] / "Test_01.json"
+        raw_file.write_text(json.dumps({"schema": "simp-trace-v1"}), encoding="utf-8")
+        final_file.write_text(json.dumps(final_record), encoding="utf-8")
+        f.equal("lifecycle/raw_stays_v1", json.loads(raw_file.read_text())["schema"],
+                "simp-trace-v1")
+        f.equal("lifecycle/final_is_v2", json.loads(final_file.read_text())["schema"],
+                "simp-trace-v2")
+        accepted, _ = P.validate_identity(module, source, sites,
+                                           [json.loads(final_file.read_text())])
+        f.equal("lifecycle/final_validates", accepted["identity"], "accepted")
+        missing, _ = P.validate_identity(module, source, sites, [])
+        f.equal("lifecycle/missing_final_rejected", missing["identity"], "rejected")
+        f.equal("lifecycle/missing_final_no_render", missing["renderAttempted"], False)
+
+        # Exercise the complete T4 lifecycle with a fixed-path T1 CLI mock.
+        t1 = out / "t1"
+        mathlib = out / "mathlib" / "Mathlib"
+        (t1 / "test" / "SimpTrace").mkdir(parents=True)
+        mathlib.mkdir(parents=True)
+        original = mathlib / "Test" / "Lifecycle.lean"
+        original.parent.mkdir()
+        original.write_text(source, encoding="utf-8")
+        traced = t1 / "test" / "SimpTrace" / "TestTraced.lean"
+        traced.write_text(
+            'example : True := by simp_trace =>trace "test/SimpTrace/meas_out/TestTraced_01.json"\n',
+            encoding="utf-8")
+        (t1 / "test" / "SimpTrace" / "TestTraced.manifest.json").write_text(
+            "{}", encoding="utf-8")
+        (t1 / "test" / "SimpTrace" / "check_transcription.py").write_text("", encoding="utf-8")
+        (t1 / "test" / "SimpTrace" / "finalize_traces.py").write_text("", encoding="utf-8")
+        calls: list[tuple[list[str], dict[str, str] | None]] = []
+        original_run = P.run
+
+        def fake_run(cmd: list[str], cwd: pathlib.Path, timeout: int = P.COMPILE_TIMEOUT,
+                     env: dict[str, str] | None = None) -> tuple[int, str, str, float]:
+            del timeout
+            calls.append((cmd, env))
+            if "check_transcription.py" in " ".join(cmd):
+                return 0, "", "", 0.01
+            if cmd and cmd[0] == "lake":
+                staged_text = pathlib.Path(cmd[-1]).read_text(encoding="utf-8")
+                f.check("lifecycle/mock_compile_uses_raw_path",
+                        str(first[2]) not in staged_text and "raw/TestTraced_01.json" in staged_text,
+                        "staged trace clause was not redirected")
+                raw_path = pathlib.Path(env["SIMP_TRACE_OUT_ROOT"]) / "raw" / "TestTraced_01.json"
+                raw_path.write_text(json.dumps({"schema": "simp-trace-v1"}), encoding="utf-8")
+                return 0, "", "", 0.01
+            if "--out-dir" in cmd:
+                out_path = pathlib.Path(cmd[cmd.index("--out-dir") + 1])
+                final_path = out_path / "TestTraced_01.json"
+                final_path.write_text(json.dumps({
+                    "schema": "simp-trace-v2", "modulePath": module,
+                    "site": {"siteOrdinal": 0, "startChar": sites[0].start,
+                              "endChar": sites[0].end, "callText": sites[0].text},
+                    "occurrence": "1", "invocation": 0, "invocations": 1,
+                    "locations": [],
+                }), encoding="utf-8")
+                f.check("lifecycle/finalizer_cli_shape",
+                        all(flag in cmd for flag in
+                            ("--traced-source", "--manifest", "--source", "--raw-dir", "--out-dir")),
+                        "explicit-path finalizer CLI was not used")
+                return 0, "", "", 0.01
+            return 1, "", "unexpected mock command", 0.01
+
+        P.run = fake_run
+        try:
+            _, transcription = P.transcribe(
+                t1, mathlib, module, "TestTraced", out / "mock-run", False, [])
+        finally:
+            P.run = original_run
+        f.equal("lifecycle/mock_final_is_v2",
+                transcription["trace_records"][0]["schema"], "simp-trace-v2")
+        mock_root = pathlib.Path(transcription["run_root"])
+        f.equal("lifecycle/mock_raw_stays_v1",
+                json.loads((mock_root / "raw" / "TestTraced_01.json").read_text())["schema"],
+                "simp-trace-v1")
+        f.check("lifecycle/compile_sets_out_root",
+                any(env and env.get("SIMP_TRACE_OUT_ROOT") == str(mock_root)
+                    for cmd, env in calls if cmd and cmd[0] == "lake"),
+                "compile did not receive the T4 run root")
+
+
 def site_count_tests(f: Failures, t1: pathlib.Path) -> None:
     mathlib = t1 / ".lake" / "packages" / "mathlib" / "Mathlib"
     if not mathlib.is_dir():
@@ -488,6 +602,11 @@ def end_to_end_test(f: Failures, t1: pathlib.Path, t2: pathlib.Path) -> None:
     """Run the harness on one small module and assert the report's structure."""
     with tempfile.TemporaryDirectory(prefix="pipeline-check-") as tmp:
         out = pathlib.Path(tmp)
+        shared = t1 / "test" / "SimpTrace" / "meas_out"
+        shared_before = {
+            path.relative_to(shared): path.read_bytes()
+            for path in shared.glob("*") if path.is_file()
+        }
         code = P.main([
             "--module", "Mathlib/Logic/Nontrivial/Defs.lean",
             "--t1", str(t1), "--t2", str(t2), "--out", str(out),
@@ -556,6 +675,11 @@ def end_to_end_test(f: Failures, t1: pathlib.Path, t2: pathlib.Path) -> None:
         # The driven worktrees stayed clean of anything this harness did.
         f.equal("e2e/t1_unchanged", report["t1_dirty_after"], report["t1_dirty"])
         f.equal("e2e/t2_unchanged", report["t2_dirty_after"], report["t2_dirty"])
+        shared_after = {
+            path.relative_to(shared): path.read_bytes()
+            for path in shared.glob("*") if path.is_file()
+        }
+        f.equal("e2e/shared_t1_outputs_unchanged", shared_after, shared_before)
 
         summary = summary_path.read_text(encoding="utf-8")
         f.check("e2e/summary_has_totals", "**total**" in summary,
@@ -577,6 +701,7 @@ def main() -> int:
     invocation_tests(f)
     mapping_tests(f)
     identity_tests(f)
+    lifecycle_tests(f)
     site_count_tests(f, t1)
     end_to_end_test(f, t1, t2)
 
