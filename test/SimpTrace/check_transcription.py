@@ -19,11 +19,10 @@ from __future__ import annotations
 
 import pathlib
 import json
-import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from trace_identity import find_sites, manifest  # noqa: E402
+from trace_identity import find_sites, manifest, trace_clause_ordinals  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MATHLIB = ROOT / ".lake" / "packages" / "mathlib" / "Mathlib"
@@ -54,10 +53,9 @@ def main() -> int:
         traced_text = traced_path.read_text(encoding="utf-8")
         traced_stem = traced_path.stem
         manifest_path = traced_path.with_suffix(".manifest.json")
-        clause_re = re.compile(
-            rf"=>trace \"test/SimpTrace/meas_out/{re.escape(traced_stem)}_([0-9]+)\.json\""
-        )
-        clause_sites = [int(m.group(1)) - 1 for m in clause_re.finditer(traced_text)]
+        # Ignore textual lookalikes in comments; only a parser-visible clause
+        # is evidence that the site was converted.
+        clause_sites = trace_clause_ordinals(traced_text, traced_stem)
         converted = len(clause_sites)
         remaining = len(find_sites(traced_text))
         print(

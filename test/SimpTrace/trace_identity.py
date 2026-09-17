@@ -97,8 +97,39 @@ def _mask_comments(source: str) -> str:
 
 
 def call_end(rest: str) -> int:
-    depth = 0
-    for i, ch in enumerate(rest):
+    depth, block_comment, quoted = 0, 0, False
+    i = 0
+    while i < len(rest):
+        ch = rest[i]
+        if block_comment:
+            if rest[i:i + 2] == "/-":
+                block_comment += 1
+                i += 2
+            elif rest[i:i + 2] == "-/":
+                block_comment -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if quoted:
+            if ch == "\\":
+                i += 2
+            else:
+                quoted = ch != '"'
+                i += 1
+            continue
+        if ch == '"':
+            quoted = True
+            i += 1
+            continue
+        if rest[i:i + 2] == "--" and depth == 0:
+            return i
+        if rest[i:i + 2] == "/-":
+            if depth == 0:
+                return i
+            block_comment = 1
+            i += 2
+            continue
         if ch in "⟨([{":
             depth += 1
         elif ch in "⟩)]}":
@@ -109,7 +140,8 @@ def call_end(rest: str) -> int:
             return i
         elif rest[i:i + 3] == "<;>" and depth == 0:
             return i
-    return len(rest)
+        i += 1
+    return i
 
 
 def find_sites(source: str) -> list[Site]:
@@ -166,6 +198,15 @@ def transform(source: str, traced_name: str) -> str:
                         r"\1\npublic meta import ExplicitLean.SimpTrace",
                         traced, count=1, flags=re.M)
     return traced
+
+
+def trace_clause_ordinals(source: str, traced_name: str) -> list[int]:
+    """Return parser-visible generated clause ordinals, excluding comments."""
+    pattern = re.compile(
+        rf'=>trace "test/SimpTrace/meas_out/{re.escape(traced_name)}_([0-9]+)\.json"'
+    )
+    return [int(match.group(1)) - 1 for match in pattern.finditer(
+        _mask_comments(source))]
 
 
 def validate_invocations(records: list[dict[str, Any]]) -> None:

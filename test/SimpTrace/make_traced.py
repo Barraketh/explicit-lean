@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Generate an authenticated traced copy of a pinned Mathlib module.
+"""Generate a traced copy of a pinned Mathlib module.
 
 The source manifest is derived before instrumentation and written beside the
-generated copy. Generated-copy ranges are kept in a provenance sidecar for
-post-Lean finalization; consumers only use identity embedded in finalized
-``simp-trace-v2`` records.
+generated copy. Finalization adds the diagnostic generated occurrence and
+invocation ordinals to each ``simp-trace-v2`` record.
 
     python3 -B test/SimpTrace/make_traced.py Logic/Basic.lean LogicBasicTraced
 """
@@ -15,7 +14,7 @@ import json
 import pathlib
 import sys
 
-from trace_identity import find_sites, manifest, transform
+from trace_identity import find_sites, manifest, trace_clause_ordinals, transform
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MATHLIB = ROOT / ".lake" / "packages" / "mathlib" / "Mathlib"
@@ -31,7 +30,8 @@ def main() -> int:
     source = source_path.read_text(encoding="utf-8")
     sites = find_sites(source)
     text = transform(source, name)
-    if text.count('=>trace "test/SimpTrace/meas_out/') != len(sites):
+    clause_sites = trace_clause_ordinals(text, name)
+    if sorted(clause_sites) != list(range(len(sites))):
         raise SystemExit(f"conversion mismatch: manifest={len(sites)} generated trace clauses differ")
     manifest_value = manifest("Mathlib/" + source_rel.replace("\\", "/"), source, sites)
     (OUT / f"{name}.lean").write_text(text, encoding="utf-8")
