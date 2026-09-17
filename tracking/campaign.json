@@ -1,17 +1,17 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "t1_round_10_fix_running_t4_final_full_gate_pending_t5_preflight_running",
+  "phase": "simplified_v2_mapping_running_translated_tree_acceptance_pending",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-17T18:24:30Z",
+  "updatedAt": "2026-09-17T18:57:13Z",
   "resumeStatus": {
-    "review": "T2_merged_and_integration_checked; T1_review_10_major_fix_running; T4_review_3_incremental_clean_final_full_gate_pending; T5_preflight_running",
+    "review": "T2_merged_and_integration_checked; T1_simplified_v2_mapping_running; T4_simplified_v2_mapping_running; T5_cone_pending; T10_cancelled",
     "t2": "merged_to_main_5ec2da5_and_integration_checked",
-    "t1": "review_10_major_nested_side_verdict_serialization_defect_fix_running; review_11_required",
-    "t4": "review_3_incremental_scope_clean_at_7db88a8; final_full_merge_gate_pending_after_T1_stability",
-    "t5": "cone_preflight_running_corrected_six_module_denominator_Data.Option.Basic_inventory_and_translated_import_order",
+    "t1": "simplified_v2_mapping_implementation_running; module_char_ranges_call_text_ordinals_complete_invocations; no_hashes_nonces",
+    "t4": "simplified_v2_mapping_bijection_running_before_render; source_preserving_replacement_gate_pending",
+    "t5": "seven_module_cone_pending_after_T1_T4_mapping_gate",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
@@ -108,11 +108,14 @@
   },
   "direction": {
     "userConversationDate": "2026-09-16",
-    "nextMilestone": "Finish the bounded T1 round-10 nested-side verdict fix and review 11; then run T4's final full merge gate (including the six-module harness once T1 is clean/stable), followed by the T5 seven-module cone.",
-    "activeState": "T2 is merged and integration-checked. T1 review 10 found a major nested-side verdict serialization gap and its bounded fix is running. T4 review 3 is clean for its incremental marker-fix scope, but final full-gate review remains required. T5 cone preflight is running.",
+    "nextMilestone": "Finish the simplified v2 mapping implementations in T1 and T4, review their complete source-site/invocation bijection, then run the six-module gate and the T5 seven-module translated dependency tree.",
+    "activeState": "The trusted-environment contract is intentionally narrow: T1 emits module, original character range, exact call text, site ordinal and complete invocation ordinals; T4 verifies the bijection before rendering. T1 and T4 simplified implementations are running. T2 is merged and integration-checked; T5 is pending the mapping gate.",
     "designDecisions": {
       "T6": "Complete: after T4 final gate, use deterministic structural bullet expansion keyed by complete invocation ordinals; refuse unsafe non-tail continuations; do not use first-dispatch or goal fingerprints.",
-      "T7": "Complete: after T4 final gate, add the existing declaration oracle in source-pair mode with a stock companion carrying the same ExplicitRw import; replayed requires compile plus oracle success."
+      "T7": "Optional diagnostic only: the existing source-pair declaration oracle may be used for focused semantic debugging, but it is not an acceptance gate and does not require per-site hashes.",
+      "T9": "Simplified v2 mapping: retain module path, original character range, exact call text, site ordinal and complete invocation ordinals; the environment is trusted, so hashes, nonces, byte authentication and forgery tests are out of scope.",
+      "T10": "Cancelled: no neutral cryptographic conformance lane; missing/extra/duplicate/range/invocation fixtures belong in the T1/T4 implementation tests.",
+      "acceptance": "Ultimate acceptance is source-preserving replacement of the pinned Mathlib simp family plus successful compilation of the translated dependency tree and then the full Mathlib tree. Whole-tree acceptance remains zero until those checks pass."
     },
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
@@ -251,14 +254,14 @@
   },
   "blockers": [
     {
-      "id": "t1-round-10-nested-side-verdicts",
-      "status": "open_major_fix_in_progress",
-      "detail": "Review 10 found that validator reasons from nested side/congr steps are logged but not serialized on the exact nested Step, allowing known-bad replay. The bounded fix must propagate structured verdicts recursively, add fail-closed JSON regressions, rerun the end-to-end replay, and pass review 11 before T1 merge."
+      "id": "t1-simplified-v2-mapping",
+      "status": "open_implementation_in_progress",
+      "detail": "T1 is implementing the trusted-environment v2 mapping contract: module path, original character range, exact call text, source ordinal and complete invocation ordinals. Hashes, nonces, byte authentication and a neutral forgery suite are intentionally out of scope. The complete mapping and focused regressions must pass before T1 merge."
     },
     {
-      "id": "t4-final-full-merge-gate",
-      "status": "pending_t1_stability",
-      "detail": "T4 review 3 is clean for the changed marker-fix scope at 7db88a8, but the protocol still requires a final full review gate and six-module harness run against a clean, stable T1."
+      "id": "t4-simplified-v2-mapping",
+      "status": "open_implementation_in_progress",
+      "detail": "T4 is implementing the trusted-environment v2 mapping check and must reject incomplete or ambiguous site/invocation mappings before rendering. After T1 is stable, run the final six-module gate and review source-preserving output."
     },
     {
       "id": "bounded-run-policy",
@@ -293,7 +296,7 @@
     {
       "id": "translated-tree-acceptance",
       "status": "open",
-      "detail": "Full translated dependency tree, complete remaining-call audit and final semantic/trust checks have not passed."
+      "detail": "Ultimate acceptance remains open: every pinned Mathlib simp-family call must be source-preservingly replaced, the translated dependency tree must compile, and full Mathlib compilation plus the remaining-call audit must pass. No acceptance credit is recorded."
     }
   ],
   "scopeQuestion": {
@@ -303,10 +306,11 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Complete T1's bounded round-10 fix for recursive side/congr verdict serialization, rerun its focused checks and T4 end-to-end replay, then dispatch review 11; merge only with no critical or major defects.",
-    "After T1 is clean and stable, run T4's final full merge-gate review and six-module harness; retain the corrected denominator and attribute failures conservatively.",
-    "After the T4 final gate, implement T6's deterministic structural multi-invocation rendering, then T7's source-pair declaration-oracle adapter; do not start either before the gate.",
-    "Continue the running T5 preflight: reconcile the six-module denominator with the 91-call cone, inventory Data.Option.Basic, and specify translated-import-root build order; then run the seven-module cone only after T4 is accepted.",
+    "Complete T1's simplified v2 mapping implementation and focused regressions: module path, original character range, exact call text, site ordinal and complete invocation ordinals; do not add hashes, nonces or forgery machinery.",
+    "Complete T4's matching simplified v2 bijection check before rendering, then run the final six-module source-preserving replacement gate against the stable T1 output.",
+    "Run the T5 seven-module cone with the translated dependency-root order, then extend the same source-preserving replacement and compilation workflow to the full pinned Mathlib tree.",
+    "Use T7's declaration oracle only as an optional focused diagnostic; do not make it, per-site hashes, or a neutral T10 forgery suite acceptance prerequisites.",
+    "Record unresolved calls visibly and preserve original calls as adjacent comments; acceptance requires source preservation, translated dependency-tree compilation, full Mathlib compilation and zero remaining executable simp-family calls.",
     "Do not provision AWS or any other host without new user authorization; preserve the closed pilot evidence and immutable deadline/authorization records."
   ],
   "work": [
@@ -352,8 +356,8 @@
     },
     {
       "id": "translated-isempty-option-cone-2026-09-16",
-      "status": "blocked_pending_user_style_decision",
-      "description": "69 modules, 91 calls in seven targets. All seven targets individually passed (90 replayed + one explicit); latest full cold run certified 42 modules before ExistsUnique failed strict metadata comparison due to generated line-length warnings. Formatter committed 2a1d30c with focused Python and Linux syntax/value checks. Bounded EOF file-length allowance decision pending. Whole-tree acceptance unchanged at zero. Stop and hand off after this cone compiles and certifies together."
+      "status": "pending_simplified_v2_mapping_and_source_preserving_cone",
+      "description": "The seven-module cone remains 69 modules and 91 calls. Historical encoded-artifact cold receipts and formatter work are closed as moot. Run the simplified v2 mapping gate, preserve original source calls as comments, and compile the translated dependency tree; whole-tree acceptance remains zero."
     },
     {
       "id": "override-compliance-dsimp",
@@ -367,8 +371,8 @@
     },
     {
       "id": "T1-trace-capture",
-      "status": "in_review",
-      "description": "Forked simp traversal recorder (`simp_trace ... =>trace`), 9 review rounds; branch task/T1-trace-capture; zero goal-state divergence from stock simp; six-module corpus traces with classified unresolved outcomes."
+      "status": "running_simplified_v2_mapping",
+      "description": "T1's recorder is running the trusted-environment v2 mapping implementation: module path, original character range, exact call text, site ordinal and complete invocation ordinals. Hashes, nonces and neutral forgery validation are out of scope; original replay/trace evidence remains historical until the mapping gate passes."
     },
     {
       "id": "T2-explicit-rw",
@@ -382,8 +386,13 @@
     },
     {
       "id": "T4-pipeline",
-      "status": "in_review",
-      "description": "End-to-end harness: transcribe, trace, render, splice, compile, per-site attributed report; branch task/T4-pipeline; first run 45/82 replayed."
+      "status": "running_simplified_v2_mapping",
+      "description": "T4's pipeline is running the trusted-environment v2 mapping check before rendering, then source-preserving replacement and compilation. It must consume the complete T1 site/invocation mapping; hashes, nonces and T10's neutral forgery suite are not required."
+    },
+    {
+      "id": "T10-trace-identity-conformance",
+      "status": "cancelled",
+      "description": "Cancelled by the trusted-environment clarification. No neutral cryptographic vector, hash/nonce authentication or standalone forgery suite is needed; ordinary missing/extra/duplicate/range/invocation regressions belong in T1 and T4."
     }
   ],
   "activeChecks": [
