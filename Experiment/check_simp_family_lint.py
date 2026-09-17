@@ -154,6 +154,68 @@ class NegativeChecks(unittest.TestCase):
         self.assertFalse(lint.has_simp_family("@[simp]\ntheorem t : True := trivial"))
         self.assertFalse(lint.has_simp_family("@[simp, norm_cast]\ntheorem t := trivial"))
 
+    def test_bracket_attribute_forms_are_not_tactic_calls(self) -> None:
+        for snippet in (
+            "@[simp]",
+            "@[simp, norm_cast]",
+            "@[local simp]",
+            "@[scoped simp]",
+            "@[simps]",
+            "@[simps!]",
+            "@[-simp]",
+            "@[simp] theorem t : True := trivial",
+            "@[to_additive, simp] theorem t : True := trivial",
+            "@[simps apply_coe, simp] def f := 1",
+        ):
+            with self.subTest(snippet=snippet):
+                self.assertFalse(
+                    lint.has_simp_family(snippet),
+                    f"{snippet!r} is attribute syntax, not a tactic call",
+                )
+
+    def test_attribute_command_forms_are_not_tactic_calls(self) -> None:
+        # `attribute [...simp...]` occurs in hundreds of pinned Mathlib files;
+        # generated files must keep those declarations verbatim.
+        for snippet in (
+            "attribute [simp] Foo.bar",
+            "attribute [simp] upperPolar_extent lowerPolar_intent",
+            "attribute [local simp] foo",
+            "attribute [scoped simp] foo",
+            "attribute [-simp] foo",
+            "attribute [simp, norm_cast] foo bar",
+            "  attribute [simp] a b c",
+            "attribute [dsimp] foo",
+            "attribute [push_cast] foo",
+        ):
+            with self.subTest(snippet=snippet):
+                self.assertFalse(
+                    lint.has_simp_family(snippet),
+                    f"{snippet!r} is an attribute command, not a tactic call",
+                )
+
+    def test_attr_assignment_form_is_not_a_tactic_call(self) -> None:
+        for snippet in (
+            "@[to_additive (attr := simp)] theorem t : a = a := rfl",
+            "@[to_additive (attr := simp, norm_cast)] def f := 1",
+            "@[simps (attr := simp)] def g := 2",
+        ):
+            with self.subTest(snippet=snippet):
+                self.assertFalse(
+                    lint.has_simp_family(snippet),
+                    f"{snippet!r} is attribute configuration, not a tactic call",
+                )
+
+    def test_attribute_as_an_ordinary_word_does_not_shield_a_tactic(self) -> None:
+        # Only a command-position `attribute` opens an attribute list; the word
+        # appearing mid-expression must not suppress a real finding.
+        self.assertTrue(lint.has_simp_family("exact foo attribute [simp]"))
+
+    def test_attribute_line_does_not_shield_a_later_tactic(self) -> None:
+        source = "attribute [simp] foo\n\nexample : True := by\n  simp\n"
+        results = lint.findings(source)
+        self.assertEqual([item.token for item in results], ["simp"])
+        self.assertEqual(results[0].line, 4)
+
 
 class CommentChecks(unittest.TestCase):
     """Comments, including the retained originals, are ignored."""
@@ -250,6 +312,94 @@ class ApiChecks(unittest.TestCase):
             dirty.write_text("theorem t : True := by simp\n", encoding="utf-8")
             self.assertEqual(lint.main([str(clean), "--quiet"]), 0)
             self.assertEqual(lint.main([str(dirty), "--quiet"]), 1)
+
+
+class WholeFileChecks(unittest.TestCase):
+    """Whole-file runs, including the reviewer's round-1 reproduction."""
+
+    #: Pinned Mathlib module whose line 277 is `attribute [simp] ...`.  Round 1
+    #: flagged that line; it must never be reported again.
+    REPRODUCTION = (
+        HERE.parents[0]
+        / ".lake"
+        / "packages"
+        / "mathlib"
+        / "Mathlib"
+        / "Order"
+        / "Concept.lean"
+    )
+
+    def test_reproduction_file_reports_no_attribute_finding(self) -> None:
+        if not self.REPRODUCTION.exists():
+            self.skipTest("pinned Mathlib checkout is not available")
+        text = self.REPRODUCTION.read_text(encoding="utf-8")
+        results = lint.findings(text)
+        # The file genuinely contains simp *tactic* calls, so a zero-findings
+        # assertion would be wrong.  What round 1 requires is that no finding
+        # comes from the `attribute [simp]` declaration on line 277.
+        attribute_lines = [
+            number
+            for number, line in enumerate(text.splitlines(), start=1)
+            if line.lstrip().startswith("attribute [")
+        ]
+        self.assertEqual(attribute_lines, [277])
+        self.assertNotIn(
+            277,
+            [item.line for item in results],
+            "the `attribute [simp]` declaration must not be flagged",
+        )
+        for item in results:
+            with self.subTest(line=item.line):
+                self.assertFalse(
+                    text.splitlines()[item.line - 1].lstrip().startswith("attribute ["),
+                    "no finding may come from an attribute declaration",
+                )
+
+    def test_handwritten_file_reports_exactly_the_one_real_call(self) -> None:
+        source = """\
+/-- Doc comment mentioning simp only [foo]. -/
+@[simp]
+theorem a : True := trivial
+
+@[simp, norm_cast]
+theorem b : True := trivial
+
+@[local simp]
+theorem c : True := trivial
+
+@[simps]
+def d := 1
+
+@[to_additive (attr := simp)]
+theorem e : True := trivial
+
+attribute [simp] a b
+attribute [local simp] c
+attribute [scoped simp] c
+attribute [-simp] a
+
+-- A retained original: simp [foo]
+/- block comment with dsimp only [bar] -/
+def message : String := "simp only [baz]"
+
+example : True := by
+  simp
+"""
+        results = lint.findings(source)
+        self.assertEqual(
+            [(item.token, item.line) for item in results],
+            [("simp", 27)],
+            f"expected exactly one finding, got {lint.format_findings(results)}",
+        )
+
+    def test_handwritten_file_via_the_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "Attributes.lean"
+            path.write_text(
+                "attribute [simp] foo\n@[simp, norm_cast]\ntheorem t : True := trivial\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(lint.main([str(path), "--quiet"]), 0)
 
 
 class DatabaseChecks(unittest.TestCase):

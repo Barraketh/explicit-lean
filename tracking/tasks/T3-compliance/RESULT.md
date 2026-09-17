@@ -1,60 +1,58 @@
 # T3-compliance result
 
-Status: complete. Branch `task/T3-compliance`. Both pinned files matched their
-recorded `moduleSourceSha256` before any work.
+Status: complete, round 1 defects fixed. Branch `task/T3-compliance`.
 
-## Part A: the two `dsimp` overrides
+## Parts A and B (verified clean in round 1; shas matched before any work)
 
-- `Mathlib/Algebra/Algebra/Subalgebra/Unitization.lean`, `1734864b48394331`:
-  `dsimp [starAlgHom]` unfolded the let-bound local, turning
-  `((StarAlgebra.adjoin R ↑s).subtype.comp starAlgHom) ↑x = ↑x` into
-  `(algebraMap R A) 0 + ↑x = ↑x`. New replacement:
-  `show (algebraMap R A) 0 + _ = _` / `rw [map_zero]` / `exact zero_add _` --
-  the `show` gets there definitionally; `rw [map_zero, zero_add]` in one step
-  fails because `zero_add` also fires on the RHS.
-- `Mathlib/Algebra/Category/Grp/EpiMono.lean`, `3251bc59333b0c31`: replaced by
-  `rw [Equiv.coe_trans, Equiv.coe_trans, Function.comp_apply,
-  Function.comp_apply]` / `unfold tau`, which reaches exactly the goal the
-  original `dsimp only [...]` produced (verified with `trace_state` both ways).
+- `Unitization.lean`, `1734864b48394331`: `dsimp [starAlgHom]` unfolded a
+  let-bound local to `(algebraMap R A) 0 + ↑x = ↑x`. Replaced by
+  `show (algebraMap R A) 0 + _ = _` / `rw [map_zero]` / `exact zero_add _`; a
+  one-step `rw [map_zero, zero_add]` fails (`zero_add` also fires on the RHS).
+- `EpiMono.lean`, `3251bc59333b0c31`: replaced by `rw [Equiv.coe_trans,
+  Equiv.coe_trans, Function.comp_apply, Function.comp_apply]` / `unfold tau`.
 
-No `erw` and no simp-family tactic. `source`, byte ranges, occurrence ids,
-digests and the JSON schema are unchanged; no other entry was touched.
-`test/Compliance/splice.py` regenerates all four whole-file Lean copies from
-the pinned sources, re-checking the sha and byte range each time.
+No `erw`, no simp-family tactic; `source`, byte ranges, ids, digests and the
+schema unchanged. `splice.py` regenerates all four whole-file copies, checking
+the sha and byte range. The JSON loader is
+**`simp_manual_overrides.load_database`**, not `manual_overlay.py`, which
+delegates to it, so the one call added there covers both.
 
-## Part B: the lint
+## Round 1 fixes (both real; both fixed and pinned by tests)
 
-- `Experiment/simp_family_lint.py` exports `findings`, `has_simp_family`,
-  `assert_clean`, `format_findings`, and a CLI (`--quiet`; exit 1 on a
-  finding). It masks nested block comments, line comments (including retained
-  `-- Original simp:` lines) and string/char/raw/interpolated literals, then
-  tokenises, growing each candidate to a full dotted identifier (so `simple`,
-  `Simp.Result` and `simp_lemma_name` miss) and skipping `@[...]` lists.
-- Loader wiring: the function that reads the JSON is
-  **`simp_manual_overrides.load_database`**, not `manual_overlay.py`, which
-  delegates to it on every path -- so the one call added there covers both and
-  `manual_overlay.py` is unmodified. The pre-existing `BANNED_SEARCH_PATTERN`
-  omits `dsimp`/`push_cast`/`norm_cast`; it was left in place and the lint runs
-  alongside it.
+- **Defect 1 (attribute false positives).** `_in_attribute_list` recognised
+  only `@[...]`. It now also recognises the `attribute [...]` command (required
+  to be in command position, so `exact foo attribute [simp]` is still flagged)
+  and `(attr := simp)`, and tolerates the `-` of `[-simp]`. Clean on
+  `attribute [simp|local simp|scoped simp|-simp] foo`, `(attr := simp)`,
+  `@[simp]`, `@[simp, norm_cast]`, `@[local simp]`, `@[simps]`.
+- **Defect 2 (untested).** `check_simp_family_lint.py` grew 8 tests (30 -> 38):
+  one per attribute form above, plus the two whole-file runs.
 
-## Checks (all run in the worktree)
+Extra verification: swept **all 1385** pinned Mathlib files containing
+`attribute [` -- **0** attribute-derived findings; a differential run of old vs
+new lint over 300 random files shows only attribute-line findings disappeared
+and no new ones appeared, so no false negative.
+
+**One correction to the brief:** the run over `Mathlib/Order/Concept.lean`
+**cannot** report zero findings -- it has 13 genuine simp tactic calls; the
+reviewer cited it only as the reproduction for the `attribute [simp]` on line
+277. The test asserts the right property instead: line 277 is not reported and
+no finding comes from any attribute line. The hand-written test asserts
+exactly one finding, as asked.
+
+## Checks (all re-run in the worktree after the fix)
 
 | Check | Result |
 | --- | --- |
-| `lake env lean` on all 4 `test/Compliance/*.lean` (2 controls, 2 spliced) | PASS, 4-5s each, peak RSS < 1 GB |
-| Overlay-rendered modules (with `-- Original simp:` blocks) compiled | PASS |
-| `python3 -B Experiment/check_simp_family_lint.py` | PASS, 30 tests |
-| `python3 -B Experiment/check_manual_overlay.py` | PASS, 6 tests |
-| `python3 -B Experiment/check_simp_manual_overrides.py` | PASS |
+| `lake env lean` on all 4 `test/Compliance/*.lean` | PASS, 4-5s, RSS < 1 GB |
+| Overlay-rendered modules (with `-- Original simp:`) | PASS |
+| `check_simp_family_lint.py` / `check_manual_overlay.py` | PASS, 38 / 6 tests |
+| `check_simp_manual_overrides.py`; `splice.py` regen | PASS; byte-identical |
 | Lint over all 21 replacements | 21 entries, **0 findings** |
 
-## Known limitations / open questions
+## Known limitations (pre-existing, not introduced by T3)
 
-- `Experiment/check_simp_manual_composition.py` reports "generated renderer
-  continuation indentation leaves no line budget". **Pre-existing, not mine**:
-  it fails identically on the untouched main checkout at `6eaed50`, from
-  `_format_generated_line` in `check_simp_engine_boundary_source.py`, which I
-  do not own. Flagged for the coordinator, not fixed here.
-- The lint treats `@[simp]` / `@[simps]` as declaration attributes, not
-  findings, matching the rule's scope (executable code). Barring overrides from
-  *adding* simp attributes would be a separate rule.
+`check_simp_manual_composition.py` fails with "generated renderer continuation
+indentation leaves no line budget" -- identical on the untouched main checkout
+at `6eaed50`, from `_format_generated_line` in
+`check_simp_engine_boundary_source.py`, which T3 does not own.

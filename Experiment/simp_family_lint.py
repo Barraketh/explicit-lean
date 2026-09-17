@@ -75,6 +75,9 @@ ATTRIBUTE_ONLY_TOKENS: frozenset[str] = frozenset({"simps", "simps!", "simps?"})
 _IDENT_BODY = re.compile(r"[A-Za-z0-9_'À-ɏΑ-ω!?]")
 _IDENT_START = re.compile(r"[A-Za-z_À-ɏΑ-ω]")
 
+# The `(attr := ...)` configuration used by `@[to_additive (attr := simp)]`.
+_ATTR_ASSIGN = re.compile(r"\(\s*attr\s*:=")
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -206,12 +209,43 @@ def _tokens(masked: str) -> Iterable[tuple[str, int]]:
 
 
 def _in_attribute_list(masked: str, offset: int) -> bool:
-    """True when ``offset`` sits inside an ``@[...]`` attribute list.
+    """True when ``offset`` sits inside an attribute list.
 
-    Scans backwards from the token, tracking bracket depth so that a nested
-    argument list such as ``@[simps apply_coe, simp]`` is handled, and stops at
-    any character that cannot appear in an attribute list.
+    Generated Mathlib files keep their original attributes, which are
+    declaration syntax rather than tactic calls.  The forms recognised here
+    are the ones that actually occur in pinned Mathlib:
+
+    * ``@[simp]``, ``@[simp, norm_cast]``, ``@[local simp]``, ``@[simps]``
+    * ``attribute [simp] foo``, ``attribute [local simp] foo``,
+      ``attribute [scoped simp] foo`` and ``attribute [-simp] foo`` -- the
+      last one *removes* the attribute, so flagging it would be doubly wrong
+    * ``(attr := simp)``, as used by ``@[to_additive (attr := simp)]``
+
+    The scan walks backwards from the token over the rest of the list,
+    tracking bracket depth so nested argument lists such as
+    ``@[simps apply_coe, simp]`` are handled, and stops at any character that
+    cannot appear in one.
     """
+
+    # `(attr := simp)` and `(attr := simp, norm_cast)`: look back for the
+    # `attr :=` marker inside the enclosing parentheses.
+    depth = 0
+    probe = offset - 1
+    while probe >= 0:
+        char = masked[probe]
+        if char == ")":
+            depth += 1
+        elif char == "(":
+            if depth == 0:
+                if _ATTR_ASSIGN.match(masked, probe):
+                    return True
+                break
+            depth -= 1
+        elif char in " \t\n,:=" or _IDENT_BODY.match(char) or char == ".":
+            pass
+        else:
+            break
+        probe -= 1
 
     depth = 0
     probe = offset - 1
@@ -221,16 +255,43 @@ def _in_attribute_list(masked: str, offset: int) -> bool:
             depth += 1
         elif char == "[":
             if depth == 0:
-                return probe >= 1 and masked[probe - 1] == "@"
+                return _opens_attribute_list(masked, probe)
             depth -= 1
-        elif char in " \t\n,":
-            pass
-        elif _IDENT_BODY.match(char) or char == ".":
+        elif char in " \t\n,-" or _IDENT_BODY.match(char) or char == ".":
+            # `-` carries the `@[-simp]` / `attribute [-simp]` removal form.
             pass
         else:
             return False
         probe -= 1
     return False
+
+
+def _opens_attribute_list(masked: str, bracket: int) -> bool:
+    """True when the ``[`` at ``bracket`` opens an attribute list.
+
+    That is either ``@[`` directly, or a ``[`` preceded by the ``attribute``
+    command keyword (with optional modifiers already consumed by the caller).
+    """
+
+    probe = bracket - 1
+    if probe >= 0 and masked[probe] == "@":
+        return True
+    while probe >= 0 and masked[probe] in " \t\n":
+        probe -= 1
+    if probe < 0:
+        return False
+    stop = probe + 1
+    while probe >= 0 and _IDENT_BODY.match(masked[probe]):
+        probe -= 1
+    word = masked[probe + 1 : stop]
+    if word != "attribute":
+        return False
+    # `attribute` must be a command head, i.e. start a line rather than sit in
+    # the middle of an expression such as `foo attribute [x]`.
+    scan = probe
+    while scan >= 0 and masked[scan] in " \t":
+        scan -= 1
+    return scan < 0 or masked[scan] == "\n"
 
 
 def _line_column(source: str, offset: int) -> tuple[int, int]:
