@@ -12,21 +12,31 @@
           "kind": "rw",
           "pos": [
             0,
+            1,
+            0,
             1
           ],
-          "name": "a✝",
+          "name": "h",
           "dir": "fwd",
           "local": {
-            "userName": "a._@._internal.0.test.SimpTrace.Fixtures.2021293446._hygCtx._hyg.14",
-            "inaccessible": true,
-            "ctxIndex": 2
-          },
-          "prop": "true"
+            "userName": "h",
+            "inaccessible": false,
+            "ctxIndex": 4
+          }
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "add_zero",
+          "dir": "fwd"
         },
         {
           "kind": "rw",
           "pos": [],
-          "name": "and_self",
+          "name": "eq_self",
           "dir": "fwd"
         }
       ]

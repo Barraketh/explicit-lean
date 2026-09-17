@@ -14,12 +14,12 @@
             0,
             1
           ],
-          "name": "a✝",
+          "name": "hp",
           "dir": "fwd",
           "local": {
-            "userName": "a._@._internal.0.test.SimpTrace.Fixtures.2021293446._hygCtx._hyg.14",
-            "inaccessible": true,
-            "ctxIndex": 2
+            "userName": "hp",
+            "inaccessible": false,
+            "ctxIndex": 3
           },
           "prop": "true"
         },

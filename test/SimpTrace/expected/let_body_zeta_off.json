@@ -13,20 +13,23 @@
           "pos": [
             0,
             1
-          ]
+          ],
+          "to": "have x : Nat := a;\nf\n  (@HAdd.hAdd.{0, 0, 0} Nat Nat Nat (@instHAdd.{0} Nat instAddNat) x\n    (@OfNat.ofNat.{0} Nat (nat_lit 0) (instOfNatNat (nat_lit 0))))"
         },
         {
           "kind": "change",
           "pos": [
             0,
             1
-          ]
+          ],
+          "to": "have x : Nat := a;\nf x"
         },
         {
           "kind": "change",
           "pos": [
             1
-          ]
+          ],
+          "to": "have x : Nat := a;\nf x"
         },
         {
           "kind": "rw",

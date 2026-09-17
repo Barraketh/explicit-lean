@@ -16,13 +16,24 @@
             0,
             1
           ],
-          "name": "a✝",
+          "name": "h",
           "dir": "fwd",
           "local": {
-            "userName": "a._@._internal.0.test.SimpTrace.Fixtures.2021293439._hygCtx._hyg.21",
-            "inaccessible": true,
-            "ctxIndex": 3
-          }
+            "userName": "h",
+            "inaccessible": false,
+            "ctxIndex": 6
+          },
+          "side": [
+            {
+              "goal": "P a",
+              "pre": "P a",
+              "post": null,
+              "close": {
+                "by": "assumption:hp"
+              },
+              "steps": []
+            }
+          ]
         },
         {
           "kind": "rw",

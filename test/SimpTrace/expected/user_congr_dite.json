@@ -51,6 +51,11 @@
                   "pos": [],
                   "name": "hf",
                   "dir": "fwd",
+                  "local": {
+                    "userName": "hf",
+                    "inaccessible": false,
+                    "ctxIndex": 10
+                  },
                   "side": [
                     {
                       "goal": "q",
@@ -79,13 +84,18 @@
                   "pos": [],
                   "name": "hg",
                   "dir": "fwd",
+                  "local": {
+                    "userName": "hg",
+                    "inaccessible": false,
+                    "ctxIndex": 11
+                  },
                   "side": [
                     {
                       "goal": "¬q",
                       "pre": "¬q",
                       "post": null,
                       "close": {
-                        "by": "rfl"
+                        "by": "unresolved:discharged by rewriting to True, steps not recorded"
                       },
                       "steps": []
                     }

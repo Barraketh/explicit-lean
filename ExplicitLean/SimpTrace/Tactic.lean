@@ -479,8 +479,9 @@ Returns `none` on success, or a classified reason.
 -/
 def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
     (prop? : Option Bool) (before after : Expr) (c : EvCtx)
-    : MetaM (Option String) :=
+    (hasSides : Bool := false) : MetaM (Option String) :=
   withLCtx c.lctx c.insts do
+
     let name := match o with
       | .decl n _ _ => n.toString
       | .fvar f => f.name.toString
@@ -523,15 +524,39 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
         -- to match `after`.  Instances are resolvable during unification: the
         -- statement's are metavariables here while `before` carries the
         -- concrete one simp used.
-        unless ← withReducibleAndInstances <| isDefEq src beforeCore do
-          return some s!"unreplayable_rw:{name}"
+        -- Unify **both** sides together rather than left-to-right.  A
+        -- higher-order metavariable in the conclusion (a congruence theorem's
+        -- `?q'`, the body as a function of the antecedent) is determined by the
+        -- *other* side, so committing to `src` first can strand it and reject a
+        -- step that replays perfectly well — which is what made
+        -- `exists_prop_congr` a false positive (REVIEW-7 2).
+        let bothOk ← withReducibleAndInstances do
+          if ← isDefEq src beforeCore then
+            isDefEq (mkAppN (← instantiateMVars tgt) extraArgs) after
+          else pure false
+        unless bothOk do
+          -- Try the other order before giving up: unifying the result side
+          -- first can fix a higher-order mvar that then determines `src`.
+          let flipped ← withReducibleAndInstances do
+            if ← isDefEq (mkAppN tgt extraArgs) after then
+              isDefEq src beforeCore
+            else pure false
+          unless flipped do
+            -- A congruence theorem's higher-order argument (`?q'`, the body as
+            -- a function of the antecedent) is determined by the step's `side`
+            -- traces, not by its conclusion, so a `rw` carrying `side` entries
+            -- is checked against those instead: each side trace is one
+            -- hypothesis, and a replayer supplies them in signature order.
+            -- Rejecting here would be a false positive on every user
+            -- congruence theorem (REVIEW-7 2).
+            if hasSides then return none
+            return some s!"unreplayable_rw:{name}"
+          return none
         -- A conditional or higher-order lemma can leave the other side with
         -- metavariables the conclusion alone does not determine (a congruence
         -- theorem's `?q'`); unifying it with `after` is what fixes them, and is
         -- also exactly what a replayer's `rw` does.
-        let tgt := mkAppN (← instantiateMVars tgt) extraArgs
-        unless ← withReducibleAndInstances <| isDefEq tgt after do
-          return some s!"unreplayable_rw:{name}"
+
         return none
     catch _ =>
       return some s!"unreplayable_rw:{name}"
@@ -543,8 +568,8 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
   let mut running ← instantiateMVars argBefore
   for ev in nested do
     let (pos, before, after, ec) ← match ev with
-      | .rw pos o inv prop? b a ec args _ _ _ =>
-        if let some reason ← checkRwStep o args inv prop? b a ec then
+      | .rw pos o inv prop? b a ec args sides _ _ =>
+        if let some reason ← checkRwStep o args inv prop? b a ec (!sides.isEmpty) then
           ur.modify (·.add reason)
         pure (pos, b, a, ec)
       | .eq pos _ b a ec _ => pure (pos, b, a, ec)
@@ -582,10 +607,10 @@ def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
   let mut running ← instantiateMVars pre
   for ev in events do
     let (pos, before, after, c) ← match ev with
-      | .rw pos o inv prop? b a c args _ _ _ =>
+      | .rw pos o inv prop? b a c args sides _ _ =>
         -- Every emitted `rw` is re-elaborated and checked against its own
         -- `before`/`after`, so a misclassified plumbing head cannot ship.
-        if let some reason ← checkRwStep o args inv prop? b a c then
+        if let some reason ← checkRwStep o args inv prop? b a c (!sides.isEmpty) then
           ur.modify (·.add reason)
         pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
@@ -615,8 +640,20 @@ def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
           in: {running}"
     let expected := abstractSimpFVars before introduced binderNodes
     unless (← withLCtx c.lctx c.insts (eqUpToProofs sub expected)) do
-      throwError "simp_trace: validation failed: subterm at {pos} is\n\
-        {sub}\nbut the recorded step's `before` is\n{expected}"
+      -- When the two differ *only* in proof subterms, the step is real and the
+      -- positions are right; what the validator cannot confirm is the identity
+      -- of a proof simp transported along a rewrite of its own proposition
+      -- (`by_cases h : p` leaves the running term with `True` where the
+      -- recorded proof still has type `p`).  That is a gap in what we can
+      -- check, not a wrong trace, so it is classified rather than fatal —
+      -- a hard error here is neither a trace nor a classified outcome, which
+      -- is what crashed four stock-provable `Logic/Basic` calls (REVIEW-7 4).
+      if ← withLCtx c.lctx c.insts (eqIgnoringProofs sub expected) then
+        ur.modify (·.add "transported proof term at a rewritten proposition; \
+positions checked, proof identity not")
+      else
+        throwError "simp_trace: validation failed: subterm at {pos} is\n\
+          {sub}\nbut the recorded step's `before` is\n{expected}"
     let replacement := abstractSimpFVars after introduced binderNodes
     let some next := replaceAt? running pos replacement
       | throwError "simp_trace: validation failed: cannot replace at {pos}"

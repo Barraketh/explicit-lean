@@ -51,6 +51,11 @@
                   "pos": [],
                   "name": "hb",
                   "dir": "fwd",
+                  "local": {
+                    "userName": "hb",
+                    "inaccessible": false,
+                    "ctxIndex": 8
+                  },
                   "side": [
                     {
                       "goal": "q",

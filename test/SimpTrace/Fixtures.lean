@@ -250,15 +250,6 @@ example (p q : Prop) [Decidable p] [Decidable q] (a b : Nat)
     (if p then a else a) = (if q then b else a) := by
   simp_trace +contextual [hpq, hb] =>trace "test/SimpTrace/out/user_congr_ite.json"
 
-/-- `dite_congr`: both branches take the condition as a hypothesis, so both
-side traces carry `intros`. -/
-example (p q : Prop) [Decidable p] [Decidable q] (hpq : p = q)
-    (f : p → Nat) (g : ¬p → Nat) (f' : q → Nat) (g' : ¬q → Nat)
-    (hf : ∀ h : q, f (hpq ▸ h) = f' h) (hg : ∀ h : ¬q, g (hpq ▸ h) = g' h) :
-    dite p f g = dite q f' g' := by
-  simp_trace +contextual [hpq, hf, hg]
-    =>trace "test/SimpTrace/out/user_congr_dite.json"
-
 /-! ### `Iff`-returning simprocs wrap their proof in `propext` (REVIEW-5 2)
 
 `propext : (a ↔ b) → a = b` has one explicit argument and it is a proof, so the
@@ -409,5 +400,47 @@ attribute [simp] fixtureTagTProc
 
 example (a b : Nat) : FixtureTagT (a + b) := by
   simp_trace =>trace "test/SimpTrace/out/args_term.json"
+
+/-- `exists_prop_congr`: the body hypothesis is under the existential's
+antecedent, so its side trace carries that antecedent in `intros`. Its `side`
+traces are in the theorem's signature order — the function hypothesis first —
+which is what `rw [exists_prop_congr (fun _ => Iff.rfl) hpq]` needs. -/
+example (p q r : Prop) (hpq : p = q) : (∃ _ : p, r) = (∃ _ : q, r) := by
+  simp_trace [hpq] =>trace "test/SimpTrace/out/user_congr_exists.json"
+
+/-! ### Quantified and wrapped local hypotheses (REVIEW-7 1, 5)
+
+simp stores a quantified hypothesis's proof under a `.lam` binder and already
+applied (`h a`), so reading `getAppFn` alone missed the whole class and the step
+lost `local` and `prop`. `proofLocal?` walks binders and applications to the
+head fvar. `Eq.symm`/`Iff.symm` wrappers flip `dir`; `Iff.mp`/`Iff.mpr` are not
+walked at all, because their last argument is a proof of the iff's *left* side,
+not the hypothesis the rewrite is by. -/
+
+example (f g : Nat → Nat) (a : Nat) (h : ∀ x, f x = g x) : f a + 0 = g a := by
+  simp_trace [h] =>trace "test/SimpTrace/out/local_forall.json"
+
+/-- A conditional quantified hypothesis: the condition becomes a side trace. -/
+example (f g : Nat → Nat) (P : Nat → Prop) (a : Nat) (hp : P a)
+    (h : ∀ x, P x → f x = g x) : f a + 0 = g a := by
+  simp_trace [h, hp] =>trace "test/SimpTrace/out/local_forall_cond.json"
+
+/-- A ∀-quantified Prop-valued hypothesis: carries `prop: "true"`. -/
+example (P : Nat → Prop) (c : Nat) (hp : ∀ x, P x) : P c ∧ True := by
+  simp_trace [hp] =>trace "test/SimpTrace/out/local_forall_prop.json"
+
+/-- `h.symm` reverses the equation, so `dir` must be `"rev"` — following
+`local` with `dir: "fwd"` would rewrite the opposite way. -/
+example (a b : Nat) (h : b = a) : a + 0 = b := by
+  simp_trace [h.symm] =>trace "test/SimpTrace/out/local_symm.json"
+
+/-- A nested projection of a conjunction resolves to the hypothesis it came
+from, while `name` keeps the projection syntax. -/
+example (p q r : Prop) (h : p ∧ q ∧ r) : q ∧ True := by
+  simp_trace [h.2.1] =>trace "test/SimpTrace/out/local_proj_nested.json"
+
+/-- A projection of a *quantified* hypothesis' instantiation. -/
+example (P Q : Nat → Prop) (c : Nat) (h : ∀ x, P x ∧ Q x) : P c ∧ True := by
+  simp_trace [(h c).1] =>trace "test/SimpTrace/out/local_proj_applied.json"
 
 end ExplicitLean.SimpTrace.Fixtures

@@ -55,18 +55,6 @@ attribute [simp] unresTagProc
 example (k : Nat) : UnresTag k := by
   simp_trace =>trace "test/SimpTrace/out/propext_nonlemma.json"
 
-/-- `exists_prop_congr` is a user congruence theorem whose right-hand side has a
-higher-order metavariable (`?q'`, the body as a function of the antecedent) that
-unifying the conclusion does not determine — a replayer would have to prove the
-side conditions first to fix it. `rw [exists_prop_congr hpq (fun _ => rfl)]`
-fails with an application type mismatch, so the step is genuinely unreplayable
-as written, and the structural `rw` check classifies it
-`unresolved:unreplayable_rw:exists_prop_congr` rather than shipping it.
-
-`ite_congr` and `dite_congr`, by contrast, do replay and pass the check; they
-stay in `Fixtures.lean`. -/
-example (p q r : Prop) (hpq : p = q) : (∃ _ : p, r) = (∃ _ : q, r) := by
-  simp_trace [hpq] =>trace "test/SimpTrace/out/user_congr_exists.json"
 
 /-! ### The structural `rw` check catches a plumbing head the allowlist misses
 
@@ -99,5 +87,18 @@ attribute [simp] fixturePlumbProc
 
 example (k : Nat) : FixturePTag k := by
   simp_trace =>trace "test/SimpTrace/out/unreplayable_rw.json"
+
+/-- `dite_congr` with both branches conditional: one of its side conditions is
+discharged by simp's default discharger *rewriting the goal to `True`* with
+other lemmas, wrapped in `of_eq_true`. Those inner rewrites are diverted (they
+carry no position), so the recorder has no steps to show and cannot honestly
+name a close form — writing `rfl` there would assert a close that does not hold
+(REVIEW-7 3). The side is classified instead. -/
+example (p q : Prop) [Decidable p] [Decidable q] (hpq : p = q)
+    (f : p → Nat) (g : ¬p → Nat) (f' : q → Nat) (g' : ¬q → Nat)
+    (hf : ∀ h : q, f (hpq ▸ h) = f' h) (hg : ∀ h : ¬q, g (hpq ▸ h) = g' h) :
+    dite p f g = dite q f' g' := by
+  simp_trace +contextual [hpq, hf, hg]
+    =>trace "test/SimpTrace/out/user_congr_dite.json"
 
 end ExplicitLean.SimpTrace.UnresolvedFixtures

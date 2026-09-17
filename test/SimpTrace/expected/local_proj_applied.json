@@ -14,14 +14,17 @@
             0,
             1
           ],
-          "name": "a✝",
+          "name": "(h c).1",
           "dir": "fwd",
           "local": {
-            "userName": "a._@._internal.0.test.SimpTrace.Fixtures.2021293446._hygCtx._hyg.14",
-            "inaccessible": true,
-            "ctxIndex": 2
+            "userName": "h",
+            "inaccessible": false,
+            "ctxIndex": 4
           },
-          "prop": "true"
+          "prop": "true",
+          "args": [
+            "c"
+          ]
         },
         {
           "kind": "rw",

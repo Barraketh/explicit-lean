@@ -14,7 +14,8 @@
             0,
             1
           ],
-          "source": "dreduceIte"
+          "source": "dreduceIte",
+          "to": "@OfNat.ofNat.{0} Nat (nat_lit 3) (instOfNatNat (nat_lit 3))"
         },
         {
           "kind": "unfold",

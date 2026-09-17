@@ -77,22 +77,41 @@ if what remains is neither `Eq` nor `Iff`, the lemma is Prop-valued.  `after`
 then says which of `True`/`False` simp rewrote to.
 -/
 
-/-- The local a stored simp-theorem proof was built from, if any.
+/-- The local a stored simp-theorem proof was built from, together with the
+arguments it was applied to and whether the wrapper reversed the direction.
 
-simp wraps a hypothesis before storing it: `h : p` becomes `eq_true h`, `h : ¬p`
-becomes `eq_false h`, an `Iff` becomes `propext h`, a conjunct becomes
-`And.left h`.  Each wrapper takes the proof it wraps as its last explicit
-argument, so recursing there reaches the hypothesis. -/
-partial def proofFVar? (proof : Expr) : Option FVarId :=
-  match proof.getAppFn with
-  | .fvar fvarId => some fvarId
-  | .const n _ =>
-    if n == ``eq_true || n == ``eq_false || n == ``propext
-       || n == ``And.left || n == ``And.right || n == ``Iff.mp
-       || n == ``Iff.mpr || n == ``Eq.symm || n == ``of_eq_true then
-      if proof.getAppNumArgs == 0 then none else proofFVar? proof.appArg!
-    else none
-  | _ => none
+simp stores a hypothesis's proof already instantiated and wrapped: `h a b` for a
+∀-quantified `h`, `eq_true (h a)` for a Prop-valued one, `And.left h` for a
+conjunct, and under a `.lam` binder when the hypothesis is quantified.  The head
+fvar is the local; the applied arguments are what a replayer must supply.
+
+`Iff.mp`/`Iff.mpr` are **not** walked: `Iff.mp h hp` takes the iff `h` *and* a
+proof `hp` of its left side, so `appArg!` reaches `hp`, which is not the
+hypothesis the rewrite is by (REVIEW-7 5).  `Eq.symm`/`Iff.symm` are walked but
+flip the direction, for the same reason the simproc path does. -/
+partial def proofLocal? (proof : Expr) : Option (FVarId × Array Expr × Bool) :=
+  go proof false
+where
+  go (e : Expr) (inv : Bool) : Option (FVarId × Array Expr × Bool) :=
+    match e with
+    -- A quantified hypothesis's proof is stored under binders.
+    -- A quantified hypothesis's proof is stored under binders.  The arguments
+    -- it is applied to below then reference those binders, so they are loose
+    -- bvars here, not terms a replayer could write; unification recovers them
+    -- from the subterm instead, so we keep the local and drop the arguments.
+    | .lam _ _ body _ =>
+      (go body inv).map fun (fvarId, _, i) => (fvarId, #[], i)
+    | _ =>
+      match e.getAppFn with
+      | .fvar fvarId => some (fvarId, e.getAppArgs, inv)
+      | .const n _ =>
+        if n == ``Eq.symm || n == ``Iff.symm then
+          if e.getAppNumArgs == 0 then none else go e.appArg! (!inv)
+        else if n == ``eq_true || n == ``eq_false || n == ``propext
+                || n == ``And.left || n == ``And.right || n == ``of_eq_true then
+          if e.getAppNumArgs == 0 then none else go e.appArg! inv
+        else none
+      | _ => none
 
 /--
 Resolve an `Origin.stx` to the local hypothesis it elaborated to, when it is one.
@@ -109,18 +128,20 @@ syntax's characters: a character whitelist dropped every non-ASCII name (`hα`,
 `==`, because `Origin` compares its stored `Syntax` and the trace's copy is not
 the tree's.
 -/
-def resolveStxOrigin (o : Origin) : Simp.SimpM Origin := do
-  let .stx id _ := o | return o
+def resolveStxOrigin (o : Origin) :
+    Simp.SimpM (Origin × Array Expr × Bool) := do
+  let .stx id _ := o | return (o, #[], false)
   for thms in (← readThe Simp.Context).simpTheorems do
     for sthm in thms.pre.values ++ thms.post.values do
       if let .stx id' _ := sthm.origin then
         if id' == id then
-          match proofFVar? sthm.proof with
-          | some fvarId => return .fvar fvarId
+          match proofLocal? sthm.proof with
+          | some (fvarId, args, inv) => return (.fvar fvarId, args, inv)
           -- The argument elaborated to something that is not a local (a term,
-          -- a global applied to arguments): leave the origin as written.
-          | none => return o
-  return o
+          -- a global applied to arguments): leave the origin as written, and
+          -- the caller classifies it — "unresolved" is never a silent pass.
+          | none => return (o, #[], false)
+  return (o, #[], false)
 
 /-- Is this origin's statement an equation or an iff (after its binders)? -/
 def originIsEquational (o : Origin) (lctx : LocalContext) (insts : LocalInstances) :
@@ -477,10 +498,19 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             -- original origin for `name` and `dir`: the syntax is what carries
             -- a leading `←`, and replacing it would silently turn a reverse
             -- rewrite into a forward one.
-            let resolved ← resolveStxOrigin o
+            let (resolved, rargs, rinv) ← resolveStxOrigin o
+            -- Every rewrite origin must be a global constant or a local fvar.
+            -- A `.stx` that resolves to neither leaves the step without the
+            -- identity the spec requires, and the structural check cannot see
+            -- it either, so it is classified rather than silently shipped
+            -- (REVIEW-7 1a) — "none" is never a pass.
+            if resolved matches .stx .. then
+              ref.modify (·.markUnresolved "origin")
             let prop? ← propFlag? resolved r.expr evCtx.lctx evCtx.insts
+            -- A wrapper that reverses the statement (`h.symm`) flips `dir`.
             ref.modify (·.push
-              (.rw pos o inv prop? e r.expr evCtx #[] side none resolved))
+              (.rw pos o (inv != rinv) prop? e r.expr evCtx rargs side none
+                resolved))
         | none =>
           -- No origin at all: a simproc that registered nothing (`simpUsingDecide`
           -- and the ground arithmetic/matcher simprocs).  Same classification.
@@ -547,9 +577,23 @@ a `throwError`, so `simp_trace (disch := omega)` failed on a goal stock
 `simp (disch := omega)` proves.
 -/
 
+/-- Is the goal `e` actually closed by reflexivity — both sides of an `Eq` or
+`Iff` definitionally equal?  Only then is `rfl` an honest close form. -/
+def goalIsRfl (e : Expr) : Simp.SimpM Bool := do
+  let e ← instantiateMVars e
+  try
+    if let some (_, lhs, rhs) := e.eq? then
+      return ← withReducible <| isDefEq lhs rhs
+    if let some (lhs, rhs) := e.iff? then
+      return ← withReducible <| isDefEq lhs rhs
+    return false
+  catch _ => return false
+
 /-- Describe how a side condition closed, and reconcile that with the events the
-recorder captured, so a replayer is never told to do the work twice. -/
-def describeProof (proof : Expr) (nested : Array Event)
+recorder captured, so a replayer is never told to do the work twice.
+`goal` is the side goal, needed to tell a genuine `rfl` close from an
+`of_eq_true`-wrapped rewrite to `True`. -/
+def describeProof (goal : Expr) (proof : Expr) (nested : Array Event)
     (dischargerText? : Option String) :
     Simp.SimpM (String × Array Event × Option String) := do
   match proof with
@@ -560,7 +604,18 @@ def describeProof (proof : Expr) (nested : Array Event)
     return (s!"assumption:{display}", #[], none)
   | _ =>
     if nested.isEmpty then
-      if proof.isAppOf ``of_eq_true then return ("rfl", nested, none)
+      if proof.isAppOf ``of_eq_true then
+        -- `of_eq_true p` means the goal was *rewritten to `True`* by the steps
+        -- in `p`, not that it holds by `rfl`.  Those inner rewrites are
+        -- diverted (they carry no position), so `nested` is empty and writing
+        -- `rfl` asserts a close we never observed and that usually does not
+        -- hold — `rfl` cannot prove an opaque `P k` (REVIEW-7 3).
+        -- `rfl` is recorded only when the goal really is closed by reflexivity.
+        if ← goalIsRfl goal then return ("rfl", nested, none)
+        return ("unresolved:discharged by rewriting to True, steps not \
+recorded", nested,
+          some "side condition rewritten to `True` by lemmas whose steps carry \
+no position")
       else if proof.isAppOf ``eq_true_of_decide then return ("decide", nested, none)
       else if proof.isAppOf ``trivial || proof.isAppOf ``True.intro then
         return ("true_intro", nested, none)
@@ -611,7 +666,7 @@ def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
       -- instantiate so the recorded term is ground.
       let e ← instantiateMVars e
       let evCtx ← captureEvCtx ref
-      let (by_, kept, unresolved?) ← describeProof proof nested dischargerText?
+      let (by_, kept, unresolved?) ← describeProof e proof nested dischargerText?
       if let some reason := unresolved? then
         ref.modify (·.markUnresolved reason)
       let rec_ : SideRec := .mk e kept (some by_) evCtx #[] e none

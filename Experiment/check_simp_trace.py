@@ -160,6 +160,13 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         elif got.get("steps"):
             fail(messages, f"{where}: nested `steps` on a {kind!r} step")
 
+        # A `change` must carry `to` (the `pp.all` replacement term): T2's
+        # `change t at [pos]` needs it and a generator cannot recover it from
+        # the goal (T2 REVIEW-7). The expected skeletons pin it too, so it
+        # cannot silently disappear again.
+        if kind == "change" and not got.get("to"):
+            fail(messages, f"{where}: `change` step without a `to` term")
+
         if kind == "unfold" and not got.get("name"):
             fail(messages, f"{where}: `unfold` step without a constant name")
 
@@ -257,6 +264,13 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                 check_steps(side_path, gs.get("steps", []), ws.get("steps", []), messages)
 
 
+def check_location_fields(path: str, loc: dict, messages: list[str]) -> None:
+    """Every location carries `pre`/`post`, as the spec requires."""
+    for field in ("pre", "post"):
+        if field not in loc:
+            fail(messages, f"{path}: location has no `{field}`")
+
+
 def check_trace(name: str, actual: dict, expected: dict, messages: list[str]) -> None:
     if actual.get("schema") != expected.get("schema"):
         fail(
@@ -298,6 +312,7 @@ def check_trace(name: str, actual: dict, expected: dict, messages: list[str]) ->
                 f"{path}.close: expected {want.get('close')!r}, "
                 f"got {got.get('close')!r}",
             )
+        check_location_fields(path, got, messages)
         check_steps(path, got.get("steps", []), want.get("steps", []), messages)
 
 

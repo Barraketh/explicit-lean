@@ -144,20 +144,75 @@ that transport is recorded as its own `change` step instead (see
 -/
 partial def eqUpToProofs (a b : Expr) : MetaM Bool := do
   if a == b then return true
-  if (← isProof a) && (← isProof b) then
-    let ta ← inferType a
-    let tb ← inferType b
-    if ← withReducible <| isDefEq ta tb then return true
+  -- `isProof`/`inferType` throw "unexpected bound variable" on a term with
+  -- loose bvars, and the validator reaches exactly such subterms: a `dite`
+  -- with dependent branches puts the running term's bvars under the binder we
+  -- are comparing beneath.  Proof irrelevance is a *relaxation*, so skipping it
+  -- for an open subterm only makes the comparison stricter, never wrong — and
+  -- it is what stops four stock-provable `Logic/Basic` calls from crashing
+  -- instead of being traced (REVIEW-7 4).
+  if !a.hasLooseBVars && !b.hasLooseBVars then
+    if (← isProof a) && (← isProof b) then
+      let ta ← inferType a
+      let tb ← inferType b
+      -- Both sides are proofs, so proof irrelevance applies as soon as the
+      -- propositions agree.  They can differ *syntactically* because a proof is
+      -- transported along a rewrite the step itself performed — `by_cases h : p`
+      -- turns `p` into `True` in the running term while the recorded proof
+      -- still has type `p` — so the comparison must see through the same
+      -- unfolding simp's own `isDefEq` does, not only reducible.
+      if ← withReducible <| isDefEq ta tb then return true
+      if ← withDefault <| isDefEq ta tb then return true
   match a, b with
   | .mdata _ b₁, _ => eqUpToProofs b₁ b
   | _, .mdata _ b₂ => eqUpToProofs a b₂
   | .app f₁ a₁, .app f₂ a₂ => eqUpToProofs f₁ f₂ <&&> eqUpToProofs a₁ a₂
-  | .lam _ t₁ b₁ _, .lam _ t₂ b₂ _ => eqUpToProofs t₁ t₂ <&&> eqUpToProofs b₁ b₂
-  | .forallE _ t₁ b₁ _, .forallE _ t₂ b₂ _ => eqUpToProofs t₁ t₂ <&&> eqUpToProofs b₁ b₂
+  -- Introduce a real local when descending under a binder, so the bodies are
+  -- closed and `isProof` can run on them.  Without this a proof argument under
+  -- a `dite`'s dependent binder (`s h` against an elided `s ⋯`) cannot be
+  -- compared at all — and calling `isProof` on the open body instead throws
+  -- "unexpected bound variable", which crashed four stock-provable
+  -- `Logic/Basic` calls (REVIEW-7 4).
+  | .lam n t₁ b₁ bi, .lam _ t₂ b₂ _ =>
+    eqUpToProofs t₁ t₂ <&&>
+      withLocalDecl n bi t₁ fun x =>
+        eqUpToProofs (b₁.instantiate1 x) (b₂.instantiate1 x)
+  | .forallE n t₁ b₁ bi, .forallE _ t₂ b₂ _ =>
+    eqUpToProofs t₁ t₂ <&&>
+      withLocalDecl n bi t₁ fun x =>
+        eqUpToProofs (b₁.instantiate1 x) (b₂.instantiate1 x)
   | .letE _ t₁ v₁ b₁ _, .letE _ t₂ v₂ b₂ _ =>
     eqUpToProofs t₁ t₂ <&&> eqUpToProofs v₁ v₂ <&&> eqUpToProofs b₁ b₂
   | .proj s₁ i₁ b₁, .proj s₂ i₂ b₂ =>
     if s₁ == s₂ && i₁ == i₂ then eqUpToProofs b₁ b₂ else return false
+  | _, _ => return false
+
+/-- Structural equality that accepts **any** two proof subterms as equal.
+
+Weaker than `eqUpToProofs`, which requires their propositions to agree.  Used
+only to tell a genuinely wrong trace from one whose sole difference is a proof
+simp transported along a rewrite of the proposition that proof is about; the
+latter is classified, the former is fatal. -/
+partial def eqIgnoringProofs (a b : Expr) : MetaM Bool := do
+  if a == b then return true
+  if !a.hasLooseBVars && !b.hasLooseBVars then
+    if (← isProof a) && (← isProof b) then return true
+  match a, b with
+  | .mdata _ b₁, _ => eqIgnoringProofs b₁ b
+  | _, .mdata _ b₂ => eqIgnoringProofs a b₂
+  | .app f₁ a₁, .app f₂ a₂ => eqIgnoringProofs f₁ f₂ <&&> eqIgnoringProofs a₁ a₂
+  | .lam n t₁ b₁ bi, .lam _ t₂ b₂ _ =>
+    eqIgnoringProofs t₁ t₂ <&&>
+      withLocalDecl n bi t₁ fun x =>
+        eqIgnoringProofs (b₁.instantiate1 x) (b₂.instantiate1 x)
+  | .forallE n t₁ b₁ bi, .forallE _ t₂ b₂ _ =>
+    eqIgnoringProofs t₁ t₂ <&&>
+      withLocalDecl n bi t₁ fun x =>
+        eqIgnoringProofs (b₁.instantiate1 x) (b₂.instantiate1 x)
+  | .letE _ t₁ v₁ b₁ _, .letE _ t₂ v₂ b₂ _ =>
+    eqIgnoringProofs t₁ t₂ <&&> eqIgnoringProofs v₁ v₂ <&&> eqIgnoringProofs b₁ b₂
+  | .proj s₁ i₁ b₁, .proj s₂ i₂ b₂ =>
+    if s₁ == s₂ && i₁ == i₂ then eqIgnoringProofs b₁ b₂ else return false
   | _, _ => return false
 
 /--
