@@ -96,6 +96,202 @@ def git_dirty(worktree: pathlib.Path) -> bool:
 
 
 # --------------------------------------------------------------------------
+# Authenticated source-site identity (simp-trace-v2)
+
+
+def build_manifest(module_path: str, source: str,
+                   site_list: list[S.Site]) -> dict:
+    """Build the v2 manifest from the exact original source text."""
+    return {
+        "modulePath": module_path,
+        "sites": [
+            {
+                "siteOrdinal": site.index,
+                "startChar": site.start,
+                "endChar": site.end,
+                "line": site.line,
+                "column": site.column,
+                "callText": source[site.start:site.end],
+            }
+            for site in site_list
+        ],
+    }
+
+
+def _identity_descriptor(site: dict) -> dict:
+    return {key: site.get(key) for key in (
+        "siteOrdinal", "startChar", "endChar", "line", "column", "callText",
+    )}
+
+
+def validate_identity(module_path: str, source: str,
+                      site_list: list[S.Site], trace_records: list[dict]
+                      ) -> tuple[dict, dict[int, list[dict]]]:
+    """Validate a complete v2 trace set before any rendering is attempted.
+
+    Returns a machine-readable result and, only on acceptance, traces grouped
+    by authenticated source site ordinal. Filenames, list indexes and generated
+    occurrence positions are never used as identity matches.
+    """
+    manifest = build_manifest(module_path, source, site_list)
+    expected_by_key = {
+        (module_path, site["siteOrdinal"], site["startChar"],
+         site["endChar"], site["callText"]): site
+        for site in manifest["sites"]
+    }
+    expected_by_ordinal = {site["siteOrdinal"]: site for site in manifest["sites"]}
+    missing = {site["siteOrdinal"]: site for site in manifest["sites"]}
+    extra: list[dict] = []
+    duplicates: list[dict] = []
+    invalid: list[dict] = []
+    mismatches: list[dict] = []
+    grouped: dict[int, list[dict]] = {}
+    seen: dict[tuple[int, int], dict] = {}
+
+    for record_index, record in enumerate(trace_records):
+        if not isinstance(record, dict):
+            invalid.append({"recordIndex": record_index, "reason": "record_not_object"})
+            continue
+        if "__parseError" in record:
+            invalid.append({"recordIndex": record_index,
+                            "reason": "malformed_json",
+                            "file": record["__parseError"],
+                            "detail": record.get("__parseDetail", "")})
+            continue
+        if record.get("schema") != "simp-trace-v2":
+            invalid.append({"recordIndex": record_index,
+                            "reason": "unsupported_schema",
+                            "schema": record.get("schema")})
+            continue
+        required = ("modulePath", "site", "occurrence", "invocation",
+                    "invocations", "locations")
+        missing_fields = [key for key in required if key not in record]
+        if missing_fields:
+            invalid.append({"recordIndex": record_index,
+                            "reason": "missing_fields", "fields": missing_fields})
+            continue
+        if record["modulePath"] != module_path:
+            extra.append({"recordIndex": record_index,
+                          "reason": "module_mismatch",
+                          "modulePath": record.get("modulePath")})
+            continue
+        site = record["site"]
+        if not isinstance(site, dict):
+            invalid.append({"recordIndex": record_index, "reason": "site_not_object"})
+            continue
+        identity_fields = ("siteOrdinal", "startChar", "endChar", "callText")
+        if any(field not in site for field in identity_fields):
+            invalid.append({"recordIndex": record_index,
+                            "reason": "missing_site_identity_fields",
+                            "fields": [field for field in identity_fields if field not in site]})
+            continue
+        if (not isinstance(site["siteOrdinal"], int)
+                or isinstance(site["siteOrdinal"], bool)
+                or not isinstance(site["startChar"], int)
+                or isinstance(site["startChar"], bool)
+                or not isinstance(site["endChar"], int)
+                or isinstance(site["endChar"], bool)
+                or site["startChar"] < 0
+                or site["endChar"] < site["startChar"]
+                or not isinstance(site["callText"], str)):
+            invalid.append({"recordIndex": record_index,
+                            "reason": "malformed_site_identity",
+                            "site": _identity_descriptor(site)})
+            continue
+        try:
+            identity_key = (module_path, site["siteOrdinal"], site["startChar"],
+                            site["endChar"], site["callText"])
+        except TypeError:
+            invalid.append({"recordIndex": record_index,
+                            "reason": "unhashable_site_identity",
+                            "site": _identity_descriptor(site)})
+            continue
+        expected = expected_by_key.get(identity_key)
+        if expected is None:
+            ordinal_expected = expected_by_ordinal.get(site.get("siteOrdinal"))
+            if ordinal_expected is not None:
+                mismatches.append({"recordIndex": record_index,
+                                   "reason": "site_range_or_call_mismatch",
+                                   "site": _identity_descriptor(site),
+                                   "expected": _identity_descriptor(ordinal_expected)})
+            else:
+                extra.append({"recordIndex": record_index,
+                              "reason": "unmatched_site_identity",
+                              "site": _identity_descriptor(site)})
+            continue
+        if site.get("siteOrdinal") != expected["siteOrdinal"]:
+            extra.append({"recordIndex": record_index,
+                          "reason": "unmatched_site_identity",
+                          "site": _identity_descriptor(site)})
+            continue
+        invocation = record["invocation"]
+        total = record["invocations"]
+        if (not isinstance(invocation, int) or isinstance(invocation, bool)
+                or not isinstance(total, int) or isinstance(total, bool)
+                or total < 1 or invocation < 0 or invocation >= total):
+            invalid.append({"recordIndex": record_index,
+                            "reason": "invalid_invocation",
+                            "invocation": invocation, "invocations": total})
+            continue
+        if not isinstance(record["occurrence"], str):
+            invalid.append({"recordIndex": record_index,
+                            "reason": "occurrence_not_string"})
+            continue
+        if not isinstance(record["locations"], list):
+            invalid.append({"recordIndex": record_index,
+                            "reason": "locations_not_array"})
+            continue
+        key = (expected["siteOrdinal"], invocation)
+        if key in seen:
+            duplicates.append({"siteOrdinal": key[0], "invocation": key[1]})
+            continue
+        seen[key] = record
+        grouped.setdefault(expected["siteOrdinal"], []).append(record)
+        missing.pop(expected["siteOrdinal"], None)
+
+    incomplete: list[dict] = []
+    for site in manifest["sites"]:
+        ordinal = site["siteOrdinal"]
+        records = grouped.get(ordinal, [])
+        totals = {record["invocations"] for record in records}
+        if len(totals) != 1:
+            if records or ordinal in missing:
+                incomplete.append({"siteOrdinal": ordinal,
+                                   "expectedOrdinals": [],
+                                   "observedOrdinals": sorted(record["invocation"] for record in records),
+                                   "declaredTotals": sorted(totals)})
+            continue
+        total = next(iter(totals))
+        expected_ordinals = list(range(total))
+        observed_ordinals = sorted(record["invocation"] for record in records)
+        if observed_ordinals != expected_ordinals:
+            incomplete.append({"siteOrdinal": ordinal,
+                               "expectedOrdinals": expected_ordinals,
+                               "observedOrdinals": observed_ordinals,
+                               "declaredTotals": [total]})
+
+    expected_count = len(manifest["sites"])
+    observed_count = len(trace_records)
+    accepted = not (missing or extra or duplicates or invalid or mismatches
+                    or incomplete or len(grouped) != expected_count)
+    result = {
+        "identity": "accepted" if accepted else "rejected",
+        "expectedSites": expected_count,
+        "observedTraceRecords": observed_count,
+        "missingSites": [_identity_descriptor(site) for site in missing.values()],
+        "extraTraces": extra,
+        "duplicateSiteInvocations": duplicates,
+        "invalidRecords": invalid,
+        "identityMismatches": mismatches,
+        "incompleteInvocationOrdinals": incomplete,
+        "renderAttempted": False,
+    }
+    if accepted:
+        result["renderAttempted"] = False
+    return result, grouped
+
+
+# --------------------------------------------------------------------------
 # Stage 1: transcribe
 
 
@@ -140,69 +336,28 @@ def transcribe(t1: pathlib.Path, mathlib_rel: str, traced_name: str,
     )
     log.append(f"trace compile of {traced_name}: exit {code} in {compile_secs:.1f}s")
 
-    # One JSON per *invocation*. A site under `<;>` or inside a `rcases`
-    # alternation runs once per branch, and the recorder writes the extra runs
-    # as `<name>_<NN>.<k>.json`, all sharing the site's `occurrence`. They are
-    # collected per site so the renderer can see that a site has several, which
-    # no single `explicit_rw` can replace.
-    # One JSON per *invocation*. A site under `<;>` or inside an alternation
-    # runs once per branch, and the recorder writes the extra runs as
-    # `<name>_<NN>.<k>.json`, all sharing the site's `occurrence`.
-    #
-    # Repeated executions are retained even when their trace content is
-    # identical; no execution may be deduplicated by content.
-    # Keep every execution, including identical traces. The spec's
-    # `invocation`/`invocations` fields are metadata, not a deduplication key.
-    by_index: dict[int, list[dict]] = {}
+    # Read every JSON produced by this compile. Filenames and numeric stems are
+    # provenance only: identity matching happens later from each v2 envelope.
+    trace_records: list[dict] = []
     stale = 0
     meas = t1 / "test" / "SimpTrace" / "meas_out"
     for path in sorted(meas.glob(f"{traced_name}_*.json")):
-        stem = path.stem[len(traced_name) + 1 :]
-        head, _, tail = stem.partition(".")
-        if not head.isdigit() or (tail and not tail.isdigit()):
-            log.append(f"ignored unparsable trace file name: {path.name}")
-            continue
         if path.stat().st_mtime < compile_started - 1:
             # Left over from an earlier compile, not written by this one.
             stale += 1
             continue
-        raw = path.read_text(encoding="utf-8")
         try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            log.append(f"ignored unparsable trace JSON: {path.name}")
-            continue
-        by_index.setdefault(int(head) - 1, []).append(parsed)
-
-    traces: dict[int, dict] = {}
-    for index, executions in by_index.items():
-        # New traces may declare the total on every file. Use the maximum
-        # declaration and never under-count files actually observed.
-        declared = 0
-        for execution in executions:
-            value = execution.get("invocations")
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-                declared = max(declared, value)
-            elif value is not None:
-                log.append(
-                    f"invalid invocations field for site {index + 1}: {value!r}"
-                )
-            ordinal = execution.get("invocation")
-            if ordinal is not None and (
-                not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0
-            ):
-                log.append(
-                    f"invalid invocation field for site {index + 1}: {ordinal!r}"
-                )
-        count = max(len(executions), declared)
-        chosen = dict(executions[0])
-        if count > 1:
-            chosen["_invocations"] = count
-        traces[index] = chosen
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            # Keep a machine-readable malformed record. Dropping it would
+            # misreport a malformed trace as only a missing site.
+            log.append(f"malformed trace JSON: {path.name}: {exc}")
+            parsed = {"__parseError": path.name, "__parseDetail": str(exc)}
+        trace_records.append(parsed)
     if stale:
         log.append(f"ignored {stale} trace file(s) left by an earlier compile")
     return traced, {
-        "traces": traces,
+        "trace_records": trace_records,
         "transcription_ok": transcription_ok,
         "compile_exit": code,
         "compile_seconds": round(compile_secs, 2),
@@ -557,13 +712,47 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
         raise SystemExit(f"no traced copy is known for {mathlib_rel}")
     source_rel = mathlib_rel[len("Mathlib/") :]
     source_path = mathlib / source_rel
-    source = source_path.read_text(encoding="utf-8")
+    # Decode the exact bytes; `Path.read_text` uses universal-newline mode and
+    # could otherwise change the authenticated source hash/ranges on CRLF input.
+    source = source_path.read_bytes().decode("utf-8")
 
     log: list[str] = []
-    _, transcription = transcribe(t1, mathlib_rel, traced_name, False, log)
-    traces = transcription["traces"]
-
     site_list = S.find_sites(source)
+    _, transcription = transcribe(t1, mathlib_rel, traced_name, False, log)
+    identity, authenticated = validate_identity(
+        mathlib_rel, source, site_list, transcription["trace_records"],
+    )
+    if identity["identity"] == "rejected":
+        # Produce one diagnostic record per expected source site, but do not
+        # render, splice, compile, or claim replay for any of them.
+        records = [
+            {
+                "site": site.index, "line": site.line, "column": site.column,
+                "original": site.text, "alone_on_line": site.alone_on_line,
+                "status": "identity_failed", "attribution": "harness",
+                "detail": "authenticated trace identity rejected",
+            }
+            for site in site_list
+        ]
+        return {
+            "module": mathlib_rel, "traced_module": traced_name,
+            "sites": len(site_list), "compile_mode": "identity_failed",
+            "whole_module_exit": None, "whole_module_errors": [],
+            "whole_module_seconds": 0, "transcription": {
+                k: v for k, v in transcription.items() if k != "trace_records"
+            },
+            "trace_count": len(transcription["trace_records"]),
+            "identity": identity, "records": records, "log": log,
+            "seconds": round(time.monotonic() - started, 2),
+        }
+    traces: dict[int, dict] = {}
+    for ordinal, executions in authenticated.items():
+        executions.sort(key=lambda record: record["invocation"])
+        chosen = dict(executions[0])
+        if len(executions) > 1:
+            chosen["_invocations"] = len(executions)
+        traces[ordinal] = chosen
+    identity["renderAttempted"] = True
     records = [render_site(s, traces.get(s.index)) for s in site_list]
     for rec in records:
         findings = lint_replacement(rec)
@@ -644,9 +833,10 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
         "whole_module_errors": diagnostics[:20],
         "whole_module_seconds": round(compile_secs, 2),
         "transcription": {
-            k: v for k, v in transcription.items() if k != "traces"
+            k: v for k, v in transcription.items() if k != "trace_records"
         },
         "trace_count": len(traces),
+        "identity": identity,
         "records": records,
         "log": log,
         "seconds": round(time.monotonic() - started, 2),
@@ -654,7 +844,8 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
 
 
 STATUS_ORDER = (
-    "replayed", "unresolved", "render_failed", "compile_failed", "probe_inconclusive"
+    "replayed", "unresolved", "render_failed", "compile_failed",
+    "probe_inconclusive", "identity_failed",
 )
 
 
@@ -675,8 +866,8 @@ def summarize(report: dict) -> str:
         f"T2 `{report['t2_branch']}` at `{report['t2_commit']}`"
         f"{' (dirty)' if report['t2_dirty'] else ''}.",
         "",
-        "| module | sites | replayed | unresolved | render_failed | compile_failed | probe_inconclusive | mode | s |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| module | sites | replayed | unresolved | render_failed | compile_failed | probe_inconclusive | identity_failed | mode | s |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     totals = {k: 0 for k in STATUS_ORDER}
     total_sites = 0
@@ -692,12 +883,14 @@ def summarize(report: dict) -> str:
             f"| `{name}` | {mod['sites']} | {counts['replayed']} | "
             f"{counts['unresolved']} | {counts['render_failed']} | "
             f"{counts['compile_failed']} | {counts['probe_inconclusive']} | "
+            f"{counts['identity_failed']} | "
             f"{mod['compile_mode']} | {mod['seconds']:.0f} |"
         )
     lines.append(
         f"| **total** | **{total_sites}** | **{totals['replayed']}** | "
         f"**{totals['unresolved']}** | **{totals['render_failed']}** | "
-        f"**{totals['compile_failed']}** | **{totals['probe_inconclusive']}** | | |"
+        f"**{totals['compile_failed']}** | **{totals['probe_inconclusive']}** | "
+        f"**{totals['identity_failed']}** | | |"
     )
 
     lines += ["", "## Failures, per site", ""]

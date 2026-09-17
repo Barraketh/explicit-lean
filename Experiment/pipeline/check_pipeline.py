@@ -407,6 +407,69 @@ def mapping_tests(f: Failures) -> None:
             "an unrelated diagnostic was selected")
 
 
+def identity_tests(f: Failures) -> None:
+    """The v2 source-site bijection fails closed before rendering."""
+    source = (
+        "-- Unicode before the authenticated sites: λ\n"
+        "@[simp] lemma attr_one : True := by simp [p]\n"
+        "@[simp] lemma attr_two : True := by simp [p]\n"
+        "example : True := by simp [p]; simp [q]\n"
+        "example : True := by simp; simp\n"
+    )
+    module = "Mathlib/Test/Identity.lean"
+    sites = S.find_sites(source)
+    manifest = P.build_manifest(module, source, sites)
+
+    def record(site: dict, invocation: int = 0, invocations: int = 1) -> dict:
+        return {
+            "schema": "simp-trace-v2", "modulePath": module,
+            "site": {key: site[key] for key in
+                     ("siteOrdinal", "startChar", "endChar", "callText")},
+            "occurrence": str(site["siteOrdinal"]),
+            "invocation": invocation, "invocations": invocations,
+            "locations": [],
+        }
+
+    records = [record(site) for site in manifest["sites"]]
+    f.check("identity/unicode_char_ranges",
+            manifest["sites"][0]["startChar"] > 0,
+            "fixture did not exercise a nonzero Unicode character offset")
+    accepted, _ = P.validate_identity(module, source, sites, records)
+    f.equal("identity/valid_fixture", accepted["identity"], "accepted")
+    f.equal("identity/fixture_site_count", accepted["expectedSites"], 6)
+
+    def rejected(name: str, forged: list[dict], category: str | None = None) -> None:
+        result, _ = P.validate_identity(module, source, sites, forged)
+        f.equal("identity/" + name, result["identity"], "rejected")
+        f.equal("identity/" + name + "/no_render", result["renderAttempted"], False)
+        if category is not None:
+            f.check("identity/" + name + "/category", bool(result.get(category)),
+                    f"category {category} was empty: {result!r}")
+
+    rejected("missing_site", records[:-1], "missingSites")
+    extra = list(records) + [record(manifest["sites"][0])]
+    rejected("duplicate_invocation", extra, "duplicateSiteInvocations")
+    altered = record(manifest["sites"][0], invocation=2, invocations=2)
+    rejected("out_of_range_invocation", records[:-1] + [altered],
+             "incompleteInvocationOrdinals")
+    wrong_call = list(records)
+    wrong_call[0] = record(dict(manifest["sites"][0], callText="simp [forged]"))
+    rejected("wrong_call", wrong_call, "identityMismatches")
+    wrong_range = list(records)
+    wrong_range[0] = record(dict(manifest["sites"][0], startChar=0))
+    rejected("wrong_range", wrong_range, "identityMismatches")
+    extra = list(records) + [dict(records[0], modulePath="Mathlib/Other.lean")]
+    rejected("extra_trace", extra, "extraTraces")
+    malformed = list(records)
+    malformed[0] = dict(malformed[0], locations="not-an-array")
+    rejected("malformed_locations", malformed, "invalidRecords")
+    two_invocations = list(records[:-1]) + [record(manifest["sites"][-1], 0, 2),
+                                             record(manifest["sites"][-1], 1, 2)]
+    result, _ = P.validate_identity(module, source, sites, two_invocations)
+    f.equal("identity/identical_invocation_payloads", result["identity"], "accepted")
+    rejected("v1_rejected", [{**records[0], "schema": "simp-trace-v1"}], "invalidRecords")
+
+
 def site_count_tests(f: Failures, t1: pathlib.Path) -> None:
     mathlib = t1 / ".lake" / "packages" / "mathlib" / "Mathlib"
     if not mathlib.is_dir():
@@ -454,7 +517,7 @@ def end_to_end_test(f: Failures, t1: pathlib.Path, t2: pathlib.Path) -> None:
             f.check(f"e2e/module_has_{key}", key in mod, "missing key")
         f.equal("e2e/module_sites", mod["sites"], 1)
         f.check("e2e/compile_mode",
-                mod["compile_mode"] in ("whole_module", "per_site"),
+                mod["compile_mode"] in ("whole_module", "per_site", "identity_failed"),
                 f"got {mod['compile_mode']!r}")
         f.equal("e2e/one_record", len(mod["records"]), 1)
 
@@ -475,9 +538,13 @@ def end_to_end_test(f: Failures, t1: pathlib.Path, t2: pathlib.Path) -> None:
                 rec["original"].startswith(("simp", "dsimp")),
                 f"original is {rec['original']!r}")
 
-        # The translated module was written and carries the new import.
+        # Identity rejection is fail-closed: no renderer or translated module.
         translated = out / "Mathlib" / "Logic" / "Nontrivial" / "Defs.lean"
-        f.check("e2e/translated_written", translated.is_file(), "not written")
+        f.equal("e2e/identity_rejected_v1", mod.get("identity", {}).get("identity"), "rejected")
+        f.equal("e2e/identity_render_not_attempted",
+                mod.get("identity", {}).get("renderAttempted"), False)
+        f.check("e2e/translated_not_written", not translated.is_file(),
+                "identity failure wrote a translated module")
         if translated.is_file():
             text = translated.read_text(encoding="utf-8")
             f.check("e2e/import_added", "import ExplicitLean.ExplicitRw" in text,
@@ -509,6 +576,7 @@ def main() -> int:
     diagnostic_tests(f)
     invocation_tests(f)
     mapping_tests(f)
+    identity_tests(f)
     site_count_tests(f, t1)
     end_to_end_test(f, t1, t2)
 
