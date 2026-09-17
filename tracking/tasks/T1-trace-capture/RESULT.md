@@ -71,6 +71,32 @@ tally exactly — the fork does not diverge from stock.
   fixed: no `#N` in any of the 57 traces — subterms come from the live traversal with binders in scope. **M7**: this file replaces
   the overstated one.
 
+## Lemma-headed simproc proofs (spec amendment 408a39b)
+
+A simproc whose proof is one lemma applied is now an ordinary `rw` naming that lemma, with the discharged condition as a `side`
+sub-trace and `"source"` naming the simproc. `classifyProof` is **generic, never a table of simproc names**: it takes the proof's
+head constant and walks its arguments against the lemma's own binder telescope, requiring every *explicit* argument to be a
+subterm of the position, an instance, or a proof (which becomes the side entry). Plumbing heads (`Eq.trans`/`Eq.mpr`/`Eq.symm`/
+`of_eq_true`) are excluded, so those stay `eq`.
+
+| simproc | proof head | recorded | replay shape, verified well-typed |
+| --- | --- | --- | --- |
+| `reduceIte` | `ite_cond_eq_true`/`_false` | `rw` + side | `rw [ite_cond_eq_true 1 2 (eq_true h)]` |
+| `reduceDIte` | `dite_cond_eq_true`/`_false` | `rw` + side | `rw [dite_cond_eq_true (eq_true h)]` |
+| `simpUsingDecide` (`+decide`) | `eq_true_of_decide` | `rw` + side | `rw [eq_true_of_decide (rfl : decide _ = true)]` |
+| `Nat.reduceEqDiff` | `eq_false_of_decide` | `rw` + side | `rw [eq_false_of_decide (rfl : decide _ = false)]` |
+| `reduceCtorEq` | `eq_false'` | `rw` + **unresolved** side | — (see below) |
+
+Each row was checked by running the replay in ordinary Lean; the `Decidable` instance being an argument of `ite` rather than part
+of the motive is what makes the shape work, as the coordinator noted. The actual head constants are
+`ite_cond_eq_true`/`dite_cond_eq_true`, not `if_pos`/`dif_pos` — Lean 4.32.2's `reduceIte` builds the former.
+
+**`reduceCtorEq` is the honest limit.** Its head *is* one lemma, but `eq_false'`'s explicit argument is a `noConfusion`
+elimination under a local binder — a term no close form in the spec describes. Claiming `true_intro` would tell a replayer to
+close `FixtureColor.red = FixtureColor.green → False`, which is not `True`; the side entry carries a classified `unresolved:`
+close instead and the call is reported unresolved. On `Nat` literals `Nat.reduceEqDiff` fires first and maps cleanly (the
+`ctor_eq` fixture); `ctor_eq_inductive` reaches the real one.
+
 **Fixture changes** (four skeletons; each is the fork being more faithful). `contextual` now emits two **`intro_ctx`** steps
 (never emitted before); `zeta` puts `zeta` first — verified against `trace.Debug.Meta.Tactic.simp` that `reduceStep (pre)` fires
 on the `let` before any `add_zero`, so the old order was a reconstruction artifact; `shadowed` emits `beta` then three separate
@@ -78,18 +104,18 @@ on the `let` before any `add_zero`, so the old order was a reconstruction artifa
 rewrites as `side` evidence (side goal `n = 3`). The checker gained the amended spec's forms (`omega`, `unresolved:` closes,
 `prop`, `intro_ctx` naming) and was re-verified to catch a perturbed `pos`.
 
-**Checks, all re-run from scratch.** `lake build ExplicitLean.SimpTrace` with oleans deleted: clean, no warnings, 19.05 s, 736 MB.
-`Fixtures.lean` (30): pass with 1 classified unresolved, 3.62 s, 1 506 MB. `python3 -B Experiment/check_simp_trace.py`:
-`OK: 30 ...`, 12.10 s. `IsEmptyBasicTraced.lean`: pass 17/17, 4.71 s, 677 MB. The three measurement modules: see the table.
-Nothing came near 30 minutes or 40 GB.
+**Checks, all re-run from scratch after the amendment.** `lake build ExplicitLean.SimpTrace` with oleans deleted: clean, no
+warnings, 14.63 s, 737 MB. `Fixtures.lean` (33): pass, 4.93 s, 1 511 MB — the one remaining unresolved is the deliberate
+`ctor_eq_inductive` fixture. `python3 -B Experiment/check_simp_trace.py`: `OK: 33 ...`, 9.23 s, and its new assertion (a `rw`
+carrying a `source` must carry a `side`) was verified to fire on a regression. `IsEmptyBasicTraced.lean`: pass 17/17, 4.06 s,
+676 MB. The three measurement modules re-run unchanged — those corpora contain no lemma-headed simproc firings. Nothing came near
+30 minutes or 40 GB.
 
 **Known limitations.**
 
-- **`ite` with a non-ground condition is unresolvable in the spec** (the one fixture unresolved). `(if n = 3 then 1 else 2) = 1`
-  given `h : n = 3` is provable by neither `rfl` nor `decide`, and not replayable by `rw` either — the `Decidable (n = 3)`
-  instance makes the motive ill-typed (verified). The step is emitted with `by:"unresolved:..."` plus side evidence. A fix needs
-  an `eq` variant carrying a lemma name (`if_pos`/`if_neg`) and its condition proof: a spec amendment, hence a coordinator
-  decision.
+- **`reduceCtorEq` on a user inductive is the one remaining unresolved fixture** — its condition proof is a `noConfusion` term no
+  close form describes (above). Resolving it needs a close form for "eliminated by `noConfusion`", which is a further spec
+  question, not a coding one.
 - `eta` is in the spec but **never emitted**: stock `reduceStep` does not perform eta reduction (its `-- TODO: eta reduction` is
   still there in 4.32.2), so emitting it would diverge from stock simp.
 - `simpHaveTelescope` simplifies a `have` telescope as a unit through `MonadSimp SimpM`, which dispatches to stock `simp`; a
@@ -97,7 +123,7 @@ Nothing came near 30 minutes or 40 GB.
 - Disabling the cache costs time on heavily shared terms — not visible at this size (IsEmpty 4.71 s against the reconstruction's
   2.4 s) but worth watching on a large module. A Lean bump needs a re-sync.
 
-**Open questions.** 1. Amend the spec for lemma-backed `eq` steps (`if_pos`-class simprocs)? Without it every `ite` on a
-hypothesis-dependent condition is unresolved — a common Mathlib shape. 2. `exists_prop_congr`-style congruence theorems simplify
+**Open questions.** 1. Should the spec gain a close form for a condition discharged by constructor `noConfusion`? That is the
+only thing keeping `reduceCtorEq` unresolved. 2. `exists_prop_congr`-style congruence theorems simplify
 under their own binders: give the spec a position form, or is the classified unresolved the intended end state? 3. `ctxIndex` is
 `LocalDecl.index` and (per REVIEW-3) is not a `rename_i` argument; worth saying so in the spec.
