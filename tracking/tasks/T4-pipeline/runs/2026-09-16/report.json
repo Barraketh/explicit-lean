@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-16T23:27:09",
+ "generated": "2026-09-16T23:30:03",
  "t1_worktree": "/Users/ptsier/projects/explicit-lean-worktrees/T1-trace-capture",
  "t1_commit": "1d8ba00b6216b1558aabf92e4bc8137410a0013d",
  "t1_branch": "task/T1-trace-capture",
@@ -29,11 +29,11 @@
      "body": "explicit_rw: step 3: lemma `eq_true rightTotal_empty` does not match the subterm at position [0, 1, 1]. Expected ∀ (R : ?m.11 → ?m.12 → Prop) [IsEmpty ?m.12], RightTotal R but the subterm is RightTotal R"
     }
    ],
-   "whole_module_seconds": 2.06,
+   "whole_module_seconds": 2.07,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 0,
-    "compile_seconds": 2.57,
+    "compile_seconds": 2.53,
     "classified_lines": []
    },
    "trace_count": 17,
@@ -46,7 +46,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.07,
+     "compile_seconds": 2.1,
      "attribution": "",
      "detail": ""
     },
@@ -58,7 +58,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.06,
+     "compile_seconds": 2.08,
      "attribution": "",
      "detail": ""
     },
@@ -70,7 +70,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.07,
+     "compile_seconds": 2.03,
      "attribution": "",
      "detail": ""
     },
@@ -82,7 +82,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.11,
+     "compile_seconds": 2.06,
      "attribution": "",
      "detail": ""
     },
@@ -94,7 +94,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.16,
+     "compile_seconds": 2.13,
      "attribution": "",
      "detail": ""
     },
@@ -106,7 +106,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.12,
+     "compile_seconds": 2.14,
      "attribution": "",
      "detail": ""
     },
@@ -118,7 +118,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.1,
+     "compile_seconds": 2.09,
      "attribution": "",
      "detail": ""
     },
@@ -130,7 +130,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.38,
+     "compile_seconds": 2.1,
      "attribution": "",
      "detail": ""
     },
@@ -142,7 +142,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.17,
+     "compile_seconds": 2.09,
      "attribution": "",
      "detail": ""
     },
@@ -154,7 +154,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.22,
+     "compile_seconds": 2.07,
      "attribution": "",
      "detail": ""
     },
@@ -166,7 +166,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.05,
+     "compile_seconds": 2.12,
      "attribution": "",
      "detail": ""
     },
@@ -178,7 +178,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.1,
+     "compile_seconds": 2.08,
      "attribution": "",
      "detail": ""
     },
@@ -202,7 +202,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.1,
+     "compile_seconds": 2.11,
      "attribution": "",
      "detail": ""
     },
@@ -214,7 +214,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.08,
+     "compile_seconds": 2.1,
      "attribution": "",
      "detail": ""
     },
@@ -226,7 +226,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.12,
+     "compile_seconds": 2.11,
      "error": "explicit_rw: step 2: lemma `eq_true leftTotal_empty` does not match the subterm at position [0, 1, 0, 1].",
      "error_body": "explicit_rw: step 2: lemma `eq_true leftTotal_empty` does not match the subterm at position [0, 1, 0, 1]. Expected ∀ (R : ?m.6 → ?m.7 → Prop) [IsEmpty ?m.6], LeftTotal R but the subterm is LeftTotal R",
      "error_line": 122,
@@ -241,7 +241,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.06,
+     "compile_seconds": 2.09,
      "error": "explicit_rw: step 3: lemma `eq_true rightTotal_empty` does not match the subterm at position [0, 1, 1].",
      "error_body": "explicit_rw: step 3: lemma `eq_true rightTotal_empty` does not match the subterm at position [0, 1, 1]. Expected ∀ (R : ?m.11 → ?m.12 → Prop) [IsEmpty ?m.12], RightTotal R but the subterm is RightTotal R",
      "error_line": 125,
@@ -251,10 +251,10 @@
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of IsEmptyBasicTraced: exit 0 in 2.6s",
+    "trace compile of IsEmptyBasicTraced: exit 0 in 2.5s",
     "ignored 17 trace file(s) left by an earlier compile"
    ],
-   "seconds": 40.75
+   "seconds": 40.27
   },
   {
    "module": "Mathlib/Logic/Nontrivial/Defs.lean",
@@ -263,11 +263,11 @@
    "compile_mode": "whole_module",
    "whole_module_exit": 0,
    "whole_module_errors": [],
-   "whole_module_seconds": 2.05,
+   "whole_module_seconds": 2.04,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 0,
-    "compile_seconds": 2.46,
+    "compile_seconds": 2.65,
     "classified_lines": []
    },
    "trace_count": 1,
@@ -286,10 +286,10 @@
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of NontrivialDefsTraced: exit 0 in 2.5s",
-    "ignored 5 trace file(s) left by an earlier compile"
+    "trace compile of NontrivialDefsTraced: exit 0 in 2.6s",
+    "ignored 1 trace file(s) left by an earlier compile"
    ],
-   "seconds": 4.55
+   "seconds": 4.73
   },
   {
    "module": "Mathlib/Logic/Function/Defs.lean",
@@ -298,11 +298,11 @@
    "compile_mode": "whole_module",
    "whole_module_exit": 0,
    "whole_module_errors": [],
-   "whole_module_seconds": 2.22,
+   "whole_module_seconds": 2.23,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 0,
-    "compile_seconds": 2.85,
+    "compile_seconds": 2.82,
     "classified_lines": []
    },
    "trace_count": 2,
@@ -333,10 +333,10 @@
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of FunctionDefsTraced: exit 0 in 2.9s",
+    "trace compile of FunctionDefsTraced: exit 0 in 2.8s",
     "ignored 3 trace file(s) left by an earlier compile"
    ],
-   "seconds": 5.11
+   "seconds": 5.09
   },
   {
    "module": "Mathlib/Logic/ExistsUnique.lean",
@@ -345,11 +345,11 @@
    "compile_mode": "whole_module",
    "whole_module_exit": 0,
    "whole_module_errors": [],
-   "whole_module_seconds": 2.19,
+   "whole_module_seconds": 2.33,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 0,
-    "compile_seconds": 2.64,
+    "compile_seconds": 2.72,
     "classified_lines": []
    },
    "trace_count": 8,
@@ -445,10 +445,10 @@
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of ExistsUniqueTraced: exit 0 in 2.6s",
+    "trace compile of ExistsUniqueTraced: exit 0 in 2.7s",
     "ignored 8 trace file(s) left by an earlier compile"
    ],
-   "seconds": 4.86
+   "seconds": 5.09
   },
   {
    "module": "Mathlib/Logic/Function/Basic.lean",
@@ -488,11 +488,11 @@
      "body": "explicit_rw: step 6: lemma `Function.curry_uncurry` does not match the subterm at position [1, 1, 0, 0, 1]. Expected curry (uncurry ?f) but the subterm is curry (uncurry f) a"
     }
    ],
-   "whole_module_seconds": 2.88,
+   "whole_module_seconds": 2.59,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 1,
-    "compile_seconds": 3.63,
+    "compile_seconds": 3.8,
     "classified_lines": [
      "test/SimpTrace/FunctionBasicTraced.lean:665:52: error: simp_trace unresolved: side condition rewritten to `True` by lemmas whose steps carry no position",
      "test/SimpTrace/FunctionBasicTraced.lean:684:2: error: simp_trace unresolved: side condition rewritten to `True` by lemmas whose steps carry no position",
@@ -512,7 +512,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.63,
+     "compile_seconds": 2.62,
      "attribution": "",
      "detail": ""
     },
@@ -535,7 +535,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.66,
+     "compile_seconds": 2.71,
      "error": "unknown free variable `_fvar.8351.163`",
      "error_body": "unknown free variable `_fvar.8351.163`",
      "error_line": 393,
@@ -550,7 +550,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.55,
+     "compile_seconds": 2.57,
      "attribution": "",
      "detail": ""
     },
@@ -607,7 +607,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.62,
+     "compile_seconds": 2.78,
      "attribution": "",
      "detail": ""
     },
@@ -649,7 +649,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.82,
+     "compile_seconds": 2.69,
      "attribution": "",
      "detail": ""
     },
@@ -661,7 +661,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.73,
+     "compile_seconds": 2.68,
      "attribution": "",
      "detail": ""
     },
@@ -673,7 +673,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.62,
+     "compile_seconds": 2.75,
      "error": "unknown free variable `_fvar.17365.51`",
      "error_body": "unknown free variable `_fvar.17365.51`",
      "error_line": 898,
@@ -737,7 +737,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.55,
+     "compile_seconds": 2.64,
      "error": "explicit_rw: step 6: lemma `Function.curry_uncurry` does not match the subterm at position [1, 1, 0, 0, 1].",
      "error_body": "explicit_rw: step 6: lemma `Function.curry_uncurry` does not match the subterm at position [1, 1, 0, 0, 1]. Expected curry (uncurry ?f) but the subterm is curry (uncurry f) a",
      "error_line": 985,
@@ -752,7 +752,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.49,
+     "compile_seconds": 2.64,
      "attribution": "",
      "detail": ""
     },
@@ -764,7 +764,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.64,
+     "compile_seconds": 2.59,
      "attribution": "",
      "detail": ""
     },
@@ -776,7 +776,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.5,
+     "compile_seconds": 2.64,
      "attribution": "",
      "detail": ""
     },
@@ -788,17 +788,17 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.55,
+     "compile_seconds": 2.58,
      "attribution": "",
      "detail": ""
     }
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of FunctionBasicTraced: exit 1 in 3.6s",
+    "trace compile of FunctionBasicTraced: exit 1 in 3.8s",
     "ignored 28 trace file(s) left by an earlier compile"
    ],
-   "seconds": 43.49
+   "seconds": 43.89
   },
   {
    "module": "Mathlib/Logic/Basic.lean",
@@ -820,11 +820,11 @@
      "body": "explicit_rw: step 1: `unfold Ne` was applied where the head constant is `Iff`."
     }
    ],
-   "whole_module_seconds": 2.53,
+   "whole_module_seconds": 2.66,
    "transcription": {
     "transcription_ok": true,
     "compile_exit": 1,
-    "compile_seconds": 3.66,
+    "compile_seconds": 3.9,
     "classified_lines": [
      "test/SimpTrace/LogicBasicTraced.lean:553:21: error: simp_trace unresolved: transported proof term at a rewritten proposition; positions checked, proof identity not",
      "test/SimpTrace/LogicBasicTraced.lean:553:21: error: simp_trace unresolved: transported proof term at a rewritten proposition; positions checked, proof identity not",
@@ -848,7 +848,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.53,
+     "compile_seconds": 2.64,
      "attribution": "",
      "detail": ""
     },
@@ -860,7 +860,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.69,
+     "compile_seconds": 2.63,
      "attribution": "",
      "detail": ""
     },
@@ -872,7 +872,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.57,
+     "compile_seconds": 2.63,
      "attribution": "",
      "detail": ""
     },
@@ -906,7 +906,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.57,
+     "compile_seconds": 2.64,
      "error": "explicit_rw: step 1: lemma `eq_true cast_heq` does not match the subterm at position [].",
      "error_body": "explicit_rw: step 1: lemma `eq_true cast_heq` does not match the subterm at position []. Expected ∀ (h : ?m.19 = ?m.20) (a : ?m.19), cast h a ≍ a but the subterm is cast e b ≍ b",
      "error_line": 498,
@@ -944,7 +944,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.53,
+     "compile_seconds": 2.62,
      "attribution": "",
      "detail": ""
     },
@@ -956,7 +956,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.52,
+     "compile_seconds": 2.62,
      "attribution": "",
      "detail": ""
     },
@@ -979,7 +979,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.69,
+     "compile_seconds": 2.62,
      "attribution": "",
      "detail": ""
     },
@@ -991,7 +991,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.91,
+     "compile_seconds": 2.61,
      "attribution": "",
      "detail": ""
     },
@@ -1014,7 +1014,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.83,
+     "compile_seconds": 2.63,
      "attribution": "",
      "detail": ""
     },
@@ -1037,7 +1037,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.83,
+     "compile_seconds": 2.63,
      "attribution": "",
      "detail": ""
     },
@@ -1061,7 +1061,7 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "compile_failed",
-     "compile_seconds": 2.76,
+     "compile_seconds": 2.64,
      "error": "explicit_rw: step 1: `unfold Ne` was applied where the head constant is `Iff`.",
      "error_body": "explicit_rw: step 1: `unfold Ne` was applied where the head constant is `Iff`.",
      "error_line": 920,
@@ -1196,7 +1196,7 @@
      "alone_on_line": false,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.65,
+     "compile_seconds": 2.61,
      "attribution": "",
      "detail": ""
     },
@@ -1208,20 +1208,20 @@
      "alone_on_line": true,
      "long_line_waiver": false,
      "status": "replayed",
-     "compile_seconds": 2.68,
+     "compile_seconds": 2.64,
      "attribution": "",
      "detail": ""
     }
    ],
    "log": [
     "check_transcription.py: exit 0 in 0.0s",
-    "trace compile of LogicBasicTraced: exit 1 in 3.7s",
+    "trace compile of LogicBasicTraced: exit 1 in 3.9s",
     "ignored 47 trace file(s) left by an earlier compile"
    ],
-   "seconds": 41.01
+   "seconds": 40.77
   }
  ],
- "seconds": 139.81,
+ "seconds": 139.89,
  "t1_dirty_after": false,
  "t2_dirty_after": true
 }

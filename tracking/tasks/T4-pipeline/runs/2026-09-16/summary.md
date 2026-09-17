@@ -1,15 +1,15 @@
 # End-to-end replay summary
 
-Generated 2026-09-16T23:27:09.
+Generated 2026-09-16T23:30:03.
 T1 `task/T1-trace-capture` at `1d8ba00b6216b1558aabf92e4bc8137410a0013d`; T2 `task/T2-explicit-rw` at `7ccb98b25d72c2e2ec0f25a96e18bc5e880c9cd3` (dirty).
 
 | module | sites | replayed | unresolved | render_failed | compile_failed | mode | s |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `Logic/IsEmpty/Basic.lean` | 17 | 15 | 0 | 0 | 2 | per_site | 41 |
+| `Logic/IsEmpty/Basic.lean` | 17 | 15 | 0 | 0 | 2 | per_site | 40 |
 | `Logic/Nontrivial/Defs.lean` | 1 | 1 | 0 | 0 | 0 | whole_module | 5 |
 | `Logic/Function/Defs.lean` | 2 | 1 | 0 | 1 | 0 | whole_module | 5 |
 | `Logic/ExistsUnique.lean` | 8 | 8 | 0 | 0 | 0 | whole_module | 5 |
-| `Logic/Function/Basic.lean` | 23 | 9 | 1 | 8 | 5 | per_site | 43 |
+| `Logic/Function/Basic.lean` | 23 | 9 | 1 | 8 | 5 | per_site | 44 |
 | `Logic/Basic.lean` | 31 | 11 | 0 | 18 | 2 | per_site | 41 |
 | **total** | **82** | **45** | **1** | **27** | **9** | | |
 
