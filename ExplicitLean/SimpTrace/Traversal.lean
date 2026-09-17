@@ -937,7 +937,9 @@ partial def processCongrHypothesisT (ref : TraceRef) (pos : Pos)
       | some p => pure p
       | none =>
         ref.modify (·.markUnresolved
-          s!"congruence theorem `{thmName}` simplifies a subterm that is not a child of the application (no position in the spec's convention)")
+          s!"congruence theorem `{thmName}` rewrote a subterm that is not a \
+child of the application; the node's whole change is recorded as one `change` \
+step rather than as the individual rewrites")
         pure pos
     let r ← simpT ref hpos lhs
     let rhs := hType.appArg!
