@@ -28,25 +28,87 @@ it. Steps apply in order; each position is relative to the result of the
 previous step. There is no fallback, no search and no retry at other positions:
 every failure names the step index and the reason.
 
-## Step forms
+## Step forms — the complete list
 
-| Form                              | Meaning                                         |
-| --------------------------------- | ----------------------------------------------- |
-| `e at [..]`                       | rewrite left-to-right with the equation/iff `e`  |
-| `← e at [..]`                     | rewrite right-to-left                            |
-| `unfold c at [..]`                | delta-unfold the constant `c` (definitional)     |
-| `beta at [..]`                    | beta-reduce the subterm (definitional)           |
-| `eta at [..]`                     | eta-reduce the subterm (definitional)            |
-| `proj at [..]`                    | reduce a structure projection (definitional)     |
-| `zeta at [..]`                    | replace `let x := v; b` by `b[v/x]` (the only    |
-|                                   | step that destroys a `let`)                      |
-| `change t at [..]`                | replace by the defeq term `t` (definitional)     |
-| `eq (lhs = rhs) by rfl at [..]`   | prove the equation with `rfl`/`decide`, rewrite  |
-| `intro_ctx h at [..]`             | recognised, **not implemented**; fails by name   |
+Every step kind `tracking/SIMP-TRACE-SPEC.md` defines has exactly one rendering
+here. A generator author should not need to read the parser; if a construct is
+not in this table, it has no form (see "Not expressible" below).
+
+| Form                                   | Spec kind / field                       |
+| -------------------------------------- | --------------------------------------- |
+| `e at [..]`                            | `rw`, `dir: "fwd"`                      |
+| `← e at [..]`                          | `rw`, `dir: "rev"`                      |
+| `e a b at [..]`                        | `rw` with `args: ["a", "b"]`            |
+| `e at [..] with [p, ...]`              | `rw` with `side`: one side proof per    |
+|                                        | hypothesis, **in order**                |
+| `eq_true h at [..]`                    | `rw` with `prop: "true"`                |
+| `eq_false h at [..]`                   | `rw` with `prop: "false"`               |
+| `unfold c at [..]`                     | `unfold`                                |
+| `beta at [..]`                         | `beta`                                  |
+| `eta at [..]`                          | `eta`                                   |
+| `proj at [..]`                         | `proj`                                  |
+| `zeta at [..]`                         | `zeta` (the only step that kills a `let`)|
+| `iota at [..]`                         | `iota` (**one** matcher/recursor step)  |
+| `change t at [..]`                     | `change`, from its `to` field           |
+| `eq (lhs = rhs) by rfl at [..]`        | `eq`, `by: "rfl"`                       |
+| `eq (lhs = rhs) by decide at [..]`     | `eq`, `by: "decide"`                    |
+| `congr i [nested steps] at [..]`       | `congr` with `arg: i` and its `steps`   |
+| `... at h`                             | location `{"hyp": "h"}`                 |
+| `... then <side proof>`                | the location's `close`                  |
+
+### Side proofs — `with [...]` and `then`
+
+Both take the same closed, **recursive** grammar:
+
+| Side proof                | Spec `close.by` / use                              |
+| ------------------------- | -------------------------------------------------- |
+| `rfl`                     | `"rfl"`                                            |
+| `decide`                  | `"decide"`                                         |
+| `omega`                   | `"omega"` (a decision procedure, not simp family)  |
+| `nofun`                   | `"nofun"` (impossible constructor equation)        |
+| `exact t`                 | `"true_intro"` → `exact True.intro`;                |
+|                           | `"assumption:n"` → `exact n`;                       |
+|                           | `"absurd:h"` → `exact h.elim`                       |
+| `intro x y ; <side proof>` | a side trace with `intros` — needed whenever the   |
+|                           | hypothesis is implication-shaped, as `ite_congr`   |
+|                           | and `dite_congr` produce                            |
+| `explicit_rw [...] (then <side proof>)?` | a side trace with its own `steps`     |
+
+`then` applies to the goal, so a trace that rewrites a hypothesis puts its
+closer on the next line — which is where `absurd:<hyp>` lands.
+
+### Naming an inaccessible hypothesis
+
+The spec's `local` field may report `inaccessible: true` with a `ctxIndex`; the
+recorded `name` is then a display form such as `a✝`, which cannot be written.
+The convention is **ordinary Lean**: emit `rename_i` on the line before
+`explicit_rw`. `rename_i` names the last *n* inaccessible hypotheses in context
+order, so a generator names every inaccessible up to and including the one it
+needs, and then uses its chosen name:
+
+```
+rename_i h₁ h₂        -- two inaccessibles; h₁ is the earlier
+explicit_rw [h₁ at [0, 1, 0, 1]]
+```
+
+This needs no `explicit_rw` syntax and is why none exists.
+
+### Not expressible, deliberately
+
+| Construct            | Why                                                 |
+| -------------------- | --------------------------------------------------- |
+| `intro_ctx h at [..]` | Recognised so a trace fails **by name**, but not    |
+|                      | implemented: contextual rewriting changes what is in |
+|                      | scope for later positions, which this tactic's       |
+|                      | single-location model does not represent.            |
+| `at *`               | Positions are relative to one location. Emit one     |
+|                      | `explicit_rw` per location.                          |
 
 `e` is an ordinary term, so explicit arguments (`baz a b`), local hypotheses and
 side-condition proofs are written as usual and elaborated as usual: implicits,
-universes and instances are recovered by elaboration and unification.
+universes and instances are recovered by elaboration and unification. Terms are
+restricted to the whitelist grammar below; a `pp.all` term from the recorder
+(universe annotations, `nat_lit`) must be re-rendered into it.
 
 Positions are raw child indices, *not* `conv`'s `arg n` numbering: `conv`'s
 `arg` counts explicit arguments, while `0`/`1` here are the `fn`/`arg` children

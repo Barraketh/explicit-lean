@@ -72,27 +72,29 @@ def run_escape_sweep(full: bool = False) -> tuple[int, str, float]:
     if not full:
         slots = {k: v for k, v in list(slots.items())[:SWEEP_SLOTS_DEFAULT]}
 
-    header = ("import ExplicitLean.ExplicitRw\n"
-              "import Mathlib.Data.Set.Basic\n"
-              "set_option linter.unusedVariables false\n"
-              "example (n a b : Nat) (f g : Nat → Nat) (s t : Set Nat) (p : Prop)\n"
-              "    (h : a = b) : True := by\n")
-
     start = time.monotonic()
     escapes = benigns = esc_bad = ben_bad = 0
     parse_rejected = elab_rejected = 0
     failures: list[str] = []
     for kind in ("escape", "benign"):
         for term in spec[kind]:
-            for slot_name, tmpl in slots.items():
-                body = "  " + tmpl.replace("{T}", term) + "\n  trivial\n"
+            for slot_name, slot in slots.items():
+                # Each slot brings its own goal, so a probe reaches the term
+                # rather than dying on a position the goal cannot support. The
+                # step is the file's last tactic: a trailing one would be
+                # absorbed as an argument, since application spans lines.
+                src = ("import ExplicitLean.ExplicitRw\n"
+                       "set_option linter.unusedVariables false\n"
+                       "example (n a b : Nat) (f' g : Nat → Nat) (p : Prop)\n"
+                       f"    (h : a = b) {slot['binders']} : {slot['goal']} := by\n"
+                       "  " + slot["tmpl"].replace("{T}", term) + "\n")
                 with tempfile.NamedTemporaryFile("w", suffix=".lean", delete=False,
                                                  dir=str(REPO)) as fh:
-                    fh.write(header + body)
+                    fh.write(src)
                     probe = Path(fh.name)
                 try:
-                    _, out, _ = run(["lake", "env", "lean",
-                                     str(probe.relative_to(REPO))])
+                    code, out, _ = run(["lake", "env", "lean",
+                                        str(probe.relative_to(REPO))])
                 finally:
                     probe.unlink(missing_ok=True)
                 parsed_off = any(m in out for m in (
@@ -102,20 +104,18 @@ def run_escape_sweep(full: bool = False) -> tuple[int, str, float]:
                     escapes += 1
                     if parsed_off:
                         parse_rejected += 1
-                    elif term in POST_PARSE_ESCAPES and out.strip():
-                        # Two probes cannot be stopped by the parser: `admit` is
-                        # a bare identifier that parses and then fails to
-                        # resolve, and `$x` is an antiquotation the tactic names
-                        # itself. They are listed explicitly so that anything
-                        # *else* surviving the parser is a failure, rather than
-                        # being waved through as "rejected somehow".
+                    elif term in POST_PARSE_ESCAPES and code != 0 and any(
+                            m in out for m in ("explicit_rw:", "Unknown identifier")):
+                        # Rejected after the parser, and *attributably*: the
+                        # message must name this tactic or the unresolved
+                        # identifier, and the probe must exit non-zero. Without
+                        # that, an unrelated error would be credited as a refusal.
                         elab_rejected += 1
                     else:
                         esc_bad += 1
-                        why = "no error at all" if not out.strip() else \
-                              "survived the parser"
-                        failures.append(f"ESCAPE {why}: {term!r} "
-                                        f"in slot {slot_name}")
+                        why = ("no error at all" if not out.strip()
+                               else "survived the parser")
+                        failures.append(f"ESCAPE {why}: {term!r} in slot {slot_name}")
                 else:
                     benigns += 1
                     if parsed_off:

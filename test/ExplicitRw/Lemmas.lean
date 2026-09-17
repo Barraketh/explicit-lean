@@ -254,4 +254,22 @@ theorem side_dite_congr (c : Prop) [Decidable c] (x u : c → Nat) (y : ¬c → 
 theorem side_nested_trace (a b c : Nat) (h : a = b) (hc : b = c) : a = c := by
   explicit_rw [h at [0, 1]] then explicit_rw [hc at [0, 1]] then rfl
 
+/-! ## Inaccessible hypotheses are named with `rename_i`
+
+The spec's `local` field can report `inaccessible: true` with a `ctxIndex`, and
+the recorded `name` is then a display form such as `a✝` that cannot be written.
+The convention is ordinary Lean: `rename_i` names the last *n* inaccessible
+hypotheses in context order, so a generator names every inaccessible up to and
+including the one it needs. `explicit_rw` needs no syntax for this, which is why
+it has none.
+-/
+
+theorem inaccessible_via_rename_i (a b c : Nat) : a = b → b = c → a + 0 = b := by
+  intro _ _
+  -- Two inaccessibles; the step below needs the *earlier* one, so both are named.
+  rename_i h₁ h₂
+  explicit_rw [h₁ at [0, 1, 0, 1]]
+  guard_target =ₛ b + 0 = b
+  rfl
+
 end ExplicitRwTest.Lemmas
