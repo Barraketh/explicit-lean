@@ -43,16 +43,14 @@ terse completion notices, then makes merge and next-dispatch decisions.
   evidence. T9 is diagnosing an authenticated source-site identity contract.
   T1 must capture the two attribute-line sites and T4 must refuse missing,
   extra, duplicate or mismatched identities before either branch can advance.
-- **T9 identity decision:** adopt `simp-trace-v2`. T1 derives a canonical
-  manifest from uninstrumented source bytes and emits original UTF-8 ranges,
-  exact call/source/manifest hashes and complete invocation ordinals. T4 proves
-  the full bijection before rendering; generated-copy positions and filenames
-  are diagnostic only. Implement T1 producer and T4 consumer in parallel with
-  narrow ownership, then review each and rerun the full gate.
-- **T10 v2 conformance vectors:** an independent lane is building canonical
-  UTF-8 range/hash/invocation fixtures and adversarial mutations without using
-  either T1 or T4 implementation, so producer and consumer share a neutral
-  compatibility gate.
+- **T9 identity decision (simplified by user direction):** keep
+  `simp-trace-v2`, but the environment is not adversarial. T1 emits module,
+  original character range, exact call text, site ordinal and complete
+  invocation ordinals. T4 checks the complete bijection before rendering.
+  Hashes, nonces, byte authentication and forgery tests are out of scope.
+- **T10 hash conformance lane: CANCELLED as unnecessary.** Ordinary fixtures
+  for missing/extra/duplicate/range/invocation mistakes belong in T1/T4; no
+  neutral cryptographic vector suite is needed.
 - **Named `zeta` decision:** T1's local-let fvar delta is represented as an
   existing `change` step with an explicit `pp.all` `to` value. Plain `letE`
   zeta remains `zeta`. Do not broaden T2's zeta semantics or add a name-based
@@ -65,17 +63,16 @@ terse completion notices, then makes merge and next-dispatch decisions.
   `first` dispatch or goal fingerprints. Non-tail continuations may be copied
   only when simp-free and scope/order preserving; otherwise refuse the site.
   T1 must emit the specified ordinals before T4 implementation begins.
-- **T7 declaration-oracle design: COMPLETE.** Commit `3615686` specifies a
-  source-pair gate with a stock companion carrying the same ExplicitRw import.
-  Reuse the existing oracle and strict parser unchanged; `replayed` requires
-  compile plus oracle success. Whole-module failures remain module-scoped and
-  per-site attribution requires an isolated successful compile. Implement only
-  after T4's current merge gate passes.
+- **T7 declaration-oracle design: optional diagnostic.** The source-pair design
+  remains available for focused semantic debugging, but the user clarified
+  that acceptance is source-preserving translation plus compilation of the
+  rewritten dependency tree. Do not require per-site hashes or oracle runs.
 - **T5 cone preflight review 3: READY.** The accepted contract has 91 sites,
   seven Option shapes, 69 modules / 134 edges in the complete all-import
   header closure, a 61-module public-export diagnostic subset, and exactly one
-  non-target bridge (`Relator -> Function.Defs`). The runner must stage/hash
-  the complete closure and pass strict root, lint and T7 oracle gates.
+  non-target bridge (`Relator -> Function.Defs`). The runner must stage the
+  complete closure, prove strict-root resolution, lint replacements and compile
+  the translated dependency order. Hashes/oracle runs are optional diagnostics.
 
 After a slot completes, reuse it immediately for the next independent review or
 fix. The coordinator alone integrates accepted branches and updates this plan.

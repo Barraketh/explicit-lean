@@ -1,5 +1,11 @@
 # T9: authenticated source-site identity
 
+> Superseded by the user's non-adversarial-environment direction on
+> 2026-09-17. Keep the site-bijection diagnosis and source-range/call-text
+> mapping, but hashes, nonces, byte authentication and forgery tests are not
+> implementation requirements. The current contract is
+> `tracking/SIMP-TRACE-SPEC.md`.
+
 ## Finding
 
 The T4 review-4 failure is a producer/consumer contract failure, not a Lean

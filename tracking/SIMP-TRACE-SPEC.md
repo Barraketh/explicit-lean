@@ -1,11 +1,12 @@
 # simp trace format v2 (interface between trace capture and positional replay)
 
-Amended 2026-09-17 after T4 final review 4: every trace is authenticated to an
-exact executable call in the uninstrumented pinned source. The producer emits
-a canonical site manifest and the consumer proves a complete bijection before
-rendering. Generated-copy positions and filenames are provenance only. The
-full field contract and adversarial fixtures are in
-`tracking/tasks/T9-site-trace-identity/DESIGN.md`.
+Amended 2026-09-17 after T4 final review 4: every trace is tied to an exact
+executable call in the uninstrumented pinned source. The producer emits a site
+manifest and the consumer proves a complete bijection before rendering.
+Generated-copy positions and filenames are diagnostic only. The environment is
+not adversarial: cryptographic hashes, nonces and forgery resistance are not
+part of this contract. The rejected stronger design is preserved historically
+in `tracking/tasks/T9-site-trace-identity/DESIGN.md`.
 
 Amended 2026-09-16 after T4 run 1: `invocation`/`invocations` for sites executed
 more than once; rendering rule in PLAN.md step 3.
@@ -26,18 +27,11 @@ One trace per executed simp call. JSON object (identity fields are mandatory):
 ```
 { "schema": "simp-trace-v2",
   "modulePath": "Mathlib/Logic/IsEmpty/Basic.lean",
-  "sourceSha256": "<sha256 of exact original source bytes>",
-  "manifestSha256": "<sha256 of canonical site manifest>",
   "site": { "siteOrdinal": <source-order diagnostic ordinal>,
-            "startByte": <inclusive UTF-8 byte offset>,
-            "endByte": <exclusive UTF-8 byte offset>,
             "startChar": <inclusive Unicode scalar offset>,
             "endChar": <exclusive Unicode scalar offset>,
-            "callText": "<exact original simp syntax text>",
-            "callSha256": "<sha256 of callText UTF-8 bytes>" },
+            "callText": "<exact original simp syntax text>" },
   "occurrence": "<diagnostic getRef position in generated traced copy>",
-  "tracedSourceSha256": "<generated traced-copy hash>",
-  "tracedRange": {"startByte": <inclusive>, "endByte": <exclusive>},
   "invocation": <k>, "invocations": <n> (a source site executed n times, e.g. under `t <;> simp`
                                         or inside a tactic run per goal, produces n traces numbered
                                         in execution order; the renderer decides the per-goal form),
@@ -47,14 +41,14 @@ One trace per executed simp call. JSON object (identity fields are mandatory):
                    "close": null | {"by": "rfl" | "true_intro" | "assumption:<name>" | "absurd:<hyp name>" | "decide" | "nofun"} } ] }
 ```
 
-The producer derives the site manifest from the uninstrumented source bytes,
+The producer derives the site manifest from the uninstrumented source text,
 then generates the traced copy. Every executable site must be present and
 replaced exactly once. The consumer recomputes the source manifest and requires
-an exact bijection by module path, source/manifest hashes, byte range, exact
-call slice/hash, and complete invocation ordinals. Any missing, extra,
-duplicate, malformed, stale or mismatched record rejects the whole module as
-`identity_failed` before rendering; it contributes zero replayed sites. Never
-map by filename, list index, line number, generated position, or nearest call.
+an exact bijection by module path, character range, exact call slice, site
+ordinal and complete invocation ordinals. Any missing, extra, duplicate,
+malformed or mismatched record rejects the whole module as `identity_failed`
+before rendering; it contributes zero replayed sites. Never map by filename,
+list index, line number, generated position, or nearest call.
 `"nofun"` closes a goal of the form `c₁ ... = c₂ ... → False` (distinct constructors) or
 any goal refutable by empty pattern matching; replay is `exact nofun`. It is the close
 form for `reduceCtorEq`-style side conditions.
