@@ -279,10 +279,15 @@ structure SolvedStep where
   deriving Inhabited
 
 /-- Repeatedly bridge definitional gaps until `target` is reachable, up to a
-small bound so a non-converging search fails loudly rather than hanging. -/
+small bound.  Exhausting the bound throws a distinct error: reporting an empty
+result here would surface later as "cannot locate recorded subterm" and send a
+reader looking for a missing term rather than a non-converging reduction. -/
 partial def collectBridges (running target : Expr) (simpFVars : Array FVarId)
     (ctxDepth : Nat) (fuel : Nat := 32) : MetaM (Array Bridge) := do
-  if fuel == 0 then return #[]
+  if fuel == 0 then
+    throwError "simp_trace: definitional bridge search exceeded its bound of 32 \
+      reductions without reaching the recorded subterm\n\
+      target:  {target}\nrunning: {running}"
   if !(findOccurrences running target simpFVars ctxDepth).isEmpty then return #[]
   match ← findBridge? running target simpFVars with
   | none => return #[]

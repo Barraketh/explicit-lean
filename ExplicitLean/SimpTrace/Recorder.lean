@@ -212,24 +212,35 @@ def instrumentD (ref : RecorderRef) (p : Simp.DSimproc) : Simp.DSimproc :=
     | .continue none => pure ()
     return stepResult
 
-/-- Name how a side condition closed, for the sub-trace's `close`. -/
+/--
+Describe how a side condition closed, and reconcile that with the steps the
+recorder captured, so a replayer is never told to do the work twice.
+
+If the proof is a bare hypothesis, the discharge is that `assumption` and any
+recorded steps are dead (simp explored, then used the hypothesis): drop them.
+If steps did reduce the goal, they are the discharge and `close` is the closing
+form they end in.
+-/
 private def describeProof (proof : Expr) (nested : Array RawStep) :
-    Simp.SimpM (Option String) := do
+    Simp.SimpM (Option String × Array RawStep) := do
   match proof with
   | .fvar fvarId =>
     let n := (← fvarId.getDecl).userName
-    return some s!"assumption:{n}"
+    -- The hypothesis alone proves it; recorded steps did not contribute.
+    return (some s!"assumption:{n.eraseMacroScopes}", #[])
   | _ =>
     if nested.isEmpty then
       -- No recorded rewriting: the discharger closed it definitionally or by a
       -- decision procedure.  Distinguish the common shapes.
-      if proof.isAppOf ``of_eq_true then return some "rfl"
-      else if proof.isAppOf ``eq_true_of_decide then return some "decide"
+      if proof.isAppOf ``of_eq_true then return (some "rfl", nested)
+      else if proof.isAppOf ``eq_true_of_decide then return (some "decide", nested)
       else if proof.isAppOf ``trivial || proof.isAppOf ``True.intro then
-        return some "trivial"
-      else return some "unknown"
+        return (some "true_intro", nested)
+      else return (some "unknown", nested)
     else
-      return some "rfl"
+      -- The recorded steps reduced the side goal to `True`; closing it is then
+      -- `True.intro`, and the steps are the actual discharge.
+      return (some "true_intro", nested)
 
 /-- Instrument the discharger: each call is one side condition.  Steps performed
 by a nested simp inside the discharger are captured into the side frame. -/
@@ -250,8 +261,8 @@ def instrumentDischarge (ref : RecorderRef) (d : Simp.Discharge) : Simp.Discharg
         return { st with
           before := ← instantiateMVars st.before
           after := ← instantiateMVars st.after }
-      let by_ ← describeProof proof nested
-      let sideRec : RawSide := { goal := e, steps := nested, by_ }
+      let (by_, keptSteps) ← describeProof proof nested
+      let sideRec : RawSide := { goal := e, steps := keptSteps, by_ }
       ref.modify fun (s : RecorderState) =>
         { s with pendingSide := s.pendingSide.push sideRec }
       return some proof
