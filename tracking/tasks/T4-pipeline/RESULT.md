@@ -13,18 +13,24 @@ REVIEW-1/2 fixes in `Experiment/pipeline/`:
 - v1 traces and any incomplete, malformed, extra, duplicate, range, call, or
   invocation-mismatched v2 set fail closed as `identity_failed` before
   rendering or output writes; machine-readable categories cover each failure.
+- Each module now gets a fresh T4-owned `trace-runs/<name>-*/stage`, `raw`, and
+  `final` tree. Staged `=>trace` paths target run-local raw files; the T1
+  environment compiles the staged copy, the explicit-path finalizer writes
+  final v2 records, and T4 consumes only that final directory.
 
 ## Checks
 
 | command | result |
 | --- | --- |
-| `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 224 checks, 2 s |
+| `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 240 checks, 2 s |
 | focused marker/lint repros and `git diff --check` | PASS |
 
-The six-module harness was not rerun: T1 is dirty at `0b4fd28` with
-uncommitted producer/sidecar changes, and v2 output is not clean and available
-for all six modules. No six-module result is claimed here; the prior clean
-baseline is not current evidence.
+The six-module harness was not rerun: the fixed explicit-path T1 finalizer CLI
+is not committed on the available T1 tip, so only focused lifecycle mocks ran.
+Those mocks verify shared T1 output/status preservation, raw-v1/final-v2
+separation, repeat-run isolation, and missing-final fail-closed behavior. No
+six-module result is claimed here; the prior clean baseline is not current
+evidence.
 
 Known limitations: per-branch `<;>` calls remain explicitly refused pending the
 later per-branch rendering task; T1 currently has two newly visible attributed
