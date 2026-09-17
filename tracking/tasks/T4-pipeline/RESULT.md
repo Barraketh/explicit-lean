@@ -17,18 +17,23 @@ REVIEW-1/2 fixes in `Experiment/pipeline/`:
   `final` tree. Staged `=>trace` paths target run-local raw files; the T1
   environment compiles the staged copy, the explicit-path finalizer writes
   final v2 records, and T4 consumes only that final directory.
+- Publications are cleared per module before a run and promoted atomically only
+  when every site replays; identity, render, unresolved, and compile failures
+  leave no stale translated module or tied success marker.
 
 ## Checks
 
 | command | result |
 | --- | --- |
-| `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 241 checks, 5 s |
+| `python3 -B Experiment/pipeline/check_pipeline.py` | PASS, 246 checks, 4 s |
 | focused marker/lint repros and `git diff --check` | PASS |
+| fresh `--module all` gate | PASS, 7/7 identity gates, 91/91 sites |
 
-T1/main is clean at `6313029` and T2 is clean at `8b57c4a`; the fresh run left
+T1/main was clean at `f8219ef` and T2 was clean at `8b57c4a`; the fresh run left
 both statuses and T1 shared outputs unchanged. All seven configured modules
 passed identity (`91/91` sites, `renderAttempted=true`). Replay totals were
-`56 replayed`, `1 unresolved`, `18 render_failed`, and `16 compile_failed`.
+`56 replayed`, `1 unresolved`, `18 render_failed`, and `16 compile_failed`;
+only the two fully successful modules were atomically published.
 The bounded `OptionBasicTraced` mapping added the requested seventh module.
 
 Known limitations: per-branch `<;>` calls remain explicitly refused pending the
