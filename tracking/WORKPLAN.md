@@ -9,11 +9,13 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 9 in progress | task/T1-trace-capture | R9 merge gate failed: 48/78 traces replay; 4 critical (side goal recorded as subterm; `name` holds raw syntax; inaccessible tokens; off-by-one position), 3 major, 1 minor |
 | T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 8 in progress | task/T2-explicit-rw | R8: no soundness defects; 4 major in gates/docs (axiom audit, sweep slots, rename_i docs, forms table) |
 | T3-compliance | Rewrite two `dsimp` overrides; simp-family lint for overrides and generated regions | none | **merged** (af33e32) | task/T3-compliance | R3: NO DEFECTS |
-| T4-pipeline | Per-module driver: transcribe, trace, render `explicit_rw` source with original comment, splice, compile in T2 worktree, per-site report attributed to a side | T1, T2 worktrees (read-only) | dispatched | task/T4-pipeline | |
+| T4-pipeline | Per-module driver: transcribe, trace, render `explicit_rw` source with original comment, splice, compile in T2 worktree, per-site report attributed to a side | T1, T2 worktrees (read-only) | implemented; review round 1 running | task/T4-pipeline | R1 pending |
 | T5-cone | Run T4 on the seven-module cone (91 calls); record per-call outcomes | T0, T4 | planned | | |
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
 
 Log (newest first):
+
+- 2026-09-16: T4 harness built (179 unit checks). First six-module run at T1 1d8ba00 / T2 7ccb98b: 82 sites, 45 replayed, 1 unresolved, 27 render_failed, 9 compile_failed; attribution t1 21, harness 16, t2 0. Largest blocks: 16 sites executed more than once (`t <;> simp`), 11 `rw.name` holding raw syntax (T1 R9 defect), 4 quantified `prop` steps without `args`. Spec gains `invocation`/`invocations`; PLAN gains the per-goal rendering rule. T4 review round 1 dispatched.
 
 - 2026-09-16: user decision after slow convergence: merge gate is now no critical/major (minors tracked), reviews incremental after round 2, end-to-end replay is the primary test (COORDINATION.md e2ffee1). T4 pipeline harness dispatched driving the T1 and T2 worktrees read-only. T1 round 9: mechanical replay 48/78, all failures T1-side (side goal recorded as the simproc subterm, raw syntax in `name`, inaccessible tokens, one off-by-one position); fix dispatched. T2 round 8: no soundness defects; gate/doc majors in fix.
 
