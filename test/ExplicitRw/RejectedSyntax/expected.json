@@ -1,7 +1,8 @@
 {
-  "then_simp.lean": "expected 'assumption', 'decide', 'exact' or 'rfl'",
-  "then_simp_all.lean": "expected 'assumption', 'decide', 'exact' or 'rfl'",
-  "then_seq.lean": "expected 'assumption', 'decide', 'exact' or 'rfl'",
-  "then_trivial.lean": "expected 'assumption', 'decide', 'exact' or 'rfl'",
-  "eq_by_simp.lean": "expected 'decide' or 'rfl'"
+  "then_simp.lean": "expected 'decide', 'exact' or 'rfl'",
+  "then_simp_all.lean": "expected 'decide', 'exact' or 'rfl'",
+  "then_seq.lean": "expected 'decide', 'exact' or 'rfl'",
+  "then_trivial.lean": "expected 'decide', 'exact' or 'rfl'",
+  "eq_by_simp.lean": "expected 'decide' or 'rfl'",
+  "then_assumption.lean": "expected 'decide', 'exact' or 'rfl'"
 }

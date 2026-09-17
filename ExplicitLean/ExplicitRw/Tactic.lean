@@ -37,8 +37,11 @@ every failure names the step index and the reason.
 | `beta at [..]`                    | beta-reduce the subterm (definitional)           |
 | `eta at [..]`                     | eta-reduce the subterm (definitional)            |
 | `proj at [..]`                    | reduce a structure projection (definitional)     |
+| `zeta at [..]`                    | replace `let x := v; b` by `b[v/x]` (the only    |
+|                                   | step that destroys a `let`)                      |
 | `change t at [..]`                | replace by the defeq term `t` (definitional)     |
 | `eq (lhs = rhs) by rfl at [..]`   | prove the equation with `rfl`/`decide`, rewrite  |
+| `intro_ctx h at [..]`             | recognised, **not implemented**; fails by name   |
 
 `e` is an ordinary term, so explicit arguments (`baz a b`), local hypotheses and
 side-condition proofs are written as usual and elaborated as usual: implicits,
@@ -51,12 +54,16 @@ of `Expr.app`, so `f a b` has `b` at `[1]` and `a` at `[0, 1]`.
 ## Closing form
 
 `explicit_rw [...] then rfl` runs `rfl` on the remaining goal after the last
-step. The closer is a **closed enumeration** — `rfl`, `decide`, `assumption`,
-`exact <term>` — and `eq ... by` likewise accepts only `rfl` or `decide`. Omit
-the clause to leave the goal open. `trivial` is excluded on purpose: it is a
-macro that tries several tactics in turn, which is search; write
-`exact True.intro` instead. `rfl` is the ordinary `rfl` tactic (`Eq`/`Iff`/`HEq`
-reflexivity and `@[refl]` lemmas), not a simp-backed one.
+step. The closer is a **closed enumeration** — `rfl`, `decide`, `exact <term>` —
+and `eq ... by` likewise accepts only `rfl` or `decide`. Omit the clause to leave
+the goal open. `trivial` and bare `assumption` are excluded because both search
+where the spec recorded an exact choice; the spec's `true_intro`,
+`assumption:<name>` and `absurd:<hyp>` all render as `exact <term>`. `rfl` is the
+ordinary `rfl` tactic (`Eq`/`Iff`/`HEq` reflexivity and `@[refl]` lemmas), not a
+simp-backed one.
+
+The `then` clause applies to the goal. A trace that rewrites a hypothesis leaves
+the closer to the next line, which is where the spec's `absurd:<hyp>` form lands.
 
 Neither slot is a `tacticSeq`, deliberately. A free `tacticSeq` would let a
 generated trace carry `simp` (or any forbidden tactic) *inside* the product
@@ -68,7 +75,10 @@ equation, an `exact` closer — is rejected if it contains a `by` block.
 ## No simp
 
 Nothing in this tactic calls, imports for use, or expands to `Lean.Meta.Simp` or
-any simp-family tactic, and no trace written in this syntax can introduce one.
+any simp-family tactic, and no trace written in this syntax can introduce one:
+the two tactic slots are closed enumerations, and every term the tactic
+elaborates is refused if it elaborates a tactic block, however that block got
+there (written, via `macro`/`notation`, or via a custom term elaborator).
 `Experiment/check_no_simp_family.py` enforces the former.
 -/
 
@@ -95,6 +105,18 @@ recorded after such a step still describe the term.
 -/
 syntax explicitRwRed := (&"beta" <|> &"eta" <|> &"proj" <|> &"zeta") explicitRwPos
 
+/--
+`intro_ctx <name> at [1]` — the spec's contextual-simp step, which makes the
+antecedent of an implication available as a hypothesis for later steps.
+
+It is **recognised but not implemented**: contextual rewriting changes what is in
+scope for subsequent positions, which this tactic's single-location model does
+not represent. It is given syntax anyway so that a trace containing it fails with
+an honest "not implemented" error naming the kind, rather than being parsed as a
+lemma called `intro_ctx`.
+-/
+syntax explicitRwIntroCtx := &"intro_ctx " ident explicitRwPos
+
 /-- `change t at [1]` — last-resort definitional replacement, checked by defeq. -/
 syntax explicitRwChange := "change " term explicitRwPos
 
@@ -103,18 +125,21 @@ The closers a trace may use, as a **closed enumeration**. `explicit_rw` is
 product code, so it must not embed a free `tacticSeq`: that would let a
 generated trace carry `simp` (or any other forbidden tactic) inside the product
 tactic, where `Experiment/check_no_simp_family.py` could never see it. The
-spec's `close` field maps onto `rfl | decide | assumption`, plus `exact <term>`
-for a closing lemma application.
+spec's `close` field maps onto `rfl` and `decide`, plus `exact <term>` for every
+form that names something: `true_intro` is `exact True.intro`,
+`assumption:<name>` is `exact <name>`, `absurd:<hyp>` is `exact <hyp>.elim`.
 
-`trivial` is deliberately **not** offered: it is a macro that tries several
-tactics in turn, which is search. Where a trace would have closed with
-`trivial`, write `exact True.intro` (or the lemma that actually applies).
+Two tactics are deliberately **not** offered, both because they search where the
+spec recorded an exact choice. `trivial` is a macro that tries several tactics in
+turn. Bare `assumption` scans the whole local context, so it can succeed by
+finding a *different* hypothesis than the one the trace recorded; the spec writes
+`assumption:<name>`, and `exact <name>` renders that exactly.
 
 `rfl` here is the ordinary `rfl` tactic — `Eq`/`Iff`/`HEq` reflexivity and
 `@[refl]` lemmas. It is not `simp`-backed and performs no simplification.
 -/
 syntax explicitRwCloser :=
-  &"rfl" <|> &"decide" <|> &"assumption" <|> (&"exact " term)
+  &"rfl" <|> &"decide" <|> (&"exact " term)
 
 /--
 `eq (2 + 3 = 5) by rfl at [1]` — a simproc-computed equation, proved by an
@@ -125,7 +150,8 @@ syntax explicitRwEq := &"eq " term " by " (&"rfl" <|> &"decide") explicitRwPos
 
 /-- One step of an `explicit_rw` trace. -/
 syntax explicitRwStep :=
-  explicitRwUnfold <|> explicitRwRed <|> explicitRwChange <|> explicitRwEq <|> explicitRwRw
+  explicitRwUnfold <|> explicitRwRed <|> explicitRwIntroCtx <|> explicitRwChange <|>
+  explicitRwEq <|> explicitRwRw
 
 /-- Optional closing tactic: `explicit_rw [...] then rfl`. -/
 syntax explicitRwClose := " then " explicitRwCloser
@@ -236,7 +262,22 @@ def elabEquation (idx : Nat) (stx : Term) : TacticM (Expr × Expr × Expr × Arr
     let e ← Term.elabTerm stx none
     checkNoPendingTactic s!"the lemma term of this step" (some idx) snapshot
     pure e
+  -- Force any still-postponed synthetic metavariables. A `Sort*`-polymorphic
+  -- lemma such as `not_nonempty_iff` can otherwise leave its universe level
+  -- unresolved, in which case `inferType` reports a bare `?m` instead of the
+  -- `Iff`, and whether that happens depends on unrelated imports. Replay must
+  -- not depend on the import context.
+  Term.synthesizeSyntheticMVarsNoPostponing
   let proof ← instantiateMVars proof
+  -- A term that failed to elaborate (an unknown identifier, say, because the
+  -- lemma's module is not imported here) comes back as `sorryAx`, whose type is
+  -- a bare metavariable. Reporting that as "does not prove an equation" sends
+  -- the trace author hunting for the wrong problem, so name it.
+  if proof.hasSorry then
+    stepError idx m!"lemma {lemmaMsg} failed to elaborate. If it is a global \
+      lemma, its module is probably not imported in this file; if it is a local \
+      hypothesis, it is not in scope at this position. (Lean reports the \
+      underlying error separately.)"
   let type ← instantiateMVars (← inferType proof)
   -- Open the lemma's own leading binders as metavariables, so that matching the
   -- position determines them by unification rather than by search.
@@ -250,6 +291,25 @@ def elabEquation (idx : Nat) (stx : Term) : TacticM (Expr × Expr × Expr × Arr
   let fromType := (← instantiateMVars type).collectMVars {} |>.result
   let extra := (fromTerm ++ fromType).map Expr.mvar
   return (lhs, rhs, eqProof, mvars ++ extra)
+
+/--
+Fail when any universe level metavariable survives in the given expressions.
+
+Levels are determined by unifying the lemma's side with the subterm at the
+recorded position. A leftover level metavariable means the trace did not pin it;
+letting Lean default it would make the same trace replay differently depending
+on elaboration order and on which modules happen to be imported.
+-/
+def checkNoLevelMVars (idx : Nat) (lemmaStx : MessageData) (es : Array Expr) :
+    TacticM Unit := do
+  for e in es do
+    let e ← instantiateMVars e
+    if e.hasLevelMVar then
+      stepError idx m!"lemma {lemmaStx} still has an unassigned universe level \
+        after matching at the given position. The position does not determine it, \
+        and `explicit_rw` never defaults a level: that would make the replay \
+        depend on the import context. Write the universe explicitly on the lemma \
+        name, or fix the position."
 
 /-- Run a rewrite step at `pos` inside `e`. -/
 def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool) :
@@ -265,6 +325,11 @@ def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool) :
       closeLemmaMVars idx m!"`{stx}`" mvars
       let eqProof ← instantiateMVars eqProof
       let target ← instantiateMVars target
+      -- Universe levels are fixed by unifying the lemma's side with the subterm.
+      -- One still unassigned means the position did not determine it; defaulting
+      -- it would make the replay depend on elaboration order and on imports, so
+      -- this is an error like any other unresolved argument.
+      checkNoLevelMVars idx m!"`{stx}`" #[eqProof, target]
       let h ← if symm then mkEqSymm eqProof else pure eqProof
       return Replacement.eq target h)
     (fun pfx child sub => badPosError idx pos pfx child sub)
@@ -390,6 +455,11 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
           | stepError idx m!"`zeta` at this position: the subterm is not a `let`."
         return b.instantiate1 v
     | k => throwError "explicit_rw: internal error: unknown reduction keyword `{k}`"
+  | ``explicitRwIntroCtx =>
+    stepError idx m!"`intro_ctx` is a recorded step kind that `explicit_rw` does not \
+      implement: contextual rewriting changes what is in scope for later positions, \
+      which this tactic's single-location model does not represent. This trace \
+      cannot be replayed; hand-write the proof instead."
   | ``explicitRwChange =>
     let pos := parsePos stx[2]
     let target : Term := ⟨stx[1]⟩
@@ -495,7 +565,6 @@ def runCloser (stx : Syntax) : TacticM Unit := do
   match stx[0][0].getAtomVal with
   | "rfl" => evalTactic (← `(tactic| rfl))
   | "decide" => evalTactic (← `(tactic| decide))
-  | "assumption" => evalTactic (← `(tactic| assumption))
   | "exact" =>
     let t : Term := ⟨stx[0][1]⟩
     checkNoTacticBlock "the closing `exact` term" none t

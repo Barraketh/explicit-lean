@@ -222,6 +222,64 @@ error: explicit_rw: step 1: position [0, 1, 1] rewrites the value of a `let`; on
 example (a b : Nat) (h : a = b) : (let y : Nat := a; y + 1) = b + 1 := by
   explicit_rw [h at [0, 1, 1]]
 
+/-! ## A macro or term elaborator expanding to `by` is refused
+
+The guard is semantic: a `by` block registers a synthetic metavariable whose
+recorded syntax is the block, whatever produced it. A syntax walk over the
+written term alone would miss a macro, so both layers run.
+-/
+
+macro "SmuggleSimp" : term => `(by simp)
+
+/--
+error: explicit_rw: the closing `exact` term contains a `by` block. `explicit_rw` is product code, so a trace may not embed a tactic block: it would let a tactic forbidden by the governing rule run inside the product tactic, where a lint over this module could not see it. Write a closed term, or prove the lemma separately and name it.
+-/
+#guard_msgs in
+example (a b : Nat) (h : a = b) : a + 0 = b := by
+  explicit_rw [h at [0, 1, 0, 1]] then exact SmuggleSimp
+
+-- Even a harmless `by` is refused: the rule is about tactics in terms, not
+-- about which tactic it happens to be.
+/--
+error: explicit_rw: the closing `exact` term contains a `by` block. `explicit_rw` is product code, so a trace may not embed a tactic block: it would let a tactic forbidden by the governing rule run inside the product tactic, where a lint over this module could not see it. Write a closed term, or prove the lemma separately and name it.
+-/
+#guard_msgs in
+example (a b : Nat) (h : a = b) : a + 0 = b := by
+  explicit_rw [h at [0, 1, 0, 1]] then exact (id (by rfl))
+
+/-! ## `zeta` applied where there is no `let` -/
+
+/-- error: explicit_rw: step 1: `zeta` at this position: the subterm is not a `let`. -/
+#guard_msgs in
+example (a : Nat) : a + 0 = a := by
+  explicit_rw [zeta at [0, 1]]
+
+/-! ## An unrecognised step keyword
+
+`frobnicate` is not a step kind. It parses as a lemma term, so the error names
+the elaboration failure rather than silently searching for a lemma of that name.
+-/
+
+/--
+error: explicit_rw: step 1: lemma `frobnicate` failed to elaborate. If it is a global lemma, its module is probably not imported in this file; if it is a local hypothesis, it is not in scope at this position. (Lean reports the underlying error separately.)
+-/
+#guard_msgs(error, drop info, drop warning) in
+example (a : Nat) : a + 0 = a := by
+  explicit_rw [frobnicate at [0, 1]]
+
+/-! ## `intro_ctx` is recognised but not implemented
+
+It has syntax so that a trace containing it fails by name, rather than being
+parsed as a lemma called `intro_ctx`.
+-/
+
+/--
+error: explicit_rw: step 1: `intro_ctx` is a recorded step kind that `explicit_rw` does not implement: contextual rewriting changes what is in scope for later positions, which this tactic's single-location model does not represent. This trace cannot be replayed; hand-write the proof instead.
+-/
+#guard_msgs in
+example (p q : Prop) (hq : q) : p → q := by
+  explicit_rw [intro_ctx hp at [1]]
+
 /-! ## `at *` is refused: positions are relative to one location -/
 
 /--

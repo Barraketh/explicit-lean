@@ -10,6 +10,7 @@ nothing is searched for.
 -/
 import ExplicitLean.ExplicitRw
 import Mathlib.Algebra.Order.Group.Nat
+import Mathlib.Logic.IsEmpty.Basic
 
 namespace ExplicitRwTest.Lemmas
 
@@ -125,6 +126,36 @@ is genuinely inferred per use rather than fixed by the first elaboration. -/
 theorem universe_polymorphic_prop (l : List Prop) : (l ++ []).length = l.length := by
   explicit_rw [List.append_nil l at [0, 1, 1]]
   guard_target =ₛ l.length = l.length
+  rfl
+
+/-! ## A `Sort*`-polymorphic lemma, from a real `IsEmpty` trace
+
+`not_nonempty_iff : ¬Nonempty α ↔ IsEmpty α` is stated for `{α : Sort u}`. The
+universe level is fixed by unifying the lemma's left side with the subterm at
+the recorded position, so the same lemma replays at `Sort 0` and at `Type` in
+this one file. A level left unassigned after matching is a step-indexed error;
+`explicit_rw` never defaults one, because defaulting would make the replay
+depend on elaboration order and on the import context.
+
+The first theorem is `call01` of the captured `Mathlib.Logic.IsEmpty.Basic`
+traces, replayed with the recorded position and direction.
+-/
+
+theorem sort_polymorphic_iff {p : Prop} :
+    (¬Nonempty p ∧ True) ↔ (IsEmpty p ∧ True) := by
+  explicit_rw [not_nonempty_iff at [0, 1, 0, 1]]
+  guard_target =ₛ (IsEmpty p ∧ True) ↔ (IsEmpty p ∧ True)
+  rfl
+
+theorem sort_polymorphic_iff_conv {p : Prop} :
+    (¬Nonempty p ∧ True) ↔ (IsEmpty p ∧ True) := by
+  conv => lhs; arg 1; rw [not_nonempty_iff]
+
+/-- The same lemma under a `∀` binder, at `Type` rather than `Prop`. -/
+theorem sort_polymorphic_under_binder : ∀ (α : Type), (¬Nonempty α) ↔ IsEmpty α := by
+  explicit_rw [not_nonempty_iff at [1, 0, 1]]
+  guard_target =ₛ ∀ (α : Type), IsEmpty α ↔ IsEmpty α
+  intro α
   rfl
 
 end ExplicitRwTest.Lemmas
