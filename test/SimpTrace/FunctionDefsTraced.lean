@@ -137,7 +137,7 @@ variable {f : α → β}
 
 theorem Injective.beq_eq {α β : Type*} [BEq α] [LawfulBEq α] [BEq β] [LawfulBEq β] {f : α → β}
     (I : Injective f) {a b : α} : (f a == f b) = (a == b) := by
-  by_cases h : a == b <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/FunctionDefsTraced_02.json"<;> simpa [I.eq_iff] using h
+  by_cases h : a == b <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/FunctionDefsTraced_02.json" <;> simpa [I.eq_iff] using h
 
 section Bicomp
 

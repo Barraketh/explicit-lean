@@ -1,40 +1,43 @@
-# T1-trace-capture: RESULT (review 10 fix)
+# T1-trace-capture: RESULT (T9 producer identity)
 
 ## Delivered
 
-- Added a structured validator verdict tree in `ExplicitLean/SimpTrace/Tactic.lean`.
-- Every event now receives its own verdict; side and dependent-congruence trees
-  recurse independently, and `buildLocation` attaches each classification to
-  the exact nested `Step.unresolved` field. Top-level behavior is preserved.
-- Extended `Experiment/check_simp_trace.py` to compare an expected
-  `unresolved` field and to fail closed if corpus regressions omit nested
-  `exists_apply_eq_apply` or `ne_eq` verdicts; the existing generic
-  `source: congr` + side shape is also required.
+- Added `test/SimpTrace/trace_identity.py`: attribute/comment-aware executable
+  site scanning, exact original character ranges, source manifests, and
+  fail-closed ordinary consistency validation. Top-level `--`/`/-` comments
+  now terminate a call while delimiters inside strings, syntax data, or nested
+  terms do not.
+- Reworked `make_traced.py` to derive the manifest before rewriting and verify
+  every replacement through a deterministic edit ledger; `FunctionBasicTraced`
+  is 25/25, including both `@[simp]` declaration-line calls.
+- Added `finalize_traces.py`, converting raw recorder files into self-contained
+  `simp-trace-v2` envelopes with module/site identity, diagnostic occurrence,
+  and complete invocation ordinals. Missing, extra, duplicate, range, call,
+  and invocation mistakes reject before output is consumed. Its explicit
+  `--traced-source --manifest --source --raw-dir --out-dir` interface never
+  mutates raw inputs.
+- Regenerated all six traced copies and manifests: 84 mapped sites and 106
+  records. Added T9 regressions for attributes, same-line and identical calls,
+  Unicode offsets, trailing comments (including nested/string data), and
+  malformed invocation sets. Conversion checks use the edit ledger, so
+  commented `=>trace` text cannot count.
 
-## Checks
+## Checks (2026-09-17)
 
-Commands run from this worktree on 2026-09-17:
-
-- `lake build ExplicitLean.SimpTrace`: PASS (7 jobs, 4.3 s).
-- `python3 -B test/SimpTrace/check_transcription.py`: PASS (82/82).
-- `lake env lean test/SimpTrace/Fixtures.lean`: PASS (0).
-- `python3 -B Experiment/check_simp_trace.py`: PASS (72 fixtures).
-- Six-module trace transcription: PASS for all modules; classified exits are
-  expected. `--report` PASS with 84 sites, 110 traces, 633 steps; nested
-  regression line PASS. (Generated output includes prior invocation variants.)
-- T4 end-to-end harness against current T2: completed; 44/84 replayed, 1
-  unresolved, 19 render failures, 18 compile failures, 2 probe inconclusive.
-  The harness now recognizes the nested `exists_apply_eq_apply` verdict.
+- `lake build ExplicitLean.SimpTrace`: PASS.
+- `python3 -B test/SimpTrace/check_transcription.py`: PASS (84/84;
+  Function.Basic 25/25).
+- Six traced Lean runs: expected classified exits only; finalizer PASS (106
+  v2 records, 84 sites).
+- `python3 -B test/SimpTrace/test_trace_identity.py`: PASS, including malformed
+  invocation and comment-boundary rejection; Function.Basic compile emitted
+  and five-path finalization produced 30 v2 records without changing raw files.
+- `python3 -B Experiment/check_simp_trace.py`: PASS (72 fixtures);
+  `--report`: PASS (84 sites, 106 records, 592 steps).
+- `git diff --check`: PASS.
 
 ## Remaining blockers
 
-- T4 still needs its multiple-invocation renderer fix (19 cases in this run).
-- Existing T1 unresolved families remain: quantified Prop arguments, unreadable
-  origins, inaccessible names, and positional/binder cases.
-- T2 still reports six compile failures; T1 does not broaden those families.
-
-## Scope
-
-Changed only `ExplicitLean/SimpTrace/Tactic.lean`,
-`Experiment/check_simp_trace.py`, and this result file. Ready for fresh review
-11.
+- Consumer-side identity gate and replay integration remain T4 work.
+- Existing classified replay families and named-zeta are intentionally out of
+  scope for this producer batch.

@@ -18,8 +18,11 @@ Exit 0 when every traced copy accounts for its source's sites, 1 otherwise.
 from __future__ import annotations
 
 import pathlib
-import re
+import json
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from trace_identity import find_sites, manifest, verify_transform  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MATHLIB = ROOT / ".lake" / "packages" / "mathlib" / "Mathlib"
@@ -34,36 +37,6 @@ MODULES = (
     ("LogicBasicTraced.lean", "Logic/Basic.lean"),
 )
 
-# A simp-family tactic *invocation*, as opposed to `@[simp]`, a declaration
-# name, a doc comment or the `Simp.simp` term-level API.
-TACTIC = re.compile(r"(?<![\w?.])(simp only|simp|dsimp only|dsimp)(?![_?\w])")
-
-
-def tactic_sites(text: str) -> int:
-    """Count simp-family tactic invocations, excluding non-tactic mentions."""
-    count = 0
-    for line in text.split("\n"):
-        stripped = line.lstrip()
-        if "@[" in line or stripped.startswith("attribute"):
-            continue
-        if "Simp.simp" in line or stripped.startswith("--") or stripped.startswith("/-"):
-            continue
-        for match in TACTIC.finditer(line):
-            before = line[: match.start()].rstrip()
-            # `<| simp e` and `$ simp e` apply the simp *API* to a term; they
-            # are not tactic invocations and the review excludes them.
-            if before.endswith(("<|", "$")):
-                continue
-            # A tactic invocation starts a tactic, or follows `by`, `;`, `<;>`,
-            # `·`, `|` or nothing at all.
-            if (
-                before == ""
-                or before.endswith(("by", ";", "<;>", "·", "|", "=>", "(", "["))
-            ):
-                count += 1
-    return count
-
-
 def main() -> int:
     problems: list[str] = []
     for traced_name, source_rel in MODULES:
@@ -75,25 +48,37 @@ def main() -> int:
         if not source_path.is_file():
             problems.append(f"{source_rel}: missing (is Mathlib built?)")
             continue
-        source_sites = tactic_sites(source_path.read_text(encoding="utf-8"))
+        source_text = source_path.read_text(encoding="utf-8")
+        source_sites = find_sites(source_text)
         traced_text = traced_path.read_text(encoding="utf-8")
-        converted = traced_text.count("simp_trace")
-        # Any simp-family tactic left unconverted in the copy.
-        remaining = tactic_sites(traced_text.replace("simp_trace", "SIMPTRACE"))
-        print(
-            f"{traced_name:28} source sites {source_sites:3}  "
-            f"converted {converted:3}  still stock {remaining:3}"
-        )
+        manifest_path = traced_path.with_suffix(".manifest.json")
+        converted = 0
+        remaining = len(find_sites(traced_text))
         if remaining:
             problems.append(
                 f"{traced_name}: {remaining} simp-family tactic site(s) were not "
                 f"converted; a traced copy must contain none"
             )
-        if converted != source_sites:
-            problems.append(
-                f"{traced_name}: converted {converted} but the source has "
-                f"{source_sites} tactic site(s)"
-            )
+        if not manifest_path.is_file():
+            problems.append(f"{traced_name}: manifest sidecar missing")
+            continue
+        try:
+            value = json.loads(manifest_path.read_text(encoding="utf-8"))
+            expected = manifest("Mathlib/" + source_rel, source_text, source_sites)
+            if value != expected:
+                problems.append(f"{traced_name}: manifest does not match source")
+            else:
+                verify_transform(source_text, traced_path.stem, traced_text, source_sites)
+                converted = len(source_sites)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            problems.append(f"{traced_name}: manifest/transform mismatch: {exc}")
+        if converted != len(source_sites):
+            problems.append(f"{traced_name}: converted {converted} but the source has "
+                            f"{len(source_sites)} tactic site(s)")
+        print(
+            f"{traced_name:28} source sites {len(source_sites):3}  "
+            f"converted {converted:3}  still stock {remaining:3}"
+        )
 
     if problems:
         for problem in problems:

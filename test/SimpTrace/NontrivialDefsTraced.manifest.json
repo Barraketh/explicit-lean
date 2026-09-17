@@ -1,0 +1,1 @@
+{"modulePath":"Mathlib/Logic/Nontrivial/Defs.lean","sites":[{"callText":"simp only [nontrivial_iff, subsingleton_iff, not_exists, Classical.not_not]","endChar":3512,"siteOrdinal":0,"startChar":3437}]}

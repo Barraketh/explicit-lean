@@ -1,0 +1,1 @@
+{"modulePath":"Mathlib/Logic/Function/Defs.lean","sites":[{"callText":"simp [funext_iff, Prod.ext_iff, forall_and]","endChar":1859,"siteOrdinal":0,"startChar":1816},{"callText":"simp [h]","endChar":4925,"siteOrdinal":1,"startChar":4917}]}
