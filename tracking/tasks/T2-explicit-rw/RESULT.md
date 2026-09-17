@@ -1,60 +1,60 @@
 # T2-explicit-rw result
 
-Status: **complete**, all required checks pass. No escalation.
+Status: **complete**, all required checks pass. Review round 1: 7/7 fixed.
 
-## What was built
+`explicit_rw` replays a simp trace positionally with no search (design and
+syntax: `ExplicitLean/ExplicitRw/Tactic.lean`). Nothing reaches
+`Lean.Meta.Simp`, **and no trace in this syntax can introduce it**.
 
-`explicit_rw`: a product tactic replaying a simp trace positionally with no
-search. Positions are the `SubExpr.Pos` child-index lists of
-`tracking/SIMP-TRACE-SPEC.md`; steps apply in order, each relative to the
-previous result; every failure names the step index and reason, with no
-fallback, search or retry. Syntax and step kinds (lemma rewrite forward/`←`,
-`unfold`, `beta`, `eta`, `proj`, `change`, `eq <eqn> by <tac>`, optional `at h`,
-closing `then tac`) are documented in `ExplicitLean/ExplicitRw/Tactic.lean`.
+## Round 1 fixes
+1. *(critical)* `then` / `eq ... by` took a free `tacticSeq`, so a trace could
+   run `simp` inside the product tactic where the lint could never see it. Both
+   are now closed enumerations: `then simp`, `then (dsimp; simp)` and
+   `eq ... by simp` fail in the **parser**; `then exact (by simp)` and a `by`
+   block in any elaborated term fail at elaboration. Per addendum `trivial` is
+   excluded (search macro; use `exact True.intro`); keywords are non-reserved,
+   so those words stay usable as ordinary terms elsewhere.
+2. *(major)* `proj` never reduced a projection-*function* application
+   (`whnfCore` does no delta). It now delta-unfolds first, and requires a
+   constructor argument so a class projection cannot make `proj` unfold freely.
+3. *(major)* `let`-body positions (child 2) need no cast; supported by
+   zeta-substituting the bound value. `let` type/value stay refused.
+4-5. *(minor)* `change` errors pretty-print the term; a dependent function
+   argument is caught before `mkCongrArg`, giving the tactic's own message.
+6. *(minor)* The lint scans `import` lines; it immediately caught this tactic's
+   own error message, which named the tactics — reworded.
+7. *(minor)* Added the missing fixtures (`proj` both shapes, `mdata`, `letE`
+   body, universe-polymorphic lemma, stale position, `change` message,
+   dependent app, refused `let` value) and corrected the coverage claims.
 
-Implementation: direct `Expr` navigation, rebuilding congruence bottom-up with
-`congrArg`/`congrFun`/`congr`, `funext` under a lambda, `forall_congr` under a
-`∀` body, `implies_congr_left` for a non-dependent arrow domain, `propext` for
-iff, and `Eq.mpr`/`Eq.mp` at the root; definitional steps carry no proof. Lemma
-arguments are opened as metavariables and fixed by unifying with the subterm,
-instances are synthesized, and any metavariable still unassigned after matching
-is a hard error, so none escapes into the goal. Nothing calls, imports for use
-or expands to `Lean.Meta.Simp` or the simp family.
-
-## Files added (only owned; `ExplicitLean.lean`, `lakefile.toml` untouched)
-`ExplicitLean/ExplicitRw.lean`; `ExplicitLean/ExplicitRw/{Basic,Tactic}.lean`;
-`test/ExplicitRw/{Basic,Binders,Definitional,Lemmas,Negative}.lean`;
+## Files (only owned; `ExplicitLean.lean`, `lakefile.toml` untouched)
+`ExplicitLean/ExplicitRw{.lean,/Basic,/Tactic}.lean`; `test/ExplicitRw/` (5
+fixtures + `RejectedSyntax/`: 5 cases, `expected.json`, README);
 `Experiment/{check_explicit_rw,check_no_simp_family}.py`.
 
-## Checks (this worktree, Lean 4.32.2, pinned Mathlib)
-| Command | Result | Runtime |
-| --- | --- | --- |
-| `lake build ExplicitLean.ExplicitRw` (clean) | PASS, no warnings | 3.1 s |
-| `lake env lean test/ExplicitRw/<each>.lean` (5) | PASS, no output | 1.9–2.6 s ea |
-| `python3 -B Experiment/check_explicit_rw.py` | PASS (5 fixtures) | 12.2 s |
-| `python3 -B Experiment/check_no_simp_family.py` | PASS (3 files) | 0.04 s |
+## Checks (all re-run from scratch; Lean 4.32.2, pinned Mathlib)
+- `lake build ExplicitLean.ExplicitRw` (clean): PASS, no warnings, 3.1 s
+- `lake env lean test/ExplicitRw/<each>.lean` (5): PASS, no output, 1.8–2.4 s ea
+- `python3 -B Experiment/check_explicit_rw.py`: PASS (5 + 5 cases), 21.0 s
+- `python3 -B Experiment/check_no_simp_family.py`: PASS (3 files), 0.04 s
 
-Both scripts were verified to *fail* when they should (the lint fed a bare
-`simp`, an `open Lean.Meta.Simp` and `mkSimpContext`; the runner fed a wrong
-`guard_target`). Fixtures cover every case the task listed. Positives assert
-their goal with `guard_target`/`guard_hyp` before closing and carry the `conv`
-equivalent as a cross-check; negatives pin ten messages with `#guard_msgs`.
+`#print axioms` on all 50 fixture theorems: **no `sorryAx`** — 33 axiom-free, 8
+`Quot.sound` (funext), 9 `propext` (iff), each matching its `conv` cross-check.
+Every check was verified to *fail* when it should: the lint fed a bare `simp`,
+an `open Lean.Meta.Simp`, `mkSimpContext` and a simp import; the runner fed a
+wrong `guard_target`, a rejected-syntax file made to compile, and one rejected
+for the wrong reason.
 
-## Known limitations
-- **Dependent positions are refused, not guessed**: dependent `∀` domain, binder
-  types, `let` parts, projection structure argument (definitional steps still
-  work there; non-dependent arrow domains work fully). This is the spec's
-  "dependent positions needing casts stay unresolved" — no spec change needed.
-- `at *` refused (positions are per-location); `at h` takes one hypothesis. Spec
-  kind `intro_ctx` unimplemented; no fixture needs it. `proj` is
-  projection-only; `change` is the general escape hatch. Binder-crossing proofs
-  use `Quot.sound` via `funext`, as `conv`/`ext` do; others are axiom-free.
-
-## Open questions
+## Limitations and open questions
+- **Dependent positions are refused, not guessed**, each with a step-indexed
+  message: dependent function argument and `∀` domain, binder types, `let`
+  type/value, projection structure argument. Definitional steps work there;
+  non-dependent arrow domains and `let` bodies work fully.
+- `at *` refused (per-location); `at h` takes one hypothesis. `intro_ctx`
+  unimplemented. Ordinary goals carry no `mdata`; that fixture wraps the target.
 - Generator must emit raw child indices, **not** `conv`'s `arg n` numbering;
-  paths are long through instance-laden arithmetic (`a` in `a + c` is
-  `[0, 1, 0, 1]`), so the planned readability post-pass matters.
-- `explicit_rw` matches up to reducible defeq, so it succeeds where plain `rw`
-  fails (`conditional_conv` in `test/ExplicitRw/Lemmas.lean`); confirm before the
-  post-pass collapses such steps into `rw [...]`, which would not re-elaborate.
+  paths are long through instance-laden arithmetic, so the readability
+  post-pass matters. `explicit_rw` also matches up to reducible defeq, so it
+  succeeds where plain `rw` fails (`conditional_conv` in `Lemmas.lean`);
+  confirm before the post-pass collapses such steps into `rw [...]`.
 - `ExplicitLean.lean` needs `ExplicitLean.ExplicitRw` wired in at merge.
