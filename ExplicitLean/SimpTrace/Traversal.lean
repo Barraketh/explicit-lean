@@ -201,6 +201,23 @@ the free variable `x`, for the duration of `k`. -/
   ref.modify fun s => { s with binders := s.binders.push x.fvarId! }
   try k finally ref.modify fun s => { s with binders := saved }
 
+/-- Run `k` with every event it logs diverted away from the trace.
+
+Used where stock simp is re-entered on a subterm the fork did not descend into
+itself (a simproc's own `simp c`, `simpHaveTelescope`'s telescope bodies): those
+firings have no position in the fork's convention, and logging them at the
+enclosing position would be wrong.  The caller records the net change instead. -/
+@[inline] def withDivertedEvents (ref : TraceRef) (k : SimpM α) : SimpM α := do
+  ref.modify fun s =>
+    { s with procDepth := s.procDepth + 1,
+             procEvents := s.procEvents.push #[],
+             procGoals := s.procGoals.push none }
+  let depth := (← ref.get).procEvents.size
+  try k finally ref.modify fun s =>
+    { s with procDepth := s.procDepth - 1,
+             procEvents := s.procEvents.take (depth - 1),
+             procGoals := s.procGoals.take (depth - 1) }
+
 /-- Set the current position for the duration of `k`. -/
 @[inline] def withPos (ref : TraceRef) (pos : Pos) (k : SimpM α) : SimpM α := do
   let saved := (← ref.get).pos
@@ -406,6 +423,63 @@ partial def reduceT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Expr :=
       let e' ← logReduction ref pos e r
       reduceT ref pos e'
 
+/-! ## Position arithmetic for applications
+
+`simpAppUsingCongr`, `congrArgs` and `tryAutoCongrTheorem?` all work on the
+*spine* of an `n`-ary application `f a₀ ... a_{n-1}`.  In `Expr`'s binary
+representation that is `(((f a₀) a₁) ... a_{n-1})`, so relative to the whole
+application the function head sits at `0ⁿ` and argument `i` sits at
+`0^(n-1-i) ++ [1]`.  REVIEW-3's fork note verified this is exactly the order the
+upstream traversal walks, so no congruence-lemma slot ever has to be mapped back
+to a child index.
+-/
+
+/-- The position of argument `i` of an `n`-ary application, relative to the
+application's own position `pos`. -/
+def argPos (pos : Pos) (n i : Nat) : Pos :=
+  (pos ++ Array.replicate (n - 1 - i) 0).push 1
+
+/-- The position of the head of an `n`-ary application. -/
+def fnPos (pos : Pos) (n : Nat) : Pos := pos ++ Array.replicate n 0
+
+/-- SOURCE: Types.lean:682-695 `private Simp.mkCongrFun'`. -/
+def mkCongrFunT (e : Expr) (r : Simp.Result) (a : Expr) : MetaM Simp.Result := do
+  let e' := e.updateApp! r.expr a
+  match r.proof? with
+  | none   => return { expr := e', proof? := none }
+  | some hf =>
+    let α ← inferType a
+    let u ← getLevel α
+    let v ← getLevel (← inferType e)
+    let f := e.appFn!
+    let .forallE x _ βx _ ← whnfD (← inferType f)
+      | throwError "failed to build congruence proof, function expected{indentExpr f}"
+    let β := Lean.mkLambda x .default α βx
+    return { expr := e', proof? := mkApp6 (mkConst ``congrFun [u, v]) α β f r.expr hf a }
+
+/-- SOURCE: Types.lean:697-703 `private Simp.mkCongrPrefix`. -/
+def mkCongrPrefixT (declName : Name) (e : Expr) : MetaM Expr := do
+  let α ← inferType e.appArg!
+  let u ← getLevel α
+  let β ← inferType e
+  let v ← getLevel β
+  return mkApp2 (mkConst declName [u, v]) α β
+
+/-- SOURCE: Types.lean:714-729 `private Simp.mkCongr'`. -/
+def mkCongrT (e : Expr) (r₁ r₂ : Simp.Result) : MetaM Simp.Result := do
+  let e' := e.updateApp! r₁.expr r₂.expr
+  match r₁.proof?, r₂.proof? with
+  | none,    none    => return { expr := e', proof? := none }
+  | some hf, none    =>
+    let h ← mkCongrPrefixT ``congrFun' e
+    return { expr := e', proof? := mkApp4 h e.appFn! r₁.expr hf r₂.expr }
+  | none,    some ha  =>
+    let h ← mkCongrPrefixT ``congrArg e
+    return { expr := e', proof? := mkApp4 h e.appArg! r₂.expr r₁.expr ha }
+  | some hf, some ha =>
+    let h ← mkCongrPrefixT ``_root_.congr e
+    return { expr := e', proof? := mkApp6 h e.appFn! r₁.expr e.appArg! r₂.expr hf ha }
+
 /-! ## The `dsimp` layer
 
 SOURCE: Main.lean:469-529.  `dsimpImpl` is driven by `Meta.transformWithCache`,
@@ -484,6 +558,7 @@ partial def dsimpT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Expr := do
     return e
   visit pos e
 where
+  /-- SOURCE: Main.lean:522 — the `dpre` pipeline, verbatim. -/
   pre (pos : Pos) (e : Expr) : SimpM TransformStep := do
     let m ← getMethods
     let s ← withPos ref pos (m.dpre e)
@@ -506,110 +581,115 @@ where
         | s => return s
       | s => return s
     | s => return s
-  post (pos : Pos) (e : Expr) : SimpM TransformStep := do
+  /-- SOURCE: Main.lean:523 — the `dpost` pipeline, verbatim. -/
+  postStep (pos : Pos) (e : Expr) : SimpM TransformStep := do
     let m ← getMethods
     let s ← withPos ref pos (m.dpost e)
     let s ← logDStep ref pos e s
     match s with
     | .continue e? => dsimpReduceT ref pos (e?.getD e)
     | s => return s
+  /-- SOURCE: Transform.lean:111-114 `visitPost`. -/
+  visitPost (pos : Pos) (e : Expr) : SimpM Expr := do
+    match ← postStep pos e with
+    | .done e => return e
+    | .visit e => visit pos e
+    | .continue e? => return e?.getD e
+  /-- SOURCE: Transform.lean:116-121 `visitLambda`.
+
+  Upstream collects the whole lambda telescope, instantiating each body with
+  `instantiateRev fvars`, and runs `visitPost` on the term *rebuilt* by
+  `mkLambdaFVars`.  Two consequences the fork must preserve, and previously did
+  not: `pre`/`post` never see a term with loose bvars (REVIEW-4 defect 2's
+  PANIC — stock `rewritePost` was handed an open term), and the post step
+  happens at the telescope *root*, not inside the binder (defect 1's wrong
+  position).  `usedLetOnly` is threaded because it decides whether unused
+  binders survive the rebuild. -/
+  visitLambda (pos : Pos) (fvars : Array Expr) (e : Expr) : SimpM Expr := do
+    match e with
+    | .lam n d b c =>
+      withLocalDecl n c (← visit (pos.push 0) (d.instantiateRev fvars)) fun x =>
+        withBinder ref x do visitLambda (pos.push 1) (fvars.push x) b
+    | e =>
+      let body ← visit pos (e.instantiateRev fvars)
+      visitPost (rootOf pos fvars.size)
+        (← mkLambdaFVars (usedLetOnly := (← usedLetOnly)) fvars body)
+  /-- SOURCE: Transform.lean:123-128 `visitForall`. -/
+  visitForall (pos : Pos) (fvars : Array Expr) (e : Expr) : SimpM Expr := do
+    match e with
+    | .forallE n d b c =>
+      withLocalDecl n c (← visit (pos.push 0) (d.instantiateRev fvars)) fun x =>
+        withBinder ref x do visitForall (pos.push 1) (fvars.push x) b
+    | e =>
+      let body ← visit pos (e.instantiateRev fvars)
+      visitPost (rootOf pos fvars.size)
+        (← mkForallFVars (usedLetOnly := (← usedLetOnly)) fvars body)
+  /-- SOURCE: Transform.lean:130-135 `visitLet`.
+
+  The `let` telescope is the path REVIEW-4 defects 1 and 2 share: under
+  `zeta := false` the traversal descends here rather than zeta-reducing, so
+  getting the rebuild and the post position right is what fixes both. -/
+  visitLet (pos : Pos) (fvars : Array Expr) (e : Expr) : SimpM Expr := do
+    match e with
+    | .letE n t v b nondep =>
+      withLetDecl n (← visit (pos.push 0) (t.instantiateRev fvars))
+          (← visit (pos.push 1) (v.instantiateRev fvars)) (nondep := nondep) fun x =>
+        withBinder ref x do visitLet (pos.push 2) (fvars.push x) b
+    | e =>
+      let body ← visit pos (e.instantiateRev fvars)
+      visitPost (rootOf pos fvars.size)
+        (← mkLetFVars (usedLetOnly := (← usedLetOnly)) (generalizeNondepLet := false)
+          fvars body)
+  /-- SOURCE: Transform.lean:136-155 `visitApp`, including `skipInstances`.
+
+  Upstream resolves instance arguments through `getFunInfoNArgs` and does not
+  visit them when `skipInstances` is set (`!cfg.instances`); visiting them would
+  let `dsimp` rewrite inside an instance where stock does not. -/
+  visitApp (pos : Pos) (e : Expr) : SimpM Expr := do
+    let skipInstances := !(← Simp.getConfig).instances
+    e.withApp fun f args => do
+      let n := args.size
+      let f ← visit (fnPos pos n) f
+      if skipInstances then
+        let infos := (← getFunInfoNArgs f args.size).paramInfo
+        let mut args := args
+        for i in [0:args.size] do
+          if h : i < infos.size then
+            if infos[i].isInstance then
+              continue
+          args := args.set! i (← visit (argPos pos n i) args[i]!)
+        visitPost pos (mkAppN f args)
+      else
+        let mut args := args
+        for i in [0:args.size] do
+          args := args.set! i (← visit (argPos pos n i) args[i]!)
+        visitPost pos (mkAppN f args)
+  /-- SOURCE: Transform.lean:110-112 `visit`.  `checkCache` is dropped (the
+  documented cache disablement), but `withIncRecDepth` and the per-node
+  `Core.checkSystem "transform"` are kept: without the latter a long `dsimp`
+  traversal is uninterruptible (REVIEW-4 defect 3). -/
   visit (pos : Pos) (e : Expr) : SimpM Expr := withIncRecDepth do
+    Core.checkSystem "transform"
     match ← pre pos e with
     | .done e => return e
     | .visit e => visit pos e
     | .continue e? =>
       let e := e?.getD e
-      let e ← visitChildren pos e
-      match ← post pos e with
-      | .done e => return e
-      | .visit e => visit pos e
-      | .continue e? => return e?.getD e
-  visitChildren (pos : Pos) (e : Expr) : SimpM Expr := do
-    match e with
-    | .app f a => return e.updateApp! (← visit (pos.push 0) f) (← visit (pos.push 1) a)
-    | .mdata _ b => return e.updateMData! (← visit (pos.push 0) b)
-    | .proj _ _ b => return e.updateProj! (← visit (pos.push 0) b)
-    | .lam _ d b _ =>
-      let d ← visit (pos.push 0) d
-      let b ← withLocalDecl e.bindingName! e.bindingInfo! d fun x =>
-        withBinder ref x do
-          let b ← visit (pos.push 1) (b.instantiate1 x)
-          return b.abstract #[x]
-      return e.updateLambdaE! d b
-    | .forallE _ d b _ =>
-      let d ← visit (pos.push 0) d
-      let b ← withLocalDecl e.bindingName! e.bindingInfo! d fun x =>
-        withBinder ref x do
-          let b ← visit (pos.push 1) (b.instantiate1 x)
-          return b.abstract #[x]
-      return e.updateForallE! d b
-    | .letE _ t v b nd =>
-      let t ← visit (pos.push 0) t
-      let v ← visit (pos.push 1) v
-      let b ← withLetDecl e.letName! t v fun x =>
-        withBinder ref x do
-          let b ← visit (pos.push 2) (b.instantiate1 x)
-          return b.abstract #[x]
-      return e.updateLet! t v b nd
-    | e => return e
-
-
-/-! ## Position arithmetic for applications
-
-`simpAppUsingCongr`, `congrArgs` and `tryAutoCongrTheorem?` all work on the
-*spine* of an `n`-ary application `f a₀ ... a_{n-1}`.  In `Expr`'s binary
-representation that is `(((f a₀) a₁) ... a_{n-1})`, so relative to the whole
-application the function head sits at `0ⁿ` and argument `i` sits at
-`0^(n-1-i) ++ [1]`.  REVIEW-3's fork note verified this is exactly the order the
-upstream traversal walks, so no congruence-lemma slot ever has to be mapped back
-to a child index.
--/
-
-/-- The position of argument `i` of an `n`-ary application, relative to the
-application's own position `pos`. -/
-def argPos (pos : Pos) (n i : Nat) : Pos :=
-  (pos ++ Array.replicate (n - 1 - i) 0).push 1
-
-/-- The position of the head of an `n`-ary application. -/
-def fnPos (pos : Pos) (n : Nat) : Pos := pos ++ Array.replicate n 0
-
-/-- SOURCE: Types.lean:682-695 `private Simp.mkCongrFun'`. -/
-def mkCongrFunT (e : Expr) (r : Simp.Result) (a : Expr) : MetaM Simp.Result := do
-  let e' := e.updateApp! r.expr a
-  match r.proof? with
-  | none   => return { expr := e', proof? := none }
-  | some hf =>
-    let α ← inferType a
-    let u ← getLevel α
-    let v ← getLevel (← inferType e)
-    let f := e.appFn!
-    let .forallE x _ βx _ ← whnfD (← inferType f)
-      | throwError "failed to build congruence proof, function expected{indentExpr f}"
-    let β := Lean.mkLambda x .default α βx
-    return { expr := e', proof? := mkApp6 (mkConst ``congrFun [u, v]) α β f r.expr hf a }
-
-/-- SOURCE: Types.lean:697-703 `private Simp.mkCongrPrefix`. -/
-def mkCongrPrefixT (declName : Name) (e : Expr) : MetaM Expr := do
-  let α ← inferType e.appArg!
-  let u ← getLevel α
-  let β ← inferType e
-  let v ← getLevel β
-  return mkApp2 (mkConst declName [u, v]) α β
-
-/-- SOURCE: Types.lean:714-729 `private Simp.mkCongr'`. -/
-def mkCongrT (e : Expr) (r₁ r₂ : Simp.Result) : MetaM Simp.Result := do
-  let e' := e.updateApp! r₁.expr r₂.expr
-  match r₁.proof?, r₂.proof? with
-  | none,    none    => return { expr := e', proof? := none }
-  | some hf, none    =>
-    let h ← mkCongrPrefixT ``congrFun' e
-    return { expr := e', proof? := mkApp4 h e.appFn! r₁.expr hf r₂.expr }
-  | none,    some ha  =>
-    let h ← mkCongrPrefixT ``congrArg e
-    return { expr := e', proof? := mkApp4 h e.appArg! r₂.expr r₁.expr ha }
-  | some hf, some ha =>
-    let h ← mkCongrPrefixT ``_root_.congr e
-    return { expr := e', proof? := mkApp6 h e.appFn! r₁.expr e.appArg! r₂.expr hf ha }
+      match e with
+      | .forallE .. => visitForall pos #[] e
+      | .lam ..     => visitLambda pos #[] e
+      | .letE ..    => visitLet pos #[] e
+      | .app ..     => visitApp pos e
+      | .mdata _ b  => visitPost pos (e.updateMData! (← visit (pos.push 0) b))
+      | .proj _ _ b => visitPost pos (e.updateProj! (← visit (pos.push 0) b))
+      | _           => visitPost pos e
+  /-- `usedLetOnly := cfg.zeta || cfg.zetaUnused` (SOURCE: Main.lean:526). -/
+  usedLetOnly : SimpM Bool := do
+    let cfg ← Simp.getConfig
+    return cfg.zeta || cfg.zetaUnused
+  /-- The position of the telescope root, `n` binders above `pos`. -/
+  rootOf (pos : Pos) (n : Nat) : Pos :=
+    if n == 0 then pos else pos.extract 0 (pos.size - n)
 
 /-! ## The main traversal
 
@@ -773,22 +853,20 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
       subst := subst.push instNew
       type := type.bindingBody!
     | CongrArgKind.eq =>
-      let r := argResults[j]!
+      subst := subst.push arg
+      let argResult := argResults[j]!
+      let argProof ← argResult.getProof' arg
       j := j + 1
-      subst := subst.push argNew
-      proof := mkApp proof argNew
-      type := type.bindingBody!
-      proof := mkApp proof (← r.getProof)
-      subst := subst.push (← r.getProof)
-      type := type.bindingBody!
+      proof := mkApp2 proof argResult.expr argProof
+      subst := subst.push argResult.expr |>.push argProof
+      type := type.bindingBody!.bindingBody!
     | _ => unreachable!
-  let rhs := type.appArg!.instantiateRev subst
-  if (← hasAssignableMVar proof <||> hasAssignableMVar rhs) then
-    return none
-  if !hasCast then
-    return some { expr := mkAppN f argsNew, proof? := proof }
-  else
+  let some (_, _, rhs) := type.instantiateRev subst |>.eq? | unreachable!
+  let rhs ← if hasCast then Simp.removeUnnecessaryCasts rhs else pure rhs
+  if hasProof then
     return some { expr := rhs, proof? := proof }
+  else
+    return some { expr := rhs }
 
 /-- SOURCE: Main.lean:531-543 `Simp.visitFn`, position-threaded. -/
 partial def visitFnT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Result := do
@@ -1083,31 +1161,51 @@ partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Res
 
 /-- SOURCE: Main.lean:436-467 `Simp.simpLet`, position-threaded.
 
-`simpHaveTelescope` (Main.lean:415-424) simplifies an entire `have` telescope
-at once through the generic `MonadSimp SimpM` instance, which dispatches to
-*stock* `simp`; its inner rewrites therefore carry no position.  Rather than
-diverge from stock simp we run it unchanged and, if it changed anything, record
-a classified unresolved reason. -/
+Two things upstream does here are invisible to a `Methods` wrapper and must be
+recorded, or the validator replays against a term simp has already changed
+(REVIEW-4 defect 1):
+
+* **`letToHave`** rewrites the `let` into a `have` *before* any simplification.
+  That is a definitional change of the term at this position, so it is logged as
+  a `change` step carrying the converted term. Without it the validator
+  navigates a `let` while every later event was recorded against a `have`.
+* **`simpHaveTelescope`** simplifies a whole `have` telescope at once through
+  the generic `MonadSimp SimpM` instance, which dispatches to *stock* `simp`;
+  its inner rewrites carry no position. We run it unchanged (diverging from
+  stock simp is never an option) and record the whole telescope rewrite as one
+  `change` at this position, so the replayed term stays in step. The call is
+  additionally marked unresolved, because a `change` is a defeq assertion rather
+  than the sequence of rewrites simp actually made. -/
 partial def simpLetT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Result := do
   assert! e.isLet
   if e.letNondep! then
-    haveTelescope e
+    haveTelescope pos e
   else
     let e ←
       if (← Simp.getConfig).letToHave then
         let eNew ← letToHave e
+        unless eNew == e do
+          -- A definitional conversion at this position; never a silent desync.
+          ref.modify (·.push (.defeq pos .change none e eNew (← captureEvCtx ref)))
         if eNew.isLet && eNew.letNondep! then
-          return ← haveTelescope eNew
+          return ← haveTelescope pos eNew
         pure eNew
       else
         pure e
     return { expr := (← dsimpT ref pos e) }
 where
-  haveTelescope (e : Expr) : SimpM Simp.Result := do
-    let r ← Simp.simpHaveTelescope e
+  haveTelescope (pos : Pos) (e : Expr) : SimpM Simp.Result := do
+    -- `simpHaveTelescope` runs *stock* `simp` on the telescope's bodies, under
+    -- the telescope's own binders.  Those firings carry no position of their
+    -- own and are observed on open terms, so they are diverted exactly as a
+    -- simproc's nested `simp` is (`procEvents`), and the telescope rewrite is
+    -- recorded as one `change` at this position instead.
+    let r ← withDivertedEvents ref (Simp.simpHaveTelescope e)
     unless r.expr == e do
+      ref.modify (·.push (.defeq pos .change none e r.expr (← captureEvCtx ref)))
       ref.modify (·.markUnresolved
-        "`have` telescope simplified as a unit (`simpHaveTelescope`)")
+        "`have` telescope simplified as a unit (`simpHaveTelescope` runs stock \
+simp, so its inner rewrites carry no position); recorded as one `change`")
     return r
 
 /-- SOURCE: Main.lean:657-670 `Simp.simpStep`, position-threaded. -/
