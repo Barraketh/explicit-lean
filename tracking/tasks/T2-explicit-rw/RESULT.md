@@ -71,8 +71,7 @@ calling the simplifier in `MetaM` produced neither a `by` node nor a synthetic
 metavariable and passed — my claim that the guard caught a block "however it got
 there" was false. Terms are now parsed in a whitelist grammar. **Residual hole,
 stated not papered over:** an identifier bound to a `@[term_elab]` elaborator is
-indistinguishable from a constant at parse time — closed generator-side, **noted
-for T4, not here**.
+indistinguishable from a constant at parse time — closed generator-side, **T4**.
 **Round 2**: the `let`-body branch abstracted by *value*, destroying the `let`
 when the value was closed and capturing unrelated occurrences when it was free —
 now `withLetDecl` + `mkLetFVars` by identity. `zeta` became a real kind; bare
