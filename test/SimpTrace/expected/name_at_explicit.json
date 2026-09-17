@@ -4,7 +4,7 @@
   {
    "loc": "goal",
    "closed": true,
-   "pre": "P c ∧ True",
+   "pre": "(∀ (x : ℕ), x = a → p x) ↔ p a",
    "post": null,
    "close": {
     "by": "true_intro"
@@ -16,22 +16,13 @@
       0,
       1
      ],
-     "name": "h.1",
-     "dir": "fwd",
-     "local": {
-      "userName": "h",
-      "inaccessible": false,
-      "ctxIndex": 4
-     },
-     "prop": "true",
-     "args": [
-      "c"
-     ]
+     "name": "forall_eq",
+     "dir": "fwd"
     },
     {
      "kind": "rw",
      "pos": [],
-     "name": "and_self",
+     "name": "iff_self",
      "dir": "fwd"
     }
    ]

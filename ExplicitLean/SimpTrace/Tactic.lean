@@ -188,13 +188,21 @@ namespace the spec defines. -/
 partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId)
     (ev : Event) : MetaM (Option Step) := do
   match ev with
-  | .rw pos o inv prop? before after c args side src? localO =>
+  | .rw pos o inv prop? before after c args side src? localO proj =>
     let beforePP ← ppIn c before
     let afterPP ← ppIn c after
-    let (lemmaName, rev, _) ← originName o c contextualFVars
-    -- The `local` object comes from the *resolved* origin, so `simp [h]` and
-    -- `simp [*]` agree; `name`/`dir` stay with the written syntax (REVIEW-5 1).
-    let (_, _, localRef?) ← originName localO c contextualFVars
+    -- `dir` still comes from the written syntax, which is what carries a
+    -- leading `←`; `name` does not.  The spec says `name` is "<lemma or hyp
+    -- name>", and pretty-printing the syntax put whole terms there --
+    -- `heq_comm (a := a)`, `@forall_eq _ p a`, `if_neg fun h ↦ hb ⟨a, h⟩` --
+    -- which no generator can emit as a name.  Take `name` (and the `local`
+    -- object) from the *resolved* origin, so `simp [h]` and `simp [*]` agree
+    -- and the name is always a bare constant or a local's display name; the
+    -- arguments the syntax applied travel in `args` (REVIEW-9 2, 3).
+    let (_, rev, _) ← originName o c contextualFVars
+    let (baseName, _, localRef?) ← originName localO c contextualFVars
+    -- The projection is part of the name a replayer must write.
+    let lemmaName := baseName ++ proj
     let sideSteps ← side.mapM (sideToTrace ur contextualFVars)
     let argStrs ← args.mapM (ppArg c)
     let propStr? := prop?.map (fun b => if b then "true" else "false")
@@ -216,7 +224,7 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
     -- this step's `side` traces, so replay has them in hand.
     let sideEqs : Array (Expr × Expr) := side.filterMap fun r =>
       match r.events.back? with
-      | some (.rw _ _ _ _ _ a _ _ _ _ _) => some (r.goal, a)
+      | some (.rw _ _ _ _ _ a ..) => some (r.goal, a)
       | some (.eq _ _ _ a _ _) => some (r.goal, a)
       | some (.defeq _ _ _ _ a _) => some (r.goal, a)
       | _ => none
@@ -597,7 +605,7 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
   let mut running ← instantiateMVars argBefore
   for ev in nested do
     let (pos, before, after, ec) ← match ev with
-      | .rw pos o inv prop? b a ec args sides _ _ =>
+      | .rw pos o inv prop? b a ec args sides _ _ _ =>
         if let some reason ← checkRwStep o args inv prop? b a ec (!sides.isEmpty) then
           ur.modify (·.add reason)
         pure (pos, b, a, ec)
@@ -636,7 +644,7 @@ def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
   let mut running ← instantiateMVars pre
   for ev in events do
     let (pos, before, after, c) ← match ev with
-      | .rw pos o inv prop? b a c args sides _ _ =>
+      | .rw pos o inv prop? b a c args sides _ _ _ =>
         -- Every emitted `rw` is re-elaborated and checked against its own
         -- `before`/`after`, so a misclassified plumbing head cannot ship.
         if let some reason ← checkRwStep o args inv prop? b a c (!sides.isEmpty) then

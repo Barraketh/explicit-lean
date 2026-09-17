@@ -90,10 +90,15 @@ fvar is the local; the applied arguments are what a replayer must supply.
 proof `hp` of its left side, so `appArg!` reaches `hp`, which is not the
 hypothesis the rewrite is by (REVIEW-7 5).  `Eq.symm`/`Iff.symm` are walked but
 flip the direction, for the same reason the simproc path does. -/
-partial def proofLocal? (proof : Expr) : Option (Origin × Array Expr × Bool) :=
+partial def proofLocal? (proof : Expr) :
+    Option (Origin × Array Expr × Bool × String) :=
   go proof false
 where
-  go (e : Expr) (inv : Bool) : Option (Origin × Array Expr × Bool) :=
+  /-- The fourth component is the projection suffix walked through on the way
+  to the local (`".2.1"` for `h.2.1`).  It is part of the *name*: `simp [h.2.1]`
+  with `h : p ∧ q ∧ r` rewrites by the conjunct, and a name of plain `h` would
+  tell a replayer to rewrite by the whole conjunction (REVIEW-9 2). -/
+  go (e : Expr) (inv : Bool) : Option (Origin × Array Expr × Bool × String) :=
     match e with
     -- A quantified hypothesis's proof is stored under binders.
     -- A quantified hypothesis's proof is stored under binders.  The arguments
@@ -101,24 +106,31 @@ where
     -- bvars here, not terms a replayer could write; unification recovers them
     -- from the subterm instead, so we keep the local and drop the arguments.
     | .lam _ _ body _ =>
-      (go body inv).map fun (o, _, i) => (o, #[], i)
+      (go body inv).map fun (o, _, i, pr) => (o, #[], i, pr)
     | _ =>
       match e.getAppFn with
       -- A beta-redex: simp stores `(fun x => ...) a`, so look inside the
       -- function rather than treating the redex as opaque.
       | .lam .. => go e.getAppFn.headBeta inv
-      | .fvar fvarId => some (.fvar fvarId, e.getAppArgs, inv)
+      | .fvar fvarId => some (.fvar fvarId, e.getAppArgs, inv, "")
       | .const n _ =>
         if n == ``Eq.symm || n == ``Iff.symm then
           if e.getAppNumArgs == 0 then none else go e.appArg! (!inv)
+        else if n == ``And.left || n == ``And.right then
+          -- Record which conjunct, innermost last: `h.2.1` is
+          -- `And.left (And.right h)`, walked outside-in, so the suffix built
+          -- here reads `.2` then `.1` -- the order the user wrote.
+          if e.getAppNumArgs == 0 then none else
+            let comp := if n == ``And.left then ".1" else ".2"
+            (go e.appArg! inv).map fun (o, a, i, pr) => (o, a, i, pr ++ comp)
         else if n == ``eq_true || n == ``eq_false || n == ``propext
-                || n == ``And.left || n == ``And.right || n == ``of_eq_true then
+                || n == ``of_eq_true then
           if e.getAppNumArgs == 0 then none else go e.appArg! inv
         else
           -- A *global* constant the user applied explicitly (`@xor_not_right a`
           -- in `simp [← @xor_not_right a]`): a legitimate, replayable origin,
           -- so it resolves to the declaration rather than being classified.
-          some (.decl n true false, e.getAppArgs, inv)
+          some (.decl n true false, e.getAppArgs, inv, "")
       | _ => none
 
 /--
@@ -137,19 +149,19 @@ syntax's characters: a character whitelist dropped every non-ASCII name (`hα`,
 the tree's.
 -/
 def resolveStxOrigin (o : Origin) :
-    Simp.SimpM (Origin × Array Expr × Bool) := do
-  let .stx id _ := o | return (o, #[], false)
+    Simp.SimpM (Origin × Array Expr × Bool × String) := do
+  let .stx id _ := o | return (o, #[], false, "")
   for thms in (← readThe Simp.Context).simpTheorems do
     for sthm in thms.pre.values ++ thms.post.values do
       if let .stx id' _ := sthm.origin then
         if id' == id then
           match proofLocal? sthm.proof with
-          | some (resolved, args, inv) => return (resolved, args, inv)
+          | some (resolved, args, inv, proj) => return (resolved, args, inv, proj)
           -- The argument elaborated to something that is not a local (a term,
           -- a global applied to arguments): leave the origin as written, and
           -- the caller classifies it — "unresolved" is never a silent pass.
-          | none => return (o, #[], false)
-  return (o, #[], false)
+          | none => return (o, #[], false, "")
+  return (o, #[], false, "")
 
 /-- Is this origin's statement an equation or an iff (after its binders)? -/
 def originIsEquational (o : Origin) (lctx : LocalContext) (insts : LocalInstances) :
@@ -392,7 +404,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
         if first then
           for ev in diverted do
             let (before, after) := match ev with
-              | .rw _ _ _ _ b a _ _ _ _ _ => (some b, some a)
+              | .rw _ _ _ _ b a .. => (some b, some a)
               | .eq _ _ b a _ _ => (some b, some a)
               | .defeq _ _ _ b a _ => (some b, some a)
               | .congr _ _ _ b a _ _ _ => (some b, some a)
@@ -458,7 +470,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
         s!"simproc:{(src?.map toString).getD declName.toString} lemma \
 `{declName}` applied to its recorded arguments does not re-elaborate")
     ref.modify (·.push (.rw pos (.decl declName true false) inv none
-      e r.expr evCtx explicitArgs sides src? (.decl declName true false)))
+      e r.expr evCtx explicitArgs sides src? (.decl declName true false) ""))
   | .computed =>
     ref.modify (·.push (.eq pos src? e r.expr evCtx side))
 where
@@ -609,7 +621,7 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             -- original origin for `name` and `dir`: the syntax is what carries
             -- a leading `←`, and replacing it would silently turn a reverse
             -- rewrite into a forward one.
-            let (resolved, rargs, rinv) ← resolveStxOrigin o
+            let (resolved, rargs, rinv, rproj) ← resolveStxOrigin o
             -- Every rewrite origin must be a global constant or a local fvar.
             -- A `.stx` that resolves to neither leaves the step without the
             -- identity the spec requires, and the structural check cannot see
@@ -621,7 +633,7 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             -- A wrapper that reverses the statement (`h.symm`) flips `dir`.
             ref.modify (·.push
               (.rw pos o (inv != rinv) prop? e r.expr evCtx rargs side none
-                resolved))
+                resolved rproj))
         | none =>
           -- No origin at all: a simproc that registered nothing (`simpUsingDecide`
           -- and the ground arithmetic/matcher simprocs).  Same classification.

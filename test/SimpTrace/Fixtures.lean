@@ -470,4 +470,24 @@ example (P Q : Prop) [Decidable (P ∧ Q)] (a b : Nat) (hp : ¬ P) :
     (if P ∧ Q then a else b) = b := by
   simp_trace [hp] =>trace "test/SimpTrace/out/side_cond_eq_false.json"
 
+/-! ### `name` is a name, not written syntax (REVIEW-9 2, 3)
+
+The spec's `name` is "<lemma or hyp name>". Pretty-printing the written syntax
+put whole terms there -- `heq_comm (a := a)`, `@forall_eq _ p a` -- which no
+generator can emit as a name. `name` now comes from the *resolved* origin, so
+it is always a bare constant or a local's display name (plus any projection
+suffix, which is part of the name); the arguments the syntax applied travel in
+`args`, in explicit binder order, and `dir` keeps a leading `←`. -/
+
+/-- Named-argument syntax: `name` is the bare constant and the named argument
+becomes positional in `args`.  Two different types, so `heq_eq_eq` (which needs
+one) cannot fire first and `heq_comm` is the rewrite under test. -/
+example (α β : Type) (a : α) (b : β) : HEq a b ↔ HEq b a := by
+  simp_trace [heq_comm (a := a) (b := b)] =>trace "test/SimpTrace/out/name_named_arg.json"
+
+/-- `@`-syntax with explicit universe/type arguments: all of them land in
+`args`, none of them in `name`. -/
+example (p : Nat → Prop) (a : Nat) : (∀ x, x = a → p x) ↔ p a := by
+  simp_trace [@forall_eq _ p a] =>trace "test/SimpTrace/out/name_at_explicit.json"
+
 end ExplicitLean.SimpTrace.Fixtures

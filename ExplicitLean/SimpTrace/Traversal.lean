@@ -87,13 +87,18 @@ inductive Event where
   records where it came from.
 
   `localOrigin` is `origin` resolved to a local hypothesis when `origin` is the
-  *syntax* of one (`simp [h]`); it supplies the `local` object and the `prop`
-  flag, while `origin` still supplies `name` and `dir`, since only the syntax
-  carries a leading `←`. -/
+  *syntax* of one (`simp [h]`); it supplies the `local` object, the `prop` flag
+  and `name`, while `origin` supplies only `dir`, since the syntax is what
+  carries a leading `←`.  `name` must be a bare constant or a local's display
+  name, so it cannot come from the syntax (REVIEW-9 2).
+
+  `proj` is the projection suffix the written origin applied to that local
+  (`".2.1"` for `h.2.1`); it belongs to the name, since rewriting by `h`
+  instead of `h.2.1` rewrites by a different proposition. -/
   | rw (pos : Pos) (origin : Origin) (inv : Bool) (prop? : Option Bool)
        (before after : Expr) (ctx : EvCtx)
        (args : Array Expr) (side : Array SideRec) (source? : Option Name)
-       (localOrigin : Origin)
+       (localOrigin : Origin) (proj : String)
   /-- A simproc firing (or any procedure-computed equation). -/
   | eq (pos : Pos) (source? : Option Name) (before after : Expr)
        (ctx : EvCtx) (side : Array SideRec)
@@ -136,7 +141,8 @@ def SideRec.post? : SideRec → Option Expr | SideRec.mk _ _ _ _ _ _ p => p
 /-- Re-root an event's position under `base`.  Used to place events captured
 relative to a subterm back at their absolute positions. -/
 partial def Event.rebase (base : Pos) : Event → Event
-  | .rw p o inv pr b a c args side src lo => .rw (base ++ p) o inv pr b a c args side src lo
+  | .rw p o inv pr b a c args side src lo pj =>
+    .rw (base ++ p) o inv pr b a c args side src lo pj
   | .eq p s b a c side => .eq (base ++ p) s b a c side
   | .defeq p k n b a c => .defeq (base ++ p) k n b a c
   | .introCtx p f c => .introCtx (base ++ p) f c
@@ -149,7 +155,7 @@ def Event.pos : Event → Pos
 
 /-- Replace an event's position. -/
 def Event.reposition (q : Pos) : Event → Event
-  | .rw _ o inv pr b a c args side src lo => .rw q o inv pr b a c args side src lo
+  | .rw _ o inv pr b a c args side src lo pj => .rw q o inv pr b a c args side src lo pj
   | .eq _ s b a c side => .eq q s b a c side
   | .defeq _ k n b a c => .defeq q k n b a c
   | .introCtx _ f c => .introCtx q f c
@@ -1158,7 +1164,7 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
         ref.modify (·.push
           (.rw pos (.decl c.theoremName true false) false none e eNew
             (← captureEvCtx ref) #[] sidesFinal (some `congr)
-            (.decl c.theoremName true false)))
+            (.decl c.theoremName true false) ""))
       congrArgsT ref pos { expr := eNew, proof? := proof } extraArgs
         origNumArgs numArgs
     else

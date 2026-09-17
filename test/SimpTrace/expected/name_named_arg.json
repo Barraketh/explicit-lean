@@ -4,7 +4,7 @@
   {
    "loc": "goal",
    "closed": true,
-   "pre": "P c ∧ True",
+   "pre": "a ≍ b ↔ b ≍ a",
    "post": null,
    "close": {
     "by": "true_intro"
@@ -16,22 +16,19 @@
       0,
       1
      ],
-     "name": "h.1",
+     "name": "heq_comm",
      "dir": "fwd",
-     "local": {
-      "userName": "h",
-      "inaccessible": false,
-      "ctxIndex": 4
-     },
-     "prop": "true",
      "args": [
-      "c"
+      "α",
+      "β",
+      "a",
+      "b"
      ]
     },
     {
      "kind": "rw",
      "pos": [],
-     "name": "and_self",
+     "name": "iff_self",
      "dir": "fwd"
     }
    ]
