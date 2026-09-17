@@ -230,4 +230,35 @@ theorem iota_two_steps : outerStep (innerStep 0) = 20 := by
   guard_target =ₛ 20 = 20
   rfl
 
+/-! ## The `congr` step: cast transport
+
+`congr i [steps] at pos` rebuilds the application at `pos` through its
+auto-generated congruence theorem, proving argument `i`'s equation from the
+nested steps. Unlike `congrArg` it transports the arguments that *depend* on
+`i`, which is what makes a `cast` position replayable at all: the type-equality
+proof rides along.
+
+These three replay T1's recorded traces verbatim. The first is the shape of
+`Mathlib/Logic/Function/Basic.lean:390`.
+-/
+
+/-- T1's `congr_cast` trace: `congr` at `[0, 1]` on argument 3, nested `hfa`. -/
+theorem congr_cast {α β : Type} (h : α = β) (f : α → α) (a : α) (hfa : f a = a) :
+    cast h (f a) = cast h a := by
+  explicit_rw [congr 3 [hfa at []] at [0, 1]] then rfl
+
+/-- T1's `congr_nested_cast` trace: a `congr` inside a `congr`, transporting two
+levels of type equality. -/
+theorem congr_nested_cast {α β γ : Type} (h₁ : α = β) (h₂ : β = γ) (f : α → α)
+    (a : α) (hfa : f a = a) :
+    cast h₂ (cast h₁ (f a)) = cast h₂ (cast h₁ a) := by
+  explicit_rw [congr 3 [congr 3 [hfa at []] at []] at [0, 1]] then rfl
+
+/-- The `Function/Basic:390` shape, which used to panic the recorder. -/
+theorem congr_function_basic {α β : Type} (h : α = β) (g : α → α) (x : α)
+    (hgx : g x = x) : cast h (g x) = cast h x := by
+  explicit_rw [congr 3 [hgx at []] at [0, 1]]
+  guard_target =ₛ cast h x = cast h x
+  rfl
+
 end ExplicitRwTest.Definitional

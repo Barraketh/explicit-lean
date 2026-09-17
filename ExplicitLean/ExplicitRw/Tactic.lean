@@ -8,6 +8,7 @@ public meta import Lean.Elab.Tactic.Location
 public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.Meta.Tactic.Intro
 public meta import Lean.Parser.Tactic
+public meta import Lean.Meta.CongrTheorems
 
 public meta section
 
@@ -398,10 +399,44 @@ two are accepted; see `explicitRwCloser` for why this is not a `tacticSeq`.
 -/
 syntax explicitRwEq := &"eq " explicitRwType " by " (&"rfl" <|> &"decide") explicitRwPos
 
-/-- One step of an `explicit_rw` trace. -/
+/-- The innermost nesting level: no further `congr`. -/
+syntax explicitRwInnerStep0 :=
+  explicitRwUnfold <|> explicitRwRed <|> explicitRwChange <|> explicitRwEq <|>
+  explicitRwRw
+
+/-- A `congr` whose nested steps are innermost. -/
+syntax explicitRwCongr0 :=
+  &"congr " num " [" explicitRwInnerStep0,* "]" explicitRwPos
+
+/-- One nesting level up, so a `congr` may nest a `congr` — which T1's
+`congr_nested_cast` trace does, transporting two levels of type equality. -/
+syntax explicitRwInnerStep :=
+  explicitRwUnfold <|> explicitRwRed <|> explicitRwChange <|> explicitRwEq <|>
+  explicitRwCongr0 <|> explicitRwRw
+
+/--
+`congr <i> [nested steps] at [pos]` — the spec's `congr` step kind.
+
+At `pos` the subterm must be an application. The auto-generated congruence
+theorem for its head is obtained with `Lean.Meta.mkCongrSimp?`; the equation for
+argument `i` is proved by replaying the nested steps as a sub-replay rooted at
+that argument; and the theorem is then applied, which transports the arguments
+that depend on it. This is what a plain `congrArg` cannot do, and it is why a
+dependent position that `explicit_rw` otherwise refuses becomes replayable.
+
+`Lean.Meta.CongrTheorems` is ordinary congruence-lemma generation, not the
+simplifier: it lives outside `Lean.Meta.Tactic.Simp`, and
+`Experiment/check_no_simp_family.py` accepts the import.
+-/
+syntax explicitRwCongr :=
+  &"congr " num " [" explicitRwInnerStep,* "]" explicitRwPos
+
+/-- One step of an `explicit_rw` trace. The keyword-led forms are tried before
+the bare-term rewrite, so `beta at [...]` is the reduction rather than a lemma
+named `beta`. -/
 syntax explicitRwStep :=
   explicitRwUnfold <|> explicitRwRed <|> explicitRwIntroCtx <|> explicitRwChange <|>
-  explicitRwEq <|> explicitRwRw
+  explicitRwEq <|> explicitRwCongr <|> explicitRwRw
 
 /-- Optional closing tactic: `explicit_rw [...] then rfl`. -/
 syntax explicitRwClose := " then " explicitRwSideProof
@@ -596,7 +631,10 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
   | ``explicitRwTermArrow => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a → $b)
   | ``explicitRwType => toTermCore stx[0]
   | k =>
-    throwError "explicit_rw: internal error: unhandled whitelisted node `{k}`"
+    if k.toString.endsWith "pseudo.antiquot" then
+      throwError "explicit_rw: antiquotations are not admitted in a trace term."
+    else
+      throwError "explicit_rw: internal error: unhandled whitelisted node `{k}`"
 
 /-- `toTermCore` in `TacticM`, which is where the step elaborators run. -/
 def toTerm (stx : Syntax) : TacticM Term := toTermCore stx
@@ -998,8 +1036,9 @@ partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bo
     (fun pfx child sub => badPosError idx pos pfx child sub)
 
 /-- Apply one parsed step to the current expression. -/
-partial def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Replacement := do
-  let stx := stx.raw[0]
+partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement := do
+  -- Each alternation wraps its chosen form in a one-field node.
+  let stx := stx[0]
   match stx.getKind with
   | ``explicitRwUnfold =>
     let pos := parsePos stx[2]
@@ -1042,7 +1081,71 @@ partial def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : Ta
         | none =>
           stepError idx m!"`iota` at this position: the application does not reduce; \
             its major premise is not a constructor."
+    | "" =>
+      throwError "explicit_rw: antiquotations are not admitted in a trace step."
     | k => throwError "explicit_rw: internal error: unknown reduction keyword `{k}`"
+  | ``explicitRwCongr | ``explicitRwCongr0 =>
+    -- `congr i [steps] at pos`: rebuild the application at `pos` through its
+    -- auto-generated congruence theorem, proving argument `i`'s equation from
+    -- the nested steps. Unlike `congrArg`, this transports the arguments that
+    -- *depend* on `i`, which is what makes a dependent position replayable.
+    let argIdx := (stx[1].isNatLit?).getD 0
+    let inner := stx[3].getSepArgs
+    let pos := parsePos stx[5]
+    rewriteAt e pos
+      (fun sub => do
+        let fn := sub.getAppFn
+        let args := sub.getAppArgs
+        if h : argIdx < args.size then
+          let some congrThm ← mkCongrSimp? fn
+            | stepError idx m!"`congr {argIdx}`: no congruence theorem could be \
+                generated for the head{indentExpr fn}"
+          -- Prove `args[i] = rhs` by replaying the nested steps at that argument.
+          let target := args[argIdx]
+          let mut cur := target
+          let mut proof? : Option Expr := none
+          for h2 : j in [0 : inner.size] do
+            let r ← runStep idx cur inner[j]
+            let next ← instantiateMVars r.newExpr
+            match proof?, r.proof? with
+            | none, p => proof? := p
+            | some p, none => proof? := some p
+            | some p, some q => proof? := some (← mkEqTrans p q)
+            cur := next
+          let argEq ← match proof? with
+            | some p => instantiateMVars p
+            | none => mkEqRefl target
+          -- Apply the congruence theorem with the argument equation in place.
+          let newArgs := args.set! argIdx cur
+          let newSub := mkAppN fn newArgs
+          let mut cargs : Array Expr := #[]
+          let mut k := 0
+          for kind in congrThm.argKinds do
+            if k >= args.size then break
+            match kind with
+            | .fixed => cargs := cargs.push args[k]!
+            | .eq =>
+              cargs := cargs.push args[k]!
+              cargs := cargs.push newArgs[k]!
+              let eqPf ← if k == argIdx then pure argEq else mkEqRefl args[k]!
+              cargs := cargs.push eqPf
+            | .cast => cargs := cargs.push args[k]!
+            | _ =>
+              stepError idx m!"`congr {argIdx}`: the congruence theorem for this \
+                head needs an argument kind `explicit_rw` does not build."
+            k := k + 1
+          let pf := mkAppN congrThm.proof cargs
+          -- Check the built proof really proves what we claim before using it.
+          let pfTy ← instantiateMVars (← inferType pf)
+          let expected ← mkEq sub newSub
+          unless ← isDefEq pfTy expected do
+            stepError idx m!"`congr {argIdx}`: the congruence theorem proves\
+              {indentExpr pfTy}\nbut this step needs{indentExpr expected}"
+          return Replacement.eq newSub pf
+        else
+          stepError idx m!"`congr {argIdx}`: the application at this position has \
+            only {args.size} argument(s).")
+      (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwIntroCtx =>
     stepError idx m!"`intro_ctx` is a recorded step kind that `explicit_rw` does not \
       implement: contextual rewriting changes what is in scope for later positions, \
@@ -1064,8 +1167,7 @@ partial def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : Ta
       -- fail, since pinning that type is the whole point of the step.
       if newSub.hasSorry then
         stepError idx m!"the `change` term of this step does not elaborate at the \
-          type of the subterm{indentExpr (← inferType sub)}\n(Lean reports the \
-          underlying error separately.)"
+          type of the subterm{indentExpr (← inferType sub)}"
       return newSub
   | ``explicitRwEq =>
     let pos := parsePos stx[4]
@@ -1109,7 +1211,7 @@ partial def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : Ta
   | k => throwError "explicit_rw: internal error: unexpected step kind `{k}`"
 
 /-- Apply every step in order to the expression at `target`, rebuilding the goal. -/
-partial def runSteps (steps : Array (TSyntax ``explicitRwStep)) (target : Target) : TacticM Unit := do
+partial def runSteps (steps : Array Syntax) (target : Target) : TacticM Unit := do
   for h : idx in [0 : steps.size] do
     let stx := steps[idx]
     let goal ← getMainGoal
@@ -1203,7 +1305,7 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
     runSideProofOn idx which? stx[3] goal'
   | ``explicitRwSideNested =>
     -- Replay a nested trace under the introduced hypotheses.
-    let steps := stx[2].getSepArgs.map fun x => (⟨x⟩ : TSyntax ``explicitRwStep)
+    let steps := stx[2].getSepArgs
     let remaining ← Tactic.run goal do
       runSteps steps none
       unless stx[4].isNone do
@@ -1223,7 +1325,7 @@ end Impl
 open Impl in
 @[tactic explicitRw]
 def evalExplicitRw : Tactic := fun stx => do
-  let steps := stx[2].getSepArgs.map fun s => (⟨s⟩ : TSyntax ``explicitRwStep)
+  let steps := stx[2].getSepArgs
   let locStx := stx[4]
   let closeStx := stx[5]
   -- Resolve the location: the goal, or exactly one hypothesis.
