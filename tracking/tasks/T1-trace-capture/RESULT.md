@@ -1,129 +1,143 @@
 # T1-trace-capture: RESULT (T1b — forked traversal)
 
-`simp_trace` now runs a **fork of simp's own traversal** that records positions directly. Frontend unchanged and still
-substitutable (every `simp` argument form plus a trailing `=>trace "<path>"`; without it the JSON is logged as
-`simp-trace-json:{...}`); goal-state replication still mirrors `Meta.simpGoal`.
+`simp_trace` runs a **fork of simp's own traversal** that records positions directly. Frontend unchanged and still substitutable
+(every `simp` argument form plus a trailing `=>trace "<path>"`, else the JSON is logged); goal state mirrors `Meta.simpGoal`.
 
-## The fork — `ExplicitLean/SimpTrace/Traversal.lean` (1180 lines, 41 `SOURCE:` annotations)
+## The fork — `ExplicitLean/SimpTrace/Traversal.lean` (~1200 lines, 43 `SOURCE:` annotations)
 
-Copied from Lean 4.32.2 `src/lean/Lean/Meta/Tactic/Simp/`: 31 functions from **Main.lean** (`reduceStep`, `reduce`, `unfold?`,
+Copied from Lean 4.32.2 `src/lean/Lean/Meta/Tactic/Simp/`: the traversal of **Main.lean** (`reduceStep`, `reduce`, `unfold?`,
 `reduceProjFn?`, `reduceFVar`, `dsimpImpl`, `simpProj`/`Const`/`Lambda`/`Arrow`/`Forall`/`Let`/`App`/`Step`, `visitFn`,
 `congr`/`congrDefault`, `processCongrHypothesis`, `trySimpCongrTheorem?`, `simpLoop`, `simpImpl`, `withNewLemmas`,
-`lambdaTelescopeDSimp` and their helpers) and 6 from **Types.lean** (`congrArgs`, `simpAppUsingCongr`, `tryAutoCongrTheorem?`,
-`mkCongrFun'`/`mkCongrPrefix`/`mkCongr'`). Each carries a `SOURCE:` comment with its upstream file and line range, so a Lean bump
-re-syncs by diffing. Nine are `private` upstream; every symbol their bodies reference is public, so no `private`/`unsafe`/
-`@[implemented_by]` boundary had to be reproduced — no escalation.
+`lambdaTelescopeDSimp` and helpers), the congruence machinery of **Types.lean** (`congrArgs`, `simpAppUsingCongr`,
+`tryAutoCongrTheorem?`, `mkCongr*`), and **Transform.lean**'s `transformWithCache` (as `dsimpT`, round 4). Each carries a
+`SOURCE:` comment with its upstream file and line range. Nine are `private` upstream; every symbol their bodies reference is
+public, so no `private`/`unsafe`/`@[implemented_by]` boundary had to be reproduced.
 
-**Stock and untouched:** everything deciding *what* simp does — `Simp.Methods` (`pre`/`post`/`dpre`/`dpost`/`discharge?`) from
-the context, `Simp.rewrite?`, `Simp.Result`, simproc tables, congruence lookup, `synthesizeArgs`, `mkCongrSimp?`. Two edits
-applied uniformly: every recursive `Simp.simp`/`Simp.dsimp` (an `@[extern "lean_simp"]` opaque that would dispatch to *stock*
-`simpImpl` and lose positions) becomes `simpT`/`dsimpT` with the child's position; and stock `Methods` run under `withPos`, so the
-recorder reads the position of the subterm they fire on.
+**Stock and untouched:** everything deciding *what* simp does — `Simp.Methods` from the context, `Simp.rewrite?`, `Simp.Result`,
+simproc tables, congruence lookup, `synthesizeArgs`, `mkCongrSimp?`. Two edits applied uniformly: every recursive
+`Simp.simp`/`Simp.dsimp` (an `@[extern "lean_simp"]` opaque that would dispatch to *stock* `simpImpl` and lose positions) becomes
+`simpT`/`dsimpT` with the child's position; and stock `Methods` run under `withPos`.
 
 **Threading.** `pos : Pos` is an explicit parameter on every copied function, extended per the spec (`app` 0/1, binder 0/1, `letE`
 0/1/2, `mdata`/`proj` 0). For an `n`-ary application argument `i` is at `0^(n-1-i) ++ [1]` (`argPos`/`fnPos`) — exactly the order
-`simpAppUsingCongr`'s `visit` walks, as REVIEW-3's fork note predicted. `processCongrHypothesisT` locates the argument a
-congruence *hypothesis* simplifies and hands `simpT` its position, so `ite_congr` traces at the condition. A **binder stack**
-(`EvCtx.binders`) records the fvars the traversal substituted for term binders, so the validator never infers them.
+`simpAppUsingCongr`'s `visit` walks. A **binder stack** (`EvCtx.binders`) records the fvars the traversal substituted for term
+binders, so the validator never infers them.
 
-**Two deliberate departures.** (1) The result **cache is disabled**: keyed on the expression alone, reuse at a second position
-would log events nowhere or at the first — a position-exact trace and an expression-keyed cache are incompatible. (2) A simproc
-may call the opaque `Simp.simp` on a subterm of its choosing (`reduceIte` on an `ite`'s condition); that enters stock `simpImpl`
-and its firings carry no position, so they are **diverted** into a frame and attached to the simproc's `eq` step as `side`
-evidence.
+**Deliberate departures.** (1) The result **cache is disabled**: keyed on the expression alone, reuse at a second position would
+log events nowhere or at the first. (2) Where stock simp is re-entered on a subterm the fork did not descend into — a simproc's
+own `simp c`, `simpHaveTelescope`, a congruence hypothesis — those firings have no position, so they are **diverted** and the net
+change recorded instead.
 
-**Deleted.** `Position.lean` lost 327 of 404 lines: `findBridge?`, `findBridgeChain?`, `reducibleSites`, `reduceHere?`,
-`substAll`, `refresh`, `findOccurrences`, `Occurrence`, `Bridge`, `collectBridges`, `solvePositions`, the no-op-match rule. What
-remains is navigation plus the **validator**, run after every location: navigate `pos`, check the subterm equals `before`,
-substitute `after`, require the final term to equal simp's result; mismatch is a hard failure. **No search anywhere in the
-recorder.**
+**Deleted.** `Position.lean` lost 327 of 404 lines (`findBridgeChain?`, `reducibleSites`, `refresh`, `findOccurrences`,
+`collectBridges`, `solvePositions`, the no-op-match rule). What remains is navigation plus the **validator**: navigate `pos`,
+check the subterm equals `before` (modulo proof irrelevance), substitute `after`, require the final term to equal simp's result.
+**No search anywhere in the recorder.**
 
-## Measurements (macOS, Lean 4.32.2; outputs gitignored; wall/RSS are cold-cache upper bounds — a warm re-run is ~2.9 s)
+## Measurements (macOS, Lean 4.32.2; outputs gitignored; cold-cache figures)
 
-| file | calls | traced | steps | kinds | bytes | wall | peak RSS | unres. |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `IsEmptyBasicTraced.lean` | 17 | 17 | 76 | `rw` 70, `unfold` 6 | 15 045 | 4.71 s | 677 MB | 0 |
-| `NontrivialDefsTraced.lean` | 1 | 1 | 6 | `rw` 6 | 1 109 | 5.20 s | 638 MB | 0 |
-| `FunctionDefsTraced.lean` | 1 | 1 | 12 | `rw` 8, `proj` 4 | 1 878 | 5.09 s | 645 MB | 0 |
-| `ExistsUniqueTraced.lean` | 8 | 8 | 29 | `rw` 23, `beta` 4, `unfold` 2 | 5 601 | 5.33 s | 649 MB | 1 |
-| **Mathlib total** | **10** | **10** | **47** | `rw` 37, `beta` 4, `proj` 4, `unfold` 2 | **8 588** | — | — | **1** |
+| file | calls | traced | steps | kinds | bytes | wall | stock | peak RSS | unres. |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `IsEmptyBasicTraced.lean` | 17 | 17 | 76 | `rw` 70, `unfold` 6 | 15 045 | 2.58 s | — | 677 MB | 0 |
+| `NontrivialDefsTraced.lean` | 1 | 1 | 6 | `rw` 6 | 1 109 | 2.52 s | — | 638 MB | 0 |
+| `FunctionDefsTraced.lean` | 1 | 1 | 12 | `rw` 8, `proj` 4 | 1 878 | 2.68 s | — | 646 MB | 0 |
+| `ExistsUniqueTraced.lean` | 8 | 8 | 29 | `rw` 23, `beta` 4, `unfold` 2 | 5 601 | 2.70 s | — | 651 MB | 1 |
+| `FunctionBasicTraced.lean` | 19 | 19 | 102 | `rw` 76, `beta` 7, `proj` 5, `intro_ctx` 8, `unfold` 4, `change` 2 | 20 070 | 3.84 s | 2.62 s | 743 MB | 5 |
 
-Every call stock simp proves traces (10/10, against REVIEW-3's 8/11); no goal stock simp closes is left open. The one unresolved
-is `ExistsUnique.lean:121` — *`exists_prop_congr` simplifies a subterm that is not a child of the application*; its trace is
-emitted and passes validation, the flag being conservative about a firing it cannot place. IsEmpty reproduces the previous kind
-tally exactly — the fork does not diverge from stock.
+**Every call stock simp proves traces: 46 of 46**, none leaves a goal stock closes, no panics, no validation failures. The 6
+unresolved are all congruence transports. The four committed corpora reproduce their earlier tallies exactly.
 
-## REVIEW-3 items (each reproduced before, re-run after)
+**REVIEW-3 items, all confirmed fixed by the round-4 reviewer.** C1 an unattributable firing is an `eq` step whose `by` a scratch
+check decides, never an abort; `iota` gained an emitter. C2 fixed by deleting the search: chain depths 4–30 flat, matching stock.
+M3 `(disch := omega)` records `close:{"by":"omega"}`. M4 both Mathlib calls trace; fixing (b) exposed that a non-dependent arrow
+is a binder node binding no term variable, so `Expr.abstract`'s indices need padding. M5 Prop-valued lemmas carry `"prop"`.
+M6 no `#N` in any trace.
 
-- **C1** fixed: an unattributable firing is an `eq` step whose `by` a scratch check decides, never an abort. `FINAL.lean` closes
-  (`Nat.reduceAdd`, `by:"rfl"`); `IOTA5.lean`'s `Option.getD` traces as `unfold` + **`iota`** — the kind that previously had no
-  emitter. (`IOTA2.lean:19`'s error is stock simp's own unsolved goal, verified against stock.)
-- **C2** fixed by deletion. Chain depths 4/6/8/12: **2.71/2.70/2.70/3.26 s** (was 6.8/219.4/timeout/timeout), flat against stock's
-  2.7 s. `PROJ3.lean`: **3.98 s** vs stock 4.04 s (was a 101.6 s timeout).
-- **M3** fixed: `UNK2.lean` records `close:{"by":"omega"}`. Discharger text is read by pretty-printing the node and stripping
-  delimiters, stable across its `atomic`/`patternIgnore` wrappers.
-- **M4** both fixed. (a) `Function/Defs.lean` emits the four `proj` reductions at four distinct positions in simp's order — the
-  composition the chain search exhausted its bound on. (b) `ExistsUnique.lean:115` traces; the `_fvar` leak is structurally
-  impossible now. Fixing (b) exposed a real validator bug: **a non-dependent arrow is a binder node that binds no term variable**,
-  so `Expr.abstract`'s indices need padding for it.
-- **M5** fixed: a Prop-valued lemma carries `"prop":"true"`/`"false"`, from the origin's declared type. Both lemmas REVIEW-3 named
-  carry it — `leftTotal_empty`/`rightTotal_empty` (`true`), `List.not_mem_nil` (`false`). Acting on the flag is T2's side. **M6**
-  fixed: no `#N` in any of the 57 traces — subterms come from the live traversal with binders in scope. **M7**: this file replaces
-  the overstated one.
-
-## Lemma-headed simproc proofs (spec amendment 408a39b)
-
-A simproc whose proof is one lemma applied is now an ordinary `rw` naming that lemma, with the discharged condition as a `side`
-sub-trace and `"source"` naming the simproc. `classifyProof` is **generic, never a table of simproc names**: it takes the proof's
-head constant and walks its arguments against the lemma's own binder telescope, requiring every *explicit* argument to be a
-subterm of the position, an instance, or a proof (which becomes the side entry). Plumbing heads (`Eq.trans`/`Eq.mpr`/`Eq.symm`/
+**Lemma-headed simproc proofs (spec 408a39b).** A simproc whose proof is one lemma applied is an ordinary `rw` naming that
+lemma, with the discharged condition as a `side` sub-trace and `"source"` naming the simproc. `classifyProof` is **generic, never
+a table of simproc names**: it walks the proof head's arguments against the lemma's own binder telescope, requiring every
+*explicit* argument to be a subterm of the position, an instance, or a proof. Plumbing heads (`Eq.trans`/`Eq.mpr`/`Eq.symm`/
 `of_eq_true`) are excluded, so those stay `eq`.
 
-| simproc | proof head | recorded | replay shape, verified well-typed |
-| --- | --- | --- | --- |
-| `reduceIte` | `ite_cond_eq_true`/`_false` | `rw` + side | `rw [ite_cond_eq_true 1 2 (eq_true h)]` |
-| `reduceDIte` | `dite_cond_eq_true`/`_false` | `rw` + side | `rw [dite_cond_eq_true (eq_true h)]` |
-| `simpUsingDecide` (`+decide`) | `eq_true_of_decide` | `rw` + side | `rw [eq_true_of_decide (rfl : decide _ = true)]` |
-| `Nat.reduceEqDiff` | `eq_false_of_decide` | `rw` + side | `rw [eq_false_of_decide (rfl : decide _ = false)]` |
-| `reduceCtorEq` | `eq_false'` | `rw` + **unresolved** side | — (see below) |
+| simproc | proof head | verified replay shape |
+| --- | --- | --- |
+| `reduceIte` / `reduceDIte` | `ite_cond_eq_true`/`_false`, `dite_…` | `rw [ite_cond_eq_true 1 2 (eq_true h)]` |
+| `+decide` / `Nat.reduceEqDiff` | `eq_true_of_decide` / `eq_false_of_decide` | `rw [eq_true_of_decide (rfl : decide _ = true)]` |
+| `reduceCtorEq` | `eq_false'` | `exact eq_false' nofun` (round 4) |
 
-Each row was checked by running the replay in ordinary Lean; the `Decidable` instance being an argument of `ite` rather than part
-of the motive is what makes the shape work, as the coordinator noted. The actual head constants are
-`ite_cond_eq_true`/`dite_cond_eq_true`, not `if_pos`/`dif_pos` — Lean 4.32.2's `reduceIte` builds the former.
+Each replay shape was run in ordinary Lean; the heads are `ite_cond_eq_true`/`dite_cond_eq_true`, not `if_pos`/`dif_pos`. The
+round-4 reviewer confirmed `classifyProof` resisted all three fooling attempts.
 
-**`reduceCtorEq` is the honest limit.** Its head *is* one lemma, but `eq_false'`'s explicit argument is a `noConfusion`
-elimination under a local binder — a term no close form in the spec describes. Claiming `true_intro` would tell a replayer to
-close `FixtureColor.red = FixtureColor.green → False`, which is not `True`; the side entry carries a classified `unresolved:`
-close instead and the call is reported unresolved. On `Nat` literals `Nat.reduceEqDiff` fires first and maps cleanly (the
-`ctor_eq` fixture); `ctor_eq_inductive` reaches the real one.
+**Earlier fixture-skeleton changes,** each the fork being more faithful: `contextual` emits `intro_ctx` (never emitted before);
+`zeta` puts `zeta` first (verified against `trace.Debug.Meta.Tactic.simp`); `shadowed` emits three separate rewrites where the
+old trace merged two occurrences; `ite` carries the simproc's nested rewrites as `side`.
 
-**Fixture changes** (four skeletons; each is the fork being more faithful). `contextual` now emits two **`intro_ctx`** steps
-(never emitted before); `zeta` puts `zeta` first — verified against `trace.Debug.Meta.Tactic.simp` that `reduceStep (pre)` fires
-on the `let` before any `add_zero`, so the old order was a reconstruction artifact; `shadowed` emits `beta` then three separate
-`add_zero` rewrites at exact positions where the old trace merged two occurrences; `ite` carries the simproc's nested condition
-rewrites as `side` evidence (side goal `n = 3`). The checker gained the amended spec's forms (`omega`, `unresolved:` closes,
-`prop`, `intro_ctx` naming) and was re-verified to catch a perturbed `pos`.
+## Round 4 fixes
 
-**Checks, all re-run from scratch after the amendment.** `lake build ExplicitLean.SimpTrace` with oleans deleted: clean, no
-warnings, 14.63 s, 737 MB. `Fixtures.lean` (33): pass, 4.93 s, 1 511 MB — the one remaining unresolved is the deliberate
-`ctor_eq_inductive` fixture. `python3 -B Experiment/check_simp_trace.py`: `OK: 33 ...`, 9.23 s, and its new assertion (a `rw`
-carrying a `source` must carry a `side`) was verified to fire on a regression. `IsEmptyBasicTraced.lean`: pass 17/17, 4.06 s,
-676 MB. The three measurement modules re-run unchanged — those corpora contain no lemma-headed simproc firings. Nothing came near
-30 minutes or 40 GB.
+**1 (critical) — `let` under every config.** `dsimpT` was a hand-written traversal, not a port of `transformWithCache`. It is now
+the latter verbatim: `visitLambda`/`visitForall`/`visitLet` collect the whole telescope, instantiate each body with
+`instantiateRev fvars`, and run the post step on the term rebuilt by `mkLambdaFVars` **at the telescope root**. That fixes the
+wrong post position under a binder. `simpLetT` no longer desyncs the validator: a `letToHave` conversion is recorded as a `change`
+at the position, and `simpHaveTelescope` — which runs *stock* simp on the telescope bodies through the `MonadSimp SimpM` instance,
+so its firings have no position — has its events diverted and the net rewrite recorded as one `change`, with the call classified
+unresolved. Fixtures: both reviewer shapes under `zeta := true` and `zeta := false`, plus the `zetaDelta` shape; all five verified
+to be proved by stock with the same goal state.
+
+**2 (critical) — the PANIC.** Root cause was **not** the binder path but `tryAutoCongrTheoremT?`: its `eq` arm pushed two `subst`
+entries where upstream pushes three (`arg`, `argResult.expr`, `argProof`), and the tail read `type.appArg!.instantiateRev subst`
+instead of destructuring `type.instantiateRev subst |>.eq?`. The misaligned `subst` left loose bvars in the rhs, which reached
+stock `rewritePost`. Loop and tail are now upstream's, including `getProof'`, `removeUnnecessaryCasts` and the `hasProof` branch.
+Found by asserting closedness at every stock-method entry; those assertions now pass and **no corpus produces a panic**.
+
+**3 (major) — `dsimp` fidelity and the validator.** Restored verbatim: `skipInstances := !cfg.instances` via `getFunInfoNArgs`,
+`usedLetOnly := cfg.zeta || cfg.zetaUnused` on every rebuild, per-node `Core.checkSystem "transform"`. The five validation
+failures are gone. Two causes, both fixed at the source rather than by loosening the check: (a) a congruence theorem rewrites its
+hypotheses' subterms *and* transports everything depending on them (`ite_congr` carries the `Decidable` instance and the branch
+binder types), so `trySimpCongrTheoremT?` now diverts the hypothesis rewrites and records the node's whole change as one `change`
+— this also fixed `:976`, whose recorded `before` was a strictly wrong position; (b) `validate` compares with `eqUpToProofs`,
+structural equality with proof subterms compared by type, because upstream's own `isDefEq` runs with `proofIrrelevance := true`
+and rejecting `Classical.choose h` against `Classical.choose ⋯` made the validator stricter than the engine it checks. Instance
+arguments and binder types are deliberately **not** weakened. `validate` also instantiates metavariables on both sides: an
+instance argument can still be an unassigned `?m` when a step is recorded and be assigned later.
+
+**4 (major) — the fixture gate.** `Fixtures.lean` exits 0 once defect 5 lands. To stop a nonzero exit being reported as a pass
+again, `check_simp_trace.py` compiles the positive fixtures itself and fails on any nonzero exit — verified to fire. Calls
+unresolved *by design* moved to `test/SimpTrace/UnresolvedFixtures.lean`, whose traces are still compared and which must report at
+least one classified line, so a fixture that silently stopped being unresolved is caught too.
+
+**5 (major) — `nofun`.** `assumptionName?` recognises a condition proof refutable by empty pattern matching from its **type**
+(one hypothesis, an equation between distinct constructors) rather than from the `noConfusion` term's shape, an implementation
+detail. `reduceCtorEq` records `close:{"by":"nofun"}`; replay is `exact eq_false' nofun`.
+
+**6 (minor)** an `eq` step whose firing registered no origin no longer carries the placeholder `"source":"simproc"`; the field is
+omitted and the call classified. **7 (minor)** `simpLoopT` takes one `reduceStep` (`reduceOnce`) as upstream, not a fixpoint, so
+`maxSteps` is charged per reduction.
+
+**Checks, all re-run from scratch.** `lake build ExplicitLean.SimpTrace` with oleans deleted: clean, no warnings, 10.17 s, 737 MB.
+`Fixtures.lean` (38 traces): **exit 0**, 3.22 s, 1 512 MB. `UnresolvedFixtures.lean`: exits 1 by design, 1 classified line.
+`python3 -B Experiment/check_simp_trace.py`: `OK: 38 ...`, 14.76 s; it now compiles the fixtures itself, and both its newer
+assertions (a `rw` with a `source` must carry a `side`; a positive fixture must exit 0) were verified to fire on a regression.
+`IsEmptyBasicTraced.lean`: pass 17/17, 2.58 s, 677 MB. The five measurement modules: see the table. Nothing came near 30 minutes
+or 40 GB.
 
 **Known limitations.**
 
-- **`reduceCtorEq` on a user inductive is the one remaining unresolved fixture** — its condition proof is a `noConfusion` term no
-  close form describes (above). Resolving it needs a close form for "eliminated by `noConfusion`", which is a further spec
-  question, not a coding one.
+- **Congruence transports are recorded as one `change`, not as the individual rewrites** (6 of 46 calls).
+  `ite_congr`/`dite_congr`/`exists_prop_congr` rewrite a subterm *and* transport the arguments depending on it; the transport has
+  no position in the spec's convention. The trace is sound and validates, but a replayer gets a defeq assertion where simp made a
+  rewrite. This is the largest remaining gap.
+- **`simpHaveTelescope`** simplifies a `have` telescope through `MonadSimp SimpM`, which dispatches to *stock* `simp`; its inner
+  rewrites carry no position, so the telescope rewrite is one `change` and the call is classified. Redirecting it would need a
+  change to that instance, outside this task's ownership.
 - `eta` is in the spec but **never emitted**: stock `reduceStep` does not perform eta reduction (its `-- TODO: eta reduction` is
   still there in 4.32.2), so emitting it would diverge from stock simp.
-- `simpHaveTelescope` simplifies a `have` telescope as a unit through `MonadSimp SimpM`, which dispatches to stock `simp`; a
-  change there marks the call unresolved. Unexercised by this corpus.
-- Disabling the cache costs time on heavily shared terms — not visible at this size (IsEmpty 4.71 s against the reconstruction's
-  2.4 s) but worth watching on a large module. A Lean bump needs a re-sync.
+- The disabled result cache costs 1.99x on the reviewer's 200-identical-subterm pathology and **nothing measurable on real
+  modules** (0.82x–1.47x). On that pathology it also exhausts the default `maxSteps` where stock succeeds, because each identical
+  subterm is re-simplified; raising `maxSteps` makes both succeed.
+- A Lean bump needs a re-sync; the `SOURCE:` annotations give file and line range for every copied function.
 
-**Open questions.** 1. Should the spec gain a close form for a condition discharged by constructor `noConfusion`? That is the
-only thing keeping `reduceCtorEq` unresolved. 2. `exists_prop_congr`-style congruence theorems simplify
-under their own binders: give the spec a position form, or is the classified unresolved the intended end state? 3. `ctxIndex` is
-`LocalDecl.index` and (per REVIEW-3) is not a `rename_i` argument; worth saying so in the spec.
+**Open questions.** 1. Should the spec gain a position form, or a dedicated kind, for a congruence theorem's transported
+arguments? That is the only thing keeping the 6 unresolved calls unresolved, and the shape is common. 2. `ctxIndex` is
+`LocalDecl.index` and (per REVIEW-3) is not a `rename_i` argument; worth saying so in the spec. 3. REVIEW-4 found a **T2-side**
+blocker worth flagging: T2 elaborates a lemma before unifying it with the subterm, so class-polymorphic lemmas like `add_zero`
+fail with a stuck instance problem where plain `rw` succeeds. `add_zero` is the first step of four T1 fixtures, so T1 traces of
+ordinary Mathlib cannot replay until T2 resolves instances against the position.
