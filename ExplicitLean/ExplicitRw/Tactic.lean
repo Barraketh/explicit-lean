@@ -154,9 +154,10 @@ partial def checkNoTacticBlock (what : String) (idx? : Option Nat) (stx : Syntax
   let offending? := find? stx
   if let some kind := offending? then
     let msg := m!"{what} contains a `{kind}` block. `explicit_rw` is product code, so a \
-      trace may not embed a tactic block: it would let a forbidden tactic (`simp`, \
-      `dsimp`, ...) run inside the product tactic where the no-simp-family lint \
-      cannot see it. Write a closed term, or prove the lemma separately and name it."
+      trace may not embed a tactic block: it would let a tactic forbidden by the \
+      governing rule run inside the product tactic, where a lint over this module \
+      could not see it. Write a closed term, or prove the lemma separately and \
+      name it."
     match idx? with
     | some idx => stepError idx msg
     | none => throwError "explicit_rw: {msg}"

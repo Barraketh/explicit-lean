@@ -6,8 +6,9 @@ the governing rule in AGENTS.md it must not call, import for use, or expand to
 `Lean.Meta.Simp` or any simp-family tactic.
 
 This check scans every file under `ExplicitLean/ExplicitRw*` for references to
-simp-family identifiers and to the `Lean.Meta.Simp` namespace. It fails on the
-first offending reference, naming the file, line and matched text.
+simp-family identifiers, to the `Lean.Meta.Simp` namespace, and for `import`
+lines naming any simp module. It reports every offending reference with file,
+line and matched text.
 
 Comments and docstrings are exempt on purpose: the modules *document* that they
 avoid simp, and forbidding the word would make that impossible to say. Only
@@ -57,6 +58,15 @@ NAMESPACE_PATTERN = re.compile(r"(?<![A-Za-z0-9_])(Lean\.Meta\.Simp|Meta\.Simp|S
 # `mkSimpContext`, `SimpTheorems`. Catches a call that the patterns above miss
 # because it is a camel-case member rather than a bare tactic name.
 CAMEL_PATTERN = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z0-9_]*[Ss]imp(?:roc)?[A-Z][A-Za-z0-9_]*")
+
+# An import of any simp module. Import lines are checked *before* comments are
+# stripped and separately from the patterns above, because an import contributes
+# no identifier use: `public meta import Lean.Meta.Tactic.Simp` would otherwise
+# pass the lint. The governing rule forbids importing the simp family for use,
+# so the import itself is the violation.
+IMPORT_PATTERN = re.compile(
+    r"^\s*(?:public\s+)?(?:meta\s+)?import\s+(\S*[Ss]imp\S*)", re.MULTILINE
+)
 
 
 def strip_comments(text: str) -> list[tuple[int, str]]:
@@ -108,6 +118,17 @@ def main() -> int:
     violations: list[str] = []
     for path in files:
         text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(REPO)
+
+        # Import lines first, on the raw text: an import is a violation in its
+        # own right and contributes no identifier for the patterns below.
+        for match in IMPORT_PATTERN.finditer(text):
+            lineno = text[: match.start()].count("\n") + 1
+            violations.append(
+                f"{rel}:{lineno}: simp-family import `{match.group(1)}`:\n"
+                f"    {match.group(0).strip()}"
+            )
+
         for lineno, code in strip_comments(text):
             if not code.strip():
                 continue
@@ -117,7 +138,6 @@ def main() -> int:
                 (CAMEL_PATTERN, "simp-derived identifier"),
             ):
                 for match in pattern.finditer(code):
-                    rel = path.relative_to(REPO)
                     violations.append(
                         f"{rel}:{lineno}: {what} `{match.group(0)}` in code:\n"
                         f"    {code.strip()}"
