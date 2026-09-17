@@ -9,7 +9,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 9 in progress | task/T1-trace-capture | R9 merge gate failed: 48/78 traces replay; 4 critical (side goal recorded as subterm; `name` holds raw syntax; inaccessible tokens; off-by-one position), 3 major, 1 minor |
 | T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 8 in progress | task/T2-explicit-rw | R8: no soundness defects; 4 major in gates/docs (axiom audit, sweep slots, rename_i docs, forms table) |
 | T3-compliance | Rewrite two `dsimp` overrides; simp-family lint for overrides and generated regions | none | **merged** (af33e32) | task/T3-compliance | R3: NO DEFECTS |
-| T4-pipeline | Per-module driver: transcribe, trace, render `explicit_rw` source with original comment, splice, compile in T2 worktree, per-site report attributed to a side | T1, T2 worktrees (read-only) | implemented; review round 1 running | task/T4-pipeline | R1 pending |
+| T4-pipeline | Per-module driver: transcribe, trace, render `explicit_rw` source with original comment, splice, compile in T2 worktree, per-site report attributed to a side | T1, T2 worktrees (read-only) | **merged; baseline accepted** | task/T4-pipeline | REVIEW-8 PASS at `f0b59ac`; 246 checks; 7/7 modules and 91/91 identity |
 | T5-cone | Run T4 on the seven-module cone (91 calls); record per-call outcomes | T0, T4 | planned | | |
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
 | T13-cone-runner | Strict readable translated-root cone runner with closure, staging, freshness, resolution, build-order and lint gates | T5 preflight | **merged** | task/T13-cone-runner | R2 PASS at `d258d6c` for `298755b`; focused checks and one-module compile passed; full cone unrun |
@@ -84,6 +84,11 @@ terse completion notices, then makes merge and next-dispatch decisions.
   critical or major defects. The focused checks, closure/order preflight and a
   real one-module pinned Lean compile passed. The full 69-module/134-edge cone
   compile and replay remain unrun and are not acceptance evidence.
+- **T4 baseline: ACCEPTED / MERGED.** REVIEW-8 at `f0b59ac` passes the stale-
+  publication lifecycle gate. The reviewed fresh seven-module evidence is
+  exactly 7/7 modules and 91/91 identity sites, with 56/91 replayed, 1 unresolved,
+  18 render_failed, and 16 compile_failed. This is a partial replay
+  baseline only; it is not full translated-cone or whole-tree acceptance.
 - **Post-cone SQLite ledger:** after the 91-site pipeline compiles reliably and
   before whole-corpus scaling, replace loose manifest/trace discovery with a
   SQLite execution ledger. Keep original sources and generated Lean as files;
@@ -145,15 +150,12 @@ reviews; harness replay counts are the primary test).
    renderer reads it (spec update if so).
    Merge when no critical/major; wire `ExplicitLean.SimpTrace` (recorder only,
    not product) into the build.
-3. **T4 fix round 1** (REVIEW-1.md items above), then an incremental review 2. Then
-   implement the multiple-invocation rendering rule (PLAN.md step 3,
-   "Rendering"), switch the harness from driving worktrees by path to the
-   merged main checkout, and add the declaration oracle
-   (`Experiment/SimpEngineDeclarationOracle.lean`) as a post-compile check.
-4. **Iterate on the six-module table** until every non-replayed site is either
-   a classified unresolved with an agreed reason or a tracked defect. First
-   run: 82 sites, 45 replayed, 1 unresolved, 27 render_failed, 9 compile_failed.
-5. **T5 cone.** Run the harness on the seven-module cone (Logic.Basic,
+3. **T4 baseline: COMPLETE / MERGED.** The accepted implementation and
+   REVIEW-8 stale-publication gate are integrated. Keep the seven-module
+   evidence as a partial replay baseline: 7/7 modules, 91/91 identity sites,
+   56/91 replayed, 1 unresolved, 18 render_failed, and 16 compile_failed.
+4. **T5 cone.** Run the translated dependency-root workflow on the seven-module
+   cone (Logic.Basic,
    ExistsUnique, Function.Basic, Function.Defs, IsEmpty.Basic,
    Nontrivial.Defs, Data.Option.Basic) with a translated import root so
    modules import translated dependencies, and record per-call outcomes in

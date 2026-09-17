@@ -5,12 +5,12 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-17T20:05:03Z",
+  "updatedAt": "2026-09-17T20:27:51Z",
   "resumeStatus": {
-    "review": "T2_merged_and_integration_checked; T1_simplified_v2_mapping_running; T4_simplified_v2_mapping_running; T5_cone_pending; T10_cancelled",
+    "review": "T2_merged_and_integration_checked; T1_simplified_v2_mapping_running; T4_baseline_accepted_and_merged; T5_cone_pending; T10_cancelled",
     "t2": "merged_to_main_5ec2da5_and_integration_checked",
     "t1": "simplified_v2_mapping_implementation_running; module_char_ranges_call_text_ordinals_complete_invocations; no_hashes_nonces",
-    "t4": "simplified_v2_mapping_bijection_running_before_render; source_preserving_replacement_gate_pending",
+    "t4": "baseline_accepted_and_merged; 7_of_7_modules_and_91_of_91_identity; replay_56_of_91_unresolved_1_render_failed_18_compile_failed_16; full_cone_unrun",
     "t5": "strict_cone_runner_merged; seven_module_cone_pending_after_T1_T4_mapping_gate",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
@@ -108,8 +108,8 @@
   },
   "direction": {
     "userConversationDate": "2026-09-16",
-    "nextMilestone": "Finish the simplified v2 mapping implementations in T1 and T4, review their complete source-site/invocation bijection, then run the six-module gate and the T5 seven-module translated dependency tree.",
-    "activeState": "The trusted-environment contract is intentionally narrow: T1 emits module, original character range, exact call text, site ordinal and complete invocation ordinals; T4 verifies the bijection before rendering. T1 and T4 simplified implementations are running. T2 is merged and integration-checked; the T13 strict cone runner is merged, while the T5 cone remains pending the mapping gate and actual run.",
+    "nextMilestone": "Run the T5 seven-module translated dependency cone from the accepted T4 baseline, preserving source calls and recording per-call outcomes; whole-tree acceptance remains pending.",
+    "activeState": "The trusted-environment contract is intentionally narrow: T1 emits module, original character range, exact call text, site ordinal and complete invocation ordinals; T4 verifies the bijection before rendering. T4's baseline is accepted and merged with 7/7 modules and 91/91 identity sites: 56/91 replayed, 1 unresolved, 18 render_failed and 16 compile_failed. T1 and T2 remain integrated; the T5 translated dependency cone and whole-tree acceptance remain pending.",
     "designDecisions": {
       "T6": "Complete: after T4 final gate, use deterministic structural bullet expansion keyed by complete invocation ordinals; refuse unsafe non-tail continuations; do not use first-dispatch or goal fingerprints.",
       "T7": "Optional diagnostic only: the existing source-pair declaration oracle may be used for focused semantic debugging, but it is not an acceptance gate and does not require per-site hashes.",
@@ -260,8 +260,8 @@
     },
     {
       "id": "t4-simplified-v2-mapping",
-      "status": "open_implementation_in_progress",
-      "detail": "T4 is implementing the trusted-environment v2 mapping check and must reject incomplete or ambiguous site/invocation mappings before rendering. After T1 is stable, run the final six-module gate and review source-preserving output."
+      "status": "resolved_accepted_merged",
+      "detail": "T4 REVIEW-8 at f0b59ac passed the stale-publication lifecycle gate and is merged. Fresh baseline evidence is 7/7 modules and 91/91 identity sites: 56/91 replayed, 1 unresolved, 18 render_failed and 16 compile_failed. This is not full cone or whole-tree acceptance."
     },
     {
       "id": "bounded-run-policy",
@@ -307,7 +307,7 @@
   },
   "nextActions": [
     "Complete T1's simplified v2 mapping implementation and focused regressions: module path, original character range, exact call text, site ordinal and complete invocation ordinals; do not add hashes, nonces or forgery machinery.",
-    "Complete T4's matching simplified v2 bijection check before rendering, then run the final six-module source-preserving replacement gate against the stable T1 output.",
+    "Use the accepted T4 baseline to run the T5 seven-module translated dependency cone with source-preserving output; retain the exact 7/7, 91/91, 56/1/18/16 evidence and do not claim full-cone acceptance.",
     "Run the T5 seven-module cone with the translated dependency-root order, then extend the same source-preserving replacement and compilation workflow to the full pinned Mathlib tree.",
     "Use T7's declaration oracle only as an optional focused diagnostic; do not make it, per-site hashes, or a neutral T10 forgery suite acceptance prerequisites.",
     "Record unresolved calls visibly and preserve original calls as adjacent comments; acceptance requires source preservation, translated dependency-tree compilation, full Mathlib compilation and zero remaining executable simp-family calls.",
@@ -386,8 +386,8 @@
     },
     {
       "id": "T4-pipeline",
-      "status": "running_simplified_v2_mapping",
-      "description": "T4's pipeline is running the trusted-environment v2 mapping check before rendering, then source-preserving replacement and compilation. It must consume the complete T1 site/invocation mapping; hashes, nonces and T10's neutral forgery suite are not required."
+      "status": "merged_reviewed_baseline_accepted",
+      "description": "T4 implementation through 00d076d and REVIEW-8 f0b59ac are merged. Focused pipeline suite passes 246 checks; reviewed fresh baseline is 7/7 modules and 91/91 identity sites, with 56/91 replayed, 1 unresolved, 18 render_failed and 16 compile_failed. Full translated cone and whole-tree acceptance remain unrun."
     },
     {
       "id": "T13-cone-runner",
@@ -798,6 +798,14 @@
       "implementationCommit": "298755b",
       "reviewCommit": "d258d6c",
       "detail": "REVIEW-2 verdict PASS with REVIEW-1 major fixed. Verified python3 -B Experiment/check_readable_cone.py (4 tests OK); python3 -m py_compile Experiment/run_readable_cone.py Experiment/check_readable_cone.py; git diff --check; python3 -B Experiment/check_simp_family_lint.py (46 tests OK, 2 skipped); python3 -B Experiment/check_no_simp_family.py (3 files scanned, PASS); discover_closure plus verify_reviewed_closure/verify_build_order (69 modules, 134 edges, kinds import 8/public import 96/public meta import 30, one Relator bridge); python3 -B Experiment/check_translated_imports.py (passed, expected conflicting stock returnCode 1 and missing audit rejection); and a real one-module pinned Lean compile with fresh output and translated-root resolution. The seven-module cone compile/replay and full-tree acceptance were not run."
+    },
+    {
+      "checkedAt": "2026-09-17T20:27:51Z",
+      "scope": "T4_pipeline_review_8_integration",
+      "result": "passed_partial_baseline",
+      "implementationCommit": "00d076d",
+      "reviewCommit": "f0b59ac",
+      "detail": "T4 REVIEW-8 passed the stale-publication lifecycle gate and is merged. python3 -B Experiment/pipeline/check_pipeline.py passed 246 checks; python3 -m py_compile Experiment/pipeline/*.py Experiment/simp_family_lint.py and git diff --check passed. Reviewed fresh baseline evidence is exactly 7/7 modules and 91/91 identity sites, with 56/91 replayed, 1 unresolved, 18 render_failed and 16 compile_failed. Full translated cone and whole-tree acceptance remain unrun."
     }
   ],
   "historicalAutomation": {
