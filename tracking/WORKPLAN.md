@@ -26,8 +26,11 @@ terse completion notices, then makes merge and next-dispatch decisions.
 - **T2 review 9: COMPLETE.** No critical or major defects; review commit
   `dbb6c703`. T2 merged to main at `5ec2da5` and is wired through
   `ExplicitLean.lean`. Focused main-check rerun is the integration gate.
-- **T1 review 10:** verify round-9 trace fidelity and the step-level unresolved
-  contract using end-to-end replay. Merge gate: no critical or major.
+- **T1 review 10: MAJOR, fix dispatched.** Round-9 fidelity checks passed, but
+  validator reasons from nested side steps are logged without being serialized
+  on the exact nested `Step`, permitting known-bad replay. The bounded fix must
+  propagate structured verdicts recursively through side/congr trees, add
+  fail-closed JSON regressions, and return for review 11.
 - **T4 fix round 1:** fix every REVIEW-1 item within T4 ownership, rerun focused
   checks and the six-module harness, then dispatch review 2. Per-branch
   multiple-invocation rendering remains the next bounded T4 feature after the
