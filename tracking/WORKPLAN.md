@@ -23,8 +23,9 @@ batch start reports ordinary work available with no rate-limit or spend stop.
 The coordinator reads only committed `RESULT.md` / `REVIEW-*.md` summaries and
 terse completion notices, then makes merge and next-dispatch decisions.
 
-- **T2 review 9:** verify the round-8 axiom-audit, structured sweep-slot,
-  `rename_i`, and step-form-table fixes. Merge gate: no critical or major.
+- **T2 review 9: COMPLETE.** No critical or major defects; review commit
+  `dbb6c703`. T2 merged to main at `5ec2da5` and is wired through
+  `ExplicitLean.lean`. Focused main-check rerun is the integration gate.
 - **T1 review 10:** verify round-9 trace fidelity and the step-level unresolved
   contract using end-to-end replay. Merge gate: no critical or major.
 - **T4 fix round 1:** fix every REVIEW-1 item within T4 ownership, rerun focused
@@ -74,7 +75,9 @@ reviews; harness replay counts are the primary test).
    modules import translated dependencies, and record per-call outcomes in
    `campaign.json`. Data.Option.Basic is the only cone module not yet traced.
 6. **Follow-ups (minors, tracked, not blocking):** T2 error-message wording
-   items from REVIEW-7/8; T1 RESULT.md length; the harness `.gitignore` line.
+   items from REVIEW-7/8; reconcile T1's non-spec `zeta.name` emission before
+   T4 consumes such traces; T1/T2 RESULT.md length; the harness `.gitignore`
+   line.
 7. **Remote worker:** none provisioned. Provision Scaleway GP1-L only if a
    local job fails on resources (see `campaign.json.remoteWorker`).
 
