@@ -218,7 +218,7 @@ namespace the spec defines. -/
 partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId)
     (ev : Event) : MetaM (Option Step) := do
   match ev with
-  | .rw pos o inv prop? before after c args side src? localO proj =>
+  | .rw pos o inv prop? before after c args side src? localO proj derivation? =>
     let beforePP ← ppIn c before
     let afterPP ← ppIn c after
     -- `dir` still comes from the written syntax, which is what carries a
@@ -244,7 +244,7 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
         -- one lemma applied (amended spec): provenance, not a replay input.
         source? := src?.map toString,
         before? := some beforePP, after? := some afterPP,
-        side := sideSteps }
+        side := sideSteps, derivation? := derivation? }
     return some step
   | .eq pos src? before after c side =>
     let beforePP ← ppIn c before
@@ -739,7 +739,7 @@ mutual
 partial def classifyEventTree (ur : IO.Ref Unresolved) (ev : Event) :
     MetaM ValidationVerdict := do
   match ev with
-  | .rw _ o inv prop? b a c args sides _ lo pj =>
+  | .rw _ o inv prop? b a c args sides _ lo pj _ =>
     let reason? ← checkRwStep (resolvedOrigin o lo) args inv prop? b a c
       (!sides.isEmpty) pj
     if let some reason := reason? then ur.modify (·.add reason)
@@ -816,7 +816,7 @@ def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
     let verdict ← classifyEventTree ur ev
     verdicts := verdicts.push verdict
     let (pos, before, after, c) ← match ev with
-      | .rw pos _ _ _ b a c _ _ _ _ _ =>
+      | .rw pos _ _ _ b a c _ _ _ _ _ _ =>
         pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
       | .defeq pos _ _ b a c => pure (pos, b, a, c)

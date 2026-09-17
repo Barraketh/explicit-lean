@@ -46,6 +46,34 @@ structure CloseInfo where
   by_ : String
   deriving Inhabited, Repr
 
+/-! ### Operational theorem derivations
+
+These records deliberately contain only replay provenance.  In particular they
+do not contain the matcher assignment, a proof expression, or any other term
+payload.  The replayer repeats matching at `redex`.
+-/
+
+structure BinderDerivation where
+  id : Nat
+  classification : String
+  deriving Inhabited, Repr
+
+structure DischargeDerivation where
+  binder : Nat
+  provenance : String
+  deriving Inhabited, Repr
+
+structure RuleDerivation where
+  origin : String
+  source? : Option String := none
+  sourceArg? : Option Nat := none
+  preprocess : Array String := #[]
+  redex : Pos := #[]
+  extraArgs : Nat := 0
+  binders : Array BinderDerivation := #[]
+  discharge : Array DischargeDerivation := #[]
+  deriving Inhabited, Repr
+
 mutual
 
 /-- A recorded step.  `kind` discriminates; unused fields stay `none`/empty. -/
@@ -84,6 +112,9 @@ structure Step where
   after?  : Option String := none
   /-- Side-condition sub-traces, one per discharged hypothesis. -/
   side    : Array SideTrace := #[]
+  /-- Event-time theorem construction provenance.  This is intentionally
+  term-free; it is an operational recipe, not a serialized proof. -/
+  derivation? : Option RuleDerivation := none
   /-- Set when the in-tactic validator classified *this step*: the step is
   recorded as observed, but a consumer must not replay it.  The classification
   used to exist only as a compile-time `logError`, invisible to anything
@@ -173,6 +204,25 @@ def LocalRef.toJson : LocalRef → String
 def CloseInfo.toJson (c : CloseInfo) : String :=
   obj #[("by", some (str c.by_))]
 
+def BinderDerivation.toJson (b : BinderDerivation) : String :=
+  obj #[ ("id", some (toString b.id)), ("classification", some (str b.classification)) ]
+
+def DischargeDerivation.toJson (d : DischargeDerivation) : String :=
+  obj #[ ("binder", some (toString d.binder)), ("provenance", some (str d.provenance)) ]
+
+def RuleDerivation.toJson (d : RuleDerivation) : String :=
+  obj #[
+    ("origin", some (str d.origin)),
+    ("source", d.source?.map str),
+    ("sourceArg", d.sourceArg?.map toString),
+    ("preprocess", if d.preprocess.isEmpty then none else some (strArray d.preprocess)),
+    ("redex", some (posJson d.redex)),
+    ("extraArgs", some (toString d.extraArgs)),
+    ("binders", if d.binders.isEmpty then none else
+      some ("[" ++ String.intercalate "," (d.binders.toList.map BinderDerivation.toJson) ++ "]")),
+    ("discharge", if d.discharge.isEmpty then none else
+      some ("[" ++ String.intercalate "," (d.discharge.toList.map DischargeDerivation.toJson) ++ "]"))]
+
 mutual
 
 partial def Step.toJson (s : Step) : String :=
@@ -198,6 +248,7 @@ partial def Step.toJson (s : Step) : String :=
     ("side", if s.side.isEmpty then none else
       some ("[" ++ String.intercalate ","
         (s.side.toList.map SideTrace.toJson) ++ "]")),
+    ("derivation", s.derivation?.map RuleDerivation.toJson),
     ("unresolved", s.unresolved?.map str)]
 
 partial def SideTrace.toJson (t : SideTrace) : String :=

@@ -99,6 +99,7 @@ inductive Event where
        (before after : Expr) (ctx : EvCtx)
        (args : Array Expr) (side : Array SideRec) (source? : Option Name)
        (localOrigin : Origin) (proj : String)
+       (derivation? : Option RuleDerivation := none)
   /-- A simproc firing (or any procedure-computed equation). -/
   | eq (pos : Pos) (source? : Option Name) (before after : Expr)
        (ctx : EvCtx) (side : Array SideRec)
@@ -141,8 +142,8 @@ def SideRec.post? : SideRec → Option Expr | SideRec.mk _ _ _ _ _ _ p => p
 /-- Re-root an event's position under `base`.  Used to place events captured
 relative to a subterm back at their absolute positions. -/
 partial def Event.rebase (base : Pos) : Event → Event
-  | .rw p o inv pr b a c args side src lo pj =>
-    .rw (base ++ p) o inv pr b a c args side src lo pj
+  | .rw p o inv pr b a c args side src lo pj d =>
+    .rw (base ++ p) o inv pr b a c args side src lo pj d
   | .eq p s b a c side => .eq (base ++ p) s b a c side
   | .defeq p k n b a c => .defeq (base ++ p) k n b a c
   | .introCtx p f c => .introCtx (base ++ p) f c
@@ -155,7 +156,7 @@ def Event.pos : Event → Pos
 
 /-- Replace an event's position. -/
 def Event.reposition (q : Pos) : Event → Event
-  | .rw _ o inv pr b a c args side src lo pj => .rw q o inv pr b a c args side src lo pj
+  | .rw _ o inv pr b a c args side src lo pj d => .rw q o inv pr b a c args side src lo pj d
   | .eq _ s b a c side => .eq q s b a c side
   | .defeq _ k n b a c => .defeq q k n b a c
   | .introCtx _ f c => .introCtx q f c
