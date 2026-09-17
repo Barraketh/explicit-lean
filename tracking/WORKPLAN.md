@@ -31,11 +31,11 @@ terse completion notices, then makes merge and next-dispatch decisions.
   on the exact nested `Step`, permitting known-bad replay. The bounded fix must
   propagate structured verdicts recursively through side/congr trees, add
   fail-closed JSON regressions, and return for review 11.
-- **T4 review 2 fix COMPLETE; review 3 running.** Commits `c47f3fe`/`646e6bf`
-  plan replacements and aggregated marker insertions entirely against original
-  coordinates; 194 focused checks pass. A fresh incremental reviewer is
-  attacking same-line, mixed, Unicode and multi-line cases. Per-branch
-  multiple-invocation rendering follows only after this merge gate passes.
+- **T4 review 3: NO DEFECTS in incremental scope.** Marker/lint/source
+  preservation attacks and 194 checks pass at `7db88a8`. Do not merge yet: the
+  protocol requires a final full merge-gate review, including the six-module
+  harness once T1 is clean and stable. Per-branch multiple-invocation rendering
+  follows only after that final gate passes.
 - **Named `zeta` decision:** T1's local-let fvar delta is represented as an
   existing `change` step with an explicit `pp.all` `to` value. Plain `letE`
   zeta remains `zeta`. Do not broaden T2's zeta semantics or add a name-based
