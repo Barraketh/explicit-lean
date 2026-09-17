@@ -18,8 +18,12 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 State at handoff: main branch clean at this commit. Task branches (each in
 `/Users/ptsier/projects/explicit-lean-worktrees/<task>`, all committed, no
 uncommitted work): `task/T1-trace-capture` (recorder, forked simp traversal;
-fix round 9 was in progress when the session ended; last commit "identical
-re-elaborated traces overwrite rather than accumulate"), `task/T2-explicit-rw`
+round 9 fixes COMPLETE and committed: all four criticals, both majors, minor 7
+and the replay fixtures; harness replay at this tip 50/82; the 6 failures the
+harness attributes to t2 are steps T1 now classifies via a new field the T4
+renderer does not read yet; `.stx` steps were previously never validated,
+classified lines rose 16 to 29; RESULT.md 215 lines; awaiting incremental
+review 10), `task/T2-explicit-rw`
 (replay tactic; round 8 fixes committed at 6dc6932+, all 9 items fixed incl. the axiom-set audit; awaiting incremental review 9; one open coordinator item: whether `zeta` steps carry a `name`, which the spec does not define),
 `task/T4-pipeline` (harness; review round 1 done, REVIEW-1.md at 171079f: 3 major, no critical: `@[` lines skipped hide two sites so the corpus is 84 not 82; stale diagnostics mis-charged to sites; mid-line retained originals drop the `unresolved:` marker; plus minors incl. the harness never running the simp-family lint). T3 is merged.
 Agents from this session are gone; a new session re-dispatches per
@@ -30,12 +34,10 @@ reviews; harness replay counts are the primary test).
    (verify REVIEW-8 fixes: axiom-set audit, structured sweep slots, `rename_i`
    docs and fixture, complete step-forms table). If no critical/major, merge
    into main and wire `ExplicitLean.ExplicitRw` into `ExplicitLean.lean`.
-2. **T1 fix round 9 completion.** Check `tracking/tasks/T1-trace-capture/RESULT.md`
-   for a "Round 9 fixes" section. If absent, re-dispatch the round-9 fix list
-   from REVIEW-9.md (side goal recorded as the simproc subterm; raw syntax in
-   `name`; inaccessible tokens without `local`; off-by-one position on
-   Option/Basic:96) plus emitting `invocation`/`invocations`. Then an
-   incremental review 10 with the T4 harness replay table as its main input.
+2. **T1 incremental review 10** (round 9 fixes are committed; see RESULT.md
+   "Round 9 fixes"). Main input: the T4 harness replay table at the T1 tip.
+   Check the new classification field T1 added and decide whether T4's
+   renderer reads it (spec update if so).
    Merge when no critical/major; wire `ExplicitLean.SimpTrace` (recorder only,
    not product) into the build.
 3. **T4 fix round 1** (REVIEW-1.md items above), then an incremental review 2. Then
