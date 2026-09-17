@@ -104,9 +104,21 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                 fail(messages, f"{where}: `eq` step without a source")
             by = got.get("by")
             if by not in ("rfl", "decide") and not (
-                isinstance(by, str) and by.startswith("unresolved:")
+                isinstance(by, str) and by.startswith("unresolved:simproc:")
             ):
                 fail(messages, f"{where}: `eq` step with by={by!r}")
+        # The amended spec's lemma-headed simproc proofs: a `rw` may carry a
+        # `source` naming the simproc the lemma application came from.  When it
+        # does, the lemma's discharged conditions must appear as `side` entries,
+        # or the step tells a replayer to apply a conditional lemma with nothing
+        # to discharge its hypothesis.
+        if kind == "rw" and got.get("source") and not got.get("side"):
+            fail(
+                messages,
+                f"{where}: `rw` from simproc {got['source']!r} carries no `side` "
+                f"sub-trace for its discharged condition",
+            )
+
         if kind == "unfold" and not got.get("name"):
             fail(messages, f"{where}: `unfold` step without a constant name")
 

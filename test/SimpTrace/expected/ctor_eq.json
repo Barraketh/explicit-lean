@@ -10,18 +10,28 @@
       "steps": [
         {
           "kind": "rw",
-          "pos": [],
-          "name": "eq_true_of_decide",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "eq_false_of_decide",
           "dir": "fwd",
+          "source": "Nat.reduceEqDiff",
           "side": [
             {
-              "goal": "true = true",
+              "goal": "false = false",
               "close": {
                 "by": "rfl"
               },
               "steps": []
             }
           ]
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
         }
       ]
     }

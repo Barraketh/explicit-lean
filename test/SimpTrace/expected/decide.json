@@ -9,10 +9,19 @@
       },
       "steps": [
         {
-          "kind": "eq",
+          "kind": "rw",
           "pos": [],
-          "source": "decide",
-          "by": "decide"
+          "name": "eq_true_of_decide",
+          "dir": "fwd",
+          "side": [
+            {
+              "goal": "true = true",
+              "close": {
+                "by": "rfl"
+              },
+              "steps": []
+            }
+          ]
         }
       ]
     }

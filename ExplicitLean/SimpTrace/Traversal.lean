@@ -81,10 +81,13 @@ mutual
 inductive Event where
   /-- A rewrite fired by `pre`/`post` and attributed to a simp theorem origin.
   `inv` is the `←` direction.  `prop?` is `some true`/`some false` when the
-  lemma is Prop-valued and simp used it as `P = True` / `P = False`. -/
+  lemma is Prop-valued and simp used it as `P = True` / `P = False`.
+  `source?` names the simproc whose *proof* was this one lemma applied, per the
+  amended spec's `eq` bullet: such a firing is an ordinary `rw`, and `source`
+  records where it came from. -/
   | rw (pos : Pos) (origin : Origin) (inv : Bool) (prop? : Option Bool)
        (before after : Expr) (ctx : EvCtx)
-       (args : Array Expr) (side : Array SideRec)
+       (args : Array Expr) (side : Array SideRec) (source? : Option Name)
   /-- A simproc firing (or any procedure-computed equation). -/
   | eq (pos : Pos) (source? : Option Name) (before after : Expr)
        (ctx : EvCtx) (side : Array SideRec)

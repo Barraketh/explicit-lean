@@ -14,9 +14,9 @@
             0,
             1
           ],
-          "name": "ite_cond_eq_true",
+          "name": "dite_cond_eq_true",
           "dir": "fwd",
-          "source": "reduceIte",
+          "source": "reduceDIte",
           "side": [
             {
               "goal": "n = 3",

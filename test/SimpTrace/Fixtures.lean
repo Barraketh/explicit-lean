@@ -152,4 +152,30 @@ example (a : Nat) : a + 0 = a := by
 example : True := by
   simp_trace =>trace "test/SimpTrace/out/closes_true.json"
 
+/-- `reduceDIte`, the dependent sibling of `reduceIte`.  Its proof is
+`dite_cond_eq_true ... (h : c = True)`, one lemma applied, so the amended spec
+records it as a `rw` naming that lemma with the condition as a `side`. -/
+example (n : Nat) (h : n = 3) :
+    (dite (n = 3) (fun _ => 1) (fun _ => 2)) = 1 := by
+  simp_trace [h] =>trace "test/SimpTrace/out/dite.json"
+
+/-- A simproc proof headed by a lemma whose condition is *not* a hypothesis.
+On `Nat` literals `Nat.reduceEqDiff` fires first; its proof head is
+`eq_false_of_decide`, one lemma applied, so this is a `rw` with the decision
+procedure as the side close. -/
+example : ((1 : Nat) = 2) = False := by
+  simp_trace =>trace "test/SimpTrace/out/ctor_eq.json"
+
+/-- `reduceCtorEq` proper: distinct constructors of a user inductive.  Its proof
+head **is** one lemma (`eq_false'`), so the amended spec records a `rw` naming
+it — but `eq_false'`'s explicit argument is a `noConfusion` elimination built
+under a local binder, which no close form in the spec describes.  The side entry
+therefore carries a classified `unresolved:` close and the call is reported
+unresolved, rather than claiming a `true_intro` that would close a goal which is
+not `True`.  This is the honest end state for this simproc under the spec. -/
+inductive FixtureColor where | red | green | blue
+
+example : (FixtureColor.red = FixtureColor.green) = False := by
+  simp_trace =>trace "test/SimpTrace/out/ctor_eq_inductive.json"
+
 end ExplicitLean.SimpTrace.Fixtures

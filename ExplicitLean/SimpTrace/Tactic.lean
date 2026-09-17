@@ -171,7 +171,7 @@ namespace the spec defines. -/
 partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId)
     (ev : Event) : MetaM (Option Step) := do
   match ev with
-  | .rw pos o inv prop? before after c args side =>
+  | .rw pos o inv prop? before after c args side src? =>
     let beforePP ← ppIn c before
     let afterPP ← ppIn c after
     let (lemmaName, rev, localRef?) ← originName o c contextualFVars
@@ -182,6 +182,9 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
       { kind := "rw", pos := pos, name? := some lemmaName,
         dir? := some (if inv || rev then "rev" else "fwd"),
         prop? := propStr?, local? := localRef?, args := argStrs,
+        -- Present only when this `rw` came from a simproc whose proof was this
+        -- one lemma applied (amended spec): provenance, not a replay input.
+        source? := src?.map toString,
         before? := some beforePP, after? := some afterPP,
         side := sideSteps }
     return some step
@@ -193,7 +196,7 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
     -- this step's `side` traces, so replay has them in hand.
     let sideEqs : Array (Expr × Expr) := side.filterMap fun r =>
       match r.events.back? with
-      | some (.rw _ _ _ _ _ a _ _ _) => some (r.goal, a)
+      | some (.rw _ _ _ _ _ a _ _ _ _) => some (r.goal, a)
       | some (.eq _ _ _ a _ _) => some (r.goal, a)
       | some (.defeq _ _ _ _ a _) => some (r.goal, a)
       | _ => none
@@ -205,12 +208,13 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
       -- honest gap.  The step is emitted with a classified `unresolved:` `by`
       -- and the call is reported unresolved, naming the simproc.
       let srcName := (src?.map toString).getD "anonymous"
-      ur.modify (·.add s!"simproc equation not provable by rfl or decide \
-        ({srcName}): {beforePP} = {afterPP}")
+      -- The amended spec's classified form for a simproc proof that is neither
+      -- one lemma applied nor kernel-checkable.
+      ur.modify (·.add s!"simproc:{srcName} ({beforePP} = {afterPP})")
       let step : Step :=
         { kind := "eq", pos := pos,
           lhs? := some beforePP, rhs? := some afterPP,
-          by_? := some "unresolved:not provable by rfl or decide",
+          by_? := some s!"unresolved:simproc:{srcName}",
           source? := some srcName,
           before? := some beforePP, after? := some afterPP,
           side := sideSteps }
@@ -361,7 +365,7 @@ def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit :=
   let mut running := pre
   for ev in events do
     let (pos, before, after, c) ← match ev with
-      | .rw pos _ _ _ b a c _ _ => pure (pos, b, a, c)
+      | .rw pos _ _ _ b a c _ _ _ => pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
       | .defeq pos _ _ b a c => pure (pos, b, a, c)
       | .introCtx .. => continue

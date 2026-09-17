@@ -1,0 +1,39 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "eq_false'",
+          "dir": "fwd",
+          "source": "reduceCtorEq",
+          "side": [
+            {
+              "goal": "FixtureColor.red = FixtureColor.green → False",
+              "close": {
+                "by": "unresolved:condition proof not a hypothesis or a recorded discharge"
+              },
+              "steps": []
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

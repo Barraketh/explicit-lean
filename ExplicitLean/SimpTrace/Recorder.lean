@@ -107,6 +107,145 @@ def propFlag? (o : Origin) (after : Expr) (lctx : LocalContext)
   else if after.isFalse then return some false
   else return none
 
+/-! ### Lemma-headed simproc proofs (spec amendment 408a39b)
+
+A simproc whose returned proof is an application of **one lemma** is not an `eq`
+step: it is an ordinary `rw` whose `name` is that lemma, with the discharged
+condition as a `side` sub-trace and `"source"` naming the simproc.  `reduceIte`
+returns `ite_cond_eq_true α c inst a b (h : c = True)`, `reduceDIte` returns
+`dite_cond_eq_true ...`; both are genuine equation lemmas, and because the
+`Decidable` instance is an *argument of `ite`* rather than part of the rewrite
+motive, `rw [ite_cond_eq_true a b (eq_true h)]` is well-typed ordinary Lean.
+
+The test is generic, never a table of simproc names: take the proof's head
+constant and walk its arguments against the lemma's own binder telescope.  Each
+explicit argument must be
+
+* a subterm of the term being rewritten (the `ite`'s branches and condition),
+* an instance argument (`instImplicit`, or a class-typed argument), or
+* a proof — which is the discharged condition, and becomes the `side` entry.
+
+If any explicit argument is none of these, the proof is not a plain lemma
+application at this position and we fall back to `eq`/unresolved.  Implicit
+arguments are unification's business and are not checked.
+-/
+
+/-- The outcome of inspecting a simproc's proof term. -/
+inductive ProofShape where
+  /-- One lemma applied; `name` is it.  `proofArgs` are the explicit arguments
+  that are proofs, i.e. the conditions the discharger established. -/
+  | lemmaApp (name : Name) (proofArgs : Array Expr)
+  /-- Anything else: let the `rfl`/`decide` scratch check decide. -/
+  | computed
+  deriving Inhabited
+
+/-- Is `a` a subterm of `e` (structurally)? -/
+def isSubtermOf (a e : Expr) : Bool :=
+  Option.isSome <| e.find? fun s => s == a
+
+/--
+Classify a simproc's proof term per the amended spec.  `target` is the term the
+simproc rewrote, so "a subterm of the position" is decided against it.
+-/
+def classifyProof (target : Expr) (proof : Expr) : MetaM ProofShape := do
+  let .const declName _ := proof.getAppFn | return .computed
+  -- `Eq.trans`/`Eq.mpr`/`of_eq_true` and friends are plumbing, not the lemma
+  -- the rewrite is by; a proof headed by one is not a single lemma application.
+  if declName == ``Eq.trans || declName == ``Eq.mpr || declName == ``Eq.symm
+     || declName == ``id || declName == ``of_eq_true then
+    return .computed
+  let some ci := (← getEnv).find? declName | return .computed
+  let args := proof.getAppArgs
+  -- Walk the lemma's own telescope so we know which arguments are explicit.
+  let shape? ← forallTelescopeReducing ci.type fun xs _ => do
+    if xs.size < args.size then return none
+    let mut proofArgs : Array Expr := #[]
+    for i in [0:args.size] do
+      let arg := args[i]!
+      let some decl ← xs[i]!.fvarId!.findDecl? | return none
+      match decl.binderInfo with
+      | .implicit | .strictImplicit | .instImplicit => continue
+      | .default =>
+        if ← isProof arg then
+          proofArgs := proofArgs.push arg
+        else if isSubtermOf arg target then
+          continue
+        else if (← Meta.isClass? (← inferType arg)).isSome then
+          continue
+        else
+          -- An explicit argument that is neither a subterm of the position, an
+          -- instance, nor a proof: the lemma is not being applied *to this
+          -- position*, so replay could not reconstruct the argument.
+          return none
+    return some proofArgs
+  match shape? with
+  | some proofArgs => return .lemmaApp declName proofArgs
+  | none => return .computed
+
+/--
+Emit the step for a procedure firing, per the amended spec's `eq` bullet: a
+proof that is one lemma applied is an ordinary `rw` naming that lemma, with the
+discharged conditions as `side` entries and `source` naming the simproc;
+anything else stays an `eq`, whose `by` the scratch check decides (and which
+becomes a classified `unresolved:simproc:<name>` when it cannot).
+-/
+def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
+    (evCtx : EvCtx) (side : Array SideRec) (src? : Option Name) :
+    Simp.SimpM Unit := do
+  let shape ← match r.proof? with
+    | some proof => classifyProof e (← instantiateMVars proof)
+    | none => pure .computed
+  match shape with
+  | .lemmaApp declName proofArgs =>
+    -- Each proof argument is a condition the simproc established.  We already
+    -- captured the discharger's own work as `side`; when we captured none, the
+    -- condition came from somewhere else and we must name it honestly.
+    let mut sides := side
+    let mut unnamed : Array String := #[]
+    if sides.isEmpty then
+      for pa in proofArgs do
+        let ty ← instantiateMVars (← inferType pa)
+        match ← assumptionName? pa with
+        | some by_ => sides := sides.push (SideRec.mk ty #[] (some by_) evCtx)
+        | none =>
+          -- The condition's proof is a term no close form describes — a
+          -- `noConfusion` elimination under a binder, say.  Naming it
+          -- `true_intro` would tell a replayer to close a goal that is not
+          -- `True`; record the classified form instead.
+          let txt := (← ppExpr ty).pretty
+          unnamed := unnamed.push txt
+          sides := sides.push
+            (SideRec.mk ty #[] (some s!"unresolved:condition proof not a \
+              hypothesis or a recorded discharge") evCtx)
+    for u in unnamed do
+      ref.modify (·.markUnresolved
+        s!"simproc:{(src?.map toString).getD declName.toString} side condition \
+`{u}` proved by a term no close form describes")
+    ref.modify (·.push (.rw pos (.decl declName true false) false none
+      e r.expr evCtx #[] sides src?))
+  | .computed =>
+    ref.modify (·.push (.eq pos src? e r.expr evCtx side))
+where
+  /-- Name the close form a condition proof corresponds to, or `none` when no
+  spec form describes it.  simp wraps a hypothesis `h : c` as `eq_true h` to
+  get `c = True`, and a decidable ground condition as `eq_true_of_decide`. -/
+  assumptionName? (pa : Expr) : Simp.SimpM (Option String) := do
+    let core := if pa.isAppOfArity ``eq_true 2 || pa.isAppOfArity ``eq_false 2
+      then pa.appArg! else pa
+    match core with
+    | .fvar fvarId =>
+      let n := (← fvarId.getDecl).userName
+      return some s!"assumption:{n.eraseMacroScopes}"
+    | _ =>
+      if core.isAppOf ``eq_true_of_decide || core.isAppOf ``of_decide_eq_true then
+        return some "decide"
+      else if core.isAppOf ``rfl || core.isAppOf ``Eq.refl then
+        return some "rfl"
+      else if core.isConstOf ``True.intro || core.isAppOf ``trivial then
+        return some "true_intro"
+      else
+        return none
+
 /-! ### Method instrumentation -/
 
 /-- Capture the position the traversal is currently at. -/
@@ -186,15 +325,14 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             | _ => pure false
           if isProc then
             let src := match o with | .decl n _ _ => some n | _ => none
-            ref.modify (·.push (.eq pos src e r.expr evCtx (side ++ divertedSide)))
+            emitProcStep ref pos e r evCtx (side ++ divertedSide) src
           else
             let prop? ← propFlag? o r.expr evCtx.lctx evCtx.insts
-            ref.modify (·.push (.rw pos o inv prop? e r.expr evCtx #[] side))
+            ref.modify (·.push (.rw pos o inv prop? e r.expr evCtx #[] side none))
         | none =>
           -- No origin at all: a simproc that registered nothing (`simpUsingDecide`
-          -- and the ground arithmetic/matcher simprocs).  This is the spec's
-          -- `eq` kind, whose `by` a scratch check decides — never an abort.
-          ref.modify (·.push (.eq pos none e r.expr evCtx (side ++ divertedSide)))
+          -- and the ground arithmetic/matcher simprocs).  Same classification.
+          emitProcStep ref pos e r evCtx (side ++ divertedSide) none
     match stepResult with
     | .done r => record r
     | .visit r => record r
@@ -241,8 +379,8 @@ def instrumentD (ref : TraceRef) (p : Simp.DSimproc) : Simp.DSimproc := fun e =>
         if ← Simp.isSimproc n then
           ref.modify (·.push (.eq pos (some n) e e' evCtx #[]))
         else
-          ref.modify (·.push (.rw pos (.decl n true false) false none e e' evCtx #[] #[]))
-      | o => ref.modify (·.push (.rw pos o false none e e' evCtx #[] #[]))
+          ref.modify (·.push (.rw pos (.decl n true false) false none e e' evCtx #[] #[] none))
+      | o => ref.modify (·.push (.rw pos o false none e e' evCtx #[] #[] none))
   return stepResult
 
 /-! ### Dischargers
