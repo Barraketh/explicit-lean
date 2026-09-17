@@ -12,21 +12,20 @@ simp-family tactic, *provided its file declares no term elaborators* (Round 3.1)
 ## Round 7 fixes (all diagnostics or bookkeeping)
 1+2. *(minor)* Round 6 fixed the antiquotation wording in the term and step
    slots, but the recursive side-proof grammar added in that same round
-   re-introduced "internal error" in four of six slots. The test now lives in one
-   `isAntiquot` predicate used by every fallthrough, pinned by three fixtures.
-   The `congr` refusal compared terms differing only in *implicit* arguments, so
-   it printed the same term twice; both are now rendered **eagerly** under
-   `pp.explicit` — eagerly because `MessageData` resolves its context where the
-   error is displayed, not where it is thrown.
+   re-introduced "internal error" in four of six slots. One `isAntiquot`
+   predicate now serves every fallthrough, pinned by three fixtures. The `congr`
+   refusal compared terms differing only in *implicit* arguments, printing the
+   same term twice; both are now rendered **eagerly** under `pp.explicit` —
+   eagerly because `MessageData` resolves its context where the error is
+   displayed, not where it is thrown.
 3. *(minor, honesty)* The escape-sweep figures had **no committed artefact**:
    they came from scratch runs, two of which proved to be classifier errors
    rather than grammar defects — exactly the case where an artefact matters. The
    probe list now lives in `test/ExplicitRw/sweep/probes.json` and
-   `check_explicit_rw.py` runs it, so the count is produced by the check rather
-   than asserted here. The classifier also became honest about *stage*: an escape
-   must be **rejected**, and the report says how many by the parser versus at
-   elaboration (`admit` parses as an identifier then fails to resolve; `$x` the
-   tactic names itself). An escape admitted in silence is the failure condition.
+   `check_explicit_rw.py` runs it, so the count is produced by the check, not
+   asserted here. An escape must be stopped by the **parser**; the only two that
+   cannot be (`admit`, `$x`) are listed explicitly, so anything else surviving
+   the parser fails the run.
 4. *(trivial)* The fixture count said 6; there are 7.
 
 ## Round 6 fixes
@@ -53,9 +52,8 @@ simp-family tactic, *provided its file declares no term elaborators* (Round 3.1)
    error no longer promises a diagnostic that was never printed.
 **Recursive side proofs** (item 4). `with [...]` and `then` take a closed
 *recursive* grammar: `rfl | decide | omega | nofun | exact <term> |
-intro <ids> ; <proof> |` a nested `explicit_rw`. A conditional lemma's hypothesis
-is often implication-shaped — `ite_congr`/`dite_congr` give `c → x = u` — which
-no flat enumeration can discharge.
+intro <ids> ; <proof> |` a nested `explicit_rw`. An implication-shaped hypothesis
+— `ite_congr`/`dite_congr` give `c → x = u` — needs the `intro` form.
 **The `congr` step** (T1 round-5 cross-check). The spec's `congr` kind had no T2
 form, so cast-transport traces could not replay. `congr <i> [steps] at [pos]`
 rebuilds the application through `Lean.Meta.mkCongrSimp?`'s theorem; unlike
@@ -79,10 +77,9 @@ calling the simplifier in `MetaM` produced neither a `by` node nor a synthetic
 metavariable and passed — my claim that the guard caught a block "however it got
 there" was false. Terms are now parsed in a whitelist grammar. **Residual hole,
 stated not papered over:** an identifier bound to a `@[term_elab]` elaborator is
-indistinguishable from a constant at parse time — closed generator-side, **T4**.
-**Round 2**: the `let`-body branch abstracted by *value*, destroying the `let`
-when its value was closed. **Round 1**: the `tacticSeq` hole in `then`/`eq … by`,
-now closed enumerations. Details in git.
+indistinguishable from a constant at parse time — closed generator-side (**T4**).
+**Round 2**: the `let`-body branch abstracted by *value*. **Round 1**: the
+`tacticSeq` hole in `then`/`eq … by`, now closed enumerations. Details in git.
 
 ## Files (only owned; `ExplicitLean.lean`, `lakefile.toml` untouched)
 `ExplicitLean/ExplicitRw{.lean,/Basic,/Tactic}.lean`; `test/ExplicitRw/` (7
