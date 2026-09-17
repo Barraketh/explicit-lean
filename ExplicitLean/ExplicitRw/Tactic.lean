@@ -457,6 +457,20 @@ syntax (name := explicitRw) "explicit_rw " "[" explicitRwStep,* "]"
 
 namespace Impl
 
+/--
+Is this syntax node an antiquotation (`$x`)?
+
+Antiquotations are admitted by every category's parser but mean nothing in a
+trace, so each dispatch fallthrough checks for one and says so plainly. Round 6
+fixed this in the term and step slots; round 7 found the recursive side-proof
+slots added in the same round had re-introduced the "internal error" wording, so
+the test now lives in one place.
+-/
+def isAntiquot (k : Name) : Bool :=
+  let s := k.toString
+  s.endsWith "antiquot" || s.endsWith "antiquot" || s == "«$»"
+
+
 /-- `fun (x : α) => ... => body`: a typed binder group, desugared to nested
 single binders so it can be built with ordinary quotations. -/
 def mkTypedFun (xs : Array Ident) (ty body : Term) : TermElabM Term := do
@@ -631,7 +645,7 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
   | ``explicitRwTermArrow => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a → $b)
   | ``explicitRwType => toTermCore stx[0]
   | k =>
-    if k.toString.endsWith "pseudo.antiquot" then
+    if isAntiquot k then
       throwError "explicit_rw: antiquotations are not admitted in a trace term."
     else
       throwError "explicit_rw: internal error: unhandled whitelisted node `{k}`"
@@ -1139,8 +1153,20 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement 
           let pfTy ← instantiateMVars (← inferType pf)
           let expected ← mkEq sub newSub
           unless ← isDefEq pfTy expected do
+            -- Print with `pp.explicit`: when the step changes an argument the
+            -- congruence theorem treats as fixed, the two sides differ *only* in
+            -- implicit arguments, so the default rendering shows the same term
+            -- twice and the refusal reads as nonsense.
+            -- Render the two terms *eagerly* under `pp.explicit`: `MessageData`
+            -- resolves its context when the error is finally displayed, so
+            -- setting the option around the throw has no effect.
+            let opts := (← getOptions).setBool `pp.explicit true
+            let pfStr ← withOptions (fun _ => opts) do ppExpr pfTy
+            let expStr ← withOptions (fun _ => opts) do ppExpr expected
             stepError idx m!"`congr {argIdx}`: the congruence theorem proves\
-              {indentExpr pfTy}\nbut this step needs{indentExpr expected}"
+              \n  {pfStr}\nbut this step needs\n  {expStr}\n\
+              (shown with `pp.explicit`, because the mismatch is in the \
+              implicit arguments.)"
           return Replacement.eq newSub pf
         else
           stepError idx m!"`congr {argIdx}`: the application at this position has \
@@ -1208,7 +1234,11 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement 
     let sideTacs : Array Syntax :=
       if stx[3].isNone then #[] else stx[3][0][2].getSepArgs
     runRwStep idx e pos term symm sideTacs
-  | k => throwError "explicit_rw: internal error: unexpected step kind `{k}`"
+  | k =>
+    if isAntiquot k then
+      stepError idx m!"antiquotations are not admitted in a trace step."
+    else
+      throwError "explicit_rw: internal error: unexpected step kind `{k}`"
 
 /-- Apply every step in order to the expression at `target`, rebuilding the goal. -/
 partial def runSteps (steps : Array Syntax) (target : Target) : TacticM Unit := do
@@ -1316,7 +1346,10 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
       stepError idx m!"{where?} left {remaining.length} goal(s) open on\
         {indentExpr (← instantiateMVars (← goal.getType))}"
   | k =>
-    throwError "explicit_rw: internal error: unknown side proof `{k}`"
+    if isAntiquot k then
+      stepError idx m!"antiquotations are not admitted in a side proof."
+    else
+      throwError "explicit_rw: internal error: unknown side proof `{k}`"
 
 end
 
