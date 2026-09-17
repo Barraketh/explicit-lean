@@ -376,13 +376,37 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
       let mut first := true
       for pa in proofArgs do
         let ty ← instantiateMVars (← inferType pa)
-        -- The diverted events were recorded against the *subterm* the simproc
-        -- simplified, but the side goal is an equation about it (`c = False`),
-        -- so each position needs the path from the equation down to its
-        -- left-hand side prepended.  `Eq lhs rhs` is `((Eq α) lhs) rhs`, so the
-        -- lhs sits at `[0, 1]` (REVIEW-9 1).
-        let lhsPath : Pos := if ty.eq?.isSome then #[0, 1] else #[]
-        let evs := if first then diverted.map (Event.rebase lhsPath) else #[]
+        -- The diverted events came from the simproc's nested `simp`, which
+        -- calls *stock* `simpImpl`: the fork's `withPos` never runs inside it,
+        -- so every one of them arrives at the frame root with `pos = []`.  A
+        -- constant prefix would therefore give three rewrites of three
+        -- different subterms the same position -- which elaborates and then
+        -- rewrites the wrong subterm.  Recover each position from the subterm
+        -- the event records, threading the goal so later steps see the earlier
+        -- rewrites.  An event whose `before` is absent or occurs more than once
+        -- is a genuine unknown: drop the whole side trace rather than guess,
+        -- and let the caller classify it (REVIEW-9 1).
+        let mut located : Array Event := #[]
+        let mut cur := ty
+        let mut locOk := true
+        if first then
+          for ev in diverted do
+            let (before, after) := match ev with
+              | .rw _ _ _ _ b a _ _ _ _ _ => (some b, some a)
+              | .eq _ _ b a _ _ => (some b, some a)
+              | .defeq _ _ _ b a _ => (some b, some a)
+              | .congr _ _ _ b a _ _ _ => (some b, some a)
+              | .introCtx .. => (none, none)
+            match before, after with
+            | some b, some a =>
+              match uniqueOccurrence? cur b with
+              | some q =>
+                located := located.push (ev.reposition q)
+                cur := (replaceAt? cur q a).getD cur
+              | none => locOk := false
+            | _, _ => locOk := false
+        let evs := if first && locOk then located else #[]
+        let unlocated := first && !locOk && !diverted.isEmpty
         first := false
         -- With steps recorded, the close is what the goal becomes *after* them;
         -- with none, it is what the goal already is.  Never a hardcoded form.
@@ -391,16 +415,17 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
         -- Reading the last event's `after` instead would hand `goalCloseForm?`
         -- a subterm (`False`) rather than the goal (`False = False`), which is
         -- what made `rfl`-closable conditions come out classified (REVIEW-9 1).
-        let after := evs.foldl (init := ty) fun acc ev =>
-          let (pos, a) := match ev with
-            | .rw p _ _ _ _ a _ _ _ _ _ => (p, some a)
-            | .eq p _ _ a _ _ => (p, some a)
-            | .defeq p _ _ _ a _ => (p, some a)
-            | .congr p _ _ _ a _ _ _ => (p, some a)
-            | .introCtx .. => (#[], none)
-          match a with
-          | none => acc
-          | some a => (replaceAt? acc pos a).getD acc
+        let after := if evs.isEmpty then ty else cur
+        if unlocated then
+          -- The steps exist but their positions could not be recovered, so the
+          -- trace cannot say *where* to rewrite.  Emitting the goal with no
+          -- steps would claim it was discharged by nothing; say what happened.
+          let txt := (← ppExpr ty).pretty
+          unnamed := unnamed.push txt
+          sides := sides.push
+            (SideRec.mk ty #[] (some "unresolved:nested simp steps could not be \
+              placed in the side goal") evCtx #[] ty none)
+          continue
         match ← goalCloseForm? after with
         | some by_ => sides := sides.push (SideRec.mk ty evs (some by_) evCtx #[] ty
             (if evs.isEmpty then none else some after))

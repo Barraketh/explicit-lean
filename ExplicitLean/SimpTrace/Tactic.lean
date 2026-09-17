@@ -851,7 +851,21 @@ def evalSimpTrace : Tactic := fun stx => withMainContext do
   let json := trace.toJson
   match outPath? stx with
   | some path =>
-    IO.FS.writeFile (← resolveOutPath path) json
+    -- A single *syntactic* site can run many times -- `by_cases h : P <;>
+    -- simp_trace ...` runs it once per branch, on a different goal each time,
+    -- with a different hypothesis of the same name in scope.  Writing them all
+    -- to one path let the last branch silently overwrite the others, so the
+    -- surviving trace named `h` while replay applied it to every branch, where
+    -- `h : P` in some and `h : ¬P` in others.  Give each run after the first
+    -- its own `.<n>.json`, so no invocation is lost (REVIEW-9 1).
+    let base ← resolveOutPath path
+    let mut target := base
+    let mut n := 1
+    while (← target.pathExists) do
+      let stem := base.toString.dropRight ".json".length
+      target := System.FilePath.mk s!"{stem}.{n}.json"
+      n := n + 1
+    IO.FS.writeFile target json
   | none =>
     logInfo m!"simp-trace-json:{json}"
   -- One classified line per call, so a driver can catalogue it.  The goal state

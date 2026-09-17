@@ -90,6 +90,40 @@ partial def replaceAt? (e : Expr) (pos : Pos) (repl : Expr) : Option Expr := do
     | .proj s i' _, 0 => some (.proj s i' sub')
     | _, _ => none
 
+/-- Every position at which `target` occurs in `e`, outermost-first.
+
+A simproc's nested `simp` calls *stock* `simpImpl`, so the events it produces
+carry no position of their own -- they all arrive at the diverted frame's root
+(`[]`).  Prefixing a constant path onto them would make three rewrites of three
+different subterms all claim the same position, which type-checks and then
+rewrites the wrong subterm (REVIEW-9 1).  The position has to be recovered from
+the one thing those events do carry: the subterm they rewrote.
+
+Structural equality only, and *all* occurrences are returned so the caller can
+refuse an ambiguous match rather than pick one. -/
+partial def occurrencesOf (e target : Expr) : Array Pos :=
+  go e #[] #[]
+where
+  go (e : Expr) (here : Pos) (acc : Array Pos) : Array Pos :=
+    let acc := if e == target then acc.push here else acc
+    match e with
+    | .app f a => go a (here.push 1) (go f (here.push 0) acc)
+    | .lam _ t b _ => go b (here.push 1) (go t (here.push 0) acc)
+    | .forallE _ t b _ => go b (here.push 1) (go t (here.push 0) acc)
+    | .letE _ t v b _ =>
+      go b (here.push 2) (go v (here.push 1) (go t (here.push 0) acc))
+    | .mdata _ b => go b (here.push 0) acc
+    | .proj _ _ b => go b (here.push 0) acc
+    | _ => acc
+
+/-- The single position at which `target` occurs in `e`, or `none` when it does
+not occur or occurs more than once.  Ambiguity is a genuine unknown here: the
+diverted event does not say which occurrence it rewrote. -/
+def uniqueOccurrence? (e target : Expr) : Option Pos :=
+  match occurrencesOf e target with
+  | #[p] => some p
+  | _ => none
+
 /-- Navigate to `pos`, returning the subterm and the number of binder *nodes*
 crossed to reach it.  Returns `none` for a position the term does not have. -/
 partial def navigate? (e : Expr) (pos : Pos) (depth : Nat := 0) :
