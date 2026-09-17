@@ -28,6 +28,10 @@ SWEEP_DIR = FIXTURE_DIR / "sweep"
 SWEEP_SLOTS_DEFAULT = 2
 # The only escape probes the *parser* cannot stop; see run_escape_sweep.
 POST_PARSE_ESCAPES = {"admit", "$x"}
+# The only axioms a replayed proof may depend on: Lean's three classical
+# axioms, which ordinary Mathlib lemmas already use. Anything else — `sorryAx`
+# from an admitted proof, or a freshly declared `axiom` — fails the audit.
+ALLOWED_AXIOMS = {"propext", "Quot.sound", "Classical.choice"}
 MODULE = "ExplicitLean.ExplicitRw"
 
 # Fixtures that deliberately contain failing proofs, checked via `#guard_msgs`.
@@ -128,10 +132,18 @@ def run_escape_sweep(full: bool = False) -> tuple[int, str, float]:
 
 
 def run_axiom_check(fixtures: list[Path]) -> tuple[int, str, float]:
-    """`#print axioms` every theorem of the positive fixtures; fail on `sorryAx`.
+    """`#print axioms` every theorem of the positive fixtures, against an allowlist.
 
     The fixture bodies are concatenated into one scratch file with their imports
-    hoisted, then one `#print axioms` per theorem is appended.
+    hoisted, then one `#print axioms` per theorem is appended and the reported
+    axiom set is parsed.
+
+    The governing rule forbids `sorry`/`admit` *and* new axioms. An earlier
+    version grepped the output for `sorryAx`, which enforced only the first half:
+    a theorem depending on a freshly declared `axiom` prints that axiom's name
+    and no `sorryAx`, so it passed. Comparing against an allowlist closes that,
+    and is the honest reading of the rule — anything outside
+    `ALLOWED_AXIOMS` is a new axiom by definition.
     """
     import re
     import tempfile
@@ -170,13 +182,34 @@ def run_axiom_check(fixtures: list[Path]) -> tuple[int, str, float]:
                                      str(scratch.relative_to(REPO))])
         if code != 0:
             return 1, f"the axiom-audit file failed to compile:\n{output}", elapsed
-        if "sorryAx" in output:
-            bad = [l for l in output.splitlines() if "sorryAx" in l]
-            return 1, ("a fixture theorem depends on sorryAx:\n  "
-                       + "\n  ".join(bad)), elapsed
-        checked = len(prints)
-        clean = sum(1 for l in output.splitlines() if "does not depend" in l)
-        return 0, f"{checked} theorems, no sorryAx ({clean} axiom-free)", elapsed
+        # Parse every `#print axioms` line and compare its axiom set with the
+        # allowlist, rather than searching the text for one forbidden name.
+        offenders: list[str] = []
+        reported = 0
+        clean = 0
+        for line in output.splitlines():
+            m = re.match(r"'(?P<thm>[^']+)' depends on axioms: \[(?P<ax>[^\]]*)\]",
+                         line.strip())
+            if m:
+                reported += 1
+                axs = {a.strip() for a in m.group("ax").split(",") if a.strip()}
+                extra = axs - ALLOWED_AXIOMS
+                if extra:
+                    offenders.append(f"{m.group('thm')} depends on "
+                                     f"{sorted(extra)}")
+                continue
+            if "does not depend on any axioms" in line:
+                reported += 1
+                clean += 1
+        if offenders:
+            return 1, ("fixture theorems depend on axioms outside the allowlist "
+                       f"{sorted(ALLOWED_AXIOMS)}:\n  "
+                       + "\n  ".join(offenders)), elapsed
+        if reported != len(prints):
+            return 1, (f"expected {len(prints)} axiom reports, parsed {reported}"
+                       f" — the audit is not covering every theorem"), elapsed
+        return 0, (f"{len(prints)} theorems, all within the allowlist "
+                   f"({clean} axiom-free)"), elapsed
     finally:
         scratch.unlink(missing_ok=True)
 
@@ -234,7 +267,7 @@ def main() -> int:
     # the next reviewer.
     code, output, elapsed = run_axiom_check(fixtures)
     if code != 0:
-        print(f"check_explicit_rw: FAIL: sorryAx audit")
+        print("check_explicit_rw: FAIL: axiom audit")
         print(output)
         return 1
     print(f"  axiom audit: {output} ({elapsed:.1f}s)")
