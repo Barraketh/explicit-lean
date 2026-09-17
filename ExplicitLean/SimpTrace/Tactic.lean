@@ -671,6 +671,30 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
         -- argument".  Re-check the explicit binders against the LHS alone; a
         -- step carrying `side` traces is exempt, since discharging such an
         -- argument is what a side trace is for (REVIEW-9 2).
+        -- A Prop-valued local rewrites as `eq_true h` / `eq_false h`, which
+        -- applies `h` *unapplied*: an explicit binder of its own (`h : ∀ n,
+        -- ¬ f n`) can never be recovered by unification the way `rw [h]` would
+        -- recover it, because the replayer never gets to match `h`'s own
+        -- statement against the subterm.  Such an argument has to be in `args`
+        -- (REVIEW-9 residual risk r4).
+        if prop?.isSome && args.isEmpty && !hasSides then
+          -- Count the *syntactic* binders only.  `forallTelescopeReducing`
+          -- unfolds `¬P` to `P → False` and reports one explicit binder for a
+          -- hypothesis that has no quantifier at all, which would classify
+          -- `h : ¬P` -- a step that replays perfectly well.  An *implicit*
+          -- binder is fine: `rw` recovers it by unification.
+          let rec explicitBinders : Expr → Nat
+            | .forallE _ _ body bi =>
+              (if bi.isExplicit then 1 else 0) + explicitBinders body
+            | _ => 0
+          let type? : Option Expr ← match o with
+            | .fvar fvarId => pure ((← getLCtx).find? fvarId |>.map (·.type))
+            | .decl declName _ _ =>
+              pure ((← getEnv).find? declName |>.map (·.type))
+            | _ => pure none
+          if let some ty := type? then
+            if explicitBinders ty > 0 then
+              return some s!"unapplied_quantified_prop:{name}"
         unless hasSides do
           let lhsOnly ← withoutModifyingState do
             withReducibleAndInstances do
@@ -747,6 +771,17 @@ def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
             (!sides.isEmpty) pj then
           ur.modify (·.add reason)
           thisReason := some reason
+        -- A side trace's own steps are steps a replayer writes too, and they
+        -- were never checked: `sides` was read only for the `hasSides` flag.
+        -- That is how r4 of REVIEW-9's residual-risk set shipped -- its side
+        -- step rewrites by a ∀-quantified `h` that `eq_false h` cannot apply
+        -- (REVIEW-9 residual risk).
+        for sd in sides do
+          for sev in sd.events do
+            if let .rw _ so sinv sprop sb sa sc sargs ssides _ slo spj := sev then
+              if let some reason ← checkRwStep (resolvedOrigin so slo) sargs sinv
+                  sprop sb sa sc (!ssides.isEmpty) spj then
+                ur.modify (·.add reason)
         pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
       | .defeq pos _ _ b a c => pure (pos, b, a, c)

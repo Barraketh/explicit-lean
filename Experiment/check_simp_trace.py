@@ -444,6 +444,77 @@ def check_symlink_containment(messages: list[str]) -> None:
             pass
 
 
+REPLAY_DIR = ROOT / "test" / "SimpTrace" / "replay"
+
+
+def check_replay_traces(messages: list[str]) -> None:
+    """The residual-risk traces (REVIEW-9): a side goal in the wrong frame.
+
+    The in-tactic validator and `check_side_positions` jointly miss a side trace
+    whose goal is stated in the wrong frame, whose steps sit at `[]` and whose
+    close is wrong for the real goal — a position test cannot see it. These four
+    traces were built by the reviewer to pass both gates and fail replay.
+
+    What is checked here is the invariant they violate, not a stored rendering:
+    a side goal with recorded steps must say how it closes, and each step's
+    position must address a subterm that the goal actually has at that depth.
+    """
+    if not REPLAY_DIR.is_dir():
+        fail(messages, f"{REPLAY_DIR.relative_to(ROOT)} does not exist")
+        return
+    traces = sorted(REPLAY_DIR.glob("r*.json"))
+    if len(traces) < 4:
+        fail(messages,
+             f"{REPLAY_DIR.relative_to(ROOT)}: expected the four residual-risk "
+             f"traces r1-r4, found {len(traces)}; run `lake env lean "
+             f"test/SimpTrace/replay/Risk.lean`")
+        return
+
+    def visit(where: str, steps: list) -> None:
+        for i, st in enumerate(steps):
+            for j, side in enumerate(st.get("side", []) or []):
+                sw = f"{where}.steps[{i}].side[{j}]"
+                sub = side.get("steps", []) or []
+                close = (side.get("close") or {}).get("by")
+                # A side goal with steps and no close claims it was discharged
+                # by nothing. This is exactly r3's shape.
+                if sub and not close:
+                    fail(messages, f"{sw}: {side.get('goal')!r} records "
+                                   f"{len(sub)} step(s) but no close")
+                # `pre` is the goal's pp, so a side goal stated in the wrong
+                # frame shows up as a `pre` that is not the goal.
+                if side.get("pre") and side.get("goal") and \
+                        side["pre"] != side["goal"]:
+                    fail(messages, f"{sw}: `pre` is {side['pre']!r} but the goal "
+                                   f"is {side['goal']!r}; a side goal's `pre` is "
+                                   f"its own goal's pp")
+                # The goal is an equation, so a step rewriting its left-hand
+                # side cannot sit at the root: `[]` addresses the whole
+                # equation. r3 records two sides with the same `P = False`
+                # goal, one at `[0, 1]` and one at `[]`, and only the first
+                # replays.
+                goal = side.get("goal") or ""
+                if " = " in goal or " ↔ " in goal:
+                    for k, st2 in enumerate(sub):
+                        if st2.get("pos") == [] and st2.get("before") \
+                                and st2["before"] != goal:
+                            fail(messages,
+                                 f"{sw}.steps[{k}]: rewrites "
+                                 f"{st2['before']!r} at the root of the "
+                                 f"equation goal {goal!r}")
+                visit(sw, sub)
+            visit(f"{where}.steps[{i}]", st.get("steps", []) or [])
+
+    for path in traces:
+        try:
+            trace = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            fail(messages, f"{path.name}: {exc}")
+            continue
+        for k, loc in enumerate(trace.get("locations", [])):
+            visit(f"{path.name}.locations[{k}]", loc.get("steps", []) or [])
+
+
 def check_path_containment(messages: list[str]) -> None:
     """The out-clause must refuse to write outside the package root.
 
@@ -749,6 +820,7 @@ def main() -> int:
                 f"{EXPECTED_DIR.relative_to(ROOT)}",
             )
 
+    check_replay_traces(messages)
     check_path_containment(messages)
     check_symlink_containment(messages)
 

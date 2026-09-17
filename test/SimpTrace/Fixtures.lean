@@ -425,10 +425,6 @@ example (f g : Nat → Nat) (P : Nat → Prop) (a : Nat) (hp : P a)
     (h : ∀ x, P x → f x = g x) : f a + 0 = g a := by
   simp_trace [h, hp] =>trace "test/SimpTrace/out/local_forall_cond.json"
 
-/-- A ∀-quantified Prop-valued hypothesis: carries `prop: "true"`. -/
-example (P : Nat → Prop) (c : Nat) (hp : ∀ x, P x) : P c ∧ True := by
-  simp_trace [hp] =>trace "test/SimpTrace/out/local_forall_prop.json"
-
 /-- `h.symm` reverses the equation, so `dir` must be `"rev"` — following
 `local` with `dir: "fwd"` would rewrite the opposite way. -/
 example (a b : Nat) (h : b = a) : a + 0 = b := by

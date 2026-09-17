@@ -101,4 +101,17 @@ example (p q : Prop) [Decidable p] [Decidable q] (hpq : p = q)
   simp_trace +contextual [hpq, hf, hg]
     =>trace "test/SimpTrace/out/user_congr_dite.json"
 
+
+/-- A ∀-quantified Prop-valued hypothesis, classified by design.
+
+simp uses `hp : ∀ x, P x` as the rewrite `P c ↝ True`, whose proof is
+`eq_true (hp c)`. A replayer writes `rw [eq_true hp]`, which Lean rejects: the
+`c` is the binder simp instantiated, and it is a *loose bvar* in the stored
+proof, so it cannot be recovered as a term for `args` either. `rw [eq_true
+(hp c)]` succeeds -- both verified in plain Lean -- so the information exists
+but not in a form this recorder can reach, and the step says so rather than
+shipping an `eq_true hp` that fails (REVIEW-9 residual risk r4). -/
+example (P : Nat → Prop) (c : Nat) (hp : ∀ x, P x) : P c ∧ True := by
+  simp_trace [hp] =>trace "test/SimpTrace/out/local_forall_prop.json"
+
 end ExplicitLean.SimpTrace.UnresolvedFixtures

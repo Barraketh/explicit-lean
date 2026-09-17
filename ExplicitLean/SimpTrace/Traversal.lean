@@ -1096,12 +1096,23 @@ partial def processCongrHypothesisT (ref : TraceRef) (thmName : Name)
       -- found for `name`.  `ppExpr` gives the `a✝` form a generator can bind.
       let intros ← xs.mapM fun x => do
         pure (← ppExpr x).pretty
-      -- `pre`/`post` for the side goal (spec e95c745): a congruence hypothesis
-      -- establishes `lhs = r.expr`, so its own goal runs from `lhs` to the
-      -- simplified form, which is what a replayer has to reach.
+      -- One rule for every side goal (REVIEW-9 1): `pre` is the goal's own pp
+      -- and positions are relative to it.  This path used to set `pre := lhs`
+      -- and `post := r.expr` -- the equation's *sides* rather than the goal --
+      -- so one trace stated `dite_cond_eq_false`'s side as `P = False` and an
+      -- `exists_prop_congr` side as `P` eight lines apart, and the steps'
+      -- positions were relative to neither consistently.  The goal is
+      -- `lhs = r.expr` and the steps carry `lhs` to `r.expr`, so after them it
+      -- is `r.expr = r.expr`: `rfl`, with or without steps.
+      let post ← instantiateMVars (← mkEq r.expr r.expr)
+      -- The events were captured by `simpT ref #[] lhs`, so their positions are
+      -- relative to `lhs`; the goal is the equation `lhs = r.expr`, in which
+      -- `lhs` sits at `[0, 1]` (`((Eq α) lhs) rhs`).  Without this prefix the
+      -- same `P = False` goal appeared once with a step at `[0, 1]` and once at
+      -- `[]`, and only the first replays (REVIEW-9 residual risk r3).
+      let evs := evs.map (Event.rebase #[0, 1])
       let side : SideRec :=
-        .mk goal evs (if evs.isEmpty then some "rfl" else none)
-          (← captureEvCtx ref) intros lhs (some r.expr)
+        .mk goal evs (some "rfl") (← captureEvCtx ref) intros goal (some post)
       return (progress, some side)
 
 /-- SOURCE: Main.lean:586-635 `Simp.trySimpCongrTheorem?`, position-threaded.

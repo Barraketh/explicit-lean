@@ -1,119 +1,134 @@
 {
-  "schema": "simp-trace-v1",
-  "locations": [
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "dite p f g = dite q f' g'",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
     {
-      "loc": "goal",
-      "closed": true,
-      "pre": "dite p f g = dite q f' g'",
-      "post": null,
-      "close": {
-        "by": "true_intro"
-      },
-      "steps": [
+     "kind": "rw",
+     "pos": [
+      0,
+      1
+     ],
+     "name": "dite_congr",
+     "dir": "fwd",
+     "source": "congr",
+     "side": [
+      {
+       "goal": "p = q",
+       "pre": "p = q",
+       "post": "q = q",
+       "close": {
+        "by": "rfl"
+       },
+       "steps": [
         {
-          "kind": "rw",
-          "pos": [
-            0,
-            1
-          ],
-          "name": "dite_congr",
-          "dir": "fwd",
-          "source": "congr",
-          "side": [
-            {
-              "goal": "p = q",
-              "pre": "p",
-              "post": "q",
-              "close": null,
-              "steps": [
-                {
-                  "kind": "rw",
-                  "pos": [],
-                  "name": "hpq",
-                  "dir": "fwd",
-                  "local": {
-                    "userName": "hpq",
-                    "inaccessible": false,
-                    "ctxIndex": 5
-                  }
-                }
-              ]
-            },
-            {
-              "goal": "f ⋯ = f' h",
-              "pre": "f ⋯",
-              "post": "f' h",
-              "close": null,
-              "intros": [
-                "h"
-              ],
-              "steps": [
-                {
-                  "kind": "rw",
-                  "pos": [],
-                  "name": "hf",
-                  "dir": "fwd",
-                  "local": {
-                    "userName": "hf",
-                    "inaccessible": false,
-                    "ctxIndex": 10
-                  },
-                  "side": [
-                    {
-                      "goal": "q",
-                      "pre": "q",
-                      "post": null,
-                      "close": {
-                        "by": "assumption:h"
-                      },
-                      "steps": []
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "goal": "g ⋯ = g' ⋯",
-              "pre": "g ⋯",
-              "post": "g' ⋯",
-              "close": null,
-              "intros": [
-                "h"
-              ],
-              "steps": [
-                {
-                  "kind": "rw",
-                  "pos": [],
-                  "name": "hg",
-                  "dir": "fwd",
-                  "local": {
-                    "userName": "hg",
-                    "inaccessible": false,
-                    "ctxIndex": 11
-                  },
-                  "side": [
-                    {
-                      "goal": "¬q",
-                      "pre": "¬q",
-                      "post": null,
-                      "close": {
-                        "by": "unresolved:discharged by rewriting to True, steps not recorded"
-                      },
-                      "steps": []
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "kind": "rw",
-          "pos": [],
-          "name": "eq_self",
-          "dir": "fwd"
+         "kind": "rw",
+         "pos": [
+          0,
+          1
+         ],
+         "name": "hpq",
+         "dir": "fwd",
+         "local": {
+          "userName": "hpq",
+          "inaccessible": false,
+          "ctxIndex": 5
+         }
         }
-      ]
+       ]
+      },
+      {
+       "goal": "f ⋯ = f' h",
+       "pre": "f ⋯ = f' h",
+       "post": "f' h = f' h",
+       "close": {
+        "by": "rfl"
+       },
+       "intros": [
+        "h"
+       ],
+       "steps": [
+        {
+         "kind": "rw",
+         "pos": [
+          0,
+          1
+         ],
+         "name": "hf",
+         "dir": "fwd",
+         "local": {
+          "userName": "hf",
+          "inaccessible": false,
+          "ctxIndex": 10
+         },
+         "side": [
+          {
+           "goal": "q",
+           "pre": "q",
+           "post": null,
+           "close": {
+            "by": "assumption:h"
+           },
+           "steps": []
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "goal": "g ⋯ = g' ⋯",
+       "pre": "g ⋯ = g' ⋯",
+       "post": "g' ⋯ = g' ⋯",
+       "close": {
+        "by": "rfl"
+       },
+       "intros": [
+        "h"
+       ],
+       "steps": [
+        {
+         "kind": "rw",
+         "pos": [
+          0,
+          1
+         ],
+         "name": "hg",
+         "dir": "fwd",
+         "local": {
+          "userName": "hg",
+          "inaccessible": false,
+          "ctxIndex": 11
+         },
+         "side": [
+          {
+           "goal": "¬q",
+           "pre": "¬q",
+           "post": null,
+           "close": {
+            "by": "unresolved:discharged by rewriting to True, steps not recorded"
+           },
+           "steps": []
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "eq_self",
+     "dir": "fwd"
     }
-  ]
+   ]
+  }
+ ]
 }

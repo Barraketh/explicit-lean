@@ -1,98 +1,108 @@
 {
-  "schema": "simp-trace-v1",
-  "locations": [
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "(if p then a else a) = if q then b else a",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
     {
-      "loc": "goal",
-      "closed": true,
-      "pre": "(if p then a else a) = if q then b else a",
-      "post": null,
-      "close": {
-        "by": "true_intro"
-      },
-      "steps": [
+     "kind": "rw",
+     "pos": [
+      0,
+      1
+     ],
+     "name": "ite_congr",
+     "dir": "fwd",
+     "source": "congr",
+     "side": [
+      {
+       "goal": "p = q",
+       "pre": "p = q",
+       "post": "q = q",
+       "close": {
+        "by": "rfl"
+       },
+       "steps": [
         {
-          "kind": "rw",
-          "pos": [
-            0,
-            1
-          ],
-          "name": "ite_congr",
-          "dir": "fwd",
-          "source": "congr",
-          "side": [
-            {
-              "goal": "p = q",
-              "pre": "p",
-              "post": "q",
-              "close": null,
-              "steps": [
-                {
-                  "kind": "rw",
-                  "pos": [],
-                  "name": "hpq",
-                  "dir": "fwd",
-                  "local": {
-                    "userName": "hpq",
-                    "inaccessible": false,
-                    "ctxIndex": 7
-                  }
-                }
-              ]
-            },
-            {
-              "goal": "a = b",
-              "pre": "a",
-              "post": "b",
-              "close": null,
-              "intros": [
-                "a✝"
-              ],
-              "steps": [
-                {
-                  "kind": "rw",
-                  "pos": [],
-                  "name": "hb",
-                  "dir": "fwd",
-                  "local": {
-                    "userName": "hb",
-                    "inaccessible": false,
-                    "ctxIndex": 8
-                  },
-                  "side": [
-                    {
-                      "goal": "q",
-                      "pre": "q",
-                      "post": null,
-                      "close": {
-                        "by": "assumption:a✝"
-                      },
-                      "steps": []
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "goal": "a = a",
-              "pre": "a",
-              "post": "a",
-              "close": {
-                "by": "rfl"
-              },
-              "intros": [
-                "a✝"
-              ],
-              "steps": []
-            }
-          ]
-        },
-        {
-          "kind": "rw",
-          "pos": [],
-          "name": "eq_self",
-          "dir": "fwd"
+         "kind": "rw",
+         "pos": [
+          0,
+          1
+         ],
+         "name": "hpq",
+         "dir": "fwd",
+         "local": {
+          "userName": "hpq",
+          "inaccessible": false,
+          "ctxIndex": 7
+         }
         }
-      ]
+       ]
+      },
+      {
+       "goal": "a = b",
+       "pre": "a = b",
+       "post": "b = b",
+       "close": {
+        "by": "rfl"
+       },
+       "intros": [
+        "a✝"
+       ],
+       "steps": [
+        {
+         "kind": "rw",
+         "pos": [
+          0,
+          1
+         ],
+         "name": "hb",
+         "dir": "fwd",
+         "local": {
+          "userName": "hb",
+          "inaccessible": false,
+          "ctxIndex": 8
+         },
+         "side": [
+          {
+           "goal": "q",
+           "pre": "q",
+           "post": null,
+           "close": {
+            "by": "assumption:a✝"
+           },
+           "steps": []
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "goal": "a = a",
+       "pre": "a = a",
+       "post": "a = a",
+       "close": {
+        "by": "rfl"
+       },
+       "intros": [
+        "a✝"
+       ],
+       "steps": []
+      }
+     ]
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "eq_self",
+     "dir": "fwd"
     }
-  ]
+   ]
+  }
+ ]
 }
