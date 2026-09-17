@@ -557,13 +557,17 @@ def check_path_containment(messages: list[str]) -> None:
 # Fixture files that must compile cleanly.  The negative fixtures
 # (`OutsideRoot`, `SymlinkEscape`) are checked separately and are *expected* to
 # fail, so they are not listed here.
-POSITIVE_FIXTURES = ("test/SimpTrace/Fixtures.lean",
-                     "test/SimpTrace/IsEmptyBasicTraced.lean")
+POSITIVE_FIXTURES = ("test/SimpTrace/Fixtures.lean",)
 
 # Fixtures whose calls are classified `unresolved:`, so the file itself exits 1
 # by design.  Their traces are still compared against skeletons; only the exit
 # code is not required to be zero.
-UNRESOLVED_FIXTURES = ("test/SimpTrace/UnresolvedFixtures.lean",)
+# `IsEmptyBasicTraced` joined this list in round 9: `leftTotal_empty` and
+# `rightTotal_empty` take an explicit `(R : α → β → Prop)` that the rewrite
+# `eq_true <lemma>` cannot assign, so those two calls are classified rather than
+# shipped. T4's harness independently reports the same two sites.
+UNRESOLVED_FIXTURES = ("test/SimpTrace/UnresolvedFixtures.lean",
+                       "test/SimpTrace/IsEmptyBasicTraced.lean")
 
 
 def check_fixture_compiles(messages: list[str]) -> None:

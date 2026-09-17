@@ -23,10 +23,9 @@ stock `Methods` run under `withPos`.
 `simpAppUsingCongr`'s `visit` walks. A **binder stack** (`EvCtx.binders`) records the fvars the traversal substituted for term binders, so
 the validator never infers them.
 
-**Deliberate departures.** (1) The result **cache is disabled**: keyed on the expression alone, reuse at a second position would log
-events nowhere or at the first. (2) Where stock simp is re-entered on a subterm the fork did not descend into — a simproc's own `simp c`,
-`simpHaveTelescope`, a congruence hypothesis — those firings have no position, so they are **diverted** and the net change recorded
-instead.
+**Deliberate departures.** (1) The result **cache is disabled**: keyed on the expression alone, reusing a hit would log that
+node's events nowhere or at the first. (2) Where stock simp is re-entered on a subterm the fork did not descend into, those
+firings have no position, so they are **diverted** into a side frame and attached to the step that caused them.
 
 **Deleted.** `Position.lean` lost 327 of 404 lines (`findBridgeChain?`, `reducibleSites`, `refresh`, `findOccurrences`, `collectBridges`,
 `solvePositions`, the no-op-match rule). What remains is navigation plus the **validator**: navigate `pos`, check the subterm equals
@@ -55,7 +54,7 @@ Timings are under **Checks** below; `Logic/Basic` against its stock original is 
 
 **All 82 sites compile with zero crashes, zero validation failures and no error other than the classified lines.** `sites` and
 `traces` differ because a site under `by_cases <;>` runs once per branch, on a different goal, and each run now has its own trace
-(round 9; previously the last branch silently overwrote the rest). Both numbers are the tool's. 24 classified lines: 12 are steps whose
+(round 9; previously the last branch silently overwrote the rest). Both numbers are the tool's. 29 classified lines; 16 are steps whose
 own verdict the trace now carries (`--report` groups them by reason), the rest the transported-proof shape below.
 `test/SimpTrace/make_traced.py` generates the traced copies and `check_transcription.py` verifies every source site was converted —
 82 of 82, enforced, after an earlier generator silently dropped 9.
@@ -106,11 +105,11 @@ with the recorded `before` (direction-aware, `prop`-flag-aware) and requires the
 `unresolved:unreplayable_rw:<name>`. A misclassified plumbing head therefore cannot ship as a `rw`, whether or not the allowlist names it
 — `UnresolvedFixtures.lean` pins this with a *user-defined* plumbing head no allowlist could know about.
 
-Subtleties the corpus forced, each surfaced by a step that demonstrably *does* replay failing the check: `args` excludes proof arguments
-(they are `side` entries, not terms a replayer writes); recorded `args` go to the lemma's **explicit** binder positions, not to `mkAppN`;
-`forallMetaTelescope` without reducing, and the conclusion read as written before any `whnfR` (reducing turns `LeftTotal R` into `∃ b, R a
-b`); the extra-argument peel applies only to a rigid LHS; and both sides are unified **together**, since a higher-order metavariable in
-one is determined by the other (round 7's C2).
+Subtleties the corpus forced, each surfaced by a step that demonstrably *does* replay failing the check: proof arguments are
+excluded from `args` (they are `side` entries); recorded `args` go to the lemma's **explicit** binders in order; the telescope
+is opened without reducing and the conclusion read before any `whnfR`; the extra-argument peel applies only to a rigid LHS;
+and both sides are unified **together**, since a higher-order mvar on one is determined by the other (round 7's C2).
+Round 9 added: validate against the *resolved* origin, check explicit binders against the LHS alone, and walk `side` steps.
 
 ## Round 7 fixes
 
@@ -149,13 +148,14 @@ Every number is a tool's output. End-to-end replay is the primary test: T4's har
 | `Logic/Nontrivial/Defs.lean` | 1 | 1 |
 | `Logic/Function/Defs.lean` | 2 | 1 |
 | `Logic/ExistsUnique.lean` | 8 | 8 |
-| `Logic/Function/Basic.lean` | 23 | 8 |
-| `Logic/Basic.lean` | 31 | 14 |
-| **total** | **82** | **47** |
+| `Logic/Function/Basic.lean` | 23 | 9 |
+| `Logic/Basic.lean` | 31 | 16 |
+| **total** | **82** | **50** |
 
-Attribution of the 35 non-replayed: **harness 16, t1 19, t2 0** (T4's first run scored 45/82, t1 21). The 16 are
+Attribution of the 32 non-replayed: **harness 16, t1 10, t2 6** (T4's first run: 45/82, t1 21). The 16 are
 `render_failed:multiple_invocations`, which T4 attributes to its own renderer and which the per-invocation traces below make
-fixable.
+fixable. The 6 "t2" are steps this tactic *already classifies* — T4's renderer does not yet read the new step-level
+`unresolved` field; with a scratch copy of that renderer honouring it, t2 goes to **0**.
 
 **1. Side goals (C1).** One code path: the side goal is the lemma hypothesis's instantiated type, `pre` its pp, positions
 relative to it, and the close read off the goal **after** the recorded steps — reading the last step's `after` handed
@@ -170,46 +170,46 @@ making a trace that elaborates rewrite the wrong thing:
   find the local and then reporting the bare local gave `exact hp` against `P = True`. The wrapper is kept.
 
 **2. `name` is a name (C2, C3).** `rw.name` was the pretty-printed *syntax*, so 11 sites carried whole terms (`heq_comm
-(a := a)`, `@forall_eq _ p a`, `if_neg fun h ↦ hb ⟨a, h⟩`). It now comes from the resolved origin — always a bare constant or
-a local's display name — with `dir` still from the syntax, which is what carries a leading `←`. Resolving to the head fvar
-alone would have lost the projection, so `proofLocal?` returns the path it walks (`h.2.1`, the order written). Arguments at
-*implicit* binders are dropped: they cannot be written positionally and unification recovers them.
+(a := a)`, `@forall_eq _ p a`). It now comes from the resolved origin — always a bare constant or a local's display name —
+with `dir` still from the syntax, which carries a leading `←`. Resolving to the head fvar alone would lose the projection, so
+`proofLocal?` returns the path it walks (`h.2.1`). Arguments at *implicit* binders are dropped: they cannot be written
+positionally and unification recovers them.
 
 **3. Steps carry their own verdict.** A classified step was a compile-time `logError` only, invisible to anything reading the
-JSON, so T4's renderer emitted six steps this tactic already knew could not replay. `Step` gains `unresolved`. Confirmed with
-a scratch copy of T4's renderer honouring it: **t2 6 → 0**, all six were mine.
+JSON, so T4's renderer emitted six steps this tactic already knew could not replay. `Step` gains `unresolved`; with a scratch
+copy of T4's renderer honouring it, **t2 6 → 0**.
 
-**4. `.stx` steps were never validated (C2).** `checkRwStep` got the *written* origin, `rwStatement?` reads no statement from
-a `.stx`, and the `.stx` branch suppressed the report — so every step from `simp [h]` skipped the safety net entirely. It now
-validates against the resolved origin, applies the recorded projection, and checks explicit binders against the **left-hand
-side alone**, as `rw` does: unifying `after` too made this validator strictly more permissive than the tactic it protects, so
-`dif_pos (hc : c)` shipped and failed at replay. Classified rose 16 → 24, all of it previously-unvalidated steps.
+**4. `.stx` steps were never validated (C2).** `checkRwStep` got the *written* origin and `rwStatement?` reads no statement
+from a `.stx`, so every step from `simp [h]` skipped the safety net entirely. It now validates against the resolved origin,
+applies the recorded projection, and checks explicit binders against the **left-hand side alone**, as `rw` does — unifying
+`after` too made this validator more permissive than the tactic it protects, so `dif_pos (hc : c)` shipped and failed.
 
 **5. Positions on partial applications (C4).** simp matches a lemma against a *prefix* and reapplies the rest, so
-`h : Option.map f = Option.map g` rewrites the *function* of `Option.map f (some x)`: `[0,1]` → `[0,1,0]`, with `before`
-trimmed to match. The descent is the surplus over the lemma's own LHS arity. Counting shared trailing arguments instead — my
-first attempt — cannot tell this from a lemma rewriting a whole application with an untouched argument, and broke 5
-ExistsUnique calls; the fixtures pin both shapes.
+`h : Option.map f = Option.map g` rewrites the *function* of `Option.map f (some x)`: `[0,1]` → `[0,1,0]`, `before` trimmed to
+match. The descent is the surplus over the lemma's own LHS arity; counting shared trailing arguments instead — my first
+attempt — cannot tell this from a lemma rewriting a whole application with an untouched argument, and broke 5 ExistsUnique
+calls.
 
-**6. Measurements (M5, M6).** `--report` now prints `sites` and `traces` separately and groups every classified step by
-reason with its sites and shapes, so RESULT.md needs no hand-written reconciliation. The invented "two sites share a file"
-sentence is gone.
+**6. Measurements (M5, M6).** `--report` prints `sites` and `traces` separately and groups every classified step by reason
+with its sites and shapes, so RESULT.md needs no hand-written reconciliation.
 
-New fixtures (72 total, none classified): `ite_cond_eq_false`, `dite_cond_eq_false`, a compound `p = False` side goal,
-`heq_comm (a := a)`, `@forall_eq _ p a`, a partial application and a two-level one.
+New fixtures (72 total): `ite_cond_eq_false`, `dite_cond_eq_false`, a compound `p = False` side goal, `heq_comm (a := a)`,
+`@forall_eq _ p a`, a partial application and a two-level one. `test/SimpTrace/replay/` holds the reviewer's four
+residual-risk traces and the checker verifies the invariants they violate; r1 and r2 now replay, r4 is classified, and r3's
+remainder is the scratch translator not threading a side proof into `eq_false`.
 
 **Checks, all re-run from scratch after the last commit.** `lake build ExplicitLean.SimpTrace` with its oleans deleted: 11 s,
-0 errors. `Fixtures.lean` exit 0 (72 fixtures, none classified); `UnresolvedFixtures.lean` exit 1 by design, 4 classified
-lines. `python3 -B Experiment/check_simp_trace.py`: `OK: 72 ...`. `check_transcription.py`: OK, 82 of 82. The six modules,
-`/usr/bin/time -l`: IsEmpty 2.44 s / 646 MB, Nontrivial 2.38 s / 637 MB, FunctionDefs 2.65 s / 648 MB, ExistsUnique 2.58 s /
-651 MB, FunctionBasic 3.39 s / 712 MB, LogicBasic 3.68 s / 720 MB — nothing near 30 min or 40 GB.
+0 errors. `Fixtures.lean` exit 0, none classified; `UnresolvedFixtures.lean` exit 1 by design. `check_simp_trace.py`:
+`OK: 72 ...`. `check_transcription.py`: OK, 82 of 82. The six modules, `/usr/bin/time -l`: 2.38–3.68 s and 637–720 MB each —
+nothing near 30 min or 40 GB.
 
-**Known limitations.** `simpHaveTelescope` dispatches to *stock* `simp` through `MonadSimp SimpM`, so its inner rewrites have
-no position and the whole rewrite is one `change`; redirecting it needs a change to that instance, outside this task. `eta` is
-in the spec but never emitted — stock `reduceStep` does not eta-reduce in 4.32.2, so emitting it would diverge. The disabled
-result cache costs 1.99x on a 200-identical-subterm pathology. A Lean bump needs a re-sync; the `SOURCE:` annotations give the
-file and line range for every copied function.
+**Known limitations.** `simpHaveTelescope` dispatches to *stock* `simp`, so its inner rewrites have no position and the whole
+rewrite is one `change`; redirecting it needs a change to that instance, outside this task. `eta` is in the spec but never
+emitted — stock `reduceStep` does not eta-reduce in 4.32.2. The disabled cache costs 1.99x on a 200-identical-subterm
+pathology. A Lean bump needs a re-sync; the `SOURCE:` annotations give file and line range for every copied function.
 
-**Open, not fixed.** 19 sites remain t1-attributed: `eq_true <lemma>` against a quantified Prop-valued lemma with no `args`
-(4), unknown free variable from `hh _`/`hf _`-style instantiation (3), `unfold Ne` where the head is `Iff` (1), inaccessible
-`h✝` rendering (1), and the `unassigned_explicit_argument` family (6) which is now honestly classified rather than shipped.
+**Open, not fixed.** 10 sites remain t1-attributed: unknown free variable from `hh _`/`hf _`-style instantiation, where the
+argument is a binder the traversal introduced and is a loose bvar in the stored proof; `unfold Ne` where the head is `Iff`;
+inaccessible `h✝` rendering; and a `Function.curry_uncurry` position under `addExtraArgs`. The families this round closed
+(`unapplied_quantified_prop`, `unassigned_explicit_argument`) are now *classified* rather than shipped, so a renderer that
+reads `unresolved` refuses them instead of emitting a tactic that fails.
