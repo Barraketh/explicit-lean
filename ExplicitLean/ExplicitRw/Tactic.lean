@@ -43,6 +43,8 @@ not in this table, it has no form (see "Not expressible" below).
 |                                        | hypothesis, **in order**                |
 | `eq_true h at [..]`                    | `rw` with `prop: "true"`                |
 | `eq_false h at [..]`                   | `rw` with `prop: "false"`               |
+| `prop_true h at [..]`                  | proposition proof `h : p`, yielding `p = True` |
+| `prop_false h at [..]`                 | proposition proof `h : ¬p`, yielding `p = False` |
 | `unfold c at [..]`                     | `unfold`                                |
 | `beta at [..]`                         | `beta`                                  |
 | `eta at [..]`                          | `eta`                                   |
@@ -411,6 +413,11 @@ syntax explicitRwWith := " with " "[" explicitRwSideTac,* "]"
 /-- A lemma rewrite, forwards or backwards: `foo a b at [1]`, `← bar at []`. -/
 syntax explicitRwRw := ("← ")? explicitRwTerm explicitRwPos (explicitRwWith)?
 
+/-- A proposition-valued rule application, whose proof is supplied after the
+selected redex has fixed the rule's ordinary and instance arguments. -/
+syntax explicitRwProp := (&"prop_true" <|> &"prop_false") explicitRwTerm explicitRwPos
+  (explicitRwWith)?
+
 /-- `unfold f at [1]` — delta-unfold one constant, definitionally. -/
 syntax explicitRwUnfold := "unfold " ident explicitRwPos
 
@@ -464,7 +471,7 @@ syntax explicitRwEq := &"eq " explicitRwType " by " (&"rfl" <|> &"decide") expli
 /-- The innermost nesting level: no further `congr`. -/
 syntax explicitRwInnerStep0 :=
   explicitRwUnfold <|> explicitRwRed <|> explicitRwChange <|> explicitRwEq <|>
-  explicitRwRw
+  explicitRwProp <|> explicitRwRw
 
 /-- A `congr` whose nested steps are innermost. -/
 syntax explicitRwCongr0 :=
@@ -474,7 +481,7 @@ syntax explicitRwCongr0 :=
 `congr_nested_cast` trace does, transporting two levels of type equality. -/
 syntax explicitRwInnerStep :=
   explicitRwUnfold <|> explicitRwRed <|> explicitRwChange <|> explicitRwEq <|>
-  explicitRwCongr0 <|> explicitRwRw
+  explicitRwCongr0 <|> explicitRwProp <|> explicitRwRw
 
 /--
 `congr <i> [nested steps] at [pos]` — the spec's `congr` step kind.
@@ -498,7 +505,7 @@ the bare-term rewrite, so `beta at [...]` is the reduction rather than a lemma
 named `beta`. -/
 syntax explicitRwStep :=
   explicitRwUnfold <|> explicitRwRed <|> explicitRwIntroCtx <|> explicitRwChange <|>
-  explicitRwEq <|> explicitRwCongr <|> explicitRwRw
+  explicitRwEq <|> explicitRwCongr <|> explicitRwProp <|> explicitRwRw
 
 /-- Optional closing tactic: `explicit_rw [...] then rfl`. -/
 syntax explicitRwClose := " then " explicitRwSideProof
@@ -914,6 +921,44 @@ def elabEquation (idx : Nat) (stx : Term) : TacticM (Expr × Expr × Expr × Arr
   return (lhs, rhs, eqProof, mvars ++ extra)
 
 /--
+Elaborate the proof supplied to a `prop_true`/`prop_false` step.  Unlike an
+equation lemma, a proposition rule has a proof type rather than an equality
+type.  Open every leading binder as an ordinary metavariable, then match the
+resulting proposition with the *selected* redex.  This is intentionally called
+from inside `rewriteAt`: implicit arguments, explicit binders and instances are
+therefore fixed by that redex before any remaining proof hypotheses are closed.
+-/
+def elabProposition (idx : Nat) (stx : Term) (sub : Expr) (truth : Bool) :
+    TacticM (Expr × Array Expr) := do
+  checkNoTacticBlock s!"the proposition proof of this step" (some idx) stx
+  let snapshot ← syntheticMVarSnapshot
+  let proof ←
+    if let some name ← resolveBareConst? stx then
+      let info ← getConstInfo name
+      let lvls ← info.levelParams.mapM fun _ => mkFreshLevelMVar
+      pure (mkConst name lvls)
+    else
+      elabStrict (some idx) s!"the proposition proof of this step" stx
+        (allowMVars := true)
+  checkNoPendingTactic s!"the proposition proof of this step" (some idx) snapshot
+  let proof ← instantiateMVars proof
+  let type ← instantiateMVars (← inferType proof)
+  let (mvars, _, _) ← forallMetaTelescope type
+  let proof' := mkAppN proof mvars
+  let proofType ← instantiateMVars (← inferType proof')
+  let expected :=
+    if truth then sub else mkApp (mkConst ``Not) sub
+  unless ← isDefEq proofType expected do
+    let expected ← instantiateMVars expected
+    stepError idx m!"proposition proof `{stx}` does not match the selected proposition at \
+      position: expected a proof of{indentExpr expected}
+      but its type is{indentExpr (← instantiateMVars proofType)}"
+  let fromTerm := (← instantiateMVars proof).collectMVars {} |>.result
+  let fromType := (← instantiateMVars type).collectMVars {} |>.result
+  let extra := (fromTerm ++ fromType).map Expr.mvar
+  return (proof', mvars ++ extra)
+
+/--
 Fail when any universe level metavariable survives in the given expressions.
 
 Levels are determined by unifying the lemma's side with the subterm at the
@@ -1287,6 +1332,45 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement 
             {remaining.length} goal(s) open."
         let h ← instantiateMVars goal
         return Replacement.eq (← instantiateMVars rhs) h)
+      (fun pfx child sub => badPosError idx pos pfx child sub)
+  | ``explicitRwProp =>
+    let truth := stx[0][0].getAtomVal == "prop_true"
+    let term ← toTerm stx[1]
+    let pos := parsePos stx[2]
+    let sideTacs : Array Syntax :=
+      if stx[3].isNone then #[] else stx[3][0][2].getSepArgs
+    rewriteAt e pos
+      (fun sub => do
+        let (proof, mvars) ← elabProposition idx term sub truth
+        -- Match first, then synthesize class-implicit binders before selecting
+        -- proof-valued side evidence.  Otherwise an unresolved instance would
+        -- occupy a `with [...]` slot ahead of the recorded proof hypothesis.
+        synthesizeInstanceMVars idx m!"`{term}`" mvars sub
+        -- A proposition rule can still have proof-valued binders.  They are
+        -- discharged by the same closed, ordered side-proof language as an
+        -- ordinary rewrite lemma; no hypothesis search is introduced here.
+        let propMVars ← mvars.filterM fun m => do
+          match ← instantiateMVars m with
+          | .mvar mid => do
+            if ← mid.isAssigned then pure false
+            else isProp (← instantiateMVars (← mid.getType))
+          | _ => pure false
+        if sideTacs.size > propMVars.size then
+          stepError idx m!"the `with` clause supplies {sideTacs.size} proof(s) but proposition proof \
+            `{term}` has {propMVars.size} undetermined hypothesis(es) at this position."
+        for h : i in [0 : sideTacs.size] do
+          let .mvar mid := ← instantiateMVars propMVars[i]! | pure ()
+          runSideProofOn idx (some i) sideTacs[i] mid
+        closeLemmaMVars idx m!"`{term}`" mvars
+        let proof ← instantiateMVars proof
+        let eqProof ←
+          if truth then
+            mkAppM ``eq_true #[proof]
+          else
+            mkAppM ``eq_false #[proof]
+        checkNoLevelMVars idx m!"`{term}`" #[eqProof]
+        let replacement := if truth then mkConst ``True else mkConst ``False
+        return Replacement.eq replacement eqProof)
       (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwRw =>
     let symm := !stx[0].isNone

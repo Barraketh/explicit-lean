@@ -89,6 +89,20 @@ after matching at the given position. Supply it as an explicit argument, or fix 
 example (a : Nat) : a + 0 = a := by
   explicit_rw [leaky a at [0, 1]]
 
+/-! Proposition rules also refuse a proof-valued binder when no side evidence
+is recorded. -/
+
+private theorem proposition_requires {p q : Prop} (h : p = q) : p = q := h
+
+/--
+error: explicit_rw: step 1: lemma `proposition_requires` still has an unassigned argument of type
+  p = q
+after matching at the given position. Supply it as an explicit argument, or fix the position. `explicit_rw` never searches for it.
+-/
+#guard_msgs in
+example (p q : Prop) : (p = q) = True := by
+  explicit_rw [prop_true proposition_requires at [0, 1]]
+
 /-! ## A definitional step that is not applicable -/
 
 /-- error: explicit_rw: step 1: `beta` at this position: the subterm is not a beta-redex. -/
