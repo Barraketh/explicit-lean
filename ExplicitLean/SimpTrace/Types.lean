@@ -22,6 +22,15 @@ array rather than a packed `SubExpr.Pos` because the spec's wire form is the
 array and because packed positions cap the coordinate at `maxChildren`. -/
 abbrev Pos := Array Nat
 
+/-- A reference to a local hypothesis, per the amended spec. -/
+inductive LocalRef where
+  /-- An ordinary local: its user name, whether that name is inaccessible, and
+  its index in the local context at the point of use. -/
+  | ordinary (userName : String) (inaccessible : Bool) (ctxIndex : Nat)
+  /-- A hypothesis introduced by contextual simp, in its own namespace. -/
+  | contextual (ctxIndex : Nat)
+  deriving Inhabited, Repr
+
 /-- How a location (goal or hypothesis) was closed, if it was. -/
 structure CloseInfo where
   /-- `rfl`, `trivial`, `assumption:<name>`, `eq_self` or `decide`. -/
@@ -38,6 +47,12 @@ structure Step where
   name?   : Option String := none
   /-- `"fwd"` or `"rev"` for `rw`. -/
   dir?    : Option String := none
+  /-- For a local-hypothesis reference: the spec's `local` object.  Either an
+  ordinary local (`userName`/`inaccessible`/`ctxIndex`) or a hypothesis
+  introduced by contextual simp (`contextual`/`ctxIndex`).  The two namespaces
+  never collide, so an inaccessible hypothesis is replayable (a generator names
+  it with `rename_i`) and can never be mistaken for a contextual label. -/
+  local?  : Option LocalRef := none
   /-- Explicit argument terms needed for replay. -/
   args    : Array String := #[]
   /-- `eq` steps: the computed equation and how replay should prove it. -/
@@ -116,6 +131,14 @@ private def obj (fields : Array (String × Option String)) : String :=
   let parts := fields.filterMap fun (k, v?) => v?.map fun v => str k ++ ":" ++ v
   "{" ++ String.intercalate "," parts.toList ++ "}"
 
+def LocalRef.toJson : LocalRef → String
+  | .ordinary userName inaccessible ctxIndex =>
+    "{\"userName\":" ++ str userName ++
+    ",\"inaccessible\":" ++ (if inaccessible then "true" else "false") ++
+    ",\"ctxIndex\":" ++ toString ctxIndex ++ "}"
+  | .contextual ctxIndex =>
+    "{\"contextual\":true,\"ctxIndex\":" ++ toString ctxIndex ++ "}"
+
 def CloseInfo.toJson (c : CloseInfo) : String :=
   obj #[("by", some (str c.by_))]
 
@@ -127,6 +150,7 @@ partial def Step.toJson (s : Step) : String :=
     ("pos", some (posJson s.pos)),
     ("name", s.name?.map str),
     ("dir", s.dir?.map str),
+    ("local", s.local?.map LocalRef.toJson),
     ("args", if s.args.isEmpty then none else some (strArray s.args)),
     ("lhs", s.lhs?.map str),
     ("rhs", s.rhs?.map str),

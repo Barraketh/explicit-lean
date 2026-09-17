@@ -119,10 +119,11 @@ partial def toStep (counters : IO.Ref Counters) (s : SolvedStep) : MetaM Step :=
     if let .decl declName _ _ := origin then
       if ← Simp.isSimproc declName then
         return ← mkEqStep counters raw s.pos beforePP afterPP (some declName) side
-    let (name, rev) ← originName origin raw.lctx raw.localInsts
+    let (name, rev, local?) ←
+      originName origin raw.lctx raw.localInsts raw.contextualFVars
     return { kind := "rw", pos := s.pos, name? := some name,
              dir? := some (if inv || rev then "rev" else "fwd"),
-             before? := some beforePP, after? := some afterPP, side }
+             local?, before? := some beforePP, after? := some afterPP, side }
   | .proc name? =>
     -- A simproc-computed equation.  Confirm the replay tactic really proves it.
     return ← mkEqStep counters raw s.pos beforePP afterPP name? side
@@ -170,32 +171,43 @@ where
                (if by_ == "decide" then "decide" else "simproc")),
              before? := some beforePP, after? := some afterPP, side }
 
-  /-- Name a rewrite origin, resolving local hypotheses to their user names.
-  Returns the name and whether the syntax carried a `←`. -/
-  originName (o : Origin) (lctx : LocalContext) (insts : LocalInstances) :
-      MetaM (String × Bool) := do
+  /-- Name a rewrite origin.  Returns the name, whether the syntax carried a
+  `←`, and, for a local hypothesis, the spec's `local` reference object.
+
+  An inaccessible name is recorded as the actual user name plus
+  `inaccessible: true` and the context index, so a replay generator can bind it
+  with `rename_i`.  Contextual hypotheses use the separate `contextual`
+  namespace, so the two can never collide. -/
+  originName (o : Origin) (lctx : LocalContext) (insts : LocalInstances)
+      (contextualFVars : Array FVarId) :
+      MetaM (String × Bool × Option LocalRef) := do
     match o with
-    | .decl n _ _ => return (n.toString, false)
+    | .decl n _ _ => return (n.toString, false, none)
     | .fvar fvarId =>
       withLCtx lctx insts do
         match lctx.find? fvarId with
         | some d =>
-          -- `+contextual` introduces inaccessible antecedent hypotheses; give
-          -- them the stable name the matching `intro_ctx` step uses.
           let n := d.userName
-          if n.isInaccessibleUserName || n.hasMacroScopes then
-            return (s!"ctx:{d.index}", false)
-          else return (n.toString, false)
-        | none => return (fvarId.name.toString, false)
+          let inaccessible := n.isInaccessibleUserName || n.hasMacroScopes
+          -- Display form: strip macro scopes so the name is the one a reader
+          -- (and `rename_i`) sees, e.g. `a✝` rather than the hygienic form.
+          let display := n.eraseMacroScopes.toString
+          if contextualFVars.contains fvarId then
+            return (display, false, some (.contextual d.index))
+          else
+            return (display, false,
+              some (.ordinary display inaccessible d.index))
+        | none => return (fvarId.name.toString, false, none)
     | .stx _ ref =>
+      -- `simp [← h]`-style arguments carry their own syntax.
       -- `simp [← h]` records the argument syntax; strip the arrow into `dir`.
       let txt := ref.prettyPrint.pretty.trimAscii.toString
       if txt.startsWith "←" then
-        return (txt.drop 1 |>.trimAscii.toString, true)
+        return (txt.drop 1 |>.trimAscii.toString, true, none)
       else if txt.startsWith "<-" then
-        return (txt.drop 2 |>.trimAscii.toString, true)
-      else return (txt, false)
-    | .other n => return (n.toString, false)
+        return (txt.drop 2 |>.trimAscii.toString, true, none)
+      else return (txt, false, none)
+    | .other n => return (n.toString, false, none)
 
   /-- The head constant that was delta-unfolded, when that is what happened. -/
   unfoldedConstant? (before after : Expr) : Option Name :=
@@ -238,6 +250,64 @@ def elabSelection (stx : Syntax) : TacticM Selection := do
   | .wildcard =>
     return { fvarIds := ← (← getMainGoal).getNondepPropHyps, simplifyTarget := true }
 
+/-! ### Output paths
+
+A tactic that writes files must not be able to write anywhere on the machine.
+The trace file must resolve under the current package root (the directory
+containing `lakefile.toml`) or under a directory named by
+`SIMP_TRACE_OUT_ROOT`; anything else — absolute paths elsewhere, or relative
+paths escaping via `..` — is an error.
+-/
+
+/-- Environment variable naming an additional permitted output root. -/
+def outRootEnvVar : String := "SIMP_TRACE_OUT_ROOT"
+
+/-- Collapse `.` and `..` without touching the filesystem, so containment is
+decided on the path itself rather than on what happens to exist. -/
+def normalizeComponents (p : System.FilePath) : List String :=
+  p.components.foldl (init := []) fun acc c =>
+    if c == "" || c == "." then acc
+    else if c == ".." then acc.dropLast
+    else acc ++ [c]
+
+/-- Is `path` inside `root`? -/
+def isInside (root path : System.FilePath) : Bool :=
+  let r := normalizeComponents root
+  let p := normalizeComponents path
+  r.isPrefixOf p
+
+/-- Search upward from the working directory for the package root. -/
+partial def findPackageRoot : IO (Option System.FilePath) := do
+  let rec go (dir : System.FilePath) (fuel : Nat) : IO (Option System.FilePath) := do
+    if fuel == 0 then return none
+    if ← (dir / "lakefile.toml").pathExists then return some dir
+    match dir.parent with
+    | some parent => go parent (fuel - 1)
+    | none => return none
+  go (← IO.currentDir) 64
+
+/-- Resolve and validate an `out :=` path, or throw. -/
+def resolveOutPath (path : String) : MetaM System.FilePath := do
+  let raw : System.FilePath := path
+  let absolute ← if raw.isAbsolute then pure raw else do
+    pure ((← IO.currentDir) / raw)
+  let mut roots : Array System.FilePath := #[]
+  if let some packageRoot ← findPackageRoot then
+    roots := roots.push packageRoot
+  if let some envRoot ← IO.getEnv outRootEnvVar then
+    if !envRoot.isEmpty then
+      roots := roots.push envRoot
+  if roots.isEmpty then
+    throwError "simp_trace: no package root found (no lakefile.toml above the \
+      working directory) and {outRootEnvVar} is unset; cannot place {path}"
+  unless roots.any (isInside · absolute) do
+    throwError "simp_trace: refusing to write outside the package root\n\
+      out:   {path}\n  permitted roots: {roots.map (·.toString)}\n\
+      Set {outRootEnvVar} to permit another directory."
+  if let some parent := absolute.parent then
+    IO.FS.createDirAll parent
+  return absolute
+
 /-! ### The tactic -/
 
 /-- Run instrumented simp on one expression, returning the result and the raw
@@ -256,7 +326,7 @@ def tracedSimp (e : Expr) (ctx : Simp.Context) (simprocs : Simp.SimprocsArray)
 /-- Turn one traced run into a `LocationTrace`, validating every position. -/
 def buildLocation (counters : IO.Ref Counters) (hyp? : Option String)
     (pre : Expr) (result : Simp.Result) (raws : Array RawStep)
-    (closed : Bool) : MetaM LocationTrace := do
+    (closed : Bool) (absurdHyp? : Option String := none) : MetaM LocationTrace := do
   let (solved, running) ← solvePositions (← getLCtx) pre raws
   -- Validation: the replayed running term must be simp's actual result.
   unless running == result.expr do
@@ -265,12 +335,21 @@ def buildLocation (counters : IO.Ref Counters) (hyp? : Option String)
   let steps ← solved.mapM (toStep counters)
   let prePP := (← ppExpr pre).pretty
   let postPP := (← ppExpr result.expr).pretty
-  let close : Option CloseInfo :=
-    if closed then
-      if result.expr.isTrue then some { by_ := "trivial" }
-      else if result.expr.isFalse then some { by_ := "assumption:False" }
-      else some { by_ := "rfl" }
-    else none
+  -- Close forms follow the amended spec: `rfl | true_intro | assumption:<name> |
+  -- absurd:<hyp name> | decide`.  We never guess `rfl`: a location that closed
+  -- for a reason we cannot name is an error rather than a wrong replay hint.
+  let close : Option CloseInfo ←
+    if !closed then pure none
+    else if result.expr.isTrue then
+      pure (some { by_ := "true_intro" })
+    else if result.expr.isFalse then
+      match absurdHyp? with
+      | some h => pure (some { by_ := s!"absurd:{h}" })
+      | none =>
+        throwError "simp_trace: location closed via False with no named hypothesis"
+    else
+      throwError "simp_trace: location closed but result is neither True nor \
+        False: {result.expr}"
   return { hyp?, pre := prePP, post? := if closed then none else some postPP,
            steps, close }
 
@@ -312,7 +391,10 @@ def evalSimpTrace : Tactic := fun stx => withMainContext do
         | some _ =>
           match (← applySimpResult mvarIdNew (mkFVar fvarId) type res) with
           | none =>
-            addLoc (← buildLocation counters (some hypName) type res raws true)
+            -- The hypothesis simplified to `False` and closed the goal by
+            -- absurdity of that hypothesis; name it for replay.
+            addLoc (← buildLocation counters (some hypName) type res raws true
+              (absurdHyp? := some hypName))
             done := true
           | some (value, newType) =>
             addLoc (← buildLocation counters (some hypName) type res raws false)
@@ -321,7 +403,9 @@ def evalSimpTrace : Tactic := fun stx => withMainContext do
         | none =>
           if res.expr.isFalse then
             mvarIdNew.assign (← mkFalseElim (← mvarIdNew.getType) (mkFVar fvarId))
-            addLoc (← buildLocation counters (some hypName) type res raws true)
+            -- The proof is false-elimination of this very hypothesis, so name it.
+            addLoc (← buildLocation counters (some hypName) type res raws true
+              (absurdHyp? := some hypName))
             done := true
           else
             addLoc (← buildLocation counters (some hypName) type res raws false)
@@ -370,7 +454,7 @@ def evalSimpTrace : Tactic := fun stx => withMainContext do
   let json := trace.toJson
   match outPath? stx with
   | some path =>
-    IO.FS.writeFile path json
+    IO.FS.writeFile (← resolveOutPath path) json
   | none =>
     logInfo m!"simp-trace-json:{json}"
   let c ← counters.get

@@ -48,6 +48,10 @@ structure RawStep where
   antecedent of an implication; they are not term binders of the running term,
   so position solving must not count them as binder crossings. -/
   fvarKinds  : Array (FVarId × Bool) := #[]
+  /-- Proof locals simp introduced beyond the location's own context: the
+  antecedent hypotheses `+contextual` assumes.  Filled in by position solving,
+  which knows the base context. -/
+  contextualFVars : Array FVarId := #[]
   /-- Side-condition sub-runs performed while this step's lemma was matched. -/
   side       : Array RawSide := #[]
 
@@ -122,7 +126,6 @@ private def classify (before after : Expr) (usedBefore usedAfter : Simp.UsedSimp
     -- by decidability without registering any theorem, so the firing looks
     -- unattributed.  It is a computed equation: route it to `mkEqStep`, whose
     -- scratch check confirms `decide` actually proves it.
-    else if after.isTrue || after.isFalse then .proc none
     else .unattributed
   else
     match newOnes[newOnes.size - 1]! with
@@ -171,6 +174,12 @@ def instrument (ref : RecorderRef) (tag : String) (p : Simp.Simproc) : Simp.Simp
         if let .unattributed := prov then
           if let some (o, inv) ← reattribute? e r.expr (tag == "post") then
             prov := .thm o inv
+          else if r.expr.isTrue || r.expr.isFalse then
+            -- `simpUsingDecide` (`+decide` / `Simp.Config.decide`) closes a
+            -- proposition by decidability without registering a theorem, so no
+            -- origin exists.  It is a computed equation: route it to
+            -- `mkEqStep`, whose scratch check confirms `decide` proves it.
+            prov := .proc none
         let side := (← ref.get).pendingSide
         ref.modify fun (s : RecorderState) =>
           RecorderState.push { s with pendingSide := #[] }

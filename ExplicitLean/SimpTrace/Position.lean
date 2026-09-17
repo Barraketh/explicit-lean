@@ -314,7 +314,9 @@ def solvePositions (baseLCtx : LocalContext) (pre : Expr) (raws : Array RawStep)
     -- Contextual hypotheses in scope at this firing.  Their presence means the
     -- firing happened under an implication whose antecedent simp assumed, so a
     -- match must lie in the consequent of that many implications.
-    let ctxDepth := (introduced.filter fun (_, isPrf) => isPrf).size
+    let contextualFVars := (introduced.filter fun (_, isPrf) => isPrf).map (·.1)
+    let ctxDepth := contextualFVars.size
+    let raw := { raw with contextualFVars }
     -- The recorded `before` may predate child rewrites simp has already made.
     -- Refresh it against what we have already replayed, then search.
     let refreshed := refresh raw.before applied
