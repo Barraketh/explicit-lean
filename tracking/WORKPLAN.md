@@ -13,6 +13,49 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T5-cone | Run T4 on the seven-module cone (91 calls); record per-call outcomes | T0, T4 | planned | | |
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
 
+## Next steps (written at session end, 2026-09-16)
+
+State at handoff: main branch clean at this commit. Task branches (each in
+`/Users/ptsier/projects/explicit-lean-worktrees/<task>`, all committed, no
+uncommitted work): `task/T1-trace-capture` (recorder, forked simp traversal;
+fix round 9 was in progress when the session ended; last commit "identical
+re-elaborated traces overwrite rather than accumulate"), `task/T2-explicit-rw`
+(replay tactic; round 8 fixes committed, awaiting incremental review 9),
+`task/T4-pipeline` (harness; review round 1 was in progress). T3 is merged.
+Agents from this session are gone; a new session re-dispatches per
+`tracking/COORDINATION.md` (revised gate: no critical/major; incremental
+reviews; harness replay counts are the primary test).
+
+1. **T2 merge gate.** Dispatch an incremental review 9 of `task/T2-explicit-rw`
+   (verify REVIEW-8 fixes: axiom-set audit, structured sweep slots, `rename_i`
+   docs and fixture, complete step-forms table). If no critical/major, merge
+   into main and wire `ExplicitLean.ExplicitRw` into `ExplicitLean.lean`.
+2. **T1 fix round 9 completion.** Check `tracking/tasks/T1-trace-capture/RESULT.md`
+   for a "Round 9 fixes" section. If absent, re-dispatch the round-9 fix list
+   from REVIEW-9.md (side goal recorded as the simproc subterm; raw syntax in
+   `name`; inaccessible tokens without `local`; off-by-one position on
+   Option/Basic:96) plus emitting `invocation`/`invocations`. Then an
+   incremental review 10 with the T4 harness replay table as its main input.
+   Merge when no critical/major; wire `ExplicitLean.SimpTrace` (recorder only,
+   not product) into the build.
+3. **T4 review round 1 and fixes.** Read REVIEW-1.md when present. Then
+   implement the multiple-invocation rendering rule (PLAN.md step 3,
+   "Rendering"), switch the harness from driving worktrees by path to the
+   merged main checkout, and add the declaration oracle
+   (`Experiment/SimpEngineDeclarationOracle.lean`) as a post-compile check.
+4. **Iterate on the six-module table** until every non-replayed site is either
+   a classified unresolved with an agreed reason or a tracked defect. First
+   run: 82 sites, 45 replayed, 1 unresolved, 27 render_failed, 9 compile_failed.
+5. **T5 cone.** Run the harness on the seven-module cone (Logic.Basic,
+   ExistsUnique, Function.Basic, Function.Defs, IsEmpty.Basic,
+   Nontrivial.Defs, Data.Option.Basic) with a translated import root so
+   modules import translated dependencies, and record per-call outcomes in
+   `campaign.json`. Data.Option.Basic is the only cone module not yet traced.
+6. **Follow-ups (minors, tracked, not blocking):** T2 error-message wording
+   items from REVIEW-7/8; T1 RESULT.md length; the harness `.gitignore` line.
+7. **Remote worker:** none provisioned. Provision Scaleway GP1-L only if a
+   local job fails on resources (see `campaign.json.remoteWorker`).
+
 Log (newest first):
 
 - 2026-09-16: T4 harness built (179 unit checks). First six-module run at T1 1d8ba00 / T2 7ccb98b: 82 sites, 45 replayed, 1 unresolved, 27 render_failed, 9 compile_failed; attribution t1 21, harness 16, t2 0. Largest blocks: 16 sites executed more than once (`t <;> simp`), 11 `rw.name` holding raw syntax (T1 R9 defect), 4 quantified `prop` steps without `args`. Spec gains `invocation`/`invocations`; PLAN gains the per-goal rendering rule. T4 review round 1 dispatched.

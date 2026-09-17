@@ -1,6 +1,8 @@
 # Start here: search-free Mathlib
 
-**September 16 direction change (read first):** the user reviewed the
+**Live state (read first): [tracking/WORKPLAN.md](tracking/WORKPLAN.md), section "Next steps", then [tracking/COORDINATION.md](tracking/COORDINATION.md).** Task branches and worktrees are listed there; T3 is merged, T1/T2/T4 are in review.
+
+**September 16 direction change:** the user reviewed the
 generated `IsEmpty.Basic` (135 source lines rendered as 7,113 lines of encoded
 expression-DAG payloads) and retired the machine-oriented boundary artifact as
 the product. The rule is now **"no simp family"**: generated code must be
