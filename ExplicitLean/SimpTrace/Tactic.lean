@@ -155,6 +155,29 @@ structure Unresolved where
 def Unresolved.add (u : Unresolved) (r : String) : Unresolved :=
   if u.reasons.contains r then u else { u with reasons := u.reasons.push r }
 
+/-! ### Structured validation verdicts
+
+The validator walks the event tree before rendering it.  A call-level reason is
+useful for diagnostics, but it is not enough for a consumer of the JSON: a
+rewrite in a discharged side goal (or under a dependent congruence node) is a
+separate replay action.  Keep a verdict tree parallel to the event tree so the
+reason is attached to the exact rendered `Step`.
+-/
+
+inductive ValidationVerdict where
+  | mk (reason? : Option String)
+      (side : Array (Array ValidationVerdict))
+      (nested : Array ValidationVerdict)
+
+def ValidationVerdict.reason? : ValidationVerdict → Option String
+  | .mk reason? _ _ => reason?
+
+def ValidationVerdict.side : ValidationVerdict → Array (Array ValidationVerdict)
+  | .mk _ side _ => side
+
+def ValidationVerdict.nested : ValidationVerdict → Array ValidationVerdict
+  | .mk _ _ nested => nested
+
 /-- Name a rewrite origin.  Returns the name, whether the syntax carried a `←`,
 and, for a local hypothesis, the spec's `local` reference object.
 
@@ -710,23 +733,50 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
     catch _ =>
       return some s!"unreplayable_rw:{name}"
 
-/-- Replay a `congr` step's nested steps against the argument they describe.
+mutual
+
+/-- Classify one event and all of its nested side/congruence event trees. -/
+partial def classifyEventTree (ur : IO.Ref Unresolved) (ev : Event) :
+    MetaM ValidationVerdict := do
+  match ev with
+  | .rw _ o inv prop? b a c args sides _ lo pj =>
+    let reason? ← checkRwStep (resolvedOrigin o lo) args inv prop? b a c
+      (!sides.isEmpty) pj
+    if let some reason := reason? then ur.modify (·.add reason)
+    let sideVerdicts ← sides.mapM fun sd => classifyEventArray ur sd.events
+    return .mk reason? sideVerdicts #[]
+  | .eq _ _ _ _ _ sides =>
+    let sideVerdicts ← sides.mapM fun sd => classifyEventArray ur sd.events
+    return .mk none sideVerdicts #[]
+  | .defeq .. => return .mk none #[] #[]
+  | .introCtx .. => return .mk none #[] #[]
+  | .congr _ _ nested _ _ argBefore argAfter c =>
+    let nestedVerdicts ← validateNested ur c nested argBefore argAfter
+    return .mk none #[] nestedVerdicts
+
+/-- Classify an event array, retaining one verdict per event. -/
+partial def classifyEventArray (ur : IO.Ref Unresolved) (events : Array Event) :
+    MetaM (Array ValidationVerdict) := do
+  let mut out : Array ValidationVerdict := #[]
+  for ev in events do
+    out := out.push (← classifyEventTree ur ev)
+  return out
+
+/- Replay a `congr` step's nested steps against the argument they describe.
 Positions are relative to the argument, per the spec. -/
 partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
-    (nested : Array Event) (argBefore argAfter : Expr) : MetaM Unit := do
+    (nested : Array Event) (argBefore argAfter : Expr) :
+    MetaM (Array ValidationVerdict) := do
   let mut running ← instantiateMVars argBefore
+  let mut verdicts : Array ValidationVerdict := #[]
   for ev in nested do
+    let verdict ← classifyEventTree ur ev
+    verdicts := verdicts.push verdict
     let (pos, before, after, ec) ← match ev with
-      | .rw pos o inv prop? b a ec args sides _ lo pj =>
-        if let some reason ← checkRwStep (resolvedOrigin o lo) args inv prop? b a ec
-            (!sides.isEmpty) pj then
-          ur.modify (·.add reason)
-        pure (pos, b, a, ec)
+      | .rw pos _ _ _ b a ec .. => pure (pos, b, a, ec)
       | .eq pos _ b a ec _ => pure (pos, b, a, ec)
       | .defeq pos _ _ b a ec => pure (pos, b, a, ec)
-      | .congr pos _ inner b a ab aa ec =>
-        validateNested ur ec inner ab aa
-        pure (pos, b, a, ec)
+      | .congr pos _ _ b a _ _ ec => pure (pos, b, a, ec)
       | .introCtx .. => continue
     let before ← instantiateMVars before
     let after ← instantiateMVars after
@@ -746,56 +796,38 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
   unless (← withLCtx c.lctx c.insts (eqUpToProofs running argAfter)) do
     throwError "simp_trace: validation failed: `congr` nested steps do not \
       reach the argument's result\nreplayed: {running}\nactual:   {argAfter}"
+  return verdicts
+
+end
 
 /-- Replay `steps` structurally from `pre`, checking every position.
 
-Returns the classification for each *top-level* event by index, so the emitted
-step can carry it: a reason that exists only as a `logError` is invisible to
-anything reading the JSON, and a renderer will happily emit a step the
-validator already knows cannot replay (REVIEW-9 2). -/
+Returns one structured verdict for every event, so classifications can be
+attached recursively to the exact rendered step. -/
 def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
-    (events : Array Event) : MetaM (Array (Option String)) := do
+    (events : Array Event) : MetaM (Array ValidationVerdict) := do
   -- Instance arguments can still be unassigned metavariables at the moment a
   -- step is recorded and get assigned later in the run, so a recorded subterm
   -- and the running term can differ only by `?m` versus its assignment.  Both
   -- sides are instantiated before every comparison.
   let mut running ← instantiateMVars pre
-  let mut reasons : Array (Option String) := #[]
+  let mut verdicts : Array ValidationVerdict := #[]
   for ev in events do
-    let mut thisReason : Option String := none
+    let verdict ← classifyEventTree ur ev
+    verdicts := verdicts.push verdict
     let (pos, before, after, c) ← match ev with
-      | .rw pos o inv prop? b a c args sides _ lo pj =>
-        -- Every emitted `rw` is re-elaborated and checked against its own
-        -- `before`/`after`, so a misclassified plumbing head cannot ship.
-        if let some reason ← checkRwStep (resolvedOrigin o lo) args inv prop? b a c
-            (!sides.isEmpty) pj then
-          ur.modify (·.add reason)
-          thisReason := some reason
-        -- A side trace's own steps are steps a replayer writes too, and they
-        -- were never checked: `sides` was read only for the `hasSides` flag.
-        -- That is how r4 of REVIEW-9's residual-risk set shipped -- its side
-        -- step rewrites by a ∀-quantified `h` that `eq_false h` cannot apply
-        -- (REVIEW-9 residual risk).
-        for sd in sides do
-          for sev in sd.events do
-            if let .rw _ so sinv sprop sb sa sc sargs ssides _ slo spj := sev then
-              if let some reason ← checkRwStep (resolvedOrigin so slo) sargs sinv
-                  sprop sb sa sc (!ssides.isEmpty) spj then
-                ur.modify (·.add reason)
+      | .rw pos _ _ _ b a c _ _ _ _ _ =>
         pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
       | .defeq pos _ _ b a c => pure (pos, b, a, c)
-      | .congr pos _ nested b a ab aa c =>
+      | .congr pos _ _ b a _ _ c =>
         -- Keeping the `congr` kind honest needs both halves checked: the node's
         -- whole before/after is verified below exactly like any other step, and
         -- the nested steps must independently replay the *argument* from
         -- `argBefore` to `argAfter` at positions relative to it.
-        validateNested ur c nested ab aa
         pure (pos, b, a, c)
       | .introCtx .. =>
-        reasons := reasons.push none
         continue
-    reasons := reasons.push thisReason
     -- The traversal observed the subterm with its enclosing binders as free
     -- variables; the running term still has loose bvars there.  The event
     -- carries exactly the variables the traversal substituted, outermost first,
@@ -835,28 +867,45 @@ positions checked, proof identity not")
   unless (← eqUpToProofs running result) do
     throwError "simp_trace: validation failed: replayed term does not match \
       simp's result\nreplayed: {running}\nactual:   {result}"
-  return reasons
+  return verdicts
 
 /-! ### The tactic -/
+
+mutual
+
+partial def attachStep (st : Step) (v : ValidationVerdict) : Step :=
+  let side := st.side.mapIdx fun i sd =>
+    let nested := v.side.getD i #[]
+    { sd with steps := attachSteps sd.steps nested }
+  let nested := if st.kind == "congr" then attachSteps st.steps v.nested else st.steps
+  { st with unresolved? := v.reason?, side := side, steps := nested }
+
+partial def attachSteps (steps : Array Step)
+    (verdicts : Array ValidationVerdict) : Array Step := Id.run do
+  let mut out : Array Step := #[]
+  let mut stepIndex := 0
+  for v in verdicts do
+    if stepIndex < steps.size then
+      out := out.push (attachStep steps[stepIndex]! v)
+      stepIndex := stepIndex + 1
+  return out
+
+end
 
 /-- Turn one traced run into a `LocationTrace`. -/
 def buildLocation (ur : IO.Ref Unresolved)
     (hyp? : Option String) (pre : Expr) (result : Simp.Result)
     (events : Array Event) (closed : Bool)
     (absurdHyp? : Option String := none) : MetaM LocationTrace := do
-  let reasons ← validate ur pre result.expr events
+  let verdicts ← validate ur pre result.expr events
   -- Hypotheses `+contextual` introduced, so their references land in the
   -- spec's separate `contextual` namespace.
   let contextualFVars : Array FVarId := events.filterMap fun ev =>
     match ev with
     | .introCtx _ fid _ => some fid
     | _ => none
-  -- `filterMapM` drops `introCtx`-only events, so walk with the index to keep
-  -- each reason aligned with the step it belongs to.
-  let mut steps : Array Step := #[]
-  for ev in events, i in [0:events.size] do
-    if let some st ← eventToStep ur contextualFVars ev then
-      steps := steps.push { st with unresolved? := reasons.getD i none }
+  let rawSteps ← events.filterMapM (eventToStep ur contextualFVars)
+  let steps := attachSteps rawSteps verdicts
   let prePP := (← ppExpr pre).pretty
   let postPP := (← ppExpr result.expr).pretty
   -- Close forms follow the amended spec.  We never guess `rfl`: a location that

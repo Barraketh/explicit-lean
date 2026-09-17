@@ -83,7 +83,7 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
             fail(messages, f"{where}: unknown step kind {kind!r}")
 
         for field in ("kind", "pos", "name", "dir", "source", "by", "local",
-                      "prop", "arg", "args"):
+                      "prop", "arg", "args", "unresolved"):
             if field in want:
                 if got.get(field) != want[field]:
                     fail(
@@ -740,6 +740,11 @@ def report() -> int:
     # shapes each reason covers. A bare count says nothing about what is left
     # to fix; this says which lemma at which site (REVIEW-9 6).
     by_reason: dict[str, list[str]] = {}
+    nested_regressions = {
+        "exists_apply_eq_apply": False,
+        "ne_eq": False,
+        "side_congr": False,
+    }
     for name, directory, prefix in MEASUREMENT_DIRS:
         for pth in sorted(directory.glob(f"{prefix}*.json")):
             try:
@@ -747,7 +752,7 @@ def report() -> int:
             except (OSError, json.JSONDecodeError):
                 continue
 
-            def visit(steps: list) -> None:
+            def visit(steps: list, nested: bool = False) -> None:
                 for st in steps:
                     reason = st.get("unresolved")
                     if reason:
@@ -755,9 +760,16 @@ def report() -> int:
                         by_reason.setdefault(reason, []).append(
                             f"{pth.stem}:`{shape}`"
                         )
+                    if nested and st.get("name") == "exists_apply_eq_apply":
+                        nested_regressions["exists_apply_eq_apply"] |= bool(reason)
+                    if nested and st.get("name") == "ne_eq":
+                        nested_regressions["ne_eq"] |= bool(reason)
+                    if (st.get("kind") == "rw" and st.get("source") == "congr"
+                            and st.get("side")):
+                        nested_regressions["side_congr"] = True
                     for side in st.get("side", []):
-                        visit(side.get("steps", []))
-                    visit(st.get("steps", []))
+                        visit(side.get("steps", []), True)
+                    visit(st.get("steps", []), True)
 
             for loc in trace.get("locations", []):
                 visit(loc.get("steps", []))
@@ -770,6 +782,18 @@ def report() -> int:
     print("| --- | --- | --- |")
     for reason, hits in sorted(by_reason.items(), key=lambda kv: (-len(kv[1]), kv[0])):
         print(f"| `{reason}` | {len(hits)} | {', '.join(sorted(set(hits)))} |")
+    missing_regressions = [name for name, present in nested_regressions.items() if not present]
+    if missing_regressions:
+        print(
+            "FAIL nested validator regressions missing: "
+            + ", ".join(missing_regressions),
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        "Nested validator regressions: exists_apply_eq_apply and ne_eq are "
+        "marked on nested steps; generic side/congr shape present."
+    )
     return 0
 
 
