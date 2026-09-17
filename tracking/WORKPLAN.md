@@ -35,6 +35,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
   checks and the six-module harness, then dispatch review 2. Per-branch
   multiple-invocation rendering remains the next bounded T4 feature after the
   review fixes pass.
+- **Named `zeta` decision:** T1's local-let fvar delta is represented as an
+  existing `change` step with an explicit `pp.all` `to` value. Plain `letE`
+  zeta remains `zeta`. Do not broaden T2's zeta semantics or add a name-based
+  step; the fixed position plus kernel-checked definitional equality is the
+  portable contract. Implement after the current T1 round-10 fix to avoid
+  overlapping ownership.
 
 After a slot completes, reuse it immediately for the next independent review or
 fix. The coordinator alone integrates accepted branches and updates this plan.
@@ -78,9 +84,8 @@ reviews; harness replay counts are the primary test).
    modules import translated dependencies, and record per-call outcomes in
    `campaign.json`. Data.Option.Basic is the only cone module not yet traced.
 6. **Follow-ups (minors, tracked, not blocking):** T2 error-message wording
-   items from REVIEW-7/8; reconcile T1's non-spec `zeta.name` emission before
-   T4 consumes such traces; T1/T2 RESULT.md length; the harness `.gitignore`
-   line.
+   items from REVIEW-7/8; implement the recorded named-`zeta` decision; T1/T2
+   RESULT.md length; the harness `.gitignore` line.
 7. **Remote worker:** none provisioned. Provision Scaleway GP1-L only if a
    local job fails on resources (see `campaign.json.remoteWorker`).
 
