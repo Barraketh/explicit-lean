@@ -265,6 +265,41 @@ def _artifact_files(root: Path, module: str) -> list[Path]:
     return sorted(path for path in candidates if path.is_file() and not path.is_symlink())
 
 
+def _output_family(output: Path) -> list[Path]:
+    """Return every expected emitted artifact for one module output."""
+    candidates = [output, output.with_suffix(".ir")]
+    candidates.extend(output.parent.glob(output.name + ".*"))
+    return sorted(set(candidates))
+
+
+def _prepare_output_family(output: Path) -> dict[str, object]:
+    """Remove only this module's old outputs, preserving all prerequisites."""
+    before = _output_family(output)
+    existing_before = [path for path in before if path.exists()]
+    removed: list[str] = []
+    for path in before:
+        if path.is_dir() and not path.is_symlink():
+            raise ConeFailure(f"unexpected directory in module output family: {path}")
+        if path.is_symlink():
+            raise ConeFailure(f"unexpected symlink in module output family: {path}")
+        if path.exists():
+            path.unlink()
+            removed.append(str(path))
+    return {
+        "beforeFamily": [str(path) for path in existing_before],
+        "removedFamily": removed,
+    }
+
+
+def _freshness(prepared: dict[str, object], output: Path) -> dict[str, object]:
+    after = [path for path in _output_family(output) if path.is_file() and not path.is_symlink()]
+    return {
+        **prepared,
+        "afterFamily": [str(path) for path in after],
+        "freshOlean": output.is_file() and not output.is_symlink(),
+    }
+
+
 def stage_artifacts(stock_root: Path, translated_root: Path, modules: Iterable[str]) -> dict[str, object]:
     if not stock_root.is_dir() or stock_root.is_symlink():
         raise ConeFailure(f"invalid stock artifact root: {stock_root}")
@@ -338,29 +373,31 @@ def _compile_module(imports: ImportEnvironment, run_dir: Path, module: str) -> d
     source = source_path(imports.source_root, module)
     output = imports.translated_olean_root / module_relative(module, ".olean")
     output.parent.mkdir(parents=True, exist_ok=True)
+    prepared = _prepare_output_family(output)
     result = run_pinned_lean(imports, ["-R", str(imports.source_root), "-o", str(output), str(source)])
     log = _write_log(run_dir, module.removeprefix("Mathlib.").replace(".", "_") + ".log", result.stdout)
-    family = []
-    for candidate in (output, output.with_suffix(".ir"), *output.parent.glob(output.name + ".*")):
-        if candidate.is_file() and not candidate.is_symlink():
-            family.append(str(candidate))
-    if result.returncode != 0:
-        raise ConeFailure(f"pinned compile failed for {module}; see {log}")
-    if not output.is_file() or output.is_symlink():
-        raise ConeFailure(f"compiler did not produce translated olean for {module}: {output}")
-    resolution = imports.resolve_mathlib([module], require_all=True)[module]
-    if not resolution["resolvedFromTranslatedRoot"]:
-        raise ConeFailure(f"{module} did not resolve from translated root")
-    return {
+    freshness = _freshness(prepared, output)
+    entry: dict[str, object] = {
         "module": module,
-        "status": "passed",
         "source": str(source),
         "output": str(output),
-        "family": family,
-        "resolution": _strip_resolution(resolution),
+        "family": freshness["afterFamily"],
+        "freshness": freshness,
         "log": log,
         "returnCode": result.returncode,
     }
+    if result.returncode != 0:
+        entry.update({"status": "failed", "failure": f"pinned compile failed; see {log}"})
+        return entry
+    if not freshness["freshOlean"]:
+        entry.update({"status": "failed", "failure": f"compiler did not produce a fresh translated olean: {output}"})
+        return entry
+    resolution = imports.resolve_mathlib([module], require_all=True)[module]
+    if not resolution["resolvedFromTranslatedRoot"]:
+        entry.update({"status": "failed", "failure": f"{module} did not resolve from translated root"})
+        return entry
+    entry.update({"status": "passed", "resolution": _strip_resolution(resolution)})
+    return entry
 
 
 def lint_targets(source_root: Path) -> dict[str, object]:
@@ -426,6 +463,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             entry = _compile_module(imports, run_dir, module)
             entry["role"] = "bridge" if module == BRIDGE else "target"
             modules.append(entry)
+            if entry["status"] != "passed":
+                report["modules"] = modules
+                raise ConeFailure(f"build failed for {module}: {entry.get('failure', 'unknown failure')}")
         report["modules"] = modules
         report["lint"] = lint_targets(source_root)
         report["status"] = "passed"
