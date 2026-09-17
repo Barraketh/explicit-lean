@@ -84,6 +84,12 @@ structure Step where
   after?  : Option String := none
   /-- Side-condition sub-traces, one per discharged hypothesis. -/
   side    : Array SideTrace := #[]
+  /-- Set when the in-tactic validator classified *this step*: the step is
+  recorded as observed, but a consumer must not replay it.  The classification
+  used to exist only as a compile-time `logError`, invisible to anything
+  reading the JSON, so a renderer emitted the step anyway and it failed at
+  replay (REVIEW-9 2). -/
+  unresolved? : Option String := none
 
 /-- A side-condition sub-trace: the same `steps`/`close` shape as a location. -/
 structure SideTrace where
@@ -191,7 +197,8 @@ partial def Step.toJson (s : Step) : String :=
     ("after", s.after?.map str),
     ("side", if s.side.isEmpty then none else
       some ("[" ++ String.intercalate ","
-        (s.side.toList.map SideTrace.toJson) ++ "]"))]
+        (s.side.toList.map SideTrace.toJson) ++ "]")),
+    ("unresolved", s.unresolved?.map str)]
 
 partial def SideTrace.toJson (t : SideTrace) : String :=
   obj #[

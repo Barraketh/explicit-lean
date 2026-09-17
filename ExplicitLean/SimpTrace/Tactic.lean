@@ -563,11 +563,13 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
     (hasSides : Bool := false) (proj : String := "") : MetaM (Option String) :=
   withLCtx c.lctx c.insts do
 
-    let name := match o with
-      | .decl n _ _ => n.toString
-      | .fvar f => f.name.toString
-      | .stx _ r => r.prettyPrint.pretty.trimAscii.toString
-      | .other n => n.toString
+    let name ← match o with
+      | .decl n _ _ => pure n.toString
+      -- The *display* name, as `name` and `local` report it; the raw
+      -- `_uniq.8929.19` names nothing a reader can act on.
+      | .fvar f => pure ((← ppExpr (mkFVar f)).pretty)
+      | .stx _ r => pure (r.prettyPrint.pretty.trimAscii.toString)
+      | .other n => pure n.toString
     try
       withoutModifyingState do
         let some (lhs, rhs, unfilled) ← rwStatement? o args prop? proj
@@ -714,15 +716,22 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
     throwError "simp_trace: validation failed: `congr` nested steps do not \
       reach the argument's result\nreplayed: {running}\nactual:   {argAfter}"
 
-/-- Replay `steps` structurally from `pre`, checking every position. -/
+/-- Replay `steps` structurally from `pre`, checking every position.
+
+Returns the classification for each *top-level* event by index, so the emitted
+step can carry it: a reason that exists only as a `logError` is invisible to
+anything reading the JSON, and a renderer will happily emit a step the
+validator already knows cannot replay (REVIEW-9 2). -/
 def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
-    (events : Array Event) : MetaM Unit := do
+    (events : Array Event) : MetaM (Array (Option String)) := do
   -- Instance arguments can still be unassigned metavariables at the moment a
   -- step is recorded and get assigned later in the run, so a recorded subterm
   -- and the running term can differ only by `?m` versus its assignment.  Both
   -- sides are instantiated before every comparison.
   let mut running ← instantiateMVars pre
+  let mut reasons : Array (Option String) := #[]
   for ev in events do
+    let mut thisReason : Option String := none
     let (pos, before, after, c) ← match ev with
       | .rw pos o inv prop? b a c args sides _ lo pj =>
         -- Every emitted `rw` is re-elaborated and checked against its own
@@ -730,6 +739,7 @@ def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
         if let some reason ← checkRwStep (resolvedOrigin o lo) args inv prop? b a c
             (!sides.isEmpty) pj then
           ur.modify (·.add reason)
+          thisReason := some reason
         pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
       | .defeq pos _ _ b a c => pure (pos, b, a, c)
@@ -740,7 +750,10 @@ def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
         -- `argBefore` to `argAfter` at positions relative to it.
         validateNested ur c nested ab aa
         pure (pos, b, a, c)
-      | .introCtx .. => continue
+      | .introCtx .. =>
+        reasons := reasons.push none
+        continue
+    reasons := reasons.push thisReason
     -- The traversal observed the subterm with its enclosing binders as free
     -- variables; the running term still has loose bvars there.  The event
     -- carries exactly the variables the traversal substituted, outermost first,
@@ -780,6 +793,7 @@ positions checked, proof identity not")
   unless (← eqUpToProofs running result) do
     throwError "simp_trace: validation failed: replayed term does not match \
       simp's result\nreplayed: {running}\nactual:   {result}"
+  return reasons
 
 /-! ### The tactic -/
 
@@ -788,14 +802,19 @@ def buildLocation (ur : IO.Ref Unresolved)
     (hyp? : Option String) (pre : Expr) (result : Simp.Result)
     (events : Array Event) (closed : Bool)
     (absurdHyp? : Option String := none) : MetaM LocationTrace := do
-  validate ur pre result.expr events
+  let reasons ← validate ur pre result.expr events
   -- Hypotheses `+contextual` introduced, so their references land in the
   -- spec's separate `contextual` namespace.
   let contextualFVars : Array FVarId := events.filterMap fun ev =>
     match ev with
     | .introCtx _ fid _ => some fid
     | _ => none
-  let steps ← events.filterMapM (eventToStep ur contextualFVars)
+  -- `filterMapM` drops `introCtx`-only events, so walk with the index to keep
+  -- each reason aligned with the step it belongs to.
+  let mut steps : Array Step := #[]
+  for ev in events, i in [0:events.size] do
+    if let some st ← eventToStep ur contextualFVars ev then
+      steps := steps.push { st with unresolved? := reasons.getD i none }
   let prePP := (← ppExpr pre).pretty
   let postPP := (← ppExpr result.expr).pretty
   -- Close forms follow the amended spec.  We never guess `rfl`: a location that
