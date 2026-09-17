@@ -1,5 +1,7 @@
 # simp trace format v1 (interface between trace capture and positional replay)
 
+Amended 2026-09-16 after T4 run 1: `invocation`/`invocations` for sites executed
+more than once; rendering rule in PLAN.md step 3.
 Amended 2026-09-16 after T1 round 6: side traces carry `pre`/`post`; dsimproc
 firings are `change` steps with `source`.
 Amended 2026-09-16 after T1 congr implementation: user `@[congr]` theorems are
@@ -18,6 +20,9 @@ One trace per executed simp call. JSON object:
 { "schema": "simp-trace-v1",
   "module": "Mathlib.Logic.IsEmpty.Basic", "occurrence": "<occurrence id or source range>",
   "call": "<original simp syntax text>",
+  "invocation": <k>, "invocations": <n> (a source site executed n times, e.g. under `t <;> simp`
+                                        or inside a tactic run per goal, produces n traces numbered
+                                        in execution order; the renderer decides the per-goal form),
   "locations": [ { "loc": "goal" | {"hyp": "<user name>"},
                    "pre": "<pp of the location before>", "post": "<pp after, or null if closed>",
                    "steps": [ STEP, ... ],

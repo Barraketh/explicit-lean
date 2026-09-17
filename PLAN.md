@@ -75,7 +75,15 @@ consequences:
      and an acceptable interim renderer. Nothing in this tactic may call
      `Lean.Meta.Simp`.
    - **Rendering.** The generated source is the step list in that syntax, the
-     original call as a comment above it. A **readability post-pass** may
+     original call as a comment above it. A site executed more than once
+     (`t <;> simp`, or a tactic run once per goal) renders per execution:
+     when the site is the last tactic of its block, `t` is followed by one
+     focused bullet `· explicit_rw [...]` per goal in execution order; when
+     all executions recorded identical steps, keep `<;> explicit_rw [...]`;
+     otherwise `<;> first | explicit_rw [...] | explicit_rw [...]` with a
+     comment naming the goal each alternative belongs to (`first` is an
+     ordinary combinator, not simp). The site counts as replayed only when
+     every execution replays. A **readability post-pass** may
      collapse steps: consecutive top-level rewrites become plain `rw [...]`,
      a single closing lemma becomes `exact`, definitional-only steps become
      `change`/`unfold`. The post-pass must re-elaborate to the same goal; if
