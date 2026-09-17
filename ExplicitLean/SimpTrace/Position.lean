@@ -116,6 +116,50 @@ right de Bruijn index.  (`Expr.replace` does not, and getting this wrong was
 review round 1's shadowed-binder defect.)
 -/
 
+/-!
+### Comparison modulo proof irrelevance
+
+The validator compares a recorded subterm against the running term structurally.
+Plain `==` is too strict in one place: two proofs of the same proposition are
+interchangeable, and simp freely replaces one by another — `Classical.choose h`
+against `Classical.choose ⋯` is the shape REVIEW-4 found at
+`Mathlib/Logic/Function/Basic.lean:848`.  Upstream simp's own `isDefEq` runs with
+`proofIrrelevance := true`, so rejecting these would make the validator *less*
+faithful than the engine it is checking, not more.
+
+We compare structurally but treat two subterms that are both proofs of
+definitionally equal propositions as equal.  Everything else still requires
+exact structural equality, so nothing carrying computational content is weakened.
+-/
+
+/--
+Structural equality with proof subterms compared by their types only.
+
+Proof irrelevance is the one thing simp may change without a step being able to
+name it, and upstream's own `isDefEq` runs with `proofIrrelevance := true`.
+Instance arguments and binder types are deliberately **not** weakened here: when
+a congruence theorem transports them it is because the condition changed, and
+that transport is recorded as its own `change` step instead (see
+`trySimpCongrTheoremT?`), which keeps the validator exact.
+-/
+partial def eqUpToProofs (a b : Expr) : MetaM Bool := do
+  if a == b then return true
+  if (← isProof a) && (← isProof b) then
+    let ta ← inferType a
+    let tb ← inferType b
+    if ← withReducible <| isDefEq ta tb then return true
+  match a, b with
+  | .mdata _ b₁, _ => eqUpToProofs b₁ b
+  | _, .mdata _ b₂ => eqUpToProofs a b₂
+  | .app f₁ a₁, .app f₂ a₂ => eqUpToProofs f₁ f₂ <&&> eqUpToProofs a₁ a₂
+  | .lam _ t₁ b₁ _, .lam _ t₂ b₂ _ => eqUpToProofs t₁ t₂ <&&> eqUpToProofs b₁ b₂
+  | .forallE _ t₁ b₁ _, .forallE _ t₂ b₂ _ => eqUpToProofs t₁ t₂ <&&> eqUpToProofs b₁ b₂
+  | .letE _ t₁ v₁ b₁ _, .letE _ t₂ v₂ b₂ _ =>
+    eqUpToProofs t₁ t₂ <&&> eqUpToProofs v₁ v₂ <&&> eqUpToProofs b₁ b₂
+  | .proj s₁ i₁ b₁, .proj s₂ i₂ b₂ =>
+    if s₁ == s₂ && i₁ == i₂ then eqUpToProofs b₁ b₂ else return false
+  | _, _ => return false
+
 /--
 Abstract the traversal-introduced free variables of `target` so it matches the
 open subterm sitting at a position under `binderNodes` binder nodes.

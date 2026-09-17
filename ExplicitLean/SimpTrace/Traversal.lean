@@ -909,7 +909,14 @@ is no position in the spec's convention for it: the call is then marked
 unresolved with a classified reason rather than logged at a wrong position. -/
 partial def processCongrHypothesisT (ref : TraceRef) (pos : Pos)
     (hypArgs : Array Expr) (hypNumArgs : Nat) (thmName : Name)
-    (h : Expr) (hType : Expr) : SimpM Bool := do
+    (h : Expr) (hType : Expr) : SimpM Bool :=
+  -- A congruence theorem's `rhs` transports every argument that depends on the
+  -- subterm its hypothesis rewrote: `ite_congr`/`dite_congr` rewrite an `ite`'s
+  -- condition and carry the `Decidable` instance and each branch's binder type
+  -- with it.  Those transported arguments have no position of their own, so the
+  -- hypothesis's own rewrites are diverted and the whole node's change is
+  -- recorded once, by the caller, as a `change` (REVIEW-4 `:848`, `:929`).
+  withDivertedEvents ref do
   forallTelescopeReducing hType fun xs hType => withNewLemmasT ref xs do
     let lhs ← instantiateMVars hType.appFn!.appArg!
     -- Locate `lhs` among the congruence application's arguments.
@@ -984,6 +991,12 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
         catch _ => return none
       if (← hasAssignableMVar proof <||> hasAssignableMVar eNew) then
         return none
+      -- The congruence theorem rewrote its hypotheses' subterms *and*
+      -- transported everything depending on them.  Neither half is separately
+      -- addressable in the spec's convention, so the node's whole change is
+      -- recorded once here, as a `change` at this position.
+      unless eNew == e do
+        ref.modify (·.push (.defeq pos .change none e eNew (← captureEvCtx ref)))
       congrArgsT ref pos { expr := eNew, proof? := proof } extraArgs
         origNumArgs numArgs
     else

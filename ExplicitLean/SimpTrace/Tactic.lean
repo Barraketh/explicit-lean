@@ -383,14 +383,14 @@ def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit :=
       | throwError "simp_trace: validation failed: no subterm at position {pos}\n\
           in: {running}"
     let expected := abstractSimpFVars before introduced binderNodes
-    unless sub == expected do
+    unless (← withLCtx c.lctx c.insts (eqUpToProofs sub expected)) do
       throwError "simp_trace: validation failed: subterm at {pos} is\n\
         {sub}\nbut the recorded step's `before` is\n{expected}"
     let replacement := abstractSimpFVars after introduced binderNodes
     let some next := replaceAt? running pos replacement
       | throwError "simp_trace: validation failed: cannot replace at {pos}"
     running := next
-  unless running == result do
+  unless (← eqUpToProofs running result) do
     throwError "simp_trace: validation failed: replayed term does not match \
       simp's result\nreplayed: {running}\nactual:   {result}"
 
