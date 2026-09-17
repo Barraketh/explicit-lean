@@ -178,8 +178,13 @@ arguments are unification's business and are not checked.
 /-- The outcome of inspecting a simproc's proof term. -/
 inductive ProofShape where
   /-- One lemma applied; `name` is it.  `proofArgs` are the explicit arguments
-  that are proofs, i.e. the conditions the discharger established. -/
+  that are proofs, i.e. the conditions the discharger established.
+  `explicitArgs` is *every* explicit argument, in the lemma's own order: replay
+  writes `rw [name a₁ a₂ ...]` and must supply what simp supplied, and an
+  explicit *instance*-typed argument in particular cannot be left to synthesis,
+  which may pick a different instance than simp used (REVIEW-6 2). -/
   | lemmaApp (name : Name) (proofArgs : Array Expr) (inv : Bool := false)
+       (explicitArgs : Array Expr := #[])
   /-- Anything else: let the `rfl`/`decide` scratch check decide. -/
   | computed
   deriving Inhabited
@@ -222,12 +227,12 @@ partial def classifyProof (target : Expr) (proof : Expr) : MetaM ProofShape := d
   -- lemmas and names no single one, so it stays unresolved.
   if declName == ``Iff.symm && proof.getAppNumArgs == 3 then
     match ← classifyProof target proof.appArg! with
-    | .lemmaApp n args inv => return .lemmaApp n args (!inv)
+    | .lemmaApp n pargs inv eargs => return .lemmaApp n pargs (!inv) eargs
     | .computed => return .computed
   -- `Eq.symm (propext (L ...))`: one lemma, applied in reverse.
   if declName == ``Eq.symm && proof.getAppNumArgs == 4 then
     match ← classifyProof target proof.appArg! with
-    | .lemmaApp n args inv => return .lemmaApp n args (!inv)
+    | .lemmaApp n pargs inv eargs => return .lemmaApp n pargs (!inv) eargs
     | .computed => return .computed
   if isPlumbingHead declName then
     return .computed
@@ -237,27 +242,50 @@ partial def classifyProof (target : Expr) (proof : Expr) : MetaM ProofShape := d
   let shape? ← forallTelescopeReducing ci.type fun xs _ => do
     if xs.size < args.size then return none
     let mut proofArgs : Array Expr := #[]
+    let mut explicitArgs : Array Expr := #[]
     for i in [0:args.size] do
       let arg := args[i]!
       let some decl ← xs[i]!.fvarId!.findDecl? | return none
       match decl.binderInfo with
       | .implicit | .strictImplicit | .instImplicit => continue
       | .default =>
+        -- Every explicit argument is recorded, in order: a replayer writes
+        -- `rw [name a₁ a₂ ...]` and must supply exactly what simp supplied.
+        -- A proof argument is additionally a `side` entry (it is a condition
+        -- the discharger established), and a subterm of the position is
+        -- recoverable by unification -- but recording it costs nothing and
+        -- removes the need for the replayer to re-derive it.
+        explicitArgs := explicitArgs.push arg
         if ← isProof arg then
           proofArgs := proofArgs.push arg
         else if isSubtermOf arg target then
           continue
         else if (← Meta.isClass? (← inferType arg)).isSome then
+          -- An explicit *instance*-typed argument: synthesis may pick a
+          -- different instance than simp did, so it must be in `args`. It is,
+          -- above; accepting it here is now safe.
           continue
         else
-          -- An explicit argument that is neither a subterm of the position, an
-          -- instance, nor a proof: the lemma is not being applied *to this
-          -- position*, so replay could not reconstruct the argument.
+          -- Neither a subterm of the position, an instance, nor a proof: the
+          -- lemma is not being applied *to this position*, so replay could not
+          -- reconstruct the argument.
           return none
-    return some proofArgs
+    return some (proofArgs, explicitArgs)
   match shape? with
-  | some proofArgs => return .lemmaApp declName proofArgs
+  | some (proofArgs, explicitArgs) =>
+    return .lemmaApp declName proofArgs false explicitArgs
   | none => return .computed
+
+/-- Does `declName` applied to `args` elaborate?  A cheap scratch check that the
+recorded argument list is one a replayer can actually write. -/
+def checkArgsElaborate (declName : Name) (args : Array Expr) : MetaM Bool := do
+  if args.isEmpty then return true
+  try
+    withoutModifyingState do
+      let f ← mkConstWithFreshMVarLevels declName
+      let _ ← inferType (mkAppN f args)
+      pure true
+  catch _ => pure false
 
 /--
 Emit the step for a procedure firing, per the amended spec's `eq` bullet: a
@@ -273,7 +301,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
     | some proof => classifyProof e (← instantiateMVars proof)
     | none => pure .computed
   match shape with
-  | .lemmaApp declName proofArgs inv =>
+  | .lemmaApp declName proofArgs inv explicitArgs =>
     -- Each proof argument is a condition the simproc established.  We already
     -- captured the discharger's own work as `side`; when we captured none, the
     -- condition came from somewhere else and we must name it honestly.
@@ -298,8 +326,18 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
       ref.modify (·.markUnresolved
         s!"simproc:{(src?.map toString).getD declName.toString} side condition \
 `{u}` proved by a term no close form describes")
+    -- Confirm `name` applied to `args` really elaborates to what simp used: a
+    -- recorded argument list that does not reproduce simp's term would send a
+    -- replayer to a different instance or a different lemma instantiation
+    -- (REVIEW-6 2).  On failure the call is classified rather than silently
+    -- emitting an unreplayable step.
+    let ok ← checkArgsElaborate declName explicitArgs
+    unless ok do
+      ref.modify (·.markUnresolved
+        s!"simproc:{(src?.map toString).getD declName.toString} lemma \
+`{declName}` applied to its recorded arguments does not re-elaborate")
     ref.modify (·.push (.rw pos (.decl declName true false) inv none
-      e r.expr evCtx #[] sides src? (.decl declName true false)))
+      e r.expr evCtx explicitArgs sides src? (.decl declName true false)))
   | .computed =>
     ref.modify (·.push (.eq pos src? e r.expr evCtx side))
 where

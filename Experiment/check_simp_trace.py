@@ -82,7 +82,7 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
             fail(messages, f"{where}: unknown step kind {kind!r}")
 
         for field in ("kind", "pos", "name", "dir", "source", "by", "local",
-                      "prop", "arg"):
+                      "prop", "arg", "args"):
             if field in want:
                 if got.get(field) != want[field]:
                     fail(
@@ -91,7 +91,7 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                         f"got {got.get(field)!r}",
                     )
             elif field in got and field in ("name", "dir", "source", "prop",
-                                            "local", "arg"):
+                                            "local", "arg", "args"):
                 fail(messages, f"{where}: unexpected {field}={got[field]!r}")
 
         # A `rw` step must name a lemma and a direction; an `eq` step must name

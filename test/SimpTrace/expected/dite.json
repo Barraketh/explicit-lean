@@ -17,6 +17,9 @@
           "name": "dite_cond_eq_true",
           "dir": "fwd",
           "source": "reduceDIte",
+          "args": [
+            "Eq.trans (congrFun' (congrArg Eq h) 3) (eq_self 3)"
+          ],
           "side": [
             {
               "goal": "n = 3",

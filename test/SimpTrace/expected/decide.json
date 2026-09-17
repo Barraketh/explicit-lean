@@ -13,6 +13,9 @@
           "pos": [],
           "name": "eq_true_of_decide",
           "dir": "fwd",
+          "args": [
+            "Eq.refl true"
+          ],
           "side": [
             {
               "goal": "true = true",

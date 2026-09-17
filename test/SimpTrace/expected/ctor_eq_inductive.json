@@ -17,6 +17,9 @@
           "name": "eq_false'",
           "dir": "fwd",
           "source": "reduceCtorEq",
+          "args": [
+            "fun h => False.elim (noConfusion_of_Nat FixtureColor.ctorIdx h)"
+          ],
           "side": [
             {
               "goal": "FixtureColor.red = FixtureColor.green → False",

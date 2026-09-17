@@ -11,11 +11,12 @@
         {
           "kind": "rw",
           "pos": [],
-          "name": "ExplicitLean.SimpTrace.Fixtures.fixtureTag_iff",
+          "name": "ExplicitLean.SimpTrace.Fixtures.fixtureTagT_lem",
           "dir": "fwd",
-          "source": "ExplicitLean.SimpTrace.Fixtures.fixtureTagProc",
+          "source": "ExplicitLean.SimpTrace.Fixtures.fixtureTagTProc",
           "args": [
-            "k"
+            "a",
+            "b"
           ]
         }
       ]

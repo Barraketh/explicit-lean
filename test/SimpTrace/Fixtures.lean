@@ -364,4 +364,55 @@ example (pα : Prop) : pα → pα ∧ True := by
   intro _
   simp_trace [*] =>trace "test/SimpTrace/out/name_unicode_inaccessible.json"
 
+/-! ### Explicit arguments are recorded in `args` (REVIEW-6 2)
+
+A lemma's explicit arguments are what a replayer writes after its name. An
+explicit *instance*-typed argument especially cannot be left to synthesis: with
+two instances in scope, synthesis may pick a different one than simp used, and
+the step would be silently wrong. Every explicit argument is recorded, in the
+lemma's own order, and `checkArgsElaborate` confirms `name` applied to them
+still elaborates. -/
+
+class FixtureWidget (α : Type) where val : Nat
+instance fixtureW1 : FixtureWidget Nat := ⟨1⟩
+instance fixtureW2 : FixtureWidget Nat := ⟨99⟩
+
+def FixtureTagE (n : Nat) : Prop := n = n
+
+theorem fixtureTagE_lem (w : FixtureWidget Nat) (n : Nat) : FixtureTagE n = True := by
+  unfold FixtureTagE; simp
+
+open Lean Meta Simp in
+/-- The simproc passes `fixtureW2` explicitly; `args` must name it, or replay
+synthesises `fixtureW1` instead. -/
+simproc_decl fixtureTagEProc (FixtureTagE _) := fun e => do
+  let_expr FixtureTagE n := e | return .continue
+  let pf := mkApp2 (mkConst ``fixtureTagE_lem) (mkConst ``fixtureW2) n
+  return .done { expr := mkConst ``True, proof? := pf }
+
+attribute [simp] fixtureTagEProc
+
+example (k : Nat) : FixtureTagE k := by
+  simp_trace =>trace "test/SimpTrace/out/args_instance.json"
+
+def FixtureTagT (n : Nat) : Prop := n = n
+
+theorem fixtureTagT_lem (n : Nat) (m : Nat) : FixtureTagT (n + m) = True := by
+  unfold FixtureTagT; simp
+
+open Lean Meta Simp in
+/-- Two explicit *term* arguments, both subterms of the position: they are
+recorded in `args` in the lemma's order, so replay writes
+`rw [fixtureTagT_lem a b]` rather than relying on unification to split `a + b`. -/
+simproc_decl fixtureTagTProc (FixtureTagT (_ + _)) := fun e => do
+  let_expr FixtureTagT s := e | return .continue
+  let_expr HAdd.hAdd _ _ _ _ a b := s | return .continue
+  let pf := mkApp2 (mkConst ``fixtureTagT_lem) a b
+  return .done { expr := mkConst ``True, proof? := pf }
+
+attribute [simp] fixtureTagTProc
+
+example (a b : Nat) : FixtureTagT (a + b) := by
+  simp_trace =>trace "test/SimpTrace/out/args_term.json"
+
 end ExplicitLean.SimpTrace.Fixtures
