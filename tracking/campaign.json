@@ -1,13 +1,17 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "trace_capture_and_positional_replay_in_review_harness_built",
+  "phase": "t1_round_10_fix_running_t4_final_full_gate_pending_t5_preflight_running",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-17T06:40:35Z",
+  "updatedAt": "2026-09-17T18:24:30Z",
   "resumeStatus": {
-    "review": "complete_independent_code_and_nat_review",
+    "review": "T2_merged_and_integration_checked; T1_review_10_major_fix_running; T4_review_3_incremental_clean_final_full_gate_pending; T5_preflight_running",
+    "t2": "merged_to_main_5ec2da5_and_integration_checked",
+    "t1": "review_10_major_nested_side_verdict_serialization_defect_fix_running; review_11_required",
+    "t4": "review_3_incremental_scope_clean_at_7db88a8; final_full_merge_gate_pending_after_T1_stability",
+    "t5": "cone_preflight_running_corrected_six_module_denominator_Data.Option.Basic_inventory_and_translated_import_order",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
@@ -104,7 +108,12 @@
   },
   "direction": {
     "userConversationDate": "2026-09-16",
-    "nextMilestone": "Readable generator: translate the 91 calls of the 7-target cone (Logic.Basic, Logic.ExistsUnique, Logic.Function.Basic, Logic.Function.Defs, Logic.IsEmpty.Basic, Logic.Nontrivial.Defs, Data.Option.Basic) into ordinary rw/exact/change Lean, validated by module build and declaration oracle, with originals preserved as comments and no simp-family token.",
+    "nextMilestone": "Finish the bounded T1 round-10 nested-side verdict fix and review 11; then run T4's final full merge gate (including the six-module harness once T1 is clean/stable), followed by the T5 seven-module cone.",
+    "activeState": "T2 is merged and integration-checked. T1 review 10 found a major nested-side verdict serialization gap and its bounded fix is running. T4 review 3 is clean for its incremental marker-fix scope, but final full-gate review remains required. T5 cone preflight is running.",
+    "designDecisions": {
+      "T6": "Complete: after T4 final gate, use deterministic structural bullet expansion keyed by complete invocation ordinals; refuse unsafe non-tail continuations; do not use first-dispatch or goal fingerprints.",
+      "T7": "Complete: after T4 final gate, add the existing declaration oracle in source-pair mode with a stock companion carrying the same ExplicitRw import; replayed requires compile plus oracle success."
+    },
     "pilotModules": 15,
     "pilotCandidates": "tracking/handoff-snapshot.json#pilotCandidates",
     "readiness": "Replacement run 20260912T121122Z-8bee8d23dd71dea5b94662ab66864ff1 is terminal Failed/1 before translation. Linux setup, focused checks, strict boundary preflight and fresh 216,029,345-byte manifest generation passed. Independent verification ran 5h50m22s and all per-module occurrence lists matched, then the inventory fallback-provenance check failed: fresh header-import recomputation marked 560 full-frontend fallbacks while the manifest recorded 216, with 75 common. The zero-byte verifier result and exact 35,339-byte stderr were preserved. Four versioned AES256 S3 objects remain; the downloaded 10,877,575-byte archive SHA-256 0a1435d6bedfb5130df6c0ebbac39da72f7ec67994d00683ccfdf3f9f2e2fa47 matches its uploaded hash and run-exit records originalExitCode 1 with successful evidence upload. Instance i-0f9698935a4ccb630 is terminated, volume vol-0524b323969ba9add is gone, the exact stack is deleted and no active r7i.4xlarge remains. Corpus translation never began. Local diagnosis proved a producer/verifier protocol mismatch: aggregate deferred-plus-isolated fallback versus direct header imports. The reviewed bounded fix preserves exact fallback equality and fail-closed source/environment/marker checks; 36 verifier tests, inventory-header controls, Python compilation and diff validation pass. A complete local replay was not run because available memory was below the unchanged 12 GiB reserve. No additional AWS host is authorized.",
@@ -242,6 +251,16 @@
   },
   "blockers": [
     {
+      "id": "t1-round-10-nested-side-verdicts",
+      "status": "open_major_fix_in_progress",
+      "detail": "Review 10 found that validator reasons from nested side/congr steps are logged but not serialized on the exact nested Step, allowing known-bad replay. The bounded fix must propagate structured verdicts recursively, add fail-closed JSON regressions, rerun the end-to-end replay, and pass review 11 before T1 merge."
+    },
+    {
+      "id": "t4-final-full-merge-gate",
+      "status": "pending_t1_stability",
+      "detail": "T4 review 3 is clean for the changed marker-fix scope at 7db88a8, but the protocol still requires a final full review gate and six-module harness run against a clean, stable T1."
+    },
+    {
       "id": "bounded-run-policy",
       "status": "resolved",
       "detail": "Published full authorization 9b9e639445a63577b68355114218b4140509bacd was consumed by the now-terminal replacement run. Its instance, volume and stack are deleted. All invocation authorizations/nonces are exhausted. Do not add another host, reuse a nonce, or extend the cutoff without new user authorization."
@@ -284,9 +303,11 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Follow tracking/WORKPLAN.md 'Next steps' in order: T2 incremental review 9 then merge; T1 round-9 fixes then review 10 then merge; T4 review 1, multiple-invocation rendering, oracle; iterate the six-module replay table; then the seven-module cone.",
-    "Harness first run (T4, 2026-09-16): 82 sites, 45 replayed, 1 unresolved, 27 render_failed, 9 compile_failed; no failure attributed to the replay tactic.",
-    "Obtain new user authorization before any AWS host; Scaleway GP1-L only on local resource failure; no standing instance."
+    "Complete T1's bounded round-10 fix for recursive side/congr verdict serialization, rerun its focused checks and T4 end-to-end replay, then dispatch review 11; merge only with no critical or major defects.",
+    "After T1 is clean and stable, run T4's final full merge-gate review and six-module harness; retain the corrected denominator and attribute failures conservatively.",
+    "After the T4 final gate, implement T6's deterministic structural multi-invocation rendering, then T7's source-pair declaration-oracle adapter; do not start either before the gate.",
+    "Continue the running T5 preflight: reconcile the six-module denominator with the 91-call cone, inventory Data.Option.Basic, and specify translated-import-root build order; then run the seven-module cone only after T4 is accepted.",
+    "Do not provision AWS or any other host without new user authorization; preserve the closed pilot evidence and immutable deadline/authorization records."
   ],
   "work": [
     {
