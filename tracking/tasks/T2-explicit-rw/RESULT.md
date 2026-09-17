@@ -81,10 +81,10 @@ pre-fix code and the escape sweep against the widened grammar.
   type/value, projection argument.
 - `intro_ctx` recognised but unimplemented (T1 does not emit it); `at *` refused.
   Ordinary goals carry no `mdata`, so that fixture wraps the target.
-- Recorded `lhs`/`rhs`/`to` strings must be **whitelist-dialect** terms. Round 4
-  widened the grammar to the spellings Lean's pretty printer emits, so ordinary
-  output now passes through; but the dialect excludes `⟨…⟩`, `match`, `let`,
-  `show … from` and big operators (`∑`), which a generator must re-render.
+- Recorded `lhs`/`rhs`/`to` must be **whitelist-dialect** terms. Round 4 widened
+  the grammar to what Lean's pretty printer emits, so ordinary output passes
+  through, but the dialect excludes `⟨…⟩`, `match`, `let`, `show … from` and big
+  operators (`∑`), which a generator must re-render.
 - Generator must emit raw child indices, **not** `conv`'s `arg n` numbering.
   `explicit_rw` also matches up to reducible defeq, succeeding where plain `rw`
   fails (`conditional_conv`); confirm before the post-pass collapses such steps.
