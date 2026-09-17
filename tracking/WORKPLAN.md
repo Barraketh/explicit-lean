@@ -49,6 +49,10 @@ terse completion notices, then makes merge and next-dispatch decisions.
   the full bijection before rendering; generated-copy positions and filenames
   are diagnostic only. Implement T1 producer and T4 consumer in parallel with
   narrow ownership, then review each and rerun the full gate.
+- **T10 v2 conformance vectors:** an independent lane is building canonical
+  UTF-8 range/hash/invocation fixtures and adversarial mutations without using
+  either T1 or T4 implementation, so producer and consumer share a neutral
+  compatibility gate.
 - **Named `zeta` decision:** T1's local-let fvar delta is represented as an
   existing `change` step with an explicit `pp.all` `to` value. Plain `letE`
   zeta remains `zeta`. Do not broaden T2's zeta semantics or add a name-based
