@@ -10,6 +10,7 @@ root, so the relative `out :=` paths resolve.
 -/
 import ExplicitLean.SimpTrace
 import Mathlib.Logic.Basic
+import Mathlib.Logic.Function.Basic
 import Mathlib.Algebra.Order.Group.Nat
 import Mathlib.Algebra.Group.Basic
 
@@ -510,5 +511,27 @@ example (f g : α → β) (h : Option.map f = Option.map g) (x : α) :
 lemma's arity rather than assumed to be a single level. -/
 example (f g : α → β → γ) (h : f = g) (a : α) (b : β) : f a b = g a b := by
   simp_trace only [h] =>trace "test/SimpTrace/out/partial_app_deep.json"
+
+/-! ### Indexed and liberal theorem lookup
+
+Both lookup modes must select the same theorem and preserve the extra
+arguments that are lifted after matching the theorem's fixed redex. -/
+example {α α' β : Type} [DecidableEq α] [DecidableEq α']
+    (f : α × α' → β) (a : α) (a' : α') (b : β) :
+    Function.update (Function.curry f) a
+        (Function.update (Function.curry f a) a' b) a =
+      Function.update (Function.curry f a) a' b := by
+  simp_trace (config := { index := true })
+    [Function.update_self]
+    =>trace "test/SimpTrace/out/index_true_update.json"
+
+example {α α' β : Type} [DecidableEq α] [DecidableEq α']
+    (f : α × α' → β) (a : α) (a' : α') (b : β) :
+    Function.update (Function.curry f) a
+        (Function.update (Function.curry f a) a' b) a =
+      Function.update (Function.curry f a) a' b := by
+  simp_trace (config := { index := false })
+    [Function.update_self]
+    =>trace "test/SimpTrace/out/index_false_update.json"
 
 end ExplicitLean.SimpTrace.Fixtures

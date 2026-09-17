@@ -426,6 +426,7 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     let lhs := type.appFn!.appArg!
     if rflOnly && !(thm.rfl || (backward.defeqAttrib.useBackward.get (← getOptions) && thm.backwardRfl)) then
       return none
+    Simp.recordTriedSimpTheorem thm.origin
     let mut extraArgs : Array Expr := #[]
     let mut core := e
     for _ in *...numExtraArgs do
@@ -477,13 +478,12 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
 def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
     (tree : SimpTheoremTree) (erased : PHashSet Origin) (rflOnly : Bool) :
     Simp.SimpM (Option Simp.Result) := do
-  let candidates ← Simp.withSimpIndexConfig <| tree.getMatchWithExtra e
-  let candidates := candidates.insertionSort fun a b => a.1.priority > b.1.priority
-  for (thm, extra) in candidates do
-    if erased.contains thm.origin then continue
-    -- Keep the stock Simp accounting in lockstep; this is internal state and
-    -- is not part of the term-free derivation payload.
-    Simp.recordTriedSimpTheorem thm.origin
+  let useBackward := backward.defeqAttrib.useBackward.get (← getOptions)
+  let tryCandidate (thm : SimpTheorem) (extra : Nat) : Simp.SimpM (Option Simp.Result) := do
+    checkSystem "simp"
+    if erased.contains thm.origin then return none
+    if rflOnly && !(thm.rfl || (useBackward && thm.backwardRfl)) then
+      return none
     if let some (result, derivation, pos, before, after) ←
         tryTheoremOperational? ref tag e thm extra rflOnly then
       let evCtx ← captureEvCtx ref
@@ -495,6 +495,26 @@ def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
       ref.modify (·.push (.rw pos thm.origin (inv != rinv) prop? before after evCtx
         rargs sides none resolved rproj (some derivation)))
       return some result
+    return none
+  if (← Simp.getConfig).index then
+    let candidates ← Simp.withSimpIndexConfig <| tree.getMatchWithExtra e
+    let candidates := candidates.insertionSort fun a b => a.1.priority > b.1.priority
+    for (thm, extra) in candidates do
+      if let some result ← tryCandidate thm extra then return some result
+  else
+    let (theorems, numArgs) ← Simp.withSimpIndexConfig <| tree.getMatchLiberal e
+    let theorems := theorems.insertionSort fun a b => a.priority > b.priority
+    for thm in theorems do
+      if erased.contains thm.origin then continue
+      if rflOnly && !(thm.rfl || (useBackward && thm.backwardRfl)) then continue
+      let lhsNumArgs ← withNewMCtxDepth do
+        let val ← thm.getValue
+        let type ← inferType val
+        let (_, _, type) ← forallMetaTelescopeReducing type
+        let type ← whnf (← instantiateMVars type)
+        return type.appFn!.appArg!.getAppNumArgs
+      if let some result ← tryCandidate thm (numArgs - lhsNumArgs) then
+        return some result
   return none
 
 def rewritePreOperational (ref : TraceRef) : Simp.Simproc := fun e => do

@@ -1,0 +1,1 @@
+{"schema":"simp-trace-v1","locations":[{"loc":"goal","closed":true,"pre":"Function.update (Function.curry f) a (Function.update (Function.curry f a) a' b) a = Function.update (Function.curry f a) a' b","post":null,"close":{"by":"true_intro"},"steps":[{"kind":"rw","pos":[0,1],"name":"Function.update_self","dir":"fwd"},{"kind":"rw","pos":[],"name":"eq_self","dir":"fwd"}]}]}
