@@ -514,7 +514,8 @@ def check_fixture_compiles(messages: list[str]) -> None:
 
 # Directories the measurement modules write to, and the module that writes each.
 MEASUREMENT_DIRS = (
-    ("IsEmptyBasicTraced", ROOT / "test" / "SimpTrace" / "isempty_out", ""),
+    ("IsEmptyBasicTraced", ROOT / "test" / "SimpTrace" / "meas_out",
+     "IsEmptyBasicTraced_"),
     ("NontrivialDefsTraced", ROOT / "test" / "SimpTrace" / "meas_out",
      "NontrivialDefsTraced_"),
     ("FunctionDefsTraced", ROOT / "test" / "SimpTrace" / "meas_out",
@@ -596,7 +597,7 @@ def report() -> int:
         print(
             "\nRun the five measurement modules first, e.g.\n"
             "  for f in IsEmptyBasicTraced NontrivialDefsTraced FunctionDefsTraced \\\n"
-            "           ExistsUniqueTraced FunctionBasicTraced; do \\\n"
+            "           ExistsUniqueTraced FunctionBasicTraced LogicBasicTraced; do \\\n"
             "    lake env lean test/SimpTrace/$f.lean; done",
             file=sys.stderr,
         )
