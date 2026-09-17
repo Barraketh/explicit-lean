@@ -1,0 +1,478 @@
+{
+ "_comment": [
+  "Hand-written `simp-trace-v1` fixtures for the renderer unit tests.",
+  "",
+  "Every case is written from tracking/SIMP-TRACE-SPEC.md, NOT from the current",
+  "recorder output. Where the recorder deviates from the spec, the spec wins here",
+  "and the deviation is reported as a T1 defect; the renderer must not be shaped",
+  "around a defect it would then hide.",
+  "",
+  "`expect` is the exact `explicit_rw` text the step or trace must render as.",
+  "`error` is the RenderError reason a malformed field must raise, with the side",
+  "the failure is attributed to."
+ ],
+
+ "steps": [
+  {
+   "name": "rw_plain_fwd",
+   "why": "spec STEP `rw`: name, position, forward direction",
+   "step": {"kind": "rw", "pos": [0, 1, 1], "name": "nontrivial_iff", "dir": "fwd",
+            "before": "Nontrivial α", "after": "∃ x y, x ≠ y"},
+   "expect": "nontrivial_iff at [0, 1, 1]"
+  },
+  {
+   "name": "rw_rev",
+   "why": "spec `dir: rev` is the `←` direction",
+   "step": {"kind": "rw", "pos": [], "name": "Classical.not_not", "dir": "rev"},
+   "expect": "← Classical.not_not at []"
+  },
+  {
+   "name": "rw_root_position",
+   "why": "spec: `[]` is the whole location",
+   "step": {"kind": "rw", "pos": [], "name": "iff_self", "dir": "fwd"},
+   "expect": "iff_self at []"
+  },
+  {
+   "name": "rw_args_atomic",
+   "why": "spec `args`: explicit argument terms, applied to the name",
+   "step": {"kind": "rw", "pos": [1], "name": "congrFun", "dir": "fwd",
+            "args": ["a", "b"]},
+   "expect": "congrFun a b at [1]"
+  },
+  {
+   "name": "rw_args_compound_parenthesised",
+   "why": "a compound argument must be parenthesised or application misbinds",
+   "step": {"kind": "rw", "pos": [1], "name": "foo", "dir": "fwd",
+            "args": ["surjInv hf.right", "(already parenthesised)"]},
+   "expect": "foo (surjInv hf.right) (already parenthesised) at [1]"
+  },
+  {
+   "name": "rw_prop_true",
+   "why": "spec: a Prop-valued fact used as `p = True` replays as `eq_true name`",
+   "step": {"kind": "rw", "pos": [0, 1], "name": "hp", "dir": "fwd", "prop": "true",
+            "local": {"userName": "hp", "inaccessible": false, "ctxIndex": 3}},
+   "expect": "eq_true hp at [0, 1]"
+  },
+  {
+   "name": "rw_prop_false",
+   "why": "spec: `¬p` used as `p = False` replays as `eq_false name`",
+   "step": {"kind": "rw", "pos": [], "name": "h", "dir": "fwd", "prop": "false",
+            "local": {"userName": "h", "inaccessible": false, "ctxIndex": 8}},
+   "expect": "eq_false h at []"
+  },
+  {
+   "name": "rw_prop_with_args",
+   "why": "the prop wrapper applies to the name, the args to the wrapped term",
+   "step": {"kind": "rw", "pos": [1], "name": "hf", "dir": "fwd", "prop": "true",
+            "args": ["x"]},
+   "expect": "eq_true hf x at [1]"
+  },
+  {
+   "name": "rw_side_rfl",
+   "why": "spec `side`: one nested trace per hypothesis of a conditional lemma",
+   "step": {"kind": "rw", "pos": [1], "name": "ite_cond_eq_false", "dir": "fwd",
+            "side": [{"pre": "c = False", "post": null, "steps": [],
+                      "close": {"by": "rfl"}}]},
+   "expect": "ite_cond_eq_false at [1] with [rfl]"
+  },
+  {
+   "name": "rw_side_with_steps",
+   "why": "a side trace with steps renders as a nested explicit_rw plus its close",
+   "step": {"kind": "rw", "pos": [0], "name": "if_pos", "dir": "fwd",
+            "side": [{"pre": "P", "post": null,
+                      "steps": [{"kind": "rw", "pos": [], "name": "hP", "dir": "fwd",
+                                 "prop": "true"}],
+                      "close": {"by": "rfl"}}]},
+   "expect": "if_pos at [0] with [explicit_rw [eq_true hP at []] then rfl]"
+  },
+  {
+   "name": "rw_side_intros",
+   "why": "spec: an implication-shaped hypothesis carries `intros` on its side trace",
+   "step": {"kind": "rw", "pos": [], "name": "ite_congr", "dir": "fwd",
+            "source": "congr",
+            "side": [{"pre": "b = c", "post": null, "steps": [],
+                      "close": {"by": "rfl"}},
+                     {"intros": ["hc"], "pre": "c → x = u", "post": null,
+                      "steps": [{"kind": "rw", "pos": [0], "name": "hx", "dir": "fwd"}],
+                      "close": {"by": "rfl"}}]},
+   "expect": "ite_congr at [] with [rfl, intro hc ; explicit_rw [hx at [0]] then rfl]"
+  },
+  {
+   "name": "rw_side_omega",
+   "why": "spec: a side discharged by the user's `omega` discharger",
+   "step": {"kind": "rw", "pos": [1], "name": "Nat.sub_lt", "dir": "fwd",
+            "side": [{"pre": "0 < n", "post": null, "steps": [],
+                      "close": {"by": "omega"}}]},
+   "expect": "Nat.sub_lt at [1] with [omega]"
+  },
+  {
+   "name": "rw_side_nofun",
+   "why": "spec: `nofun` is the close for reduceCtorEq-style side conditions",
+   "step": {"kind": "rw", "pos": [0], "name": "foo", "dir": "fwd",
+            "side": [{"pre": "0 = 1 → False", "post": null, "steps": [],
+                      "close": {"by": "nofun"}}]},
+   "expect": "foo at [0] with [nofun]"
+  },
+  {
+   "name": "rw_local_named",
+   "why": "an accessible local is written as its plain user name",
+   "step": {"kind": "rw", "pos": [1, 1], "name": "hab", "dir": "fwd",
+            "local": {"userName": "hab", "inaccessible": false, "ctxIndex": 5}},
+   "expect": "hab at [1, 1]"
+  },
+  {
+   "name": "rw_source_provenance_ignored",
+   "why": "spec: `source` is provenance only and has no syntax",
+   "step": {"kind": "rw", "pos": [1], "name": "if_pos", "dir": "fwd",
+            "source": "reduceIte",
+            "side": [{"pre": "P", "post": null, "steps": [],
+                      "close": {"by": "decide"}}]},
+   "expect": "if_pos at [1] with [decide]"
+  },
+
+  {
+   "name": "unfold_step",
+   "why": "spec STEP `unfold`: delta-unfold one constant",
+   "step": {"kind": "unfold", "pos": [0, 1], "name": "Function.Injective",
+            "before": "Injective f", "after": "∀ a b, f a = f b → a = b"},
+   "expect": "unfold Function.Injective at [0, 1]"
+  },
+  {
+   "name": "beta_step",
+   "why": "spec STEP `beta`",
+   "step": {"kind": "beta", "pos": [1], "before": "(fun x => x) a", "after": "a"},
+   "expect": "beta at [1]"
+  },
+  {
+   "name": "eta_step",
+   "why": "spec STEP `eta`",
+   "step": {"kind": "eta", "pos": [0, 1]},
+   "expect": "eta at [0, 1]"
+  },
+  {
+   "name": "proj_step",
+   "why": "spec STEP `proj`: structure projection reduction",
+   "step": {"kind": "proj", "pos": []},
+   "expect": "proj at []"
+  },
+  {
+   "name": "zeta_step",
+   "why": "spec STEP `zeta`: `let x := v; b` to `b[v/x]`",
+   "step": {"kind": "zeta", "pos": [1, 0]},
+   "expect": "zeta at [1, 0]"
+  },
+  {
+   "name": "iota_step",
+   "why": "spec STEP `iota`: matcher/recursor on a constructor, one step",
+   "step": {"kind": "iota", "pos": [1]},
+   "expect": "iota at [1]"
+  },
+
+  {
+   "name": "change_step",
+   "why": "spec STEP `change`: definitional replacement checked by defeq",
+   "step": {"kind": "change", "pos": [1], "to": "Nat.succ n",
+            "before": "n + 1"},
+   "expect": "change Nat.succ n at [1]"
+  },
+  {
+   "name": "change_dsimproc",
+   "why": "spec: a dsimproc firing is a `change` with `source`, never an `eq`",
+   "step": {"kind": "change", "pos": [], "to": "(3)", "source": "dreduceIte",
+            "before": "if True then 3 else 4"},
+   "expect": "change (3) at []"
+  },
+
+  {
+   "name": "eq_step_rfl",
+   "why": "spec STEP `eq`: a simproc equation proved by an ordinary tactic",
+   "step": {"kind": "eq", "pos": [1], "lhs": "2 + 3", "rhs": "5", "by": "rfl",
+            "source": "Nat.reduceAdd"},
+   "expect": "eq (2 + 3 = 5) by rfl at [1]"
+  },
+  {
+   "name": "eq_step_decide",
+   "why": "spec: `by` is exactly `rfl` or `decide`",
+   "step": {"kind": "eq", "pos": [], "lhs": "(2 : ℕ) < 5", "rhs": "True",
+            "by": "decide", "source": "Nat.reduceLT"},
+   "expect": "eq ((2 : ℕ) < 5 = True) by decide at []"
+  },
+
+  {
+   "name": "congr_step",
+   "why": "spec STEP `congr`: dependent congruence with nested steps",
+   "step": {"kind": "congr", "pos": [0], "arg": 3,
+            "steps": [{"kind": "rw", "pos": [], "name": "hn", "dir": "fwd"}],
+            "before": "Fin.cast h v", "after": "Fin.cast h' v"},
+   "expect": "congr 3 [hn at []] at [0]"
+  },
+  {
+   "name": "congr_nested",
+   "why": "T2's grammar nests congr two levels; T1's congr_nested_cast needs it",
+   "step": {"kind": "congr", "pos": [], "arg": 2,
+            "steps": [{"kind": "congr", "pos": [1], "arg": 1,
+                       "steps": [{"kind": "rw", "pos": [], "name": "hm",
+                                  "dir": "fwd"}]}]},
+   "expect": "congr 2 [congr 1 [hm at []] at [1]] at []"
+  },
+  {
+   "name": "congr_with_reduction",
+   "why": "nested steps are ordinary steps of any innermost kind",
+   "step": {"kind": "congr", "pos": [1], "arg": 0,
+            "steps": [{"kind": "beta", "pos": [1]},
+                      {"kind": "unfold", "pos": [], "name": "f"}]},
+   "expect": "congr 0 [beta at [1], unfold f at []] at [1]"
+  }
+ ],
+
+ "step_errors": [
+  {
+   "name": "unknown_kind_is_hard_error",
+   "why": "spec: unknown `kind` values are a hard error for the replay tactic",
+   "step": {"kind": "rewrite", "pos": [], "name": "foo"},
+   "error": "unknown_kind", "side": "t1"
+  },
+  {
+   "name": "intro_ctx_unimplemented",
+   "why": "T2 recognises `intro_ctx` and does not implement it",
+   "step": {"kind": "intro_ctx", "pos": [1], "name": "a"},
+   "error": "intro_ctx", "side": "t2"
+  },
+  {
+   "name": "name_is_written_syntax",
+   "why": "T1 defect: `name` must be a name, not a term (REVIEW-9 defect 2)",
+   "step": {"kind": "rw", "pos": [], "name": "if_neg fun h ↦ hb ⟨a, h⟩", "dir": "fwd"},
+   "error": "name_is_syntax", "side": "t1"
+  },
+  {
+   "name": "name_named_argument_is_syntax",
+   "why": "T1 defect: `heq_comm (a := a)` is syntax in a name field",
+   "step": {"kind": "rw", "pos": [], "name": "heq_comm (a := a)", "dir": "fwd"},
+   "error": "name_is_syntax", "side": "t1"
+  },
+  {
+   "name": "inaccessible_display_name",
+   "why": "T1 defect: `a✝` does not lex (REVIEW-9 defect 3a)",
+   "step": {"kind": "rw", "pos": [0], "name": "a✝", "dir": "fwd"},
+   "error": "inaccessible_name", "side": "t1"
+  },
+  {
+   "name": "hygienic_name",
+   "why": "T1 defect: a raw hygienic name is not a user name (REVIEW-9 defect 3b)",
+   "step": {"kind": "rw", "pos": [0], "name": "h._@.test.M.279._hygCtx._hyg.71",
+            "dir": "fwd"},
+   "error": "hygienic_name", "side": "t1"
+  },
+  {
+   "name": "args_elided",
+   "why": "T1 defect: `⋯` is pretty-printer elision, not a term",
+   "step": {"kind": "rw", "pos": [], "name": "foo", "dir": "fwd",
+            "args": ["surjInv ⋯"]},
+   "error": "elided_term", "side": "t1"
+  },
+  {
+   "name": "change_to_has_telescope",
+   "why": "T1 defect: `change.to` with `have` syntax (REVIEW-9 defect 7)",
+   "step": {"kind": "change", "pos": [],
+            "to": "have x : Nat := a;\nf (@HAdd.hAdd Nat Nat Nat inst a b)"},
+   "error": "multiline_term", "side": "t1"
+  },
+  {
+   "name": "change_to_pp_all",
+   "why": "T2 dialect gap: universes and nat_lit are outside the term grammar",
+   "step": {"kind": "change", "pos": [],
+            "to": "@OfNat.ofNat.{0} Nat (nat_lit 3) (instOfNatNat (nat_lit 3))"},
+   "error": "pp_all_term", "side": "t1"
+  },
+  {
+   "name": "reduction_with_name",
+   "why": "T1/T2 gap: `zeta` with a `name` is in neither the spec nor the grammar",
+   "step": {"kind": "zeta", "pos": [1, 0], "name": "g"},
+   "error": "reduction_has_name", "side": "t1"
+  },
+  {
+   "name": "bad_direction",
+   "why": "`dir` is exactly fwd or rev",
+   "step": {"kind": "rw", "pos": [], "name": "foo", "dir": "backwards"},
+   "error": "bad_dir", "side": "t1"
+  },
+  {
+   "name": "bad_prop_value",
+   "why": "`prop` is exactly the strings true or false",
+   "step": {"kind": "rw", "pos": [], "name": "h", "dir": "fwd", "prop": true},
+   "error": "bad_prop", "side": "t1"
+  },
+  {
+   "name": "bad_eq_by",
+   "why": "spec: `eq.by` is exactly rfl or decide",
+   "step": {"kind": "eq", "pos": [], "lhs": "a", "rhs": "b", "by": "omega"},
+   "error": "bad_eq_by", "side": "t1"
+  },
+  {
+   "name": "bad_position",
+   "why": "POS is a list of child indices",
+   "step": {"kind": "beta", "pos": "root"},
+   "error": "bad_pos", "side": "t1"
+  },
+  {
+   "name": "side_with_by_block",
+   "why": "T2 rejects every term containing a `by` block",
+   "step": {"kind": "rw", "pos": [], "name": "foo", "dir": "fwd",
+            "args": ["by exact h"]},
+   "error": "term_has_by", "side": "t1"
+  },
+  {
+   "name": "empty_side_trace",
+   "why": "a side with neither steps nor a close discharges nothing",
+   "step": {"kind": "rw", "pos": [], "name": "foo", "dir": "fwd",
+            "side": [{"pre": "P", "post": "P", "steps": []}]},
+   "error": "empty_side", "side": "t1"
+  }
+ ],
+
+ "closes": [
+  {"name": "close_rfl", "close": {"by": "rfl"}, "expect": "rfl"},
+  {"name": "close_decide", "close": {"by": "decide"}, "expect": "decide"},
+  {"name": "close_omega", "close": {"by": "omega"}, "expect": "omega"},
+  {"name": "close_nofun", "close": {"by": "nofun"}, "expect": "nofun"},
+  {"name": "close_true_intro", "close": {"by": "true_intro"},
+   "expect": "exact True.intro"},
+  {"name": "close_assumption", "close": {"by": "assumption:hab"},
+   "expect": "exact hab"},
+  {"name": "close_absurd", "close": {"by": "absurd:hn"},
+   "expect": "exact hn.elim"}
+ ],
+
+ "close_errors": [
+  {"name": "close_unresolved", "close": {"by": "unresolved:simproc:foo"},
+   "error": "unresolved_close"},
+  {"name": "close_trivial_not_offered", "close": {"by": "trivial"},
+   "error": "unknown_close"},
+  {"name": "close_bare_assumption_not_offered", "close": {"by": "assumption"},
+   "error": "unknown_close"},
+  {"name": "close_assumption_inaccessible",
+   "close": {"by": "assumption:a✝"}, "error": "inaccessible_name"}
+ ],
+
+ "traces": [
+  {
+   "name": "goal_location",
+   "why": "a goal location renders as one explicit_rw with a `then` closer",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo]",
+             "locations": [{"loc": "goal", "pre": "a = b", "post": null,
+                            "steps": [{"kind": "rw", "pos": [0, 1], "name": "foo",
+                                       "dir": "fwd"}],
+                            "close": {"by": "rfl"}}]},
+   "expect": ["explicit_rw [foo at [0, 1]] then rfl"]
+  },
+  {
+   "name": "hypothesis_location",
+   "why": "spec `{\"hyp\": n}` renders as the tactic's `at h` location clause",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo] at h",
+             "locations": [{"loc": {"hyp": "h"}, "pre": "P h", "post": "Q h",
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd"}],
+                            "close": null}]},
+   "expect": ["explicit_rw [foo at []] at h"]
+  },
+  {
+   "name": "multi_location",
+   "why": "spec: `at h ⊢` and `at *` become one explicit_rw per location, in order",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo] at h ⊢",
+             "locations": [{"loc": {"hyp": "h"}, "pre": "P", "post": "Q",
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd"}], "close": null},
+                           {"loc": "goal", "pre": "R", "post": null,
+                            "steps": [{"kind": "rw", "pos": [1], "name": "bar",
+                                       "dir": "rev"}],
+                            "close": {"by": "true_intro"}}]},
+   "expect": ["explicit_rw [foo at []] at h",
+              "explicit_rw [← bar at [1]] then exact True.intro"]
+  },
+  {
+   "name": "no_close_leaves_goal_open",
+   "why": "spec: `close: null` means the goal stays open, so no `then` clause",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo]",
+             "locations": [{"loc": "goal", "pre": "a", "post": "b",
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd"}],
+                            "close": null}]},
+   "expect": ["explicit_rw [foo at []]"]
+  }
+ ],
+
+ "trace_errors": [
+  {
+   "name": "wrong_schema",
+   "trace": {"schema": "simp-trace-v2", "locations": []},
+   "error": "bad_schema"
+  },
+  {
+   "name": "no_locations",
+   "trace": {"schema": "simp-trace-v1", "locations": []},
+   "error": "bad_trace"
+  }
+ ],
+
+ "unresolved": [
+  {
+   "name": "unresolved_discharger",
+   "why": "spec: a non-simp discharger is a classified unresolved outcome",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp (disch := positivity) [foo]",
+             "locations": [{"loc": "goal", "pre": "a", "post": null,
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd",
+                                       "side": [{"pre": "0 < x", "post": null,
+                                                 "steps": [],
+                                                 "close": {"by": "unresolved:positivity"}}]}],
+                            "close": {"by": "rfl"}}]},
+   "expect": "positivity"
+  },
+  {
+   "name": "unresolved_simproc",
+   "why": "spec: a simproc proof that is neither rfl/decide nor one lemma",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp",
+             "locations": [{"loc": "goal", "pre": "a", "post": null, "steps": [],
+                            "close": {"by": "unresolved:simproc:Finset.decide"}}]},
+   "expect": "simproc:Finset.decide"
+  },
+  {
+   "name": "resolved_trace_has_no_reason",
+   "why": "a clean trace must not be reported unresolved",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo]",
+             "locations": [{"loc": "goal", "pre": "a", "post": null,
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd"}],
+                            "close": {"by": "rfl"}}]},
+   "expect": null
+  }
+ ],
+
+ "inaccessible": [
+  {
+   "name": "collects_ctx_indices_sorted",
+   "why": "spec: rename_i names come from the order of inaccessible declarations",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp",
+             "locations": [{"loc": "goal", "pre": "a", "post": null,
+                            "steps": [{"kind": "rw", "pos": [], "name": "x", "dir": "fwd",
+                                       "local": {"userName": "x", "inaccessible": true,
+                                                 "ctxIndex": 7}},
+                                      {"kind": "rw", "pos": [], "name": "y", "dir": "fwd",
+                                       "local": {"userName": "y", "inaccessible": true,
+                                                 "ctxIndex": 4}},
+                                      {"kind": "rw", "pos": [], "name": "z", "dir": "fwd",
+                                       "local": {"userName": "z", "inaccessible": false,
+                                                 "ctxIndex": 9}}],
+                            "close": null}]},
+   "expect": [4, 7]
+  }
+ ]
+}

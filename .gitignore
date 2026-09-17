@@ -3,3 +3,7 @@
 .cloud/
 __pycache__/
 *.pyc
+
+# T4 pipeline run outputs; the committed run lives under
+# tracking/tasks/T4-pipeline/runs/.
+/out/
