@@ -35,10 +35,18 @@ we can rebuild a genuine `simp` syntax node and hand it to stock
 `mkSimpContext`, which reads its arguments by position.
 -/
 
-syntax (name := simpTrace) "simp_trace" (" (" &"out" " := " str ")")? optConfig
+/-- The out-clause.  It is written *last* and introduced by its own `out`
+keyword rather than an open paren, so it can never compete with `simp`'s own
+parenthesized forms (`(config := ...)`, `(discharger := ...)`, `(disch := ...)`).
+A paren-led clause makes the parser commit on `(` and demand `out`, which would
+leave `simp_trace` unable to express those forms at all — i.e. not substitutable
+for `simp`, the whole point of the tactic. -/
+syntax simpTraceOut := &" out" " := " str
+
+syntax (name := simpTrace) "simp_trace" optConfig
   (discharger)? (&" only")?
   (" [" withoutPosition((simpStar <|> simpErase <|> simpLemma),*,?) "]")?
-  (location)? : tactic
+  (location)? (simpTraceOut)? : tactic
 
 /-! ### Pretty-printing helpers -/
 
@@ -133,6 +141,10 @@ partial def toStep (counters : IO.Ref Counters) (s : SolvedStep) : MetaM Step :=
     else if isProj raw.before then
       return { kind := "proj", pos := s.pos,
                before? := some beforePP, after? := some afterPP }
+    else if raw.before.isLet then
+      -- `zeta`: `let x := v; b` to `b[v/x]` (amended spec).
+      return { kind := "zeta", pos := s.pos,
+               before? := some beforePP, after? := some afterPP }
     else if let some c := unfoldedConstant? raw.before raw.after then
       return { kind := "unfold", pos := s.pos, name? := some c.toString,
                before? := some beforePP, after? := some afterPP }
@@ -154,7 +166,8 @@ where
     return { kind := "eq", pos,
              lhs? := some beforePP, rhs? := some afterPP,
              by_? := some by_,
-             source? := some ((source?.map toString).getD "simproc"),
+             source? := some ((source?.map toString).getD
+               (if by_ == "decide" then "decide" else "simproc")),
              before? := some beforePP, after? := some afterPP, side }
 
   /-- Name a rewrite origin, resolving local hypotheses to their user names.
@@ -209,7 +222,7 @@ slots so stock argument elaboration is used verbatim.
 def toSimpSyntax (stx : Syntax) : Syntax :=
   let simpTk := mkAtomFrom stx "simp"
   Syntax.node (SourceInfo.fromRef stx) ``Parser.Tactic.simp
-    #[simpTk, stx[2], stx[3], stx[4], stx[5], stx[6]]
+    #[simpTk, stx[1], stx[2], stx[3], stx[4], stx[5]]
 
 /-! ### Locations -/
 
@@ -219,7 +232,7 @@ structure Selection where
   simplifyTarget : Bool
 
 def elabSelection (stx : Syntax) : TacticM Selection := do
-  match expandOptLocation stx[6] with
+  match expandOptLocation stx[5] with
   | .targets hyps simplifyTarget =>
     return { fvarIds := ← getFVarIds hyps, simplifyTarget }
   | .wildcard =>
@@ -364,9 +377,9 @@ def evalSimpTrace : Tactic := fun stx => withMainContext do
   if c.unknownEq > 0 then
     logInfo m!"simp_trace: {c.unknownEq} `eq` step(s) with by=\"unknown\""
 where
-  /-- The `(out := "...")` path, when given. -/
+  /-- The `(out := "...")` path, when given.  The clause is the last slot. -/
   outPath? (stx : Syntax) : Option String :=
-    if stx[1].isNone then none
-    else (stx[1][3].isStrLit?)
+    if stx[6].isNone then none
+    else stx[6][0][2].isStrLit?
 
 end ExplicitLean.SimpTrace

@@ -117,7 +117,13 @@ private def classify (before after : Expr) (usedBefore usedAfter : Simp.UsedSimp
   -- actually fired, so a single firing can add more than one origin.  The
   -- rewrite we are recording is the last origin registered.
   if newOnes.isEmpty then
-    if before == after then .defeq else .unattributed
+    if before == after then .defeq
+    -- `simpUsingDecide` (`+decide` / `Simp.Config.decide`) closes a proposition
+    -- by decidability without registering any theorem, so the firing looks
+    -- unattributed.  It is a computed equation: route it to `mkEqStep`, whose
+    -- scratch check confirms `decide` actually proves it.
+    else if after.isTrue || after.isFalse then .proc none
+    else .unattributed
   else
     match newOnes[newOnes.size - 1]! with
     | .decl n p inv => .thm (.decl n p inv) inv
@@ -245,8 +251,13 @@ def instrumentDischarge (ref : RecorderRef) (d : Simp.Discharge) : Simp.Discharg
 def mkRecordingMethods (ref : RecorderRef) (simprocs : Simp.SimprocsArray)
     (discharge? : Option Simp.Discharge) : Simp.Methods :=
   let d : Simp.Discharge := discharge?.getD Simp.dischargeDefault?
+  -- Mirror stock simp exactly: `simpCore` uses `mkDefaultMethodsCore`
+  -- (`wellBehavedDischarge := true`) when no custom discharger is given, and
+  -- `false` only for a user discharger.  Hardcoding `false` would force
+  -- `withFreshCache` on every implication descent, changing which subterms simp
+  -- revisits and so the trace itself.
   let base := Simp.mkMethods simprocs (instrumentDischarge ref d)
-    (wellBehavedDischarge := false)
+    (wellBehavedDischarge := discharge?.isNone)
   { base with
     pre := instrument ref "pre" base.pre
     post := instrument ref "post" base.post

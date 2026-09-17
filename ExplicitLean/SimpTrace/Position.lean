@@ -228,6 +228,9 @@ def reduceHere? (e : Expr) : MetaM (Option Expr) := do
   -- Beta.
   if e.isApp && e.getAppFn.isLambda then
     return some e.headBeta
+  -- Zeta: `let x := v; b` becomes `b[v/x]`.
+  if let .letE _ _ v b _ := e then
+    return some (b.instantiate1 v)
   -- Projection.
   if e.isProj then
     if let some e' ← reduceProj? e then return some e'
@@ -315,15 +318,17 @@ def solvePositions (baseLCtx : LocalContext) (pre : Expr) (raws : Array RawStep)
     -- The recorded `before` may predate child rewrites simp has already made.
     -- Refresh it against what we have already replayed, then search.
     let refreshed := refresh raw.before applied
+    let direct := findOccurrences running raw.before simpFVars ctxDepth
+    -- A refreshed term equal to the step's own `after` would make the step a
+    -- no-op: the replayed child rewrites already produced the result, so the
+    -- real firing is elsewhere (typically behind a definitional reduction).
+    let refreshUsable := refreshed != raw.after
     let occs :=
-      let direct := findOccurrences running raw.before simpFVars ctxDepth
-      if direct.isEmpty then
+      if direct.isEmpty && refreshUsable then
         findOccurrences running refreshed simpFVars ctxDepth
       else direct
     let effectiveBefore :=
-      if (findOccurrences running raw.before simpFVars ctxDepth).isEmpty then
-        refreshed
-      else raw.before
+      if direct.isEmpty && refreshUsable then refreshed else raw.before
     let mut occs := occs
     let mut effectiveBefore := effectiveBefore
     if occs.isEmpty then
