@@ -236,7 +236,12 @@ private def describeProof (proof : Expr) (nested : Array RawStep) :
       else if proof.isAppOf ``eq_true_of_decide then return (some "decide", nested)
       else if proof.isAppOf ``trivial || proof.isAppOf ``True.intro then
         return (some "true_intro", nested)
-      else return (some "unknown", nested)
+      else
+        -- Same policy as the main trace: a close we cannot name is an error,
+        -- never a value the spec does not define and replay cannot execute.
+        throwError "simp_trace: side condition discharged by a proof whose \
+          closing form is not one of the spec's (rfl, true_intro, \
+          assumption:<name>, absurd:<hyp>, decide)\n  proof: {proof}"
     else
       -- The recorded steps reduced the side goal to `True`; closing it is then
       -- `True.intro`, and the steps are the actual discharge.

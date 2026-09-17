@@ -44,7 +44,7 @@ Delimiter choice is what makes `simp_trace` substitutable for `simp`.  A
 `(out := ...)` is swallowed by `optConfig` when no other argument precedes it,
 and a bare trailing `out := ...` is swallowed by the `location` parser in
 `simp_trace ... at h`.  A distinct leading keyword is unambiguous everywhere. -/
-syntax simpTraceOut := " with_trace " str
+syntax simpTraceOut := &" with_trace " str
 
 syntax (name := simpTrace) "simp_trace" optConfig
   (discharger)? (&" only")?
@@ -192,14 +192,19 @@ where
         | some d =>
           let n := d.userName
           let inaccessible := n.isInaccessibleUserName || n.hasMacroScopes
-          -- Display form: strip macro scopes so the name is the one a reader
-          -- (and `rename_i`) sees, e.g. `a✝` rather than the hygienic form.
-          let display := n.eraseMacroScopes.toString
+          -- `name` must be the form the pretty-printer shows, e.g. `a✝`.
+          -- Never `eraseMacroScopes`: for an inaccessible `a✝` it yields plain
+          -- `a`, which in the same context usually denotes a *different*,
+          -- accessible local — a name that silently resolves to the wrong
+          -- hypothesis.  `local.userName` keeps the raw user name, and
+          -- `ctxIndex` disambiguates; a generator binds it with `rename_i`.
+          let display ← withLCtx lctx insts do
+            pure (← ppExpr (mkFVar fvarId)).pretty
           if contextualFVars.contains fvarId then
             return (display, false, some (.contextual d.index))
           else
             return (display, false,
-              some (.ordinary display inaccessible d.index))
+              some (.ordinary n.toString inaccessible d.index))
         | none => return (fvarId.name.toString, false, none)
     | .stx _ ref =>
       -- `simp [← h]`-style arguments carry their own syntax.
@@ -292,24 +297,33 @@ partial def findPackageRoot : IO (Option System.FilePath) := do
 /-- Resolve and validate an `out :=` path, or throw. -/
 def resolveOutPath (path : String) : MetaM System.FilePath := do
   let raw : System.FilePath := path
-  let absolute ← if raw.isAbsolute then pure raw else do
-    pure ((← IO.currentDir) / raw)
+  let cwd ← IO.currentDir
+  let absolute := if raw.isAbsolute then raw else cwd / raw
+  let some parent := absolute.parent
+    | throwError "simp_trace: out path has no parent directory: {path}"
+  -- Create the parent so it can be resolved, then compare *resolved* paths.
+  -- Textual `..` collapsing does not see through a symlink, so a symlink
+  -- anywhere under the root would otherwise be a write primitive to any path
+  -- on the machine.
+  IO.FS.createDirAll parent
+  let realParent ← try IO.FS.realPath parent catch _ => pure parent
+  let target := realParent / (absolute.fileName.getD "trace.json")
   let mut roots : Array System.FilePath := #[]
   if let some packageRoot ← findPackageRoot then
-    roots := roots.push packageRoot
+    roots := roots.push (← try IO.FS.realPath packageRoot catch _ => pure packageRoot)
   if let some envRoot ← IO.getEnv outRootEnvVar then
     if !envRoot.isEmpty then
-      roots := roots.push envRoot
+      let envPath : System.FilePath := envRoot
+      roots := roots.push (← try IO.FS.realPath envPath catch _ => pure envPath)
   if roots.isEmpty then
     throwError "simp_trace: no package root found (no lakefile.toml above the \
       working directory) and {outRootEnvVar} is unset; cannot place {path}"
-  unless roots.any (isInside · absolute) do
+  unless roots.any (isInside · target) do
     throwError "simp_trace: refusing to write outside the package root\n\
-      out:   {path}\n  permitted roots: {roots.map (·.toString)}\n\
+      out:      {path}\n  resolves to: {target}\n\
+      permitted roots: {roots.map (·.toString)}\n\
       Set {outRootEnvVar} to permit another directory."
-  if let some parent := absolute.parent then
-    IO.FS.createDirAll parent
-  return absolute
+  return target
 
 /-! ### The tactic -/
 

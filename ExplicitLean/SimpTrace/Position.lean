@@ -225,12 +225,17 @@ structure Bridge where
 /-- One definitional reduction at the head of `e`, or `none`.  These are the
 reductions `Simp.reduceStep` performs outside `Methods`. -/
 def reduceHere? (e : Expr) : MetaM (Option Expr) := do
+  -- A subterm taken from under a binder carries loose bound variables.  `whnf`
+  -- and `unfoldDefinition?` panic on those, so only the syntactic reductions
+  -- (beta, zeta) are safe there; anything needing the elaborator is skipped.
+  let loose := e.hasLooseBVars
   -- Beta.
   if e.isApp && e.getAppFn.isLambda then
     return some e.headBeta
   -- Zeta: `let x := v; b` becomes `b[v/x]`.
   if let .letE _ _ v b _ := e then
     return some (b.instantiate1 v)
+  if loose then return none
   -- Projection.
   if e.isProj then
     if let some e' ← reduceProj? e then return some e'
@@ -242,20 +247,15 @@ def reduceHere? (e : Expr) : MetaM (Option Expr) := do
       return some e'.headBeta
   return none
 
-/--
-Find a single definitional reduction in `running` that makes `target` appear.
-We try each position, reduce its subterm, and accept the first reduction that
-yields a running term in which `target` occurs.
--/
-partial def findBridge? (running target : Expr) (simpFVars : Array FVarId) :
-    MetaM (Option Bridge) :=
-  go running #[]
+/-- Every position in `e` at which a definitional reduction applies, with the
+reduced subterm.  Pre-order, so outermost reductions are tried first. -/
+partial def reducibleSites (e : Expr) : MetaM (Array (Pos × Expr × Expr)) := do
+  go e #[]
 where
-  go (e : Expr) (pos : Pos) : MetaM (Option Bridge) := do
+  go (e : Expr) (pos : Pos) : MetaM (Array (Pos × Expr × Expr)) := do
+    let mut acc : Array (Pos × Expr × Expr) := #[]
     if let some e' ← reduceHere? e then
-      let candidate := (replaceAt? running pos e').getD running
-      if !(findOccurrences candidate target simpFVars).isEmpty then
-        return some { pos, before := e, after := e' }
+      acc := acc.push (pos, e, e')
     let children : Array (Nat × Expr) :=
       match e with
       | .app f a => #[(0, f), (1, a)]
@@ -266,9 +266,40 @@ where
       | .proj _ _ b => #[(0, b)]
       | _ => #[]
     for (i, c) in children do
-      if let some br ← go c (pos.push i) then
-        return some br
-    return none
+      acc := acc ++ (← go c (pos.push i))
+    return acc
+
+/--
+Find a *sequence* of definitional reductions that makes `target` reachable in
+`running`, or `none`.
+
+A single-reduction probe is not enough.  Mathlib routinely stacks
+`@[reducible]`/`abbrev` definitions, so exposing a recorded subterm can need
+several delta steps composed at the same position (`g3 n` to `g2 n` to `g1 n` to
+`n`), interleaved with beta/zeta/proj.  We therefore search breadth-first over
+reduction sequences, bounded by `fuel`, and return the whole chain in order so
+each link is emitted as its own step.
+-/
+partial def findBridgeChain? (running target : Expr) (simpFVars : Array FVarId)
+    (ctxDepth : Nat) (fuel : Nat) : MetaM (Option (Array Bridge)) := do
+  -- Frontier of (term, reductions taken to reach it).  Breadth-first keeps the
+  -- chain shortest, so we never emit reductions simp did not need.
+  let mut frontier : Array (Expr × Array Bridge) := #[(running, #[])]
+  let mut seen : Array Expr := #[running]
+  for _ in [0:fuel] do
+    let mut next : Array (Expr × Array Bridge) := #[]
+    for (term, chain) in frontier do
+      for (pos, before, after) in ← reducibleSites term do
+        let some candidate := replaceAt? term pos after | continue
+        let chain' := chain.push { pos, before, after }
+        if !(findOccurrences candidate target simpFVars ctxDepth).isEmpty then
+          return some chain'
+        unless seen.contains candidate do
+          seen := seen.push candidate
+          next := next.push (candidate, chain')
+    if next.isEmpty then return none
+    frontier := next
+  return none
 
 /-! ### Trace assembly -/
 
@@ -278,22 +309,19 @@ structure SolvedStep where
   raw : RawStep
   deriving Inhabited
 
-/-- Repeatedly bridge definitional gaps until `target` is reachable, up to a
-small bound.  Exhausting the bound throws a distinct error: reporting an empty
-result here would surface later as "cannot locate recorded subterm" and send a
-reader looking for a missing term rather than a non-converging reduction. -/
-partial def collectBridges (running target : Expr) (simpFVars : Array FVarId)
+/-- Bridge the definitional gap to `target`, returning the reductions in order.
+Exhausting the bound throws a distinct error: returning an empty result would
+surface later as "cannot locate recorded subterm" and send a reader looking for
+a missing term rather than a non-converging reduction. -/
+def collectBridges (running target : Expr) (simpFVars : Array FVarId)
     (ctxDepth : Nat) (fuel : Nat := 32) : MetaM (Array Bridge) := do
-  if fuel == 0 then
-    throwError "simp_trace: definitional bridge search exceeded its bound of 32 \
-      reductions without reaching the recorded subterm\n\
-      target:  {target}\nrunning: {running}"
   if !(findOccurrences running target simpFVars ctxDepth).isEmpty then return #[]
-  match ← findBridge? running target simpFVars with
-  | none => return #[]
-  | some br =>
-    let some next := replaceAt? running br.pos br.after | return #[br]
-    return #[br] ++ (← collectBridges next target simpFVars ctxDepth (fuel - 1))
+  match ← findBridgeChain? running target simpFVars ctxDepth fuel with
+  | some chain => return chain
+  | none =>
+    throwError "simp_trace: no sequence of at most {fuel} definitional \
+      reductions reaches the recorded subterm\n\
+      target:  {target}\nrunning: {running}"
 
 /--
 Solve positions for `raws` against the location's pre-term `pre`, returning the
