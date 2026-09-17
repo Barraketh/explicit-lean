@@ -118,18 +118,20 @@ inductive SideRec where
   /-- `intros` are the antecedents introduced before the steps, for an
   implication-shaped congruence hypothesis (`c → x = u`); spec 2e73661. -/
   | mk (goal : Expr) (events : Array Event) (by_ : Option String) (ctx : EvCtx)
-       (intros : Array String)
+       (intros : Array String) (pre : Expr) (post? : Option Expr)
 
 end
 
 instance : Inhabited Event := ⟨Event.introCtx #[] default {}⟩
-instance : Inhabited SideRec := ⟨SideRec.mk default #[] none {} #[]⟩
+instance : Inhabited SideRec := ⟨SideRec.mk default #[] none {} #[] default none⟩
 
-def SideRec.goal : SideRec → Expr | SideRec.mk g _ _ _ _ => g
-def SideRec.events : SideRec → Array Event | SideRec.mk _ e _ _ _ => e
-def SideRec.by_ : SideRec → Option String | SideRec.mk _ _ b _ _ => b
-def SideRec.evCtx : SideRec → EvCtx | SideRec.mk _ _ _ c _ => c
-def SideRec.intros : SideRec → Array String | SideRec.mk _ _ _ _ i => i
+def SideRec.goal : SideRec → Expr | SideRec.mk g _ _ _ _ _ _ => g
+def SideRec.events : SideRec → Array Event | SideRec.mk _ e _ _ _ _ _ => e
+def SideRec.by_ : SideRec → Option String | SideRec.mk _ _ b _ _ _ _ => b
+def SideRec.evCtx : SideRec → EvCtx | SideRec.mk _ _ _ c _ _ _ => c
+def SideRec.intros : SideRec → Array String | SideRec.mk _ _ _ _ i _ _ => i
+def SideRec.pre : SideRec → Expr | SideRec.mk _ _ _ _ _ p _ => p
+def SideRec.post? : SideRec → Option Expr | SideRec.mk _ _ _ _ _ _ p => p
 
 /-- Re-root an event's position under `base`.  Used to place events captured
 relative to a subterm back at their absolute positions. -/
@@ -582,7 +584,13 @@ def dsimpReduceT (ref : TraceRef) (pos : Pos) : DSimproc := fun e => do
     let eNew' ← reduceFVar' (← Simp.getConfig) (← Simp.getSimpTheorems) eNew
     if eNew' != eNew then
       -- Unfolding a `let`-bound local is zeta-delta: the spec's `zeta` kind.
-      ref.modify (·.push (.defeq pos .zeta none eNew eNew' (← captureEvCtx ref)))
+      -- Name the local that was unfolded — stock `reduceFVar'` knows it and
+      -- records it, and without it a replayer sees `zeta` at an fvar position
+      -- with nothing saying which local it was (REVIEW-6 6).
+      let unfolded ← match eNew with
+        | .fvar fvarId => do pure (some (← fvarId.getDecl).userName)
+        | _ => pure none
+      ref.modify (·.push (.defeq pos .zeta unfolded eNew eNew' (← captureEvCtx ref)))
       eNew := eNew'
   if eNew != e then return .visit eNew else return .done e
 
@@ -1045,9 +1053,12 @@ partial def processCongrHypothesisT (ref : TraceRef) (thmName : Name)
       -- found for `name`.  `ppExpr` gives the `a✝` form a generator can bind.
       let intros ← xs.mapM fun x => do
         pure (← ppExpr x).pretty
+      -- `pre`/`post` for the side goal (spec e95c745): a congruence hypothesis
+      -- establishes `lhs = r.expr`, so its own goal runs from `lhs` to the
+      -- simplified form, which is what a replayer has to reach.
       let side : SideRec :=
         .mk goal evs (if evs.isEmpty then some "rfl" else none)
-          (← captureEvCtx ref) intros
+          (← captureEvCtx ref) intros lhs (some r.expr)
       return (progress, some side)
 
 /-- SOURCE: Main.lean:586-635 `Simp.trySimpCongrTheorem?`, position-threaded.
@@ -1105,7 +1116,8 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
       unless eNew == e do
         let sidesFinal ← sides.mapM fun sd => do
           pure (SideRec.mk (← instantiateMVars sd.goal) sd.events sd.by_
-            sd.evCtx sd.intros)
+            sd.evCtx sd.intros (← instantiateMVars sd.pre)
+            (← sd.post?.mapM instantiateMVars))
         ref.modify (·.push
           (.rw pos (.decl c.theoremName true false) false none e eNew
             (← captureEvCtx ref) #[] sidesFinal (some `congr)
@@ -1352,7 +1364,10 @@ partial def simpStepT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Resul
   | .fvar ..     =>
     let e' ← reduceFVar' (← Simp.getConfig) (← Simp.getSimpTheorems) e
     unless e' == e do
-      ref.modify (·.push (.defeq pos .zeta none e e' (← captureEvCtx ref)))
+      let unfolded ← match e with
+        | .fvar fvarId => do pure (some (← fvarId.getDecl).userName)
+        | _ => pure none
+      ref.modify (·.push (.defeq pos .zeta unfolded e e' (← captureEvCtx ref)))
     return { expr := e' }
 
 /-- SOURCE: Main.lean:677-712 `Simp.simpLoop`, position-threaded.

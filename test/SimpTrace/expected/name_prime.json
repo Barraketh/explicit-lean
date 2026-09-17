@@ -9,25 +9,29 @@
       },
       "steps": [
         {
-          "kind": "congr",
+          "kind": "rw",
+          "pos": [
+            0,
+            1,
+            0,
+            1
+          ],
+          "name": "h'",
+          "dir": "fwd",
+          "local": {
+            "userName": "h'",
+            "inaccessible": false,
+            "ctxIndex": 3
+          }
+        },
+        {
+          "kind": "rw",
           "pos": [
             0,
             1
           ],
-          "arg": 3,
-          "steps": [
-            {
-              "kind": "rw",
-              "pos": [],
-              "name": "hfa",
-              "dir": "fwd",
-              "local": {
-                "userName": "hfa",
-                "inaccessible": false,
-                "ctxIndex": 6
-              }
-            }
-          ]
+          "name": "add_zero",
+          "dir": "fwd"
         },
         {
           "kind": "rw",

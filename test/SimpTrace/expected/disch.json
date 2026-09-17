@@ -17,7 +17,12 @@
             1
           ],
           "name": "h",
-          "dir": "fwd"
+          "dir": "fwd",
+          "local": {
+            "userName": "h",
+            "inaccessible": false,
+            "ctxIndex": 3
+          }
         },
         {
           "kind": "rw",

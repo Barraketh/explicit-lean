@@ -20,6 +20,8 @@
           "side": [
             {
               "goal": "r = r",
+              "pre": "r",
+              "post": "r",
               "close": {
                 "by": "rfl"
               },
@@ -30,13 +32,20 @@
             },
             {
               "goal": "p = q",
+              "pre": "p",
+              "post": "q",
               "close": null,
               "steps": [
                 {
                   "kind": "rw",
                   "pos": [],
                   "name": "hpq",
-                  "dir": "fwd"
+                  "dir": "fwd",
+                  "local": {
+                    "userName": "hpq",
+                    "inaccessible": false,
+                    "ctxIndex": 4
+                  }
                 }
               ]
             }

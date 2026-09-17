@@ -88,6 +88,10 @@ structure Step where
 /-- A side-condition sub-trace: the same `steps`/`close` shape as a location. -/
 structure SideTrace where
   goal  : String
+  /-- Like a location, the side goal before and after its steps; `post?` is
+  `none` when the side goal was closed (spec e95c745). -/
+  pre   : String := ""
+  post? : Option String := none
   steps : Array Step := #[]
   close : Option CloseInfo := none
   /-- Antecedents introduced before the steps, for an implication-shaped
@@ -192,6 +196,8 @@ partial def Step.toJson (s : Step) : String :=
 partial def SideTrace.toJson (t : SideTrace) : String :=
   obj #[
     ("goal", some (str t.goal)),
+    ("pre", some (str t.pre)),
+    ("post", some (match t.post? with | none => "null" | some p => str p)),
     ("intros", if t.intros.isEmpty then none else some (strArray t.intros)),
     ("steps", some ("[" ++ String.intercalate ","
       (t.steps.toList.map Step.toJson) ++ "]")),

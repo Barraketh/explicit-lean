@@ -77,39 +77,50 @@ if what remains is neither `Eq` nor `Iff`, the lemma is Prop-valued.  `after`
 then says which of `True`/`False` simp rewrote to.
 -/
 
+/-- The local a stored simp-theorem proof was built from, if any.
+
+simp wraps a hypothesis before storing it: `h : p` becomes `eq_true h`, `h : ¬p`
+becomes `eq_false h`, an `Iff` becomes `propext h`, a conjunct becomes
+`And.left h`.  Each wrapper takes the proof it wraps as its last explicit
+argument, so recursing there reaches the hypothesis. -/
+partial def proofFVar? (proof : Expr) : Option FVarId :=
+  match proof.getAppFn with
+  | .fvar fvarId => some fvarId
+  | .const n _ =>
+    if n == ``eq_true || n == ``eq_false || n == ``propext
+       || n == ``And.left || n == ``And.right || n == ``Iff.mp
+       || n == ``Iff.mpr || n == ``Eq.symm || n == ``of_eq_true then
+      if proof.getAppNumArgs == 0 then none else proofFVar? proof.appArg!
+    else none
+  | _ => none
+
 /--
 Resolve an `Origin.stx` to the local hypothesis it elaborated to, when it is one.
 
-When the user writes `simp [h]` for a local `h`, simp records the origin as the
-*syntax* the user wrote, not `Origin.fvar`; via `simp [*]` the same rewrite
-records an `Origin.fvar`. The spec is unconditional — a rewrite by a local
-hypothesis carries the `local` object and, when the lemma is Prop-valued, the
-`prop` flag — so the two forms must not disagree (REVIEW-5 1). `simp [h]` is the
-dominant shape in Mathlib.
+`simp [h]` records the *syntax* the user wrote; `simp [*]` records an
+`Origin.fvar`.  The spec is unconditional — a rewrite by a local hypothesis
+carries the `local` object and, when Prop-valued, the `prop` flag — so the two
+forms must not disagree.
 
-The simp theorem carrying this origin has the hypothesis as its `proof` (or as
-the head of an application of it), so this is a lookup rather than a search.
+The fvar is read off the simp theorem's **proof term**, never guessed from the
+syntax's characters: a character whitelist dropped every non-ASCII name (`hα`,
+`h₃`, `«quoted»`), losing `local` and `prop` for names Mathlib uses constantly
+(REVIEW-6 1).  Matching is on `Origin.stx`'s unique `id` rather than structural
+`==`, because `Origin` compares its stored `Syntax` and the trace's copy is not
+the tree's.
 -/
-def resolveStxOrigin (o : Origin) (lctx : LocalContext) : Simp.SimpM Origin := do
-  let .stx _ ref := o | return o
-  -- The syntax the user wrote is an identifier when the argument is a
-  -- hypothesis (`simp [h]`, `simp [← h]`); strip a leading arrow and look the
-  -- name up in the local context that was live at the firing.  This is a
-  -- lookup, not a search: scanning the theorem trees would be a 20 000-entry
-  -- walk per step, and matching `Origin` structurally does not work anyway
-  -- because the stored `Syntax` differs from the trace's copy.
-  let txt := ref.prettyPrint.pretty.trimAscii.toString
-  let txt := if txt.startsWith "←" then (txt.drop 1).trimAscii.toString
-    else if txt.startsWith "<-" then (txt.drop 2).trimAscii.toString
-    else txt
-  -- An argument that is not a bare identifier (`simp [foo a b]`, a term) names
-  -- no single hypothesis, so it is left as it is.
-  unless txt.all (fun c => c.isAlphanum || c == '_' || c == '\'' || c == '!'
-      || c == '?' || c == '\u2080' || c == '\u2081' || c == '\u2082') do
-    return o
-  match lctx.findFromUserName? (Name.mkSimple txt) with
-  | some decl => return .fvar decl.fvarId
-  | none => return o
+def resolveStxOrigin (o : Origin) : Simp.SimpM Origin := do
+  let .stx id _ := o | return o
+  for thms in (← readThe Simp.Context).simpTheorems do
+    for sthm in thms.pre.values ++ thms.post.values do
+      if let .stx id' _ := sthm.origin then
+        if id' == id then
+          match proofFVar? sthm.proof with
+          | some fvarId => return .fvar fvarId
+          -- The argument elaborated to something that is not a local (a term,
+          -- a global applied to arguments): leave the origin as written.
+          | none => return o
+  return o
 
 /-- Is this origin's statement an equation or an iff (after its binders)? -/
 def originIsEquational (o : Origin) (lctx : LocalContext) (insts : LocalInstances) :
@@ -168,7 +179,7 @@ arguments are unification's business and are not checked.
 inductive ProofShape where
   /-- One lemma applied; `name` is it.  `proofArgs` are the explicit arguments
   that are proofs, i.e. the conditions the discharger established. -/
-  | lemmaApp (name : Name) (proofArgs : Array Expr)
+  | lemmaApp (name : Name) (proofArgs : Array Expr) (inv : Bool := false)
   /-- Anything else: let the `rfl`/`decide` scratch check decide. -/
   | computed
   deriving Inhabited
@@ -184,10 +195,13 @@ argument and that argument is a proof, so the generic walk below happily
 classified `propext h` as a rewrite by `propext` — a step no replayer can
 execute, since `rw [propext]` is not a rewrite. -/
 def isPlumbingHead (n : Name) : Bool :=
-  n == ``Eq.trans || n == ``Eq.mpr || n == ``Eq.mp || n == ``Eq.symm
-  || n == ``id || n == ``of_eq_true || n == ``eq_true || n == ``eq_false
-  || n == ``eq_self || n == ``propext || n == ``Iff.intro || n == ``Iff.mp
-  || n == ``Iff.mpr || n == ``iff_of_eq || n == ``Eq.subst || n == ``Eq.ndrec
+  n == ``Eq.trans || n == ``Eq.symm || n == ``Eq.mpr || n == ``Eq.mp
+  || n == ``propext || n == ``Iff.symm || n == ``Iff.trans || n == ``Iff.intro
+  || n == ``Iff.mp || n == ``Iff.mpr || n == ``Iff.rfl || n == ``Iff.of_eq
+  || n == ``of_eq_true || n == ``of_eq_false || n == ``eq_self
+  || n == ``eq_true || n == ``eq_false || n == ``iff_of_eq
+  || n == ``Eq.ndrec || n == ``Eq.rec || n == ``Eq.subst || n == ``Eq.substr
+  || n == ``id || n == ``trans
 
 /--
 Classify a simproc's proof term per the amended spec.  `target` is the term the
@@ -203,6 +217,18 @@ partial def classifyProof (target : Expr) (proof : Expr) : MetaM ProofShape := d
   -- `by` the scratch check decides (REVIEW-5 2).
   if declName == ``propext && proof.getAppNumArgs == 3 then
     return ← classifyProof target proof.appArg!
+  -- `Iff.symm h` proves the iff in the other direction, so the lemma inside is
+  -- the rewriting one and the rewrite is reversed.  `Iff.trans` composes two
+  -- lemmas and names no single one, so it stays unresolved.
+  if declName == ``Iff.symm && proof.getAppNumArgs == 3 then
+    match ← classifyProof target proof.appArg! with
+    | .lemmaApp n args inv => return .lemmaApp n args (!inv)
+    | .computed => return .computed
+  -- `Eq.symm (propext (L ...))`: one lemma, applied in reverse.
+  if declName == ``Eq.symm && proof.getAppNumArgs == 4 then
+    match ← classifyProof target proof.appArg! with
+    | .lemmaApp n args inv => return .lemmaApp n args (!inv)
+    | .computed => return .computed
   if isPlumbingHead declName then
     return .computed
   let some ci := (← getEnv).find? declName | return .computed
@@ -247,7 +273,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
     | some proof => classifyProof e (← instantiateMVars proof)
     | none => pure .computed
   match shape with
-  | .lemmaApp declName proofArgs =>
+  | .lemmaApp declName proofArgs inv =>
     -- Each proof argument is a condition the simproc established.  We already
     -- captured the discharger's own work as `side`; when we captured none, the
     -- condition came from somewhere else and we must name it honestly.
@@ -257,7 +283,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
       for pa in proofArgs do
         let ty ← instantiateMVars (← inferType pa)
         match ← assumptionName? pa with
-        | some by_ => sides := sides.push (SideRec.mk ty #[] (some by_) evCtx #[])
+        | some by_ => sides := sides.push (SideRec.mk ty #[] (some by_) evCtx #[] ty none)
         | none =>
           -- The condition's proof is a term no close form describes — a
           -- `noConfusion` elimination under a binder, say.  Naming it
@@ -267,12 +293,12 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
           unnamed := unnamed.push txt
           sides := sides.push
             (SideRec.mk ty #[] (some s!"unresolved:condition proof not a \
-              hypothesis or a recorded discharge") evCtx #[])
+              hypothesis or a recorded discharge") evCtx #[] ty none)
     for u in unnamed do
       ref.modify (·.markUnresolved
         s!"simproc:{(src?.map toString).getD declName.toString} side condition \
 `{u}` proved by a term no close form describes")
-    ref.modify (·.push (.rw pos (.decl declName true false) false none
+    ref.modify (·.push (.rw pos (.decl declName true false) inv none
       e r.expr evCtx #[] sides src? (.decl declName true false)))
   | .computed =>
     ref.modify (·.push (.eq pos src? e r.expr evCtx side))
@@ -285,8 +311,12 @@ where
       then pa.appArg! else pa
     match core with
     | .fvar fvarId =>
-      let n := (← fvarId.getDecl).userName
-      return some s!"assumption:{n.eraseMacroScopes}"
+      -- The *display* name, never `eraseMacroScopes`: for an inaccessible `a✝`
+      -- the erased form is plain `a`, which in the same context usually denotes
+      -- a different, accessible local, so a generator emitting `exact a` picks
+      -- the wrong one.  `name`, `intros` and `local` already use the display
+      -- form; `close.by` must agree with them (REVIEW-6 5).
+      return some s!"assumption:{(← ppExpr (mkFVar fvarId)).pretty}"
     | _ =>
       if core.isAppOf ``eq_true_of_decide || core.isAppOf ``of_decide_eq_true then
         return some "decide"
@@ -377,7 +407,8 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         -- condition; naming the `ite` there would misdescribe the side goal.
         let divertedSide : Array SideRec :=
           if diverted.isEmpty then #[]
-          else #[SideRec.mk (divertedGoal?.getD e) diverted (some "true_intro") evCtx #[]]
+          else #[SideRec.mk (divertedGoal?.getD e) diverted (some "true_intro") evCtx #[]
+              (divertedGoal?.getD e) none]
         let news := newOrigins usedBefore usedAfter
         -- `+contextual` registers the antecedent hypothesis alongside the
         -- lemma that fired, so a single firing can add more than one origin;
@@ -407,7 +438,7 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             -- original origin for `name` and `dir`: the syntax is what carries
             -- a leading `←`, and replacing it would silently turn a reverse
             -- rewrite into a forward one.
-            let resolved ← resolveStxOrigin o evCtx.lctx
+            let resolved ← resolveStxOrigin o
             let prop? ← propFlag? resolved r.expr evCtx.lctx evCtx.insts
             ref.modify (·.push
               (.rw pos o inv prop? e r.expr evCtx #[] side none resolved))
@@ -453,15 +484,16 @@ def instrumentD (ref : TraceRef) (p : Simp.DSimproc) : Simp.DSimproc := fun e =>
     if let some e' := changed? then
       let pos ← currentPos ref
       let evCtx ← captureEvCtx ref
-      match news[news.size - 1]! with
-      | .decl n _ _ =>
-        if ← Simp.isSimproc n then
-          ref.modify (·.push (.eq pos (some n) e e' evCtx #[]))
-        else
-          ref.modify (·.push
-            (.rw pos (.decl n true false) false none e e' evCtx #[] #[] none
-              (.decl n true false)))
-      | o => ref.modify (·.push (.rw pos o false none e e' evCtx #[] #[] none o))
+      -- `instrumentD` wraps `dpre`/`dpost`, the **definitional** layer, so a
+      -- firing here is definitional by construction.  The spec (e95c745) makes
+      -- it a `change` carrying the dsimproc's name in `source`; recording it as
+      -- a propositional `eq` or `rw` forces a replayer into a rewrite it cannot
+      -- perform — T2 refused the `dreduce_ite` step outright, because its
+      -- position is the domain of a dependent `∀` (REVIEW-6 4).
+      let src := match news[news.size - 1]! with
+        | .decl n _ _ => some n
+        | _ => none
+      ref.modify (·.push (.defeq pos .change src e e' evCtx))
   return stepResult
 
 /-! ### Dischargers
@@ -483,9 +515,10 @@ def describeProof (proof : Expr) (nested : Array Event)
     Simp.SimpM (String × Array Event × Option String) := do
   match proof with
   | .fvar fvarId =>
-    let n := (← fvarId.getDecl).userName
+    -- The display name, for the reason given at `assumptionName?` above.
+    let display := (← ppExpr (mkFVar fvarId)).pretty
     -- The hypothesis alone proves it; recorded events did not contribute.
-    return (s!"assumption:{n.eraseMacroScopes}", #[], none)
+    return (s!"assumption:{display}", #[], none)
   | _ =>
     if nested.isEmpty then
       if proof.isAppOf ``of_eq_true then return ("rfl", nested, none)
@@ -542,7 +575,7 @@ def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
       let (by_, kept, unresolved?) ← describeProof proof nested dischargerText?
       if let some reason := unresolved? then
         ref.modify (·.markUnresolved reason)
-      let rec_ : SideRec := .mk e kept (some by_) evCtx #[]
+      let rec_ : SideRec := .mk e kept (some by_) evCtx #[] e none
       ref.modify fun s => { s with pendingSide := s.pendingSide.push rec_ }
       return some proof
 

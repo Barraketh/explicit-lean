@@ -20,6 +20,8 @@
           "side": [
             {
               "goal": "false = false",
+              "pre": "false = false",
+              "post": null,
               "close": {
                 "by": "rfl"
               },

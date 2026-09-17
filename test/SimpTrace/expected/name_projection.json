@@ -12,31 +12,21 @@
           "kind": "rw",
           "pos": [
             0,
-            1,
-            0,
             1
           ],
-          "name": "h",
+          "name": "hβ.1",
           "dir": "fwd",
           "local": {
-            "userName": "h",
+            "userName": "hβ",
             "inaccessible": false,
             "ctxIndex": 3
-          }
-        },
-        {
-          "kind": "rw",
-          "pos": [
-            0,
-            1
-          ],
-          "name": "add_zero",
-          "dir": "fwd"
+          },
+          "prop": "true"
         },
         {
           "kind": "rw",
           "pos": [],
-          "name": "eq_self",
+          "name": "and_self",
           "dir": "fwd"
         }
       ]

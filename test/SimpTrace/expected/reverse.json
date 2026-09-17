@@ -17,7 +17,12 @@
             1
           ],
           "name": "h",
-          "dir": "rev"
+          "dir": "rev",
+          "local": {
+            "userName": "h",
+            "inaccessible": false,
+            "ctxIndex": 3
+          }
         },
         {
           "kind": "rw",

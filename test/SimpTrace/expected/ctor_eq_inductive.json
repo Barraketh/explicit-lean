@@ -20,6 +20,8 @@
           "side": [
             {
               "goal": "FixtureColor.red = FixtureColor.green → False",
+              "pre": "FixtureColor.red = FixtureColor.green → False",
+              "post": null,
               "close": {
                 "by": "nofun"
               },

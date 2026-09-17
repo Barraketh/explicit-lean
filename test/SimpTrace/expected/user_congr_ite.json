@@ -20,18 +20,27 @@
           "side": [
             {
               "goal": "p = q",
+              "pre": "p",
+              "post": "q",
               "close": null,
               "steps": [
                 {
                   "kind": "rw",
                   "pos": [],
                   "name": "hpq",
-                  "dir": "fwd"
+                  "dir": "fwd",
+                  "local": {
+                    "userName": "hpq",
+                    "inaccessible": false,
+                    "ctxIndex": 7
+                  }
                 }
               ]
             },
             {
               "goal": "a = b",
+              "pre": "a",
+              "post": "b",
               "close": null,
               "intros": [
                 "a✝"
@@ -45,8 +54,10 @@
                   "side": [
                     {
                       "goal": "q",
+                      "pre": "q",
+                      "post": null,
                       "close": {
-                        "by": "assumption:a"
+                        "by": "assumption:a✝"
                       },
                       "steps": []
                     }
@@ -56,6 +67,8 @@
             },
             {
               "goal": "a = a",
+              "pre": "a",
+              "post": "a",
               "close": {
                 "by": "rfl"
               },

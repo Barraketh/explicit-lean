@@ -6,7 +6,6 @@
         "hyp": "h"
       },
       "closed": false,
-      "close": null,
       "steps": [
         {
           "kind": "rw",

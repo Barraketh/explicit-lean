@@ -245,8 +245,14 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
         { kind := "unfold", pos := pos, name? := unfolded.map toString,
           before? := some beforePP, after? := some afterPP }
       | .change =>
-        -- Filled in below; `pp.all` needs the monad.
-        { kind := "change", pos := pos,
+        -- Filled in below; `pp.all` needs the monad.  `name?` carries the
+        -- dsimproc's name here, which the spec renders as `source` (e95c745).
+        { kind := "change", pos := pos, source? := unfolded.map toString,
+          before? := some beforePP, after? := some afterPP }
+      | .zeta =>
+        -- A `zetaDelta` unfold names the local it replaced, so a replayer knows
+        -- *which* one (REVIEW-6 6); a plain `letE` zeta carries no name.
+        { kind := "zeta", pos := pos, name? := unfolded.map toString,
           before? := some beforePP, after? := some afterPP }
       | k =>
         { kind := k.toString, pos := pos,
@@ -279,7 +285,11 @@ partial def sideToTrace (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
   -- Antecedents an implication-shaped congruence hypothesis introduced before
   -- its steps.  Pretty-printed so a generator can `intro` them by name.
   let intros := r.intros
-  return { goal := goalPP, steps, intros,
+  -- Spec e95c745: a side trace carries `pre`/`post` like a location, so a
+  -- replayer can tell what the side goal started as and what remains.
+  let prePP ← ppIn c r.pre
+  let postPP? ← r.post?.mapM (ppIn c)
+  return { goal := goalPP, pre := prePP, post? := postPP?, steps, intros,
            close := r.by_.map fun b => { by_ := b } }
 
 end

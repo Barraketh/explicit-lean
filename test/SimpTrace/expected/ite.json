@@ -20,6 +20,8 @@
           "side": [
             {
               "goal": "n = 3",
+              "pre": "n = 3",
+              "post": null,
               "close": {
                 "by": "true_intro"
               },
@@ -31,7 +33,12 @@
                     1
                   ],
                   "name": "h",
-                  "dir": "fwd"
+                  "dir": "fwd",
+                  "local": {
+                    "userName": "h",
+                    "inaccessible": false,
+                    "ctxIndex": 2
+                  }
                 },
                 {
                   "kind": "rw",

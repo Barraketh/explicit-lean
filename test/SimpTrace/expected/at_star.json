@@ -6,7 +6,6 @@
         "hyp": "h"
       },
       "closed": false,
-      "close": null,
       "steps": [
         {
           "kind": "rw",
@@ -22,7 +21,6 @@
     {
       "loc": "goal",
       "closed": false,
-      "close": null,
       "steps": [
         {
           "kind": "rw",

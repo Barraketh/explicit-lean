@@ -25,7 +25,12 @@
                   "kind": "rw",
                   "pos": [],
                   "name": "hfa",
-                  "dir": "fwd"
+                  "dir": "fwd",
+                  "local": {
+                    "userName": "hfa",
+                    "inaccessible": false,
+                    "ctxIndex": 8
+                  }
                 }
               ]
             }

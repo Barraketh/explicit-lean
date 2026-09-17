@@ -19,10 +19,12 @@
           "side": [
             {
               "goal": "n ≤ m",
-              "steps": [],
+              "pre": "n ≤ m",
+              "post": null,
               "close": {
                 "by": "assumption:h"
-              }
+              },
+              "steps": []
             }
           ]
         },

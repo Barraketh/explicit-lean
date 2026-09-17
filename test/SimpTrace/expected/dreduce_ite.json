@@ -9,13 +9,12 @@
       },
       "steps": [
         {
-          "kind": "eq",
+          "kind": "change",
           "pos": [
             0,
             1
           ],
-          "source": "dreduceIte",
-          "by": "rfl"
+          "source": "dreduceIte"
         },
         {
           "kind": "unfold",

@@ -336,4 +336,32 @@ one. -/
 example (f : Nat → Nat) : (∀ x : Fin (if True then 3 else 4), f x.val = f x.val) := by
   simp_trace =>trace "test/SimpTrace/out/dreduce_ite.json"
 
+/-! ### Hypothesis names are resolved from the proof term, not from characters
+
+`resolveStxOrigin` reads the fvar off the simp theorem's stored proof, walking
+the wrappers simp adds (`eq_true h`, `And.left h`, ...). A character whitelist
+dropped every non-ASCII name, losing `local` and `prop` for names Mathlib uses
+constantly (REVIEW-6 1). -/
+
+example (a b : Nat) (h₃ : a = b) : a + 0 = b := by
+  simp_trace [h₃] =>trace "test/SimpTrace/out/name_subscript.json"
+
+example (a b : Nat) (hα : a = b) : a + 0 = b := by
+  simp_trace [hα] =>trace "test/SimpTrace/out/name_greek.json"
+
+example (a b : Nat) (h' : a = b) : a + 0 = b := by
+  simp_trace [h'] =>trace "test/SimpTrace/out/name_prime.json"
+
+/-- A projection of a local: the origin resolves through `And.left` to `hβ`,
+so `local` names the hypothesis the projection came from while `name` keeps the
+projection syntax the user wrote. -/
+example (p q : Prop) (hβ : p ∧ q) : p ∧ True := by
+  simp_trace [hβ.1] =>trace "test/SimpTrace/out/name_projection.json"
+
+/-- A Unicode-named inaccessible: `name` is the display form, `local.userName`
+the full hygienic name. -/
+example (pα : Prop) : pα → pα ∧ True := by
+  intro _
+  simp_trace [*] =>trace "test/SimpTrace/out/name_unicode_inaccessible.json"
+
 end ExplicitLean.SimpTrace.Fixtures

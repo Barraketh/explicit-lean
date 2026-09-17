@@ -20,18 +20,27 @@
           "side": [
             {
               "goal": "p = q",
+              "pre": "p",
+              "post": "q",
               "close": null,
               "steps": [
                 {
                   "kind": "rw",
                   "pos": [],
                   "name": "hpq",
-                  "dir": "fwd"
+                  "dir": "fwd",
+                  "local": {
+                    "userName": "hpq",
+                    "inaccessible": false,
+                    "ctxIndex": 5
+                  }
                 }
               ]
             },
             {
               "goal": "f ⋯ = f' h",
+              "pre": "f ⋯",
+              "post": "f' h",
               "close": null,
               "intros": [
                 "h"
@@ -45,6 +54,8 @@
                   "side": [
                     {
                       "goal": "q",
+                      "pre": "q",
+                      "post": null,
                       "close": {
                         "by": "assumption:h"
                       },
@@ -56,6 +67,8 @@
             },
             {
               "goal": "g ⋯ = g' ⋯",
+              "pre": "g ⋯",
+              "post": "g' ⋯",
               "close": null,
               "intros": [
                 "h"
@@ -69,6 +82,8 @@
                   "side": [
                     {
                       "goal": "¬q",
+                      "pre": "¬q",
+                      "post": null,
                       "close": {
                         "by": "rfl"
                       },

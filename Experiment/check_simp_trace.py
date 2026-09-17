@@ -90,7 +90,8 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                         f"{where}.{field}: expected {want[field]!r}, "
                         f"got {got.get(field)!r}",
                     )
-            elif field in got and field in ("name", "dir", "source", "prop"):
+            elif field in got and field in ("name", "dir", "source", "prop",
+                                            "local", "arg"):
                 fail(messages, f"{where}: unexpected {field}={got[field]!r}")
 
         # A `rw` step must name a lemma and a direction; an `eq` step must name
@@ -225,6 +226,21 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                         f"{side_path}.close: expected {ws.get('close')!r}, "
                         f"got {gs.get('close')!r}",
                     )
+                # `pre`/`post` (spec e95c745): a side trace says what its goal
+                # started as and what remains, like a location. Without them a
+                # replayer cannot tell whether the side goal is closed.
+                if "pre" not in gs:
+                    fail(messages, f"{side_path}: side trace has no `pre`")
+                if "post" not in gs:
+                    fail(messages, f"{side_path}: side trace has no `post`")
+                for field in ("pre", "post"):
+                    if field in ws and gs.get(field) != ws.get(field):
+                        fail(
+                            messages,
+                            f"{side_path}.{field}: expected {ws.get(field)!r}, "
+                            f"got {gs.get(field)!r}",
+                        )
+
                 # `intros` (spec 2e73661): the antecedents an implication-shaped
                 # congruence hypothesis introduces before its steps. Each must be
                 # a non-empty name a generator can `intro`.
