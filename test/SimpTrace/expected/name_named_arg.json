@@ -1,0 +1,31 @@
+{
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "a ≍ b ↔ b ≍ a",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
+    {
+     "kind": "rw",
+     "pos": [
+      0,
+      1
+     ],
+     "name": "heq_comm",
+     "dir": "fwd"
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "iff_self",
+     "dir": "fwd"
+    }
+   ]
+  }
+ ]
+}

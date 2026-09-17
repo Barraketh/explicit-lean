@@ -1,0 +1,45 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "(let x := a;\n  f (x + 0)) =\n  let x := a;\n  f x",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "change",
+          "pos": [
+            0,
+            1
+          ],
+          "to": "have x : Nat := a;\nf\n  (@HAdd.hAdd.{0, 0, 0} Nat Nat Nat (@instHAdd.{0} Nat instAddNat) x\n    (@OfNat.ofNat.{0} Nat (nat_lit 0) (instOfNatNat (nat_lit 0))))"
+        },
+        {
+          "kind": "change",
+          "pos": [
+            0,
+            1
+          ],
+          "to": "have x : Nat := a;\nf x"
+        },
+        {
+          "kind": "change",
+          "pos": [
+            1
+          ],
+          "to": "have x : Nat := a;\nf x"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

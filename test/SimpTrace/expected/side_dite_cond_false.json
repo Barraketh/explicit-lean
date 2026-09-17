@@ -1,0 +1,60 @@
+{
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "dite P f g = g h",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
+    {
+     "kind": "rw",
+     "pos": [
+      0,
+      1
+     ],
+     "name": "dite_cond_eq_false",
+     "dir": "fwd",
+     "source": "reduceDIte",
+     "side": [
+      {
+       "goal": "P = False",
+       "pre": "P = False",
+       "post": "False = False",
+       "close": {
+        "by": "rfl"
+       },
+       "intros": [],
+       "steps": [
+        {
+         "kind": "rw",
+         "pos": [
+          0,
+          1
+         ],
+         "name": "h",
+         "dir": "fwd",
+         "prop": "false",
+         "local": {
+          "userName": "h",
+          "inaccessible": false,
+          "ctxIndex": 5
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "eq_self",
+     "dir": "fwd"
+    }
+   ]
+  }
+ ]
+}

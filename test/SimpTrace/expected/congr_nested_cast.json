@@ -1,0 +1,67 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "cast h₂ (cast h₁ (f a)) = cast h₂ (cast h₁ a)",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "congr",
+          "pos": [
+            0,
+            1
+          ],
+          "arg": 3,
+          "steps": [
+            {
+              "kind": "congr",
+              "pos": [],
+              "arg": 3,
+              "steps": [
+                {
+                  "kind": "rw",
+                  "pos": [],
+                  "name": "hfa",
+                  "dir": "fwd",
+                  "local": {
+                    "userName": "hfa",
+                    "inaccessible": false,
+                    "ctxIndex": 8
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "cast_cast",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1
+          ],
+          "name": "cast_cast",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

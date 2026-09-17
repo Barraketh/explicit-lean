@@ -1,0 +1,43 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "(1 = 2) = False",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "eq_false_of_decide",
+          "dir": "fwd",
+          "source": "Nat.reduceEqDiff",
+          "side": [
+            {
+              "goal": "false = false",
+              "pre": "false = false",
+              "post": null,
+              "close": {
+                "by": "rfl"
+              },
+              "steps": []
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

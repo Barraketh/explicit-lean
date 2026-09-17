@@ -1,0 +1,58 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "f a + 0 = g a",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1,
+            0,
+            1
+          ],
+          "name": "h",
+          "dir": "fwd",
+          "local": {
+            "userName": "h",
+            "inaccessible": false,
+            "ctxIndex": 6
+          },
+          "side": [
+            {
+              "goal": "P a",
+              "pre": "P a",
+              "post": null,
+              "close": {
+                "by": "assumption:hp"
+              },
+              "steps": []
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "add_zero",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

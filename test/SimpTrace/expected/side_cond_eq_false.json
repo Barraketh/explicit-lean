@@ -1,0 +1,75 @@
+{
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "(if P ∧ Q then a else b) = b",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
+    {
+     "kind": "rw",
+     "pos": [
+      0,
+      1
+     ],
+     "name": "ite_cond_eq_false",
+     "dir": "fwd",
+     "source": "reduceIte",
+     "args": [
+      "a",
+      "b"
+     ],
+     "side": [
+      {
+       "goal": "(P ∧ Q) = False",
+       "pre": "(P ∧ Q) = False",
+       "post": "False = False",
+       "close": {
+        "by": "rfl"
+       },
+       "intros": [],
+       "steps": [
+        {
+         "kind": "rw",
+         "pos": [
+          0,
+          1,
+          0,
+          1
+         ],
+         "name": "hp",
+         "dir": "fwd",
+         "prop": "false",
+         "local": {
+          "userName": "hp",
+          "inaccessible": false,
+          "ctxIndex": 6
+         }
+        },
+        {
+         "kind": "rw",
+         "pos": [
+          0,
+          1
+         ],
+         "name": "false_and",
+         "dir": "fwd"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "eq_self",
+     "dir": "fwd"
+    }
+   ]
+  }
+ ]
+}

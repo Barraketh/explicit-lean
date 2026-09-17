@@ -1,0 +1,29 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": {
+        "hyp": "hg"
+      },
+      "closed": false,
+      "pre": "P (g a)",
+      "post": "P (a + 0)",
+      "steps": [
+        {
+          "kind": "zeta",
+          "pos": [
+            1,
+            0
+          ],
+          "name": "g"
+        },
+        {
+          "kind": "beta",
+          "pos": [
+            1
+          ]
+        }
+      ]
+    }
+  ]
+}

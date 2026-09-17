@@ -1,0 +1,45 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "(let x := a;\n  f (x + 0)) =\n  let x := a;\n  f x",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "zeta",
+          "pos": [
+            0,
+            1
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1,
+            1
+          ],
+          "name": "add_zero",
+          "dir": "fwd"
+        },
+        {
+          "kind": "zeta",
+          "pos": [
+            1
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "(let x := a;\n    x) +\n    0 =\n  let x := a;\n  x",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "change",
+          "pos": [
+            0,
+            1,
+            0,
+            1
+          ],
+          "to": "have x : Nat := a;\nx"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "add_zero",
+          "dir": "fwd"
+        },
+        {
+          "kind": "change",
+          "pos": [
+            1
+          ],
+          "to": "have x : Nat := a;\nx"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

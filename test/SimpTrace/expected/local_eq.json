@@ -1,0 +1,44 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "a + c = b + c",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1,
+            0,
+            1
+          ],
+          "name": "h",
+          "dir": "fwd",
+          "local": {
+            "userName": "h",
+            "inaccessible": false,
+            "ctxIndex": 4
+          }
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "Nat.add_left_cancel_iff",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

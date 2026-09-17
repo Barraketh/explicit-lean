@@ -1,0 +1,40 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "∀ (x : ℕ), f x + 0 = f x",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            1,
+            0,
+            1
+          ],
+          "name": "add_zero",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1
+          ],
+          "name": "eq_self",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "implies_true",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

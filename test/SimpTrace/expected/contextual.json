@@ -1,0 +1,81 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "p → p ∧ q → q",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "intro_ctx",
+          "pos": [],
+          "name": "a✝"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1,
+            0,
+            0,
+            1
+          ],
+          "name": "a✝",
+          "dir": "fwd",
+          "local": {
+            "contextual": true,
+            "ctxIndex": 3
+          },
+          "prop": "true"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1,
+            0
+          ],
+          "name": "true_and",
+          "dir": "fwd"
+        },
+        {
+          "kind": "intro_ctx",
+          "pos": [
+            1
+          ],
+          "name": "a✝"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1,
+            1
+          ],
+          "name": "a✝",
+          "dir": "fwd",
+          "local": {
+            "contextual": true,
+            "ctxIndex": 4
+          },
+          "prop": "true"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1
+          ],
+          "name": "implies_true",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "implies_true",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

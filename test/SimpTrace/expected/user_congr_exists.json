@@ -1,0 +1,87 @@
+{
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "(∃ x, r) = ∃ x, r",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
+    {
+     "kind": "rw",
+     "pos": [
+      0,
+      1
+     ],
+     "name": "exists_prop_congr",
+     "dir": "fwd",
+     "source": "congr",
+     "side": [
+      {
+       "goal": "r = r",
+       "pre": "r = r",
+       "post": "r = r",
+       "close": {
+        "by": "rfl"
+       },
+       "intros": [
+        "h"
+       ],
+       "steps": []
+      },
+      {
+       "goal": "p = q",
+       "pre": "p = q",
+       "post": "q = q",
+       "close": {
+        "by": "rfl"
+       },
+       "steps": [
+        {
+         "kind": "rw",
+         "pos": [
+          0,
+          1
+         ],
+         "name": "hpq",
+         "dir": "fwd",
+         "local": {
+          "userName": "hpq",
+          "inaccessible": false,
+          "ctxIndex": 4
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "rw",
+     "pos": [
+      0,
+      1
+     ],
+     "name": "exists_prop",
+     "dir": "fwd"
+    },
+    {
+     "kind": "rw",
+     "pos": [
+      1
+     ],
+     "name": "exists_prop",
+     "dir": "fwd"
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "eq_self",
+     "dir": "fwd"
+    }
+   ]
+  }
+ ]
+}

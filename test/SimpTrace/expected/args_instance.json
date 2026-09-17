@@ -1,0 +1,27 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "FixtureTagE k",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "ExplicitLean.SimpTrace.Fixtures.fixtureTagE_lem",
+          "dir": "fwd",
+          "source": "ExplicitLean.SimpTrace.Fixtures.fixtureTagEProc",
+          "args": [
+            "fixtureW2",
+            "k"
+          ]
+        }
+      ]
+    }
+  ]
+}

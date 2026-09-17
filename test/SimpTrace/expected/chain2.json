@@ -1,0 +1,51 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "chain2 n + 0 = n",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "unfold",
+          "pos": [
+            0,
+            1,
+            0,
+            1
+          ],
+          "name": "ExplicitLean.SimpTrace.Fixtures.chain2"
+        },
+        {
+          "kind": "unfold",
+          "pos": [
+            0,
+            1,
+            0,
+            1
+          ],
+          "name": "ExplicitLean.SimpTrace.Fixtures.chain1"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "add_zero",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

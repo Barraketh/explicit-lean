@@ -1,0 +1,37 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "p ∧ True",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "hβ.1",
+          "dir": "fwd",
+          "local": {
+            "userName": "hβ",
+            "inaccessible": false,
+            "ctxIndex": 3
+          },
+          "prop": "true"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "and_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

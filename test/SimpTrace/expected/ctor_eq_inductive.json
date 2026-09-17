@@ -1,0 +1,43 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "(FixtureColor.red = FixtureColor.green) = False",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "eq_false'",
+          "dir": "fwd",
+          "source": "reduceCtorEq",
+          "side": [
+            {
+              "goal": "FixtureColor.red = FixtureColor.green → False",
+              "pre": "FixtureColor.red = FixtureColor.green → False",
+              "post": null,
+              "close": {
+                "by": "nofun"
+              },
+              "steps": []
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

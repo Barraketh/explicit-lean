@@ -1,0 +1,38 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": {
+        "hyp": "h"
+      },
+      "closed": true,
+      "pre": "a ≠ a",
+      "post": null,
+      "close": {
+        "by": "absurd:h"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "ne_eq",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1
+          ],
+          "name": "eq_self",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "not_true_eq_false",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

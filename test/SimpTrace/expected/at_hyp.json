@@ -1,0 +1,24 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": {
+        "hyp": "h"
+      },
+      "closed": false,
+      "pre": "a + 0 = b",
+      "post": "a = b",
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [
+            0,
+            1
+          ],
+          "name": "add_zero",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

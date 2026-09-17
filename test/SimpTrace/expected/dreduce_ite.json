@@ -1,0 +1,62 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "∀ (x : Fin (if True then 3 else 4)), f ↑x = f ↑x",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "change",
+          "pos": [
+            0,
+            1
+          ],
+          "source": "dreduceIte",
+          "to": "@OfNat.ofNat.{0} Nat (nat_lit 3) (instOfNatNat (nat_lit 3))"
+        },
+        {
+          "kind": "unfold",
+          "pos": [
+            1,
+            0,
+            1,
+            1,
+            0,
+            1
+          ],
+          "name": "ite"
+        },
+        {
+          "kind": "unfold",
+          "pos": [
+            1,
+            1,
+            1,
+            0,
+            1
+          ],
+          "name": "ite"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1
+          ],
+          "name": "eq_self",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "implies_true",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

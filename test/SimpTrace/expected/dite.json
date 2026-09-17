@@ -1,0 +1,69 @@
+{
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "(if x : n = 3 then 1 else 2) = 1",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
+    {
+     "kind": "rw",
+     "pos": [
+      0,
+      1
+     ],
+     "name": "dite_cond_eq_true",
+     "dir": "fwd",
+     "source": "reduceDIte",
+     "side": [
+      {
+       "goal": "(n = 3) = True",
+       "pre": "(n = 3) = True",
+       "post": "True = True",
+       "close": {
+        "by": "rfl"
+       },
+       "steps": [
+        {
+         "kind": "rw",
+         "pos": [
+          0,
+          1,
+          0,
+          1
+         ],
+         "name": "h",
+         "dir": "fwd",
+         "local": {
+          "userName": "h",
+          "inaccessible": false,
+          "ctxIndex": 2
+         }
+        },
+        {
+         "kind": "rw",
+         "pos": [
+          0,
+          1
+         ],
+         "name": "eq_self",
+         "dir": "fwd"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "eq_self",
+     "dir": "fwd"
+    }
+   ]
+  }
+ ]
+}

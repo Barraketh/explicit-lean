@@ -1,0 +1,43 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "cast h (f a) = cast h a",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "congr",
+          "pos": [
+            0,
+            1
+          ],
+          "arg": 3,
+          "steps": [
+            {
+              "kind": "rw",
+              "pos": [],
+              "name": "hfa",
+              "dir": "fwd",
+              "local": {
+                "userName": "hfa",
+                "inaccessible": false,
+                "ctxIndex": 6
+              }
+            }
+          ]
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_self",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}

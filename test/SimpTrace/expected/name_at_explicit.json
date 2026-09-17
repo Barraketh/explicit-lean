@@ -1,0 +1,31 @@
+{
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "(∀ (x : ℕ), x = a → p x) ↔ p a",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
+    {
+     "kind": "rw",
+     "pos": [
+      0,
+      1
+     ],
+     "name": "forall_eq",
+     "dir": "fwd"
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "iff_self",
+     "dir": "fwd"
+    }
+   ]
+  }
+ ]
+}

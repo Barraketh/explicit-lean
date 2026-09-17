@@ -1,0 +1,33 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "pre": "2 + 2 = 4",
+      "post": null,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "eq_true_of_decide",
+          "dir": "fwd",
+          "side": [
+            {
+              "goal": "true = true",
+              "pre": "true = true",
+              "post": null,
+              "close": {
+                "by": "rfl"
+              },
+              "steps": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
