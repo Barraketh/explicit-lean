@@ -41,6 +41,9 @@ terse completion notices, then makes merge and next-dispatch decisions.
   step; the fixed position plus kernel-checked definitional equality is the
   portable contract. Implement after the current T1 round-10 fix to avoid
   overlapping ownership.
+- **T6 multi-invocation design:** read-only diagnosis of all 16 known sites is
+  running in an independent worktree. It must return exact shape groups and a
+  deterministic source transformation before T4 is assigned implementation.
 
 After a slot completes, reuse it immediately for the next independent review or
 fix. The coordinator alone integrates accepted branches and updates this plan.
