@@ -89,10 +89,10 @@ fvar is the local; the applied arguments are what a replayer must supply.
 proof `hp` of its left side, so `appArg!` reaches `hp`, which is not the
 hypothesis the rewrite is by (REVIEW-7 5).  `Eq.symm`/`Iff.symm` are walked but
 flip the direction, for the same reason the simproc path does. -/
-partial def proofLocal? (proof : Expr) : Option (FVarId × Array Expr × Bool) :=
+partial def proofLocal? (proof : Expr) : Option (Origin × Array Expr × Bool) :=
   go proof false
 where
-  go (e : Expr) (inv : Bool) : Option (FVarId × Array Expr × Bool) :=
+  go (e : Expr) (inv : Bool) : Option (Origin × Array Expr × Bool) :=
     match e with
     -- A quantified hypothesis's proof is stored under binders.
     -- A quantified hypothesis's proof is stored under binders.  The arguments
@@ -100,17 +100,24 @@ where
     -- bvars here, not terms a replayer could write; unification recovers them
     -- from the subterm instead, so we keep the local and drop the arguments.
     | .lam _ _ body _ =>
-      (go body inv).map fun (fvarId, _, i) => (fvarId, #[], i)
+      (go body inv).map fun (o, _, i) => (o, #[], i)
     | _ =>
       match e.getAppFn with
-      | .fvar fvarId => some (fvarId, e.getAppArgs, inv)
+      -- A beta-redex: simp stores `(fun x => ...) a`, so look inside the
+      -- function rather than treating the redex as opaque.
+      | .lam .. => go e.getAppFn.headBeta inv
+      | .fvar fvarId => some (.fvar fvarId, e.getAppArgs, inv)
       | .const n _ =>
         if n == ``Eq.symm || n == ``Iff.symm then
           if e.getAppNumArgs == 0 then none else go e.appArg! (!inv)
         else if n == ``eq_true || n == ``eq_false || n == ``propext
                 || n == ``And.left || n == ``And.right || n == ``of_eq_true then
           if e.getAppNumArgs == 0 then none else go e.appArg! inv
-        else none
+        else
+          -- A *global* constant the user applied explicitly (`@xor_not_right a`
+          -- in `simp [← @xor_not_right a]`): a legitimate, replayable origin,
+          -- so it resolves to the declaration rather than being classified.
+          some (.decl n true false, e.getAppArgs, inv)
       | _ => none
 
 /--
@@ -136,7 +143,7 @@ def resolveStxOrigin (o : Origin) :
       if let .stx id' _ := sthm.origin then
         if id' == id then
           match proofLocal? sthm.proof with
-          | some (fvarId, args, inv) => return (.fvar fvarId, args, inv)
+          | some (resolved, args, inv) => return (resolved, args, inv)
           -- The argument elaborated to something that is not a local (a term,
           -- a global applied to arguments): leave the origin as written, and
           -- the caller classifies it — "unresolved" is never a silent pass.

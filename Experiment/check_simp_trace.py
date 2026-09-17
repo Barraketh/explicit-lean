@@ -477,6 +477,8 @@ MEASUREMENT_DIRS = (
      "ExistsUniqueTraced_"),
     ("FunctionBasicTraced", ROOT / "test" / "SimpTrace" / "meas_out",
      "FunctionBasicTraced_"),
+    ("LogicBasicTraced", ROOT / "test" / "SimpTrace" / "meas_out",
+     "LogicBasicTraced_"),
 )
 
 
