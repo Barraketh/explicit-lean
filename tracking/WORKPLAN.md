@@ -67,12 +67,11 @@ terse completion notices, then makes merge and next-dispatch decisions.
   compile plus oracle success. Whole-module failures remain module-scoped and
   per-site attribution requires an isolated successful compile. Implement only
   after T4's current merge gate passes.
-- **T5 cone preflight review 1: one MAJOR, correction dispatched.** The 91-site
-  count, target DAG, seven Option shapes, strict root and sole Relator bridge
-  are confirmed. The design's 908-module source-closure claim is wrong; an
-  independent pinned-source walk finds 61. The correction must distinguish
-  source closure, historical driver cone and artifact staging, emit an exact
-  hashed closure manifest, and return for review 2.
+- **T5 cone preflight review 3: READY.** The accepted contract has 91 sites,
+  seven Option shapes, 69 modules / 134 edges in the complete all-import
+  header closure, a 61-module public-export diagnostic subset, and exactly one
+  non-target bridge (`Relator -> Function.Defs`). The runner must stage/hash
+  the complete closure and pass strict root, lint and T7 oracle gates.
 
 After a slot completes, reuse it immediately for the next independent review or
 fix. The coordinator alone integrates accepted branches and updates this plan.
