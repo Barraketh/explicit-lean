@@ -15,6 +15,26 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 
 ## Next steps (written at session end, 2026-09-16)
 
+### Active resume batch (2026-09-17)
+
+Coordinator-only session; implementation and adversarial review are delegated to
+Luna at high reasoning in the existing task worktrees. Fresh Codex telemetry at
+batch start reports ordinary work available with no rate-limit or spend stop.
+The coordinator reads only committed `RESULT.md` / `REVIEW-*.md` summaries and
+terse completion notices, then makes merge and next-dispatch decisions.
+
+- **T2 review 9:** verify the round-8 axiom-audit, structured sweep-slot,
+  `rename_i`, and step-form-table fixes. Merge gate: no critical or major.
+- **T1 review 10:** verify round-9 trace fidelity and the step-level unresolved
+  contract using end-to-end replay. Merge gate: no critical or major.
+- **T4 fix round 1:** fix every REVIEW-1 item within T4 ownership, rerun focused
+  checks and the six-module harness, then dispatch review 2. Per-branch
+  multiple-invocation rendering remains the next bounded T4 feature after the
+  review fixes pass.
+
+After a slot completes, reuse it immediately for the next independent review or
+fix. The coordinator alone integrates accepted branches and updates this plan.
+
 State at handoff: main branch clean at this commit. Task branches (each in
 `/Users/ptsier/projects/explicit-lean-worktrees/<task>`, all committed, no
 uncommitted work): `task/T1-trace-capture` (recorder, forked simp traversal;
