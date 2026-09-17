@@ -63,6 +63,16 @@ structure DischargeDerivation where
   provenance : String
   deriving Inhabited, Repr
 
+/-! A deliberately small, term-free recipe for the two common conditional
+simprocs.  The selected theorem is named by the rendered `rw` step; this
+record carries only the operational facts needed to audit that selection. -/
+structure SimprocDerivation where
+  source : String
+  redex : Pos
+  branch : String
+  constructor : String
+  deriving Inhabited, Repr
+
 structure RuleDerivation where
   origin : String
   source? : Option String := none
@@ -72,6 +82,7 @@ structure RuleDerivation where
   extraArgs : Nat := 0
   binders : Array BinderDerivation := #[]
   discharge : Array DischargeDerivation := #[]
+  simproc? : Option SimprocDerivation := none
   deriving Inhabited, Repr
 
 mutual
@@ -210,6 +221,10 @@ def BinderDerivation.toJson (b : BinderDerivation) : String :=
 def DischargeDerivation.toJson (d : DischargeDerivation) : String :=
   obj #[ ("binder", some (toString d.binder)), ("provenance", some (str d.provenance)) ]
 
+def SimprocDerivation.toJson (d : SimprocDerivation) : String :=
+  obj #[ ("source", some (str d.source)), ("redex", some (posJson d.redex)),
+    ("branch", some (str d.branch)), ("constructor", some (str d.constructor)) ]
+
 def RuleDerivation.toJson (d : RuleDerivation) : String :=
   obj #[
     ("origin", some (str d.origin)),
@@ -221,7 +236,8 @@ def RuleDerivation.toJson (d : RuleDerivation) : String :=
     ("binders", if d.binders.isEmpty then none else
       some ("[" ++ String.intercalate "," (d.binders.toList.map BinderDerivation.toJson) ++ "]")),
     ("discharge", if d.discharge.isEmpty then none else
-      some ("[" ++ String.intercalate "," (d.discharge.toList.map DischargeDerivation.toJson) ++ "]"))]
+      some ("[" ++ String.intercalate "," (d.discharge.toList.map DischargeDerivation.toJson) ++ "]")),
+    ("simproc", d.simproc?.map SimprocDerivation.toJson)]
 
 mutual
 

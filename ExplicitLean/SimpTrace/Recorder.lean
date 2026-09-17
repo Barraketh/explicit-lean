@@ -404,15 +404,15 @@ def derivationFor (_ref : TraceRef) (o : Origin) (constructionOrigin : Origin)
     (processedType : Expr)
     (redex : Pos) (extraArgs : Nat) (binders : Array BinderDerivation)
     (discharge : Array DischargeDerivation) : Simp.SimpM RuleDerivation := do
-  let sourceArg? ← sourceArgOrdinal? o
-  let source? := match o with
+  let sourceArgOrdinal ← sourceArgOrdinal? o
+  let sourceKind := match o with
     | .stx _ _ => some "simp-argument"
     | .decl _ _ _ => none
     | .fvar _ => some "local-evidence"
     | .other _ => none
   let preprocess ← preprocessOperations constructionOrigin processedType
-  return ⟨originLabel constructionOrigin, source?, sourceArg?, preprocess, redex, extraArgs,
-    binders, discharge⟩
+  return ⟨originLabel constructionOrigin, sourceKind, sourceArgOrdinal, preprocess,
+    redex, extraArgs, binders, discharge, none⟩
 
 /-- A copy of `Simp.tryTheoremCore` with event-time provenance capture. -/
 def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
@@ -517,13 +517,22 @@ def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
         return some result
   return none
 
+def noteProcGoal (ref : TraceRef) (e : Expr) : Simp.SimpM Unit := do
+  ref.modify fun s =>
+    if s.procEvents.size > 0 && s.procGoals.size > 0
+       && (s.procGoals.getD (s.procGoals.size - 1) none).isNone then
+      { s with procGoals := s.procGoals.set! (s.procGoals.size - 1) (some e) }
+    else s
+
 def rewritePreOperational (ref : TraceRef) : Simp.Simproc := fun e => do
+  noteProcGoal ref e
   for thms in (← Simp.getContext).simpTheorems do
     if let some r ← rewriteOperational? ref "pre" e thms.pre thms.erased false then
       return .visit r
   return .continue
 
 def rewritePostOperational (ref : TraceRef) : Simp.Simproc := fun e => do
+  noteProcGoal ref e
   for thms in (← Simp.getContext).simpTheorems do
     if let some r ← rewriteOperational? ref "post" e thms.post thms.erased false then
       return .visit r
@@ -695,16 +704,122 @@ def checkArgsElaborate (declName : Name) (args : Array Expr) : MetaM Bool := do
       pure true
   catch _ => pure false
 
-/--
-Emit the step for a procedure firing, per the amended spec's `eq` bullet: a
-proof that is one lemma applied is an ordinary `rw` naming that lemma, with the
-discharged conditions as `side` entries and `source` naming the simproc;
-anything else stays an `eq`, whose `by` the scratch check decides (and which
-becomes a classified `unresolved:simproc:<name>` when it cannot).
--/
+/-! ### Bounded operational records for `reduceIte`/`reduceDIte`
+
+The built-in procedures simplify their condition with a nested stock `simp`,
+then choose one of four fixed semantic lemmas.  The fork already diverts the
+nested events into `procEvents`; replay those events structurally to identify
+the branch, and record the constructor directly.  This deliberately does not
+look at `Simp.Result.proof?`: the result is used only for the stock parity
+check, while the derivation comes from the procedure's visible redex and the
+condition trace. -/
+
+def eventExprPair? : Event → Option (Expr × Expr)
+  | .rw _ _ _ _ before after .. => some (before, after)
+  | .eq _ _ before after .. => some (before, after)
+  | .defeq _ _ _ before after .. => some (before, after)
+  | .congr _ _ _ before after .. => some (before, after)
+  | .introCtx .. => none
+
+def replayProcCondition (goal : Expr) (nested : Array Event) :
+    Option (Expr × Array Event) := Id.run do
+  let mut current := goal
+  let mut located : Array Event := #[]
+  for ev in nested do
+    let some (before, after) := eventExprPair? ev | return none
+    let some p := uniqueOccurrence? current before | return none
+    let some next := replaceAt? current p after | return none
+    located := located.push (ev.reposition p)
+    current := next
+  return some (current, located)
+
+def mkIteConditionSide (goal : Expr) (truth : Expr) (nested : Array Event)
+    (ctx : EvCtx) : Simp.SimpM (Option (SideRec × Bool)) := do
+  let sideGoal ← mkEq goal truth
+  match replayProcCondition sideGoal nested with
+  | none => return none
+  | some (after, events) =>
+    let by_ ← goalCloseForm? after
+    let complete := by_.isSome
+    let rec_ : SideRec := .mk sideGoal events by_ ctx #[] sideGoal (some after)
+    return some (rec_, complete)
+
+def emitBoundedIteStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
+    (evCtx : EvCtx) (side : Array SideRec) (src : Name)
+    (diverted : Array Event) (procGoal? : Option Expr) : Simp.SimpM Unit := do
+  let isDite := src == ``reduceDIte
+  let constructorTrue := if isDite then ``dite_cond_eq_true else ``ite_cond_eq_true
+  let constructorFalse := if isDite then ``dite_cond_eq_false else ``ite_cond_eq_false
+  let expectedShape := if isDite then "dite" else "ite"
+  let fail (reason : String) := do
+    ref.modify (·.markUnresolved s!"simproc:{src}: {reason}")
+  let (condition, _selected, args) ←
+    if isDite then
+      let_expr dite _ c _ _ _ ← e
+        | fail s!"{expectedShape} redex missing"; return
+      pure (c, r.expr, #[])
+    else
+      let_expr ite _ c _ tb eb ← e
+        | fail s!"{expectedShape} redex missing"; return
+      if r.expr == tb then pure (c, tb, #[tb, eb])
+      else if r.expr == eb then pure (c, eb, #[tb, eb])
+      else fail "result is neither branch"; return
+  let procGoal ← match procGoal? with
+    | some goal => pure goal
+    | none => fail "condition trace missing"; return
+  unless procGoal == condition do
+    fail "condition trace redex mismatch"; return
+  let trueResult := replayProcCondition condition diverted
+  let (conditionAfter, _) ← match trueResult with
+    | some result => pure result
+    | none => fail "condition trace could not be placed"; return
+  let (truth, constructor, branch) ←
+    if conditionAfter.isTrue then pure (mkConst ``True, constructorTrue, "true")
+    else if conditionAfter.isFalse then pure (mkConst ``False, constructorFalse, "false")
+    else fail "condition trace does not close to True or False"; return
+  let (conditionSide, complete) ← match ← mkIteConditionSide condition truth diverted evCtx with
+    | some result => pure result
+    | none => fail "condition evidence missing"; return
+  unless complete do fail "condition evidence is incomplete"
+  let ctx ← captureEvCtx ref
+  let origin : Origin := .decl constructor true false
+  let source := some src
+  let derivation : RuleDerivation :=
+    { origin := "simproc:" ++ src.toString,
+      source? := some "operational",
+      redex := pos,
+      simproc? := some
+        { source := src.toString, redex := pos, branch := branch,
+          constructor := constructor.toString } }
+  ref.modify (·.push (.rw pos origin false none e r.expr ctx args
+    (side.push conditionSide) source origin "" (some derivation)))
+
+/- A cached simproc origin is not added to `usedTheorems` again.  The nested
+condition frame is the identifying signal we retain for these two fixed
+redexes, so recover the bounded source without consulting the result proof. -/
+def inferBoundedIteSource? (e : Expr) (r : Simp.Result)
+    (procGoal? : Option Expr) : Option Name :=
+  if procGoal?.isNone then none
+  else if e.isAppOf ``dite then some ``reduceDIte
+  else if e.isAppOf ``ite then
+    let args := e.getAppArgs
+    if h : args.size >= 5 then
+      let tb := args[3]!
+      let eb := args[4]!
+      if r.expr == tb || r.expr == eb then some ``reduceIte else none
+    else none
+  else none
+
 def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
     (evCtx : EvCtx) (side : Array SideRec) (src? : Option Name)
-    (diverted : Array Event := #[]) : Simp.SimpM Unit := do
+    (diverted : Array Event := #[]) (procGoal? : Option Expr := none) : Simp.SimpM Unit := do
+  -- These two procedures are handled from their redex and diverted condition
+  -- frame.  In particular, do this before the generic proof classifier below:
+  -- their branch proof is not recorder input.
+  if let some src := src? then
+    if src == ``reduceIte || src == ``reduceDIte then
+      emitBoundedIteStep ref pos e r evCtx side src diverted procGoal?
+      return
   let shape ← match r.proof? with
     | some proof => classifyProof e (← instantiateMVars proof)
     | none => pure .computed
@@ -961,7 +1076,7 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             -- untrimmed pair: `emitProcStep` takes the whole `Simp.Result`,
             -- and pairing a trimmed `e` with it would describe two different
             -- terms.
-            emitProcStep ref pos e r evCtx side src rebased
+            emitProcStep ref pos e r evCtx side src rebased divertedGoal?
           else
             -- `simp [h]` records the *syntax* as the origin.  Resolve it to
             -- the hypothesis for the `local` object and the `prop` flag, which
@@ -992,7 +1107,8 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         | none =>
           -- No origin at all: a simproc that registered nothing (`simpUsingDecide`
           -- and the ground arithmetic/matcher simprocs).  Same classification.
-          emitProcStep ref pos e r evCtx side none rebased
+          let bounded? := inferBoundedIteSource? e r divertedGoal?
+          emitProcStep ref pos e r evCtx side bounded? rebased divertedGoal?
     match stepResult with
     | .done r => record r
     | .visit r => record r
