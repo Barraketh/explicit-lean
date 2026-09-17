@@ -6,14 +6,16 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | Task | Scope | Depends on | Status | Branch | Review |
 | --- | --- | --- | --- | --- | --- |
 | T0-remote-host | On demand only: Scaleway GP1-L (32 vCPU, 128 GB, $0.89/hr). Provision only when a local job fails on resources; delete when idle for an extended period and re-provision later | a local resource failure | deferred (user decision 2026-09-16) | | |
-| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | fix round 6 in progress | task/T1-trace-capture | R6: 2 critical (non-ASCII hyp names dropped; explicit class args unrecorded), 3 major, 3 minor; still zero goal divergence |
-| T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 6 in progress | task/T2-explicit-rw | R6: 1 critical (`eq` slot admits sorry), 3 major, 2 minor; recursive side proofs and `congr` kind pending |
+| T1-trace-capture | `simp_trace` tactic: run stock simp with instrumented methods, emit spec-v1 JSON; fixtures + Python validator | spec | review round 7 running | task/T1-trace-capture | R6 fixed; structural rw validation added; pending from T2 R7: `change` steps lack `to`, most locations lack pre/post |
+| T2-explicit-rw | `explicit_rw` positional replay tactic per spec, no simp machinery; fixtures with hand-written traces; conv reference | spec | fix round 7 in progress | task/T2-explicit-rw | R7: 0 critical/major, 3 minor, 1 trivial; integration gate 5/5 traces replay |
 | T3-compliance | Rewrite two `dsimp` overrides; simp-family lint for overrides and generated regions | none | **merged** (af33e32) | task/T3-compliance | R3: NO DEFECTS |
 | T4-pipeline | Per-module driver: capture traces for a module, render `explicit_rw` source with original comment, build, oracle | T1, T2 | planned | | |
 | T5-cone | Run T4 on the seven-module cone (91 calls); record per-call outcomes | T0, T4 | planned | | |
 | T6-readability-pass | Collapse top-level steps to `rw`/`exact`/`change` when re-elaboration matches | T2 | planned | | |
 
 Log (newest first):
+
+- 2026-09-16: T2 round 7: no critical/major; `elabStrict` withstood 8 attacks; `congr` refused every unsound rebuild; 270-probe recursive-slot sweep 0 escapes; integration gate 5/5 T1 traces replay. Two T1-side findings held for T1's next fix round: `change` steps carry no `to`, 59/61 locations omit `pre`/`post`. T1: structural rw validation (re-elaborate every recorded lemma against before/after) added with zero corpus false positives; review round 7 running with a Logic/Basic measurement.
 
 - 2026-09-16: T1 round 6: zero divergence on 20 dsimp-path goals; defects: character-whitelist name resolution (non-ASCII hypotheses), explicit class-typed args unrecorded, plumbing-head list incomplete, dsimproc firings as propositional `eq`, macro-scope erasure in closes. Spec bump e95c745: side traces carry pre/post; dsimproc firings are `change` with `source`. Fix dispatched.
 
