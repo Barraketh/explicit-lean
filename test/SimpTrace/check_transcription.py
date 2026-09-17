@@ -29,6 +29,7 @@ MATHLIB = ROOT / ".lake" / "packages" / "mathlib" / "Mathlib"
 
 # (traced copy under test/SimpTrace/, source under Mathlib/)
 MODULES = (
+    ("OptionBasicTraced.lean", "Data/Option/Basic.lean"),
     ("IsEmptyBasicTraced.lean", "Logic/IsEmpty/Basic.lean"),
     ("NontrivialDefsTraced.lean", "Logic/Nontrivial/Defs.lean"),
     ("FunctionDefsTraced.lean", "Logic/Function/Defs.lean"),

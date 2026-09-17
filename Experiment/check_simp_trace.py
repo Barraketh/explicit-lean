@@ -557,7 +557,8 @@ def check_path_containment(messages: list[str]) -> None:
 # Fixture files that must compile cleanly.  The negative fixtures
 # (`OutsideRoot`, `SymlinkEscape`) are checked separately and are *expected* to
 # fail, so they are not listed here.
-POSITIVE_FIXTURES = ("test/SimpTrace/Fixtures.lean",)
+POSITIVE_FIXTURES = ("test/SimpTrace/Fixtures.lean",
+                     "test/SimpTrace/OptionBasicTraced.lean")
 
 # Fixtures whose calls are classified `unresolved:`, so the file itself exits 1
 # by design.  Their traces are still compared against skeletons; only the exit
@@ -616,6 +617,8 @@ def check_fixture_compiles(messages: list[str]) -> None:
 
 # Directories the measurement modules write to, and the module that writes each.
 MEASUREMENT_DIRS = (
+    ("OptionBasicTraced", ROOT / "test" / "SimpTrace" / "meas_out",
+     "OptionBasicTraced_"),
     ("IsEmptyBasicTraced", ROOT / "test" / "SimpTrace" / "meas_out",
      "IsEmptyBasicTraced_"),
     ("NontrivialDefsTraced", ROOT / "test" / "SimpTrace" / "meas_out",
