@@ -443,4 +443,31 @@ example (p q r : Prop) (h : p ∧ q ∧ r) : q ∧ True := by
 example (P Q : Nat → Prop) (c : Nat) (h : ∀ x, P x ∧ Q x) : P c ∧ True := by
   simp_trace [(h c).1] =>trace "test/SimpTrace/out/local_proj_applied.json"
 
+/-! ### Side goals from conditional rewrites (REVIEW-9 1)
+
+Every side goal is the lemma hypothesis's *instantiated type*, `pre` is its pp,
+positions inside `steps` are relative to that goal, and `close` comes from the
+discharger's actual proof -- `true_intro` only when the goal after the steps is
+literally `True`. These three pin the cases that previously reported a close
+form the goal did not have. -/
+
+/-- `ite_cond_eq_false`: the side goal is `c = False`, discharged from a
+hypothesis, so `close.by` is `assumption:<name>` and not `true_intro`. -/
+example (P : Prop) [Decidable P] (a b : Nat) (h : ¬ P) : (if P then a else b) = b := by
+  simp_trace [h] =>trace "test/SimpTrace/out/side_ite_cond_false.json"
+
+/-- `dite_cond_eq_false`: same condition shape under a *dependent* `if`, where
+the branches bind the condition's proof. -/
+example (P : Prop) [Decidable P] (f : P → Nat) (g : ¬P → Nat) (h : ¬ P) :
+    (dite P f g) = g h := by
+  simp_trace [h] =>trace "test/SimpTrace/out/side_dite_cond_false.json"
+
+/-- A conditional lemma whose side goal is a compound `p = False`: the recorded
+steps rewrite each conjunct, and the close is read off the goal *after* those
+steps (`False = False`, hence `rfl`) rather than off the last step's `after`
+(`False`, which is not a close form at all). -/
+example (P Q : Prop) [Decidable (P ∧ Q)] (a b : Nat) (hp : ¬ P) :
+    (if P ∧ Q then a else b) = b := by
+  simp_trace [hp] =>trace "test/SimpTrace/out/side_cond_eq_false.json"
+
 end ExplicitLean.SimpTrace.Fixtures

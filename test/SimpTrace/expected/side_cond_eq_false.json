@@ -4,7 +4,7 @@
   {
    "loc": "goal",
    "closed": true,
-   "pre": "(if n = 3 then 1 else 2) = 1",
+   "pre": "(if P ∧ Q then a else b) = b",
    "post": null,
    "close": {
     "by": "true_intro"
@@ -16,21 +16,22 @@
       0,
       1
      ],
-     "name": "ite_cond_eq_true",
+     "name": "ite_cond_eq_false",
      "dir": "fwd",
      "source": "reduceIte",
      "args": [
-      "1",
-      "2"
+      "a",
+      "b"
      ],
      "side": [
       {
-       "goal": "(n = 3) = True",
-       "pre": "(n = 3) = True",
-       "post": "True = True",
+       "goal": "(P ∧ Q) = False",
+       "pre": "(P ∧ Q) = False",
+       "post": "False = False",
        "close": {
         "by": "rfl"
        },
+       "intros": [],
        "steps": [
         {
          "kind": "rw",
@@ -38,12 +39,13 @@
           0,
           1
          ],
-         "name": "h",
+         "name": "hp",
          "dir": "fwd",
+         "prop": "false",
          "local": {
-          "userName": "h",
+          "userName": "hp",
           "inaccessible": false,
-          "ctxIndex": 2
+          "ctxIndex": 6
          }
         },
         {
@@ -52,7 +54,7 @@
           0,
           1
          ],
-         "name": "eq_self",
+         "name": "false_and",
          "dir": "fwd"
         }
        ]
