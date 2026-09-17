@@ -53,15 +53,84 @@ listed Mathlib imports may remain byte-identical stock dependency families, but
 must be staged under the translated root rather than resolved from a stock
 Mathlib search root.
 
-`Mathlib.Init` is a broad root. A comment-stripped source import walk from
-these targets reaches 908 distinct Mathlib source modules (including the seven
-targets), so the direct table is not a complete artifact manifest. The
-preflight must either stage the exact `--deps` closure or, more simply, copy the
-pinned stock Mathlib artifact families into the translated root and overwrite
-the seven targets plus the Relator bridge. Do not put a stock directory that
-contains `Mathlib/` later in `LEAN_PATH`: that is a fallback and violates the
-strict import contract. Record every staged non-target family and hash; the
-bridge's output is the only non-target family rebuilt for this cone.
+The reproducible **source-import closure is 61 modules**, including the seven
+targets and `Mathlib.Logic.Relator`. This number is for the pinned source walk
+over `public import` and `public meta import` edges after nested block and line
+comments are removed. It is not the historical **69-module runtime/driver
+cone** in the campaign tracker: that larger list includes execution/driver
+support and is a separate staging input. Nor is it a reason to claim that a
+full copy of every Mathlib artifact family is an exact source closure; full
+family staging is an optional cache/layout optimization.
+
+The implementation must emit `manifest.json` from the actual pinned walk, not
+assume 61 (or 69). The manifest records the sorted module list, every source
+import edge (including import kind), source SHA-256, root/toolchain identity,
+and a SHA-256 of canonical JSON for that closure. If full stock families are
+staged, record their paths and hashes separately from `source_closure`; the
+closure manifest still describes what was resolved. Do not put a stock
+directory that contains `Mathlib/` later in `LEAN_PATH`: that is a fallback and
+violates the strict import contract.
+
+This exact command both reproduces 61 and proves the only non-target source
+edge into a target is `Mathlib.Logic.Relator ->
+Mathlib.Logic.Function.Defs`:
+
+```sh
+python3 -B - <<'PY'
+from pathlib import Path
+import re
+root = Path('/Users/ptsier/projects/explicit-lean-worktrees/T1-trace-capture/.lake/packages/mathlib/Mathlib')
+targets = {
+  'Mathlib.Logic.Basic', 'Mathlib.Logic.ExistsUnique',
+  'Mathlib.Logic.Function.Basic', 'Mathlib.Logic.Function.Defs',
+  'Mathlib.Logic.IsEmpty.Basic', 'Mathlib.Logic.Nontrivial.Defs',
+  'Mathlib.Data.Option.Basic',
+}
+def blank(s):
+  out = list(s); i = 0; depth = 0
+  while i < len(s):
+    if depth:
+      if s.startswith('/-', i): out[i:i+2] = [' '] * 2; i += 2; depth += 1; continue
+      if s.startswith('-/', i): out[i:i+2] = [' '] * 2; i += 2; depth -= 1; continue
+      out[i] = ' '; i += 1; continue
+    if s.startswith('--', i):
+      j = s.find('\n', i); j = len(s) if j < 0 else j
+      out[i:j] = [' '] * (j-i); i = j; continue
+    if s.startswith('/-', i): out[i:i+2] = [' '] * 2; i += 2; depth = 1; continue
+    if s[i] == '"':
+      out[i] = ' '; i += 1
+      while i < len(s):
+        if s[i] == '\\': out[i:i+2] = [' '] * min(2, len(s)-i); i += 2
+        elif s[i] == '"': out[i] = ' '; i += 1; break
+        else: out[i] = ' '; i += 1
+      continue
+    i += 1
+  return ''.join(out)
+def imports(m):
+  p = root / ('/'.join(m.split('.')[1:]) + '.lean')
+  return [(kind, name) for kind, name in re.findall(
+    r'(?m)^\s*(public(?:\s+meta)?\s+import)\s+([A-Za-z0-9_.]+)',
+    blank(p.read_text())) if name.startswith('Mathlib.')]
+seen = set(); todo = sorted(targets); edges = {}
+while todo:
+  m = todo.pop()
+  if m in seen: continue
+  seen.add(m); edges[m] = imports(m)
+  todo += [name for _, name in edges[m] if name not in seen]
+cross = sorted((m, name) for m, es in edges.items() if m not in targets
+               for _, name in es if name in targets)
+assert len(seen) == 61, len(seen)
+assert cross == [('Mathlib.Logic.Relator', 'Mathlib.Logic.Function.Defs')], cross
+print('source_closure_modules=61')
+print('non_target_imports_target=' + repr(cross))
+PY
+```
+
+The seven targets are still compiled in the order above. Recompile the
+Relator bridge after `Function.Defs`; its source edge is the reason a stock
+Relator olean is not valid for the translated root. All other source-closure
+families may remain byte-identical stock inputs, but must be staged under the
+translated root (or resolved from an exact, hashed dependency manifest).
 
 ## Independent site counts
 
@@ -267,6 +336,44 @@ source. A failed whole-module build is not oracle-eligible; clean isolated
 per-site probes are oracle-eligible independently and must each pass before a
 site is reported replayed.
 
+For every target/bridge, the runner must append one `oracle` object to the
+module manifest with these required fields (and no inferred defaults):
+`module`, `role` (`target` or `bridge`), `scope` (`whole_module` or
+`per_site`), `stock_source` and `applied_source` each containing `path` and
+`sha256`, `stock_companion` containing `path` and `sha256`,
+`source_imports` (ordered `{kind,module}` entries), `resolved_imports` (ordered
+`{module,path,sha256,origin}` entries), `oracle_binary` containing `path` and
+`sha256`, `argv`, `log` and `report` each containing `path` and `sha256`,
+`status`, `failure_category`, and `failure_detail`. `report` must retain the
+canonical oracle schema/counts; for a per-site probe also record
+`site_index`, `probe_source` path/hash, and the exact invocation identity.
+Hash the adapter companion after writing it and hash all files after the
+oracle exits. Missing fields, stale hashes, or an unordered/mismatched source
+pair are protocol failures.
+
+The runner-level contract is an exact argv shape, with paths resolved inside a
+fresh run directory:
+
+```text
+run_t5_cone.py --run-dir RUN --source-root RUN/source --olean-root RUN/translated-oleans \
+  --manifest RUN/manifest.json --module Mathlib.Logic.Nontrivial.Defs \
+  --role target --scope whole_module --stock-source STOCK.lean \
+  --applied-source RUN/source/Mathlib/Logic/Nontrivial/Defs.lean \
+  --oracle-mode source_pair_v1
+```
+
+The runner first writes/verifies `stock-with-explicit-rw.lean`, then invokes
+the canonical pinned oracle with this exact inner argv:
+
+```text
+python3 -B Experiment/lean_toolchain_cache.py oracle MODULE STOCK_WITH_EXPLICIT_RW.lean APPLIED.lean
+```
+
+`MODULE`, both source paths, the adapter hash, and oracle binary hash must be
+recorded in the manifest. Whole-module mode uses one such invocation after a
+successful build; per-site mode uses one for each already-clean probe. A
+module/bridge build failure is `not_run`, never a successful oracle result.
+
 ## Acceptance boundary
 
 The cone is accepted only if all 91 sites are inventoried, every Data.Option
@@ -276,4 +383,3 @@ lint is zero for generated executable regions, and each clean module/probe
 passes the declaration/environment/axiom oracle. Any missing Option trace,
 stock-root resolution, stale dependency family, or oracle failure is a
 fail-closed blocker, not a reason to lower the denominator.
-
