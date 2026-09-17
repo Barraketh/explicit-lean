@@ -37,6 +37,11 @@ terse completion notices, then makes merge and next-dispatch decisions.
   injected trace clause inside the comment. Fix top-level comment boundaries,
   preserve the comment after the instrumented call, and require actual emitted
   v2 output before review 13.
+- **T1 v2 review 13: one MAJOR, fix/interface batch running.** The call boundary
+  is fixed, but a second comment masker misreads `--` inside syntax quotations
+  while counting generated clauses. Replace rescanning with the deterministic
+  transform edit ledger and exact generated-file comparison. The same batch
+  adds the explicit-path, non-mutating raw-v1 to final-v2 CLI needed by T4.
 - **T4 review 3: NO DEFECTS in incremental scope.** Marker/lint/source
   preservation attacks and 194 checks pass at `7db88a8`. Do not merge yet: the
   protocol requires a final full merge-gate review, including the six-module
