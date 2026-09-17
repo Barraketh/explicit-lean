@@ -54,12 +54,11 @@ plus the `Function/Basic:390` shape.
 ## Rounds 1-5 fixes (each re-verified by the following reviewer)
 **Round 5** *(4 major, 1 minor)*: the sort productions read their keyword one node
 too shallow, so `Type`/`Type*`/`Sort*` collapsed to `Sort _`, which unifies with
-anything including `Prop`. `iota` used `whnfCore` and reduced many steps where
-the spec says one — now `reduceRecMatcher?`. `ℕ ℤ ℚ ℝ ℂ` added as atoms; `nofun`
-close form added. **Addendum**: a class-polymorphic lemma was elaborated before
-unification, so nothing fixed its instance argument and `add_zero` was stuck; a
-bare constant is now resolved directly and instances synthesized only after the
-position fixes the carrier.
+anything including `Prop`. `iota` reduced many steps where the spec says one —
+now `reduceRecMatcher?`. `ℕ ℤ ℚ ℝ ℂ` added as atoms; `nofun` added. **Addendum**:
+a class-polymorphic lemma was elaborated before unification, so nothing fixed its
+instance argument and `add_zero` was stuck; a bare constant is now resolved
+directly and instances synthesized after the position fixes the carrier.
 **Round 4** *(4 major, sufficiency)*: the grammar admitted far less than Lean
 prints; it now covers conditionals, projection on parenthesised terms, untyped
 binders, the operators Mathlib pp emits, set-builder, pairs and sorts. Two sweep
@@ -99,9 +98,8 @@ pre-fix code and the escape sweep after each widening.
 - **Dependent positions are refused, not guessed**, each with a step-indexed
   message: dependent function argument and `∀` domain, binder types, `let`
   type/value, projection argument. A `congr` step is the way to replay one.
-- `intro_ctx` recognised but unimplemented (T1 does not emit it); `at *` refused.
-  Ordinary goals carry no `mdata`, so that fixture wraps the target. `congr`
-  nesting is two levels deep, which is what T1 emits.
+- `intro_ctx` recognised but unimplemented (T1 does not emit it); `at *` refused;
+  `congr` nesting is two levels deep, which is what T1 emits.
 - Recorded `lhs`/`rhs`/`to` must be **whitelist-dialect** terms. Rounds 4-5
   widened the grammar to what the pretty printer emits (`ℕ ℤ ℚ ℝ ℂ` included), but
   the dialect excludes `⟨…⟩`, `match`, `let`, `show … from` and big operators
