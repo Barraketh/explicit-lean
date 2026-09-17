@@ -31,8 +31,9 @@ terse completion notices, then makes merge and next-dispatch decisions.
   on the exact nested `Step`, permitting known-bad replay. The bounded fix must
   propagate structured verdicts recursively through side/congr trees, add
   fail-closed JSON regressions, and return for review 11.
-- **T4 fix round 1:** fix every REVIEW-1 item within T4 ownership, rerun focused
-  checks and the six-module harness, then dispatch review 2. Per-branch
+- **T4 fix round 1: COMPLETE; review 2 running.** Commit `0c77254` fixes all
+  seven REVIEW-1 items and `deeed5c` records 84 detected sites plus a passing
+  focused suite. A fresh reviewer is verifying the fixes. Per-branch
   multiple-invocation rendering remains the next bounded T4 feature after the
   review fixes pass.
 - **Named `zeta` decision:** T1's local-let fvar delta is represented as an
