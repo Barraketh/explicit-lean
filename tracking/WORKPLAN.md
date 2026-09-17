@@ -14,6 +14,8 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T6-structural-rendering | Deterministic structural expansion for complete multi-invocation traces; preserve safe continuations and refuse unsafe shapes | T4 | **merged; accepted** | codex/t6-structural-rendering | REVIEW-3 PASS at `0738ac7`; 265 checks; 91/91 identity; 59 replayed, 5 unresolved, 6 render_failed, 0 structurally_refused, 21 compile_failed |
 | T13-cone-runner | Strict readable translated-root cone runner with closure, staging, freshness, resolution, build-order and lint gates | T5 preflight | **merged** | task/T13-cone-runner | R2 PASS at `d258d6c` for `298755b`; focused checks and one-module compile passed; full cone unrun |
 | T17-explicit-provenance | Consumer-side explicit proposition provenance for fixed redexes; focused fixtures | T2 | **merged; accepted** | task/T17-explicit-provenance | REVIEW-1 PASS at `df81614`; 14 fixtures (11 site-shaped + 3 support); producer/renderer integration and fresh seven-module gate pending |
+| T16-rule-derivations | Term-free theorem-rule derivations captured at the matcher boundary, preserving indexed/liberal lookup parity | T1 | **merged; accepted** | task/T16-rule-derivations | REVIEW-2 PASS at `4a42543`; implementation through `a9c2d4e`; 74 fixture skeletons pass |
+| T18-simproc-inventory | Inventory simproc steps in the accepted 91-site corpus | T6, T16 | **documented; candidates deferred** | task/T18-simproc-inventory | `d2eaf48`; reduceIte 15/6 and reduceDIte 15/8 are later bounded candidates; eqComm deferred |
 
 ## Next steps (written at session end, 2026-09-16)
 
@@ -92,6 +94,15 @@ terse completion notices, then makes merge and next-dispatch decisions.
   and validate the fixed-redex consumer slice only. Do not count those 11 as
   corpus replay until producer/renderer integration and a fresh seven-module
   gate pass.
+- **T16 theorem-rule derivations: ACCEPTED / MERGED.** The term-free producer
+  captures matcher derivations while preserving indexed and liberal theorem
+  lookup. REVIEW-2 at `4a42543` passes the 74 fixture skeletons and payload
+  containment checks. This is producer evidence only: do not count corpus
+  replay until renderer integration and a fresh seven-module gate pass.
+- **T18 simproc inventory: DOCUMENTED / DEFERRED.** The accepted 91-site
+  inventory records 15 `reduceIte` steps across 6 sites and 15 `reduceDIte`
+  steps across 8 sites as later bounded simproc candidates. The one `eqComm`
+  site is deferred; no simproc implementation was added.
 - **T4 baseline: ACCEPTED / MERGED.** REVIEW-8 at `f0b59ac` passes the stale-
   publication lifecycle gate. The reviewed fresh seven-module evidence is
   exactly 7/7 modules and 91/91 identity sites, with 56/91 replayed, 1 unresolved,
