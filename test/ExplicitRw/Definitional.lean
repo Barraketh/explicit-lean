@@ -187,10 +187,19 @@ theorem zeta_then_rewrite (a b : Nat) (h : a = b) :
   guard_target =ₛ b + 7 = b + 7
   rfl
 
-/-! ## The `iota` step: one matcher or recursor reduction on a constructor -/
+/-! ## The `iota` step: **exactly one** matcher or recursor reduction
 
+The spec says "reduced one step". Round 5 found this was using `whnfCore`, which
+iterates to weak-head normal form and so swallows the redexes that later recorded
+`iota` steps address — a trace of N steps would fail at step 2. It now uses
+`reduceRecMatcher?`, the single-step primitive.
+-/
+
+/-- One `iota` contracts the recursor and leaves a beta-redex behind, rather than
+continuing to a normal form: the following `beta` steps are what finish the job,
+and they would have nothing to do if `iota` had normalised. -/
 theorem iota_recursor : Nat.rec (motive := fun _ => Nat) 7 (fun _ _ => 9) 0 = 7 := by
-  explicit_rw [iota at [0, 1]]
+  explicit_rw [iota at [0, 1], beta at [0, 1]]
   guard_target =ₛ 7 = 7
   rfl
 
@@ -202,6 +211,23 @@ def classify : Nat → Nat
 theorem iota_matcher : classify 0 = 100 := by
   explicit_rw [unfold classify at [0, 1], iota at [0, 1]]
   guard_target =ₛ 100 = 100
+  rfl
+
+/-- Nested matchers: each needs its **own** `iota`. If one step reduced to weak-head
+normal form, the second step would fail at a position the recorder considered
+valid, so this fixture pins the step count. -/
+def outerStep : Nat → Nat
+  | 0 => 10
+  | _ + 1 => 20
+
+def innerStep : Nat → Nat
+  | 0 => 1
+  | _ + 1 => 2
+
+theorem iota_two_steps : outerStep (innerStep 0) = 20 := by
+  explicit_rw [unfold innerStep at [0, 1, 1], iota at [0, 1, 1],
+               unfold outerStep at [0, 1], iota at [0, 1]]
+  guard_target =ₛ 20 = 20
   rfl
 
 end ExplicitRwTest.Definitional

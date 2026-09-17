@@ -161,6 +161,12 @@ syntax:max (name := explicitRwTermSort)
 syntax:max (name := explicitRwTermSortStar) ("Type*" <|> "Sort*") : explicitRwTerm
 /-- `Prop`. -/
 syntax:max (name := explicitRwTermProp) "Prop" : explicitRwTerm
+/-- Mathlib's numeric type notations. These are declared as notation *tokens*,
+not identifiers, so the lexer stops before the category sees them unless they are
+listed here — and `(2 : ℝ)` is exactly how the pretty printer spells an ascribed
+literal, so a generator holds these constantly. -/
+syntax:max (name := explicitRwTermNumType)
+  ("ℕ" <|> "ℤ" <|> "ℚ" <|> "ℝ" <|> "ℂ") : explicitRwTerm
 
 /-! ### Grouping, application, projection -/
 
@@ -310,7 +316,8 @@ procedure for linear arithmetic, not a simp-family tactic; the spec records it
 as a side close. Nothing else is accepted, for the same reason the closer set is
 closed.
 -/
-syntax explicitRwSideTac := &"rfl" <|> &"decide" <|> &"omega" <|> (&"exact " explicitRwTerm)
+syntax explicitRwSideTac :=
+  &"rfl" <|> &"decide" <|> &"omega" <|> &"nofun" <|> (&"exact " explicitRwTerm)
 
 /-- The optional side-condition clause of a rewrite step. -/
 syntax explicitRwWith := " with " "[" explicitRwSideTac,* "]"
@@ -360,7 +367,7 @@ finding a *different* hypothesis than the one the trace recorded.
 `@[refl]` lemmas. It is not `simp`-backed and performs no simplification.
 -/
 syntax explicitRwCloser :=
-  &"rfl" <|> &"decide" <|> (&"exact " explicitRwTerm)
+  &"rfl" <|> &"decide" <|> &"nofun" <|> (&"exact " explicitRwTerm)
 
 /--
 `eq (2 + 3 = 5) by rfl at [1]` — a simproc-computed equation, proved by an
@@ -430,11 +437,23 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
   | ``explicitRwTermNum => return ⟨stx[0]⟩
   | ``explicitRwTermStr => return ⟨stx[0]⟩
   | ``explicitRwTermProp => `(Prop)
+  | ``explicitRwTermNumType =>
+    match stx[0][0].getAtomVal with
+    | "ℕ" => `(Nat)
+    | "ℤ" => `(Int)
+    | "ℚ" => `(Rat)
+    | "ℝ" => `(Real)
+    | "ℂ" => `(Complex)
+    | k => throwError "explicit_rw: internal error: unknown numeric type `{k}`"
   | ``explicitRwTermSortStar =>
-    if stx[0].getAtomVal == "Type*" then `(Type _) else `(Sort _)
+    -- The alternation wraps its atom one node deeper, as every other
+    -- alternation in this file does.
+    if stx[0][0].getAtomVal == "Type*" then `(Type _) else `(Sort _)
   | ``explicitRwTermSort =>
-    let isType := stx[0].getAtomVal == "Type"
+    let isType := stx[0][0].getAtomVal == "Type"
     if stx[1].isNone then
+      -- Bare `Sort` is `Sort _`; bare `Type` is `Type`, which must *not*
+      -- unify with `Prop`.
       if isType then `(Type) else `(Sort _)
     else
       -- A named or numeric universe: `Type u`, `Sort 1`.
@@ -637,6 +656,22 @@ where
     return none
 
 /--
+Resolve `stx` when it is a bare global constant, and `none` otherwise.
+
+Used so that a class-polymorphic lemma's instance arguments stay open until the
+position fixes them; anything with explicit arguments elaborates normally,
+because those arguments usually pin the instance themselves.
+-/
+def resolveBareConst? (stx : Term) : TacticM (Option Name) := do
+  let .ident _ _ _ _ := stx.raw | return none
+  try
+    let cs ← realizeGlobalConst stx.raw
+    match cs with
+    | [c] => return some c
+    | _ => return none
+  catch _ => return none
+
+/--
 Elaborate a term to a proof of an equation or iff, returning `lhs`, `rhs` and a
 proof of `lhs = rhs`, together with the metavariables introduced for the
 lemma's own arguments so the caller can insist they all get assigned.
@@ -645,26 +680,31 @@ def elabEquation (idx : Nat) (stx : Term) : TacticM (Expr × Expr × Expr × Arr
   checkNoTacticBlock s!"the lemma term of this step" (some idx) stx
   let lemmaMsg := m!"`{stx}`"
   let snapshot ← syntheticMVarSnapshot
-  let proof ← Term.withSynthesize (postpone := .no) do
-    let e ← Term.elabTerm stx none
-    checkNoPendingTactic s!"the lemma term of this step" (some idx) snapshot
-    pure e
-  -- Force any still-postponed synthetic metavariables. A `Sort*`-polymorphic
-  -- lemma such as `not_nonempty_iff` can otherwise leave its universe level
-  -- unresolved, in which case `inferType` reports a bare `?m` instead of the
-  -- `Iff`, and whether that happens depends on unrelated imports. Replay must
-  -- not depend on the import context.
-  Term.synthesizeSyntheticMVarsNoPostponing
+  -- Elaborate *without* forcing instance synthesis. A class-polymorphic lemma
+  -- such as Mathlib's `add_zero` has an instance-implicit argument whose type is
+  -- only fixed once the lemma's left side is unified with the subterm at the
+  -- recorded position; synthesizing here would fail with "typeclass instance
+  -- problem is stuck" on a metavariable, which is what plain `rw` avoids by
+  -- postponing. Unification happens in `runRwStep`; `closeLemmaMVars` then
+  -- synthesizes whatever remains.
+  -- A bare constant is resolved directly rather than elaborated, so its
+  -- instance-implicit arguments stay open as metavariables for unification to
+  -- fix. Going through `Term.elabTerm` would try to synthesize them immediately
+  -- and fail with "typeclass instance problem is stuck" on a metavariable,
+  -- because nothing has yet said what type the lemma is being used at.
+  let proof ← Term.withoutErrToSorry do
+    if let some name ← resolveBareConst? stx then
+      let info ← getConstInfo name
+      let lvls ← info.levelParams.mapM fun _ => mkFreshLevelMVar
+      pure (mkConst name lvls)
+    else
+      instantiateMVars (← Term.elabTerm stx none)
+  checkNoPendingTactic s!"the lemma term of this step" (some idx) snapshot
   let proof ← instantiateMVars proof
-  -- A term that failed to elaborate (an unknown identifier, say, because the
-  -- lemma's module is not imported here) comes back as `sorryAx`, whose type is
-  -- a bare metavariable. Reporting that as "does not prove an equation" sends
-  -- the trace author hunting for the wrong problem, so name it.
-  if proof.hasSorry then
-    stepError idx m!"lemma {lemmaMsg} failed to elaborate. If it is a global \
-      lemma, its module is probably not imported in this file; if it is a local \
-      hypothesis, it is not in scope at this position. (Lean reports the \
-      underlying error separately.)"
+  -- Elaboration runs under `withoutErrToSorry`, so a term that fails (an unknown
+  -- identifier, say, because the lemma's module is not imported) throws Lean's
+  -- own message with the step index attached, rather than coming back as
+  -- `sorryAx` for a later check to misdiagnose.
   let type ← instantiateMVars (← inferType proof)
   -- Open the lemma's own leading binders as metavariables, so that matching the
   -- position determines them by unification rather than by search.
@@ -717,10 +757,45 @@ def runSideTac (idx : Nat) (which : Nat) (tacStx : Syntax) (goal : MVarId) :
   | "rfl" => run (← `(tactic| rfl))
   | "decide" => run (← `(tactic| decide))
   | "omega" => run (← `(tactic| omega))
+  | "nofun" => run (← `(tactic| exact nofun))
   | "exact" =>
     let t ← toTerm tacStx[0][1]
     run (← `(tactic| exact $t))
   | k => throwError "explicit_rw: internal error: unknown `with` entry `{k}`"
+
+/--
+Synthesize the instance-implicit arguments of a lemma once the position has
+fixed their types, and check the result against the subterm.
+
+Instance arguments are left open by `elabEquation` so that unification with the
+subterm can determine them; this is where they are closed. A synthesized
+instance that is not defeq to the one the subterm actually uses would silently
+rewrite along a different algebraic structure, so that is a step-indexed error
+rather than something to paper over.
+-/
+def synthesizeInstanceMVars (idx : Nat) (lemmaStx : MessageData)
+    (mvars : Array Expr) (sub : Expr) : TacticM Unit := do
+  for m in mvars do
+    let m ← instantiateMVars m
+    let .mvar mid := m | continue
+    if ← mid.isAssigned then continue
+    let ty ← instantiateMVars (← mid.getType)
+    if ty.hasExprMVar then continue
+    let some _ ← isClass? ty | continue
+    match ← trySynthInstance ty with
+    | .some val =>
+      -- If the position already determined an instance, the synthesized one
+      -- must agree with it; otherwise the replay would rewrite along a
+      -- different structure than the recorder did.
+      unless ← isDefEq m val do
+        stepError idx m!"lemma {lemmaStx} needs an instance of{indentExpr ty}\n\
+          but the instance synthesized here is not the one the subterm uses:\
+          {indentExpr sub}"
+      pure ()
+    | .undef => pure ()
+    | .none =>
+      stepError idx m!"lemma {lemmaStx} needs an instance of{indentExpr ty}\n\
+        which cannot be synthesized at this position."
 
 /-- Run a rewrite step at `pos` inside `e`, with its `with` clause if any. -/
 def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool)
@@ -730,6 +805,15 @@ def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool)
     (fun sub => do
       let (lhs, rhs, eqProof, mvars) ← elabEquation idx stx
       let (source, target) := if symm then (rhs, lhs) else (lhs, rhs)
+      -- Unify the *type* of the lemma's side with the subterm's type first. That
+      -- is what fixes a class-polymorphic lemma's instance argument: once the
+      -- carrier is known, synthesis has something to work with. Without this the
+      -- instance metavariable blocks the defeq below and the step reports a
+      -- spurious mismatch (`?a + 0` against `7 + 0`).
+      let srcTy ← inferType source
+      let subTy ← inferType sub
+      discard <| isDefEq srcTy subTy
+      synthesizeInstanceMVars idx m!"`{stx}`" mvars sub
       unless ← isDefEq source sub do
         stepError idx m!"lemma `{stx}` does not match the subterm at \
           position {Pos.render pos}.\nExpected{indentExpr (← instantiateMVars source)}\n\
@@ -881,10 +965,10 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
           | stepError idx m!"`zeta` at this position: the subterm is not a `let`."
         return b.instantiate1 v
     | "iota" => runDefeqStep idx e pos m!"`iota`" fun sub => do
-        -- One step of matcher/recursor reduction on a constructor. `whnfCore`
-        -- performs iota; requiring the head to be a matcher or recursor and the
-        -- term to actually change keeps this from standing in for a general
-        -- `whnf`, the same guard `proj` uses.
+        -- Exactly ONE contraction, as the spec requires: `reduceRecMatcher?` is
+        -- the single-step primitive. `whnfCore` would iterate to weak-head
+        -- normal form and swallow the redexes that later recorded `iota` steps
+        -- address, so a trace of N steps would fail at step 2.
         let fn := sub.getAppFn
         let isMatcher ← Meta.isMatcherApp sub
         let env ← getEnv
@@ -895,11 +979,11 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
         unless isMatcher || isRec do
           stepError idx m!"`iota` at this position: the subterm is not a matcher or \
             recursor application; its head is `{fn}`."
-        let r ← whnfCore sub
-        if r == sub then
+        match ← reduceRecMatcher? sub with
+        | some r => return r
+        | none =>
           stepError idx m!"`iota` at this position: the application does not reduce; \
             its major premise is not a constructor."
-        return r
     | k => throwError "explicit_rw: internal error: unknown reduction keyword `{k}`"
   | ``explicitRwIntroCtx =>
     stepError idx m!"`intro_ctx` is a recorded step kind that `explicit_rw` does not \
@@ -917,7 +1001,16 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
         let e ← Term.elabTermEnsuringType target ty
         checkNoPendingTactic s!"the `change` term of this step" (some idx) snapshot
         pure e
-      instantiateMVars newSub
+      let newSub ← instantiateMVars newSub
+      -- `elabTermEnsuringType` reports a type mismatch as a *recoverable* error
+      -- and hands back `sorryAx`, which would then pass the defeq check against
+      -- anything. A `change` whose term does not have the subterm's type must
+      -- fail, since pinning that type is the whole point of the step.
+      if newSub.hasSorry then
+        stepError idx m!"the `change` term of this step does not elaborate at the \
+          type of the subterm{indentExpr (← inferType sub)}\n(Lean reports the \
+          underlying error separately.)"
+      return newSub
   | ``explicitRwEq =>
     let pos := parsePos stx[4]
     let eqStx ← toTerm stx[1]
@@ -1014,6 +1107,7 @@ def runCloser (stx : Syntax) : TacticM Unit := do
   match stx[0][0].getAtomVal with
   | "rfl" => evalTactic (← `(tactic| rfl))
   | "decide" => evalTactic (← `(tactic| decide))
+  | "nofun" => evalTactic (← `(tactic| exact nofun))
   | "exact" =>
     let t ← toTerm stx[0][1]
     checkNoTacticBlock "the closing `exact` term" none t

@@ -101,4 +101,21 @@ theorem close_absurd (p : Prop) (q : Prop) (hq : p = False) (hp : p) : q := by
   guard_hyp hp :ₛ False
   exact hp.elim
 
+/-- spec `{"by":"nofun"}` — for `reduceCtorEq`-style side conditions, where the
+goal is an impossible equation between two distinct constructors. -/
+inductive Colour where
+  | red
+  | green
+
+theorem close_nofun : Colour.red = Colour.green → False := by
+  explicit_rw [] then nofun
+
+/-- `nofun` is available inside a `with [...]` side clause too: the lemma's
+hypothesis is the impossible constructor equation. -/
+theorem side_nofun (a b : Nat) (h : (Colour.red = Colour.green → False) → a = b) :
+    a + 0 = b := by
+  explicit_rw [h _ at [0, 1, 0, 1] with [nofun]]
+  guard_target =ₛ b + 0 = b
+  rfl
+
 end ExplicitRwTest.Basic

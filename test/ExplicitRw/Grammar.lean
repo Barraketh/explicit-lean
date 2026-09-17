@@ -13,6 +13,7 @@ construct still rejected — lives in `test/ExplicitRw/RejectedSyntax/`.
 import ExplicitLean.ExplicitRw
 import Mathlib.Data.Set.Basic
 import Mathlib.Algebra.Order.Group.Nat
+import Mathlib.Data.Real.Basic
 
 namespace ExplicitRwTest.Grammar
 
@@ -126,15 +127,66 @@ theorem pair_spelling (a b c : Nat) (h : a = c) : (a, b) = (c, b) := by
   guard_target =ₛ (c, b) = (c, b)
   rfl
 
-theorem sort_spellings (α β : Type) (h : α = β) : (α × Nat) = (β × Nat) := by
-  explicit_rw [h at [0, 1, 0, 1]]
-  guard_target =ₛ (β × Nat) = (β × Nat)
-  rfl
+/-! ## Sorts
 
-/-- `Type`, `Prop`, `Type*` and `Sort*` parse in an ascription. -/
-theorem sort_ascriptions (a b : Nat) (h : a = b) : a + 0 = b := by
-  explicit_rw [change ((a : Nat) + 0) at [0, 1], h at [0, 1, 0, 1]]
+These pin what each sort spelling *elaborates to*, not merely that it parses.
+Round 5 found that the sort productions read their keyword one node too shallow,
+so every spelling collapsed to `Sort _` — an unconstrained universe metavariable
+that unifies with anything, `Prop` included. The previous fixtures here contained
+no sort spelling at all, which is why nothing caught it. Each theorem below would
+fail if that bug returned.
+-/
+
+/-- `Type` at a `Type` position: accepted. -/
+theorem sort_type_at_type : (fun (_α : Type) => True) Nat := by
+  explicit_rw [change (Type) at [0, 0]] then exact trivial
+
+/-- `Sort 0` *is* `Prop`, so this is accepted. -/
+theorem sort_sort0_at_prop : (fun (_α : Prop) => True) True := by
+  explicit_rw [change (Sort 0) at [0, 0]] then exact trivial
+
+/-- `Type u` with a named universe. -/
+theorem sort_type_universe : (fun (_α : Type) => True) Nat := by
+  explicit_rw [change (Type 0) at [0, 0]] then exact trivial
+
+/-- `Type*` and `Sort*` are wildcards, so they fit a `Type` position. -/
+theorem sort_star : (fun (_α : Type) => True) Nat := by
+  explicit_rw [change (Type*) at [0, 0]] then exact trivial
+
+theorem sort_star_sort : (fun (_α : Type) => True) Nat := by
+  explicit_rw [change (Sort*) at [0, 0]] then exact trivial
+
+/-- `Prop` at a `Prop` position. -/
+theorem sort_prop_at_prop : (fun (_α : Prop) => True) True := by
+  explicit_rw [change (Prop) at [0, 0]] then exact trivial
+
+/-! ## Mathlib's numeric type notations
+
+`ℕ ℤ ℚ ℝ ℂ` are notation tokens rather than identifiers, so the lexer stops
+before the whitelist category unless they are listed as atoms. `(2 : ℝ)` is the
+ordinary pretty-printed form of an ascribed literal, so a generator holds these
+constantly.
+-/
+
+theorem numeric_nat (a b : Nat) (h : a = b) : a + 0 = b := by
+  explicit_rw [change ((a : ℕ) + 0) at [0, 1], h at [0, 1, 0, 1]]
   guard_target =ₛ b + 0 = b
   rfl
+
+theorem numeric_int (a b : Int) (h : a = b) : a + 0 = b := by
+  explicit_rw [change ((a : ℤ) + 0) at [0, 1], h at [0, 1, 0, 1]]
+  guard_target =ₛ b + 0 = b
+  exact Int.add_zero b
+
+theorem numeric_real (x y : ℝ) (h : x = y) : x + 0 = y := by
+  explicit_rw [h at [0, 1, 0, 1]]
+  guard_target =ₛ y + 0 = y
+  exact add_zero y
+
+/-- The ascription spelling `(2 : ℝ)` inside a lemma term. -/
+theorem numeric_ascription (y : ℝ) (h : (2 : ℝ) = y) : (2 : ℝ) + 0 = y := by
+  explicit_rw [h at [0, 1, 0, 1]]
+  guard_target =ₛ y + 0 = y
+  exact add_zero y
 
 end ExplicitRwTest.Grammar

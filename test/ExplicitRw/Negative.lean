@@ -215,13 +215,12 @@ example (a : Nat) : a + 0 = a := by
 
 /-! ## An unrecognised step keyword
 
-`frobnicate` is not a step kind. It parses as a lemma term, so the error names
-the elaboration failure rather than silently searching for a lemma of that name.
+`frobnicate` is not a step kind. It parses as a lemma term, and since round 5
+elaborates lemma terms without error-recovery the underlying Lean message is
+reported directly rather than wrapped, which is more useful.
 -/
 
-/--
-error: explicit_rw: step 1: lemma `frobnicate` failed to elaborate. If it is a global lemma, its module is probably not imported in this file; if it is a local hypothesis, it is not in scope at this position. (Lean reports the underlying error separately.)
--/
+/-- error: explicit_rw: step 1: Unknown identifier `frobnicate` -/
 #guard_msgs(error, drop info, drop warning) in
 example (a : Nat) : a + 0 = a := by
   explicit_rw [frobnicate at [0, 1]]

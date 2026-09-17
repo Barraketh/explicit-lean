@@ -11,6 +11,7 @@ nothing is searched for.
 import ExplicitLean.ExplicitRw
 import Mathlib.Algebra.Order.Group.Nat
 import Mathlib.Logic.IsEmpty.Basic
+import Mathlib.Data.Real.Basic
 
 namespace ExplicitRwTest.Lemmas
 
@@ -191,6 +192,42 @@ theorem prop_true_rendering (p q : Prop) (hp : p) : (p ∧ q) ↔ (True ∧ q) :
 theorem prop_false_rendering (p q : Prop) (hp : ¬p) : (p ∧ q) ↔ (False ∧ q) := by
   explicit_rw [eq_false hp at [0, 1, 0, 1]]
   guard_target =ₛ (False ∧ q) ↔ (False ∧ q)
+  rfl
+
+/-! ## Class-polymorphic lemmas: instances resolved against the position
+
+Mathlib's `add_zero` is stated for any `AddZeroClass`. Its instance argument is
+left open through elaboration and fixed by unifying the lemma's side with the
+subterm at the recorded position — the carrier type comes from the goal, not
+from a guess. Elaborating the lemma eagerly instead fails with "typeclass
+instance problem is stuck" on a metavariable, which is exactly what plain `rw`
+avoids by postponing, and it blocked many ordinary T1 traces.
+-/
+
+theorem instance_add_zero_nat : (7 : Nat) + 0 = 7 := by
+  explicit_rw [add_zero at [0, 1]]
+  guard_target =ₛ (7 : Nat) = 7
+  rfl
+
+/-- The same lemma where the carrier is a *variable* with a class assumption. -/
+theorem instance_monoid_polymorphic {M : Type} [Monoid M] (a : M) : a * 1 = a := by
+  explicit_rw [mul_one at [0, 1]]
+  guard_target =ₛ a = a
+  rfl
+
+/-- Under a binder, where the instance must be resolved inside the lambda. -/
+theorem instance_under_binder (f : Nat → Nat) :
+    (fun x => f x + 0) = (fun x => f x) := by
+  explicit_rw [add_zero at [0, 1, 1]]
+  guard_target =ₛ (fun x => f x) = (fun x => f x)
+  rfl
+
+/-- A commutativity lemma at `ℝ`, whose instance path is long. -/
+theorem instance_mul_comm_real (x y : ℝ) : x * y = y * x := by
+  explicit_rw [mul_comm x y at [0, 1]]
+  -- `=` rather than `=ₛ`: the two sides differ only in instance paths that the
+  -- syntactic comparison distinguishes but elaboration does not.
+  guard_target = (y * x = y * x)
   rfl
 
 end ExplicitRwTest.Lemmas
