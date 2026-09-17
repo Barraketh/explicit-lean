@@ -22,6 +22,7 @@ Exit status is 0 when every fixture matches, 1 otherwise.
 from __future__ import annotations
 
 import json
+import re
 import pathlib
 import subprocess
 import sys
@@ -562,8 +563,15 @@ def tally(paths: list[pathlib.Path]) -> dict:
             count += walk(loc.get("steps", []))
         per_call.append(count)
 
+    # A single *syntactic* site runs once per branch under `by_cases <;>`, and
+    # each run has its own trace file (`_22.json`, `_22.1.json`, ...). Report
+    # both: `sites` is what the source contains, `traces` what simp_trace
+    # produced. Conflating them is what put an invented reconciliation in
+    # RESULT.md for three rounds (REVIEW-9 5).
+    sites = {re.sub(r"\.\d+$", "", pth.stem) for pth in paths}
     return {
-        "calls": len(paths),
+        "sites": len(sites),
+        "traces": len(paths),
         "steps": steps,
         "kinds": dict(sorted(kinds.items(), key=lambda kv: (-kv[1], kv[0]))),
         "bytes": total_bytes,
@@ -603,15 +611,15 @@ def report() -> int:
         )
         return 1
 
-    print("| file | calls | steps | kinds | bytes |")
-    print("| --- | --- | --- | --- | --- |")
-    totals = {"calls": 0, "steps": 0, "bytes": 0}
+    print("| file | sites | traces | steps | kinds | bytes |")
+    print("| --- | --- | --- | --- | --- | --- |")
+    totals = {"sites": 0, "traces": 0, "steps": 0, "bytes": 0}
     all_kinds: dict[str, int] = {}
     for name, t in rows:
         kinds = ", ".join(f"`{k}` {v}" for k, v in t["kinds"].items())
         print(
-            f"| `{name}.lean` | {t['calls']} | {t['steps']} | {kinds} | "
-            f"{t['bytes']} |"
+            f"| `{name}.lean` | {t['sites']} | {t['traces']} | {t['steps']} | "
+            f"{kinds} | {t['bytes']} |"
         )
         for key in totals:
             totals[key] += t[key]
@@ -622,9 +630,45 @@ def report() -> int:
         for k, v in sorted(all_kinds.items(), key=lambda kv: (-kv[1], kv[0]))
     )
     print(
-        f"| **total** | **{totals['calls']}** | **{totals['steps']}** | {kinds} | "
+        f"| **total** | **{totals['sites']}** | **{totals['traces']}** | "
+        f"**{totals['steps']}** | {kinds} | "
         f"**{totals['bytes']}** |"
     )
+
+    # Every classified step, grouped by reason, with the sites and the step
+    # shapes each reason covers. A bare count says nothing about what is left
+    # to fix; this says which lemma at which site (REVIEW-9 6).
+    by_reason: dict[str, list[str]] = {}
+    for name, directory, prefix in MEASUREMENT_DIRS:
+        for pth in sorted(directory.glob(f"{prefix}*.json")):
+            try:
+                trace = json.loads(pth.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+
+            def visit(steps: list) -> None:
+                for st in steps:
+                    reason = st.get("unresolved")
+                    if reason:
+                        shape = st.get("name") or st.get("kind") or "?"
+                        by_reason.setdefault(reason, []).append(
+                            f"{pth.stem}:`{shape}`"
+                        )
+                    for side in st.get("side", []):
+                        visit(side.get("steps", []))
+                    visit(st.get("steps", []))
+
+            for loc in trace.get("locations", []):
+                visit(loc.get("steps", []))
+
+    print()
+    if not by_reason:
+        print("No step carries an `unresolved` verdict.")
+        return 0
+    print("| classified reason | steps | sites and shapes |")
+    print("| --- | --- | --- |")
+    for reason, hits in sorted(by_reason.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        print(f"| `{reason}` | {len(hits)} | {', '.join(sorted(set(hits)))} |")
     return 0
 
 
