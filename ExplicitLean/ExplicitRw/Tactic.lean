@@ -85,8 +85,15 @@ syntax explicitRwRw := ("← ")? term explicitRwPos
 /-- `unfold f at [1]` — delta-unfold one constant, definitionally. -/
 syntax explicitRwUnfold := "unfold " ident explicitRwPos
 
-/-- `beta at [1]`, `eta at [1]`, `proj at [1]` — silent definitional reductions. -/
-syntax explicitRwRed := ("beta" <|> "eta" <|> "proj") explicitRwPos
+/--
+`beta at [1]`, `eta at [1]`, `proj at [1]`, `zeta at [1]` — the silent
+definitional reductions of the spec's `beta|eta|proj|zeta` step kinds.
+
+`zeta` is the *only* step that destroys a `let`: it replaces `let x := v; b` by
+`b[v/x]`. Rewriting inside a `let` body keeps the `let`, so that positions
+recorded after such a step still describe the term.
+-/
+syntax explicitRwRed := (&"beta" <|> &"eta" <|> &"proj" <|> &"zeta") explicitRwPos
 
 /-- `change t at [1]` — last-resort definitional replacement, checked by defeq. -/
 syntax explicitRwChange := "change " term explicitRwPos
@@ -141,17 +148,59 @@ def parsePos (stx : Syntax) : Pos :=
 /-- Which location a step sequence applies to: the goal, or one hypothesis. -/
 abbrev Target := Option FVarId
 
-/--
-Reject a term that smuggles a tactic block into product code.
+/-- The synthetic metavariables that exist right now, to diff against later. -/
+def syntheticMVarSnapshot : TacticM (Std.HashSet MVarId) := do
+  return (← getThe Term.State).syntheticMVars.toList.foldl (fun acc (m, _) => acc.insert m) {}
 
-`exact <term>` is the one closer that takes a term, and a term may contain
-`by ...`, which would reopen exactly the hole that the closed closer enumeration
-closes. So the term's syntax tree is walked and any `by` block or tactic-sequence
-node is refused before elaboration.
+/--
+Refuse a term that elaborated a tactic block.
+
+This is the authoritative check, and it is *semantic*: every `by ...`, however
+it got there — written directly, produced by a macro, by `notation`, or by a
+custom term elaborator that calls `elabTerm` on it — registers a synthetic
+metavariable whose `stx` *is* that `by` block. Matching on the recorded syntax
+rather than on the kind is what makes this robust: a nested `elabTerm` can
+register the block as `.postponed` instead of `.tactic`, so the kind alone
+misses it, while the recorded syntax is the block either way.
+
+`before` is a `syntheticMVarSnapshot` taken before the term was elaborated,
+excluding metavariables that already existed — in particular the `by` block of
+the proof that invoked `explicit_rw` itself.
+
+Call this after elaborating and before synthetic metavariables are synthesized,
+i.e. inside `Term.withSynthesize`'s body rather than after it.
+-/
+def checkNoPendingTactic (what : String) (idx? : Option Nat)
+    (before : Std.HashSet MVarId) : TacticM Unit := do
+  for (mvarId, decl) in (← getThe Term.State).syntheticMVars.toList do
+    if before.contains mvarId then
+      continue
+    let isTactic :=
+      match decl.kind with
+      | .tactic .. => true
+      | _ => decl.stx.getKind == ``Lean.Parser.Term.byTactic
+    if isTactic then
+      let msg := m!"{what} elaborates a tactic block. `explicit_rw` is product \
+        code, so a trace may not run tactics inside a term: that would let a \
+        tactic forbidden by the governing rule run where a lint over this module \
+        could not see it. Write a closed term, or prove the lemma separately and \
+        name it."
+      match idx? with
+      | some idx => stepError idx msg
+      | none => throwError "explicit_rw: {msg}"
+
+/--
+Syntactic pre-check for a tactic block, kept as a second line of defence in
+front of `checkNoPendingTactic`. It runs on macro-expanded syntax, so a macro
+whose expansion is `by ...` is caught here too, and it gives a better message
+because it names the offending node.
 -/
 partial def checkNoTacticBlock (what : String) (idx? : Option Nat) (stx : Syntax) :
     TacticM Unit := do
-  let offending? := find? stx
+  -- Expand macros first: the written syntax of `SM` carries no `by` node, but
+  -- its expansion does.
+  let expanded ← try Elab.liftMacroM (expandMacros stx) catch _ => pure stx
+  let offending? := find? stx <|> find? expanded
   if let some kind := offending? then
     let msg := m!"{what} contains a `{kind}` block. `explicit_rw` is product code, so a \
       trace may not embed a tactic block: it would let a tactic forbidden by the \
@@ -182,8 +231,11 @@ lemma's own arguments so the caller can insist they all get assigned.
 def elabEquation (idx : Nat) (stx : Term) : TacticM (Expr × Expr × Expr × Array Expr) := do
   checkNoTacticBlock s!"the lemma term of this step" (some idx) stx
   let lemmaMsg := m!"`{stx}`"
+  let snapshot ← syntheticMVarSnapshot
   let proof ← Term.withSynthesize (postpone := .no) do
-    Term.elabTerm stx none
+    let e ← Term.elabTerm stx none
+    checkNoPendingTactic s!"the lemma term of this step" (some idx) snapshot
+    pure e
   let proof ← instantiateMVars proof
   let type ← instantiateMVars (← inferType proof)
   -- Open the lemma's own leading binders as metavariables, so that matching the
@@ -333,6 +385,10 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
         return r
     | "eta" => runDefeqStep idx e pos m!"`eta`" (etaReduce idx)
     | "proj" => runDefeqStep idx e pos m!"`proj`" (projReduce idx)
+    | "zeta" => runDefeqStep idx e pos m!"`zeta`" fun sub => do
+        let .letE _ _ v b _ := sub
+          | stepError idx m!"`zeta` at this position: the subterm is not a `let`."
+        return b.instantiate1 v
     | k => throwError "explicit_rw: internal error: unknown reduction keyword `{k}`"
   | ``explicitRwChange =>
     let pos := parsePos stx[2]
@@ -340,8 +396,11 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
     checkNoTacticBlock s!"the `change` term of this step" (some idx) target
     runDefeqStep idx e pos m!"`change {target}`" fun sub => do
       let ty ← inferType sub
+      let snapshot ← syntheticMVarSnapshot
       let newSub ← Term.withSynthesize (postpone := .no) do
-        Term.elabTermEnsuringType target ty
+        let e ← Term.elabTermEnsuringType target ty
+        checkNoPendingTactic s!"the `change` term of this step" (some idx) snapshot
+        pure e
       instantiateMVars newSub
   | ``explicitRwEq =>
     let pos := parsePos stx[4]
@@ -352,8 +411,11 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
     -- Prove the stated equation with the named ordinary tactic, then rewrite.
     rewriteAt e pos
       (fun sub => do
+        let snapshot ← syntheticMVarSnapshot
         let eqType ← Term.withSynthesize (postpone := .no) do
-          Term.elabType eqStx
+          let e ← Term.elabType eqStx
+          checkNoPendingTactic s!"the `eq` equation of this step" (some idx) snapshot
+          pure e
         let eqType ← instantiateMVars eqType
         let some (_, lhs, rhs) := eqType.eq?
           | stepError idx m!"`eq {eqStx}` must state an equation `lhs = rhs`; it states\
@@ -437,7 +499,15 @@ def runCloser (stx : Syntax) : TacticM Unit := do
   | "exact" =>
     let t : Term := ⟨stx[0][1]⟩
     checkNoTacticBlock "the closing `exact` term" none t
-    evalTactic (← `(tactic| exact $t))
+    let goal ← getMainGoal
+    goal.withContext do
+      let snapshot ← syntheticMVarSnapshot
+      let val ← Term.withSynthesize (postpone := .no) do
+        let e ← Term.elabTermEnsuringType t (← goal.getType)
+        checkNoPendingTactic "the closing `exact` term" none snapshot
+        pure e
+      goal.assign (← instantiateMVars val)
+      replaceMainGoal []
   | k =>
     throwError "explicit_rw: internal error: unknown closer `{k}`"
 

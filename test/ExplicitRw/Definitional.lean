@@ -137,9 +137,44 @@ see `test/ExplicitRw/Negative.lean`.
 
 theorem let_body (a b : Nat) (h : a = b) : (let y : Nat := 7; a + y) = b + 7 := by
   explicit_rw [h at [0, 1, 2, 0, 1]]
+  -- The `let` must survive: only a `zeta` step may destroy it.
+  guard_target =ₛ (let y : Nat := 7; b + y) = b + 7
   rfl
 
 theorem let_body_conv (a b : Nat) (h : a = b) : (let y : Nat := 7; a + y) = b + 7 := by
   conv => lhs; rw [h]
+
+/-- Two steps through the same `let` body: step 2's position is only valid if
+step 1 left the `let` in place. -/
+theorem let_body_two_steps (a b c d : Nat) (h1 : a = b) (h2 : c = d) :
+    (let y : Nat := 7; a + (y + c)) = b + (7 + d) := by
+  explicit_rw [h1 at [0, 1, 2, 0, 1], h2 at [0, 1, 2, 1, 1]]
+  guard_target =ₛ (let y : Nat := 7; b + (y + d)) = b + (7 + d)
+  rfl
+
+/-- The bound value is itself a free variable: rewriting inside the body must not
+capture the standalone `a` in `(c + a)`, which the source never wrote as `y`. -/
+theorem let_body_no_capture (a b c : Nat) (h : c = b) :
+    (let y : Nat := a; y + (c + a)) = a + (b + a) := by
+  explicit_rw [h at [0, 1, 2, 1, 0, 1]]
+  guard_target =ₛ (let y : Nat := a; y + (b + a)) = a + (b + a)
+  rfl
+
+/-! ## The `zeta` step: the only step that destroys a `let` -/
+
+theorem zeta_step (a : Nat) : (let y : Nat := 7; a + y) = a + 7 := by
+  explicit_rw [zeta at [0, 1]]
+  guard_target =ₛ a + 7 = a + 7
+  rfl
+
+theorem zeta_step_conv (a : Nat) : (let y : Nat := 7; a + y) = a + 7 := by
+  conv => lhs; zeta
+
+/-- A position taken *after* a `zeta` step, against the zeta-reduced term. -/
+theorem zeta_then_rewrite (a b : Nat) (h : a = b) :
+    (let y : Nat := 7; a + y) = b + 7 := by
+  explicit_rw [zeta at [0, 1], h at [0, 1, 0, 1]]
+  guard_target =ₛ b + 7 = b + 7
+  rfl
 
 end ExplicitRwTest.Definitional

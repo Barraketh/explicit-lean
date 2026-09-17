@@ -224,17 +224,30 @@ where
             throwError "position {Pos.render seen'} rewrites the value of a `let`; \
               only definitional steps are supported there."
         | 2 =>
-          -- A `let` body needs no cast: `let x := v; b` is definitionally
-          -- `b[v/x]`, so a proof about the body with `v` substituted transports
-          -- to the whole `let` unchanged. Zeta-substitute rather than opening a
-          -- local, so the proof mentions no `let`-bound free variable.
-          let r ← go (body.instantiate1 val) rest' seen'
-          let newBody := (r.newExpr.abstract #[val]).instantiate1 (.bvar 0)
-          -- Keep the `let` when the rewrite did not disturb the bound value,
-          -- otherwise fall back to the already-substituted body.
-          let newE :=
-            if newBody.hasLooseBVars then .letE n ty val newBody nonDep else r.newExpr
-          return { newExpr := newE, proof? := r.proof? }
+          -- Open the `let` with a local declaration, so the bound variable is
+          -- abstracted *by identity* on the way out. Abstracting by value would
+          -- both destroy the `let` when the value is closed and capture
+          -- unrelated occurrences of the value when it is a free variable;
+          -- either one silently changes the term shape that later recorded
+          -- positions are written against. The `let` is destroyed only by an
+          -- explicit `zeta` step.
+          withLetDecl n ty val fun x => do
+            let r ← go (body.instantiate1 x) rest' seen'
+            let newE ← (mkLetFVars #[x] r.newExpr : MetaM _)
+            match r.proof? with
+            | none => return { newExpr := newE, proof? := none }
+            | some h =>
+              -- The proof mentions the `let`-bound local, which does not occur
+              -- in the statement `oldLet = newLet`: both sides bind it
+              -- themselves. Zeta-substituting the local out of the proof gives a
+              -- proof of the same equation in the outer context, because
+              -- `let x := v; b` is definitionally `b[v/x]`.
+              let hClosed := (← (instantiateMVars h : MetaM _)).replaceFVar x val
+              if hClosed.containsFVar x.fvarId! then
+                throwError "position {Pos.render seen'} rewrites a `let` body in a \
+                  way whose proof still mentions the bound variable; `explicit_rw` \
+                  does not build the cast this would need."
+              return { newExpr := newE, proof? := some hClosed }
         | _ => onBadPos seen i e
       | _ => onBadPos seen i e
 
