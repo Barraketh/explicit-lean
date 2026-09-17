@@ -57,7 +57,7 @@
       "module": "Mathlib/Algebra/Algebra/Subalgebra/Unitization.lean",
       "moduleSourceSha256": "35c8da597790f20fc8ab16ea39c6e18e6cedcd809ef8e0929d163499bab22566",
       "occurrence": "1734864b48394331",
-      "replacement": "dsimp [starAlgHom]\n                   rw [map_zero, zero_add]",
+      "replacement": "show (algebraMap R A) 0 + _ = _\n                   rw [map_zero]\n                   exact zero_add _",
       "source": "simp [starAlgHom]",
       "startByte": 11553
     },
@@ -138,7 +138,7 @@
       "module": "Mathlib/Algebra/Category/Grp/EpiMono.lean",
       "moduleSourceSha256": "05c54873977fe6565685910b943ed5f8d966f0bc5ab7194f7b739ec26db5324a",
       "occurrence": "3251bc59333b0c31",
-      "replacement": "dsimp only [tau, Equiv.coe_trans, Function.comp_apply]",
+      "replacement": "rw [Equiv.coe_trans, Equiv.coe_trans, Function.comp_apply, Function.comp_apply]\n  unfold tau",
       "source": "simp only [tau, Equiv.coe_trans, Function.comp_apply]",
       "startByte": 7706
     },

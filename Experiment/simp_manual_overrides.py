@@ -18,6 +18,7 @@ import re
 from typing import Any
 
 import simp_engine_inventory as inventory
+import simp_family_lint
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -166,6 +167,14 @@ def load_database(
         )
         if replacement == source or BANNED_SEARCH_PATTERN.search(replacement):
             raise RuntimeError(f"manual override {occurrence} is not an explicit replacement")
+        # The banned-token pattern above predates the September 16, 2026
+        # governing rule and does not cover `dsimp`, `push_cast`, `norm_cast`
+        # or the simp family inside `conv` blocks.  The lint is the single
+        # authority for that rule and understands comments and strings, so
+        # every replacement is checked against it before the entry is accepted.
+        simp_family_lint.assert_clean(
+            replacement, f"manual override {occurrence} replacement"
+        )
         digest = _string(
             checked.get("moduleSourceSha256"),
             f"manual override {index} moduleSourceSha256",
