@@ -243,8 +243,31 @@ where
         return some "rfl"
       else if core.isConstOf ``True.intro || core.isAppOf ``trivial then
         return some "true_intro"
+      else if ← isNofunProof core then
+        -- Spec fd4419b: `nofun` closes `c₁ ... = c₂ ... → False` (distinct
+        -- constructors) or any goal refutable by empty pattern matching.
+        -- `reduceCtorEq` hands `eq_false'` exactly such a function.
+        return some "nofun"
       else
         return none
+
+  /-- Is `e` a proof refutable by empty pattern matching — a function into
+  `False` (or any type) whose body eliminates an impossible hypothesis?
+
+  We decide this from the *type*, not the term: the proof `reduceCtorEq` builds
+  is a `noConfusion` elimination under a binder, whose exact shape is an
+  implementation detail, whereas the statement "a hypothesis equating distinct
+  constructors implies anything" is what `nofun` discharges and is stable. -/
+  isNofunProof (e : Expr) : Simp.SimpM Bool := do
+    let ty ← instantiateMVars (← inferType e)
+    forallTelescopeReducing ty fun xs _ => do
+      -- Exactly one hypothesis, and it equates two distinct constructors.
+      unless xs.size == 1 do return false
+      let hty ← whnfR (← inferType xs[0]!)
+      let some (_, lhs, rhs) := hty.eq? | return false
+      let some (c₁, _) ← constructorApp'? lhs | return false
+      let some (c₂, _) ← constructorApp'? rhs | return false
+      return c₁.name != c₂.name
 
 /-! ### Method instrumentation -/
 

@@ -219,12 +219,17 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
           before? := some beforePP, after? := some afterPP,
           side := sideSteps }
       return some step
-    let src := (src?.map toString).getD
-      (if proofTac == "decide" then "decide" else "simproc")
+    -- The spec's `eq` bullet says `"source"` is the simproc's name.  When the
+    -- firing registered no origin we do not know it, and a placeholder like
+    -- `"simproc"` would name nothing while looking like provenance: omit the
+    -- field and classify the call instead (REVIEW-4 minor 6).
+    if src?.isNone then
+      ur.modify (·.add s!"simproc firing with no recordable origin \
+({beforePP} = {afterPP}); `source` omitted")
     let step : Step :=
       { kind := "eq", pos := pos,
         lhs? := some beforePP, rhs? := some afterPP,
-        by_? := some proofTac, source? := some src,
+        by_? := some proofTac, source? := src?.map toString,
         before? := some beforePP, after? := some afterPP,
         side := sideSteps }
     return some step
@@ -362,7 +367,11 @@ follow.
 
 /-- Replay `steps` structurally from `pre`, checking every position. -/
 def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit := do
-  let mut running := pre
+  -- Instance arguments can still be unassigned metavariables at the moment a
+  -- step is recorded and get assigned later in the run, so a recorded subterm
+  -- and the running term can differ only by `?m` versus its assignment.  Both
+  -- sides are instantiated before every comparison.
+  let mut running ← instantiateMVars pre
   for ev in events do
     let (pos, before, after, c) ← match ev with
       | .rw pos _ _ _ b a c _ _ _ => pure (pos, b, a, c)
@@ -379,6 +388,8 @@ def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit :=
     -- arrow sits between them, since an arrow binds nothing but still shifts
     -- de Bruijn indices.
     let introduced := c.binders
+    let before ← instantiateMVars before
+    let after ← instantiateMVars after
     let some (sub, binderNodes) := navigate? running pos
       | throwError "simp_trace: validation failed: no subterm at position {pos}\n\
           in: {running}"
@@ -389,7 +400,8 @@ def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit :=
     let replacement := abstractSimpFVars after introduced binderNodes
     let some next := replaceAt? running pos replacement
       | throwError "simp_trace: validation failed: cannot replace at {pos}"
-    running := next
+    running ← instantiateMVars next
+  let result ← instantiateMVars result
   unless (← eqUpToProofs running result) do
     throwError "simp_trace: validation failed: replayed term does not match \
       simp's result\nreplayed: {running}\nactual:   {result}"

@@ -36,10 +36,11 @@ KNOWN_KINDS = {"rw", "unfold", "beta", "eta", "proj", "zeta", "change", "eq",
                "intro_ctx"}
 
 # Close forms the amended spec defines.  `omega` is a side-condition-only form
-# (a user-supplied `omega` discharger); `assumption:`, `absurd:` and
-# `unresolved:` are prefixes.  `unresolved:` is the spec's classified outcome:
+# (a user-supplied `omega` discharger); `nofun` closes a goal refutable by empty
+# pattern matching, e.g. `reduceCtorEq`'s constructor disequality (spec
+# fd4419b).  `assumption:`, `absurd:` and `unresolved:` are prefixes.  `unresolved:` is the spec's classified outcome:
 # the call still leaves stock simp's goal state and reports one error line.
-CLOSE_EXACT = {"rfl", "true_intro", "decide", "omega"}
+CLOSE_EXACT = {"rfl", "true_intro", "decide", "omega", "nofun"}
 CLOSE_PREFIXES = ("assumption:", "absurd:", "unresolved:")
 
 
@@ -322,6 +323,62 @@ def check_path_containment(messages: list[str]) -> None:
         target.unlink()
 
 
+# Fixture files that must compile cleanly.  The negative fixtures
+# (`OutsideRoot`, `SymlinkEscape`) are checked separately and are *expected* to
+# fail, so they are not listed here.
+POSITIVE_FIXTURES = ("test/SimpTrace/Fixtures.lean",
+                     "test/SimpTrace/IsEmptyBasicTraced.lean")
+
+# Fixtures whose calls are classified `unresolved:`, so the file itself exits 1
+# by design.  Their traces are still compared against skeletons; only the exit
+# code is not required to be zero.
+UNRESOLVED_FIXTURES = ("test/SimpTrace/UnresolvedFixtures.lean",)
+
+
+def check_fixture_compiles(messages: list[str]) -> None:
+    """Every positive fixture must compile with exit code 0.
+
+    Without this the suite could be green while a fixture file failed to
+    compile: `simp_trace` reports an unresolved call with `logError`, which
+    makes the *file* fail even though each trace it did write is well formed.
+    REVIEW-4 defect 4 was exactly that -- `Fixtures.lean` exiting 1 while the
+    result was reported as a pass. The traces are regenerated here too, so the
+    skeleton comparison below always runs against current output.
+    """
+    for rel in POSITIVE_FIXTURES:
+        result = subprocess.run(
+            ["lake", "env", "lean", rel],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            output = (result.stdout + result.stderr).strip()
+            fail(
+                messages,
+                f"{rel}: exited {result.returncode}; a positive fixture must "
+                f"compile cleanly:\n    {output[:500]}",
+            )
+
+    # The unresolved fixtures are run for their traces only.  Each must report
+    # at least one classified line: a fixture that stopped being unresolved
+    # belongs in `Fixtures.lean`, and silence here would hide that.
+    for rel in UNRESOLVED_FIXTURES:
+        result = subprocess.run(
+            ["lake", "env", "lean", rel],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        output = result.stdout + result.stderr
+        if "simp_trace unresolved:" not in output:
+            fail(
+                messages,
+                f"{rel}: reported no `simp_trace unresolved:` line; if its calls "
+                f"now trace cleanly, move them to Fixtures.lean",
+            )
+
+
 def main() -> int:
     if not EXPECTED_DIR.is_dir():
         print(f"missing expected directory: {EXPECTED_DIR}", file=sys.stderr)
@@ -334,6 +391,10 @@ def main() -> int:
 
     messages: list[str] = []
     checked = 0
+
+    # Compile the positive fixtures first: this both regenerates the traces the
+    # comparison below reads and makes a nonzero exit a hard failure.
+    check_fixture_compiles(messages)
 
     for expected_path in expected_files:
         name = expected_path.name

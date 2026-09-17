@@ -9,22 +9,27 @@
       },
       "steps": [
         {
+          "kind": "change",
+          "pos": [
+            0,
+            1,
+            0,
+            1
+          ]
+        },
+        {
           "kind": "rw",
           "pos": [
             0,
             1
           ],
-          "name": "eq_false'",
-          "dir": "fwd",
-          "source": "reduceCtorEq",
-          "side": [
-            {
-              "goal": "FixtureColor.red = FixtureColor.green → False",
-              "close": {
-                "by": "nofun"
-              },
-              "steps": []
-            }
+          "name": "add_zero",
+          "dir": "fwd"
+        },
+        {
+          "kind": "change",
+          "pos": [
+            1
           ]
         },
         {

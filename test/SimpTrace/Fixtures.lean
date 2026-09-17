@@ -167,15 +167,44 @@ example : ((1 : Nat) = 2) = False := by
   simp_trace =>trace "test/SimpTrace/out/ctor_eq.json"
 
 /-- `reduceCtorEq` proper: distinct constructors of a user inductive.  Its proof
-head **is** one lemma (`eq_false'`), so the amended spec records a `rw` naming
-it — but `eq_false'`'s explicit argument is a `noConfusion` elimination built
-under a local binder, which no close form in the spec describes.  The side entry
-therefore carries a classified `unresolved:` close and the call is reported
-unresolved, rather than claiming a `true_intro` that would close a goal which is
-not `True`.  This is the honest end state for this simproc under the spec. -/
+head is one lemma (`eq_false'`), so the amended spec records a `rw` naming it;
+`eq_false'`'s explicit argument is a proof that the constructor equation is
+absurd, which the spec's `nofun` close form (fd4419b) describes exactly.
+Replay is `exact eq_false' nofun`. -/
 inductive FixtureColor where | red | green | blue
 
 example : (FixtureColor.red = FixtureColor.green) = False := by
   simp_trace =>trace "test/SimpTrace/out/ctor_eq_inductive.json"
+
+/-! ### `let` handling under every `zeta` setting (REVIEW-4 defect 1)
+
+The `let` path is where `zeta`, `zetaDelta` and `letToHave` interact.  Under
+`zeta := false` the traversal descends into the `let` instead of reducing it,
+which is the path that previously produced a wrong position and a leaked `_fvar`.
+Both of the reviewer's shapes are fixed here under both settings. -/
+
+/-- Rewrite strictly inside a `let` body, `zeta` on: the `let` is reduced first. -/
+example (f : Nat → Nat) (a : Nat) :
+    (let x := a; f (x + 0)) = (let x := a; f x) := by
+  simp_trace =>trace "test/SimpTrace/out/let_body_zeta_on.json"
+
+/-- A `let` in operand position, `zeta` on. -/
+example (a : Nat) : (let x := a; x) + 0 = (let x := a; x) := by
+  simp_trace =>trace "test/SimpTrace/out/let_operand_zeta_on.json"
+
+/-- The same with `zeta := false`. -/
+example (a : Nat) : (let x := a; x) + 0 = (let x := a; x) := by
+  simp_trace (config := { zeta := false })
+    =>trace "test/SimpTrace/out/let_operand_zeta_off.json"
+
+/-- `zetaDelta`: a `let`-bound local unfolded because the simp set names it.
+This is the configuration of `Mathlib/Logic/Function/Basic.lean:390`, whose
+traced copy used to PANIC inside Lean's own matcher with "loose bvar in
+expression" — stock `post` had been handed an open term. -/
+example (a : Nat) (P : Nat → Prop) (hP : ∀ n, P n) : True := by
+  let g : Nat → Nat := fun s => s + 0
+  have hg : P (g a) := hP _
+  simp_trace only [g] at hg =>trace "test/SimpTrace/out/zeta_delta_at_hyp.json"
+  trivial
 
 end ExplicitLean.SimpTrace.Fixtures

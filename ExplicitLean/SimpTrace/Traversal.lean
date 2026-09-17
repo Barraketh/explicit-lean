@@ -413,6 +413,13 @@ def logReduction (ref : TraceRef) (pos : Pos) (e : Expr) (r : Reduction) :
   ref.modify (·.push (.defeq pos r.kind r.name? e r.expr (← captureEvCtx ref)))
   return r.expr
 
+/-- SOURCE: Main.lean:213-244 — a single `reduceStep`, logged.  `simpLoop` takes
+one step and re-enters, so the fork must too. -/
+def reduceOnce (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Expr := do
+  match ← reduceStepC e with
+  | none => return e
+  | some r => if r.expr == e then return e else logReduction ref pos e r
+
 /-- SOURCE: Main.lean:246-252 `private Simp.reduce`, with each step logged. -/
 partial def reduceT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Expr :=
   withIncRecDepth do
@@ -1263,7 +1270,11 @@ partial def simpLoopT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Resul
       | .continue (some r) => visitPreContinue cfg r
 where
   visitPreContinue (cfg : Simp.Config) (r : Simp.Result) : SimpM Simp.Result := do
-    let eNew ← reduceT ref pos r.expr
+    -- SOURCE: Main.lean:695 — **one** `reduceStep`, not a fixpoint.  Looping to
+    -- a fixpoint here would charge the `maxSteps` budget once per reduction
+    -- *chain* instead of once per reduction, so a cutoff would land in a
+    -- different place than stock (REVIEW-4 minor 7).
+    let eNew ← reduceOnce ref pos r.expr
     if eNew != r.expr then
       let r := { r with expr := eNew }
       r.mkEqTrans (← simpLoopT ref pos r.expr)
