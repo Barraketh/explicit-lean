@@ -309,15 +309,38 @@ syntax:25 (name := explicitRwTermArrow) explicitRwTerm:26 " → " explicitRwTerm
 syntax explicitRwPos := " at " "[" num,* "]"
 
 /--
-`with [tac, ...]` — how a conditional lemma's hypotheses are discharged, in
-order. Each entry is from a closed set: `rfl`, `decide`, `omega`, or
-`exact <whitelisted term>`. `omega` is admitted because it is a decision
-procedure for linear arithmetic, not a simp-family tactic; the spec records it
-as a side close. Nothing else is accepted, for the same reason the closer set is
-closed.
+A **side proof**: the closed, recursive grammar for discharging a side condition
+or closing a goal.
+
+The recursion matters. A conditional lemma's hypothesis is often
+implication-shaped — `ite_congr` and `dite_congr` produce `c → x = u` — so
+proving it needs to introduce the antecedent and then replay a nested trace. That
+is `intro h; explicit_rw [...] then rfl`, which no flat enumeration can express.
+
+It stays closed: `rfl`, `decide`, `omega`, `nofun`, `exact <whitelisted term>`,
+`intro <ident>+ ; <sideProof>`, and a nested `explicit_rw` with its own optional
+closer. `omega` is a decision procedure, not simp family. Nothing else is
+admitted, so a side proof can no more introduce a forbidden tactic than a closer
+can.
 -/
-syntax explicitRwSideTac :=
-  &"rfl" <|> &"decide" <|> &"omega" <|> &"nofun" <|> (&"exact " explicitRwTerm)
+declare_syntax_cat explicitRwSideProof (behavior := symbol)
+
+/-- Reflexivity. -/
+syntax (name := explicitRwSideRfl) &"rfl" : explicitRwSideProof
+/-- Decision by evaluation. -/
+syntax (name := explicitRwSideDecide) &"decide" : explicitRwSideProof
+/-- Linear arithmetic. -/
+syntax (name := explicitRwSideOmega) &"omega" : explicitRwSideProof
+/-- An impossible constructor equation. -/
+syntax (name := explicitRwSideNofun) &"nofun" : explicitRwSideProof
+/-- A closing term. -/
+syntax (name := explicitRwSideExact) &"exact " explicitRwTerm : explicitRwSideProof
+/-- Introduce the antecedents of an implication-shaped side condition. -/
+syntax (name := explicitRwSideIntro)
+  &"intro " (ident)+ " ; " explicitRwSideProof : explicitRwSideProof
+
+/-- Retained name for the entries of a `with [...]` clause. -/
+syntax explicitRwSideTac := explicitRwSideProof
 
 /-- The optional side-condition clause of a rewrite step. -/
 syntax explicitRwWith := " with " "[" explicitRwSideTac,* "]"
@@ -366,8 +389,7 @@ finding a *different* hypothesis than the one the trace recorded.
 `rfl` here is the ordinary `rfl` tactic — `Eq`/`Iff`/`HEq` reflexivity and
 `@[refl]` lemmas. It is not `simp`-backed and performs no simplification.
 -/
-syntax explicitRwCloser :=
-  &"rfl" <|> &"decide" <|> &"nofun" <|> (&"exact " explicitRwTerm)
+syntax explicitRwCloser := explicitRwSideProof
 
 /--
 `eq (2 + 3 = 5) by rfl at [1]` — a simproc-computed equation, proved by an
@@ -382,7 +404,12 @@ syntax explicitRwStep :=
   explicitRwEq <|> explicitRwRw
 
 /-- Optional closing tactic: `explicit_rw [...] then rfl`. -/
-syntax explicitRwClose := " then " explicitRwCloser
+syntax explicitRwClose := " then " explicitRwSideProof
+
+/-- A nested trace, so an implication-shaped side condition can be discharged by
+replaying its own recorded steps. -/
+syntax (name := explicitRwSideNested)
+  "explicit_rw " "[" explicitRwStep,* "]" (explicitRwClose)? : explicitRwSideProof
 
 /--
 Replay a recorded simp trace positionally, with no search.
@@ -438,13 +465,16 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
   | ``explicitRwTermStr => return ⟨stx[0]⟩
   | ``explicitRwTermProp => `(Prop)
   | ``explicitRwTermNumType =>
-    match stx[0][0].getAtomVal with
-    | "ℕ" => `(Nat)
-    | "ℤ" => `(Int)
-    | "ℚ" => `(Rat)
-    | "ℝ" => `(Real)
-    | "ℂ" => `(Complex)
-    | k => throwError "explicit_rw: internal error: unknown numeric type `{k}`"
+    -- Rebuild the *notation node* rather than mapping the token to a name.
+    -- This module is a `prelude` importing only `Lean.*`, so a hygienic
+    -- quotation such as `(Real)` would resolve in this module's scope, where
+    -- that constant does not exist; `ℕ ℤ ℚ` only appeared to work because
+    -- `Nat`/`Int`/`Rat` are Lean core. Mathlib declares each of these as a
+    -- notation whose syntax kind is `term<token>`, so reconstructing that node
+    -- lets Mathlib's own elaborator resolve it in the caller's scope.
+    let atom := stx[0][0]
+    let tok := atom.getAtomVal
+    return ⟨Syntax.node .none (Name.mkSimple s!"term{tok}") #[atom]⟩
   | ``explicitRwTermSortStar =>
     -- The alternation wraps its atom one node deeper, as every other
     -- alternation in this file does.
@@ -672,6 +702,56 @@ def resolveBareConst? (stx : Term) : TacticM (Option Name) := do
   catch _ => return none
 
 /--
+The **single** strict elaboration entry point for every term this tactic
+elaborates.
+
+Round 6 found a false theorem admitted through the one elaboration site that
+lacked a `sorry` guard: Lean's elaborators report many failures as *recoverable*
+errors, logging a message and returning a `sorryAx`-typed expression rather than
+throwing. A caller that does not check then proceeds on a term that means
+nothing, and — because the surrounding `by` block is abandoned without an error —
+the theorem is admitted at exit code 0. Fixing that per call site is how the hole
+survived two rounds, so every site now goes through here.
+
+The checks, in order: elaborate with error recovery **off**, force synthetic
+metavariables without postponing, instantiate, then reject the result if it
+contains `sorry` (synthetic or not), any expression or level metavariable, or if
+any error was logged while elaborating. Every rejection is a step-indexed error.
+
+`allowMVars` is for the one caller that legitimately needs open metavariables: a
+lemma term whose implicit and instance arguments are fixed later, by unifying
+with the subterm at the recorded position. That caller closes them itself
+(`closeLemmaMVars`, `checkNoLevelMVars`, `synthesizeInstanceMVars`).
+-/
+def elabStrict (idx? : Option Nat) (what : String) (stx : Term)
+    (expectedType? : Option Expr := none) (allowMVars := false) : TacticM Expr := do
+  let errsBefore := (← Core.getMessageLog).hasErrors
+  let e ← Term.withoutErrToSorry do
+    let e ← match expectedType? with
+      | some ty => Term.elabTermEnsuringType stx ty
+      | none => Term.elabTerm stx none
+    Term.synthesizeSyntheticMVarsNoPostponing
+    instantiateMVars e
+  let e ← instantiateMVars e
+  let fail (why : MessageData) : TacticM Expr :=
+    match idx? with
+    | some idx => stepError idx m!"{what} {why}"
+    | none => throwError "explicit_rw: {what} {why}"
+  if e.hasSorry || e.hasSyntheticSorry then
+    return ← fail m!"failed to elaborate. (The error above says why.)"
+  unless errsBefore do
+    if (← Core.getMessageLog).hasErrors then
+      return ← fail m!"failed to elaborate. (The error above says why.)"
+  unless allowMVars do
+    if e.hasExprMVar then
+      return ← fail m!"still contains an unassigned metavariable after \
+        elaboration:{indentExpr e}"
+    if e.hasLevelMVar then
+      return ← fail m!"still contains an unassigned universe level after \
+        elaboration:{indentExpr e}"
+  return e
+
+/--
 Elaborate a term to a proof of an equation or iff, returning `lhs`, `rhs` and a
 proof of `lhs = rhs`, together with the metavariables introduced for the
 lemma's own arguments so the caller can insist they all get assigned.
@@ -692,13 +772,13 @@ def elabEquation (idx : Nat) (stx : Term) : TacticM (Expr × Expr × Expr × Arr
   -- fix. Going through `Term.elabTerm` would try to synthesize them immediately
   -- and fail with "typeclass instance problem is stuck" on a metavariable,
   -- because nothing has yet said what type the lemma is being used at.
-  let proof ← Term.withoutErrToSorry do
+  let proof ←
     if let some name ← resolveBareConst? stx then
       let info ← getConstInfo name
       let lvls ← info.levelParams.mapM fun _ => mkFreshLevelMVar
       pure (mkConst name lvls)
     else
-      instantiateMVars (← Term.elabTerm stx none)
+      elabStrict (some idx) s!"the lemma term of this step" stx (allowMVars := true)
   checkNoPendingTactic s!"the lemma term of this step" (some idx) snapshot
   let proof ← instantiateMVars proof
   -- Elaboration runs under `withoutErrToSorry`, so a term that fails (an unknown
@@ -738,30 +818,6 @@ def checkNoLevelMVars (idx : Nat) (lemmaStx : MessageData) (es : Array Expr) :
         depend on the import context. Write the universe explicitly on the lemma \
         name, or fix the position."
 
-/--
-Discharge one hypothesis of a conditional lemma with one entry of a `with`
-clause. The entry comes from a closed set (`rfl`, `decide`, `omega`,
-`exact <whitelisted term>`), so a side condition cannot smuggle in a tactic any
-more than a closer can. `omega` is admitted because it is a decision procedure
-for linear arithmetic, not a member of the simp family.
--/
-def runSideTac (idx : Nat) (which : Nat) (tacStx : Syntax) (goal : MVarId) :
-    TacticM Unit := do
-  let kind := tacStx[0][0].getAtomVal
-  let run (t : TSyntax `tactic) : TacticM Unit := do
-    let remaining ← Tactic.run goal (evalTactic t)
-    unless remaining.isEmpty do
-      stepError idx m!"the `with` entry {which + 1} left {remaining.length} goal(s) \
-        open on the side condition{indentExpr (← goal.getType)}"
-  match kind with
-  | "rfl" => run (← `(tactic| rfl))
-  | "decide" => run (← `(tactic| decide))
-  | "omega" => run (← `(tactic| omega))
-  | "nofun" => run (← `(tactic| exact nofun))
-  | "exact" =>
-    let t ← toTerm tacStx[0][1]
-    run (← `(tactic| exact $t))
-  | k => throwError "explicit_rw: internal error: unknown `with` entry `{k}`"
 
 /--
 Synthesize the instance-implicit arguments of a lemma once the position has
@@ -796,53 +852,6 @@ def synthesizeInstanceMVars (idx : Nat) (lemmaStx : MessageData)
     | .none =>
       stepError idx m!"lemma {lemmaStx} needs an instance of{indentExpr ty}\n\
         which cannot be synthesized at this position."
-
-/-- Run a rewrite step at `pos` inside `e`, with its `with` clause if any. -/
-def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool)
-    (sideTacs : Array Syntax) :
-    TacticM Replacement := do
-  rewriteAt e pos
-    (fun sub => do
-      let (lhs, rhs, eqProof, mvars) ← elabEquation idx stx
-      let (source, target) := if symm then (rhs, lhs) else (lhs, rhs)
-      -- Unify the *type* of the lemma's side with the subterm's type first. That
-      -- is what fixes a class-polymorphic lemma's instance argument: once the
-      -- carrier is known, synthesis has something to work with. Without this the
-      -- instance metavariable blocks the defeq below and the step reports a
-      -- spurious mismatch (`?a + 0` against `7 + 0`).
-      let srcTy ← inferType source
-      let subTy ← inferType sub
-      discard <| isDefEq srcTy subTy
-      synthesizeInstanceMVars idx m!"`{stx}`" mvars sub
-      unless ← isDefEq source sub do
-        stepError idx m!"lemma `{stx}` does not match the subterm at \
-          position {Pos.render pos}.\nExpected{indentExpr (← instantiateMVars source)}\n\
-          but the subterm is{indentExpr sub}"
-      -- Discharge the lemma's hypotheses with the `with` clause, in order. A
-      -- hypothesis is a Prop-valued argument metavariable the position did not
-      -- determine; anything left over is still an error below.
-      let propMVars ← mvars.filterM fun m => do
-        match ← instantiateMVars m with
-        | .mvar mid => do
-          if ← mid.isAssigned then pure false else isProp (← instantiateMVars (← mid.getType))
-        | _ => pure false
-      if sideTacs.size > propMVars.size then
-        stepError idx m!"the `with` clause supplies {sideTacs.size} proof(s) but lemma \
-          `{stx}` has {propMVars.size} undetermined hypothesis(es) at this position."
-      for h : i in [0 : sideTacs.size] do
-        let .mvar mid := ← instantiateMVars propMVars[i]! | pure ()
-        runSideTac idx i sideTacs[i] mid
-      closeLemmaMVars idx m!"`{stx}`" mvars
-      let eqProof ← instantiateMVars eqProof
-      let target ← instantiateMVars target
-      -- Universe levels are fixed by unifying the lemma's side with the subterm.
-      -- One still unassigned means the position did not determine it; defaulting
-      -- it would make the replay depend on elaboration order and on imports, so
-      -- this is an error like any other unresolved argument.
-      checkNoLevelMVars idx m!"`{stx}`" #[eqProof, target]
-      let h ← if symm then mkEqSymm eqProof else pure eqProof
-      return Replacement.eq target h)
-    (fun pfx child sub => badPosError idx pos pfx child sub)
 
 /-- Run a definitional step at `pos` inside `e`, using `reduce` on the subterm. -/
 def runDefeqStep (idx : Nat) (e : Expr) (pos : Pos) (what : MessageData)
@@ -939,8 +948,57 @@ def projReduce (idx : Nat) (sub : Expr) : TacticM Expr := do
       return r
   stepError idx m!"`proj` at this position: the projection does not reduce."
 
+mutual
+
+/-- Run a rewrite step at `pos` inside `e`, with its `with` clause if any. -/
+partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool)
+    (sideTacs : Array Syntax) :
+    TacticM Replacement := do
+  rewriteAt e pos
+    (fun sub => do
+      let (lhs, rhs, eqProof, mvars) ← elabEquation idx stx
+      let (source, target) := if symm then (rhs, lhs) else (lhs, rhs)
+      -- Unify the *type* of the lemma's side with the subterm's type first. That
+      -- is what fixes a class-polymorphic lemma's instance argument: once the
+      -- carrier is known, synthesis has something to work with. Without this the
+      -- instance metavariable blocks the defeq below and the step reports a
+      -- spurious mismatch (`?a + 0` against `7 + 0`).
+      let srcTy ← inferType source
+      let subTy ← inferType sub
+      discard <| isDefEq srcTy subTy
+      synthesizeInstanceMVars idx m!"`{stx}`" mvars sub
+      unless ← isDefEq source sub do
+        stepError idx m!"lemma `{stx}` does not match the subterm at \
+          position {Pos.render pos}.\nExpected{indentExpr (← instantiateMVars source)}\n\
+          but the subterm is{indentExpr sub}"
+      -- Discharge the lemma's hypotheses with the `with` clause, in order. A
+      -- hypothesis is a Prop-valued argument metavariable the position did not
+      -- determine; anything left over is still an error below.
+      let propMVars ← mvars.filterM fun m => do
+        match ← instantiateMVars m with
+        | .mvar mid => do
+          if ← mid.isAssigned then pure false else isProp (← instantiateMVars (← mid.getType))
+        | _ => pure false
+      if sideTacs.size > propMVars.size then
+        stepError idx m!"the `with` clause supplies {sideTacs.size} proof(s) but lemma \
+          `{stx}` has {propMVars.size} undetermined hypothesis(es) at this position."
+      for h : i in [0 : sideTacs.size] do
+        let .mvar mid := ← instantiateMVars propMVars[i]! | pure ()
+        runSideProofOn idx (some i) sideTacs[i] mid
+      closeLemmaMVars idx m!"`{stx}`" mvars
+      let eqProof ← instantiateMVars eqProof
+      let target ← instantiateMVars target
+      -- Universe levels are fixed by unifying the lemma's side with the subterm.
+      -- One still unassigned means the position did not determine it; defaulting
+      -- it would make the replay depend on elaboration order and on imports, so
+      -- this is an error like any other unresolved argument.
+      checkNoLevelMVars idx m!"`{stx}`" #[eqProof, target]
+      let h ← if symm then mkEqSymm eqProof else pure eqProof
+      return Replacement.eq target h)
+    (fun pfx child sub => badPosError idx pos pfx child sub)
+
 /-- Apply one parsed step to the current expression. -/
-def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Replacement := do
+partial def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Replacement := do
   let stx := stx.raw[0]
   match stx.getKind with
   | ``explicitRwUnfold =>
@@ -997,11 +1055,9 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
     runDefeqStep idx e pos m!"`change {target}`" fun sub => do
       let ty ← inferType sub
       let snapshot ← syntheticMVarSnapshot
-      let newSub ← Term.withSynthesize (postpone := .no) do
-        let e ← Term.elabTermEnsuringType target ty
-        checkNoPendingTactic s!"the `change` term of this step" (some idx) snapshot
-        pure e
-      let newSub ← instantiateMVars newSub
+      let newSub ← elabStrict (some idx) s!"the `change` term of this step" target
+        (expectedType? := some ty)
+      checkNoPendingTactic s!"the `change` term of this step" (some idx) snapshot
       -- `elabTermEnsuringType` reports a type mismatch as a *recoverable* error
       -- and hands back `sorryAx`, which would then pass the defeq check against
       -- anything. A `change` whose term does not have the subterm's type must
@@ -1021,11 +1077,8 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
     rewriteAt e pos
       (fun sub => do
         let snapshot ← syntheticMVarSnapshot
-        let eqType ← Term.withSynthesize (postpone := .no) do
-          let e ← Term.elabType eqStx
-          checkNoPendingTactic s!"the `eq` equation of this step" (some idx) snapshot
-          pure e
-        let eqType ← instantiateMVars eqType
+        let eqType ← elabStrict (some idx) s!"the `eq` equation of this step" eqStx
+        checkNoPendingTactic s!"the `eq` equation of this step" (some idx) snapshot
         let some (_, lhs, rhs) := eqType.eq?
           | stepError idx m!"`eq {eqStx}` must state an equation `lhs = rhs`; it states\
               {indentExpr eqType}"
@@ -1056,7 +1109,7 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
   | k => throwError "explicit_rw: internal error: unexpected step kind `{k}`"
 
 /-- Apply every step in order to the expression at `target`, rebuilding the goal. -/
-def runSteps (steps : Array (TSyntax ``explicitRwStep)) (target : Target) : TacticM Unit := do
+partial def runSteps (steps : Array (TSyntax ``explicitRwStep)) (target : Target) : TacticM Unit := do
   for h : idx in [0 : steps.size] do
     let stx := steps[idx]
     let goal ← getMainGoal
@@ -1101,27 +1154,69 @@ The parser already restricts this to the closed enumeration, so this only has to
 dispatch. `exact <term>` additionally rejects a term containing a tactic block,
 which is the one way a term could reintroduce arbitrary tactics.
 -/
-def runCloser (stx : Syntax) : TacticM Unit := do
-  -- Each alternative wraps its keyword one level down: a bare keyword as
-  -- `token.<kw>`, and `exact <term>` as a `group` whose child 0 is the atom.
-  match stx[0][0].getAtomVal with
-  | "rfl" => evalTactic (← `(tactic| rfl))
-  | "decide" => evalTactic (← `(tactic| decide))
-  | "nofun" => evalTactic (← `(tactic| exact nofun))
-  | "exact" =>
-    let t ← toTerm stx[0][1]
-    checkNoTacticBlock "the closing `exact` term" none t
-    let goal ← getMainGoal
+partial def runCloser (stx : Syntax) : TacticM Unit := do
+  -- `stx` is the side proof itself; the caller has already unwrapped the
+  -- optional `then` clause around it.
+  let goal ← getMainGoal
+  runSideProofOn 0 none stx goal
+  replaceMainGoal []
+
+/--
+Run one side proof against `goal`, which it must close completely.
+
+`which?` names the `with` entry for error messages; `none` means this is a
+closing `then` clause. The `intro` and nested-`explicit_rw` cases are what make
+this recursive: an implication-shaped side condition is discharged by
+introducing its antecedents and replaying a nested trace under them.
+-/
+partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
+    (goal : MVarId) : TacticM Unit := do
+  let where? : MessageData :=
+    match which? with
+    | some i => m!"the `with` entry {i + 1}"
+    | none => m!"the closing `then` proof"
+  let run (t : TSyntax `tactic) : TacticM Unit := do
+    let remaining ← Tactic.run goal (evalTactic t)
+    unless remaining.isEmpty do
+      stepError idx m!"{where?} left {remaining.length} goal(s) open on\
+        {indentExpr (← instantiateMVars (← goal.getType))}"
+  -- `explicitRwSideTac` is a one-field wrapper around the category, and the
+  -- nested-trace alternative keeps the `explicit_rw` keyword as its own node.
+  let stx := if stx.getKind == ``explicitRwSideTac then stx[0] else stx
+  match stx.getKind with
+  | ``explicitRwSideRfl => run (← `(tactic| rfl))
+  | ``explicitRwSideDecide => run (← `(tactic| decide))
+  | ``explicitRwSideOmega => run (← `(tactic| omega))
+  | ``explicitRwSideNofun => run (← `(tactic| exact nofun))
+  | ``explicitRwSideExact =>
+    let t ← toTerm stx[1]
+    checkNoTacticBlock s!"the `exact` term of a side proof" (some idx) t
     goal.withContext do
       let snapshot ← syntheticMVarSnapshot
-      let val ← Term.withSynthesize (postpone := .no) do
-        let e ← Term.elabTermEnsuringType t (← goal.getType)
-        checkNoPendingTactic "the closing `exact` term" none snapshot
-        pure e
+      let val ← elabStrict (some idx) s!"the `exact` term of a side proof" t
+        (expectedType? := some (← goal.getType))
+      checkNoPendingTactic s!"the `exact` term of a side proof" (some idx) snapshot
       goal.assign (← instantiateMVars val)
-      replaceMainGoal []
+  | ``explicitRwSideIntro =>
+    let names : Array Name := stx[1].getArgs.map fun a => a.getId
+    let (_, goal') ← goal.introN names.size names.toList
+    runSideProofOn idx which? stx[3] goal'
+  | ``explicitRwSideNested =>
+    -- Replay a nested trace under the introduced hypotheses.
+    let steps := stx[2].getSepArgs.map fun x => (⟨x⟩ : TSyntax ``explicitRwStep)
+    let remaining ← Tactic.run goal do
+      runSteps steps none
+      unless stx[4].isNone do
+        let g ← getMainGoal
+        runSideProofOn idx which? stx[4][0][1] g
+        replaceMainGoal []
+    unless remaining.isEmpty do
+      stepError idx m!"{where?} left {remaining.length} goal(s) open on\
+        {indentExpr (← instantiateMVars (← goal.getType))}"
   | k =>
-    throwError "explicit_rw: internal error: unknown closer `{k}`"
+    throwError "explicit_rw: internal error: unknown side proof `{k}`"
+
+end
 
 end Impl
 
