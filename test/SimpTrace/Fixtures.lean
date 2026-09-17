@@ -207,4 +207,28 @@ example (a : Nat) (P : Nat → Prop) (hP : ∀ n, P n) : True := by
   simp_trace only [g] at hg =>trace "test/SimpTrace/out/zeta_delta_at_hyp.json"
   trivial
 
+/-! ### Dependent congruence: the `congr` step kind (spec 3b17247)
+
+`congr` is for the **auto-generated** congruence theorem path
+(`Lean.Meta.mkCongrSimp?`, reached from `tryAutoCongrTheorem?`) when the theorem
+transports a `CongrArgKind.cast` dependent.  Rewriting the argument by position
+alone would then need a cast, so the whole node is recorded as one `congr` step
+carrying the argument index and the argument's own steps, positions relative to
+it.  Arguments with no cast dependent stay plain `rw` steps. -/
+
+/-- A `cast` whose value argument is rewritten: the proof argument of `cast`
+depends on the types, so the auto congruence theorem transports it.  This is the
+shape of `Mathlib/Logic/Function/Basic.lean:390`, which used to PANIC. -/
+example {α β : Type} (h : α = β) (f : α → α) (a : α) (hfa : f a = a) :
+    cast h (f a) = cast h a := by
+  simp_trace [hfa] =>trace "test/SimpTrace/out/congr_cast.json"
+
+/-- A nested `cast`: rewriting the innermost value transports two levels of
+type-equality proof, so the `congr` step's nested steps sit under a second
+`congr`.  This exercises the recursive case of the nested-step validator. -/
+example {α β γ : Type} (h₁ : α = β) (h₂ : β = γ) (f : α → α) (a : α)
+    (hfa : f a = a) :
+    cast h₂ (cast h₁ (f a)) = cast h₂ (cast h₁ a) := by
+  simp_trace [hfa] =>trace "test/SimpTrace/out/congr_nested_cast.json"
+
 end ExplicitLean.SimpTrace.Fixtures

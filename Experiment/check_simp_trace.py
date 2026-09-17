@@ -33,7 +33,7 @@ EXPECTED_DIR = ROOT / "test" / "SimpTrace" / "expected"
 # Step kinds the spec defines for v1.  An unknown kind is a hard error: a
 # trace must never carry a step the replay tactic cannot interpret.
 KNOWN_KINDS = {"rw", "unfold", "beta", "eta", "proj", "zeta", "change", "eq",
-               "intro_ctx"}
+               "intro_ctx", "congr"}
 
 # Close forms the amended spec defines.  `omega` is a side-condition-only form
 # (a user-supplied `omega` discharger); `nofun` closes a goal refutable by empty
@@ -82,7 +82,7 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
             fail(messages, f"{where}: unknown step kind {kind!r}")
 
         for field in ("kind", "pos", "name", "dir", "source", "by", "local",
-                      "prop"):
+                      "prop", "arg"):
             if field in want:
                 if got.get(field) != want[field]:
                     fail(
@@ -120,6 +120,25 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                 f"sub-trace for its discharged condition",
             )
 
+        # `congr` (spec 3b17247): the step must name the argument it rewrote and
+        # carry the nested steps that rewrite it, and those nested positions are
+        # *relative to that argument*.  A nested step whose position is not
+        # relative would send a replayer to the wrong subterm, so the nesting is
+        # checked recursively here, exactly as for the top level.
+        if kind == "congr":
+            if not isinstance(got.get("arg"), int):
+                fail(messages, f"{where}: `congr` step without an integer `arg`")
+            if not got.get("steps"):
+                fail(messages, f"{where}: `congr` step with no nested `steps`")
+            check_steps(
+                f"{where}.steps",
+                got.get("steps", []),
+                want.get("steps", []),
+                messages,
+            )
+        elif got.get("steps"):
+            fail(messages, f"{where}: nested `steps` on a {kind!r} step")
+
         if kind == "unfold" and not got.get("name"):
             fail(messages, f"{where}: `unfold` step without a constant name")
 
@@ -134,6 +153,10 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         if kind == "intro_ctx" and not got.get("name"):
             fail(messages, f"{where}: `intro_ctx` step without a hypothesis name")
 
+        # `ctxIndex` is `LocalDecl.index` -- an identifier for the declaration,
+        # not a `rename_i` argument (spec 3b17247). It is only required to be a
+        # non-negative integer; no relationship to the count of inaccessible
+        # hypotheses is asserted, because none holds.
         local = got.get("local")
         if local is not None:
             if local.get("contextual") is True:

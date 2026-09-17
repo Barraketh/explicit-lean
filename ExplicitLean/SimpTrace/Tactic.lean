@@ -256,6 +256,15 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
     let hypName ← withLCtx c.lctx c.insts do
       pure (← ppExpr (mkFVar fvarId)).pretty
     return some { kind := "intro_ctx", pos := pos, name? := some hypName }
+  | .congr pos arg nested before after _ _ c =>
+    -- Spec 3b17247: `before`/`after` describe the node at `pos`; the nested
+    -- steps' positions are relative to argument `arg`.
+    let beforePP ← ppIn c before
+    let afterPP ← ppIn c after
+    let nestedSteps ← nested.filterMapM (eventToStep ur contextualFVars)
+    return some { kind := "congr", pos := pos, arg? := some arg,
+                  steps := nestedSteps,
+                  before? := some beforePP, after? := some afterPP }
 
 /-- Convert a discharged side condition into the spec's nested trace object. -/
 partial def sideToTrace (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId)
@@ -365,6 +374,39 @@ result.  On mismatch we fail loudly rather than emit a trace a replayer cannot
 follow.
 -/
 
+/-- Replay a `congr` step's nested steps against the argument they describe.
+Positions are relative to the argument, per the spec. -/
+partial def validateNested (c : EvCtx) (nested : Array Event)
+    (argBefore argAfter : Expr) : MetaM Unit := do
+  let mut running ← instantiateMVars argBefore
+  for ev in nested do
+    let (pos, before, after, ec) ← match ev with
+      | .rw pos _ _ _ b a ec _ _ _ => pure (pos, b, a, ec)
+      | .eq pos _ b a ec _ => pure (pos, b, a, ec)
+      | .defeq pos _ _ b a ec => pure (pos, b, a, ec)
+      | .congr pos _ inner b a ab aa ec =>
+        validateNested ec inner ab aa
+        pure (pos, b, a, ec)
+      | .introCtx .. => continue
+    let before ← instantiateMVars before
+    let after ← instantiateMVars after
+    let some (sub, binderNodes) := navigate? running pos
+      | throwError "simp_trace: validation failed: `congr` nested step has no \
+          subterm at relative position {pos}\n  in: {running}"
+    let expected := abstractSimpFVars before ec.binders binderNodes
+    unless (← withLCtx ec.lctx ec.insts (eqUpToProofs sub expected)) do
+      throwError "simp_trace: validation failed: `congr` nested subterm at \
+        relative {pos} is\n{sub}\nbut the step's `before` is\n{expected}"
+    let some next := replaceAt? running pos
+      (abstractSimpFVars after ec.binders binderNodes)
+      | throwError "simp_trace: validation failed: `congr` nested step cannot \
+          replace at relative {pos}"
+    running ← instantiateMVars next
+  let argAfter ← instantiateMVars argAfter
+  unless (← withLCtx c.lctx c.insts (eqUpToProofs running argAfter)) do
+    throwError "simp_trace: validation failed: `congr` nested steps do not \
+      reach the argument's result\nreplayed: {running}\nactual:   {argAfter}"
+
 /-- Replay `steps` structurally from `pre`, checking every position. -/
 def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit := do
   -- Instance arguments can still be unassigned metavariables at the moment a
@@ -377,6 +419,13 @@ def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit :=
       | .rw pos _ _ _ b a c _ _ _ => pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
       | .defeq pos _ _ b a c => pure (pos, b, a, c)
+      | .congr pos _ nested b a ab aa c =>
+        -- Keeping the `congr` kind honest needs both halves checked: the node's
+        -- whole before/after is verified below exactly like any other step, and
+        -- the nested steps must independently replay the *argument* from
+        -- `argBefore` to `argAfter` at positions relative to it.
+        validateNested c nested ab aa
+        pure (pos, b, a, c)
       | .introCtx .. => continue
     -- The traversal observed the subterm with its enclosing binders as free
     -- variables; the running term still has loose bvars there.  The event

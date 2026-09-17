@@ -288,7 +288,8 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
     -- Inside an active frame, the first `pre` we see is on the subterm the
     -- simproc handed to its nested `simp`: that is the side goal.
     ref.modify fun s =>
-      if s.procEvents.size > 0 && s.procGoals.back!.isNone then
+      if s.procEvents.size > 0 && s.procGoals.size > 0
+         && (s.procGoals.getD (s.procGoals.size - 1) none).isNone then
         { s with procGoals := s.procGoals.set! (s.procGoals.size - 1) (some e) }
       else s
     ref.modify fun s =>
@@ -306,8 +307,9 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         throw ex
     -- Read the diverted frame and its goal, then pop both.
     let st ← ref.get
-    let diverted := if st.procEvents.size >= depth then st.procEvents[depth - 1]! else #[]
-    let divertedGoal? := if st.procGoals.size >= depth then st.procGoals[depth - 1]! else none
+    let ok := depth > 0 && depth <= st.procEvents.size && depth <= st.procGoals.size
+    let diverted := if ok then st.procEvents.getD (depth - 1) #[] else #[]
+    let divertedGoal? := if ok then st.procGoals.getD (depth - 1) none else none
     ref.set { st with procDepth := st.procDepth - 1,
                       procEvents := st.procEvents.take (depth - 1),
                       procGoals := st.procGoals.take (depth - 1) }
@@ -469,7 +471,10 @@ def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
         throw ex
     -- Take the frame the discharger filled, then pop it.
     let st ← ref.get
-    let nested := if st.sideStack.size >= depth then st.sideStack[depth - 1]! else #[]
+    let nested :=
+      if depth > 0 && depth <= st.sideStack.size then
+        st.sideStack.getD (depth - 1) #[]
+      else #[]
     ref.set { st with sideStack := st.sideStack.take (depth - 1) }
     match result with
     | none => return none

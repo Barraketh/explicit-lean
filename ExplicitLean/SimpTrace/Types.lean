@@ -25,7 +25,15 @@ abbrev Pos := Array Nat
 /-- A reference to a local hypothesis, per the amended spec. -/
 inductive LocalRef where
   /-- An ordinary local: its user name, whether that name is inaccessible, and
-  its index in the local context at the point of use. -/
+  its `LocalDecl.index` in the local context at the point of use.
+
+  Per the spec, `ctxIndex` **identifies the declaration; it is not a `rename_i`
+  argument.** It counts every declaration from the front of the context,
+  including ones the user never sees (the auxiliary recursion declaration,
+  section variables), whereas `rename_i` names the *trailing* inaccessible
+  hypotheses right to left. A generator derives `rename_i` names from the order
+  of inaccessible declarations in the context; the `name` field's
+  pretty-printed form (`a✝¹`) already carries that right-to-left rank. -/
   | ordinary (userName : String) (inaccessible : Bool) (ctxIndex : Nat)
   /-- A hypothesis introduced by contextual simp, in its own namespace. -/
   | contextual (ctxIndex : Nat)
@@ -68,6 +76,10 @@ structure Step where
   source? : Option String := none
   /-- `change` steps: the `pp.all` target term. -/
   to?     : Option String := none
+  /-- `congr` steps: which argument of the application was rewritten. -/
+  arg?    : Option Nat := none
+  /-- `congr` steps: the nested steps, with positions relative to `arg`. -/
+  steps   : Array Step := #[]
   before? : Option String := none
   after?  : Option String := none
   /-- Side-condition sub-traces, one per discharged hypothesis. -/
@@ -164,6 +176,10 @@ partial def Step.toJson (s : Step) : String :=
     ("by", s.by_?.map str),
     ("source", s.source?.map str),
     ("to", s.to?.map str),
+    ("arg", s.arg?.map toString),
+    ("steps", if s.kind != "congr" then none else
+      some ("[" ++ String.intercalate ","
+        (s.steps.toList.map Step.toJson) ++ "]")),
     ("before", s.before?.map str),
     ("after", s.after?.map str),
     ("side", if s.side.isEmpty then none else

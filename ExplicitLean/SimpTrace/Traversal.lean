@@ -96,6 +96,14 @@ inductive Event where
           (before after : Expr) (ctx : EvCtx)
   /-- Contextual simp made an implication's antecedent available. -/
   | introCtx (pos : Pos) (fvarId : FVarId) (ctx : EvCtx)
+  /-- Dependent congruence (spec 3b17247): the application at `pos` had its
+  argument `arg` rewritten by `steps` (whose positions are *relative to that
+  argument*), and later arguments depending on it were cast-transported by the
+  auto-generated congruence theorem for the head.  Emitted only when a
+  `CongrArgKind.cast` dependent is present, so plain positional rewriting would
+  need casts; ordinary arguments stay plain `rw` steps. -/
+  | congr (pos : Pos) (arg : Nat) (steps : Array Event)
+          (before after : Expr) (argBefore argAfter : Expr) (ctx : EvCtx)
 
 /-- A discharged side condition: the side goal, the events recorded while it
 was discharged, and the closing form (`rfl` / `true_intro` / `assumption:<n>` /
@@ -113,9 +121,19 @@ def SideRec.events : SideRec → Array Event | SideRec.mk _ e _ _ => e
 def SideRec.by_ : SideRec → Option String | SideRec.mk _ _ b _ => b
 def SideRec.evCtx : SideRec → EvCtx | SideRec.mk _ _ _ c => c
 
+/-- Re-root an event's position under `base`.  Used to place events captured
+relative to a subterm back at their absolute positions. -/
+partial def Event.rebase (base : Pos) : Event → Event
+  | .rw p o inv pr b a c args side src => .rw (base ++ p) o inv pr b a c args side src
+  | .eq p s b a c side => .eq (base ++ p) s b a c side
+  | .defeq p k n b a c => .defeq (base ++ p) k n b a c
+  | .introCtx p f c => .introCtx (base ++ p) f c
+  | .congr p i steps b a ab aa c => .congr (base ++ p) i steps b a ab aa c
+
 /-- The position an event was logged at. -/
 def Event.pos : Event → Pos
-  | Event.rw p .. | Event.eq p .. | Event.defeq p .. | Event.introCtx p .. => p
+  | Event.rw p .. | Event.eq p .. | Event.defeq p ..
+  | Event.introCtx p .. | Event.congr p .. => p
 
 /-- Mutable trace state for one traced `simp` run. -/
 structure TraceState where
@@ -166,12 +184,14 @@ abbrev TraceRef := ST.Ref IO.RealWorld TraceState
 /-- Push an event into the innermost active frame.  Diverted into `procEvents`
 while inside a stock procedure's own nested `simp` (see `procDepth`). -/
 def TraceState.push (s : TraceState) (ev : Event) : TraceState :=
-  if s.procEvents.size > 0 then
+  if h : s.procEvents.size > 0 then
     let i := s.procEvents.size - 1
-    { s with procEvents := s.procEvents.set! i ((s.procEvents[i]!).push ev) }
-  else if s.sideStack.size > 0 then
+    have : i < s.procEvents.size := Nat.sub_lt h (by decide)
+    { s with procEvents := s.procEvents.set i ((s.procEvents[i]).push ev) }
+  else if h : s.sideStack.size > 0 then
     let i := s.sideStack.size - 1
-    { s with sideStack := s.sideStack.set! i ((s.sideStack[i]!).push ev) }
+    have : i < s.sideStack.size := Nat.sub_lt h (by decide)
+    { s with sideStack := s.sideStack.set i ((s.sideStack[i]).push ev) }
   else
     { s with events := s.events.push ev }
 
@@ -217,6 +237,30 @@ enclosing position would be wrong.  The caller records the net change instead. -
     { s with procDepth := s.procDepth - 1,
              procEvents := s.procEvents.take (depth - 1),
              procGoals := s.procGoals.take (depth - 1) }
+
+/-- Run `k`, returning its result together with the events it logged, which are
+captured into a frame instead of reaching the trace.
+
+Unlike `withDivertedEvents` the events are *kept*: the caller decides where they
+belong.  `tryAutoCongrTheoremT?` uses this because whether an argument's
+rewrites keep their own absolute positions or become a `congr` step's nested
+steps is only known after every argument has been visited (a `cast` dependent
+may appear later in the argument list). -/
+def captureEvents (ref : TraceRef) (k : SimpM α) : SimpM (α × Array Event) := do
+  ref.modify fun s => { s with procEvents := s.procEvents.push #[] }
+  let depth := (← ref.get).procEvents.size
+  let a ←
+    try k
+    catch ex =>
+      ref.modify fun s => { s with procEvents := s.procEvents.take (depth - 1) }
+      throw ex
+  let st ← ref.get
+  let evs :=
+    if depth > 0 && depth <= st.procEvents.size then
+      st.procEvents.getD (depth - 1) #[]
+    else #[]
+  ref.set { st with procEvents := st.procEvents.take (depth - 1) }
+  return (a, evs)
 
 /-- Set the current position for the duration of `k`. -/
 @[inline] def withPos (ref : TraceRef) (pos : Pos) (k : SimpM α) : SimpM α := do
@@ -694,9 +738,14 @@ where
   usedLetOnly : SimpM Bool := do
     let cfg ← Simp.getConfig
     return cfg.zeta || cfg.zetaUnused
-  /-- The position of the telescope root, `n` binders above `pos`. -/
+  /-- The position of the telescope root, `n` binders above `pos`.
+
+  `n` cannot exceed `pos.size` when the traversal reached this node from the
+  location root, but it can when a subterm is simplified from a *fresh* root
+  (`tryAutoCongrTheoremT?` visits a cast-dependent argument at `#[]` so its
+  events can be re-rooted later), so the drop is clamped. -/
   rootOf (pos : Pos) (n : Nat) : Pos :=
-    if n == 0 then pos else pos.extract 0 (pos.size - n)
+    if n == 0 then pos else pos.extract 0 (pos.size - min n pos.size)
 
 /-! ## The main traversal
 
@@ -810,6 +859,7 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
   let mut hasCast    := false
   let mut argsNew    := #[]
   let mut argResults := #[]
+  let mut eqArgEvents : Array (Nat × Expr × Expr × Array Event) := #[]
   let mut i          := 0
   for arg in args, kind in cgrThm.argKinds do
     let apos := argPos pos numArgs i
@@ -827,7 +877,12 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
     | CongrArgKind.cast  => hasCast := true; argsNew := argsNew.push arg
     | CongrArgKind.subsingletonInst => argsNew := argsNew.push arg
     | CongrArgKind.eq =>
-      let argResult ← simpT ref apos arg
+      -- Capture this argument's events separately: if the theorem turns out to
+      -- transport a `cast` dependent, they become a `congr` step's nested
+      -- `steps` (rooted at the argument) instead of steps at their own absolute
+      -- positions, which plain positional rewriting could not replay.
+      let (argResult, evs) ← captureEvents ref (simpT ref #[] arg)
+      eqArgEvents := eqArgEvents.push (i, arg, argResult.expr, evs)
       argResults := argResults.push argResult
       argsNew    := argsNew.push argResult.expr
       if argResult.proof?.isSome then hasProof := true
@@ -835,6 +890,31 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
     | _ => unreachable!
     i := i + 1
   if !simplified then return some { expr := e }
+  -- Replay the captured argument events, now that `hasCast` is settled and the
+  -- node is known to have changed.
+  if hasCast then
+    -- Cast dependents were transported: each rewritten argument becomes one
+    -- `congr` step at the application's position, carrying its own steps.
+    -- `before`/`after` describe the node at `pos` (what the validator checks);
+    -- `argBefore`/`argAfter` describe the argument the nested steps replay.
+    -- With several rewritten arguments each step's `before` is the application
+    -- as it stands when that step runs, so the steps compose in array order.
+    let evCtx ← captureEvCtx ref
+    let mut nodeArgs := args
+    for (ai, aBefore, aAfter, evs) in eqArgEvents do
+      if h : ai < nodeArgs.size then
+        unless aBefore == aAfter do
+          let nodeBefore := mkAppN f nodeArgs
+          nodeArgs := nodeArgs.set ai aAfter
+          let nodeAfter := mkAppN f nodeArgs
+          ref.modify (·.push
+            (.congr pos ai evs nodeBefore nodeAfter aBefore aAfter evCtx))
+  else
+    -- No cast: the arguments are ordinary, so their rewrites keep their own
+    -- absolute positions and stay plain steps, exactly as before.
+    for (ai, _, _, evs) in eqArgEvents do
+      for ev in evs do
+        ref.modify (·.push (ev.rebase (argPos pos numArgs ai)))
   if !hasProof && !hasCast then
     return some { expr := mkAppN f argsNew }
   let mut proof := cgrThm.proof
