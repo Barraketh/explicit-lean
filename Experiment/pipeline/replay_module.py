@@ -669,6 +669,15 @@ def diagnostic_for_probe(diagnostics: list[dict], probe: pathlib.Path,
     return None
 
 
+def clear_publication(target: pathlib.Path) -> None:
+    """Remove only this module's prior publication and success marker."""
+    marker = target.with_suffix(target.suffix + ".success")
+    for path in (target, marker):
+        if path.is_dir() and not path.is_symlink():
+            raise RuntimeError(f"refusing to remove publication directory: {path}")
+        path.unlink(missing_ok=True)
+
+
 def attribute(record: dict, message: str) -> tuple[str, str]:
     """Guess which side a compile failure belongs to, with a justification.
 
@@ -755,6 +764,10 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
     traced_name = MODULES.get(mathlib_rel)
     if traced_name is None:
         raise SystemExit(f"no traced copy is known for {mathlib_rel}")
+    target = out_dir / mathlib_rel
+    # Clear a stale publication before any current run can fail. Only this
+    # module's exact file and its tied marker are in scope.
+    clear_publication(target)
     source_rel = mathlib_rel[len("Mathlib/") :]
     source_path = mathlib / source_rel
     # Decode the source bytes without changing character coordinates.
@@ -787,7 +800,8 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
                 k: v for k, v in transcription.items() if k != "trace_records"
             },
             "trace_count": len(transcription["trace_records"]),
-            "identity": identity, "records": records, "log": log,
+            "identity": identity, "published": False,
+            "records": records, "log": log,
             "seconds": round(time.monotonic() - started, 2),
         }
     traces: dict[int, dict] = {}
@@ -808,12 +822,14 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
                 finding.describe() for finding in findings
             )
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    target = out_dir / mathlib_rel
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(build_module(source, site_list, records), encoding="utf-8")
+    run_root = pathlib.Path(transcription["run_root"])
+    translated_root = run_root / "translated"
+    translated_target = translated_root / mathlib_rel
+    translated_target.parent.mkdir(parents=True, exist_ok=True)
+    translated_target.write_text(build_module(source, site_list, records),
+                                 encoding="utf-8")
 
-    code, diagnostics, compile_secs = compile_in_t2(t2, target)
+    code, diagnostics, compile_secs = compile_in_t2(t2, translated_target)
     compile_mode = "whole_module"
 
     if code == 0:
@@ -830,7 +846,7 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
         if per_site_limit is not None:
             rendered = rendered[:per_site_limit]
         for rec in rendered:
-            probe = out_dir / "per_site" / f"{traced_name}_{rec['site'] + 1:02}"
+            probe = translated_root / "per_site" / f"{traced_name}_{rec['site'] + 1:02}"
             probe = probe.with_suffix(".lean")
             probe.parent.mkdir(parents=True, exist_ok=True)
             probe.write_text(
@@ -869,6 +885,12 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
     for rec in records:
         rec.pop("lines", None)
 
+    published = False
+    if code == 0 and all(rec["status"] == "replayed" for rec in records):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(translated_target, target)
+        published = True
+
     return {
         "module": mathlib_rel,
         "traced_module": traced_name,
@@ -881,6 +903,7 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
             k: v for k, v in transcription.items() if k != "trace_records"
         },
         "trace_count": len(traces),
+        "published": published,
         "identity": identity,
         "records": records,
         "log": log,

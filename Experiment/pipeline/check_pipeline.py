@@ -585,6 +585,47 @@ def lifecycle_tests(f: Failures) -> None:
                 "compile did not receive the T4 run root")
 
 
+def publication_tests(f: Failures) -> None:
+    """A failed current run cannot leave a stale module publication."""
+    module = "Mathlib/Logic/Nontrivial/Defs.lean"
+    source = "example : True := by simp\n"
+    with tempfile.TemporaryDirectory(prefix="publication-check-") as tmp:
+        root = pathlib.Path(tmp)
+        mathlib = root / "mathlib" / "Mathlib"
+        source_path = mathlib / "Logic" / "Nontrivial" / "Defs.lean"
+        source_path.parent.mkdir(parents=True)
+        source_path.write_text(source, encoding="utf-8")
+        out = root / "published"
+        target = out / module
+        target.parent.mkdir(parents=True)
+        target.write_text("old translated output\n", encoding="utf-8")
+        marker = target.with_suffix(target.suffix + ".success")
+        marker.write_text("old success\n", encoding="utf-8")
+        old_transcribe = P.transcribe
+
+        def fail_transcribe(*args: object, **kwargs: object) -> tuple[pathlib.Path, dict]:
+            del args, kwargs
+            return root / "stage.lean", {
+                "trace_records": [{"schema": "simp-trace-v1"}],
+                "run_root": str(root / "run"),
+            }
+
+        P.transcribe = fail_transcribe
+        try:
+            result = P.replay_module(module, root / "t1", root / "t2", out, mathlib)
+        finally:
+            P.transcribe = old_transcribe
+        f.equal("publication/identity_failed", result["compile_mode"], "identity_failed")
+        f.equal("publication/not_published", result["published"], False)
+        f.check("publication/old_output_removed", not target.exists(),
+                "stale translated output survived identity failure")
+        f.check("publication/old_marker_removed", not marker.exists(),
+                "stale success marker survived identity failure")
+        f.check("publication/no_replay", not any(rec["status"] == "replayed"
+                                                  for rec in result["records"]),
+                "identity failure reported a replayed site")
+
+
 def site_count_tests(f: Failures, t1: pathlib.Path) -> None:
     mathlib = t1 / ".lake" / "packages" / "mathlib" / "Mathlib"
     if not mathlib.is_dir():
@@ -702,6 +743,7 @@ def main() -> int:
     mapping_tests(f)
     identity_tests(f)
     lifecycle_tests(f)
+    publication_tests(f)
     site_count_tests(f, t1)
     end_to_end_test(f, t1, t2)
 
