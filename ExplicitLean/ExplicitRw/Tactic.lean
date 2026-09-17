@@ -134,16 +134,19 @@ in this syntax can introduce a simp-family tactic, *provided* the file it lives
 in declares no term elaborators.
 -/
 
-/-- A whitelisted term: see the grammar note above. -/
+/--
+A whitelisted term. One category covers terms and types alike: in dependent type
+theory they are the same syntactic class, and splitting them only duplicated
+every production.
+-/
 declare_syntax_cat explicitRwTerm
 
-/--
-A whitelisted *type*: the whitelisted terms plus the binder-free connectives and
-the typed binders needed to state an equation or an iff.
--/
-declare_syntax_cat explicitRwType
+/-- Types are whitelisted terms; the alias keeps the step syntax readable. -/
+syntax explicitRwType := explicitRwTerm
 
-/-- An identifier, optionally `@`-prefixed; dotted names and `.field` included. -/
+/-! ### Atoms -/
+
+/-- An identifier, optionally `@`-prefixed; dotted names included. -/
 syntax:max (name := explicitRwTermIdent) ("@")? ident : explicitRwTerm
 /-- A placeholder for an argument the position determines. -/
 syntax:max (name := explicitRwTermHole) "_" : explicitRwTerm
@@ -151,10 +154,92 @@ syntax:max (name := explicitRwTermHole) "_" : explicitRwTerm
 syntax:max (name := explicitRwTermNum) num : explicitRwTerm
 /-- A string literal. -/
 syntax:max (name := explicitRwTermStr) str : explicitRwTerm
-/-- Arithmetic and comparison operators, needed to state the equations that
-simproc steps compute (`eq (2 + 3 = 5) by rfl`) and the targets of `change`.
-These are ordinary notations over whitelisted operands, not an escape: the
-operands are themselves whitelisted, so no new term shape is admitted. -/
+/-- `Type`, `Type u`, `Sort u`. -/
+syntax:max (name := explicitRwTermSort)
+  ("Type" <|> "Sort") (ident <|> num)? : explicitRwTerm
+/-- `Type*` and `Sort*`, which Lean lexes as single tokens. -/
+syntax:max (name := explicitRwTermSortStar) ("Type*" <|> "Sort*") : explicitRwTerm
+/-- `Prop`. -/
+syntax:max (name := explicitRwTermProp) "Prop" : explicitRwTerm
+
+/-! ### Grouping, application, projection -/
+
+/-- Application, left-associated as usual. -/
+syntax:10 (name := explicitRwTermApp) explicitRwTerm:10 explicitRwTerm:max : explicitRwTerm
+/-- Parentheses. -/
+syntax:max (name := explicitRwTermParen) "(" explicitRwTerm ")" : explicitRwTerm
+/-- A type ascription, whose type is itself whitelisted. -/
+syntax:max (name := explicitRwTermAscr) "(" explicitRwTerm " : " explicitRwTerm ")" : explicitRwTerm
+/-- A pair, as the pretty printer writes it. -/
+syntax:max (name := explicitRwTermPair) "(" explicitRwTerm ", " explicitRwTerm ")" : explicitRwTerm
+/-- A projection on any whitelisted term: `(f x).1`, `(hp q).elim`. This admits
+no new *shape*, only a projection on an operand that is already whitelisted. -/
+syntax:max (name := explicitRwTermProj) explicitRwTerm:max "." (ident <|> num) : explicitRwTerm
+
+/-! ### Binders
+
+Both the typed and the untyped spellings, because the pretty printer omits the
+type when it is inferable. Pattern-matching lambdas are *not* admitted: `fun` is
+followed by plain identifiers only.
+-/
+
+/-- `fun x => t`, `fun x y => t`, `fun (x : α) => t`. -/
+syntax:max (name := explicitRwTermFun)
+  "fun " (ident)+ (" : " explicitRwTerm)? " => " explicitRwTerm : explicitRwTerm
+/-- `fun (x : α) => t`, the parenthesised spelling. -/
+syntax:max (name := explicitRwTermFunParen)
+  "fun " "(" (ident)+ " : " explicitRwTerm ")" " => " explicitRwTerm : explicitRwTerm
+/-- `∀ x, p`, `∀ x : α, p`, `∀ x y, p`. -/
+syntax:max (name := explicitRwTermForall)
+  "∀ " (ident)+ (" : " explicitRwTerm)? ", " explicitRwTerm : explicitRwTerm
+/-- `∀ (x : α), p`, the parenthesised spelling. -/
+syntax:max (name := explicitRwTermForallParen)
+  "∀ " "(" (ident)+ " : " explicitRwTerm ")" ", " explicitRwTerm : explicitRwTerm
+/-- `∃ x, p`, `∃ x : α, p`. -/
+syntax:max (name := explicitRwTermExists)
+  "∃ " (ident)+ (" : " explicitRwTerm)? ", " explicitRwTerm : explicitRwTerm
+/-- `∃ (x : α), p`, the parenthesised spelling. -/
+syntax:max (name := explicitRwTermExistsParen)
+  "∃ " "(" (ident)+ " : " explicitRwTerm ")" ", " explicitRwTerm : explicitRwTerm
+/-- Set-builder `{x | p}` and `{x : α | p}`. -/
+syntax:max (name := explicitRwTermSetOf)
+  "{" ident (" : " explicitRwTerm)? " | " explicitRwTerm "}" : explicitRwTerm
+
+/-! ### Conditionals -/
+
+/-- `if c then a else b`. T1's `reduceIte` simproc emits this spelling. -/
+syntax:max (name := explicitRwTermIte)
+  "if " explicitRwTerm " then " explicitRwTerm " else " explicitRwTerm : explicitRwTerm
+/-- `if h : c then a else b`, the dependent spelling. -/
+syntax:max (name := explicitRwTermDIte)
+  "if " ident " : " explicitRwTerm " then " explicitRwTerm " else " explicitRwTerm : explicitRwTerm
+
+/-! ### Prefix and postfix operators
+
+The spellings Mathlib's pretty printer emits. Each takes whitelisted operands,
+so none of them admits a new term shape.
+-/
+
+/-- Negation of a proposition. -/
+syntax:max (name := explicitRwTermNot) "¬" explicitRwTerm:40 : explicitRwTerm
+/-- Arithmetic negation. -/
+syntax:75 (name := explicitRwTermNeg) "-" explicitRwTerm:75 : explicitRwTerm
+/-- A coercion arrow, as the pretty printer writes one. -/
+syntax:max (name := explicitRwTermUp) "↑" explicitRwTerm:max : explicitRwTerm
+@[inherit_doc explicitRwTermUp]
+syntax:max (name := explicitRwTermFunCoe) "⇑" explicitRwTerm:max : explicitRwTerm
+@[inherit_doc explicitRwTermUp]
+syntax:max (name := explicitRwTermSetCoe) "↥" explicitRwTerm:max : explicitRwTerm
+/-- Inverse. -/
+syntax:max (name := explicitRwTermInv) explicitRwTerm:max "⁻¹" : explicitRwTerm
+
+/-! ### Binary operators
+
+Arithmetic and order, the algebraic and set-theoretic operators Mathlib's pretty
+printer emits, and the logical connectives needed to state an equation.
+-/
+
+/-- Arithmetic. -/
 syntax:65 (name := explicitRwTermAdd) explicitRwTerm:65 " + " explicitRwTerm:66 : explicitRwTerm
 @[inherit_doc explicitRwTermAdd]
 syntax:65 (name := explicitRwTermSub) explicitRwTerm:65 " - " explicitRwTerm:66 : explicitRwTerm
@@ -166,72 +251,93 @@ syntax:70 (name := explicitRwTermDiv) explicitRwTerm:70 " / " explicitRwTerm:71 
 syntax:70 (name := explicitRwTermMod) explicitRwTerm:70 " % " explicitRwTerm:71 : explicitRwTerm
 @[inherit_doc explicitRwTermAdd]
 syntax:75 (name := explicitRwTermPow) explicitRwTerm:76 " ^ " explicitRwTerm:75 : explicitRwTerm
+/-- Scalar multiplication. -/
+syntax:73 (name := explicitRwTermSMul) explicitRwTerm:74 " • " explicitRwTerm:73 : explicitRwTerm
+/-- Function composition. -/
+syntax:90 (name := explicitRwTermComp) explicitRwTerm:91 " ∘ " explicitRwTerm:90 : explicitRwTerm
+/-- Divisibility. -/
+syntax:50 (name := explicitRwTermDvd) explicitRwTerm:51 " ∣ " explicitRwTerm:51 : explicitRwTerm
+/-- Product of types. -/
+syntax:35 (name := explicitRwTermProd) explicitRwTerm:36 " × " explicitRwTerm:35 : explicitRwTerm
 
-/-- Application, left-associated as usual. -/
-syntax:10 (name := explicitRwTermApp) explicitRwTerm:10 explicitRwTerm:max : explicitRwTerm
-/-- Parentheses. -/
-syntax:max (name := explicitRwTermParen) "(" explicitRwTerm ")" : explicitRwTerm
-/-- A type ascription, whose type is itself whitelisted. -/
-syntax:max (name := explicitRwTermAscr) "(" explicitRwTerm " : " explicitRwType ")" : explicitRwTerm
+/-- Set membership and inclusion. -/
+syntax:50 (name := explicitRwTermMem) explicitRwTerm:51 " ∈ " explicitRwTerm:51 : explicitRwTerm
+@[inherit_doc explicitRwTermMem]
+syntax:50 (name := explicitRwTermNotMem) explicitRwTerm:51 " ∉ " explicitRwTerm:51 : explicitRwTerm
+@[inherit_doc explicitRwTermMem]
+syntax:50 (name := explicitRwTermSubset) explicitRwTerm:51 " ⊆ " explicitRwTerm:51 : explicitRwTerm
+@[inherit_doc explicitRwTermMem]
+syntax:50 (name := explicitRwTermSSubset) explicitRwTerm:51 " ⊂ " explicitRwTerm:51 : explicitRwTerm
+@[inherit_doc explicitRwTermMem]
+syntax:65 (name := explicitRwTermUnion) explicitRwTerm:65 " ∪ " explicitRwTerm:66 : explicitRwTerm
+@[inherit_doc explicitRwTermMem]
+syntax:70 (name := explicitRwTermInter) explicitRwTerm:70 " ∩ " explicitRwTerm:71 : explicitRwTerm
+@[inherit_doc explicitRwTermMem]
+syntax:70 (name := explicitRwTermSDiff) explicitRwTerm:70 " \\ " explicitRwTerm:71 : explicitRwTerm
 
-/-- Any whitelisted term is a whitelisted type. -/
-syntax:max (name := explicitRwTypeTerm) explicitRwTerm : explicitRwType
-/-- Parentheses. -/
-syntax:max (name := explicitRwTypeParen) "(" explicitRwType ")" : explicitRwType
-/-- Equality. -/
-syntax:50 (name := explicitRwTypeEq) explicitRwType:51 " = " explicitRwType:51 : explicitRwType
-/-- Iff. -/
-syntax:20 (name := explicitRwTypeIff) explicitRwType:21 " ↔ " explicitRwType:21 : explicitRwType
-/-- Negation. -/
-syntax:max (name := explicitRwTypeNot) "¬" explicitRwType:40 : explicitRwType
-/-- Conjunction. -/
-syntax:35 (name := explicitRwTypeAnd) explicitRwType:36 " ∧ " explicitRwType:35 : explicitRwType
-/-- Disjunction. -/
-syntax:30 (name := explicitRwTypeOr) explicitRwType:31 " ∨ " explicitRwType:30 : explicitRwType
-/-- Implication. -/
-syntax:25 (name := explicitRwTypeArrow) explicitRwType:26 " → " explicitRwType:25 : explicitRwType
-/-- Comparisons, for the equations a simproc step states. -/
-syntax:50 (name := explicitRwTypeLe) explicitRwType:51 " ≤ " explicitRwType:51 : explicitRwType
-@[inherit_doc explicitRwTypeLe]
-syntax:50 (name := explicitRwTypeLt) explicitRwType:51 " < " explicitRwType:51 : explicitRwType
-@[inherit_doc explicitRwTypeLe]
-syntax:50 (name := explicitRwTypeNe) explicitRwType:51 " ≠ " explicitRwType:51 : explicitRwType
+/-- Order and equality. -/
+syntax:50 (name := explicitRwTermLe) explicitRwTerm:51 " ≤ " explicitRwTerm:51 : explicitRwTerm
+@[inherit_doc explicitRwTermLe]
+syntax:50 (name := explicitRwTermLt) explicitRwTerm:51 " < " explicitRwTerm:51 : explicitRwTerm
+@[inherit_doc explicitRwTermLe]
+syntax:50 (name := explicitRwTermGe) explicitRwTerm:51 " ≥ " explicitRwTerm:51 : explicitRwTerm
+@[inherit_doc explicitRwTermLe]
+syntax:50 (name := explicitRwTermGt) explicitRwTerm:51 " > " explicitRwTerm:51 : explicitRwTerm
+@[inherit_doc explicitRwTermLe]
+syntax:50 (name := explicitRwTermEq) explicitRwTerm:51 " = " explicitRwTerm:51 : explicitRwTerm
+@[inherit_doc explicitRwTermLe]
+syntax:50 (name := explicitRwTermNe) explicitRwTerm:51 " ≠ " explicitRwTerm:51 : explicitRwTerm
 
-/-- A typed `∀` binder. -/
-syntax:max (name := explicitRwTypeForall) "∀ " "(" ident " : " explicitRwType ")" ", " explicitRwType : explicitRwType
-/-- A typed `∃` binder. -/
-syntax:max (name := explicitRwTypeExists) "∃ " "(" ident " : " explicitRwType ")" ", " explicitRwType : explicitRwType
-/-- A typed `fun` binder. -/
-syntax:max (name := explicitRwTypeFun) "fun " "(" ident " : " explicitRwType ")" " => " explicitRwType : explicitRwType
+/-- Logical connectives. -/
+syntax:20 (name := explicitRwTermIff) explicitRwTerm:21 " ↔ " explicitRwTerm:21 : explicitRwTerm
+@[inherit_doc explicitRwTermIff]
+syntax:35 (name := explicitRwTermAnd) explicitRwTerm:36 " ∧ " explicitRwTerm:35 : explicitRwTerm
+@[inherit_doc explicitRwTermIff]
+syntax:30 (name := explicitRwTermOr) explicitRwTerm:31 " ∨ " explicitRwTerm:30 : explicitRwTerm
+@[inherit_doc explicitRwTermIff]
+syntax:25 (name := explicitRwTermArrow) explicitRwTerm:26 " → " explicitRwTerm:25 : explicitRwTerm
+
+/-! ## Step syntax -/
 
 /-- `at [0, 1, 1]` — the position a step applies at. `at []` is the whole location. -/
 syntax explicitRwPos := " at " "[" num,* "]"
 
+/--
+`with [tac, ...]` — how a conditional lemma's hypotheses are discharged, in
+order. Each entry is from a closed set: `rfl`, `decide`, `omega`, or
+`exact <whitelisted term>`. `omega` is admitted because it is a decision
+procedure for linear arithmetic, not a simp-family tactic; the spec records it
+as a side close. Nothing else is accepted, for the same reason the closer set is
+closed.
+-/
+syntax explicitRwSideTac := &"rfl" <|> &"decide" <|> &"omega" <|> (&"exact " explicitRwTerm)
+
+/-- The optional side-condition clause of a rewrite step. -/
+syntax explicitRwWith := " with " "[" explicitRwSideTac,* "]"
+
 /-- A lemma rewrite, forwards or backwards: `foo a b at [1]`, `← bar at []`. -/
-syntax explicitRwRw := ("← ")? explicitRwTerm explicitRwPos
+syntax explicitRwRw := ("← ")? explicitRwTerm explicitRwPos (explicitRwWith)?
 
 /-- `unfold f at [1]` — delta-unfold one constant, definitionally. -/
 syntax explicitRwUnfold := "unfold " ident explicitRwPos
 
 /--
-`beta at [1]`, `eta at [1]`, `proj at [1]`, `zeta at [1]` — the silent
-definitional reductions of the spec's `beta|eta|proj|zeta` step kinds.
+`beta at [1]`, `eta at [1]`, `proj at [1]`, `zeta at [1]`, `iota at [1]` — the
+silent definitional reductions of the spec's `beta|eta|proj|zeta|iota` kinds.
 
-`zeta` is the *only* step that destroys a `let`: it replaces `let x := v; b` by
-`b[v/x]`. Rewriting inside a `let` body keeps the `let`, so that positions
-recorded after such a step still describe the term.
+`zeta` is the only step that destroys a `let`. `iota` reduces one matcher or
+recursor application whose major premise is a constructor.
 -/
-syntax explicitRwRed := (&"beta" <|> &"eta" <|> &"proj" <|> &"zeta") explicitRwPos
+syntax explicitRwRed :=
+  (&"beta" <|> &"eta" <|> &"proj" <|> &"zeta" <|> &"iota") explicitRwPos
 
 /--
-`intro_ctx <name> at [1]` — the spec's contextual-simp step, which makes the
-antecedent of an implication available as a hypothesis for later steps.
+`intro_ctx <name> at [1]` — the spec's contextual-simp step.
 
-It is **recognised but not implemented**: contextual rewriting changes what is in
-scope for subsequent positions, which this tactic's single-location model does
-not represent. It is given syntax anyway so that a trace containing it fails with
-an honest "not implemented" error naming the kind, rather than being parsed as a
-lemma called `intro_ctx`.
+Recognised but **not implemented**: contextual rewriting changes what is in scope
+for subsequent positions, which this tactic's single-location model does not
+represent. It has syntax so that a trace containing it fails with an honest
+"not implemented" error naming the kind, rather than being read as a lemma.
 -/
 syntax explicitRwIntroCtx := &"intro_ctx " ident explicitRwPos
 
@@ -240,18 +346,15 @@ syntax explicitRwChange := "change " explicitRwTerm explicitRwPos
 
 /--
 The closers a trace may use, as a **closed enumeration**. `explicit_rw` is
-product code, so it must not embed a free `tacticSeq`: that would let a
-generated trace carry `simp` (or any other forbidden tactic) inside the product
-tactic, where `Experiment/check_no_simp_family.py` could never see it. The
-spec's `close` field maps onto `rfl` and `decide`, plus `exact <term>` for every
-form that names something: `true_intro` is `exact True.intro`,
-`assumption:<name>` is `exact <name>`, `absurd:<hyp>` is `exact <hyp>.elim`.
+product code, so it must not embed a free `tacticSeq`. The spec's `close` field
+maps onto `rfl` and `decide`, plus `exact <term>` for every form that names
+something: `true_intro` is `exact True.intro`, `assumption:<name>` is
+`exact <name>`, `absurd:<hyp>` is `exact <hyp>.elim`.
 
 Two tactics are deliberately **not** offered, both because they search where the
-spec recorded an exact choice. `trivial` is a macro that tries several tactics in
-turn. Bare `assumption` scans the whole local context, so it can succeed by
-finding a *different* hypothesis than the one the trace recorded; the spec writes
-`assumption:<name>`, and `exact <name>` renders that exactly.
+spec recorded an exact choice: `trivial` is a macro that tries several tactics in
+turn, and bare `assumption` scans the whole local context, so it can succeed by
+finding a *different* hypothesis than the one the trace recorded.
 
 `rfl` here is the ordinary `rfl` tactic — `Eq`/`Iff`/`HEq` reflexivity and
 `@[refl]` lemmas. It is not `simp`-backed and performs no simplification.
@@ -285,6 +388,29 @@ syntax (name := explicitRw) "explicit_rw " "[" explicitRwStep,* "]"
 
 namespace Impl
 
+/-- `fun (x : α) => ... => body`: a typed binder group, desugared to nested
+single binders so it can be built with ordinary quotations. -/
+def mkTypedFun (xs : Array Ident) (ty body : Term) : TermElabM Term := do
+  let mut r := body
+  for x in xs.reverse do
+    r ← `(fun ($x : $ty) => $r)
+  return r
+
+/-- `∀ (x : α), ... , body`, nested the same way. -/
+def mkTypedForall (xs : Array Ident) (ty body : Term) : TermElabM Term := do
+  let mut r := body
+  for x in xs.reverse do
+    r ← `(∀ ($x : $ty), $r)
+  return r
+
+/-- `∃ (x : α), ... , body`, nested the same way. -/
+def mkTypedExists (xs : Array Ident) (ty body : Term) : TermElabM Term := do
+  let mut r := body
+  for x in xs.reverse do
+    let b : TSyntax ``Lean.binderIdent := ⟨x.raw⟩
+    r ← `(∃ ($b : $ty), $r)
+  return r
+
 /--
 Translate a whitelisted term or type into ordinary Lean syntax.
 
@@ -294,70 +420,137 @@ would be, so implicits, universes, instances and coercions behave as in any
 Lean proof. This function is total on the grammar; an unrecognised node is an
 internal error, never a silent pass-through to a general `term`.
 -/
-partial def toTerm (stx : Syntax) : TacticM Term := do
+partial def toTermCore (stx : Syntax) : TermElabM Term := do
   match stx.getKind with
+  -- Atoms
   | ``explicitRwTermIdent =>
     let id : Term := ⟨stx[1]⟩
     if stx[0].isNone then return id else `(@$id)
   | ``explicitRwTermHole => `(_)
   | ``explicitRwTermNum => return ⟨stx[0]⟩
   | ``explicitRwTermStr => return ⟨stx[0]⟩
-  | ``explicitRwTermAdd => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a + $b)
-  | ``explicitRwTermSub => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a - $b)
-  | ``explicitRwTermMul => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a * $b)
-  | ``explicitRwTermDiv => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a / $b)
-  | ``explicitRwTermMod => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a % $b)
-  | ``explicitRwTermPow => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a ^ $b)
-  | ``explicitRwTypeLe => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a ≤ $b)
-  | ``explicitRwTypeLt => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a < $b)
-  | ``explicitRwTypeNe => do let a ← toTerm stx[0]; let b ← toTerm stx[2]; `($a ≠ $b)
-  | ``explicitRwTermApp =>
-    let f ← toTerm stx[0]
-    let a ← toTerm stx[1]
-    `($f $a)
-  | ``explicitRwTermParen =>
-    let t ← toTerm stx[1]
-    `(($t))
-  | ``explicitRwTermAscr =>
-    let t ← toTerm stx[1]
-    let ty ← toTerm stx[3]
-    `(($t : $ty))
-  | ``explicitRwTypeTerm => toTerm stx[0]
-  | ``explicitRwTypeParen =>
-    let t ← toTerm stx[1]
-    `(($t))
-  | ``explicitRwTypeEq =>
-    let a ← toTerm stx[0]; let b ← toTerm stx[2]
-    `($a = $b)
-  | ``explicitRwTypeIff =>
-    let a ← toTerm stx[0]; let b ← toTerm stx[2]
-    `($a ↔ $b)
-  | ``explicitRwTypeNot =>
-    let a ← toTerm stx[1]
-    `(¬ $a)
-  | ``explicitRwTypeAnd =>
-    let a ← toTerm stx[0]; let b ← toTerm stx[2]
-    `($a ∧ $b)
-  | ``explicitRwTypeOr =>
-    let a ← toTerm stx[0]; let b ← toTerm stx[2]
-    `($a ∨ $b)
-  | ``explicitRwTypeArrow =>
-    let a ← toTerm stx[0]; let b ← toTerm stx[2]
-    `($a → $b)
-  | ``explicitRwTypeForall =>
-    let x : Ident := ⟨stx[2]⟩
-    let ty ← toTerm stx[4]; let body ← toTerm stx[7]
-    `(∀ ($x : $ty), $body)
-  | ``explicitRwTypeExists =>
-    let x : TSyntax ``Lean.binderIdent := ⟨stx[2]⟩
-    let ty ← toTerm stx[4]; let body ← toTerm stx[7]
-    `(∃ ($x : $ty), $body)
-  | ``explicitRwTypeFun =>
-    let x : Ident := ⟨stx[2]⟩
-    let ty ← toTerm stx[4]; let body ← toTerm stx[7]
-    `(fun ($x : $ty) => $body)
+  | ``explicitRwTermProp => `(Prop)
+  | ``explicitRwTermSortStar =>
+    if stx[0].getAtomVal == "Type*" then `(Type _) else `(Sort _)
+  | ``explicitRwTermSort =>
+    let isType := stx[0].getAtomVal == "Type"
+    if stx[1].isNone then
+      if isType then `(Type) else `(Sort _)
+    else
+      -- A named or numeric universe: `Type u`, `Sort 1`.
+      let u : TSyntax `level := ⟨stx[1][0]⟩
+      if isType then `(Type $u) else `(Sort $u)
+  -- Grouping, application, projection
+  | ``explicitRwTermApp => do
+    let f ← toTermCore stx[0]; let a ← toTermCore stx[1]; `($f $a)
+  | ``explicitRwTermParen => do let t ← toTermCore stx[1]; `(($t))
+  | ``explicitRwTermAscr => do
+    let t ← toTermCore stx[1]; let ty ← toTermCore stx[3]; `(($t : $ty))
+  | ``explicitRwTermPair => do
+    let a ← toTermCore stx[1]; let b ← toTermCore stx[3]; `(($a, $b))
+  | ``explicitRwTermProj => do
+    let t ← toTermCore stx[0]
+    let field := stx[2]
+    if field.isOfKind ``Lean.Parser.Term.ident || field.getKind == `ident then
+      let f : Ident := ⟨field⟩
+      `($t.$f:ident)
+    else
+      let n : Syntax := field
+      return ⟨Syntax.node .none ``Lean.Parser.Term.proj #[t.raw, Syntax.atom .none ".", n]⟩
+  -- Binders
+  | ``explicitRwTermFun => do
+    let xs : Array Ident := stx[1].getArgs.map (⟨·⟩)
+    let body ← toTermCore stx[4]
+    if stx[2].isNone then
+      `(fun $xs* => $body)
+    else
+      mkTypedFun xs (← toTermCore stx[2][1]) body
+  | ``explicitRwTermFunParen => do
+    let xs : Array Ident := stx[2].getArgs.map (⟨·⟩)
+    mkTypedFun xs (← toTermCore stx[4]) (← toTermCore stx[7])
+  | ``explicitRwTermForall => do
+    let xs : Array Ident := stx[1].getArgs.map (⟨·⟩)
+    let body ← toTermCore stx[4]
+    if stx[2].isNone then
+      `(∀ $xs*, $body)
+    else
+      mkTypedForall xs (← toTermCore stx[2][1]) body
+  | ``explicitRwTermForallParen => do
+    let xs : Array Ident := stx[2].getArgs.map (⟨·⟩)
+    mkTypedForall xs (← toTermCore stx[4]) (← toTermCore stx[7])
+  | ``explicitRwTermExists => do
+    let body ← toTermCore stx[4]
+    if stx[2].isNone then
+      let mut r := body
+      for a in stx[1].getArgs.reverse do
+        let b : Ident := ⟨a⟩
+        r ← `(∃ $b:ident, $r)
+      return r
+    else
+      mkTypedExists (stx[1].getArgs.map (fun a => (⟨a⟩ : Ident))) (← toTermCore stx[2][1]) body
+  | ``explicitRwTermExistsParen => do
+    mkTypedExists (stx[2].getArgs.map (fun a => (⟨a⟩ : Ident))) (← toTermCore stx[4]) (← toTermCore stx[7])
+  | ``explicitRwTermSetOf => do
+    -- `{x | p}` is `setOf fun x => p`; building the application avoids depending
+    -- on the set-builder notation being in scope.
+    let x : Ident := ⟨stx[1]⟩
+    let body ← toTermCore stx[4]
+    if stx[2].isNone then
+      `(setOf fun $x => $body)
+    else
+      let ty ← toTermCore stx[2][1]
+      `(setOf fun ($x : $ty) => $body)
+  -- Conditionals
+  | ``explicitRwTermIte => do
+    let c ← toTermCore stx[1]; let a ← toTermCore stx[3]; let b ← toTermCore stx[5]
+    `(if $c then $a else $b)
+  | ``explicitRwTermDIte => do
+    -- Build `dite` directly: the surface `if h : c then …` notation expects a
+    -- binder node this grammar does not produce.
+    let h : Ident := ⟨stx[1]⟩
+    let c ← toTermCore stx[3]; let a ← toTermCore stx[5]; let b ← toTermCore stx[7]
+    `(dite $c (fun $h => $a) (fun $h => $b))
+  -- Prefix and postfix
+  | ``explicitRwTermNot => do let a ← toTermCore stx[1]; `(¬ $a)
+  | ``explicitRwTermNeg => do let a ← toTermCore stx[1]; `(-$a)
+  | ``explicitRwTermUp => do let a ← toTermCore stx[1]; `(↑$a)
+  | ``explicitRwTermFunCoe => do let a ← toTermCore stx[1]; `(⇑$a)
+  | ``explicitRwTermSetCoe => do let a ← toTermCore stx[1]; `(↥$a)
+  | ``explicitRwTermInv => do let a ← toTermCore stx[0]; `($a⁻¹)
+  -- Binary operators
+  | ``explicitRwTermAdd => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a + $b)
+  | ``explicitRwTermSub => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a - $b)
+  | ``explicitRwTermMul => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a * $b)
+  | ``explicitRwTermDiv => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a / $b)
+  | ``explicitRwTermMod => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a % $b)
+  | ``explicitRwTermPow => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ^ $b)
+  | ``explicitRwTermSMul => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a • $b)
+  | ``explicitRwTermComp => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ∘ $b)
+  | ``explicitRwTermDvd => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ∣ $b)
+  | ``explicitRwTermProd => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a × $b)
+  | ``explicitRwTermMem => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ∈ $b)
+  | ``explicitRwTermNotMem => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ∉ $b)
+  | ``explicitRwTermSubset => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ⊆ $b)
+  | ``explicitRwTermSSubset => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ⊂ $b)
+  | ``explicitRwTermUnion => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ∪ $b)
+  | ``explicitRwTermInter => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ∩ $b)
+  | ``explicitRwTermSDiff => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a \ $b)
+  | ``explicitRwTermLe => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ≤ $b)
+  | ``explicitRwTermLt => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a < $b)
+  | ``explicitRwTermGe => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ≥ $b)
+  | ``explicitRwTermGt => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a > $b)
+  | ``explicitRwTermEq => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a = $b)
+  | ``explicitRwTermNe => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ≠ $b)
+  | ``explicitRwTermIff => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ↔ $b)
+  | ``explicitRwTermAnd => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ∧ $b)
+  | ``explicitRwTermOr => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a ∨ $b)
+  | ``explicitRwTermArrow => do let a ← toTermCore stx[0]; let b ← toTermCore stx[2]; `($a → $b)
+  | ``explicitRwType => toTermCore stx[0]
   | k =>
     throwError "explicit_rw: internal error: unhandled whitelisted node `{k}`"
+
+/-- `toTermCore` in `TacticM`, which is where the step elaborators run. -/
+def toTerm (stx : Syntax) : TacticM Term := toTermCore stx
 
 
 
@@ -505,8 +698,33 @@ def checkNoLevelMVars (idx : Nat) (lemmaStx : MessageData) (es : Array Expr) :
         depend on the import context. Write the universe explicitly on the lemma \
         name, or fix the position."
 
-/-- Run a rewrite step at `pos` inside `e`. -/
-def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool) :
+/--
+Discharge one hypothesis of a conditional lemma with one entry of a `with`
+clause. The entry comes from a closed set (`rfl`, `decide`, `omega`,
+`exact <whitelisted term>`), so a side condition cannot smuggle in a tactic any
+more than a closer can. `omega` is admitted because it is a decision procedure
+for linear arithmetic, not a member of the simp family.
+-/
+def runSideTac (idx : Nat) (which : Nat) (tacStx : Syntax) (goal : MVarId) :
+    TacticM Unit := do
+  let kind := tacStx[0][0].getAtomVal
+  let run (t : TSyntax `tactic) : TacticM Unit := do
+    let remaining ← Tactic.run goal (evalTactic t)
+    unless remaining.isEmpty do
+      stepError idx m!"the `with` entry {which + 1} left {remaining.length} goal(s) \
+        open on the side condition{indentExpr (← goal.getType)}"
+  match kind with
+  | "rfl" => run (← `(tactic| rfl))
+  | "decide" => run (← `(tactic| decide))
+  | "omega" => run (← `(tactic| omega))
+  | "exact" =>
+    let t ← toTerm tacStx[0][1]
+    run (← `(tactic| exact $t))
+  | k => throwError "explicit_rw: internal error: unknown `with` entry `{k}`"
+
+/-- Run a rewrite step at `pos` inside `e`, with its `with` clause if any. -/
+def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool)
+    (sideTacs : Array Syntax) :
     TacticM Replacement := do
   rewriteAt e pos
     (fun sub => do
@@ -516,6 +734,20 @@ def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool) :
         stepError idx m!"lemma `{stx}` does not match the subterm at \
           position {Pos.render pos}.\nExpected{indentExpr (← instantiateMVars source)}\n\
           but the subterm is{indentExpr sub}"
+      -- Discharge the lemma's hypotheses with the `with` clause, in order. A
+      -- hypothesis is a Prop-valued argument metavariable the position did not
+      -- determine; anything left over is still an error below.
+      let propMVars ← mvars.filterM fun m => do
+        match ← instantiateMVars m with
+        | .mvar mid => do
+          if ← mid.isAssigned then pure false else isProp (← instantiateMVars (← mid.getType))
+        | _ => pure false
+      if sideTacs.size > propMVars.size then
+        stepError idx m!"the `with` clause supplies {sideTacs.size} proof(s) but lemma \
+          `{stx}` has {propMVars.size} undetermined hypothesis(es) at this position."
+      for h : i in [0 : sideTacs.size] do
+        let .mvar mid := ← instantiateMVars propMVars[i]! | pure ()
+        runSideTac idx i sideTacs[i] mid
       closeLemmaMVars idx m!"`{stx}`" mvars
       let eqProof ← instantiateMVars eqProof
       let target ← instantiateMVars target
@@ -648,6 +880,26 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
         let .letE _ _ v b _ := sub
           | stepError idx m!"`zeta` at this position: the subterm is not a `let`."
         return b.instantiate1 v
+    | "iota" => runDefeqStep idx e pos m!"`iota`" fun sub => do
+        -- One step of matcher/recursor reduction on a constructor. `whnfCore`
+        -- performs iota; requiring the head to be a matcher or recursor and the
+        -- term to actually change keeps this from standing in for a general
+        -- `whnf`, the same guard `proj` uses.
+        let fn := sub.getAppFn
+        let isMatcher ← Meta.isMatcherApp sub
+        let env ← getEnv
+        let isRec :=
+          match fn with
+          | .const c _ => (env.find? c).any (· matches .recInfo _)
+          | _ => false
+        unless isMatcher || isRec do
+          stepError idx m!"`iota` at this position: the subterm is not a matcher or \
+            recursor application; its head is `{fn}`."
+        let r ← whnfCore sub
+        if r == sub then
+          stepError idx m!"`iota` at this position: the application does not reduce; \
+            its major premise is not a constructor."
+        return r
     | k => throwError "explicit_rw: internal error: unknown reduction keyword `{k}`"
   | ``explicitRwIntroCtx =>
     stepError idx m!"`intro_ctx` is a recorded step kind that `explicit_rw` does not \
@@ -704,7 +956,10 @@ def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Re
     let symm := !stx[0].isNone
     let term ← toTerm stx[1]
     let pos := parsePos stx[2]
-    runRwStep idx e pos term symm
+    -- The optional `with [...]` clause, if present.
+    let sideTacs : Array Syntax :=
+      if stx[3].isNone then #[] else stx[3][0][2].getSepArgs
+    runRwStep idx e pos term symm sideTacs
   | k => throwError "explicit_rw: internal error: unexpected step kind `{k}`"
 
 /-- Apply every step in order to the expression at `target`, rebuilding the goal. -/

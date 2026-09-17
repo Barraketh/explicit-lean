@@ -226,6 +226,15 @@ error: explicit_rw: step 1: lemma `frobnicate` failed to elaborate. If it is a g
 example (a : Nat) : a + 0 = a := by
   explicit_rw [frobnicate at [0, 1]]
 
+/-! ## `iota` where there is nothing to reduce -/
+
+/--
+error: explicit_rw: step 1: `iota` at this position: the subterm is not a matcher or recursor application; its head is `@HAdd.hAdd`.
+-/
+#guard_msgs in
+example (a : Nat) : a + 0 = a := by
+  explicit_rw [iota at [0, 1]]
+
 /-! ## `intro_ctx` is recognised but not implemented
 
 It has syntax so that a trace containing it fails by name, rather than being

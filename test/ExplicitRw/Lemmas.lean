@@ -158,4 +158,39 @@ theorem sort_polymorphic_under_binder : ∀ (α : Type), (¬Nonempty α) ↔ IsE
   intro α
   rfl
 
+/-! ## Side conditions: the `with [...]` clause
+
+A conditional lemma's hypotheses are discharged in order by a closed set of
+tactics: `rfl`, `decide`, `omega`, `exact <whitelisted term>`. `omega` is
+admitted because it is a decision procedure for linear arithmetic, which the
+spec records as a side close; it is not a member of the simp family.
+-/
+
+theorem with_omega (n : Nat) (hn : 5 ≤ n) : (n - 5) + 5 = n := by
+  explicit_rw [Nat.sub_add_cancel _ at [0, 1] with [omega]]
+  guard_target =ₛ n = n
+  rfl
+
+theorem with_exact (n : Nat) (hn : 1 ≤ n) : (n - 1) + 1 = n := by
+  explicit_rw [Nat.sub_add_cancel _ at [0, 1] with [exact hn]]
+  guard_target =ₛ n = n
+  rfl
+
+/-! ## Prop-valued rewrites: the spec's `"prop"` flag
+
+simp uses a true proposition `p` as `p = True` and a false one as `p = False`.
+The spec records this as `"prop": "true"|"false"` on the `rw` step; the generator
+renders it as `eq_true <name>` / `eq_false <name>`, which are ordinary lemmas.
+-/
+
+theorem prop_true_rendering (p q : Prop) (hp : p) : (p ∧ q) ↔ (True ∧ q) := by
+  explicit_rw [eq_true hp at [0, 1, 0, 1]]
+  guard_target =ₛ (True ∧ q) ↔ (True ∧ q)
+  rfl
+
+theorem prop_false_rendering (p q : Prop) (hp : ¬p) : (p ∧ q) ↔ (False ∧ q) := by
+  explicit_rw [eq_false hp at [0, 1, 0, 1]]
+  guard_target =ₛ (False ∧ q) ↔ (False ∧ q)
+  rfl
+
 end ExplicitRwTest.Lemmas

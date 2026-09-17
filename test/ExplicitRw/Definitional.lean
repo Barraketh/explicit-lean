@@ -187,4 +187,21 @@ theorem zeta_then_rewrite (a b : Nat) (h : a = b) :
   guard_target =ₛ b + 7 = b + 7
   rfl
 
+/-! ## The `iota` step: one matcher or recursor reduction on a constructor -/
+
+theorem iota_recursor : Nat.rec (motive := fun _ => Nat) 7 (fun _ _ => 9) 0 = 7 := by
+  explicit_rw [iota at [0, 1]]
+  guard_target =ₛ 7 = 7
+  rfl
+
+/-- A `match` compiles to a matcher application, which `iota` reduces once. -/
+def classify : Nat → Nat
+  | 0 => 100
+  | _ + 1 => 200
+
+theorem iota_matcher : classify 0 = 100 := by
+  explicit_rw [unfold classify at [0, 1], iota at [0, 1]]
+  guard_target =ₛ 100 = 100
+  rfl
+
 end ExplicitRwTest.Definitional
