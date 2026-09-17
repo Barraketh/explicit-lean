@@ -43,12 +43,12 @@ them. **`wall` and `peak RSS` are hand-transcribed** from `/usr/bin/time -l` and
 
 | file | calls | steps | kinds | bytes | wall | peak RSS |
 | --- | --- | --- | --- | --- | --- | --- |
-| `IsEmptyBasicTraced.lean` | 17 | 76 | `rw` 70, `unfold` 6 | 15045 | 2.22 s | 646 MB |
-| `NontrivialDefsTraced.lean` | 1 | 6 | `rw` 6 | 1109 | 2.20 s | 638 MB |
-| `FunctionDefsTraced.lean` | 1 | 12 | `rw` 8, `proj` 4 | 1878 | 2.90 s | 646 MB |
-| `ExistsUniqueTraced.lean` | 8 | 29 | `rw` 23, `beta` 4, `unfold` 2 | 5601 | 3.72 s | 650 MB |
-| `FunctionBasicTraced.lean` | 19 | 106 | `rw` 80, `intro_ctx` 8, `beta` 7, `proj` 5, `unfold` 4, `congr` 2 | 21027 | 4.37 s | 712 MB |
-| **total** | **46** | **229** | `rw` 187, `unfold` 12, `beta` 11, `proj` 9, `intro_ctx` 8, `congr` 2 | **44660** | — | — |
+| `IsEmptyBasicTraced.lean` | 17 | 76 | `rw` 70, `unfold` 6 | 15045  | 2.24 s | 646 MB |
+| `NontrivialDefsTraced.lean` | 1 | 6 | `rw` 6 | 1109  | 2.16 s | 637 MB |
+| `FunctionDefsTraced.lean` | 1 | 12 | `rw` 8, `proj` 4 | 1878  | 2.35 s | 646 MB |
+| `ExistsUniqueTraced.lean` | 8 | 29 | `rw` 23, `beta` 4, `unfold` 2 | 5601  | 2.38 s | 650 MB |
+| `FunctionBasicTraced.lean` | 19 | 106 | `rw` 80, `intro_ctx` 8, `beta` 7, `proj` 5, `unfold` 4, `congr` 2 | 20989  | 3.09 s | 711 MB |
+| **total** | **46** | **229** | `rw` 187, `unfold` 12, `beta` 11, `proj` 9, `intro_ctx` 8, `congr` 2 | **44622**  | — | — |
 
 **Every call stock simp proves traces: 46 of 46**, with zero unresolved lines, zero validation failures and
 zero panics across the five modules; every goal state matches stock. Two fixtures are unresolved *by design*
@@ -118,50 +118,60 @@ generates the measurement counts. **6–8 (minor)** side-trace `post` raised as 
 
 ## Round 6 fixes
 
-**1 (critical) — names were classified by characters.** `resolveStxOrigin` used a hand-rolled character
-whitelist, so every non-ASCII hypothesis name — `hα`, `h₃`, `«quoted»` — failed to resolve and the step lost
-`local` and `prop`, the very failure REVIEW-5 raised. The whitelist is gone: the fvar is read off the simp
-theorem's stored **proof term**, walking the wrappers simp adds (`eq_true h`, `eq_false h`, `propext h`,
-`And.left h`, ...). `simp [hβ.1]` resolves through `And.left` to `hβ`, recording what the origin actually is
-while `name` keeps the projection syntax the user wrote. Fixtures for subscript, Greek, prime, projection and
-a Unicode-named inaccessible.
+**1 (critical)** names were classified by *characters*, so every non-ASCII hypothesis name (`hα`, `h₃`,
+`«quoted»`) failed to resolve and the step lost `local` and `prop`. The whitelist is gone: the fvar is read
+off the simp theorem's stored **proof term**, walking the wrappers simp adds (`eq_true h`, `And.left h`, ...).
+`simp [hβ.1]` resolves through `And.left` to `hβ` while `name` keeps the projection syntax.
+**2 (critical)** an explicit class-typed argument was accepted but dropped, so with two instances in scope a
+replayer synthesised a different one than simp used. Every explicit *value* argument is now recorded in
+`args`, in the lemma's order, and `checkArgsElaborate` confirms the application still elaborates.
+**3 (major)** the plumbing list was completed (`Iff.symm`/`trans`/`rfl`/`of_eq`, `Eq.mp`, `Eq.subst`,
+`Eq.substr`, `Eq.rec`, `of_eq_false`, `trans`), and `Iff.symm`/`Eq.symm` are unwrapped **with a direction
+flip** so the lemma inside is recovered rather than discarded. The allowlist's shape is addressed below.
+**4 (major)** a dsimproc firing is definitional, so it is a `change` carrying the dsimproc in `source`
+(spec e95c745), not a propositional `eq` — T2 had refused the `dreduce_ite` step outright.
+**5 (major)** `close.by` took the erased name, so `assumption:a` named a different local than the
+`intros: ["a✝"]` in the same step; both close-form sites now use the display form.
+**6–8 (minor)** a `zetaDelta` unfold names the local it replaced; `local`/`arg`/`args` added to the checker's
+unexpected-field tuple with every skeleton regenerated; the two stale RESULT.md claims removed — they were in
+a *duplicate* "Checks" paragraph the round-5 edit had left behind, not the one that was updated.
+**Spec bump.** Side traces carry `pre`/`post`; the checker requires and compares both.
 
-**2 (critical) — an explicit instance argument was accepted but dropped.** `classifyProof` accepted an
-explicit class-typed argument and `emitProcStep` recorded only the *proof* arguments as `side`, leaving
-`args` always empty; with two instances in scope a replayer synthesises a different one than simp used, and
-the recorder reported success. Every explicit argument is now recorded in `args` in the lemma's own order,
-and `checkArgsElaborate` confirms `name` applied to them still elaborates — a failure is classified, not a
-silently unreplayable step. Verified by replaying the recorded
-`rw [fixtureTagE_lem fixtureW2 k]` in plain Lean.
+## Structural check on every emitted `rw`
 
-**3 (major) — the plumbing list was an incomplete allowlist.** Completed from Lean's `Simp.Result`
-composition helpers: `Iff.symm`/`Iff.trans`/`Iff.rfl`/`Iff.of_eq`, `Eq.mp`, `Eq.subst`, `Eq.substr`,
-`Eq.rec`, `of_eq_false`, `trans`. `Iff.symm` and `Eq.symm` are additionally **unwrapped with a direction
-flip**, so the lemma inside is recovered and recorded `rev` rather than thrown away; `Iff.trans` composes two
-lemmas and names no single one, so it stays unresolved. The review's point that an allowlist which must be
-complete to be correct is the wrong shape stands — an inverted test is the better design, and is left as a
-follow-up rather than attempted under this round's scope.
+`isPlumbingHead` is an allowlist, and an allowlist has to be *complete* to be correct — the wrong thing to
+rest on. It stays as a fast path, but correctness now rests on a structural check that needs no completeness:
+for every emitted `rw` (global lemma, local hypothesis, simproc-derived, user-congr) the in-tactic validator
+re-elaborates `name` applied to `args` in the local context at that position, opens the lemma's telescope so
+implicits, instances and conditional hypotheses become metavariables, unifies the rewritten side with the
+recorded `before` — direction-aware, and `prop`-flag-aware for `eq_true`/`eq_false` — and requires the other
+side to equal `after` up to reducible defeq. A failure is classified `unresolved:unreplayable_rw:<name>`.
+A misclassified plumbing head therefore cannot ship as a `rw`: `propext`'s statement does not unify with the
+subterm being rewritten, whether or not the allowlist happens to name it.
 
-**4 (major) — a dsimproc firing was recorded as a propositional `eq`.** `instrumentD` wraps the
-*definitional* layer, so a firing there is definitional by construction and is now a `change` carrying the
-dsimproc in `source` (spec e95c745). T2 had refused the `dreduce_ite` step outright because its position is
-the domain of a dependent `∀`; the definitional kind replays.
+Four subtleties the corpus forced, each surfaced by a step that demonstrably *does* replay failing the check:
 
-**5 (major) — `close.by` erased macro scopes.** `assumption:a` named a different, accessible local than the
-`intros: ["a✝"]` in the same step. Both close-form sites now take the display form. The only
-`eraseMacroScopes` left in the recorder is inside a comment explaining why not to use it.
+- **`args` must exclude proof arguments.** The round-6 change had put them in, so `ite_cond_eq_true`'s `args`
+  carried a proof term the replayer is meant to prove. Proof arguments belong in `side`; `args` is value
+  arguments only.
+- **Recorded `args` go to the lemma's *explicit* positions**, not to `mkAppN`, which feeds them to whatever
+  binder comes first and silently builds a different statement (`if 2 then ?a else ?b`).
+- **`forallMetaTelescope`, not the `Reducing` variant**, and the conclusion is read as written before any
+  `whnfR`: reducing turns `LeftTotal R` into `∃ b, R a b` and `p = True` into a form that no longer matches
+  the recorded subterm.
+- **The extra-argument peel** (`Simp.Result.addExtraArgs`) applies only when the lemma's LHS is a rigid
+  application; a bare metavariable LHS matches the whole subterm and must not be peeled.
 
-**6 (minor)** a `zetaDelta` unfold names the local it replaced, which stock `reduceFVar'` knows and the
-recorder was discarding. **7 (minor)** `local`, `arg` and `args` added to the checker's unexpected-field
-tuple, and all 58 expected skeletons regenerated, so `local` is pinned where the trace carries it — the three
-stale files pinned nothing. **8 (minor)** the two stale RESULT.md claims are actually removed this time, and
-the sentence about `--report` now says plainly which columns it generates and which are transcribed.
-
-**Spec bump.** Side traces carry `pre`/`post` like a location; the checker requires both and compares them.
+**No call in the measurement corpus newly becomes unresolved** — all 46 still trace clean, so the check added
+no false positives. It did find one true positive already in the tree: `exists_prop_congr`'s right-hand side
+has a higher-order metavariable that unifying the conclusion cannot determine, and
+`rw [exists_prop_congr hpq (fun _ => rfl)]` fails in plain Lean, so that fixture moved to
+`UnresolvedFixtures.lean`. A new fixture there uses a *user-defined* plumbing head — one no allowlist could
+know about — and pins the `unreplayable_rw` classification firing.
 
 **Checks, all re-run from scratch.** `lake build ExplicitLean.SimpTrace` with oleans deleted: clean, no
-warnings, 9.32 s, 750 MB. `Fixtures.lean`: **exit 0**. `UnresolvedFixtures.lean`: exits 1 by design, 2
-classified lines. `python3 -B Experiment/check_simp_trace.py`: `OK: 58 ...`; it compiles the fixtures itself,
+warnings, 9.71 s, 750 MB. `Fixtures.lean`: **exit 0**. `UnresolvedFixtures.lean`: exits 1 by design, 2
+classified lines. `python3 -B Experiment/check_simp_trace.py`: `OK: 59 ...`; it compiles the fixtures itself,
 and its assertions (a positive fixture must exit 0; a `congr` step's nested positions; a side trace's
 `intros`, `pre` and `post`; `local`/`args` where expected) were each verified to fire on a regression. The
 five measurement modules: see the table. Nothing came near 30 minutes or 40 GB.
@@ -177,10 +187,6 @@ five measurement modules: see the table. Nothing came near 30 minutes or 40 GB.
   On that pathology it also exhausts the default `maxSteps` where stock succeeds; raising `maxSteps` makes both succeed.
 - A Lean bump needs a re-sync; the `SOURCE:` annotations give file and line range for every copied function.
 
-**Open questions.** 1. `isPlumbingHead` is an allowlist that must be complete to be correct, which REVIEW-6
-rightly calls the wrong shape. An inverted test — require the head to be an `Eq`/`Iff`-concluding lemma whose
-explicit arguments are all accounted for — would be robust rather than enumerative, and is the right
-follow-up. It was out of scope for this round, which fixed the immediate omissions instead.
-2. REVIEW-4 found a **T2-side** blocker: T2 elaborates a lemma before unifying it with the subterm, so
+**Open questions.** 1. REVIEW-4 found a **T2-side** blocker: T2 elaborates a lemma before unifying it with the subterm, so
 class-polymorphic lemmas like `add_zero` fail with a stuck instance problem where plain `rw` succeeds. `add_zero` is the first step of
 four T1 fixtures, so T1 traces of ordinary Mathlib cannot replay until T2 resolves instances against the position.
