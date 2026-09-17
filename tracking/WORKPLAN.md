@@ -16,6 +16,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T17-explicit-provenance | Consumer-side explicit proposition provenance for fixed redexes; focused fixtures | T2 | **merged; accepted** | task/T17-explicit-provenance | REVIEW-1 PASS at `df81614`; 14 fixtures (11 site-shaped + 3 support); producer/renderer integration and fresh seven-module gate pending |
 | T16-rule-derivations | Term-free theorem-rule derivations captured at the matcher boundary, preserving indexed/liberal lookup parity | T1 | **merged; accepted** | task/T16-rule-derivations | REVIEW-2 PASS at `4a42543`; implementation through `a9c2d4e`; 74 fixture skeletons pass |
 | T18-simproc-inventory | Inventory simproc steps in the accepted 91-site corpus | T6, T16 | **documented; candidates deferred** | task/T18-simproc-inventory | `d2eaf48`; reduceIte 15/6 and reduceDIte 15/8 are later bounded candidates; eqComm deferred |
+| T20-ite-simprocs | Bounded operational `reduceIte`/`reduceDIte` derivations | T1, T16, T18 | **merged; accepted** | codex/t20-ite-simprocs | implementation through `22ff7819`; REVIEW-2 `1ab114ca`; checker 74/74; focused observed coverage 6/15 and 3/15 only; cached-origin misses fail closed |
 
 ## Next steps (written at session end, 2026-09-16)
 
@@ -103,6 +104,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
   inventory records 15 `reduceIte` steps across 6 sites and 15 `reduceDIte`
   steps across 8 sites as later bounded simproc candidates. The one `eqComm`
   site is deferred; no simproc implementation was added.
+- **T20 bounded ite simprocs: ACCEPTED / MERGED.** The operational,
+  term-free `reduceIte`/`reduceDIte` model is integrated through `22ff7819`
+  with REVIEW-2 `1ab114ca`: the full fixture checker passes 74/74, while
+  focused observed coverage is only 6/15 and 3/15 of the accepted T18
+  inventory. Cached-origin condition evidence remains fail-closed; no corpus
+  replay credit is claimed. The `eqComm` site remains deferred.
 - **T4 baseline: ACCEPTED / MERGED.** REVIEW-8 at `f0b59ac` passes the stale-
   publication lifecycle gate. The reviewed fresh seven-module evidence is
   exactly 7/7 modules and 91/91 identity sites, with 56/91 replayed, 1 unresolved,

@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-17T21:44:09Z",
+  "updatedAt": "2026-09-17T22:24:09Z",
   "resumeStatus": {
     "review": "T2_merged_and_integration_checked; T1_simplified_v2_mapping_running; T4_baseline_accepted_and_merged; T6_structural_rendering_accepted_and_merged; T17_consumer_provenance_accepted_and_merged; T16_rule_derivations_accepted_and_merged; T18_simproc_inventory_documented_deferred; T5_cone_pending; T10_cancelled",
     "t2": "merged_to_main_5ec2da5_and_integration_checked",
@@ -15,6 +15,7 @@
     "t17": "consumer_proposition_provenance_accepted_and_merged; implementation_4e102123; review_df81614; 14_focused_fixtures_including_11_site_shapes_pass; consumer_slice_only; producer_renderer_integration_and_fresh_seven_module_gate_pending",
     "t16": "theorem_rule_derivation_producer_accepted_and_merged; implementation_a9c2d4e; review_2_4a42543; 74_fixture_skeletons_pass; term_free_payload_containment_pass; no_corpus_replay_credit_until_renderer_integration_and_fresh_seven_module_gate",
     "t18": "simproc_inventory_documented_and_deferred; accepted_91_site_corpus; reduceIte_15_steps_6_sites; reduceDIte_15_steps_8_sites; eqComm_deferred; no_simproc_implementation",
+    "t20": "bounded_ite_simproc_operational_model_accepted_and_merged; implementation_through_22ff7819; review_2_1ab114ca; full_checker_74_of_74; focused_observed_reduceIte_6_of_15_reduceDIte_3_of_15; cached_origin_misses_fail_closed; no_corpus_replay_credit; eqComm_deferred",
     "t5": "strict_cone_runner_merged; seven_module_cone_pending_after_T1_T4_mapping_gate",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
@@ -122,6 +123,7 @@
       "T17": "Consumer-side proposition provenance fixes the redex before proposition elaboration and closes ordered proof evidence through the existing machinery. Its 14 focused fixtures (11 site shapes plus support) are consumer-slice evidence only; no corpus replay credit until producer/renderer integration and a fresh seven-module gate.",
       "T16": "Term-free theorem-rule derivations are captured at the matcher boundary with indexed/liberal lookup parity and no proof/term serialization. Producer evidence is accepted and merged, but receives no corpus replay credit until renderer integration and a fresh seven-module gate.",
       "T18": "The accepted 91-site inventory identifies reduceIte (15 steps/6 sites) and reduceDIte (15 steps/8 sites) as later bounded simproc candidates. eqComm is deferred; no simproc implementation is part of this update.",
+      "T20": "The bounded operational, term-free reduceIte/reduceDIte model is accepted and merged through 22ff7819 with REVIEW-2 1ab114ca. The full fixture checker passes 74/74; focused observed coverage is only 6/15 reduceIte and 3/15 reduceDIte. Cached-origin misses fail closed, no corpus replay credit is claimed, and eqComm remains deferred.",
       "acceptance": "Ultimate acceptance is source-preserving replacement of the pinned Mathlib simp family plus successful compilation of the translated dependency tree and then the full Mathlib tree. Whole-tree acceptance remains zero until those checks pass."
     },
     "pilotModules": 15,
