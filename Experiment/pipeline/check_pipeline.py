@@ -346,44 +346,77 @@ def diagnostic_tests(f: Failures) -> None:
 
 
 def invocation_tests(f: Failures) -> None:
-    """A site whose call runs once per branch cannot take one tactic.
+    """Structural expansion fixtures for the four observed branch families."""
+    def source(prefix: str, call: str = "simp [h]", suffix: str = "") -> str:
+        return "import A\nexample : True := by\n  " + prefix + " <;> " + call + suffix + "\n"
 
-    The recorder writes one JSON per invocation, so a call under `<;>` or inside
-    an alternation leaves several traces sharing one `occurrence`. Identical
-    ones are a repeated compile and collapse to one; differing ones are real
-    branches, and replacing the call with any single branch's steps would be
-    wrong in the others.
-    """
-    site = S.Site(index=0, start=0, end=10, text="simp [*]", line=1, column=2,
-                  alone_on_line=True, trailing="")
-    trace = {
-        "schema": "simp-trace-v1", "module": "M", "occurrence": "1",
-        "locations": [{"loc": "goal", "pre": "a", "post": None,
-                       "steps": [{"kind": "rw", "pos": [], "name": "foo",
-                                  "dir": "fwd"}],
-                       "close": {"by": "rfl"}}],
-    }
-    single = P.render_site(site, dict(trace))
-    f.equal("invocations/single_renders", single["status"], "rendered")
+    def traces(count: int, names: list[str] | None = None) -> list[dict]:
+        names = names or ["foo"] * count
+        return [{
+            "schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+            "invocation": i, "invocations": count,
+            "locations": [{"loc": "goal", "pre": "a", "post": None,
+                           "steps": [{"kind": "rw", "pos": [], "name": names[i]}],
+                           "close": {"by": "rfl"}}],
+        } for i in range(count)]
 
-    several = P.render_site(site, {**trace, "invocation": 0, "invocations": 3})
-    f.equal("invocations/several_refuse", several["status"],
-            "render_failed:multiple_invocations")
-    f.check("invocations/refusal_counts_them", "3" in several["detail"],
-            f"detail does not name the count: {several['detail']!r}")
-    f.check("invocations/original_kept",
-            any(site.text in line for line in several["lines"]),
-            "the original call was not kept")
-    f.check("invocations/marker_emitted",
-            any("explicit_rw: unresolved" in line for line in several["lines"]),
-            "no marker comment was emitted")
+    def expanded(name: str, prefix: str, count: int, suffix: str = "",
+                 names: list[str] | None = None) -> dict:
+        text = source(prefix, suffix=suffix)
+        site = S.find_sites(text)[0]
+        return P.render_site(site, traces(count, names), text)
 
-    # Identical executions are still distinct; the transcriber must not
-    # collapse them by content. This aggregate is what a two-file collection
-    # produces even when both traces are byte-identical.
-    f.equal("invocations/spec_field_is_consumed",
-            P.render_site(site, {**trace, "invocations": 2})["status"],
-            "render_failed:multiple_invocations")
+    one = expanded("A", "by_cases h : True", 2, names=["true_step", "false_step"])
+    f.equal("invocations/group_A_replayed", one["status"], "rendered")
+    f.equal("invocations/group_A_leaf_count", one["structural_leaf_count"], 2)
+    f.check("invocations/group_A_order", "true_step" in one["lines"][3]
+            and "false_step" in one["lines"][4], "ordinal order was not preserved")
+    f.check("invocations/comment_adjacent", one["lines"][2].startswith("  by_cases")
+            and one["lines"][1] == "  -- simp [h]", "original comment is not adjacent")
+
+    b = expanded("B", "rcases h with rfl | hne", 2)
+    f.equal("invocations/group_B_leaf_count", b["structural_leaf_count"], 2)
+    f.check("invocations/group_B_bullets", sum(line.lstrip().startswith("·")
+            for line in b["lines"]) == 2, "rcases did not produce two leaves")
+
+    c = expanded("C", "obtain rfl | ha := eq_or_ne x y <;> obtain rfl | ha' := eq_or_ne a b", 4)
+    f.equal("invocations/group_C_leaf_count", c["structural_leaf_count"], 4)
+    f.check("invocations/group_C_nested", sum("obtain rfl | ha'" in line for line in c["lines"]) == 2,
+            "nested obtain spine was not expanded")
+
+    d = expanded("D", "by_cases hp : P <;> by_cases hq : Q", 4,
+                 names=["p_q", "p_nq", "np_q", "np_nq"])
+    f.equal("invocations/group_D_leaf_count", d["structural_leaf_count"], 4)
+    f.check("invocations/group_D_order", all(name in "\n".join(d["lines"])
+            for name in ("p_q", "p_nq", "np_q", "np_nq")), "nested by_cases traces missing")
+
+    non_tail = expanded("non_tail", "by_cases h : True", 2,
+                        suffix=" <;> simpa [I.eq_iff] using h")
+    f.check("invocations/non_tail_suffix_copied",
+            sum("simpa [I.eq_iff] using h" in line for line in non_tail["lines"]) == 2,
+            "non-tail suffix was not copied to every leaf")
+    f.check("invocations/non_tail_lint_exempt",
+            not P.lint_replacement(non_tail), "existing suffix was treated as generated simp")
+
+    identical = expanded("identical", "by_cases h : True", 2, names=["same", "same"])
+    f.equal("invocations/identical_step_lists_keep_leaves", identical["structural_leaf_count"], 2)
+    f.equal("invocations/identical_step_lists_occurrences", "\n".join(identical["lines"]).count("same at []"), 2)
+
+    base = source("by_cases h : True")
+    site = S.find_sites(base)[0]
+    for name, records in (("missing", traces(2)[:1]),
+                          ("duplicate", traces(2)[:1] + [dict(traces(2)[0])]),
+                          ("gapped", [dict(traces(2)[0], invocation=0),
+                                      dict(traces(2)[1], invocation=2)])):
+        refused = P.render_site(site, records, base)
+        f.equal("invocations/malformed_" + name, refused["status"], "structurally_refused")
+        f.check("invocations/malformed_" + name + "/original",
+                any(site.text in line for line in refused["lines"]), "original call was not retained")
+
+    # A legacy aggregate does not carry the complete records and is refused.
+    legacy = P.render_site(site, {"schema": "simp-trace-v1", "invocations": 2,
+                                  "locations": []}, base)
+    f.equal("invocations/legacy_aggregate_refused", legacy["status"], "structurally_refused")
 
 
 def mapping_tests(f: Failures) -> None:

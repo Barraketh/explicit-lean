@@ -219,7 +219,8 @@ def overlong(lines: list[str]) -> list[str]:
 
 
 def splice(source: str, replacements: dict[int, list[str]],
-           sites: list[Site]) -> str:
+           sites: list[Site],
+           ranges: dict[int, tuple[int, int]] | None = None) -> str:
     """Replace each named site with its rendered lines.
 
     `replacements` maps a site index to the full replacement lines, already
@@ -238,6 +239,7 @@ def splice(source: str, replacements: dict[int, list[str]],
     edits: list[tuple[int, int, str, int]] = []
     markers: dict[int, list[tuple[int, str]]] = {}
 
+    ranges = ranges or {}
     for site in sites:
         lines = replacements.get(site.index)
         if not lines:
@@ -260,11 +262,18 @@ def splice(source: str, replacements: dict[int, list[str]],
             )
             lines = lines[-1:]
 
-        if site.alone_on_line:
+        start, end = ranges.get(site.index, (site.start, site.end))
+        line_start = source.rfind("\n", 0, start) + 1
+        range_alone = start == line_start + len(site.line_indent or "")
+        structural_multiline = site.index in ranges
+        if site.alone_on_line or range_alone or structural_multiline:
             # Drop the leading indentation of the first replacement line: the
-            # source keeps its original indentation at `site.start`.
+            # source keeps the indentation before the replacement range.
+            # Structural expansion can move the range left of the simp token,
+            # so derive the column from that range rather than from `site`.
             body = "\n".join(lines)
-            body = body[site.column :] if body.startswith(" " * site.column) else body
+            range_column = start - line_start
+            body = body[range_column:] if body.startswith(" " * range_column) else body
         else:
             if len(lines) > 1:
                 raise ValueError(
@@ -272,7 +281,7 @@ def splice(source: str, replacements: dict[int, list[str]],
                     f"multi-line replacement"
                 )
             body = lines[0].lstrip()
-        edits.append((site.start, site.end, body, 0))
+        edits.append((start, end, body, 0))
 
     # One deterministic zero-width insertion per source line, with retained
     # sites in source/site order. The trailing newline keeps each marker on a

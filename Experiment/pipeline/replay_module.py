@@ -12,7 +12,8 @@ Per module, in five stages:
    compile with T1's Lean environment, and finalize only its raw outputs.
 2. **Render.** Translate each trace into replacement source text for its site:
    the original call preserved as a comment, a `rename_i` line when any used
-   local is inaccessible, then one `explicit_rw` per location.
+   local is inaccessible, then one `explicit_rw` per location. Complete
+   multi-invocation sites are expanded into the source branch spine's leaves.
 3. **Splice.** Write the translated module with every site replaced and
    `import ExplicitLean.ExplicitRw` added after the existing imports.
 4. **Compile.** `lake env lean` the translated file in the T2 worktree, whose
@@ -416,7 +417,177 @@ def transcribe(t1: pathlib.Path, mathlib: pathlib.Path, mathlib_rel: str,
 # Stage 2: render
 
 
-def render_site(site: S.Site, trace: dict | None) -> dict:
+_BRANCH_TACTICS = ("by_cases", "rcases", "obtain")
+
+
+def _branch_spine(source: str, site: S.Site) -> tuple[int, int, list[str], str, str | None] | None:
+    """Find a small, source-preserving binary ``<;>`` branch spine.
+
+    This intentionally handles the four shapes in the T6 design only.  It is
+    a structural parser, not a tactic evaluator: if the source is multiline,
+    has another operator in the spine, or has a non-binary branch producer, it
+    refuses so the caller cannot guess an invocation mapping.
+    """
+    line_start = source.rfind("\n", 0, site.start) + 1
+    line_end = source.find("\n", site.start)
+    if line_end < 0:
+        line_end = len(source)
+    if site.start < line_start or site.end > line_end:
+        return None
+    line = source[line_start:line_end]
+    site_col = site.start - line_start
+    rel_end = site.end - line_start
+    before = line[:site_col]
+    suffix = line[rel_end:]
+    if suffix.strip() and not suffix.lstrip().startswith("<;>"):
+        return None
+    suffix = suffix.strip()
+    if suffix.startswith("<;>"):
+        suffix = suffix[3:].strip()
+        if not suffix or "<;>" in suffix:
+            return None
+    candidates = list(re.finditer(r"(?<![\w.])(?:by_cases|rcases|obtain)\b", before))
+    for candidate in candidates:
+        prefix = before[candidate.start() :]
+        prior = before[:candidate.start()].strip()
+        if prior not in ("", "by", ":= by") and not prior.endswith("by"):
+            continue
+        pieces = [part.strip() for part in prefix.split("<;>")]
+        if len(pieces) < 2 or pieces[-1]:
+            continue
+        branches = pieces[:-1]
+        if not all(part.startswith(_BRANCH_TACTICS) for part in branches):
+            continue
+        valid = True
+        for part in branches:
+            keyword = part.split(None, 1)[0]
+            if keyword == "rcases":
+                if not re.search(r"\bwith\b", part) or "|" not in part:
+                    valid = False
+                    break
+            elif keyword == "obtain" and "|" not in part:
+                valid = False
+                break
+            elif keyword == "by_cases" and not part[len(keyword):].strip():
+                valid = False
+                break
+        if not valid:
+            continue
+        # Replace from the first branch producer through the complete suffix.
+        inline_prefix = line[:candidate.start()].rstrip() or None
+        # A tactic following ``:= by`` shares its declaration line.  Move the
+        # whole line into the replacement so the required original-call
+        # comment remains a standalone line rather than commenting out code.
+        replace_start = line_start if inline_prefix else line_start + candidate.start()
+        return replace_start, line_end, branches, suffix, inline_prefix
+    return None
+
+
+def _invocation_records(trace: dict | list[dict] | None) -> list[dict] | None:
+    """Normalize one authenticated site to its complete ordinal list."""
+    if isinstance(trace, list):
+        return trace
+    if not isinstance(trace, dict):
+        return None
+    executions = trace.get("_executions")
+    if isinstance(executions, list):
+        return executions
+    total = trace.get("invocations", trace.get("_invocations", 1))
+    if isinstance(total, int) and total == 1:
+        return [trace]
+    return None
+
+
+def _structural_replacement(source: str, site: S.Site,
+                            executions: list[dict], base_indent: str
+                            ) -> tuple[list[str], tuple[int, int], int, list[str]]:
+    """Render complete invocation ordinals as leaves of the source branch tree."""
+    parsed = _branch_spine(source, site)
+    if parsed is None:
+        raise R.RenderError("structural_refused", "source has no supported binary <;> branch spine",
+                            side="harness")
+    start, end, branches, suffix, inline_prefix = parsed
+    count = 2 ** len(branches)
+    if len(executions) != count:
+        raise R.RenderError(
+            "structural_refused",
+            f"branch spine has {count} leaves but metadata has {len(executions)} invocations",
+            side="harness",
+        )
+    ordinals = []
+    totals = set()
+    for record in executions:
+        if not isinstance(record, dict):
+            raise R.RenderError("structural_refused", "invocation metadata is not an object",
+                                side="harness")
+        ordinal = record.get("invocation")
+        total = record.get("invocations")
+        if not isinstance(ordinal, int) or isinstance(ordinal, bool) or not isinstance(total, int):
+            raise R.RenderError("structural_refused", "missing or malformed invocation metadata",
+                                side="harness")
+        ordinals.append(ordinal)
+        totals.add(total)
+    if totals != {count} or sorted(ordinals) != list(range(count)):
+        raise R.RenderError("structural_refused", "invocation ordinals are not complete and unique",
+                            side="harness")
+    rendered: list[list[str]] = []
+    for record in sorted(executions, key=lambda item: item["invocation"]):
+        if R.unresolved_reason(record) is not None:
+            reason = R.unresolved_reason(record) or "unknown"
+            raise R.RenderError("unresolved:" + reason,
+                                "an invocation is unresolved: " + reason,
+                                side="t1")
+        bodies, inaccessible = R.render_trace(record)
+        if inaccessible:
+            raise R.RenderError("structural_refused", "inaccessible locals need branch-specific names",
+                                side="harness")
+        leaf: list[str] = []
+        for body in bodies:
+            leaf.append(body)
+        if suffix:
+            leaf.append(suffix)
+        rendered.append(leaf)
+
+    if inline_prefix:
+        lines = [inline_prefix]
+        base_indent = (site.line_indent or "") + "  "
+    else:
+        lines = S.comment_original(site.text, base_indent)
+    if inline_prefix:
+        lines.extend(S.comment_original(site.text, base_indent))
+    lines.append(base_indent + branches[0])
+    leaf_index = 0
+
+    def emit_children(tactic_index: int) -> None:
+        """Emit two children of the tactic at ``tactic_index``."""
+        nonlocal leaf_index
+        bullet_indent = base_indent + "  " * tactic_index
+        next_index = tactic_index + 1
+        for _child in (0, 1):
+            if next_index < len(branches):
+                lines.append(bullet_indent + "· " + branches[next_index])
+                emit_children(next_index)
+            else:
+                for line_no, body in enumerate(rendered[leaf_index]):
+                    if line_no == 0:
+                        lines.append(bullet_indent + "· " + body)
+                    else:
+                        lines.append(bullet_indent + "  " + body)
+                leaf_index += 1
+
+    emit_children(0)
+    if leaf_index != count:
+        raise R.RenderError("structural_refused", "renderer emitted the wrong number of leaves",
+                            side="harness")
+    # The copied non-tail suffix is existing source, not generated replacement
+    # code.  Keep a separate lint view so an existing `simpa` is not mistaken
+    # for a newly emitted simp-family tactic.
+    generated = [line for line in lines if not line.lstrip().startswith("simpa")]
+    return lines, (start, end), count, generated
+
+
+def render_site(site: S.Site, trace: dict | list[dict] | None,
+                source: str | None = None) -> dict:
     """Render one site, returning its record.
 
     Four outcomes, and the record's `lines` are what gets spliced in every one:
@@ -426,7 +597,8 @@ def render_site(site: S.Site, trace: dict | None) -> dict:
       marker comment, so the module still compiles under stock simp and the site
       is counted as unresolved rather than hidden;
     * a `RenderError` -> `render_failed:<reason>`, original call kept;
-    * otherwise the rendered replacement.
+    * otherwise the rendered replacement; a complete invocation list is
+      rendered as a structural branch expansion when source is supplied.
     """
     indent = " " * site.column
     record: dict = {
@@ -461,7 +633,7 @@ def render_site(site: S.Site, trace: dict | None) -> dict:
 
     # `_invocations` is the harness aggregate for legacy per-file traces;
     # spec-v1 traces carry `invocations` (and an ordinal `invocation`) directly.
-    invocations = trace.get("_invocations", trace.get("invocations"))
+    invocations = trace.get("_invocations", trace.get("invocations")) if isinstance(trace, dict) else None
     if invocations is not None and (
         not isinstance(invocations, int) or isinstance(invocations, bool) or invocations < 1
     ):
@@ -470,20 +642,33 @@ def render_site(site: S.Site, trace: dict | None) -> dict:
             f"the trace declares invalid invocations count {invocations!r}",
             "t1",
         )
-    if invocations and invocations > 1:
-        # The call ran more than once at this site — once per branch of an
-        # enclosing `<;>` or alternation — and each run has its own trace with
-        # its own goal. One `explicit_rw` replaces the call in every branch, so
-        # replacing it with any single branch's steps would be wrong in the
-        # others. This needs a per-branch rendering the pipeline does not do.
-        return keep_original(
-            "render_failed:multiple_invocations",
-            f"the call ran {invocations} times at this site with different steps "
-            "(one per branch), and one tactic cannot carry a different step list "
-            "per branch",
-            "harness",
-            f"-- explicit_rw: unresolved: {invocations} distinct invocations at one site",
-        )
+    executions = _invocation_records(trace)
+    if executions is None and invocations and invocations > 1:
+        return keep_original("structurally_refused", "complete invocation records are required for structural replay",
+                             "harness", "-- explicit_rw: unresolved: structurally refused: incomplete invocation records")
+    if isinstance(trace, list) or (executions is not None and len(executions) > 1):
+        if source is None:
+            return keep_original("structurally_refused", "source is required for structural replay", "harness",
+                                 "-- explicit_rw: unresolved: structurally refused: no source")
+        try:
+            expanded, span, count, generated = _structural_replacement(
+                source, site, executions, site.line_indent or indent)
+        except R.RenderError as exc:
+            if exc.reason.startswith("unresolved:"):
+                reason = exc.reason[len("unresolved:"):]
+                return keep_original(exc.reason, exc.detail, exc.side,
+                                     "-- explicit_rw: unresolved: " + reason)
+            if exc.reason != "structural_refused":
+                return keep_original("render_failed:" + exc.reason, exc.detail, exc.side)
+            return keep_original("structurally_refused", exc.detail, exc.side,
+                                 "-- explicit_rw: unresolved: structurally refused: " + exc.detail)
+        record["status"] = "rendered"
+        record["lines"] = expanded
+        record["replace_start"], record["replace_end"] = span
+        record["structural_leaf_count"] = count
+        record["invocation_ordinals"] = list(range(count))
+        record["lint_lines"] = generated
+        return record
 
     reason = R.unresolved_reason(trace)
     if reason is not None:
@@ -608,7 +793,13 @@ def build_module(source: str, site_list: list[S.Site],
         for rec in records
         if only is None or rec["site"] == only
     }
-    spliced = S.splice(source, replacements, site_list)
+    ranges = {
+        rec["site"]: (rec["replace_start"], rec["replace_end"])
+        for rec in records
+        if "replace_start" in rec and "replace_end" in rec
+        and (only is None or rec["site"] == only)
+    }
+    spliced = S.splice(source, replacements, site_list, ranges)
     return S.add_import(spliced)
 
 
@@ -640,7 +831,7 @@ def compile_in_t2(t2: pathlib.Path, path: pathlib.Path
 
 def lint_replacement(record: dict) -> list[L.Finding]:
     """Return forbidden simp-family tokens in a rendered replacement block."""
-    return L.findings("\n".join(record.get("lines") or []))
+    return L.findings("\n".join(record.get("lint_lines", record.get("lines") or [])))
 
 
 def replacement_line_range(source: str, site_list: list[S.Site],
@@ -804,15 +995,13 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
             "records": records, "log": log,
             "seconds": round(time.monotonic() - started, 2),
         }
-    traces: dict[int, dict] = {}
+    traces: dict[int, dict | list[dict]] = {}
     for ordinal, executions in authenticated.items():
         executions.sort(key=lambda record: record["invocation"])
-        chosen = dict(executions[0])
-        if len(executions) > 1:
-            chosen["_invocations"] = len(executions)
-        traces[ordinal] = chosen
+        traces[ordinal] = (dict(executions[0]) if len(executions) == 1
+                           else [dict(record) for record in executions])
     identity["renderAttempted"] = True
-    records = [render_site(s, traces.get(s.index)) for s in site_list]
+    records = [render_site(s, traces.get(s.index), source) for s in site_list]
     for rec in records:
         findings = lint_replacement(rec)
         if findings and rec["status"] == "rendered":
