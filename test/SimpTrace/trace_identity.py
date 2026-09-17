@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+DEFAULT_TRACE_ROOT = "test/SimpTrace/meas_out"
 TACTIC_RE = re.compile(r"(?<![\w?.])(simp only|simp|dsimp only|dsimp)(?![_?\w])")
 PRECEDES = ("by", ";", "<;>", "·", "|", "=>", "(", "[")
 TERM_LEVEL = ("<|", "$")
@@ -187,7 +188,17 @@ def manifest(module_path: str, source: str, sites: list[Site]) -> dict[str, Any]
     }
 
 
-def transform_with_ledger(source: str, traced_name: str) -> tuple[str, list[Edit]]:
+def _trace_clause_path(trace_root: str, traced_name: str, site_ordinal: int) -> str:
+    """Return the exact path text embedded in an injected trace clause."""
+    root = str(trace_root).rstrip("/")
+    if not root:
+        raise ValueError("trace output directory must not be empty")
+    return f"{root}/{traced_name}_{site_ordinal + 1:02}.json"
+
+
+def transform_with_ledger(
+    source: str, traced_name: str, trace_root: str = DEFAULT_TRACE_ROOT
+) -> tuple[str, list[Edit]]:
     sites = find_sites(source)
     parts: list[str] = []
     edits: list[Edit] = []
@@ -198,7 +209,7 @@ def transform_with_ledger(source: str, traced_name: str) -> tuple[str, list[Edit
                  "dsimp" if site.callText.startswith("dsimp") else "simp")
         head = "simp_trace only" if token == "simp only" else "simp_trace"
         replacement = head + site.callText[len(token):]
-        replacement += f' =>trace "test/SimpTrace/meas_out/{traced_name}_{site.siteOrdinal + 1:02}.json"'
+        replacement += f' =>trace "{_trace_clause_path(trace_root, traced_name, site.siteOrdinal)}"'
         parts.append(source[cursor:site.startChar])
         output_start = sum(len(part) for part in parts)
         parts.append(replacement)
@@ -219,14 +230,16 @@ def transform_with_ledger(source: str, traced_name: str) -> tuple[str, list[Edit
     return traced, edits
 
 
-def transform(source: str, traced_name: str) -> str:
+def transform(source: str, traced_name: str,
+              trace_root: str = DEFAULT_TRACE_ROOT) -> str:
     """Transform source while retaining the ledger-capable public helper."""
-    return transform_with_ledger(source, traced_name)[0]
+    return transform_with_ledger(source, traced_name, trace_root)[0]
 
 
 def verify_transform(source: str, traced_name: str, traced: str,
-                     sites: list[Site]) -> list[Edit]:
-    expected, edits = transform_with_ledger(source, traced_name)
+                     sites: list[Site],
+                     trace_root: str = DEFAULT_TRACE_ROOT) -> list[Edit]:
+    expected, edits = transform_with_ledger(source, traced_name, trace_root)
     if traced != expected:
         raise ValueError("traced source differs from deterministic transform")
     if len(edits) != len(sites):

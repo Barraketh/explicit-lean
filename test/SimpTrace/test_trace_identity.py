@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import subprocess
 import sys
 import tempfile
 
@@ -84,24 +85,46 @@ def main() -> int:
         raw_dir, out_dir = root / "raw", root / "final"
         source = "example : True := by simp\n"
         original.write_text(source, encoding="utf-8")
-        traced_path.write_text(transform(source, "FixtureTraced"), encoding="utf-8")
         sites = find_sites(source)
         manifest_path.write_text(json.dumps(
             manifest("Fixture.lean", source, sites), sort_keys=True,
             separators=(",", ":")), encoding="utf-8")
         raw_dir.mkdir()
+        # Explicit-path mode binds both the deterministic transform and raw
+        # v1 call text to this run-local directory.
+        traced_path.write_text(transform(source, "FixtureTraced", str(raw_dir)),
+                                encoding="utf-8")
         raw = raw_dir / "FixtureTraced_01.json"
-        raw.write_text(json.dumps({"schema": "simp-trace-v1", "call": "simp_trace =>trace \"x\"",
+        raw.write_text(json.dumps({
+                                   "schema": "simp-trace-v1",
+                                   "call": f'simp_trace =>trace "{raw_dir}/FixtureTraced_01.json"',
                                    "occurrence": "7",
                                    "locations": []}, separators=(",", ":")), encoding="utf-8")
         before = raw.read_bytes()
-        assert finalize_paths(traced_path, manifest_path, original, raw_dir, out_dir) == 0
+        completed = subprocess.run(
+            [sys.executable, str(pathlib.Path(__file__).with_name("finalize_traces.py")),
+             "--traced-source", str(traced_path), "--manifest", str(manifest_path),
+             "--source", str(original), "--raw-dir", str(raw_dir),
+             "--out-dir", str(out_dir)], capture_output=True, text=True)
+        assert completed.returncode == 0, completed.stderr
         assert raw.read_bytes() == before
         result = json.loads((out_dir / raw.name).read_text(encoding="utf-8"))
         assert result["schema"] == "simp-trace-v2"
         assert result["site"] == {"siteOrdinal": 0, "startChar": 21,
                                    "endChar": 25, "callText": "simp"}
         assert result["invocation"] == 0 and result["invocations"] == 1
+        wrong_stage = root / "wrong-stage"
+        wrong_stage.mkdir()
+        wrong_traced = wrong_stage / "FixtureTraced.lean"
+        wrong_traced.write_text(transform(source, "FixtureTraced", str(root / "wrong-raw")),
+                                 encoding="utf-8")
+        try:
+            finalize_paths(wrong_traced, manifest_path, original, raw_dir,
+                           root / "wrong-final")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("accepted staged trace clauses rooted outside --raw-dir")
     print("OK: T9 attributes, comments, same-line, identical, Unicode, and ordinal regressions")
     return 0
 

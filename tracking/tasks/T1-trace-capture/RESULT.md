@@ -21,6 +21,11 @@
   Unicode offsets, trailing comments (including nested/string data), and
   malformed invocation sets. Conversion checks use the edit ledger, so
   commented `=>trace` text cannot count.
+- Parameterized the deterministic transform and verifier by an explicit trace
+  output root. The five-path finalizer now binds that root to `--raw-dir` and
+  checks each raw v1 call path against it; legacy module mode retains the
+  committed relative root. The temp regression invokes the CLI, proves raw
+  bytes are unchanged, and rejects a staged source rooted elsewhere.
 
 ## Checks (2026-09-17)
 
@@ -35,6 +40,8 @@
 - `python3 -B Experiment/check_simp_trace.py`: PASS (72 fixtures);
   `--report`: PASS (84 sites, 106 records, 592 steps).
 - `git diff --check`: PASS.
+- Explicit-path root-binding regression: PASS (separate v2 output, unchanged
+  raw input, and mismatched-root rejection).
 
 ## Remaining blockers
 
