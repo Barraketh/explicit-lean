@@ -55,12 +55,12 @@ terse completion notices, then makes merge and next-dispatch decisions.
   compile plus oracle success. Whole-module failures remain module-scoped and
   per-site attribution requires an isolated successful compile. Implement only
   after T4's current merge gate passes.
-- **T5 cone preflight: COMPLETE.** Commit `7432def` independently confirms 84
-  corrected six-module sites plus 7 in `Data.Option.Basic` = 91. Build the four
-  independent roots, then Function.Basic, IsEmpty.Basic and Option.Basic;
-  rebuild `Mathlib.Logic.Relator` after Function.Defs as a translated bridge.
-  All Mathlib artifacts must resolve from one strict staged root, followed by
-  remaining-call lint and the T7 declaration-oracle gate.
+- **T5 cone preflight review 1: one MAJOR, correction dispatched.** The 91-site
+  count, target DAG, seven Option shapes, strict root and sole Relator bridge
+  are confirmed. The design's 908-module source-closure claim is wrong; an
+  independent pinned-source walk finds 61. The correction must distinguish
+  source closure, historical driver cone and artifact staging, emit an exact
+  hashed closure manifest, and return for review 2.
 
 After a slot completes, reuse it immediately for the next independent review or
 fix. The coordinator alone integrates accepted branches and updates this plan.
