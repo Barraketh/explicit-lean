@@ -3,6 +3,7 @@ prelude
 
 public meta import ExplicitLean.ExplicitRw.Basic
 public meta import ExplicitLean.ExplicitRw.Tactic
+public meta import ExplicitLean.ExplicitRw.LocalHandles
 
 /-!
 # `explicit_rw`

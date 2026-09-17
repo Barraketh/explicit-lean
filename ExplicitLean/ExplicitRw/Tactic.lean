@@ -4,6 +4,8 @@ prelude
 public meta import ExplicitLean.ExplicitRw.Basic
 public meta import Lean.Elab.Tactic.Basic
 public meta import Lean.Elab.Tactic.ElabTerm
+public meta import Lean.Elab.Term.TermElabM
+public meta import Lean.Elab.Term
 public meta import Lean.Elab.Tactic.Location
 public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.Meta.Tactic.Intro
@@ -217,6 +219,19 @@ syntax:max (name := explicitRwTermIdent) ("@")? ident : explicitRwTerm
 syntax:max (name := explicitRwTermHole) "_" : explicitRwTerm
 /-- A numeric literal. -/
 syntax:max (name := explicitRwTermNum) num : explicitRwTerm
+/-!
+`local_ref` and `introduced_ref` are deliberately syntax in this private
+whitelist category, rather than ordinary Lean terms.  Their term elaborators
+in the companion `ExplicitRw.LocalHandles` module are therefore reachable only
+after `explicit_rw` has accepted the closed grammar; source code cannot write
+either spelling as a normal term.
+-/
+declare_syntax_cat localRefSuffix
+syntax:max ("." num)+ : localRefSuffix
+syntax:max (name := explicitRwLocalRefTerm) "local_ref " num (localRefSuffix)? : term
+syntax:max (name := explicitRwTermLocalRef) explicitRwLocalRefTerm : explicitRwTerm
+syntax:max (name := explicitRwIntroducedRefTerm) "introduced_ref " num : term
+syntax:max (name := explicitRwTermIntroducedRef) explicitRwIntroducedRefTerm : explicitRwTerm
 /-- A string literal. -/
 syntax:max (name := explicitRwTermStr) str : explicitRwTerm
 /-- `Type`, `Type u`, `Sort u`. -/
@@ -401,6 +416,11 @@ syntax (name := explicitRwSideNofun) &"nofun" : explicitRwSideProof
 /-- A closing term. -/
 syntax (name := explicitRwSideExact) &"exact " explicitRwTerm : explicitRwSideProof
 /-- Introduce the antecedents of an implication-shaped side condition. -/
+/- A recorder-issued handle introduces exactly one binder.  The continuation is
+   recursive, so nested side proofs can introduce further handles in order. -/
+syntax (name := explicitRwSideIntroRef)
+  &"intro_ref " num " ; " explicitRwSideProof : explicitRwSideProof
+/-- Introduce the antecedents of an implication-shaped side condition. -/
 syntax (name := explicitRwSideIntro)
   &"intro " (ident)+ " ; " explicitRwSideProof : explicitRwSideProof
 
@@ -526,6 +546,97 @@ syntax (name := explicitRw) "explicit_rw " "[" explicitRwStep,* "]"
 
 namespace Impl
 
+register_option explicitRw.allowLocalRef : Bool := {
+  defValue := false
+  descr := "allow indexed local references while explicit_rw elaborates a trace term"
+}
+
+/-! ### Indexed local references
+
+The recorder's local reference carries the declaration's `LocalDecl.index`, not
+its pretty-printed name.  Keep the lookup here deliberately boring: one direct
+`PersistentArray` access followed by declaration and projection checks.  In
+particular, do not use `getLocalDeclFromUserName`, `findLocalDeclWithType?`, or
+any other context search.
+-/
+
+abbrev IntroducedHandles := Std.HashMap Nat FVarId
+
+def natLiteral? (text : String) : Option Nat :=
+  if text.isEmpty || !text.toList.all (fun c => 48 ≤ c.toNat && c.toNat ≤ 57) then none
+  else some (text.toList.foldl (fun n c => n * 10 + (c.toNat - 48)) 0)
+
+partial def natLiterals (stx : Syntax) : Array Nat :=
+  if let some n := natLiteral? (stx.getKind.toString false) then #[n]
+  else stx.getArgs.foldl (init := #[]) fun out child => out ++ natLiterals child
+
+def localRefIndex (stx : Syntax) : Nat :=
+  (natLiterals stx[1])[0]!
+
+def localRefProjectionIndices (stx : Syntax) : Array (Nat × Nat) :=
+  if stx[2].isNone then #[]
+  else (natLiterals stx[2][0]).map fun surface =>
+    (surface, if surface == 0 then 0 else surface - 1)
+
+def resolveIndexedLocal (stx : Syntax) : TermElabM Expr := do
+  let index := localRefIndex stx
+  let lctx ← getLCtx
+  if index >= lctx.decls.size then
+    throwError "explicit_rw: local_ref {index} is outside the current local context"
+  let slot := lctx.decls.get! index
+  let some decl := slot
+    | throwError "explicit_rw: local_ref {index} does not name a declaration in the current local context"
+  -- A PersistentArray slot is normally exactly its declaration index.  Keep
+  -- this check explicit so malformed or stale contexts fail closed rather than
+  -- accidentally resolving a neighbouring declaration.
+  unless decl.index == index do
+    throwError "explicit_rw: local_ref {index} resolved to a declaration with index {decl.index}"
+  -- Auxiliary declarations are implementation details of the elaborator, not
+  -- source hypotheses.  Ordinary implementation-detail declarations (including
+  -- inaccessible `h✝`/`a✝` binders) remain valid and are addressed by index.
+  if decl.isAuxDecl then
+    throwError "explicit_rw: local_ref {index} names an auxiliary declaration, not a local hypothesis"
+  let mut value := mkFVar decl.fvarId
+  for (surface, projection) in localRefProjectionIndices stx do
+    if surface == 0 then
+      throwError "explicit_rw: local_ref {index}: projection `.0` is invalid; projections are numbered from `.1`"
+    let ty ← whnf (← inferType value)
+    let .const structName _ := ty.getAppFn
+      | throwError "explicit_rw: local_ref {index}: projection .{surface} requires a structure-valued local"
+    let some info := getStructureInfo? (← getEnv) structName
+      | throwError "explicit_rw: local_ref {index}: projection .{surface} is not a structure projection"
+    if projection >= info.fieldNames.size then
+      throwError "explicit_rw: local_ref {index}: projection .{surface} is out of bounds for {structName}"
+    let fieldName := info.fieldNames[projection]!
+    value ← try mkProjection value fieldName catch _ =>
+      throwError "explicit_rw: local_ref {index}: invalid projection .{surface} for {structName}"
+  return value
+
+def elabIndexedLocalCore (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr := do
+  unless (← getOptions).getBool `explicitRw.allowLocalRef do
+    throwError "local_ref is only available inside explicit_rw"
+  let value ← resolveIndexedLocal stx
+  Term.ensureHasType expectedType? value
+
+/- Resolve every `introduced_ref` before ordinary term elaboration.  This maps a
+   handle to the indexed local declaration it denotes, preserving the same
+   closed local-ref syntax and therefore the same direct lookup path. -/
+partial def materializeIntroducedRefs (handles : IntroducedHandles) (stx : Syntax) : TacticM Syntax := do
+  if stx.getKind == ``explicitRwTermIntroducedRef ||
+      stx.getKind == ``explicitRwIntroducedRefTerm then
+    let raw := if stx.getKind == ``explicitRwTermIntroducedRef then stx[0] else stx
+    let handle := (natLiterals raw[1])[0]!
+    let some fvarId := handles.get? handle
+      | throwError "explicit_rw: introduced_ref {handle} is unknown in this side proof"
+    let decl ← FVarId.getDecl fvarId
+    let indexed := raw.setArg 1 (Syntax.mkNumLit (toString decl.index))
+    return indexed.setKind ``explicitRwLocalRefTerm
+  let oldArgs := stx.getArgs
+  let args ← oldArgs.mapM (materializeIntroducedRefs handles)
+  if args == oldArgs then
+    return stx
+  return Syntax.node stx.getHeadInfo stx.getKind args
+
 /--
 Is this syntax node an antiquotation (`$x`)?
 
@@ -580,6 +691,15 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
     if stx[0].isNone then return id else `(@$id)
   | ``explicitRwTermHole => `(_)
   | ``explicitRwTermNum => return ⟨stx[0]⟩
+  | ``explicitRwTermLocalRef | ``explicitRwTermIntroducedRef =>
+    -- Keep these syntax nodes intact.  Their dedicated term elaborator below
+    -- resolves the fvar by LocalDecl.index, so turning them into an `ident`
+    -- would reintroduce name lookup and make inaccessible declarations
+    -- dependent on pretty-printed names.
+    let raw := stx[0]
+    return ⟨raw.setKind ``explicitRwLocalRefTerm⟩
+  | ``explicitRwLocalRefTerm =>
+    return ⟨stx⟩
   | ``explicitRwTermStr => return ⟨stx[0]⟩
   | ``explicitRwTermProp => `(Prop)
   | ``explicitRwTermNumType =>
@@ -720,7 +840,8 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
       throwError "explicit_rw: internal error: unhandled whitelisted node `{k}`"
 
 /-- `toTermCore` in `TacticM`, which is where the step elaborators run. -/
-def toTerm (stx : Syntax) : TacticM Term := toTermCore stx
+def toTerm (stx : Syntax) (handles : IntroducedHandles := {}) : TacticM Term := do
+  toTermCore (← materializeIntroducedRefs handles stx)
 
 
 
@@ -847,12 +968,13 @@ with the subterm at the recorded position. That caller closes them itself
 def elabStrict (idx? : Option Nat) (what : String) (stx : Term)
     (expectedType? : Option Expr := none) (allowMVars := false) : TacticM Expr := do
   let errsBefore := (← Core.getMessageLog).hasErrors
-  let e ← Term.withoutErrToSorry do
-    let e ← match expectedType? with
-      | some ty => Term.elabTermEnsuringType stx ty
-      | none => Term.elabTerm stx none
-    Term.synthesizeSyntheticMVarsNoPostponing
-    instantiateMVars e
+  let e ← withOptions (fun o => o.setBool `explicitRw.allowLocalRef true) do
+    Term.withoutErrToSorry do
+      let e ← match expectedType? with
+        | some ty => Term.elabTermEnsuringType stx ty
+        | none => Term.elabTerm stx none
+      Term.synthesizeSyntheticMVarsNoPostponing
+      instantiateMVars e
   let e ← instantiateMVars e
   let fail (why : MessageData) : TacticM Expr :=
     match idx? with
@@ -877,7 +999,8 @@ Elaborate a term to a proof of an equation or iff, returning `lhs`, `rhs` and a
 proof of `lhs = rhs`, together with the metavariables introduced for the
 lemma's own arguments so the caller can insist they all get assigned.
 -/
-def elabEquation (idx : Nat) (stx : Term) : TacticM (Expr × Expr × Expr × Array Expr) := do
+def elabEquation (idx : Nat) (stx : Term) :
+    TacticM (Expr × Expr × Expr × Array Expr) := do
   checkNoTacticBlock s!"the lemma term of this step" (some idx) stx
   let lemmaMsg := m!"`{stx}`"
   let snapshot ← syntheticMVarSnapshot
@@ -1111,7 +1234,7 @@ mutual
 
 /-- Run a rewrite step at `pos` inside `e`, with its `with` clause if any. -/
 partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bool)
-    (sideTacs : Array Syntax) :
+    (sideTacs : Array Syntax) (handles : IntroducedHandles := {}) :
     TacticM Replacement := do
   rewriteAt e pos
     (fun sub => do
@@ -1143,7 +1266,7 @@ partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bo
           `{stx}` has {propMVars.size} undetermined hypothesis(es) at this position."
       for h : i in [0 : sideTacs.size] do
         let .mvar mid := ← instantiateMVars propMVars[i]! | pure ()
-        runSideProofOn idx (some i) sideTacs[i] mid
+        runSideProofOn idx (some i) sideTacs[i] mid handles
       closeLemmaMVars idx m!"`{stx}`" mvars
       let eqProof ← instantiateMVars eqProof
       let target ← instantiateMVars target
@@ -1157,7 +1280,8 @@ partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bo
     (fun pfx child sub => badPosError idx pos pfx child sub)
 
 /-- Apply one parsed step to the current expression. -/
-partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement := do
+partial def runStep (idx : Nat) (e : Expr) (stx : Syntax)
+    (handles : IntroducedHandles := {}) : TacticM Replacement := do
   -- Each alternation wraps its chosen form in a one-field node.
   let stx := stx[0]
   match stx.getKind with
@@ -1226,7 +1350,7 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement 
           let mut cur := target
           let mut proof? : Option Expr := none
           for h2 : j in [0 : inner.size] do
-            let r ← runStep idx cur inner[j]
+            let r ← runStep idx cur inner[j] handles
             let next ← instantiateMVars r.newExpr
             match proof?, r.proof? with
             | none, p => proof? := p
@@ -1286,7 +1410,7 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement 
       cannot be replayed; hand-write the proof instead."
   | ``explicitRwChange =>
     let pos := parsePos stx[2]
-    let target ← toTerm stx[1]
+    let target ← toTerm stx[1] handles
     checkNoTacticBlock s!"the `change` term of this step" (some idx) target
     runDefeqStep idx e pos m!"`change {target}`" fun sub => do
       let ty ← inferType sub
@@ -1304,7 +1428,7 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement 
       return newSub
   | ``explicitRwEq =>
     let pos := parsePos stx[4]
-    let eqStx ← toTerm stx[1]
+    let eqStx ← toTerm stx[1] handles
     checkNoTacticBlock s!"the `eq` equation of this step" (some idx) eqStx
     -- The `by` slot is the closed keyword `rfl` or `decide`, never a tacticSeq.
     let byKind := stx[3][0].getAtomVal
@@ -1335,7 +1459,7 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement 
       (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwProp =>
     let truth := stx[0][0].getAtomVal == "prop_true"
-    let term ← toTerm stx[1]
+    let term ← toTerm stx[1] handles
     let pos := parsePos stx[2]
     let sideTacs : Array Syntax :=
       if stx[3].isNone then #[] else stx[3][0][2].getSepArgs
@@ -1374,12 +1498,12 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement 
       (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwRw =>
     let symm := !stx[0].isNone
-    let term ← toTerm stx[1]
+    let term ← toTerm stx[1] handles
     let pos := parsePos stx[2]
     -- The optional `with [...]` clause, if present.
     let sideTacs : Array Syntax :=
       if stx[3].isNone then #[] else stx[3][0][2].getSepArgs
-    runRwStep idx e pos term symm sideTacs
+    runRwStep idx e pos term symm sideTacs handles
   | k =>
     if isAntiquot k then
       stepError idx m!"antiquotations are not admitted in a trace step."
@@ -1387,7 +1511,8 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax) : TacticM Replacement 
       throwError "explicit_rw: internal error: unexpected step kind `{k}`"
 
 /-- Apply every step in order to the expression at `target`, rebuilding the goal. -/
-partial def runSteps (steps : Array Syntax) (target : Target) : TacticM Unit := do
+partial def runSteps (steps : Array Syntax) (target : Target)
+    (handles : IntroducedHandles := {}) : TacticM Unit := do
   for h : idx in [0 : steps.size] do
     let stx := steps[idx]
     let goal ← getMainGoal
@@ -1400,7 +1525,7 @@ partial def runSteps (steps : Array Syntax) (target : Target) : TacticM Unit := 
       -- failure names the step it came from.
       let r ←
         try
-          runStep idx e stx
+          runStep idx e stx handles
         catch ex => do
           let msg ← ex.toMessageData.toString
           if msg.startsWith "explicit_rw:" then
@@ -1432,11 +1557,11 @@ The parser already restricts this to the closed enumeration, so this only has to
 dispatch. `exact <term>` additionally rejects a term containing a tactic block,
 which is the one way a term could reintroduce arbitrary tactics.
 -/
-partial def runCloser (stx : Syntax) : TacticM Unit := do
+partial def runCloser (stx : Syntax) (handles : IntroducedHandles := {}) : TacticM Unit := do
   -- `stx` is the side proof itself; the caller has already unwrapped the
   -- optional `then` clause around it.
   let goal ← getMainGoal
-  runSideProofOn 0 none stx goal
+  runSideProofOn 0 none stx goal handles
   replaceMainGoal []
 
 /--
@@ -1448,7 +1573,7 @@ this recursive: an implication-shaped side condition is discharged by
 introducing its antecedents and replaying a nested trace under them.
 -/
 partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
-    (goal : MVarId) : TacticM Unit := do
+    (goal : MVarId) (handles : IntroducedHandles := {}) : TacticM Unit := do
   let where? : MessageData :=
     match which? with
     | some i => m!"the `with` entry {i + 1}"
@@ -1467,9 +1592,9 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
   | ``explicitRwSideOmega => run (← `(tactic| omega))
   | ``explicitRwSideNofun => run (← `(tactic| exact nofun))
   | ``explicitRwSideExact =>
-    let t ← toTerm stx[1]
-    checkNoTacticBlock s!"the `exact` term of a side proof" (some idx) t
     goal.withContext do
+      let t ← toTerm stx[1] handles
+      checkNoTacticBlock s!"the `exact` term of a side proof" (some idx) t
       let snapshot ← syntheticMVarSnapshot
       let val ← elabStrict (some idx) s!"the `exact` term of a side proof" t
         (expectedType? := some (← goal.getType))
@@ -1478,15 +1603,21 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
   | ``explicitRwSideIntro =>
     let names : Array Name := stx[1].getArgs.map fun a => a.getId
     let (_, goal') ← goal.introN names.size names.toList
-    runSideProofOn idx which? stx[3] goal'
+    runSideProofOn idx which? stx[3] goal' handles
+  | ``explicitRwSideIntroRef =>
+    let handle := (natLiterals stx[1])[0]!
+    if handles.contains handle then
+      stepError idx m!"{where?} duplicates introduced handle {handle}."
+    let (fvarId, goal') ← goal.intro1P
+    runSideProofOn idx which? stx[3] goal' (handles.insert handle fvarId)
   | ``explicitRwSideNested =>
     -- Replay a nested trace under the introduced hypotheses.
     let steps := stx[2].getSepArgs
     let remaining ← Tactic.run goal do
-      runSteps steps none
+      runSteps steps none handles
       unless stx[4].isNone do
         let g ← getMainGoal
-        runSideProofOn idx which? stx[4][0][1] g
+        runSideProofOn idx which? stx[4][0][1] g handles
         replaceMainGoal []
     unless remaining.isEmpty do
       stepError idx m!"{where?} left {remaining.length} goal(s) open on\
