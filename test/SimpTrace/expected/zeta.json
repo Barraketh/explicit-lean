@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "(let y := a + 0;\n  y + 0) =\n  a",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

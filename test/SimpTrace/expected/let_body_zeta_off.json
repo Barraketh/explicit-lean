@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "(let x := a;\n  f (x + 0)) =\n  let x := a;\n  f x",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

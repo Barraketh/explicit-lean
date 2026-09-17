@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "dite p f g = dite q f' g'",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

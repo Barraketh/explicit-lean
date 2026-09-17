@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "(FixtureColor.red = FixtureColor.green) = False",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

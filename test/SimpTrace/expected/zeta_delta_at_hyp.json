@@ -6,6 +6,8 @@
         "hyp": "hg"
       },
       "closed": false,
+      "pre": "P (g a)",
+      "post": "P (a + 0)",
       "steps": [
         {
           "kind": "zeta",

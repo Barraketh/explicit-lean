@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "UnresTag k",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

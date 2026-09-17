@@ -68,6 +68,23 @@ def ppIn (c : EvCtx) (e : Expr) : MetaM String :=
   withLCtx c.lctx c.insts do
     return (← ppExpr e).pretty
 
+/-- Pretty-print an `args` entry: a term a replayer writes, so it must be
+self-contained and splice into an application.
+
+`pp.proofs` is set because the default elides a proof as `⋯`, which cannot be
+elaborated at all; the term-size limits are raised for the same reason.  The
+result is parenthesised unless it is already atomic, since the spec has the
+replayer splice it after the lemma name and `rw [l if Q then a else b b]` is a
+parse error (REVIEW-8 4). -/
+def ppArg (c : EvCtx) (e : Expr) : MetaM String :=
+  withLCtx c.lctx c.insts do
+    let s ← withOptions (fun o =>
+        ((o.setBool `pp.proofs true).setBool `pp.deepTerms true)) do
+      pure (← ppExpr e).pretty
+    -- Atomic: an identifier, a literal, or already fully bracketed.
+    let atomic := !s.any (fun ch => ch == ' ')
+    return if atomic then s else "(" ++ s ++ ")"
+
 /-- Pretty-print with `pp.all` for `change` steps. -/
 def ppAllIn (c : EvCtx) (e : Expr) : MetaM String :=
   withLCtx c.lctx c.insts do
@@ -179,7 +196,7 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
     -- `simp [*]` agree; `name`/`dir` stay with the written syntax (REVIEW-5 1).
     let (_, _, localRef?) ← originName localO c contextualFVars
     let sideSteps ← side.mapM (sideToTrace ur contextualFVars)
-    let argStrs ← args.mapM (ppIn c)
+    let argStrs ← args.mapM (ppArg c)
     let propStr? := prop?.map (fun b => if b then "true" else "false")
     let step : Step :=
       { kind := "rw", pos := pos, name? := some lemmaName,
@@ -453,7 +470,14 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
   match prop? with
   | some true => return some (concl, mkConst ``True)
   | some false =>
+    -- `Ne a b` is a *definition* (`a = b → False`), so `not?` returns `none`
+    -- on `0 ≠ 1` without unfolding it and the statement becomes `(0 ≠ 1) = False`,
+    -- which cannot unify with the recorded `before: "0 = 1"`.  Unfold first, as
+    -- the `none` arm below already does, so `a ≠ b` and `¬(a = b)` are treated
+    -- the same (REVIEW-8 2).  `Ne` is one of Mathlib's commonest simp shapes.
     if let some p := concl.not? then return some (p, mkConst ``False)
+    let unfolded ← whnfR concl
+    if let some p := unfolded.not? then return some (p, mkConst ``False)
     return some (concl, mkConst ``False)
   | none =>
     -- Read the statement as written first.  Unfolding is only a fallback, for a
@@ -490,11 +514,16 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
     try
       withoutModifyingState do
         let some (lhs, rhs) ← rwStatement? o args prop?
-          -- No statement to check against: a `.stx` origin that stayed a
-          -- user-written term, or a lemma the environment no longer has. The
-          -- positional check on `before`/`after` still applies; we do not claim
-          -- more than we verified.
-          | return none
+          -- No statement to read means the step cannot be verified at all.
+          -- Round 7 made an unresolvable *origin* classified; this is the other
+          -- half — a resolvable origin whose statement we cannot read — and
+          -- leaving it a silent pass is what let `simp [h.mp hp]` ship an
+          -- unverified `rw` with the wrong `args` (REVIEW-8 8).
+          -- "None" is never a pass.
+          | -- A `.stx` origin that stayed unresolved is already reported as
+            -- `unresolved:origin` by the recorder; do not double-report it.
+            if o matches .stx .. then return none
+            else return some s!"unreadable_rw_statement:{name}"
         -- `dir: "rev"` means simp used the equation right-to-left.
         let (src, tgt) := if inv then (rhs, lhs) else (lhs, rhs)
         -- Unify with instances resolvable: the statement's instance arguments

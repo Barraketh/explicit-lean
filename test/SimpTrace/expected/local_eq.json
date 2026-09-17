@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "a + c = b + c",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

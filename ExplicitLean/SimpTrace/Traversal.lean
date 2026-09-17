@@ -147,12 +147,36 @@ def Event.pos : Event → Pos
   | Event.rw p .. | Event.eq p .. | Event.defeq p ..
   | Event.introCtx p .. | Event.congr p .. => p
 
+/-- Replace an event's position. -/
+def Event.reposition (q : Pos) : Event → Event
+  | .rw _ o inv pr b a c args side src lo => .rw q o inv pr b a c args side src lo
+  | .eq _ s b a c side => .eq q s b a c side
+  | .defeq _ k n b a c => .defeq q k n b a c
+  | .introCtx _ f c => .introCtx q f c
+  | .congr _ i steps b a ab aa c => .congr q i steps b a ab aa c
+
+/-- Strip `base` from the front of an event's position, when it is a prefix.
+Used to make a side trace's steps relative to the side goal. -/
+def Event.strip (base : Pos) : Event → Event
+  | ev =>
+    let p := ev.pos
+    if base.size == 0 || base.size > p.size then ev
+    else if (p.extract 0 base.size) != base then ev
+    else ev.reposition (p.extract base.size p.size)
+
 /-- Mutable trace state for one traced `simp` run. -/
 structure TraceState where
   /-- Events of the location currently being simplified. -/
   events : Array Event := #[]
   /-- One frame per active discharger nesting level. -/
   sideStack : Array (Array Event) := #[]
+  /-- The traversal position each side frame opened at.  A side goal is its own
+  root (the spec roots a nested trace's positions at it), but the discharger
+  runs inside the `withPos` of the node whose condition it discharges, and the
+  nested `simp` sets its own positions below that.  Stripping this prefix as an
+  event is pushed is what makes a side step's `pos` relative to the side goal
+  (REVIEW-8 3). -/
+  sideBase : Array Pos := #[]
   /-- Side conditions collected for the rewrite currently being assembled. -/
   pendingSide : Array SideRec := #[]
   /-- Classified reasons a call could not be fully traced.  Never a silent
@@ -198,7 +222,8 @@ def TraceState.push (s : TraceState) (ev : Event) : TraceState :=
   else if h : s.sideStack.size > 0 then
     let i := s.sideStack.size - 1
     have : i < s.sideStack.size := Nat.sub_lt h (by decide)
-    { s with sideStack := s.sideStack.set i ((s.sideStack[i]).push ev) }
+    let base := s.sideBase.getD i #[]
+    { s with sideStack := s.sideStack.set i ((s.sideStack[i]).push (ev.strip base)) }
   else
     { s with events := s.events.push ev }
 
@@ -282,6 +307,18 @@ def eventCount (ref : TraceRef) : SimpM Nat := do
 @[inline] def withPos (ref : TraceRef) (pos : Pos) (k : SimpM α) : SimpM α := do
   let saved := (← ref.get).pos
   ref.modify fun s => { s with pos }
+  try k finally ref.modify fun s => { s with pos := saved }
+
+/-- Run `k` with the traversal position reset to the root.
+
+A side goal is its own root: the spec says positions are child indices "from the
+root of the location", and a side trace is a nested trace with the same shape.
+The discharger runs *inside* the `withPos` of the node whose condition it is
+discharging, so without this reset every event it logs inherits a position that
+cannot exist in the side goal — T2 rejects such a step by name (REVIEW-8 3). -/
+@[inline] def atSideRoot (ref : TraceRef) (k : SimpM α) : SimpM α := do
+  let saved := (← ref.get).pos
+  ref.modify fun s => { s with pos := #[] }
   try k finally ref.modify fun s => { s with pos := saved }
 
 /-! ## Copied helpers from `Lean/Meta/Tactic/Simp/Main.lean`

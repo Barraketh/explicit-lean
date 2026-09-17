@@ -6,6 +6,8 @@
         "hyp": "h"
       },
       "closed": false,
+      "pre": "a + 0 = b",
+      "post": "a = b",
       "steps": [
         {
           "kind": "rw",

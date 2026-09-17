@@ -164,6 +164,18 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         # `change t at [pos]` needs it and a generator cannot recover it from
         # the goal (T2 REVIEW-7). The expected skeletons pin it too, so it
         # cannot silently disappear again.
+        # `args` entries are terms a replayer *writes*, so each must be
+        # self-contained: no `⋯` proof elision (which cannot be elaborated at
+        # all) and balanced delimiters (REVIEW-8 4).
+        for i, arg in enumerate(got.get("args", []) or []):
+            if "⋯" in arg:
+                fail(messages, f"{where}.args[{i}]: {arg!r} contains an elided "
+                               f"proof `⋯`, which cannot be elaborated")
+            for opens, closes in (("(", ")"), ("[", "]"), ("{", "}"), ("⟨", "⟩")):
+                if arg.count(opens) != arg.count(closes):
+                    fail(messages, f"{where}.args[{i}]: {arg!r} has unbalanced "
+                                   f"{opens}{closes}")
+
         if kind == "change" and not got.get("to"):
             fail(messages, f"{where}: `change` step without a `to` term")
 
@@ -261,7 +273,41 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
                 for n in got_intros:
                     if not isinstance(n, str) or not n:
                         fail(messages, f"{side_path}.intros: {n!r} is not a name")
+                check_side_positions(side_path, gs, messages)
                 check_steps(side_path, gs.get("steps", []), ws.get("steps", []), messages)
+
+
+def _pp_atomic(text: str) -> bool:
+    """Does this pretty-printed term have no subterms a position could name?
+
+    A conservative syntactic test: no application, no binder, no parentheses.
+    `P` and `p` are atomic; `¬P` is not (it is `Not P`, an application whose
+    argument is at child 1).
+    """
+    return not any(ch in text for ch in " (),[]{}→∀∃λ¬")
+
+
+def check_side_positions(path: str, side: dict, messages: list[str]) -> None:
+    """A side trace's positions are rooted at its own goal, per the spec.
+
+    A step inside a side trace whose goal is atomic can only sit at `[]`; a
+    non-empty position there is one that leaked from the enclosing traversal,
+    which is what T2 rejected by name (REVIEW-8 3). Checking `pre` against the
+    steps' positions is what makes that impossible to reintroduce.
+    """
+    pre = side.get("pre")
+    if not isinstance(pre, str):
+        return
+    if not _pp_atomic(pre):
+        return
+    for index, step in enumerate(side.get("steps", [])):
+        if step.get("pos"):
+            fail(
+                messages,
+                f"{path}.steps[{index}].pos: {step['pos']!r} cannot exist in the "
+                f"side goal {pre!r}, which has no subterms; a side trace's "
+                f"positions are rooted at its own goal",
+            )
 
 
 def check_location_fields(path: str, loc: dict, messages: list[str]) -> None:

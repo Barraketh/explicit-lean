@@ -495,7 +495,7 @@ theorem heq_cast_iff_heq {α β γ : Sort _} (e : β = γ) (a : α) (b : β) :
 universe u
 variable {α β : Sort u} {e : β = α} {a : α} {b : β}
 
-lemma heq_of_eq_cast (e : β = α) : a = cast e b → a ≍ b := by rintro rfl; simp
+lemma heq_of_eq_cast (e : β = α) : a = cast e b → a ≍ b := by rintro rfl; simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_06.json"
 
 lemma eq_cast_iff_heq : a = cast e b ↔ a ≍ b := ⟨heq_of_eq_cast _, fun h ↦ by cases h; rfl⟩
 
@@ -506,7 +506,7 @@ lemma heq_iff_exists_eq_cast :
 
 lemma heq_iff_exists_cast_eq :
     a ≍ b ↔ ∃ (h : α = β), cast h a = b := by
-  simp_trace only [heq_comm (a := a), heq_iff_exists_eq_cast, eq_comm] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_06.json"
+  simp_trace only [heq_comm (a := a), heq_iff_exists_eq_cast, eq_comm] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_07.json"
 
 end Equality
 
@@ -550,7 +550,7 @@ theorem imp_forall_iff {α : Type*} {p : Prop} {q : α → Prop} : (p → ∀ x,
   forall_comm
 
 lemma imp_forall_iff_forall (A : Prop) (B : A → Prop) : (A → ∀ h : A, B h) ↔ ∀ h : A, B h := by
-  by_cases h : A <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_07.json"
+  by_cases h : A <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_08.json"
 
 @[deprecated (since := "2026-03-25")] alias exists_swap := exists_comm
 
@@ -587,15 +587,15 @@ theorem forall_true_iff' (h : ∀ a, p a ↔ True) : (∀ a, p a) ↔ True :=
   iff_true_intro fun _ ↦ of_iff_true (h _)
 
 -- This is not marked `@[simp]` because `implies_true : (α → True) = True` works
-theorem forall₂_true_iff {β : α → Sort*} : (∀ a, β a → True) ↔ True := by simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_08.json"
+theorem forall₂_true_iff {β : α → Sort*} : (∀ a, β a → True) ↔ True := by simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_09.json"
 
 -- This is not marked `@[simp]` because `implies_true : (α → True) = True` works
 theorem forall₃_true_iff {β : α → Sort*} {γ : ∀ a, β a → Sort*} :
-    (∀ (a) (b : β a), γ a b → True) ↔ True := by simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_09.json"
+    (∀ (a) (b : β a), γ a b → True) ↔ True := by simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_10.json"
 
 theorem Decidable.and_forall_ne [DecidableEq α] (a : α) {p : α → Prop} :
     (p a ∧ ∀ b, b ≠ a → p b) ↔ ∀ b, p b := by
-  simp_trace only [← @forall_eq _ p a, ← forall_and, ← or_imp, Decidable.em, forall_const] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_10.json"
+  simp_trace only [← @forall_eq _ p a, ← forall_and, ← or_imp, Decidable.em, forall_const] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_11.json"
 
 theorem and_forall_ne (a : α) : (p a ∧ ∀ b, b ≠ a → p b) ↔ ∀ b, p b :=
   open scoped Classical in Decidable.and_forall_ne a
@@ -653,15 +653,15 @@ theorem exists_apply_eq (a : α) (b : β) : ∃ f : α → β, f a = b := ⟨fun
     fun ⟨a, b, hab⟩ ↦ ⟨f a b, ⟨a, b, rfl⟩, hab⟩⟩
 
 theorem forall_apply_eq_imp_iff' {f : α → β} {p : β → Prop} :
-    (∀ a b, f a = b → p b) ↔ ∀ a, p (f a) := by simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_11.json"
+    (∀ a b, f a = b → p b) ↔ ∀ a, p (f a) := by simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_12.json"
 
 theorem forall_eq_apply_imp_iff' {f : α → β} {p : β → Prop} :
-    (∀ a b, b = f a → p b) ↔ ∀ a, p (f a) := by simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_12.json"
+    (∀ a b, b = f a → p b) ↔ ∀ a, p (f a) := by simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_13.json"
 
 theorem exists₂_comm
     {ι₁ ι₂ : Sort*} {κ₁ : ι₁ → Sort*} {κ₂ : ι₂ → Sort*} {p : ∀ i₁, κ₁ i₁ → ∀ i₂, κ₂ i₂ → Prop} :
     (∃ i₁ j₁ i₂ j₂, p i₁ j₁ i₂ j₂) ↔ ∃ i₂ j₂ i₁ j₁, p i₁ j₁ i₂ j₂ := by
-  simp_trace only [@exists_comm (κ₁ _), @exists_comm ι₁] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_13.json"
+  simp_trace only [@exists_comm (κ₁ _), @exists_comm ι₁] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_14.json"
 
 theorem And.exists {p q : Prop} {f : p ∧ q → Prop} : (∃ h, f h) ↔ ∃ hp hq, f ⟨hp, hq⟩ :=
   ⟨fun ⟨h, H⟩ ↦ ⟨h.1, h.2, H⟩, fun ⟨hp, hq, H⟩ ↦ ⟨⟨hp, hq⟩, H⟩⟩
@@ -681,7 +681,7 @@ theorem forall_or_left {q} {p : α → Prop} : (∀ x, q ∨ p x) ↔ q ∨ ∀ 
 
 -- See Note [decidable namespace]
 protected theorem Decidable.forall_or_right {q} {p : α → Prop} [Decidable q] :
-    (∀ x, p x ∨ q) ↔ (∀ x, p x) ∨ q := by simp_trace [or_comm, Decidable.forall_or_left] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_14.json"
+    (∀ x, p x ∨ q) ↔ (∀ x, p x) ∨ q := by simp_trace [or_comm, Decidable.forall_or_left] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_15.json"
 
 theorem forall_or_right {q} {p : α → Prop} : (∀ x, p x ∨ q) ↔ (∀ x, p x) ∨ q :=
   open scoped Classical in Decidable.forall_or_right
@@ -750,7 +750,7 @@ lemma Subsingleton.forall₂_iff {ι : Sort*} [Subsingleton ι] (P : ι → ι �
     (∀ i j, P i j) ↔ (∀ i, P i i) := by
   refine forall_congr' fun i ↦ ?_
   have : Nonempty ι := ⟨i⟩
-  simp_trace [Subsingleton.elim _ i] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_15.json"
+  simp_trace [Subsingleton.elim _ i] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_16.json"
 
 end Quantifiers
 
@@ -886,7 +886,7 @@ theorem forall₂_or_left : (∀ x, p x ∨ q x → r x) ↔ (∀ x, p x → r x
 
 theorem exists_mem_or_left :
     (∃ (x : _) (_ : p x ∨ q x), r x) ↔ (∃ (x : _) (_ : p x), r x) ∨ ∃ (x : _) (_ : q x), r x := by
-  simp_trace only [exists_prop] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_16.json"
+  simp_trace only [exists_prop] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_17.json"
   exact Iff.trans (exists_congr fun x ↦ or_and_right) exists_or
 
 end BoundedQuantifiers
@@ -897,7 +897,7 @@ variable {α : Sort*} {σ : α → Sort*} {P Q R : Prop} [Decidable P]
   {a b c : α} {A : P → α} {B : ¬P → α}
 
 theorem dite_eq_iff : dite P A B = c ↔ (∃ h, A h = c) ∨ ∃ h, B h = c := by
-  by_cases P <;> simp_trace [*, exists_prop_of_true, exists_prop_of_false] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_17.json"
+  by_cases P <;> simp_trace [*, exists_prop_of_true, exists_prop_of_false] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_18.json"
 
 theorem ite_eq_iff : ite P a b = c ↔ P ∧ a = c ∨ ¬P ∧ b = c :=
   dite_eq_iff.trans <| by rw [exists_prop, exists_prop]
@@ -915,7 +915,7 @@ theorem dite_ne_left_iff : dite P (fun _ ↦ a) B ≠ a ↔ ∃ h, a ≠ B h := 
   grind
 
 theorem dite_ne_right_iff : (dite P A fun _ ↦ b) ≠ b ↔ ∃ h, A h ≠ b := by
-  simp_trace only [Ne, dite_eq_right_iff, not_forall] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_18.json"
+  simp_trace only [Ne, dite_eq_right_iff, not_forall] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_19.json"
 
 theorem ite_ne_left_iff : ite P a b ≠ a ↔ ¬P ∧ a ≠ b :=
   dite_ne_left_iff.trans <| by rw [exists_prop]
@@ -960,7 +960,7 @@ applied to each of the branches. -/
 theorem apply_dite₂ {α β γ : Sort*} (f : α → β → γ) (P : Prop) [Decidable P]
     (a : P → α) (b : ¬P → α) (c : P → β) (d : ¬P → β) :
     f (dite P a b) (dite P c d) = dite P (fun h ↦ f (a h) (c h)) fun h ↦ f (b h) (d h) := by
-  by_cases h : P <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_19.json"
+  by_cases h : P <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_20.json"
 
 /-- A two-argument function applied to two `ite`s is a `ite` of that two-argument function
 applied to each of the branches. -/
@@ -971,7 +971,7 @@ theorem apply_ite₂ {α β γ : Sort*} (f : α → β → γ) (P : Prop) [Decid
 /-- A 'dite' producing a `Pi` type `Π a, σ a`, applied to a value `a : α` is a `dite` that applies
 either branch to `a`. -/
 theorem dite_apply (f : P → ∀ a, σ a) (g : ¬P → ∀ a, σ a) (a : α) :
-    (dite P f g) a = dite P (fun h ↦ f h a) fun h ↦ g h a := by by_cases h : P <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_20.json"
+    (dite P f g) a = dite P (fun h ↦ f h a) fun h ↦ g h a := by by_cases h : P <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_21.json"
 
 /-- A 'ite' producing a `Pi` type `Π a, σ a`, applied to a value `a : α` is a `ite` that applies
 either branch to `a`. -/
@@ -985,10 +985,10 @@ section
 variable [Decidable Q]
 
 theorem ite_and : ite (P ∧ Q) a b = ite P (ite Q a b) b := by
-  by_cases hp : P <;> by_cases hq : Q <;> simp_trace [hp, hq] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_21.json"
+  by_cases hp : P <;> by_cases hq : Q <;> simp_trace [hp, hq] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_22.json"
 
 theorem ite_or : ite (P ∨ Q) a b = ite P a (ite Q a b) := by
-  by_cases hp : P <;> by_cases hq : Q <;> simp_trace [hp, hq] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_22.json"
+  by_cases hp : P <;> by_cases hq : Q <;> simp_trace [hp, hq] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_23.json"
 
 theorem dite_dite_comm {B : Q → α} {C : ¬P → ¬Q → α} (h : P → ¬Q) :
     (if p : P then A p else if q : Q then B q else C p q) =
@@ -1005,19 +1005,19 @@ end
 variable {P Q}
 
 theorem ite_prop_iff_or : (if P then Q else R) ↔ (P ∧ Q ∨ ¬P ∧ R) := by
-  by_cases p : P <;> simp_trace [p] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_23.json"
+  by_cases p : P <;> simp_trace [p] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_24.json"
 
 theorem dite_prop_iff_or {Q : P → Prop} {R : ¬P → Prop} :
     dite P Q R ↔ (∃ p, Q p) ∨ (∃ p, R p) := by
-  by_cases h : P <;> simp_trace [h, exists_prop_of_false, exists_prop_of_true] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_24.json"
+  by_cases h : P <;> simp_trace [h, exists_prop_of_false, exists_prop_of_true] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_25.json"
 
 -- TODO make this a simp lemma in a future PR
 theorem ite_prop_iff_and : (if P then Q else R) ↔ ((P → Q) ∧ (¬P → R)) := by
-  by_cases p : P <;> simp_trace [p] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_25.json"
+  by_cases p : P <;> simp_trace [p] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_26.json"
 
 theorem dite_prop_iff_and {Q : P → Prop} {R : ¬P → Prop} :
     dite P Q R ↔ (∀ h, Q h) ∧ (∀ h, R h) := by
-  by_cases h : P <;> simp_trace [h, forall_prop_of_false, forall_prop_of_true] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_26.json"
+  by_cases h : P <;> simp_trace [h, forall_prop_of_false, forall_prop_of_true] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_27.json"
 
 section congr
 
@@ -1049,11 +1049,11 @@ variable {α β : Type*} [Membership α β] {p : Prop} [Decidable p]
 
 theorem mem_dite {a : α} {s : p → β} {t : ¬p → β} :
     (a ∈ if h : p then s h else t h) ↔ (∀ h, a ∈ s h) ∧ (∀ h, a ∈ t h) := by
-  by_cases h : p <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_27.json"
+  by_cases h : p <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_28.json"
 
 theorem dite_mem {a : p → α} {b : ¬p → α} {s : β} :
     (if h : p then a h else b h) ∈ s ↔ (∀ h, a h ∈ s) ∧ (∀ h, b h ∈ s) := by
-  by_cases h : p <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_28.json"
+  by_cases h : p <;> simp_trace [h] =>trace "test/SimpTrace/meas_out/LogicBasicTraced_29.json"
 
 theorem mem_ite {a : α} {s t : β} : (a ∈ if p then s else t) ↔ (p → a ∈ s) ∧ (¬p → a ∈ t) :=
   mem_dite
@@ -1069,7 +1069,7 @@ theorem not_beq_of_ne {α : Type*} [BEq α] [LawfulBEq α] {a b : α} (ne : a �
 alias beq_eq_decide := Bool.beq_eq_decide_eq
 
 @[simp] lemma beq_eq_beq {α β : Type*} [BEq α] [LawfulBEq α] [BEq β] [LawfulBEq β] {a₁ a₂ : α}
-    {b₁ b₂ : β} : (a₁ == a₂) = (b₁ == b₂) ↔ (a₁ = a₂ ↔ b₁ = b₂) := by rw [Bool.eq_iff_iff]; simp
+    {b₁ b₂ : β} : (a₁ == a₂) = (b₁ == b₂) ↔ (a₁ = a₂ ↔ b₁ = b₂) := by rw [Bool.eq_iff_iff]; simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_30.json"
 
 @[ext]
 theorem beq_ext {α : Type*} (inst1 : BEq α) (inst2 : BEq α)
@@ -1085,4 +1085,4 @@ theorem lawful_beq_subsingleton {α : Type*} (inst1 : BEq α) (inst2 : BEq α)
     [@LawfulBEq α inst1] [@LawfulBEq α inst2] :
     inst1 = inst2 := by
   ext
-  simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_29.json"
+  simp_trace =>trace "test/SimpTrace/meas_out/LogicBasicTraced_31.json"

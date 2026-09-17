@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "cast h₂ (cast h₁ (f a)) = cast h₂ (cast h₁ a)",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

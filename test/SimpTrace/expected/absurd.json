@@ -6,6 +6,8 @@
         "hyp": "h"
       },
       "closed": true,
+      "pre": "a ≠ a",
+      "post": null,
       "close": {
         "by": "absurd:h"
       },

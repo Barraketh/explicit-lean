@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "(if n = 3 then 1 else 2) = 1",
+      "post": null,
       "close": {
         "by": "true_intro"
       },
@@ -32,10 +34,7 @@
               "steps": [
                 {
                   "kind": "rw",
-                  "pos": [
-                    0,
-                    1
-                  ],
+                  "pos": [],
                   "name": "h",
                   "dir": "fwd",
                   "local": {
@@ -46,10 +45,7 @@
                 },
                 {
                   "kind": "rw",
-                  "pos": [
-                    0,
-                    1
-                  ],
+                  "pos": [],
                   "name": "eq_self",
                   "dir": "fwd"
                 }

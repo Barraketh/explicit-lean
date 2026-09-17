@@ -6,6 +6,8 @@
         "hyp": "h"
       },
       "closed": false,
+      "pre": "a + 0 = b",
+      "post": "a = b",
       "steps": [
         {
           "kind": "rw",
@@ -21,6 +23,8 @@
     {
       "loc": "goal",
       "closed": false,
+      "pre": "b + 0 = a",
+      "post": "b = a",
       "steps": [
         {
           "kind": "rw",

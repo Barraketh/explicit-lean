@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "∀ (x : Fin (if True then 3 else 4)), f ↑x = f ↑x",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

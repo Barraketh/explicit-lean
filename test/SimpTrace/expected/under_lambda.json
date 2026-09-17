@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "(fun x => f x + 0) = fun x => f x",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

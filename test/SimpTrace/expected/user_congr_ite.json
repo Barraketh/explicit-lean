@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "(if p then a else a) = if q then b else a",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

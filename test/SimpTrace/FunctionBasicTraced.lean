@@ -314,7 +314,7 @@ theorem injective_comp_right_iff_surjective {γ : Type*} [Nontrivial γ] :
   have ⟨b₀, hb⟩ := not_forall.mp not_surj
   classical have := inj (a₁ := fun _ ↦ c) (a₂ := (if · = b₀ then c' else c)) ?_
   · simpa using congr_fun this b₀
-  ext a; simp only [comp_apply, if_neg fun h ↦ hb ⟨a, h⟩]
+  ext a; simp_trace only [comp_apply, if_neg fun h ↦ hb ⟨a, h⟩] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_02.json"
 
 protected theorem Surjective.right_cancellable (hf : Surjective f) {g₁ g₂ : β → γ} :
     g₁ ∘ f = g₂ ∘ f ↔ g₁ = g₂ :=
@@ -388,7 +388,7 @@ theorem not_surjective_Type {α : Type u} (f : α → Type max u v) : ¬Surjecti
   have hg : Injective g := by
     intro s t h
     suffices cast hU (g s).2 = cast hU (g t).2 by
-      simp_trace only [g, cast_cast, cast_eq] at this =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_02.json"
+      simp_trace only [g, cast_cast, cast_eq] at this =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_03.json"
       assumption
     · congr
   exact cantor_injective g hg
@@ -408,7 +408,7 @@ theorem IsPartialInv.get_eq {α β} {f : α → β} {g} (H : IsPartialInv f g) (
 
 theorem IsPartialInv.surjective_getD {α β} {f : α → β} {g} (H : IsPartialInv f g) (x) :
     Function.Surjective (g · |>.getD x) :=
-  fun y => ⟨f y, by simp_trace [H.eq] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_03.json"⟩
+  fun y => ⟨f y, by simp_trace [H.eq] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_04.json"⟩
 
 @[deprecated (since := "2026-03-11")] alias isPartialInv_left := IsPartialInv.eq
 
@@ -426,7 +426,7 @@ theorem IsPartialInv.comp {α β γ} {f : α → β} {g : β → Option α} {h :
     (hf : IsPartialInv f g) (hh : IsPartialInv h i) :
     IsPartialInv (h ∘ f) (i · |>.bind g) := by
   intros a b
-  simp_trace [Option.bind_eq_some_iff, hh _, hf _] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_04.json"
+  simp_trace [Option.bind_eq_some_iff, hh _, hf _] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_05.json"
 
 lemma LeftInverse.eq {g : β → α} {f : α → β} (h : LeftInverse g f) (x : α) : g (f x) = x := h x
 
@@ -526,7 +526,7 @@ noncomputable def invFun {α : Sort u} {β} [Nonempty α] (f : α → β) : β �
   fun y ↦ if h : (∃ x, f x = y) then h.choose else Classical.arbitrary α
 
 theorem invFun_eq (h : ∃ a, f a = b) : f (invFun f b) = b := by
-  simp_trace only [invFun, dif_pos h, h.choose_spec] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_05.json"
+  simp_trace only [invFun, dif_pos h, h.choose_spec] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_06.json"
 
 theorem apply_invFun_apply {α β : Type*} {f : α → β} {a : α} :
     f (@invFun _ _ ⟨a⟩ f (f a)) = f a :=
@@ -662,7 +662,7 @@ lemma update_congr {β : Sort*}
 /-- On non-dependent functions, `Function.update` can be expressed as an `ite` -/
 theorem update_apply {β : Sort*} (f : α → β) (a' : α) (b : β) (a : α) :
     update f a' b a = if a = a' then b else f a := by
-  rcases Decidable.eq_or_ne a a' with rfl | hne <;> simp [*]
+  rcases Decidable.eq_or_ne a a' with rfl | hne <;> simp_trace [*] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_07.json"
 
 @[nontriviality]
 theorem update_eq_const_of_subsingleton [Subsingleton α] (a : α) (v : α') (f : α → α') :
@@ -681,12 +681,12 @@ theorem update_injective (f : ∀ a, β a) (a' : α) : Injective (update f a') :
 lemma forall_update_iff (f : ∀ a, β a) {a : α} {b : β a} (p : ∀ a, β a → Prop) :
     (∀ x, p x (update f a b x)) ↔ p a b ∧ ∀ x, x ≠ a → p x (f x) := by
   rw [← and_forall_ne a, update_self]
-  simp_trace +contextual =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_06.json"
+  simp_trace +contextual =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_08.json"
 
 theorem exists_update_iff (f : ∀ a, β a) {a : α} {b : β a} (p : ∀ a, β a → Prop) :
     (∃ x, p x (update f a b x)) ↔ p a b ∨ ∃ x ≠ a, p x (f x) := by
   rw [← not_forall_not, forall_update_iff f fun a b ↦ ¬p a b]
-  simp_trace [-not_and, not_and_or] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_07.json"
+  simp_trace [-not_and, not_and_or] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_09.json"
 
 theorem update_eq_iff {a : α} {b : β a} {f g : ∀ a, β a} :
     update f a b = g ↔ b = g a ∧ ∀ x ≠ a, f x = g x :=
@@ -794,7 +794,7 @@ theorem _root_.Pi.map_update {ι : Sort*} [DecidableEq ι] {α β : ι → Sort*
     (g : ∀ i, α i) (i : ι) (a : α i) :
     Pi.map f (Function.update g i a) = Function.update (Pi.map f g) i (f i a) := by
   ext j
-  obtain rfl | hij := eq_or_ne j i <;> simp [*]
+  obtain rfl | hij := eq_or_ne j i <;> simp_trace [*] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_10.json"
 
 @[simp]
 theorem _root_.Pi.map_injective
@@ -845,7 +845,7 @@ lemma Injective.factorsThrough (hf : Injective f) (g : α → γ) : g.FactorsThr
 lemma FactorsThrough.extend_apply {g : α → γ} (hf : g.FactorsThrough f) (e' : β → γ) (a : α) :
     extend f g e' (f a) = g a := by
   classical
-  simp_trace only [extend_def, dif_pos, exists_apply_eq_apply] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_08.json"
+  simp_trace only [extend_def, dif_pos, exists_apply_eq_apply] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_11.json"
   exact hf (Classical.choose_spec (exists_apply_eq_apply f a))
 
 @[simp]
@@ -857,7 +857,7 @@ theorem Injective.extend_apply (hf : Injective f) (g : α → γ) (e' : β → �
 theorem extend_apply' (g : α → γ) (e' : β → γ) (b : β) (hb : ¬∃ a, f a = b) :
     extend f g e' b = e' b := by
   classical
-  simp_trace [Function.extend_def, hb] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_09.json"
+  simp_trace [Function.extend_def, hb] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_12.json"
 
 @[simp]
 theorem extend_id (g : α → γ) (e' : α → γ) :
@@ -882,7 +882,7 @@ theorem Injective.extend_comp {α₁ α₂ α₃ : Sort*} {f₁₂ : α₁ → �
 
 lemma factorsThrough_iff (g : α → γ) [Nonempty γ] : g.FactorsThrough f ↔ ∃ (e : β → γ), g = e ∘ f :=
   ⟨fun hf => ⟨extend f g (const β (Classical.arbitrary γ)),
-      funext (fun x => by simp_trace only [comp_apply, hf.extend_apply] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_10.json")⟩,
+      funext (fun x => by simp_trace only [comp_apply, hf.extend_apply] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_13.json")⟩,
   fun h _ _ hf => by rw [Classical.choose_spec h, comp_apply, comp_apply, hf]⟩
 
 lemma apply_extend {δ} {g : α → γ} (F : γ → δ) (f : α → β) (e' : β → γ) (b : β) :
@@ -893,7 +893,7 @@ theorem extend_injective (hf : Injective f) (e' : β → γ) : Injective fun g �
   intro g₁ g₂ hg
   refine funext fun x ↦ ?_
   have H := congr_fun hg (f x)
-  simp_trace only [hf.extend_apply] at H =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_11.json"
+  simp_trace only [hf.extend_apply] at H =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_14.json"
   exact H
 
 lemma FactorsThrough.extend_comp {g : α → γ} (e' : β → γ) (hf : FactorsThrough g f) :
@@ -921,18 +921,18 @@ theorem surjective_comp_right_iff_injective {γ : Type*} [Nontrivial γ] :
   classical
   refine ⟨not_imp_not.mp fun not_inj surj ↦ not_subsingleton γ ⟨fun c c' ↦ ?_⟩,
     (·.surjective_comp_right)⟩
-  simp_trace only [Injective, not_forall] at not_inj =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_12.json"
+  simp_trace only [Injective, not_forall] at not_inj =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_15.json"
   have ⟨a₁, a₂, eq, ne⟩ := not_inj
   have ⟨f, hf⟩ := surj (if · = a₂ then c else c')
   have h₁ := congr_fun hf a₁
   have h₂ := congr_fun hf a₂
-  simp_trace only [comp_apply, if_neg ne, reduceIte] at h₁ h₂ =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_13.json"
+  simp_trace only [comp_apply, if_neg ne, reduceIte] at h₁ h₂ =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_16.json"
   rw [← h₁, eq, h₂]
 
 theorem Bijective.comp_right (hf : Bijective f) : Bijective fun g : β → γ ↦ g ∘ f :=
   ⟨hf.surjective.injective_comp_right, fun g ↦
     ⟨g ∘ surjInv hf.surjective,
-     by simp_trace only [comp_assoc g _ f, (leftInverse_surjInv hf).comp_eq_id, comp_id] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_14.json"⟩⟩
+     by simp_trace only [comp_assoc g _ f, (leftInverse_surjInv hf).comp_eq_id, comp_id] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_17.json"⟩⟩
 
 end Extend
 
@@ -973,14 +973,14 @@ theorem curry_update {α α' β : Type*} [DecidableEq α] [DecidableEq α']
       Function.update (curry f) aa'.1 (Function.update (curry f aa'.1) aa'.2 b) := by
   ext a a'
   let ⟨a₂, a₂'⟩ := aa'
-  obtain rfl | ha := eq_or_ne a a₂ <;> obtain rfl | ha' := eq_or_ne a' a₂' <;> simp [*]
+  obtain rfl | ha := eq_or_ne a a₂ <;> obtain rfl | ha' := eq_or_ne a' a₂' <;> simp_trace [*] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_18.json"
 
 theorem uncurry_update_update {α α' β : Type*} [DecidableEq α] [DecidableEq α']
     (f : α → α' → β) (a : α) (a' : α') (b : β) :
     uncurry (Function.update f a (Function.update (f a) a' b)) =
       Function.update (uncurry f) (a, a') b := by
   apply curry_injective
-  simp_trace [curry_update] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_15.json"
+  simp_trace [curry_update] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_19.json"
 
 end CurryAndUncurry
 
@@ -1055,7 +1055,7 @@ lemma not_bijective : Bijective Not := not_involutive.bijective
 
 @[simp]
 lemma symm_apply_eq_iff {α : Sort*} {f : α → α} : Std.Symm (f · = ·) ↔ Involutive f := by
-  simp_trace [symm_def, Involutive] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_16.json"
+  simp_trace [symm_def, Involutive] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_20.json"
 
 @[deprecated (since := "2026-06-10")] alias symmetric_apply_eq_iff := symm_apply_eq_iff
 
@@ -1128,14 +1128,14 @@ lemma forall_existsUnique_iff {r : α → β → Prop} :
   · refine ⟨fun a ↦ (h a).choose, fun hr ↦ ?_, fun h' ↦ h' ▸ ?_⟩
     exacts [((h _).choose_spec.2 _ hr).symm, (h _).choose_spec.1]
   · rintro ⟨f, hf⟩
-    simp_trace [hf] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_17.json"
+    simp_trace [hf] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_21.json"
 
 /-- A relation `r : α → β → Prop` is "function-like"
 (for each `a` there exists a unique `b` such that `r a b`)
 if and only if it is `(f · = ·)` for some function `f`. -/
 lemma forall_existsUnique_iff' {r : α → β → Prop} :
     (∀ a, ∃! b, r a b) ↔ ∃ f : α → β, r = (f · = ·) := by
-  simp_trace [forall_existsUnique_iff, funext_iff] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_18.json"
+  simp_trace [forall_existsUnique_iff, funext_iff] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_22.json"
 
 /-- A symmetric relation `r : α → α → Prop` is "function-like"
 (for each `a` there exists a unique `b` such that `r a b`)
@@ -1154,7 +1154,7 @@ protected alias Symmetric.forall_existsUnique_iff' := Std.Symm.forall_existsUniq
 if and only if it is `(f · = ·)` for some involutive function `f`. -/
 protected lemma Std.Symm.forall_existsUnique_iff {r : α → α → Prop} [Std.Symm r] :
     (∀ a, ∃! b, r a b) ↔ ∃ f : α → α, Involutive f ∧ ∀ {a b}, r a b ↔ f a = b := by
-  simp_trace [Std.Symm.forall_existsUnique_iff', funext_iff] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_19.json"
+  simp_trace [Std.Symm.forall_existsUnique_iff', funext_iff] =>trace "test/SimpTrace/meas_out/FunctionBasicTraced_23.json"
 
 @[deprecated (since := "2026-06-10")]
 protected alias Symmetric.forall_existsUnique_iff := Std.Symm.forall_existsUnique_iff

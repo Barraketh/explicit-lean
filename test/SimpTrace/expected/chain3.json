@@ -4,6 +4,8 @@
     {
       "loc": "goal",
       "closed": true,
+      "pre": "chain3 n + 0 = n",
+      "post": null,
       "close": {
         "by": "true_intro"
       },

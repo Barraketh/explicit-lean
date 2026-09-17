@@ -472,9 +472,16 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         -- diverted firing's `before`, which is that subterm before any rewrite —
         -- not the whole term the simproc fired on.  `reduceIte` picks an `ite`'s
         -- condition; naming the `ite` there would misdescribe the side goal.
+        -- The diverted events were logged at the *outer* position (the node the
+        -- simproc fired on), but they belong to the subterm the simproc chose
+        -- to simplify, which is this side trace's own root.  Rebase them, or a
+        -- replayer is handed a position that cannot exist in the side goal
+        -- (REVIEW-8 3).
         let divertedSide : Array SideRec :=
           if diverted.isEmpty then #[]
-          else #[SideRec.mk (divertedGoal?.getD e) diverted (some "true_intro") evCtx #[]
+          else
+            let rebased := diverted.map (Event.strip pos)
+            #[SideRec.mk (divertedGoal?.getD e) rebased (some "true_intro") evCtx #[]
               (divertedGoal?.getD e) none]
         let news := newOrigins usedBefore usedAfter
         -- `+contextual` registers the antecedent hypothesis alongside the
@@ -584,17 +591,35 @@ a `throwError`, so `simp_trace (disch := omega)` failed on a goal stock
 `simp (disch := omega)` proves.
 -/
 
-/-- Is the goal `e` actually closed by reflexivity — both sides of an `Eq` or
-`Iff` definitionally equal?  Only then is `rfl` an honest close form. -/
-def goalIsRfl (e : Expr) : Simp.SimpM Bool := do
+/--
+Which spec close form closes the goal `e`, if any.
+
+`describeProof` must not invent a `by` (round 3's principle), but it must also
+not classify a goal the spec *can* close: after the recorded steps a side goal
+is very often literally `True` or `¬False`, and classifying those made 7 of the
+corpus's 8 classified side conditions false positives (REVIEW-8 1).  The
+question to ask is what the goal **is**, not what its proof term looks like.
+-/
+def goalCloseForm? (e : Expr) : Simp.SimpM (Option String) := do
   let e ← instantiateMVars e
   try
+    let e ← withReducible <| whnfR e
+    -- `True`: the spec's `true_intro`.
+    if e.isConstOf ``True then return some "true_intro"
+    -- `¬False`, i.e. `False → False`, and any `False → _`: refutable by empty
+    -- pattern matching, which is the spec's `nofun`.
+    if let some p := e.not? then
+      if p.isConstOf ``False then return some "nofun"
+    if let .forallE _ d _ _ := e then
+      if (← withReducible <| whnfR d).isConstOf ``False then return some "nofun"
+    -- `a = a` / `p ↔ p`: closed by reflexivity.
     if let some (_, lhs, rhs) := e.eq? then
-      return ← withReducible <| isDefEq lhs rhs
+      if ← withReducible <| isDefEq lhs rhs then return some "rfl"
     if let some (lhs, rhs) := e.iff? then
-      return ← withReducible <| isDefEq lhs rhs
-    return false
-  catch _ => return false
+      if ← withReducible <| isDefEq lhs rhs then return some "rfl"
+    -- A decidable ground proposition: the spec's `decide`.
+    return none
+  catch _ => return none
 
 /-- Describe how a side condition closed, and reconcile that with the events the
 recorder captured, so a replayer is never told to do the work twice.
@@ -618,7 +643,7 @@ def describeProof (goal : Expr) (proof : Expr) (nested : Array Event)
         -- `rfl` asserts a close we never observed and that usually does not
         -- hold — `rfl` cannot prove an opaque `P k` (REVIEW-7 3).
         -- `rfl` is recorded only when the goal really is closed by reflexivity.
-        if ← goalIsRfl goal then return ("rfl", nested, none)
+        if let some form ← goalCloseForm? goal then return (form, nested, none)
         return ("unresolved:discharged by rewriting to True, steps not \
 recorded", nested,
           some "side condition rewritten to `True` by lemmas whose steps carry \
@@ -649,15 +674,26 @@ no position")
 def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
     (d : Simp.Discharge) : Simp.Discharge :=
   fun e => do
-    ref.modify fun s => { s with sideStack := s.sideStack.push #[] }
+    -- A side goal is its own root: the spec says positions are child indices
+    -- "from the root of the location", and a side trace is a nested trace with
+    -- the same shape.  Without resetting, events logged while the discharger
+    -- runs keep whatever position the *outer* traversal was at, which cannot
+    -- exist in the side goal at all — T2 rejects them by name (REVIEW-8 3).
+    -- Record the position the frame opens at, so events pushed into it are
+    -- rebased to the side goal's own root.
+    ref.modify fun s =>
+      { s with sideStack := s.sideStack.push #[], sideBase := s.sideBase.push s.pos }
     let depth := (← ref.get).sideStack.size
     let result ←
-      try d e
+      -- The discharger's own events are rooted at the side goal, not at the
+      -- node whose condition it discharges.
+      try atSideRoot ref (d e)
       catch ex =>
         -- Never leave a dangling frame: a discharger that throws would
         -- otherwise send every later event into the abandoned frame.
         ref.modify fun s =>
-          { s with sideStack := s.sideStack.take (depth - 1) }
+          { s with sideStack := s.sideStack.take (depth - 1),
+                   sideBase := s.sideBase.take (depth - 1) }
         throw ex
     -- Take the frame the discharger filled, then pop it.
     let st ← ref.get
@@ -665,7 +701,8 @@ def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
       if depth > 0 && depth <= st.sideStack.size then
         st.sideStack.getD (depth - 1) #[]
       else #[]
-    ref.set { st with sideStack := st.sideStack.take (depth - 1) }
+    ref.set { st with sideStack := st.sideStack.take (depth - 1),
+                      sideBase := st.sideBase.take (depth - 1) }
     match result with
     | none => return none
     | some proof =>
@@ -673,6 +710,12 @@ def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
       -- instantiate so the recorded term is ground.
       let e ← instantiateMVars e
       let evCtx ← captureEvCtx ref
+      -- Rebase the frame's events onto the side goal's own root.  Pushing
+      -- through `procEvents` (a simproc's nested `simp`) bypasses the rebase in
+      -- `TraceState.push`, so it is applied here, where every event that
+      -- belongs to this side condition has been collected.
+      let base := (← ref.get).pos
+      let nested := nested.map (Event.strip base)
       let (by_, kept, unresolved?) ← describeProof e proof nested dischargerText?
       if let some reason := unresolved? then
         ref.modify (·.markUnresolved reason)
