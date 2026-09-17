@@ -42,8 +42,14 @@ One trace per executed simp call. JSON object:
 - `{"kind":"change", "pos": POS, "to": "<pp.all term>", "before": ...}` Last-resort
   definitional replacement when no named kind applies; replay checks defeq.
 - `{"kind":"eq", "pos": POS, "lhs": "<pp>", "rhs": "<pp>", "by": "rfl"|"decide",
-   "source": "<simproc name>"}` A simproc-computed equation. Replay proves it with
-  the named ordinary tactic, never with the simproc.
+   "source": "<simproc name>"}` A simproc-computed equation whose proof is by
+  kernel computation. Replay proves it with the named ordinary tactic, never
+  with the simproc. A simproc whose returned proof is an application of one
+  lemma (e.g. `reduceIte` returning `if_pos h`, `reduceDIte` returning
+  `dif_pos h`) is NOT an `eq` step: it is recorded as an ordinary `rw` step
+  with that lemma as `name`, the discharged condition as a `side` sub-trace,
+  and `"source": "<simproc name>"` for provenance. A simproc proof that is
+  neither is a classified `unresolved:simproc:<name>` outcome.
 - `{"kind":"intro_ctx", "pos": POS, "name": "<hyp name>"}` Contextual simp made the
   antecedent of an implication at `pos` available as a hypothesis for later steps.
 
