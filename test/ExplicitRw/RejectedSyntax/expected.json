@@ -1,0 +1,15 @@
+{
+  "then_simp.lean": "unexpected identifier; expected explicitRwSideProof",
+  "then_simp_all.lean": "unexpected identifier; expected explicitRwSideProof",
+  "then_seq.lean": "unexpected token '('; expected explicitRwSideProof",
+  "then_trivial.lean": "unexpected identifier; expected explicitRwSideProof",
+  "eq_by_simp.lean": "expected 'decide' or 'rfl'",
+  "then_assumption.lean": "unexpected identifier; expected explicitRwSideProof",
+  "exact_by.lean": "unexpected token 'by'; expected explicitRwTerm",
+  "lemma_by.lean": "unexpected token 'by'; expected explicitRwTerm",
+  "exact_macro.lean": "unexpected token 'SmuggleSimp'; expected explicitRwTerm",
+  "exact_harmless_by.lean": "unexpected token 'by'; expected explicitRwTerm",
+  "exact_elab_metam.lean": "unexpected token 'SmuggleMetaM'; expected explicitRwTerm",
+  "exact_elab_tactic.lean": "unexpected token 'SmuggleRun'; expected explicitRwTerm",
+  "with_simp.lean": "unexpected identifier; expected ']'"
+}
