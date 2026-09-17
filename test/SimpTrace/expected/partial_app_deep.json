@@ -1,0 +1,38 @@
+{
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "f a b = g a b",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
+    {
+     "kind": "rw",
+     "pos": [
+      0,
+      1,
+      0,
+      0
+     ],
+     "name": "h",
+     "dir": "fwd",
+     "local": {
+      "userName": "h",
+      "inaccessible": false,
+      "ctxIndex": 6
+     }
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "eq_self",
+     "dir": "fwd"
+    }
+   ]
+  }
+ ]
+}

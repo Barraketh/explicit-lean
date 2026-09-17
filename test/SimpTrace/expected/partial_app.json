@@ -1,0 +1,37 @@
+{
+ "schema": "simp-trace-v1",
+ "locations": [
+  {
+   "loc": "goal",
+   "closed": true,
+   "pre": "Option.map f (some x) = Option.map g (some x)",
+   "post": null,
+   "close": {
+    "by": "true_intro"
+   },
+   "steps": [
+    {
+     "kind": "rw",
+     "pos": [
+      0,
+      1,
+      0
+     ],
+     "name": "h",
+     "dir": "fwd",
+     "local": {
+      "userName": "h",
+      "inaccessible": false,
+      "ctxIndex": 5
+     }
+    },
+    {
+     "kind": "rw",
+     "pos": [],
+     "name": "eq_self",
+     "dir": "fwd"
+    }
+   ]
+  }
+ ]
+}

@@ -492,4 +492,27 @@ matters here is that `name` is the bare constant, never `@forall_eq _ p a`. -/
 example (p : Nat → Prop) (a : Nat) : (∀ x, x = a → p x) ↔ p a := by
   simp_trace [@forall_eq _ p a] =>trace "test/SimpTrace/out/name_at_explicit.json"
 
+/-! ### Partial-application rewrites (REVIEW-9 4)
+
+simp matches a lemma against a *prefix* of an application and reapplies the
+arguments it did not match (`Simp.Result.addExtraArgs`). The traversal is at the
+whole application, so recording its position claimed the step rewrites the
+application, and a replayer looked for `Option.map f` at a node holding
+`Option.map f (some x)`. The position descends by the surplus, decided by the
+lemma's own left-hand-side arity -- not by which arguments happen to be equal,
+which cannot tell this apart from a lemma that rewrites the whole application
+and leaves an argument untouched (the `local_forall` fixture above). -/
+
+/-- The `Mathlib/Data/Option/Basic.lean:96` shape: the hypothesis's left-hand
+side is a partial application, so the rewritten node is the *function* of the
+application the traversal is visiting. -/
+example (f g : α → β) (h : Option.map f = Option.map g) (x : α) :
+    Option.map f (some x) = Option.map g (some x) := by
+  simp_trace only [h] =>trace "test/SimpTrace/out/partial_app.json"
+
+/-- Two surplus arguments rather than one, so the descent is counted from the
+lemma's arity rather than assumed to be a single level. -/
+example (f g : α → β → γ) (h : f = g) (a : α) (b : β) : f a b = g a b := by
+  simp_trace only [h] =>trace "test/SimpTrace/out/partial_app_deep.json"
+
 end ExplicitLean.SimpTrace.Fixtures

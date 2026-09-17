@@ -39,6 +39,60 @@ ordinary literal arithmetic, matcher reduction and `Option.getD` on a literal
 all failed on goals stock `simp` proves.
 -/
 
+/-- How many arguments the origin's own rewrite left-hand side takes, or `none`
+when its statement cannot be read.  Used to tell a lemma that rewrote a whole
+application from one simp matched against a prefix and reapplied. -/
+def lhsArity? (o : Origin) (inv : Bool) (prop? : Option Bool) :
+    Simp.SimpM (Option Nat) := do
+  -- A Prop-valued lemma rewrites the proposition itself, so its "left-hand
+  -- side" is the whole statement and there is no prefix matching to undo.
+  if prop?.isSome then return none
+  let type? : Option Expr ← match o with
+    | .decl declName _ _ => pure ((← getEnv).find? declName |>.map (·.type))
+    | .fvar fvarId => pure ((← getLCtx).find? fvarId |>.map (·.type))
+    | _ => pure none
+  let some type := type? | return none
+  try
+    forallTelescopeReducing type fun _ concl => do
+      let concl ← whnfR concl
+      let sides? :=
+        if let some (_, l, r) := concl.eq? then some (l, r)
+        else if let some (l, r) := concl.iff? then some (l, r) else none
+      let some (l, r) := sides? | return none
+      return some ((if inv then r else l).getAppNumArgs)
+  catch _ => return none
+
+/-- Deepen `pos` into the function of an application for each trailing argument
+that `before` and `after` share.
+
+simp matches a lemma against a *prefix* of an application and reapplies the
+remaining arguments, so the node that actually changed is `f` in `f a₁ ... aₙ`,
+not the application.  Counting the shared trailing arguments recovers how far
+down the rewritten node sits.  Nothing is guessed: it stops as soon as a pair
+differs, and an `after` that is not an application of the same arity leaves the
+position alone. -/
+def descendToRewritten (lhsArity : Nat) (pos : Pos) (before after : Expr) :
+    Pos × Expr × Expr := Id.run do
+  let n := before.getAppNumArgs
+  -- `lhsArity` is how many arguments the lemma's own left-hand side takes.
+  -- Only the surplus is what simp reapplied; an equal arity means the lemma
+  -- rewrote this whole application, which is the common case (`h : ∀ x, f x =
+  -- g x` rewriting `f a` to `g a` leaves `a` shared without being extra).
+  -- Counting shared trailing arguments alone cannot tell the two apart.
+  if n == 0 || after.getAppNumArgs != n || lhsArity >= n then
+    return (pos, before, after)
+  let extra := n - lhsArity
+  let bs := before.getAppArgs
+  let as := after.getAppArgs
+  -- Those surplus arguments must actually be untouched; if simp changed one,
+  -- it did not simply reapply them and the node really is this application.
+  for i in [0:extra] do
+    let j := n - 1 - i
+    if bs[j]! != as[j]! then return (pos, before, after)
+  let b := mkAppN before.getAppFn (bs.extract 0 lhsArity)
+  let a := mkAppN after.getAppFn (as.extract 0 lhsArity)
+  return (pos ++ Array.replicate extra 0, b, a)
+
 /-- The new origins a procedure registered, in registration order. -/
 def newOrigins (usedBefore usedAfter : Simp.UsedSimps) : Array Origin :=
   usedAfter.toArray.filter fun o => !usedBefore.contains o
@@ -604,6 +658,14 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
     let usedAfter := (← get).usedTheorems
     let record (r : Simp.Result) : Simp.SimpM Unit := do
       unless r.expr == e do
+        -- simp applies a partially-matching lemma to the arguments it did not
+        -- match (`Simp.Result.addExtraArgs`): `h : Option.map f = Option.map g`
+        -- rewrites the *function* of `Option.map f (some x)`.  The traversal is
+        -- at the whole application, so recording its position says the step
+        -- rewrites the application -- and a replayer then looks for
+        -- `Option.map f` at a node that holds `Option.map f (some x)`.  Descend
+        -- into the function for each trailing argument both sides share, which
+        -- is exactly the prefix simp matched (REVIEW-9 4).
         let pos ← currentPos ref
         let evCtx ← captureEvCtx ref
         let side := (← ref.get).pendingSide
@@ -640,6 +702,10 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             | _ => pure false
           if isProc then
             let src := match o with | .decl n _ _ => some n | _ => none
+            -- A simproc rewrites the node it was handed, so it keeps the
+            -- untrimmed pair: `emitProcStep` takes the whole `Simp.Result`,
+            -- and pairing a trimmed `e` with it would describe two different
+            -- terms.
             emitProcStep ref pos e r evCtx side src rebased
           else
             -- `simp [h]` records the *syntax* as the origin.  Resolve it to
@@ -657,9 +723,16 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             if resolved matches .stx .. then
               ref.modify (·.markUnresolved "origin")
             let prop? ← propFlag? resolved r.expr evCtx.lctx evCtx.insts
+            -- Now that the origin is resolved, its own left-hand side says how
+            -- many arguments the lemma matched; anything beyond that is what
+            -- simp reapplied, and the rewritten node sits that many levels
+            -- down the function spine (REVIEW-9 4).
+            let arity ← lhsArity? resolved rinv prop?
+            let (pos, e, rExpr) :=
+              descendToRewritten (arity.getD e.getAppNumArgs) pos e r.expr
             -- A wrapper that reverses the statement (`h.symm`) flips `dir`.
             ref.modify (·.push
-              (.rw pos o (inv != rinv) prop? e r.expr evCtx rargs side none
+              (.rw pos o (inv != rinv) prop? e rExpr evCtx rargs side none
                 resolved rproj))
         | none =>
           -- No origin at all: a simproc that registered nothing (`simpUsingDecide`
