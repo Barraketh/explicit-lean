@@ -51,9 +51,12 @@ of `Expr.app`, so `f a b` has `b` at `[1]` and `a` at `[0, 1]`.
 ## Closing form
 
 `explicit_rw [...] then rfl` runs `rfl` on the remaining goal after the last
-step. The closer is a **closed enumeration** — `rfl`, `decide`, `trivial`,
-`assumption`, `exact <term>` — and `eq ... by` likewise accepts only `rfl` or
-`decide`. Omit the clause to leave the goal open.
+step. The closer is a **closed enumeration** — `rfl`, `decide`, `assumption`,
+`exact <term>` — and `eq ... by` likewise accepts only `rfl` or `decide`. Omit
+the clause to leave the goal open. `trivial` is excluded on purpose: it is a
+macro that tries several tactics in turn, which is search; write
+`exact True.intro` instead. `rfl` is the ordinary `rfl` tactic (`Eq`/`Iff`/`HEq`
+reflexivity and `@[refl]` lemmas), not a simp-backed one.
 
 Neither slot is a `tacticSeq`, deliberately. A free `tacticSeq` would let a
 generated trace carry `simp` (or any forbidden tactic) *inside* the product
@@ -93,18 +96,25 @@ The closers a trace may use, as a **closed enumeration**. `explicit_rw` is
 product code, so it must not embed a free `tacticSeq`: that would let a
 generated trace carry `simp` (or any other forbidden tactic) inside the product
 tactic, where `Experiment/check_no_simp_family.py` could never see it. The
-spec's `close` field is exactly `rfl | trivial | assumption | decide`, plus
-`exact <term>` for a closing lemma application.
+spec's `close` field maps onto `rfl | decide | assumption`, plus `exact <term>`
+for a closing lemma application.
+
+`trivial` is deliberately **not** offered: it is a macro that tries several
+tactics in turn, which is search. Where a trace would have closed with
+`trivial`, write `exact True.intro` (or the lemma that actually applies).
+
+`rfl` here is the ordinary `rfl` tactic — `Eq`/`Iff`/`HEq` reflexivity and
+`@[refl]` lemmas. It is not `simp`-backed and performs no simplification.
 -/
 syntax explicitRwCloser :=
-  "rfl" <|> "decide" <|> "trivial" <|> "assumption" <|> ("exact " term)
+  &"rfl" <|> &"decide" <|> &"assumption" <|> (&"exact " term)
 
 /--
 `eq (2 + 3 = 5) by rfl at [1]` — a simproc-computed equation, proved by an
 ordinary tactic. The spec's `by` field is exactly `rfl | decide`, so only those
 two are accepted; see `explicitRwCloser` for why this is not a `tacticSeq`.
 -/
-syntax explicitRwEq := "eq " term " by " ("rfl" <|> "decide") explicitRwPos
+syntax explicitRwEq := &"eq " term " by " (&"rfl" <|> &"decide") explicitRwPos
 
 /-- One step of an `explicit_rw` trace. -/
 syntax explicitRwStep :=
@@ -263,11 +273,43 @@ def projReduce (idx : Nat) (sub : Expr) : TacticM Expr := do
   unless isProjLike do
     stepError idx m!"`proj` at this position: the subterm is not a projection; \
       its head is `{sub.getAppFn}`."
-  let r ← withReducible (whnfCore sub)
-  if r == sub then
-    stepError idx m!"`proj` at this position: the projection does not reduce; \
-      its argument is not a constructor application."
-  return r
+  -- A raw `Expr.proj` reduces by `whnfCore` alone. A projection *function*
+  -- application (what the elaborator produces for `s.field`) needs a delta step
+  -- to unfold the function first; `whnfCore` performs no delta, so without this
+  -- the step would always report "does not reduce".
+  -- Require the projected structure to be a constructor application, so that the
+  -- step really is a projection reduction. Without this, a class projection such
+  -- as `HAdd.hAdd` (which `getProjectionFnInfo?` also reports) would let `proj`
+  -- perform arbitrary unfolding.
+  let env ← getEnv
+  let structArg? : Option Expr :=
+    match sub with
+    | .proj _ _ b => some b
+    | _ =>
+      match sub.getAppFn with
+      | .const c _ =>
+        match env.getProjectionFnInfo? c with
+        | some info => sub.getAppArgs[info.numParams]?
+        | none => none
+      | _ => none
+  let some structArg := structArg?
+    | stepError idx m!"`proj` at this position: the projection is not applied to a \
+        structure argument."
+  let isCtor ←
+    match (← whnfCore structArg).getAppFn with
+    | .const c _ => pure ((env.find? c).any (· matches .ctorInfo _))
+    | _ => pure false
+  unless isCtor do
+    stepError idx m!"`proj` at this position: the projection's argument is not a \
+      constructor application, so there is nothing to reduce."
+  let r ← whnfCore sub
+  if r != sub then
+    return r
+  if let some unfolded ← unfoldDefinition? sub then
+    let r ← whnfCore unfolded
+    if r != sub then
+      return r
+  stepError idx m!"`proj` at this position: the projection does not reduce."
 
 /-- Apply one parsed step to the current expression. -/
 def runStep (idx : Nat) (e : Expr) (stx : TSyntax ``explicitRwStep) : TacticM Replacement := do
@@ -390,7 +432,6 @@ def runCloser (stx : Syntax) : TacticM Unit := do
   match stx[0][0].getAtomVal with
   | "rfl" => evalTactic (← `(tactic| rfl))
   | "decide" => evalTactic (← `(tactic| decide))
-  | "trivial" => evalTactic (← `(tactic| trivial))
   | "assumption" => evalTactic (← `(tactic| assumption))
   | "exact" =>
     let t : Term := ⟨stx[0][1]⟩

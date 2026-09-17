@@ -67,17 +67,33 @@ Compose a congruence proof for `app f a` from optional proofs of `f = f'` and
 `a = a'`. Returns `none` when both children were definitional, so that a purely
 definitional step never manufactures a proof term.
 -/
-private def congrApp (f a : Expr) (hf? ha? : Option Expr) : MetaM (Option Expr) := do
+private def congrApp (pos : Pos) (f a : Expr) (hf? ha? : Option Expr) :
+    MetaM (Option Expr) := do
   match hf?, ha? with
   | none, none => return none
   | some hf, none =>
     -- `f = f'` gives `f a = f' a` by `congrFun`.
     return some (← mkCongrFun hf a)
   | none, some ha =>
-    -- `a = a'` gives `f a = f a'` by `congrArg`.
+    -- `a = a'` gives `f a = f a'` by `congrArg`, which needs `f` non-dependent:
+    -- otherwise `f a` and `f a'` have different types and the rewrite would need
+    -- a cast. Check first, so the refusal reads like the other dependent-position
+    -- errors instead of leaking an `AppBuilder` message.
+    checkNonDependent pos f
     return some (← mkCongrArg f ha)
   | some hf, some ha =>
+    checkNonDependent pos f
     return some (← mkCongr hf ha)
+where
+  /-- Refuse a dependent function, whose congruence would need a cast. -/
+  checkNonDependent (pos : Pos) (f : Expr) : MetaM Unit := do
+    let fType ← whnf (← inferType f)
+    if let .forallE _ _ body _ := fType then
+      if body.hasLooseBVars then
+        throwError "position {Pos.render pos} rewrites an argument of a dependent \
+          function, whose result type mentions that argument; rebuilding the term \
+          would need a cast, which `explicit_rw` does not build. Only definitional \
+          steps are supported there.\nFunction:{indentExpr f}\nof type:{indentExpr fType}"
 
 /--
 Navigate `e` along `pos` and apply `k` to the subterm found there, then rebuild
@@ -106,12 +122,12 @@ where
         | 0 =>
           let r ← go f rest' seen'
           let newE := .app r.newExpr a
-          let p? ← (congrApp f a r.proof? none : MetaM _)
+          let p? ← (congrApp seen' f a r.proof? none : MetaM _)
           return { newExpr := newE, proof? := p? }
         | 1 =>
           let r ← go a rest' seen'
           let newE := .app f r.newExpr
-          let p? ← (congrApp f a none r.proof? : MetaM _)
+          let p? ← (congrApp seen' f a none r.proof? : MetaM _)
           return { newExpr := newE, proof? := p? }
         | _ => onBadPos seen i e
       | .mdata d b =>
@@ -208,14 +224,17 @@ where
             throwError "position {Pos.render seen'} rewrites the value of a `let`; \
               only definitional steps are supported there."
         | 2 =>
-          withLetDecl n ty val fun x => do
-            let r ← go (body.instantiate1 x) rest' seen'
-            let newBody ← (mkLetFVars #[x] r.newExpr : MetaM _)
-            match r.proof? with
-            | none => return { newExpr := newBody, proof? := none }
-            | some _ =>
-              throwError "position {Pos.render seen'} rewrites the body of a `let`; \
-                only definitional steps are supported there."
+          -- A `let` body needs no cast: `let x := v; b` is definitionally
+          -- `b[v/x]`, so a proof about the body with `v` substituted transports
+          -- to the whole `let` unchanged. Zeta-substitute rather than opening a
+          -- local, so the proof mentions no `let`-bound free variable.
+          let r ← go (body.instantiate1 val) rest' seen'
+          let newBody := (r.newExpr.abstract #[val]).instantiate1 (.bvar 0)
+          -- Keep the `let` when the rewrite did not disturb the bound value,
+          -- otherwise fall back to the already-substituted body.
+          let newE :=
+            if newBody.hasLooseBVars then .letE n ty val newBody nonDep else r.newExpr
+          return { newExpr := newE, proof? := r.proof? }
         | _ => onBadPos seen i e
       | _ => onBadPos seen i e
 
