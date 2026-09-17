@@ -84,10 +84,16 @@ inductive Event where
   lemma is Prop-valued and simp used it as `P = True` / `P = False`.
   `source?` names the simproc whose *proof* was this one lemma applied, per the
   amended spec's `eq` bullet: such a firing is an ordinary `rw`, and `source`
-  records where it came from. -/
+  records where it came from.
+
+  `localOrigin` is `origin` resolved to a local hypothesis when `origin` is the
+  *syntax* of one (`simp [h]`); it supplies the `local` object and the `prop`
+  flag, while `origin` still supplies `name` and `dir`, since only the syntax
+  carries a leading `←`. -/
   | rw (pos : Pos) (origin : Origin) (inv : Bool) (prop? : Option Bool)
        (before after : Expr) (ctx : EvCtx)
        (args : Array Expr) (side : Array SideRec) (source? : Option Name)
+       (localOrigin : Origin)
   /-- A simproc firing (or any procedure-computed equation). -/
   | eq (pos : Pos) (source? : Option Name) (before after : Expr)
        (ctx : EvCtx) (side : Array SideRec)
@@ -128,7 +134,7 @@ def SideRec.intros : SideRec → Array String | SideRec.mk _ _ _ _ i => i
 /-- Re-root an event's position under `base`.  Used to place events captured
 relative to a subterm back at their absolute positions. -/
 partial def Event.rebase (base : Pos) : Event → Event
-  | .rw p o inv pr b a c args side src => .rw (base ++ p) o inv pr b a c args side src
+  | .rw p o inv pr b a c args side src lo => .rw (base ++ p) o inv pr b a c args side src lo
   | .eq p s b a c side => .eq (base ++ p) s b a c side
   | .defeq p k n b a c => .defeq (base ++ p) k n b a c
   | .introCtx p f c => .introCtx (base ++ p) f c
@@ -265,6 +271,17 @@ def captureEvents (ref : TraceRef) (k : SimpM α) : SimpM (α × Array Event) :=
     else #[]
   ref.set { st with procEvents := st.procEvents.take (depth - 1) }
   return (a, evs)
+
+/-- How many events the innermost active frame currently holds.  Comparing this
+across a stock-method call says whether that call logged anything. -/
+def eventCount (ref : TraceRef) : SimpM Nat := do
+  let st ← ref.get
+  if st.procEvents.size > 0 then
+    return (st.procEvents.getD (st.procEvents.size - 1) #[]).size
+  else if st.sideStack.size > 0 then
+    return (st.sideStack.getD (st.sideStack.size - 1) #[]).size
+  else
+    return st.events.size
 
 /-- Set the current position for the duration of `k`. -/
 @[inline] def withPos (ref : TraceRef) (pos : Pos) (k : SimpM α) : SimpM α := do
@@ -611,13 +628,24 @@ partial def dsimpT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Expr := do
   let cfg ← Simp.getConfig
   unless cfg.dsimp do
     return e
-  visit pos e
+  -- SOURCE: Main.lean:524 — upstream ends in `withInDSimpWithCache`, which does
+  -- two things: it swaps the `dsimp` cache (the documented cache disablement,
+  -- dropped here) **and** it sets `Context.inDSimp := true`.  `inDSimp` is not
+  -- a cache flag: stock `dreduceIte`/`dreduceDIte` read it and take their
+  -- `.continue` arm unless it is set, so without this wrapper the `dsimp`-mode
+  -- `ite` reduction upstream performs can never happen (REVIEW-5 4).
+  Simp.withInDSimp <| visit pos e
 where
   /-- SOURCE: Main.lean:522 — the `dpre` pipeline, verbatim. -/
   pre (pos : Pos) (e : Expr) : SimpM TransformStep := do
     let m ← getMethods
+    let before ← eventCount ref
     let s ← withPos ref pos (m.dpre e)
-    let s ← logDStep ref pos e s
+    -- `instrumentD` already logged this firing when it could attribute it to a
+    -- named dsimproc (`dreduceIte` and friends).  Logging it again would
+    -- double-count the change and desync the validator — which is exactly what
+    -- entering `withInDSimp` exposed (REVIEW-5 4).
+    let s ← if (← eventCount ref) > before then pure s else logDStep ref pos e s
     match s with
     | .continue e? =>
       let e := e?.getD e
@@ -639,8 +667,9 @@ where
   /-- SOURCE: Main.lean:523 — the `dpost` pipeline, verbatim. -/
   postStep (pos : Pos) (e : Expr) : SimpM TransformStep := do
     let m ← getMethods
+    let before ← eventCount ref
     let s ← withPos ref pos (m.dpost e)
-    let s ← logDStep ref pos e s
+    let s ← if (← eventCount ref) > before then pure s else logDStep ref pos e s
     match s with
     | .continue e? => dsimpReduceT ref pos (e?.getD e)
     | s => return s
@@ -1086,7 +1115,8 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
             sd.evCtx sd.intros)
         ref.modify (·.push
           (.rw pos (.decl c.theoremName true false) false none e eNew
-            (← captureEvCtx ref) #[] sidesFinal (some `congr)))
+            (← captureEvCtx ref) #[] sidesFinal (some `congr)
+            (.decl c.theoremName true false)))
       congrArgsT ref pos { expr := eNew, proof? := proof } extraArgs
         origNumArgs numArgs
     else

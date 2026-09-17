@@ -77,6 +77,40 @@ if what remains is neither `Eq` nor `Iff`, the lemma is Prop-valued.  `after`
 then says which of `True`/`False` simp rewrote to.
 -/
 
+/--
+Resolve an `Origin.stx` to the local hypothesis it elaborated to, when it is one.
+
+When the user writes `simp [h]` for a local `h`, simp records the origin as the
+*syntax* the user wrote, not `Origin.fvar`; via `simp [*]` the same rewrite
+records an `Origin.fvar`. The spec is unconditional — a rewrite by a local
+hypothesis carries the `local` object and, when the lemma is Prop-valued, the
+`prop` flag — so the two forms must not disagree (REVIEW-5 1). `simp [h]` is the
+dominant shape in Mathlib.
+
+The simp theorem carrying this origin has the hypothesis as its `proof` (or as
+the head of an application of it), so this is a lookup rather than a search.
+-/
+def resolveStxOrigin (o : Origin) (lctx : LocalContext) : Simp.SimpM Origin := do
+  let .stx _ ref := o | return o
+  -- The syntax the user wrote is an identifier when the argument is a
+  -- hypothesis (`simp [h]`, `simp [← h]`); strip a leading arrow and look the
+  -- name up in the local context that was live at the firing.  This is a
+  -- lookup, not a search: scanning the theorem trees would be a 20 000-entry
+  -- walk per step, and matching `Origin` structurally does not work anyway
+  -- because the stored `Syntax` differs from the trace's copy.
+  let txt := ref.prettyPrint.pretty.trimAscii.toString
+  let txt := if txt.startsWith "←" then (txt.drop 1).trimAscii.toString
+    else if txt.startsWith "<-" then (txt.drop 2).trimAscii.toString
+    else txt
+  -- An argument that is not a bare identifier (`simp [foo a b]`, a term) names
+  -- no single hypothesis, so it is left as it is.
+  unless txt.all (fun c => c.isAlphanum || c == '_' || c == '\'' || c == '!'
+      || c == '?' || c == '\u2080' || c == '\u2081' || c == '\u2082') do
+    return o
+  match lctx.findFromUserName? (Name.mkSimple txt) with
+  | some decl => return .fvar decl.fvarId
+  | none => return o
+
 /-- Is this origin's statement an equation or an iff (after its binders)? -/
 def originIsEquational (o : Origin) (lctx : LocalContext) (insts : LocalInstances) :
     MetaM Bool := do
@@ -143,16 +177,33 @@ inductive ProofShape where
 def isSubtermOf (a e : Expr) : Bool :=
   Option.isSome <| e.find? fun s => s == a
 
+/-- Heads that are *plumbing*: they move a proof between `Eq`, `Iff` and `True`
+rather than rewriting anything, so a proof headed by one is never "one lemma
+applied".  `propext` is the one REVIEW-5 found: it has a single explicit
+argument and that argument is a proof, so the generic walk below happily
+classified `propext h` as a rewrite by `propext` — a step no replayer can
+execute, since `rw [propext]` is not a rewrite. -/
+def isPlumbingHead (n : Name) : Bool :=
+  n == ``Eq.trans || n == ``Eq.mpr || n == ``Eq.mp || n == ``Eq.symm
+  || n == ``id || n == ``of_eq_true || n == ``eq_true || n == ``eq_false
+  || n == ``eq_self || n == ``propext || n == ``Iff.intro || n == ``Iff.mp
+  || n == ``Iff.mpr || n == ``iff_of_eq || n == ``Eq.subst || n == ``Eq.ndrec
+
 /--
 Classify a simproc's proof term per the amended spec.  `target` is the term the
 simproc rewrote, so "a subterm of the position" is decided against it.
 -/
-def classifyProof (target : Expr) (proof : Expr) : MetaM ProofShape := do
+partial def classifyProof (target : Expr) (proof : Expr) : MetaM ProofShape := do
   let .const declName _ := proof.getAppFn | return .computed
-  -- `Eq.trans`/`Eq.mpr`/`of_eq_true` and friends are plumbing, not the lemma
-  -- the rewrite is by; a proof headed by one is not a single lemma application.
-  if declName == ``Eq.trans || declName == ``Eq.mpr || declName == ``Eq.symm
-     || declName == ``id || declName == ``of_eq_true then
+  -- An `Iff`-returning simproc wraps its proof in `propext`.  The rewriting
+  -- lemma is then the *inner* proof's head, and the rewrite is an iff rewrite,
+  -- which `rw` performs exactly as it does an equational one.  Unwrap one level
+  -- and classify that; if the inner proof is not itself a single lemma
+  -- application, the firing stays `computed` and becomes an `eq` step whose
+  -- `by` the scratch check decides (REVIEW-5 2).
+  if declName == ``propext && proof.getAppNumArgs == 3 then
+    return ← classifyProof target proof.appArg!
+  if isPlumbingHead declName then
     return .computed
   let some ci := (← getEnv).find? declName | return .computed
   let args := proof.getAppArgs
@@ -222,7 +273,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
         s!"simproc:{(src?.map toString).getD declName.toString} side condition \
 `{u}` proved by a term no close form describes")
     ref.modify (·.push (.rw pos (.decl declName true false) false none
-      e r.expr evCtx #[] sides src?))
+      e r.expr evCtx #[] sides src? (.decl declName true false)))
   | .computed =>
     ref.modify (·.push (.eq pos src? e r.expr evCtx side))
 where
@@ -352,8 +403,16 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             let src := match o with | .decl n _ _ => some n | _ => none
             emitProcStep ref pos e r evCtx (side ++ divertedSide) src
           else
-            let prop? ← propFlag? o r.expr evCtx.lctx evCtx.insts
-            ref.modify (·.push (.rw pos o inv prop? e r.expr evCtx #[] side none))
+            -- `simp [h]` records the *syntax* as the origin.  Resolve it to
+            -- the hypothesis for the `local` object and the `prop` flag, which
+            -- the spec requires unconditionally (REVIEW-5 1), but keep the
+            -- original origin for `name` and `dir`: the syntax is what carries
+            -- a leading `←`, and replacing it would silently turn a reverse
+            -- rewrite into a forward one.
+            let resolved ← resolveStxOrigin o evCtx.lctx
+            let prop? ← propFlag? resolved r.expr evCtx.lctx evCtx.insts
+            ref.modify (·.push
+              (.rw pos o inv prop? e r.expr evCtx #[] side none resolved))
         | none =>
           -- No origin at all: a simproc that registered nothing (`simpUsingDecide`
           -- and the ground arithmetic/matcher simprocs).  Same classification.
@@ -404,8 +463,10 @@ def instrumentD (ref : TraceRef) (p : Simp.DSimproc) : Simp.DSimproc := fun e =>
         if ← Simp.isSimproc n then
           ref.modify (·.push (.eq pos (some n) e e' evCtx #[]))
         else
-          ref.modify (·.push (.rw pos (.decl n true false) false none e e' evCtx #[] #[] none))
-      | o => ref.modify (·.push (.rw pos o false none e e' evCtx #[] #[] none))
+          ref.modify (·.push
+            (.rw pos (.decl n true false) false none e e' evCtx #[] #[] none
+              (.decl n true false)))
+      | o => ref.modify (·.push (.rw pos o false none e e' evCtx #[] #[] none o))
   return stepResult
 
 /-! ### Dischargers

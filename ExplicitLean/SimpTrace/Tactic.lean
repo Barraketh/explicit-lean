@@ -171,10 +171,13 @@ namespace the spec defines. -/
 partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId)
     (ev : Event) : MetaM (Option Step) := do
   match ev with
-  | .rw pos o inv prop? before after c args side src? =>
+  | .rw pos o inv prop? before after c args side src? localO =>
     let beforePP ← ppIn c before
     let afterPP ← ppIn c after
-    let (lemmaName, rev, localRef?) ← originName o c contextualFVars
+    let (lemmaName, rev, _) ← originName o c contextualFVars
+    -- The `local` object comes from the *resolved* origin, so `simp [h]` and
+    -- `simp [*]` agree; `name`/`dir` stay with the written syntax (REVIEW-5 1).
+    let (_, _, localRef?) ← originName localO c contextualFVars
     let sideSteps ← side.mapM (sideToTrace ur contextualFVars)
     let argStrs ← args.mapM (ppIn c)
     let propStr? := prop?.map (fun b => if b then "true" else "false")
@@ -196,7 +199,7 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
     -- this step's `side` traces, so replay has them in hand.
     let sideEqs : Array (Expr × Expr) := side.filterMap fun r =>
       match r.events.back? with
-      | some (.rw _ _ _ _ _ a _ _ _ _) => some (r.goal, a)
+      | some (.rw _ _ _ _ _ a _ _ _ _ _) => some (r.goal, a)
       | some (.eq _ _ _ a _ _) => some (r.goal, a)
       | some (.defeq _ _ _ _ a _) => some (r.goal, a)
       | _ => none
@@ -221,11 +224,12 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
       return some step
     -- The spec's `eq` bullet says `"source"` is the simproc's name.  When the
     -- firing registered no origin we do not know it, and a placeholder like
-    -- `"simproc"` would name nothing while looking like provenance: omit the
-    -- field and classify the call instead (REVIEW-4 minor 6).
-    if src?.isNone then
-      ur.modify (·.add s!"simproc firing with no recordable origin \
-({beforePP} = {afterPP}); `source` omitted")
+    -- `"simproc"` would name nothing while looking like provenance, so the
+    -- field is omitted (REVIEW-4 minor 6).  It is **not** an unresolved
+    -- outcome: `source` is optional provenance and the step itself is a
+    -- complete, replayable `eq` whose `by` the scratch check confirmed.
+    -- Marking it unresolved made `simp_trace` exit 1 on goals stock `simp`
+    -- proves, reintroducing REVIEW-3 C1 through the back door (REVIEW-5 3).
     let step : Step :=
       { kind := "eq", pos := pos,
         lhs? := some beforePP, rhs? := some afterPP,
@@ -384,7 +388,7 @@ partial def validateNested (c : EvCtx) (nested : Array Event)
   let mut running ← instantiateMVars argBefore
   for ev in nested do
     let (pos, before, after, ec) ← match ev with
-      | .rw pos _ _ _ b a ec _ _ _ => pure (pos, b, a, ec)
+      | .rw pos _ _ _ b a ec _ _ _ _ => pure (pos, b, a, ec)
       | .eq pos _ b a ec _ => pure (pos, b, a, ec)
       | .defeq pos _ _ b a ec => pure (pos, b, a, ec)
       | .congr pos _ inner b a ab aa ec =>
@@ -419,7 +423,7 @@ def validate (pre : Expr) (result : Expr) (events : Array Event) : MetaM Unit :=
   let mut running ← instantiateMVars pre
   for ev in events do
     let (pos, before, after, c) ← match ev with
-      | .rw pos _ _ _ b a c _ _ _ => pure (pos, b, a, c)
+      | .rw pos _ _ _ b a c _ _ _ _ => pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
       | .defeq pos _ _ b a c => pure (pos, b, a, c)
       | .congr pos _ nested b a ab aa c =>

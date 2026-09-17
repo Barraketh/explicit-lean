@@ -113,11 +113,21 @@ def check_steps(path: str, actual: list, expected: list, messages: list[str]) ->
         # does, the lemma's discharged conditions must appear as `side` entries,
         # or the step tells a replayer to apply a conditional lemma with nothing
         # to discharge its hypothesis.
-        if kind == "rw" and got.get("source") and not got.get("side"):
+        # A `rw` from a simproc-lemma or a user congruence theorem must carry a
+        # `side` per condition the lemma has -- but a lemma with *no* conditions
+        # legitimately has none, so the expectation decides. Comparing counts
+        # (done below) is the real check; asserting non-emptiness here would
+        # reject an unconditional lemma such as `fixtureTag_iff`.
+        if (
+            kind == "rw"
+            and got.get("source")
+            and want.get("side")
+            and not got.get("side")
+        ):
             fail(
                 messages,
-                f"{where}: `rw` from simproc {got['source']!r} carries no `side` "
-                f"sub-trace for its discharged condition",
+                f"{where}: `rw` from {got['source']!r} carries no `side` "
+                f"sub-trace where one is expected",
             )
 
         # `congr` (spec 3b17247): the step must name the argument it rewrote and

@@ -1,0 +1,20 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "eq",
+          "pos": [],
+          "source": "ExplicitLean.SimpTrace.UnresolvedFixtures.unresTagProc",
+          "by": "unresolved:simproc:ExplicitLean.SimpTrace.UnresolvedFixtures.unresTagProc"
+        }
+      ]
+    }
+  ]
+}

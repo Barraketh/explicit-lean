@@ -264,4 +264,76 @@ antecedent, so its side trace carries that antecedent in `intros`. -/
 example (p q r : Prop) (hpq : p = q) : (∃ _ : p, r) = (∃ _ : q, r) := by
   simp_trace [hpq] =>trace "test/SimpTrace/out/user_congr_exists.json"
 
+/-! ### `Iff`-returning simprocs wrap their proof in `propext` (REVIEW-5 2)
+
+`propext : (a ↔ b) → a = b` has one explicit argument and it is a proof, so the
+generic `classifyProof` walk used to call `propext` itself the rewriting lemma
+and emit `rw [propext]` — a step no replayer can execute. `propext` is plumbing
+exactly as `Eq.mpr`/`of_eq_true` are; the rewriting lemma is the *inner* proof's
+head, and the rewrite is an iff rewrite, which `rw` performs like any other. -/
+
+def FixtureTag (n : Nat) : Prop := n = n
+
+theorem fixtureTag_iff (n : Nat) : FixtureTag n ↔ True := by
+  unfold FixtureTag; simp
+
+open Lean Meta Simp in
+/-- A simproc whose proof is `propext (fixtureTag_iff n)`: one lemma applied,
+under `propext`. The step must name `fixtureTag_iff`, not `propext`. -/
+simproc_decl fixtureTagProc (FixtureTag _) := fun e => do
+  let_expr FixtureTag n := e | return .continue
+  let pf := mkApp3 (mkConst ``propext) (mkApp (mkConst ``FixtureTag) n)
+              (mkConst ``True) (mkApp (mkConst ``fixtureTag_iff) n)
+  return .done { expr := mkConst ``True, proof? := pf }
+
+attribute [simp] fixtureTagProc
+
+example (k : Nat) : FixtureTag k := by
+  simp_trace =>trace "test/SimpTrace/out/propext_lemma.json"
+
+/- The negative control — a simproc whose `propext` argument is *not* a single
+lemma application — is unresolved by design, so it lives in
+`UnresolvedFixtures.lean` alongside the other such cases. -/
+
+/-! ### `simp [h]` on a local hypothesis (REVIEW-5 1)
+
+simp records a hypothesis named in the argument list as `Origin.stx` — the
+syntax the user wrote — not `Origin.fvar`, which `simp [*]` produces. The spec
+is unconditional on both the `local` object and the `prop` flag, so the two
+forms must agree. The written syntax still supplies `name` and `dir`, because
+only it carries a leading `←`. -/
+
+/-- An equational local hypothesis: carries `local`, no `prop`. -/
+example (a b : Nat) (h : a = b) : a + 0 = b := by
+  simp_trace [h] =>trace "test/SimpTrace/out/local_named_eq.json"
+
+/-- A Prop-valued hypothesis used as `p = True`: carries `prop: "true"`. -/
+example (p : Prop) (h : p) : p ∧ True := by
+  simp_trace [h] =>trace "test/SimpTrace/out/local_named_prop_true.json"
+
+/-- A negated hypothesis used as `p = False`: carries `prop: "false"`. -/
+example (p : Prop) (h : ¬p) : (p ∧ True) = False := by
+  simp_trace [h] =>trace "test/SimpTrace/out/local_named_prop_false.json"
+
+/-- An inaccessible hypothesis: `name` is the display form `a✝`, and `local`
+carries the full hygienic user name, so the two can never be confused. -/
+example (a b : Nat) : a = b → a + 0 = b := by
+  intro _
+  simp_trace [*] =>trace "test/SimpTrace/out/local_named_inaccessible.json"
+
+/-- A reverse-direction hypothesis: `dir` stays `"rev"` while `local` is
+resolved, which is why the written syntax is kept for `name`/`dir`. -/
+example (a b : Nat) (h : b = a) : a + 0 = b := by
+  simp_trace [← h] =>trace "test/SimpTrace/out/local_named_rev.json"
+
+/-- `dreduceIte` (REVIEW-5 4): upstream's `dsimpImpl` ends in
+`withInDSimpWithCache`, which sets `Context.inDSimp`. Stock `dreduceIte` reads
+that flag and returns `.continue` unless it is set, so a fork that never entered
+`withInDSimp` could not reduce an `ite` in `dsimp` mode at all. Here the `Fin`
+index is reached through the `dsimp` path, and stock `simp` really does reduce
+it to `Fin 3` — the reviewer expected no observable difference, but there is
+one. -/
+example (f : Nat → Nat) : (∀ x : Fin (if True then 3 else 4), f x.val = f x.val) := by
+  simp_trace =>trace "test/SimpTrace/out/dreduce_ite.json"
+
 end ExplicitLean.SimpTrace.Fixtures

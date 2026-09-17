@@ -1,0 +1,60 @@
+{
+  "schema": "simp-trace-v1",
+  "locations": [
+    {
+      "loc": "goal",
+      "closed": true,
+      "close": {
+        "by": "true_intro"
+      },
+      "steps": [
+        {
+          "kind": "eq",
+          "pos": [
+            0,
+            1
+          ],
+          "source": "dreduceIte",
+          "by": "rfl"
+        },
+        {
+          "kind": "unfold",
+          "pos": [
+            1,
+            0,
+            1,
+            1,
+            0,
+            1
+          ],
+          "name": "ite"
+        },
+        {
+          "kind": "unfold",
+          "pos": [
+            1,
+            1,
+            1,
+            0,
+            1
+          ],
+          "name": "ite"
+        },
+        {
+          "kind": "rw",
+          "pos": [
+            1
+          ],
+          "name": "eq_self",
+          "dir": "fwd"
+        },
+        {
+          "kind": "rw",
+          "pos": [],
+          "name": "implies_true",
+          "dir": "fwd"
+        }
+      ]
+    }
+  ]
+}
