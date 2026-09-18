@@ -116,6 +116,28 @@ private meta import Mathlib.PrivateMeta
             self.assertTrue(passed["freshness"]["freshOlean"])
             self.assertEqual(len(passed["freshness"]["afterFamily"]), 2)
 
+    def test_lint_can_account_for_unchanged_baseline_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work = Path(raw)
+            generated = work / "generated"
+            baseline = work / "baseline"
+            for module in cone.TARGETS:
+                generated_path = cone.source_path(generated, module)
+                baseline_path = cone.source_path(baseline, module)
+                generated_path.parent.mkdir(parents=True, exist_ok=True)
+                baseline_path.parent.mkdir(parents=True, exist_ok=True)
+                baseline_path.write_text("module\ndef unchanged := by simpa\n", encoding="utf-8")
+                generated_path.write_text("module\ndef unchanged := by simpa\n", encoding="utf-8")
+            result = cone.lint_targets(generated, baseline)
+            self.assertEqual(result["status"], "passed")
+            self.assertEqual(result["baselineFindings"], len(cone.TARGETS))
+            self.assertEqual(result["introducedFindings"], 0)
+
+            changed = cone.source_path(generated, cone.TARGETS[0])
+            changed.write_text("module\ndef unchanged := by simpa\ndef added := by simp\n", encoding="utf-8")
+            with self.assertRaisesRegex(cone.ConeFailure, "generated target source retains"):
+                cone.lint_targets(generated, baseline)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -400,21 +400,44 @@ def _compile_module(imports: ImportEnvironment, run_dir: Path, module: str) -> d
     return entry
 
 
-def lint_targets(source_root: Path) -> dict[str, object]:
+def lint_targets(source_root: Path, baseline_source_root: Path | None = None) -> dict[str, object]:
     try:
         import simp_family_lint
     except ImportError as error:
         raise ConeFailure(f"cannot load simp-family lint: {error}") from error
     findings: list[dict[str, object]] = []
+    baseline_findings = 0
+    baseline_counts: dict[str, dict[str, int]] = {}
+    if baseline_source_root is not None:
+        if not baseline_source_root.is_dir() or baseline_source_root.is_symlink():
+            raise ConeFailure(f"invalid baseline source root: {baseline_source_root}")
+        for module in TARGETS:
+            baseline_path = source_path(baseline_source_root, module)
+            if not baseline_path.is_file() or baseline_path.is_symlink():
+                raise ConeFailure(f"missing baseline target source for lint: {baseline_path}")
+            counts = baseline_counts.setdefault(module, {})
+            for finding in simp_family_lint.findings(baseline_path.read_text(encoding="utf-8")):
+                counts[finding.token] = counts.get(finding.token, 0) + 1
+                baseline_findings += 1
     for module in TARGETS:
         path = source_path(source_root, module)
         if not path.is_file():
             raise ConeFailure(f"missing generated target source for lint: {path}")
+        counts = baseline_counts.get(module, {})
         for finding in simp_family_lint.findings(path.read_text(encoding="utf-8")):
+            if counts.get(finding.token, 0):
+                counts[finding.token] -= 1
+                continue
             findings.append({"module": module, "line": finding.line, "description": finding.describe()})
     if findings:
         raise ConeFailure(f"generated target source retains executable simp-family calls ({len(findings)})")
-    return {"status": "passed", "targetCount": len(TARGETS), "findings": 0}
+    return {
+        "status": "passed",
+        "targetCount": len(TARGETS),
+        "findings": 0,
+        "baselineFindings": baseline_findings,
+        "introducedFindings": 0,
+    }
 
 
 def run(args: argparse.Namespace) -> dict[str, object]:
@@ -467,7 +490,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 report["modules"] = modules
                 raise ConeFailure(f"build failed for {module}: {entry.get('failure', 'unknown failure')}")
         report["modules"] = modules
-        report["lint"] = lint_targets(source_root)
+        baseline_source_root = (
+            Path(args.baseline_source_root).expanduser().resolve()
+            if args.baseline_source_root else None
+        )
+        report["lint"] = lint_targets(source_root, baseline_source_root)
         report["status"] = "passed"
     except Exception as error:
         report["status"] = "failed"
@@ -485,6 +512,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-dir", required=True, help="fresh private run directory")
     parser.add_argument("--manifest", help="manifest path (default RUN/manifest.json)")
     parser.add_argument("--stock-olean-root", help="optional pinned stock root containing Mathlib/*.olean")
+    parser.add_argument(
+        "--baseline-source-root",
+        help="optional pinned source root; unchanged out-of-scope simp-family calls are baseline",
+    )
     parser.add_argument("--recorder-version")
     parser.add_argument("--renderer-version")
     return parser
