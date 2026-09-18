@@ -161,6 +161,24 @@
       "startByte": 6005
     },
     {
+      "endByte": 20568,
+      "module": "Mathlib/Logic/Basic.lean",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f",
+      "occurrence": "c28dd19f3d6d3d67",
+      "replacement": "rw [heq_comm, heq_iff_exists_eq_cast]\n  constructor <;> rintro ⟨h, hab⟩ <;> exact ⟨h, hab.symm⟩",
+      "source": "simp only [heq_comm (a := a), heq_iff_exists_eq_cast, eq_comm]",
+      "startByte": 20506
+    },
+    {
+      "endByte": 29282,
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe",
+      "occurrence": "bcd40e80cbe2ffe1",
+      "replacement": "rw [eq_update_iff] <;> exact ⟨fun h => h.1, fun h => ⟨h, fun _ _ => rfl⟩⟩",
+      "source": "simp [eqComm]",
+      "startByte": 29269
+    },
+    {
       "endByte": 36120,
       "module": "Mathlib/Logic/Function/Basic.lean",
       "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe",

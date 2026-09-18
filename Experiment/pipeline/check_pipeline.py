@@ -509,6 +509,12 @@ def derivation_tests(f: Failures) -> None:
             R.render_step(source_lambda, source_text=source, source_args=source_args,
                           operational=True),
             "if_neg (fun h => h) at []")
+    named_source = "heq_comm (a := a), heq_iff_exists_eq_cast"
+    named_term, named_direction = R.source_argument(named_source, [
+        {"argId": 0, "startChar": 0, "endChar": 17, "direction": "fwd"},
+    ], 0)
+    f.equal("derivation/source_named_argument_exact",
+            (named_term, named_direction), ("heq_comm (a := a)", "fwd"))
     reversed_source = step("direct_eq", direction="fwd")
     try:
         R.render_step(reversed_source, source_text="← foo", source_args=[

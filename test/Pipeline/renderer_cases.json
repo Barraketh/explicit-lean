@@ -222,6 +222,12 @@
             "steps": [{"kind": "beta", "pos": [1]},
                       {"kind": "unfold", "pos": [], "name": "f"}]},
    "expect": "congr 0 [beta at [1], unfold f at []] at [1]"
+  },
+  {
+   "name": "change_universe_annotations",
+   "why": "pp.all universe levels are printer metadata; elaboration recovers them",
+   "step": {"kind": "change", "pos": [], "to": "Prod.{u_1, u_2} α α'"},
+   "expect": "change Prod α α' at []"
   }
  ],
 

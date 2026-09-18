@@ -115,7 +115,15 @@ def check_term(text: Any, what: str) -> str:
         raise RenderError(
             "non_term_syntax", f"{what} carries tactic/telescope syntax: {text!r}"
         )
-    if ".{" in text or re.search(r"(?<![\w.])nat_lit\b", text):
+    # The recorder's `pp.all` printer annotates every declaration reference
+    # with universe levels (for example `Prod.{u_1, u_2}`), but those levels
+    # are recovered by ordinary elaboration and are not part of ExplicitRw's
+    # source grammar.  Erase only the printer annotation; this is a lexical
+    # normalization of the authenticated field, not term parsing or inference.
+    # Keep `nat_lit` rejected: it is an internal constructor, rather than a
+    # surface spelling whose omitted information elaboration can recover.
+    text = re.sub(r"\.\{[^{}]*\}", "", text)
+    if re.search(r"(?<![\w.])nat_lit\b", text):
         raise RenderError(
             "pp_all_term",
             f"{what} is pp.all output (universe levels / nat_lit): {text!r}",
