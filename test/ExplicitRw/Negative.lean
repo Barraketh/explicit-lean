@@ -248,18 +248,13 @@ error: explicit_rw: step 1: `iota` at this position: the subterm is not a matche
 example (a : Nat) : a + 0 = a := by
   explicit_rw [iota at [0, 1]]
 
-/-! ## `intro_ctx` is recognised but not implemented
+/-! ## `intro_ctx` validates its recorded scope before replay -/
 
-It has syntax so that a trace containing it fails by name, rather than being
-parsed as a lemma called `intro_ctx`.
--/
-
-/--
-error: explicit_rw: step 1: `intro_ctx` is a recorded step kind that `explicit_rw` does not implement: contextual rewriting changes what is in scope for later positions, which this tactic's single-location model does not represent. This trace cannot be replayed; hand-write the proof instead.
--/
+/-- error: explicit_rw: step 1: `intro_ctx 0` at [1] requires an implication -/
 #guard_msgs in
 example (p q : Prop) (hq : q) : p → q := by
-  explicit_rw [intro_ctx hp at [1]]
+  explicit_rw [intro_ctx 0 domain at [1, 0] deps [] scope 0 enter at [1] exit at [1]
+    with [] at [1]]
 
 /-! ## Antiquotations are named, in every slot
 

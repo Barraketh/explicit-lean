@@ -11,6 +11,7 @@ public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.Meta.Tactic.Intro
 public meta import Lean.Parser.Tactic
 public meta import Lean.Meta.CongrTheorems
+public meta import Lean.Util.CollectFVars
 
 public meta section
 
@@ -58,6 +59,7 @@ not in this table, it has no form (see "Not expressible" below).
 | `eq (lhs = rhs) by decide at [..]`     | `eq`, `by: "decide"`                    |
 | `congr i [nested steps] at [..]`       | `congr` with `arg: i` and its `steps`   |
 | `transport forall h [domain] body [body] at [..]` | explicit dependent-forall domain transport |
+| `intro_ctx h domain at [d] deps [..] scope s enter at [e] exit at [x] with [steps] at [..]` | contextual arrow scope with `introduced_ref h` |
 | `... at h`                             | location `{"hyp": "h"}`                 |
 | `... then <side proof>`                | the location's `close`                  |
 
@@ -102,10 +104,7 @@ This needs no `explicit_rw` syntax and is why none exists.
 
 | Construct            | Why                                                 |
 | -------------------- | --------------------------------------------------- |
-| `intro_ctx h at [..]` | Recognised so a trace fails **by name**, but not    |
-|                      | implemented: contextual rewriting changes what is in |
-|                      | scope for later positions, which this tactic's       |
-|                      | single-location model does not represent.            |
+| `intro_ctx` without recorder metadata | The consumer requires the stable handle and explicit domain/dependency/scope fields. |
 | `at *`               | Positions are relative to one location. Emit one     |
 |                      | `explicit_rw` per location.                          |
 
@@ -450,16 +449,6 @@ recursor application whose major premise is a constructor.
 syntax explicitRwRed :=
   (&"beta" <|> &"eta" <|> &"proj" <|> &"zeta" <|> &"iota") explicitRwPos
 
-/--
-`intro_ctx <name> at [1]` — the spec's contextual-simp step.
-
-Recognised but **not implemented**: contextual rewriting changes what is in scope
-for subsequent positions, which this tactic's single-location model does not
-represent. It has syntax so that a trace containing it fails with an honest
-"not implemented" error naming the kind, rather than being read as a lemma.
--/
-syntax explicitRwIntroCtx := &"intro_ctx " ident explicitRwPos
-
 /-- `change t at [1]` — last-resort definitional replacement, checked by defeq. -/
 syntax explicitRwChange := "change " explicitRwTerm explicitRwPos
 
@@ -491,6 +480,20 @@ syntax explicitRwEq := &"eq " explicitRwType " by " (&"rfl" <|> &"decide") expli
 syntax explicitRwInnerStep0 :=
   explicitRwUnfold <|> explicitRwRed <|> explicitRwChange <|> explicitRwEq <|>
   explicitRwProp <|> explicitRwRw
+
+/- A closed contextual scope. The recorder supplies the stable introduced
+   handle, exact domain position, local-declaration dependencies, and explicit
+   enter/exit scope positions. Nested ordinary steps run while the handle is
+   in scope; `introduced_ref` is the only way they can refer to it. -/
+syntax explicitRwIntroCtx :=
+  &"intro_ctx " num
+  " domain " explicitRwPos
+  " deps " "[" num,* "]"
+  " scope " num
+  " enter " explicitRwPos
+  " exit " explicitRwPos
+  " with " "[" explicitRwInnerStep0,* "]"
+  explicitRwPos
 
 /-- A `congr` whose nested steps are innermost. -/
 syntax explicitRwCongr0 :=
@@ -1448,10 +1451,84 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax)
             (some q) (some bodyR))
       (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwIntroCtx =>
-    stepError idx m!"`intro_ctx` is a recorded step kind that `explicit_rw` does not \
-      implement: contextual rewriting changes what is in scope for later positions, \
-      which this tactic's single-location model does not represent. This trace \
-      cannot be replayed; hand-write the proof instead."
+    -- A contextual introduction is a scoped replay, not a name-based `intro`.
+    -- The recorder supplies all identity data; nested steps are relative to the
+    -- introduced arrow body and may refer to its proof only by handle.
+    let handle ← checkedHandle stx[1] "intro_ctx handle"
+    if handles.contains handle then
+      stepError idx m!"`intro_ctx {handle}` reuses an introduced handle already in scope"
+    let domainPos := parsePos stx[3]
+    let dependencies := stx[6].getSepArgs.map (·.isNatLit?.getD 0)
+    let scopeId ← checkedHandle stx[9] "intro_ctx scope"
+    let enterPos := parsePos stx[11]
+    let exitPos := parsePos stx[13]
+    let nested := stx[16].getSepArgs
+    let pos := parsePos stx[18]
+    unless domainPos == pos ++ [0] do
+      stepError idx m!"`intro_ctx {handle}` domain position {Pos.render domainPos} does not \
+        equal the arrow-domain position {Pos.render (pos ++ [0])}"
+    unless enterPos == pos do
+      stepError idx m!"`intro_ctx {handle}` scope {scopeId} enters at \
+        {Pos.render enterPos} but the operation is at {Pos.render pos}"
+    unless exitPos == pos do
+      stepError idx m!"`intro_ctx {handle}` scope {scopeId} exits at \
+        {Pos.render exitPos} but the operation is at {Pos.render pos}"
+    rewriteAt e pos
+      (fun sub => do
+        let .forallE binderName binderType binderBody binderInfo := sub
+          | stepError idx m!"`intro_ctx {handle}` at {Pos.render pos} requires an implication"
+        unless ← isProp binderType do
+          stepError idx m!"`intro_ctx {handle}` requires a proposition-valued domain"
+        unless ← isProp binderBody do
+          stepError idx m!"`intro_ctx {handle}` requires a proposition-valued body"
+        if binderBody.hasLooseBVars then
+          stepError idx m!"`intro_ctx {handle}` does not support a dependent arrow body"
+        -- Dependencies are direct LocalDecl.index references. They are
+        -- validation data, never a context search or a source-level term.
+        let lctx ← getLCtx
+        let actualDependencies :=
+          (collectFVars {} binderType).fvarIds.filterMap fun fvarId =>
+            lctx.find? fvarId |>.map (·.index)
+        unless actualDependencies == dependencies do
+          stepError idx m!"`intro_ctx {handle}` domain dependencies do not match the \
+            recorded local indices"
+        for dependency in dependencies do
+          if dependency >= lctx.decls.size then
+            stepError idx m!"`intro_ctx {handle}` dependency local index {dependency} \
+              is outside the current local context"
+          let some decl := lctx.decls.get! dependency
+            | stepError idx m!"`intro_ctx {handle}` dependency local index {dependency} \
+                is not a declaration"
+          unless decl.index == dependency do
+            stepError idx m!"`intro_ctx {handle}` dependency local index {dependency} \
+              resolved to declaration index {decl.index}"
+          if decl.isAuxDecl then
+            stepError idx m!"`intro_ctx {handle}` dependency local index {dependency} \
+              names an auxiliary declaration"
+        withLocalDeclD binderName binderType fun h => do
+          let scopedHandles := handles.insert handle h.fvarId!
+          let mut cur := binderBody.instantiate1 h
+          let mut proof? : Option Expr := none
+          for hNested : j in [0 : nested.size] do
+            let r ← runStep idx cur nested[j] scopedHandles
+            let next ← instantiateMVars r.newExpr
+            match proof?, r.proof? with
+            | none, p => proof? := p
+            | some p, none => proof? := some p
+            | some p, some q => proof? := some (← mkEqTrans p q)
+            cur := next
+          let newAll ← mkForallFVars #[h] cur
+          match proof? with
+          | none =>
+            unless ← isDefEq sub newAll do
+              stepError idx m!"`intro_ctx {handle}` scoped replay changed the arrow \
+                without producing a proof"
+            return Replacement.defeq newAll
+          | some proof =>
+            let hAll ← mkLambdaFVars #[h] (← instantiateMVars proof)
+            let arrowProof ← mkForallCongr hAll
+            return Replacement.eq newAll arrowProof)
+      (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwChange =>
     let pos := parsePos stx[2]
     let target ← toTerm stx[1] handles
