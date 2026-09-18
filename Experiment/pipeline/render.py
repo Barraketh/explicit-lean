@@ -465,10 +465,14 @@ def _render_local(step: dict, introduced: dict[str, int]) -> str:
     if not isinstance(ctx_index, int) or isinstance(ctx_index, bool) or ctx_index < 0:
         raise RenderError("bad_local_ref", f"local.ctxIndex is invalid: {ctx_index!r}", side="t1")
     if local.get("contextual") is True:
-        name = step.get("name")
-        handle = introduced.get(name) if isinstance(name, str) else None
-        if handle is None:
-            raise RenderError("missing_introduced_ref", f"contextual local {name!r} has no side intro handle", side="t1")
+        # T34 records the stable handle at the recorder boundary.  Contextual
+        # locals commonly occur in a discharged side trace after the
+        # intro_ctx event, so joining by its inaccessible display name (or by
+        # finalizer file order) is unsound.  A missing handle remains a visible
+        # trace defect; never recover one from the display name.
+        handle = local.get("handle")
+        if not isinstance(handle, int) or isinstance(handle, bool) or handle < 0:
+            raise RenderError("missing_introduced_ref", "contextual local has no stable intro handle", side="t1")
         return f"introduced_ref {handle}"
     if local.get("inaccessible") not in (True, False):
         raise RenderError("bad_local_ref", "local.inaccessible is not boolean", side="t1")

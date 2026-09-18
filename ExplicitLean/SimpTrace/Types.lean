@@ -36,7 +36,7 @@ inductive LocalRef where
   pretty-printed form (`a✝¹`) already carries that right-to-left rank. -/
   | ordinary (userName : String) (inaccessible : Bool) (ctxIndex : Nat)
   /-- A hypothesis introduced by contextual simp, in its own namespace. -/
-  | contextual (ctxIndex : Nat)
+  | contextual (ctxIndex : Nat) (handle : Nat)
   deriving Inhabited, Repr
 
 /-- How a location (goal or hypothesis) was closed, if it was. -/
@@ -293,8 +293,9 @@ def LocalRef.toJson : LocalRef → String
     "{\"userName\":" ++ str userName ++
     ",\"inaccessible\":" ++ (if inaccessible then "true" else "false") ++
     ",\"ctxIndex\":" ++ toString ctxIndex ++ "}"
-  | .contextual ctxIndex =>
-    "{\"contextual\":true,\"ctxIndex\":" ++ toString ctxIndex ++ "}"
+  | .contextual ctxIndex handle =>
+    "{\"contextual\":true,\"ctxIndex\":" ++ toString ctxIndex ++
+    ",\"handle\":" ++ toString handle ++ "}"
 
 def CloseInfo.toJson (c : CloseInfo) : String :=
   obj #[("by", some (str c.by_))]
@@ -342,7 +343,7 @@ partial def Step.toJson (s : Step) : String :=
     ("source", s.source?.map str),
     ("to", s.to?.map str),
     ("arg", s.arg?.map toString),
-    ("steps", if s.kind != "congr" then none else
+    ("steps", if s.kind != "congr" && s.kind != "intro_ctx" then none else
       some ("[" ++ String.intercalate ","
         (s.steps.toList.map Step.toJson) ++ "]")),
     ("handle", if s.kind != "transport" then none else s.handle?.map toString),

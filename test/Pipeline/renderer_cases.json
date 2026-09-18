@@ -250,8 +250,28 @@
                         "name": "Function.update_of_ne", "dir": "fwd",
                         "args": ["introduced_ref 0"]}]},
     "expect": "intro_ctx 0 domain at [0, 1, 1, 1, 0] deps [1, 8, 5] scope 0 enter at [0, 1, 1, 1] exit at [0, 1, 1, 1] with [Function.update_of_ne (introduced_ref 0) at [1]] at [0, 1, 1, 1]"
+  },
+  {
+    "name": "intro_ctx_contextual_local_handle",
+    "why": "T34 local evidence carries the stable handle through a side trace",
+    "step": {"kind": "intro_ctx", "pos": [0],
+             "intro": {"handle": 0, "operation": "simpArrowT.contextual",
+                        "domain": {"position": [0, 0], "dependencies": []},
+                        "scope": {"id": 0, "owner": "simpArrowT.contextual",
+                                  "enter": [0], "exit": [0]}},
+             "steps": [{"kind": "rw", "pos": [1], "name": "hiff", "dir": "fwd",
+                        "side": [{"pre": "P", "post": null,
+                                  "steps": [{"kind": "rw", "pos": [], "name": "a✝",
+                                             "dir": "fwd", "prop": "false",
+                                             "derivation": {"origin": "local:a✝",
+                                               "source": "local-evidence", "preprocess": ["not_to_false"],
+                                               "redex": [], "extraArgs": 0},
+                                             "local": {"contextual": true, "ctxIndex": 9,
+                                                       "handle": 0}}],
+                                  "close": {"by": "rfl"}}]}]},
+    "expect": "intro_ctx 0 domain at [0, 0] deps [] scope 0 enter at [0] exit at [0] with [hiff at [1] with [explicit_rw [prop_false (introduced_ref 0) at []] then rfl]] at [0]"
   }
- ],
+],
 
  "step_errors": [
   {
@@ -282,7 +302,16 @@
                                  "enter": [], "exit": []}},
             "steps": [{"kind": "transport", "pos": [], "handle": 1,
                        "domain": [], "body": []}]},
-   "error": "nested_intro_ctx_step", "side": "t2"
+    "error": "nested_intro_ctx_step", "side": "t2"
+  },
+  {
+   "name": "contextual_local_missing_stable_handle",
+   "why": "a contextual local without T34's handle must remain visibly unresolved",
+   "step": {"kind": "rw", "pos": [], "name": "a✝", "dir": "fwd",
+            "derivation": {"origin": "local:a✝", "source": "local-evidence",
+                           "preprocess": ["not_to_false"], "redex": [], "extraArgs": 0},
+            "local": {"contextual": true, "ctxIndex": 9}, "prop": "false"},
+   "error": "missing_introduced_ref", "side": "t1"
   },
   {
    "name": "name_is_written_syntax",

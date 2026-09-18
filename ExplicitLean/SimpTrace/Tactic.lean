@@ -188,7 +188,8 @@ An inaccessible name is recorded as the pretty-printed form (`a✝`) plus the ra
 user name and the context index, so a replay generator can bind it with
 `rename_i`.  Never `eraseMacroScopes`: for an inaccessible `a✝` it yields plain
 `a`, which in the same context usually denotes a *different*, accessible local. -/
-def originName (o : Origin) (c : EvCtx) (contextualFVars : Array FVarId) :
+def originName (o : Origin) (c : EvCtx)
+    (contextualFVars : Array (FVarId × Nat)) :
     MetaM (String × Bool × Option LocalRef) := do
   match o with
   | .decl n _ _ => return (n.toString, false, none)
@@ -199,8 +200,8 @@ def originName (o : Origin) (c : EvCtx) (contextualFVars : Array FVarId) :
         let n := d.userName
         let inaccessible := n.isInaccessibleUserName || n.hasMacroScopes
         let display := (← ppExpr (mkFVar fvarId)).pretty
-        if contextualFVars.contains fvarId then
-          return (display, false, some (.contextual d.index))
+        if let some (_, handle) := contextualFVars.find? (fun (f, _) => f == fvarId) then
+          return (display, false, some (.contextual d.index handle))
         else
           return (display, false, some (.ordinary n.toString inaccessible d.index))
       | none => return (fvarId.name.toString, false, none)
@@ -218,7 +219,8 @@ mutual
 /-- Convert one logged event into a spec `Step`.  `contextualFVars` are the
 hypotheses `+contextual` introduced, so they land in the separate `local`
 namespace the spec defines. -/
-partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId)
+partial def eventToStep (ur : IO.Ref Unresolved)
+    (contextualFVars : Array (FVarId × Nat))
     (ev : Event) : MetaM (Option Step) := do
   match ev with
   | .rw pos o inv prop? before after c args side src? localO proj derivation? =>
@@ -345,7 +347,8 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
                   before? := some beforePP, after? := some afterPP }
 
 /-- Convert a discharged side condition into the spec's nested trace object. -/
-partial def sideToTrace (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId)
+partial def sideToTrace (ur : IO.Ref Unresolved)
+    (contextualFVars : Array (FVarId × Nat))
     (r : SideRec) : MetaM SideTrace := do
   let c := r.evCtx
   let goalPP ← ppIn c r.goal
@@ -998,6 +1001,61 @@ partial def attachSteps (steps : Array Step)
 
 end
 
+/-! ### Contextual scope assembly
+
+`intro_ctx` enter/exit events are recorder-internal delimiters.  The consumer
+needs the enclosed events as the scoped step list required by T33, so assemble
+that structure before converting events to wire steps.  Keeping this at the
+recorder boundary is important: the finalizer intentionally copies locations
+verbatim and must not infer scope from invocation files or display names. -/
+
+partial def scopedEvents (events : Array Event) (start : Nat) (scopeId : Nat) :
+    Array Event × Nat := Id.run do
+  let mut body : Array Event := #[]
+  let mut i := start
+  while h : i < events.size do
+    match events[i] with
+    | .introCtxExit _ info =>
+      if info.scope.id == scopeId then
+        return (body, i + 1)
+      body := body.push events[i]
+      i := i + 1
+    | ev =>
+      body := body.push ev
+      i := i + 1
+  return (body, i)
+
+partial def eventsToSteps (ur : IO.Ref Unresolved)
+    (contextualFVars : Array (FVarId × Nat))
+    (events : Array Event) : MetaM (Array Step) := do
+  let mut out : Array Step := #[]
+  let mut i := 0
+  while h : i < events.size do
+    match events[i] with
+    | .introCtx pos fvar ctx info =>
+      let (body, next) := scopedEvents events (i + 1) info.scope.id
+      let step? ← eventToStep ur contextualFVars events[i]
+      if let some base := step? then
+        -- T33's inner list is rooted at the introduced arrow body, i.e. the
+        -- forall node's body child, not at the enclosing source location.
+        -- Recorder events retain absolute positions for the outer validator;
+        -- strip that body prefix only when moving them into the scoped list.
+        let bodyRoot := info.scope.enter.push 1
+        let nested ← eventsToSteps ur contextualFVars
+          (body.map (Event.strip bodyRoot))
+        out := out.push { base with steps := nested }
+      i := next
+    | .introCtxExit .. =>
+      -- A malformed/unpaired exit is not a source-facing step.  The enclosing
+      -- validator still owns the event stream; dropping this delimiter cannot
+      -- invent a replay action.
+      i := i + 1
+    | ev =>
+      if let some step ← eventToStep ur contextualFVars ev then
+        out := out.push step
+      i := i + 1
+  return out
+
 /-- Turn one traced run into a `LocationTrace`. -/
 def buildLocation (ur : IO.Ref Unresolved)
     (hyp? : Option String) (pre : Expr) (result : Simp.Result)
@@ -1005,12 +1063,14 @@ def buildLocation (ur : IO.Ref Unresolved)
     (absurdHyp? : Option String := none) : MetaM LocationTrace := do
   let verdicts ← validate ur pre result.expr events
   -- Hypotheses `+contextual` introduced, so their references land in the
-  -- spec's separate `contextual` namespace.
-  let contextualFVars : Array FVarId := events.filterMap fun ev =>
+  -- spec's separate `contextual` namespace.  Preserve the operational handle
+  -- alongside the fvar identity: side traces often carry the local reference
+  -- after the intro event itself, and a display name is not a stable join key.
+  let contextualFVars : Array (FVarId × Nat) := events.filterMap fun ev =>
     match ev with
-    | .introCtx _ fid _ _ => some fid
+    | .introCtx _ fid _ info => some (fid, info.handle)
     | _ => none
-  let rawSteps ← events.filterMapM (eventToStep ur contextualFVars)
+  let rawSteps ← eventsToSteps ur contextualFVars events
   let steps := attachSteps rawSteps verdicts
   let prePP := (← ppExpr pre).pretty
   let postPP := (← ppExpr result.expr).pretty
