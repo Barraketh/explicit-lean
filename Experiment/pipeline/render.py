@@ -542,6 +542,11 @@ def render_rw(step: dict, depth: int, source_text: Any = None,
         and "prop_to_true" in preprocess
         and isinstance(step.get("local"), dict)
         and isinstance(step["local"].get("userName"), str)
+        # A bare local proposition (`h`, `hp`, ...) is proposition evidence,
+        # not an iff theorem.  Keep the historical local-iff path only when
+        # the source argument carries additional application syntax (for
+        # example `hh _`).
+        and term.strip() != step["local"]["userName"]
     )
     projected_prop = any(op in preprocess for op in
                          ("conjunction_left", "conjunction_right",
