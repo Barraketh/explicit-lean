@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "strict_translated_cone_accepted_broader_simp_family_and_whole_tree_pending",
+  "phase": "strict_translated_cone_revalidated_seed_pass_cone_lint_blocked_broader_simp_family_and_whole_tree_pending",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-18T03:19:11Z",
+  "updatedAt": "2026-09-18T20:30:52Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -32,12 +32,51 @@
       "status": "integrated_supporting_recorder_infrastructure",
       "commit": "8e6e569d9b784b4ef71112009b6cedfb0b5b67fe"
     },
-    "manualOverrideCount": 26,
+    "manualOverrideCount": 21,
     "cloudUsed": false,
     "wholeTreeAcceptance": "not_claimed"
   },
+  "acceptanceRevalidation": {
+    "checkedAt": "2026-09-18T20:30:52Z",
+    "checkoutCommit": "579ccbdacfcacb24e7c84c0e517cd45b5a97957d",
+    "integratedCommits": {
+      "T50": "9fb236e4a82d42f4e9b744f8416821cdf65870ef",
+      "T51": "3a05714d4ba8838ef08e78d4e61c306f219013b4",
+      "T52": "579ccbdacfcacb24e7c84c0e517cd45b5a97957d",
+      "current": "579ccbdacfcacb24e7c84c0e517cd45b5a97957d"
+    },
+    "manualOverrides": {
+      "entries": 21,
+      "modules": 17,
+      "coneRemaining": 1,
+      "coneOccurrence": "eqComm:bcd40e80cbe2ffe1"
+    },
+    "seed": {
+      "modules": 7,
+      "sourceIdentities": "91/91",
+      "invocationRecords": 113,
+      "replayed": "91/91",
+      "failures": 0,
+      "runtimeSeconds": 38.97,
+      "maximumRssBytes": 764133376,
+      "status": "passed"
+    },
+    "strictCone": {
+      "modules": 69,
+      "edges": 134,
+      "builds": 8,
+      "buildsPassed": 8,
+      "freshOutputs": true,
+      "translatedRootImportsResolved": true,
+      "lintIntroducedFindings": 1,
+      "status": "blocked_by_generated_simp_family_lint",
+      "failure": "Mathlib/Logic/Function/Defs.lean: generated simpa [I.eq_iff] using h"
+    },
+    "status": "seed_passed_cone_lint_blocked",
+    "wholeTreeAcceptance": "not_claimed"
+  },
   "resumeStatus": {
-    "review": "T47_strict_translated_cone_accepted; broader_simp_family_and_whole_tree_pending; T10_cancelled",
+    "review": "T53_seed_revalidated; strict_cone_builds_freshness_imports_passed_but_lint_blocked; broader_simp_family_and_whole_tree_pending; T10_cancelled",
     "t2": "merged_to_main_5ec2da5_and_integration_checked",
     "t1": "integrated_seed_mapping; 91_source_identities_and_113_invocation_records; no_hashes_nonces",
     "t4": "seed_accepted; 7_of_7_modules_and_91_of_91_identity; 113_invocation_records; replay_render_compile_identity_failures_zero",
@@ -46,7 +85,7 @@
     "t16": "theorem_rule_derivation_producer_accepted_and_merged; implementation_a9c2d4e; review_2_4a42543; 74_fixture_skeletons_pass; term_free_payload_containment_pass; no_corpus_replay_credit_until_renderer_integration_and_fresh_seven_module_gate",
     "t18": "simproc_inventory_documented_and_deferred; accepted_91_site_corpus; reduceIte_15_steps_6_sites; reduceDIte_15_steps_8_sites; eqComm_deferred; no_simproc_implementation",
     "t20": "bounded_ite_simproc_operational_model_accepted_and_merged; implementation_through_22ff7819; review_2_1ab114ca; full_checker_74_of_74; focused_observed_reduceIte_6_of_15_reduceDIte_3_of_15; cached_origin_misses_fail_closed; no_corpus_replay_credit; eqComm_deferred",
-    "t5": "strict_cone_accepted; 69_modules_134_edges; 8_of_8_builds_passed; fresh_outputs_and_translated_root_imports_resolved",
+    "t5": "revalidated; 69_modules_134_edges; 8_of_8_builds_passed; fresh_outputs_and_translated_root_imports_resolved; strict_lint_blocked_by_one_generated_simpa",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
@@ -144,7 +183,7 @@
   "direction": {
     "userConversationDate": "2026-09-16",
     "nextMilestone": "Extend the readable source-preserving replacement beyond the accepted 91-site seed and 69-module cone across the broader simp family, then run dependency-ordered whole-tree compilation, the remaining-call audit and final semantic/trust checks.",
-    "activeState": "T47 is integrated at 59262d7. The main seed at 86f90d1 covers 91/91 source identities and 113 invocation records with zero replay, render, compile or identity failures. The strict translated cone covers 69 modules and 134 edges; all 8 builds passed, emitted fresh outputs and resolved imports from the translated root in 11.99 seconds with 668991488 bytes maximum RSS. The provenance-bearing cache fork is integrated supporting infrastructure and the manual override database contains 26 entries. This local milestone used no cloud; whole-tree acceptance remains separate and unclaimed.",
+    "activeState": "T47 is integrated at 59262d7. The main seed at 86f90d1 covers 91/91 source identities and 113 invocation records with zero replay, render, compile or identity failures. The strict translated cone covers 69 modules and 134 edges; all 8 builds passed, emitted fresh outputs and resolved imports from the translated root in 11.99 seconds with 668991488 bytes maximum RSS. The provenance-bearing cache fork is integrated supporting infrastructure and the current manual override database contains 21 entries across 17 modules. This local milestone used no cloud; whole-tree acceptance remains separate and unclaimed.",
     "designDecisions": {
       "T6": "Accepted and merged through 814f274 with REVIEW-3 0738ac7: deterministic structural bullet expansion keyed by complete invocation ordinals; safe non-tail continuations only; unsafe shapes refuse without partial replay. Fresh seven-module report: 91/91 identity, 59 replayed, 5 unresolved, 6 render_failed, 0 structurally_refused, 21 compile_failed; 265 pipeline checks passed.",
       "T7": "Optional diagnostic only: the existing source-pair declaration oracle may be used for focused semantic debugging, but it is not an acceptance gate and does not require per-site hashes.",
@@ -156,7 +195,7 @@
       "T20": "The bounded operational, term-free reduceIte/reduceDIte model is accepted and merged through 22ff7819 with REVIEW-2 1ab114ca. The full fixture checker passes 74/74; focused observed coverage is only 6/15 reduceIte and 3/15 reduceDIte. Cached-origin misses fail closed, no corpus replay credit is claimed, and eqComm remains deferred.",
       "T47": "Strict translated-cone acceptance is recorded at integration commit 59262d7: main seed 91/91 and 113 invocation records with zero replay/render/compile/identity failures at 86f90d1; 69 modules and 134 edges; all 8 builds passed with fresh outputs and translated-root imports resolved; runtime 11.99 seconds and maximum RSS 668991488 bytes. The run was local and used no cloud.",
       "provenanceCacheFork": "The provenance-bearing simp cache fork is integrated as supporting recorder infrastructure; it is not whole-tree acceptance evidence.",
-      "manualOverrides": "The current Experiment/simp_manual_overrides.json table contains 26 entries.",
+      "manualOverrides": "The current Experiment/simp_manual_overrides.json table contains 21 entries across 17 modules; only the cone's eqComm occurrence bcd40e80cbe2ffe1 remains an override in this seed.",
       "acceptance": "Ultimate acceptance is source-preserving replacement of the pinned Mathlib simp family plus successful compilation of the translated dependency tree and then the full Mathlib tree. Whole-tree acceptance remains zero until those checks pass."
     },
     "pilotModules": 15,
@@ -355,7 +394,7 @@
   },
   "nextActions": [
     "Extend the accepted readable, source-preserving replacement beyond the 91-site seed and 69-module/134-edge cone across the broader pinned simp family; keep every original call as an adjacent comment and leave unresolved calls visible.",
-    "Preserve the provenance-bearing cache fork and the 26-entry manual override identity while adding further overrides only with the same ordinary-Lean readability and kernel/build checks.",
+    "Preserve the provenance-bearing cache fork and the 21-entry manual override identity across 17 modules while adding further overrides only with the same ordinary-Lean readability and kernel/build checks.",
     "Run dependency-ordered translated builds for the expanded cone, then compile the full pinned Mathlib tree from the translated root with fresh outputs and import-resolution audits.",
     "Complete the remaining executable simp-family call audit, reusable-call provenance checks, declaration/computational semantic checks and final trust validation; do not convert the bounded cone result into whole-tree credit.",
     "Use the declaration oracle only as an optional focused diagnostic; do not make per-site hashes, a neutral forgery suite or other retired machinery acceptance prerequisites.",
@@ -410,7 +449,7 @@
     {
       "id": "override-compliance-dsimp",
       "status": "pending",
-      "description": "The current manual override table contains 26 entries across 19 modules. Keep the two known dsimp-family cases (Unitization 1734864b48394331, EpiMono 3251bc59333b0c31) visibly pending until rewritten with unfold/change/rw and verified."
+      "description": "The current manual override table contains 21 entries across 17 modules. Keep the two known dsimp-family cases (Unitization 1734864b48394331, EpiMono 3251bc59333b0c31) visibly pending until rewritten with unfold/change/rw and verified."
     },
     {
       "id": "sixty-nine-module-cold-certification",

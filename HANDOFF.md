@@ -28,12 +28,32 @@ root. Its runtime was 11.99 seconds and maximum RSS was 668,991,488 bytes.
 
 This was a local run; no cloud was used for the T47 milestone. The
 provenance-bearing simp cache fork is integrated as supporting recorder
-infrastructure, and the current manual override database contains 26 entries.
+infrastructure, and the current manual override database contains 21 entries
+across 17 modules.
 These facts are separate from whole-Mathlib acceptance: the full-tree build,
 remaining simp-family audit, and final semantic/trust checks are still
 unclaimed. The original source calls remain adjacent comments in the accepted
 cone, and future generated output must continue to satisfy the no-simp-family
 rule and the readability requirement.
+
+## Acceptance revalidation — September 18, 2026
+
+At current commit `579ccbdacfcacb24e7c84c0e517cd45b5a97957d`, with T50
+(`9fb236e`), T51 (`3a05714`) and T52 (`579ccbd`) integrated, the fresh seed
+run covered all seven modules and all 91/91 source identities (113 invocation
+records), with 91/91 replayed and zero unresolved, render, compile, identity,
+structural or probe failures. The current manual override database contains
+21 entries across 17 modules; the only remaining override in this cone is
+`eqComm` (`bcd40e80cbe2ffe1`).
+
+The strict cone preflight found the reviewed 69 modules and 134 edges. All
+eight builds emitted fresh outputs and resolved imports from the translated
+root. The final baseline-aware strict lint failed on one newly exposed
+generated simp-family call, `simpa [I.eq_iff] using h` in
+`Mathlib/Logic/Function/Defs.lean`, after T52 removed its obsolete overlay.
+Therefore this revalidation records the 91/91 seed and the eight successful
+cone builds, but does not claim new strict-cone acceptance until that generated
+call is replaced with ordinary Lean.
 
 Next actions are to extend the readable, source-preserving replacement beyond
 the accepted 91-site seed and 69-module cone across the broader simp family,
