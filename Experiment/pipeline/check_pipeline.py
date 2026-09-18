@@ -135,8 +135,6 @@ def render_tests(f: Failures) -> None:
     # added to the spec and silently never exercised.
     covered = {c["step"]["kind"] for c in cases["steps"]}
     for kind in R.KNOWN_KINDS:
-        if kind == "intro_ctx":
-            continue  # covered by a negative case: it is unimplemented by design
         f.check(f"coverage/{kind}", kind in covered,
                 "no positive fixture for this spec step kind")
 

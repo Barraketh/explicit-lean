@@ -236,6 +236,20 @@
              "domain": [{"kind": "rw", "pos": [], "name": "hA", "dir": "fwd"}],
              "body": [{"kind": "rw", "pos": [0], "name": "hB", "dir": "fwd"}]},
     "expect": "transport forall 4 [hA at []] body [hB at [0]] at [0, 1]"
+  },
+  {
+    "name": "intro_ctx_stable_metadata",
+    "why": "T34 stable handle/domain/dependency/scope metadata renders through T33 syntax",
+    "step": {"kind": "intro_ctx", "pos": [0, 1, 1, 1],
+             "intro": {"handle": 0, "operation": "simpArrowT.contextual",
+                        "domain": {"position": [0, 1, 1, 1, 0],
+                                   "dependencies": [1, 8, 5]},
+                        "scope": {"id": 0, "owner": "simpArrowT.contextual",
+                                  "enter": [0, 1, 1, 1], "exit": [0, 1, 1, 1]}},
+             "steps": [{"kind": "rw", "pos": [1],
+                        "name": "Function.update_of_ne", "dir": "fwd",
+                        "args": ["introduced_ref 0"]}]},
+    "expect": "intro_ctx 0 domain at [0, 1, 1, 1, 0] deps [1, 8, 5] scope 0 enter at [0, 1, 1, 1] exit at [0, 1, 1, 1] with [Function.update_of_ne (introduced_ref 0) at [1]] at [0, 1, 1, 1]"
   }
  ],
 
@@ -247,10 +261,28 @@
    "error": "unknown_kind", "side": "t1"
   },
   {
-   "name": "intro_ctx_unimplemented",
-   "why": "T2 recognises `intro_ctx` and does not implement it",
-   "step": {"kind": "intro_ctx", "pos": [1], "name": "a"},
-   "error": "intro_ctx", "side": "t2"
+   "name": "intro_ctx_display_name_refused",
+   "why": "stable T34 metadata must never fall back to an inaccessible display name",
+   "step": {"kind": "intro_ctx", "pos": [1], "name": "a✝"},
+   "error": "intro_ctx_display_name", "side": "t1"
+  },
+  {
+   "name": "intro_ctx_missing_metadata",
+   "why": "T33 syntax cannot be guessed from an unstructured contextual step",
+   "step": {"kind": "intro_ctx", "pos": [1]},
+   "error": "bad_intro_ctx", "side": "t1"
+  },
+  {
+   "name": "intro_ctx_nested_structural_step",
+   "why": "T33's inner grammar excludes recursive structural steps",
+   "step": {"kind": "intro_ctx", "pos": [],
+            "intro": {"handle": 0, "operation": "simpArrowT.contextual",
+                       "domain": {"position": [0], "dependencies": []},
+                       "scope": {"id": 0, "owner": "simpArrowT.contextual",
+                                 "enter": [], "exit": []}},
+            "steps": [{"kind": "transport", "pos": [], "handle": 1,
+                       "domain": [], "body": []}]},
+   "error": "nested_intro_ctx_step", "side": "t2"
   },
   {
    "name": "name_is_written_syntax",

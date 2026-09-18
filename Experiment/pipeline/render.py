@@ -22,9 +22,9 @@ Rendering rules, in one place:
 * `congr`  -> `congr <arg> [<nested steps>] at [pos]`
 * `transport` -> `transport forall <handle> [<domain steps>] body
                  [<body steps>] at [pos]`
-* `intro_ctx` -> unrenderable; T2 documents it as recognised-but-unimplemented,
-              so a trace containing one is a classified render failure rather
-              than a step that silently vanishes.
+* `intro_ctx` -> `intro_ctx <handle> domain at <domain-pos> deps [..]
+                 scope <scope> enter at <enter> exit at <exit>
+                 with [<nested steps>] at <pos>`
 
 Closes map through one table: `rfl`/`decide`/`omega`/`nofun` render as
 themselves, `true_intro` as `exact True.intro`, `assumption:<n>` as
@@ -37,8 +37,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Spec step kinds. `intro_ctx` is listed so an unknown kind stays distinguishable
-# from a known-but-unrenderable one.
+# Spec step kinds.
 REDUCTION_KINDS = ("beta", "eta", "proj", "zeta", "iota")
 KNOWN_KINDS = ("rw", "unfold", "change", "eq", "congr", "transport", "intro_ctx") + REDUCTION_KINDS
 
@@ -636,6 +635,115 @@ def render_transport(step: dict, depth: int, *, source_text: Any = None,
     )
 
 
+def _nonnegative_int(value: Any, what: str, reason: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise RenderError(reason, f"{what} is {value!r}, not a non-negative integer",
+                          side="t1")
+    return value
+
+
+def _render_inner_steps(steps: Any, depth: int, *, source_text: Any = None,
+                        source_args: Any = None, operational: bool = False,
+                        introduced: dict[str, int] | None = None,
+                        owner: str = "intro_ctx") -> str:
+    if not isinstance(steps, list):
+        raise RenderError("bad_intro_ctx_steps", f"{owner}.steps is not a list: {steps!r}",
+                          side="t1")
+    # T33's `explicitRwInnerStep0` deliberately excludes recursive structural
+    # steps. Refuse these instead of emitting syntax the consumer cannot parse.
+    forbidden = {"intro_ctx", "transport", "congr"}
+    for nested in steps:
+        if isinstance(nested, dict) and nested.get("kind") in forbidden:
+            raise RenderError(
+                "nested_intro_ctx_step",
+                f"{owner}.steps contains {nested.get('kind')!r}, but T33's nested grammar does not admit it",
+                side="t2",
+            )
+    return ", ".join(
+        render_step(nested, depth + 1, source_text=source_text,
+                    source_args=source_args, operational=operational,
+                    introduced=introduced)
+        for nested in steps
+    )
+
+
+def render_intro_ctx(step: dict, depth: int, *, source_text: Any = None,
+                     source_args: Any = None, operational: bool = False,
+                     introduced: dict[str, int] | None = None) -> str:
+    """Render T34's stable contextual-introduction metadata using T33 syntax.
+
+    The recorder's ``intro`` object is the complete identity contract. This
+    function only validates and copies its numeric handles, positions and
+    dependency indices; it never reads a display name or searches the local
+    context for one.
+    """
+    if "name" in step:
+        raise RenderError(
+            "intro_ctx_display_name",
+            "intro_ctx carries a display name; stable metadata must not use one",
+            side="t1",
+        )
+    info = step.get("intro")
+    if not isinstance(info, dict):
+        raise RenderError("bad_intro_ctx", f"intro_ctx.intro is not an object: {info!r}",
+                          side="t1")
+    if "name" in info:
+        raise RenderError(
+            "intro_ctx_display_name",
+            "intro_ctx.intro carries a display name; stable metadata must not use one",
+            side="t1",
+        )
+
+    handle = _nonnegative_int(info.get("handle"), "intro_ctx.handle",
+                              "bad_intro_ctx_handle")
+    domain = info.get("domain")
+    if not isinstance(domain, dict):
+        raise RenderError("bad_intro_ctx_domain",
+                          f"intro_ctx.domain is not an object: {domain!r}", side="t1")
+    domain_pos = domain.get("position")
+    dependencies = domain.get("dependencies")
+    if not isinstance(dependencies, list):
+        raise RenderError("bad_intro_ctx_dependencies",
+                          f"intro_ctx.domain.dependencies is not a list: {dependencies!r}",
+                          side="t1")
+    for dependency in dependencies:
+        _nonnegative_int(dependency, "intro_ctx domain dependency",
+                         "bad_intro_ctx_dependency")
+
+    scope = info.get("scope")
+    if not isinstance(scope, dict):
+        raise RenderError("bad_intro_ctx_scope",
+                          f"intro_ctx.scope is not an object: {scope!r}", side="t1")
+    scope_id = _nonnegative_int(scope.get("id"), "intro_ctx.scope.id",
+                                "bad_intro_ctx_scope_id")
+    operation = info.get("operation")
+    owner = scope.get("owner")
+    if not isinstance(operation, str) or not operation:
+        raise RenderError("bad_intro_ctx_operation",
+                          f"intro_ctx.operation is not a non-empty string: {operation!r}",
+                          side="t1")
+    if not isinstance(owner, str) or not owner:
+        raise RenderError("bad_intro_ctx_scope_owner",
+                          f"intro_ctx.scope.owner is not a non-empty string: {owner!r}",
+                          side="t1")
+    if owner != operation:
+        raise RenderError("intro_ctx_scope_owner_mismatch",
+                          "intro_ctx.scope.owner does not equal intro_ctx.operation",
+                          side="t1")
+
+    nested = _render_inner_steps(
+        step.get("steps", []), depth, source_text=source_text,
+        source_args=source_args, operational=operational, introduced=introduced,
+    )
+    deps = "[" + ", ".join(str(dependency) for dependency in dependencies) + "]"
+    return (
+        f"intro_ctx {handle} domain {render_pos(domain_pos)} deps {deps} "
+        f"scope {scope_id} enter {render_pos(scope.get('enter'))} "
+        f"exit {render_pos(scope.get('exit'))} with [{nested}] "
+        f"{render_pos(step.get('pos'))}"
+    )
+
+
 def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
                 source_args: Any = None, operational: bool = False,
                 introduced: dict[str, int] | None = None) -> str:
@@ -707,13 +815,16 @@ def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
             operational=operational,
             introduced=introduced,
         )
-    # intro_ctx
-    raise RenderError(
-        "intro_ctx",
-        "contextual simp step: the tactic recognises `intro_ctx` but does not "
-        "implement it",
-        side="t2",
-    )
+    if kind == "intro_ctx":
+        return render_intro_ctx(
+            step,
+            depth,
+            source_text=source_text,
+            source_args=source_args,
+            operational=operational,
+            introduced=introduced,
+        )
+    raise AssertionError(f"unhandled known step kind {kind!r}")
 
 
 def collect_inaccessible(steps: list, out: list) -> None:
