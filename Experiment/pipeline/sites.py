@@ -220,7 +220,8 @@ def overlong(lines: list[str]) -> list[str]:
 
 def splice(source: str, replacements: dict[int, list[str]],
            sites: list[Site],
-           ranges: dict[int, tuple[int, int]] | None = None) -> str:
+           ranges: dict[int, tuple[int, int]] | None = None,
+           multiline_midline: set[int] | None = None) -> str:
     """Replace each named site with its rendered lines.
 
     `replacements` maps a site index to the full replacement lines, already
@@ -240,6 +241,7 @@ def splice(source: str, replacements: dict[int, list[str]],
     markers: dict[int, list[tuple[int, str]]] = {}
 
     ranges = ranges or {}
+    multiline_midline = multiline_midline or set()
     for site in sites:
         lines = replacements.get(site.index)
         if not lines:
@@ -275,12 +277,20 @@ def splice(source: str, replacements: dict[int, list[str]],
             range_column = start - line_start
             body = body[range_column:] if body.startswith(" " * range_column) else body
         else:
-            if len(lines) > 1:
+            if len(lines) > 1 and site.index not in multiline_midline:
                 raise ValueError(
                     f"site {site.index} is not alone on its line and cannot take a "
                     f"multi-line replacement"
                 )
-            body = lines[0].lstrip()
+            if site.index in multiline_midline:
+                # Authenticated source overlays may preserve a mid-line call's
+                # original text as comments after a readable replacement.  The
+                # overlay renderer owns indentation for those continuation
+                # lines; keep the first line at the call position and append
+                # the untouched source suffix after the final comment line.
+                body = "\n".join(lines)
+            else:
+                body = lines[0].lstrip()
         edits.append((start, end, body, 0))
 
     # One deterministic zero-width insertion per source line, with retained

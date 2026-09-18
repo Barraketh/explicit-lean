@@ -56,6 +56,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import render as R  # noqa: E402
 import sites as S  # noqa: E402
 import simp_family_lint as L  # noqa: E402
+import simp_manual_overrides as M  # noqa: E402
 
 # The six modules T1 has traced copies for: (Mathlib path, traced module name).
 MODULES = {
@@ -100,6 +101,79 @@ def git_hash(worktree: pathlib.Path) -> str:
 def git_dirty(worktree: pathlib.Path) -> bool:
     code, out, _, _ = run(["git", "status", "--porcelain"], worktree, timeout=60)
     return code != 0 or bool(out.strip())
+
+
+def _char_offset(source: str, byte_offset: int) -> int:
+    """Translate an authenticated UTF-8 byte offset to a Python index."""
+    encoded = source.encode("utf-8")
+    if not 0 <= byte_offset <= len(encoded):
+        raise ValueError(f"manual override byte offset is outside the source: {byte_offset}")
+    try:
+        return len(encoded[:byte_offset].decode("utf-8"))
+    except UnicodeDecodeError as error:
+        raise ValueError(f"manual override byte offset splits UTF-8: {byte_offset}") from error
+
+
+def manual_overrides_for_sites(
+    module: str, source: str, site_list: list[S.Site],
+) -> dict[int, dict]:
+    """Bind the authenticated source overlay to exact replay site identities.
+
+    The override database is byte-addressed while the replay scanner and trace
+    manifests use Python character offsets.  Convert only after validating the
+    database range/hash/occurrence against the exact source bytes, then require
+    a one-to-one match with the scanner's site range and call text.
+    """
+    _, entries = M.load_database()
+    selected = [entry for entry in entries if entry["module"] == module]
+    if not selected:
+        return {}
+    source_bytes = source.encode("utf-8")
+    M.validate_against_source(module, source_bytes, selected)
+    by_identity = {
+        (site.start, site.end, site.text): site.index
+        for site in site_list
+    }
+    result: dict[int, dict] = {}
+    for entry in selected:
+        start = _char_offset(source, int(entry["startByte"]))
+        end = _char_offset(source, int(entry["endByte"]))
+        actual = source[start:end]
+        key = (start, end, actual)
+        site_index = by_identity.get(key)
+        if site_index is None:
+            raise RuntimeError(
+                "manual override is not exactly one replay site: "
+                f"{module}:{entry['occurrence']}"
+            )
+        if site_index in result:
+            raise RuntimeError(f"duplicate manual override replay site: {module}:{site_index}")
+        result[site_index] = entry
+    return result
+
+
+def render_manual_override(site: S.Site, entry: dict, source: str) -> dict:
+    """Render one validated source overlay as a normal replay record."""
+    rendered = M.render(entry, source.encode("utf-8")).decode("utf-8")
+    lines = rendered.splitlines()
+    if not lines or not any(line.lstrip().startswith("-- Original simp:") for line in lines):
+        raise RuntimeError(f"manual override dropped its original comment: {entry['occurrence']}")
+    return {
+        "site": site.index,
+        "line": site.line,
+        "column": site.column,
+        "original": site.text,
+        "alone_on_line": site.alone_on_line,
+        "long_line_waiver": False,
+        "status": "rendered",
+        "attribution": "manual_override",
+        "detail": "authenticated manual source override",
+        "manual_override": entry["occurrence"],
+        "lines": lines,
+        "lint_lines": lines,
+        "replace_start": site.start,
+        "replace_end": site.end,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -805,7 +879,12 @@ def build_module(source: str, site_list: list[S.Site],
         if "replace_start" in rec and "replace_end" in rec
         and (only is None or rec["site"] == only)
     }
-    spliced = S.splice(source, replacements, site_list, ranges)
+    multiline_midline = {
+        rec["site"] for rec in records
+        if rec.get("manual_override")
+        and (only is None or rec["site"] == only)
+    }
+    spliced = S.splice(source, replacements, site_list, ranges, multiline_midline)
     return S.add_import(spliced)
 
 
@@ -1007,7 +1086,12 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
         traces[ordinal] = (dict(executions[0]) if len(executions) == 1
                            else [dict(record) for record in executions])
     identity["renderAttempted"] = True
-    records = [render_site(s, traces.get(s.index), source) for s in site_list]
+    manual_by_site = manual_overrides_for_sites(mathlib_rel, source, site_list)
+    records = [
+        render_manual_override(site, manual_by_site[site.index], source)
+        if site.index in manual_by_site else render_site(site, traces.get(site.index), source)
+        for site in site_list
+    ]
     for rec in records:
         findings = lint_replacement(rec)
         if findings and rec["status"] == "rendered":

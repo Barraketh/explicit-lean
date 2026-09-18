@@ -439,6 +439,43 @@ def mapping_tests(f: Failures) -> None:
             "an unrelated diagnostic was selected")
 
 
+def manual_override_tests(f: Failures) -> None:
+    """The cone's source overlays enter the real replay splice path."""
+    mathlib = ROOT / ".lake" / "packages" / "mathlib"
+    expected = {
+        "Mathlib/Logic/Basic.lean": {"c28dd19f3d6d3d67": 1},
+        "Mathlib/Logic/Function/Basic.lean": {
+            "bcd40e80cbe2ffe1": 1,
+            "acca7bbba4fc669d": 1,
+        },
+    }
+    for module, expected_ids in expected.items():
+        source = (mathlib / module).read_text(encoding="utf-8")
+        site_list = S.find_sites(source)
+        selected = P.manual_overrides_for_sites(module, source, site_list)
+        f.equal("manual/sites/" + module, len(selected), len(expected_ids))
+        observed_ids = {entry["occurrence"] for entry in selected.values()}
+        f.equal("manual/identities/" + module, observed_ids, set(expected_ids))
+        records = [
+            P.render_manual_override(site, selected[site.index], source)
+            for site in site_list if site.index in selected
+        ]
+        translated = P.build_module(source, site_list, records)
+        for record in records:
+            occurrence = record["manual_override"]
+            f.equal("manual/status/" + occurrence, record["status"], "rendered")
+            f.check("manual/comment/" + occurrence,
+                    "-- Original simp:" in translated
+                    and record["original"] in translated,
+                    "original simp call was not retained as an adjacent comment")
+            f.check("manual/lint/" + occurrence,
+                    not P.lint_replacement(record),
+                    "manual replacement contains a forbidden simp-family token")
+        f.check("manual/import/" + module,
+                "import ExplicitLean.ExplicitRw" in translated,
+                "manual replay did not use the normal ExplicitRw import path")
+
+
 def derivation_tests(f: Failures) -> None:
     """T19's term-free theorem derivation contract and refusal fixtures."""
     def step(op: str = "direct_eq", *, source: str | None = "simp-argument",
@@ -957,6 +994,7 @@ def main() -> int:
     diagnostic_tests(f)
     invocation_tests(f)
     mapping_tests(f)
+    manual_override_tests(f)
     derivation_tests(f)
     summary_tests(f)
     identity_tests(f)
