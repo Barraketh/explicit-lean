@@ -228,10 +228,8 @@ either spelling as a normal term.
 -/
 declare_syntax_cat localRefSuffix
 syntax:max ("." num)+ : localRefSuffix
-syntax:max (name := explicitRwLocalRefTerm) "local_ref " num (localRefSuffix)? : term
-syntax:max (name := explicitRwTermLocalRef) explicitRwLocalRefTerm : explicitRwTerm
-syntax:max (name := explicitRwIntroducedRefTerm) "introduced_ref " num : term
-syntax:max (name := explicitRwTermIntroducedRef) explicitRwIntroducedRefTerm : explicitRwTerm
+syntax:max (name := explicitRwLocalRefTerm) "local_ref " num (localRefSuffix)? : explicitRwTerm
+syntax:max (name := explicitRwIntroducedRefTerm) "introduced_ref " num : explicitRwTerm
 /-- A string literal. -/
 syntax:max (name := explicitRwTermStr) str : explicitRwTerm
 /-- `Type`, `Type u`, `Sort u`. -/
@@ -546,11 +544,6 @@ syntax (name := explicitRw) "explicit_rw " "[" explicitRwStep,* "]"
 
 namespace Impl
 
-register_option explicitRw.allowLocalRef : Bool := {
-  defValue := false
-  descr := "allow indexed local references while explicit_rw elaborates a trace term"
-}
-
 /-! ### Indexed local references
 
 The recorder's local reference carries the declaration's `LocalDecl.index`, not
@@ -570,16 +563,29 @@ partial def natLiterals (stx : Syntax) : Array Nat :=
   if let some n := natLiteral? (stx.getKind.toString false) then #[n]
   else stx.getArgs.foldl (init := #[]) fun out child => out ++ natLiterals child
 
-def localRefIndex (stx : Syntax) : Nat :=
-  (natLiterals stx[1])[0]!
+def localRefIndex (stx : Syntax) : TermElabM Nat := do
+  let values := natLiterals stx[1]
+  if values.size != 1 then
+    throwError "explicit_rw: local_ref requires a canonical decimal index"
+  return values[0]!
 
-def localRefProjectionIndices (stx : Syntax) : Array (Nat × Nat) :=
-  if stx[2].isNone then #[]
-  else (natLiterals stx[2][0]).map fun surface =>
-    (surface, if surface == 0 then 0 else surface - 1)
+def localRefProjectionIndices (stx : Syntax) : TermElabM (Array (Nat × Nat)) := do
+  if stx[2].isNone then return #[]
+  else
+    let values := natLiterals stx[2][0]
+    if values.isEmpty then
+      throwError "explicit_rw: local_ref projection requires canonical decimal indices"
+    return values.map fun surface =>
+      (surface, if surface == 0 then 0 else surface - 1)
+
+def checkedHandle (stx : Syntax) (what : String) : TacticM Nat := do
+  let values := natLiterals stx
+  if values.size != 1 then
+    throwError "explicit_rw: {what} requires a canonical decimal numeral"
+  return values[0]!
 
 def resolveIndexedLocal (stx : Syntax) : TermElabM Expr := do
-  let index := localRefIndex stx
+  let index ← localRefIndex stx
   let lctx ← getLCtx
   if index >= lctx.decls.size then
     throwError "explicit_rw: local_ref {index} is outside the current local context"
@@ -597,7 +603,7 @@ def resolveIndexedLocal (stx : Syntax) : TermElabM Expr := do
   if decl.isAuxDecl then
     throwError "explicit_rw: local_ref {index} names an auxiliary declaration, not a local hypothesis"
   let mut value := mkFVar decl.fvarId
-  for (surface, projection) in localRefProjectionIndices stx do
+  for (surface, projection) in (← localRefProjectionIndices stx) do
     if surface == 0 then
       throwError "explicit_rw: local_ref {index}: projection `.0` is invalid; projections are numbered from `.1`"
     let ty ← whnf (← inferType value)
@@ -613,8 +619,6 @@ def resolveIndexedLocal (stx : Syntax) : TermElabM Expr := do
   return value
 
 def elabIndexedLocalCore (stx : Syntax) (expectedType? : Option Expr) : TermElabM Expr := do
-  unless (← getOptions).getBool `explicitRw.allowLocalRef do
-    throwError "local_ref is only available inside explicit_rw"
   let value ← resolveIndexedLocal stx
   Term.ensureHasType expectedType? value
 
@@ -622,10 +626,9 @@ def elabIndexedLocalCore (stx : Syntax) (expectedType? : Option Expr) : TermElab
    handle to the indexed local declaration it denotes, preserving the same
    closed local-ref syntax and therefore the same direct lookup path. -/
 partial def materializeIntroducedRefs (handles : IntroducedHandles) (stx : Syntax) : TacticM Syntax := do
-  if stx.getKind == ``explicitRwTermIntroducedRef ||
-      stx.getKind == ``explicitRwIntroducedRefTerm then
-    let raw := if stx.getKind == ``explicitRwTermIntroducedRef then stx[0] else stx
-    let handle := (natLiterals raw[1])[0]!
+  if stx.getKind == ``explicitRwIntroducedRefTerm then
+    let raw := stx
+    let handle ← checkedHandle raw[1] "introduced_ref handle"
     let some fvarId := handles.get? handle
       | throwError "explicit_rw: introduced_ref {handle} is unknown in this side proof"
     let decl ← FVarId.getDecl fvarId
@@ -691,14 +694,11 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
     if stx[0].isNone then return id else `(@$id)
   | ``explicitRwTermHole => `(_)
   | ``explicitRwTermNum => return ⟨stx[0]⟩
-  | ``explicitRwTermLocalRef | ``explicitRwTermIntroducedRef =>
+  | ``explicitRwLocalRefTerm | ``explicitRwIntroducedRefTerm =>
     -- Keep these syntax nodes intact.  Their dedicated term elaborator below
     -- resolves the fvar by LocalDecl.index, so turning them into an `ident`
     -- would reintroduce name lookup and make inaccessible declarations
     -- dependent on pretty-printed names.
-    let raw := stx[0]
-    return ⟨raw.setKind ``explicitRwLocalRefTerm⟩
-  | ``explicitRwLocalRefTerm =>
     return ⟨stx⟩
   | ``explicitRwTermStr => return ⟨stx[0]⟩
   | ``explicitRwTermProp => `(Prop)
@@ -968,13 +968,12 @@ with the subterm at the recorded position. That caller closes them itself
 def elabStrict (idx? : Option Nat) (what : String) (stx : Term)
     (expectedType? : Option Expr := none) (allowMVars := false) : TacticM Expr := do
   let errsBefore := (← Core.getMessageLog).hasErrors
-  let e ← withOptions (fun o => o.setBool `explicitRw.allowLocalRef true) do
-    Term.withoutErrToSorry do
-      let e ← match expectedType? with
-        | some ty => Term.elabTermEnsuringType stx ty
-        | none => Term.elabTerm stx none
-      Term.synthesizeSyntheticMVarsNoPostponing
-      instantiateMVars e
+  let e ← Term.withoutErrToSorry do
+    let e ← match expectedType? with
+      | some ty => Term.elabTermEnsuringType stx ty
+      | none => Term.elabTerm stx none
+    Term.synthesizeSyntheticMVarsNoPostponing
+    instantiateMVars e
   let e ← instantiateMVars e
   let fail (why : MessageData) : TacticM Expr :=
     match idx? with
@@ -1484,7 +1483,7 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax)
             `{term}` has {propMVars.size} undetermined hypothesis(es) at this position."
         for h : i in [0 : sideTacs.size] do
           let .mvar mid := ← instantiateMVars propMVars[i]! | pure ()
-          runSideProofOn idx (some i) sideTacs[i] mid
+          runSideProofOn idx (some i) sideTacs[i] mid handles
         closeLemmaMVars idx m!"`{term}`" mvars
         let proof ← instantiateMVars proof
         let eqProof ←
@@ -1605,7 +1604,7 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
     let (_, goal') ← goal.introN names.size names.toList
     runSideProofOn idx which? stx[3] goal' handles
   | ``explicitRwSideIntroRef =>
-    let handle := (natLiterals stx[1])[0]!
+    let handle ← checkedHandle stx[1] "intro_ref handle"
     if handles.contains handle then
       stepError idx m!"{where?} duplicates introduced handle {handle}."
     let (fvarId, goal') ← goal.intro1P

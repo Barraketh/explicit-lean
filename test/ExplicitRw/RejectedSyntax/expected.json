@@ -11,5 +11,6 @@
   "exact_harmless_by.lean": "unexpected token 'by'; expected explicitRwTerm",
   "exact_elab_metam.lean": "unexpected token 'SmuggleMetaM'; expected explicitRwTerm",
   "exact_elab_tactic.lean": "unexpected token 'SmuggleRun'; expected explicitRwTerm",
-  "with_simp.lean": "unexpected identifier; expected ']'"
+  "with_simp.lean": "unexpected identifier; expected ']'",
+  "local_ref_outside.lean": "unexpected token 'local_ref'; expected term"
 }
