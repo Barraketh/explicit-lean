@@ -161,6 +161,15 @@
       "startByte": 6005
     },
     {
+      "endByte": 17467,
+      "module": "Mathlib/Logic/Basic.lean",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f",
+      "occurrence": "8e17e105590e562a",
+      "replacement": "rw [← @xor_not_left _ b, Classical.not_not]",
+      "source": "simp only [← @xor_not_left _ b, not_not]",
+      "startByte": 17425
+    },
+    {
       "endByte": 20568,
       "module": "Mathlib/Logic/Basic.lean",
       "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f",
@@ -168,6 +177,15 @@
       "replacement": "rw [heq_comm, heq_iff_exists_eq_cast]\n  constructor <;> rintro ⟨h, hab⟩ <;> exact ⟨h, hab.symm⟩",
       "source": "simp only [heq_comm (a := a), heq_iff_exists_eq_cast, eq_comm]",
       "startByte": 20506
+    },
+    {
+      "endByte": 24404,
+      "module": "Mathlib/Logic/Basic.lean",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f",
+      "occurrence": "42f1163b9fd99b7b",
+      "replacement": "constructor\n  · rintro ⟨ha, h⟩ b\n    by_cases hb : b = a\n    · exact hb ▸ ha\n    · exact h b hb\n  · intro h\n    exact ⟨h a, fun b _ => h b⟩",
+      "source": "simp only [← @forall_eq _ p a, ← forall_and, ← or_imp, Decidable.em, forall_const]",
+      "startByte": 24316
     },
     {
       "endByte": 29282,
@@ -186,6 +204,15 @@
       "replacement": "rw [extend_def, dif_pos (exists_apply_eq_apply f a)]",
       "source": "simp only [extend_def, dif_pos, exists_apply_eq_apply]",
       "startByte": 36066
+    },
+    {
+      "endByte": 5354,
+      "module": "Mathlib/Logic/Function/Defs.lean",
+      "moduleSourceSha256": "2fca1772acc783aa18df96273f5e88ff96c4088a5621e6036d5919c60c3bf50d",
+      "occurrence": "a30cdf5ef0f79ad7",
+      "replacement": "exact Bool.eq_iff_iff.mpr ⟨\n  fun h' => beq_iff_eq.mpr ((I.eq_iff).mp (beq_iff_eq.mp h')),\n  fun h' => beq_iff_eq.mpr ((I.eq_iff).mpr (beq_iff_eq.mp h'))⟩",
+      "source": "simp [h]",
+      "startByte": 5346
     },
     {
       "endByte": 6823,

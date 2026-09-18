@@ -615,7 +615,7 @@ class DatabaseChecks(unittest.TestCase):
 
     def test_every_replacement_is_clean(self) -> None:
         overrides = self.database["overrides"]
-        self.assertEqual(len(overrides), 21)
+        self.assertEqual(len(overrides), 26)
         for entry in overrides:
             with self.subTest(occurrence=entry["occurrence"]):
                 self.assertEqual(
@@ -626,7 +626,7 @@ class DatabaseChecks(unittest.TestCase):
 
     def test_fixed_database_loads(self) -> None:
         _environment, entries = manual.load_database(DATABASE)
-        self.assertEqual(len(entries), 21)
+        self.assertEqual(len(entries), 26)
 
     def test_loader_rejects_a_violating_replacement(self) -> None:
         for bad in ("dsimp [starAlgHom]", "dsimp only [tau]", "push_cast\n  rfl"):
@@ -651,7 +651,7 @@ class DatabaseChecks(unittest.TestCase):
             path = Path(directory) / "copy.json"
             path.write_text(json.dumps(self.database), encoding="utf-8")
             _environment, entries = manual.load_database(path)
-            self.assertEqual(len(entries), 21)
+            self.assertEqual(len(entries), 26)
 
 
 if __name__ == "__main__":
