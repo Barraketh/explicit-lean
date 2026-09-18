@@ -527,6 +527,18 @@ def render_rw(step: dict, depth: int, source_text: Any = None,
                 term += " " + atomize(check_term(arg, "rw.args entry"))
 
     prop = step.get("prop")
+    # A local simp argument such as `hh _` can be an iff theorem rather than
+    # proposition evidence.  The recorder's proposition preprocessing label
+    # is then historical simp bookkeeping: rendering it as `prop_true` asks
+    # ExplicitRw for a proof of the left proposition and loses the iff's
+    # rewrite direction.  Keep the source-backed iff term as an ordinary rw.
+    local_iff = (
+        details is not None
+        and details["source"] == "simp-argument"
+        and "prop_to_true" in preprocess
+        and isinstance(step.get("local"), dict)
+        and isinstance(step["local"].get("userName"), str)
+    )
     projected_prop = any(op in preprocess for op in
                          ("conjunction_left", "conjunction_right",
                           "conjunction_projection"))
@@ -534,9 +546,9 @@ def render_rw(step: dict, depth: int, source_text: Any = None,
                    else "false" if "not_to_false" in preprocess
                    else prop if projected_prop and prop in ("true", "false")
                    else None)
-    if mapped_prop is not None:
+    if mapped_prop is not None and not local_iff:
         term = ("prop_true " if mapped_prop == "true" else "prop_false ") + atomize(term)
-    elif prop is not None and details is not None:
+    elif prop is not None and details is not None and not local_iff:
         if prop not in ("true", "false"):
             raise RenderError("bad_prop", f"rw.prop is {prop!r}, not 'true'/'false'")
         # Legacy v1 traces use eq_true/eq_false. Operational T16 traces use

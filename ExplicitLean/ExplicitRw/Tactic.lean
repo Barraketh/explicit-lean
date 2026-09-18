@@ -1248,19 +1248,17 @@ partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bo
     (fun sub => do
       let (lhs, rhs, eqProof, mvars) ← elabEquation idx stx
       let (source, target) := if symm then (rhs, lhs) else (lhs, rhs)
-      -- Unify the *type* of the lemma's side with the subterm's type first. That
-      -- is what fixes a class-polymorphic lemma's instance argument: once the
-      -- carrier is known, synthesis has something to work with. Without this the
-      -- instance metavariable blocks the defeq below and the step reports a
-      -- spurious mismatch (`?a + 0` against `7 + 0`).
-      let srcTy ← inferType source
-      let subTy ← inferType sub
-      discard <| isDefEq srcTy subTy
-      synthesizeInstanceMVars idx m!"`{stx}`" mvars sub
+      -- First match the actual lemma side against the recorded redex.  This
+      -- also fixes instance-implicit arguments whose concrete instance is
+      -- embedded in the redex (notably `dif_pos` after unfolding a
+      -- definition opened under `Classical`).  Matching only the types first
+      -- leaves such an instance metavariable untouched, and synthesizing it
+      -- before the term match then incorrectly reports a missing instance.
       unless ← isDefEq source sub do
         stepError idx m!"lemma `{stx}` does not match the subterm at \
           position {Pos.render pos}.\nExpected{indentExpr (← instantiateMVars source)}\n\
           but the subterm is{indentExpr sub}"
+      synthesizeInstanceMVars idx m!"`{stx}`" mvars sub
       -- Discharge the lemma's hypotheses with the `with` clause, in order. A
       -- hypothesis is a Prop-valued argument metavariable the position did not
       -- determine; anything left over is still an error below.

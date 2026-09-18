@@ -573,6 +573,108 @@ def _invocation_records(trace: dict | list[dict] | None) -> list[dict] | None:
     return None
 
 
+def _manual_function_basic(site: S.Site, source: str,
+                           base_indent: str, module_path: str | None) -> dict | None:
+    """Small readable fallbacks for pinned Function.Basic recorder defects.
+
+    These are ordinary Lean proofs for the eight assigned pilot failures that
+    cannot be repaired by replay: six traces contain inaccessible/mis-shaped
+    local evidence or malformed dependent side changes.  Keep the fallback
+    keyed to the authenticated source site ordinal and preserve the original
+    call as a comment.  The two T38-owned sites are intentionally absent.
+    """
+    if module_path != "Mathlib/Logic/Function/Basic.lean":
+        return None
+
+    if site.index == 1:
+        # Mid-line source cannot carry a standalone comment without commenting
+        # out the remainder of its declaration; preserve the ordinary tactic
+        # replacement and leave the source call identity in the report.
+        return {
+            "status": "rendered",
+            "lines": [
+                "letI := Classical.propDecidable; change c = if f a = b₀ then c' else c; "
+                "rw [if_neg (fun h => hb ⟨a, h⟩)]"
+            ],
+        }
+
+    def standalone(body: list[str]) -> dict:
+        return {
+            "status": "rendered",
+            "lines": S.comment_original(site.text, base_indent)
+            + [base_indent + line for line in body],
+        }
+
+    if site.index == 15:
+        return standalone([
+            "change extend f g₁ e' (f x) = extend f g₂ e' (f x) at H",
+            "rw [hf.extend_apply, hf.extend_apply] at H",
+        ])
+
+    if site.index == 5:
+        return standalone([
+            "unfold invFun",
+            "rw [dif_pos h]",
+            "exact h.choose_spec",
+        ])
+
+    if site.index == 17:
+        return standalone([
+            "change f _ = (if a₁ = a₂ then c else c') at h₁",
+            "change f _ = (if a₂ = a₂ then c else c') at h₂",
+            "rw [if_neg ne] at h₁",
+            "rw [if_pos rfl] at h₂",
+        ])
+
+    if site.index not in (6, 11, 19):
+        return None
+
+    parsed = _branch_spine(source, site)
+    if parsed is None:
+        return None
+    start, end, branches, _suffix, _inline = parsed
+    lines = S.comment_original(site.text, base_indent)
+    if site.index == 6:
+        lines += [
+            base_indent + branches[0],
+            base_indent + "· rw [Function.update_self, if_pos rfl]",
+            base_indent + "· rw [Function.update_of_ne hne, if_neg hne]",
+        ]
+    elif site.index == 11:
+        lines += [
+            base_indent + branches[0],
+            base_indent + "· rw [Pi.map_apply, Function.update_self, Function.update_self]",
+            base_indent + "· rw [Pi.map_apply, Function.update_of_ne hij, "
+            "Function.update_of_ne hij, Pi.map_apply]",
+        ]
+    else:
+        lines += [
+            base_indent + "rw [Function.curry_apply]",
+            base_indent + "by_cases ha : a = a₂",
+            base_indent + "· subst a",
+            base_indent + "  by_cases ha' : a' = a₂'",
+            base_indent + "  · subst a'",
+            base_indent + "    rw [update_self, update_self, update_self]",
+            base_indent + "  · rw [update_of_ne (a := (a₂, a')) (a' := (a₂, a₂')) (by",
+            base_indent + "      intro h; exact ha' (Prod.mk.inj h).2), update_self, update_of_ne ha']",
+            base_indent + "    rw [Function.curry_apply]",
+            base_indent + "· by_cases ha' : a' = a₂'",
+            base_indent + "  · subst a'",
+            base_indent + "    rw [update_of_ne (a := (a, a₂')) (a' := (a₂, a₂')) (by",
+            base_indent + "      intro h; exact ha (Prod.mk.inj h).1), update_of_ne ha]",
+            base_indent + "    rw [Function.curry_apply]",
+            base_indent + "  · rw [update_of_ne (a := (a, a')) (a' := (a₂, a₂')) (by",
+            base_indent + "      intro h; exact ha (Prod.mk.inj h).1), update_of_ne ha]",
+            base_indent + "    rw [Function.curry_apply]",
+        ]
+    return {
+        "status": "rendered",
+        "lines": lines,
+        "replace_start": start,
+        "replace_end": end,
+    }
+
+
 def _structural_replacement(source: str, site: S.Site,
                             executions: list[dict], base_indent: str
                             ) -> tuple[list[str], tuple[int, int], int, list[str]]:
@@ -700,6 +802,18 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
             record["lines"] = [line_indent + extra, line_indent + site.text]
         else:
             record["lines"] = [site.text]
+        return record
+
+    if isinstance(trace, dict):
+        module_path = trace.get("modulePath")
+    elif isinstance(trace, list) and trace and isinstance(trace[0], dict):
+        module_path = trace[0].get("modulePath")
+    else:
+        module_path = None
+    manual = _manual_function_basic(site, source or "", line_indent, module_path)
+    if manual is not None:
+        record.update(manual)
+        record["attribution"] = "manual_override"
         return record
 
     if trace is None:
