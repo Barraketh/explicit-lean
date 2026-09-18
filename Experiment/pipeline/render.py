@@ -124,6 +124,14 @@ def check_term(text: Any, what: str) -> str:
         raise RenderError(
             "inaccessible_name", f"{what} splices an inaccessible name: {text!r}"
         )
+    # These are simp-argument/configuration spellings, not terms admitted by
+    # ExplicitRw's whitelist. In particular `*`, `-foo`, and named arguments
+    # belong to simp's argument language and must not be guessed into replay.
+    if text in ("*", "_") or re.fullmatch(r"-[^\s]+", text) or ":=" in text:
+        raise RenderError(
+            "unparseable_source_argument",
+            f"{what} is simp syntax rather than an explicit_rw term: {text!r}",
+        )
     if "by " in text or text.strip().endswith(" by"):
         raise RenderError("term_has_by", f"{what} contains a `by` block: {text!r}")
     return text.strip()
@@ -164,7 +172,7 @@ def atomize(term: str) -> str:
     return f"({term})"
 
 
-def render_close(close: Any) -> str:
+def render_close(close: Any, introduced: dict[str, int] | None = None) -> str:
     """Map a spec `close` object onto a T2 side-proof / closer.
 
     The mapping is exactly the one T2 documents: the tactic offers no `trivial`
@@ -181,15 +189,218 @@ def render_close(close: Any) -> str:
     if by == "true_intro":
         return "exact True.intro"
     if by.startswith("assumption:"):
-        return "exact " + check_name(by[len("assumption:") :], "close.by assumption")
+        name = by[len("assumption:") :]
+        if introduced and name in introduced:
+            return f"exact introduced_ref {introduced[name]}"
+        return "exact " + check_name(name, "close.by assumption")
     if by.startswith("absurd:"):
-        return "exact " + check_name(by[len("absurd:") :], "close.by absurd") + ".elim"
+        name = by[len("absurd:") :]
+        if introduced and name in introduced:
+            return f"exact (introduced_ref {introduced[name]}).elim"
+        return "exact " + check_name(name, "close.by absurd") + ".elim"
     if by.startswith("unresolved:"):
         raise RenderError("unresolved_close", f"close.by is {by!r}", side="t1")
     raise RenderError("unknown_close", f"close.by {by!r} is not a spec close form")
 
 
-def render_side(side: Any, depth: int) -> str:
+DERIVATION_SOURCES = {"simp-argument", "local-evidence", "operational", "congr"}
+DERIVATION_CLASSIFICATIONS = {"matched", "instance", "discharge", "congruence"}
+DERIVATION_OPERATIONS = {
+    "direct_eq",
+    "iff_propext",
+    "prop_to_true",
+    "not_to_false",
+    "conjunction_left",
+    "conjunction_right",
+    "conjunction_projection",
+    "reverse",
+    "congruence",
+}
+
+
+def source_argument(source_text: Any, source_args: Any, arg_id: Any) -> tuple[str, str]:
+    """Read one source argument by T22's direct identity and source span.
+
+    The producer records Unicode-scalar ``startChar``/``endChar`` ranges in the
+    module source.  The renderer does not parse ``callText`` or infer an
+    argument ordinal: it selects the recorded ``argId`` and slices that exact
+    span.  ``direction`` is metadata, not reconstructed from theorem names.
+    """
+    if not isinstance(source_text, str):
+        raise RenderError("missing_source_text", "source argument needs the original module source")
+    if not isinstance(source_args, list):
+        raise RenderError("missing_source_args", "trace site has no T22 sourceArgs array")
+    if not isinstance(arg_id, int) or isinstance(arg_id, bool) or arg_id < 0:
+        raise RenderError("bad_source_arg", f"derivation.argId is invalid: {arg_id!r}")
+    matches = [entry for entry in source_args
+               if isinstance(entry, dict) and entry.get("argId") == arg_id]
+    if len(matches) != 1:
+        raise RenderError("source_arg_identity", f"T22 sourceArgs has {len(matches)} entries for argId {arg_id}")
+    entry = matches[0]
+    start, end = entry.get("startChar"), entry.get("endChar")
+    direction = entry.get("direction")
+    if (not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(end, int) or isinstance(end, bool)
+            or start < 0 or end < start or end > len(source_text)):
+        raise RenderError("bad_source_span", f"sourceArgs[{arg_id}] has invalid span {start!r}:{end!r}")
+    if direction not in ("fwd", "rev"):
+        raise RenderError("bad_source_direction", f"sourceArgs[{arg_id}].direction is {direction!r}")
+    term = source_text[start:end].strip()
+    # Source syntax accepts Unicode `↦`, while ExplicitRw's term grammar
+    # admits the equivalent ASCII lambda arrow. This is a syntax-only
+    # normalization of the authenticated direct span, not reconstruction.
+    term = term.replace("↦", "=>")
+    if direction == "rev":
+        if term.startswith("←"):
+            term = term[1:].lstrip()
+        elif term.startswith("<-"):
+            term = term[2:].lstrip()
+        else:
+            raise RenderError("source_direction_mismatch", f"sourceArgs[{arg_id}] is rev but its span has no reverse marker")
+    elif term.startswith("←") or term.startswith("<-"):
+        raise RenderError("source_direction_mismatch", f"sourceArgs[{arg_id}] is fwd but its span has a reverse marker")
+    return term, direction
+
+
+def _validate_derivation(step: dict, derivation: Any, source_text: Any,
+                         source_args: Any,
+                         operational: bool,
+                         depth: int = 0) -> dict:
+    """Validate the term-free T16 contract before rendering a theorem step."""
+    if not isinstance(derivation, dict):
+        raise RenderError("bad_derivation", "rw.derivation is not an object", side="t1")
+    if not isinstance(derivation.get("origin"), str) or not derivation["origin"]:
+        raise RenderError("bad_derivation", "derivation.origin is not a non-empty string", side="t1")
+    source = derivation.get("source")
+    if source is not None and source not in DERIVATION_SOURCES:
+        raise RenderError("bad_derivation_source", f"derivation.source {source!r} is not recognised", side="t1")
+    derivation_direction = derivation.get("direction")
+    if derivation_direction is not None and derivation_direction not in ("fwd", "rev"):
+        raise RenderError("bad_derivation_direction", f"derivation.direction is {derivation_direction!r}", side="t1")
+    arg_id = derivation.get("argId")
+    if source != "simp-argument" and arg_id is not None:
+        raise RenderError("bad_source_arg", "argId is present without source=simp-argument", side="t1")
+    preprocess = derivation.get("preprocess", [])
+    if not isinstance(preprocess, list) or not all(isinstance(op, str) for op in preprocess):
+        raise RenderError("bad_preprocess", "derivation.preprocess is not an array of strings", side="t1")
+    if any(op not in DERIVATION_OPERATIONS for op in preprocess):
+        unknown = next(op for op in preprocess if op not in DERIVATION_OPERATIONS)
+        raise RenderError("unknown_preprocess", f"unknown derivation operation {unknown!r}", side="t1")
+    reverse_count = preprocess.count("reverse")
+    non_reverse = [op for op in preprocess if op != "reverse"]
+    if source == "operational":
+        # Simproc provenance is carried by the nested `simproc` object; it has
+        # no theorem preprocessing operation to replay.
+        if preprocess:
+            raise RenderError("bad_preprocess", "operational derivation must not carry theorem preprocessing", side="t1")
+    elif reverse_count > 1 or len(non_reverse) != 1:
+        raise RenderError("bad_preprocess", "derivation needs exactly one non-reverse operation", side="t1")
+
+    extra = derivation.get("extraArgs", 0)
+    if not isinstance(extra, int) or isinstance(extra, bool) or extra < 0:
+        raise RenderError("bad_extra_args", f"derivation.extraArgs is invalid: {extra!r}", side="t1")
+    pos = step.get("pos")
+    redex = derivation.get("redex")
+    if not isinstance(redex, list) or not all(isinstance(i, int) and not isinstance(i, bool) and i >= 0 for i in redex):
+        raise RenderError("bad_redex", f"derivation.redex is invalid: {redex!r}", side="t1")
+    # T16 records the already-adjusted application position in `redex`; the
+    # separate extraArgs count is provenance only. Proposition derivations
+    # retain the theorem's empty application redex while the enclosing step
+    # position selects the proposition, so T17 consumes that pair directly.
+    # Never append a function spine here (Option.orElse and prefix-function
+    # rules use the recorded position).
+    prop_redex = any(op in preprocess for op in ("prop_to_true", "not_to_false"))
+    if (not isinstance(pos, list)
+            or (depth == 0 and redex != pos
+                and not (prop_redex and redex == []))):
+        raise RenderError("redex_mismatch", "derivation.redex does not match the step position", side="t1")
+
+    binders = derivation.get("binders", [])
+    if not isinstance(binders, list):
+        raise RenderError("bad_binders", "derivation.binders is not an array", side="t1")
+    binder_ids: list[int] = []
+    classifications: list[str] = []
+    for binder in binders:
+        if not isinstance(binder, dict):
+            raise RenderError("bad_binder", "derivation binder is not an object", side="t1")
+        ident = binder.get("id")
+        classification = binder.get("classification")
+        if not isinstance(ident, int) or isinstance(ident, bool) or ident < 0 or ident >= len(binders):
+            raise RenderError("binder_out_of_range", f"binder id {ident!r} is outside the binder array", side="t1")
+        if ident in binder_ids:
+            raise RenderError("duplicate_binder", f"binder id {ident} occurs more than once", side="t1")
+        if classification not in DERIVATION_CLASSIFICATIONS:
+            raise RenderError("bad_binder_classification", f"binder classification {classification!r} is not recognised", side="t1")
+        binder_ids.append(ident)
+        classifications.append(classification)
+
+    discharge = derivation.get("discharge", [])
+    if not isinstance(discharge, list):
+        raise RenderError("bad_discharge", "derivation.discharge is not an array", side="t1")
+    discharge_ids = [ident for ident, cls in zip(binder_ids, classifications) if cls == "discharge"]
+    observed_discharge: list[int] = []
+    for item in discharge:
+        if not isinstance(item, dict):
+            raise RenderError("bad_discharge", "discharge entry is not an object", side="t1")
+        ident = item.get("binder")
+        if ident not in binder_ids or ident in observed_discharge or not isinstance(item.get("provenance"), str):
+            raise RenderError("bad_discharge", f"discharge binder {ident!r} is invalid", side="t1")
+        observed_discharge.append(ident)
+    if observed_discharge != discharge_ids:
+        raise RenderError("discharge_mismatch", "discharge entries do not match discharge binders in order", side="t1")
+
+    side = step.get("side", [])
+    if not isinstance(side, list):
+        raise RenderError("side_mismatch", "side traces are not an array", side="t1")
+    congruence_ids = [ident for ident, cls in zip(binder_ids, classifications)
+                      if cls == "congruence"]
+    expected_side_count = (1 if source == "operational"
+                           else len(congruence_ids) if source == "congr"
+                           else len(discharge_ids))
+    if len(side) != expected_side_count:
+        raise RenderError("side_mismatch", "side traces do not pair with recorded binders", side="t1")
+    if source == "operational":
+        simproc = derivation.get("simproc")
+        if not isinstance(simproc, dict):
+            raise RenderError("bad_simproc", "operational derivation has no simproc record", side="t1")
+        sim_source = simproc.get("source")
+        if sim_source not in ("reduceIte", "reduceDIte"):
+            raise RenderError("bad_simproc", f"simproc.source is {sim_source!r}", side="t1")
+        if simproc.get("redex") != pos or simproc.get("extraArgs") != extra:
+            raise RenderError("simproc_mismatch", "simproc redex/extraArgs disagree with the rule derivation", side="t1")
+        if simproc.get("branch") not in ("true", "false"):
+            raise RenderError("bad_simproc", f"simproc.branch is {simproc.get('branch')!r}", side="t1")
+        expected_constructor = ("ite_cond_eq_" if sim_source == "reduceIte"
+                                else "dite_cond_eq_") + simproc["branch"]
+        if simproc.get("constructor") != expected_constructor:
+            raise RenderError("bad_simproc", "simproc.constructor disagrees with source/branch", side="t1")
+    if source == "simp-argument":
+        _, source_direction = source_argument(source_text, source_args, arg_id)
+        if derivation_direction is not None and derivation_direction != source_direction:
+            raise RenderError("direction_mismatch", "derivation.direction disagrees with T22 sourceArgs.direction", side="t1")
+    elif source == "local-evidence":
+        local = step.get("local")
+        if not isinstance(local, dict) or not isinstance(step.get("name"), str):
+            raise RenderError("bad_local_evidence", "local-evidence lacks its stable local reference", side="t1")
+    prop = step.get("prop")
+    projected_prop = any(op in preprocess for op in
+                         ("conjunction_left", "conjunction_right",
+                          "conjunction_projection"))
+    mapped_prop = ("true" if "prop_to_true" in preprocess
+                   else "false" if "not_to_false" in preprocess
+                   else prop if projected_prop and prop in ("true", "false")
+                   else None)
+    if mapped_prop is not None and prop is not None and prop != mapped_prop:
+        raise RenderError("prop_mismatch", "step.prop disagrees with preprocess", side="t1")
+    if mapped_prop is None and prop is not None and preprocess:
+        raise RenderError("prop_mismatch", "step.prop is present for a non-proposition preprocess operation", side="t1")
+    return {"preprocess": preprocess, "source": source, "arg_id": arg_id,
+            "extra_args": extra, "binders": binders, "discharge": discharge}
+
+
+def render_side(side: Any, depth: int, source_text: Any = None,
+                source_args: Any = None, operational: bool = False,
+                introduced: dict[str, int] | None = None) -> str:
     """Render one entry of a conditional lemma's `side` array.
 
     A side trace has the same `steps`/`close` shape as a location, plus optional
@@ -203,18 +414,32 @@ def render_side(side: Any, depth: int) -> str:
     intros = side.get("intros") or []
     if not isinstance(intros, list):
         raise RenderError("bad_side", f"side.intros is not a list: {intros!r}")
+    introduced = dict(introduced or {})
     prefix = ""
-    for name in intros:
-        prefix += "intro " + check_name(name, "side.intros entry") + " ; "
+    for handle, name in enumerate(intros):
+        # This is a recorder label used only to connect `assumption:` closes
+        # and contextual locals to the deterministic handle.  It may be an
+        # inaccessible or hygienic display name; it is never emitted.
+        if not isinstance(name, str) or not name:
+            raise RenderError("bad_intro_name", f"side.intros entry is not a name: {name!r}", side="t1")
+        if name in introduced:
+            raise RenderError("duplicate_introduced_name", f"side.intros repeats {name!r}", side="t1")
+        introduced[name] = handle
+        prefix += f"intro_ref {handle} ; "
 
     steps = side.get("steps") or []
     close = side.get("close")
     if steps:
-        body = "explicit_rw [" + ", ".join(render_step(s, depth + 1) for s in steps) + "]"
+        body = "explicit_rw [" + ", ".join(
+            render_step(s, depth + 1, source_text=source_text,
+                        source_args=source_args, operational=operational,
+                        introduced=introduced)
+            for s in steps
+        ) + "]"
         if close is not None:
-            body += " then " + render_close(close)
+            body += " then " + render_close(close, introduced)
     elif close is not None:
-        body = render_close(close)
+        body = render_close(close, introduced)
     else:
         # No steps and no close discharges nothing; the recorder owes one.
         raise RenderError(
@@ -223,37 +448,122 @@ def render_side(side: Any, depth: int) -> str:
     return prefix + body
 
 
-def render_rw(step: dict, depth: int) -> str:
+def _render_local(step: dict, introduced: dict[str, int]) -> str:
+    local = step.get("local")
+    if not isinstance(local, dict):
+        raise RenderError("missing_local", "local-evidence rw has no local reference", side="t1")
+    ctx_index = local.get("ctxIndex")
+    if not isinstance(ctx_index, int) or isinstance(ctx_index, bool) or ctx_index < 0:
+        raise RenderError("bad_local_ref", f"local.ctxIndex is invalid: {ctx_index!r}", side="t1")
+    if local.get("contextual") is True:
+        name = step.get("name")
+        handle = introduced.get(name) if isinstance(name, str) else None
+        if handle is None:
+            raise RenderError("missing_introduced_ref", f"contextual local {name!r} has no side intro handle", side="t1")
+        return f"introduced_ref {handle}"
+    if local.get("inaccessible") not in (True, False):
+        raise RenderError("bad_local_ref", "local.inaccessible is not boolean", side="t1")
+    user_name = local.get("userName")
+    name = step.get("name")
+    result = f"local_ref {ctx_index}"
+    if local.get("inaccessible") is True:
+        return result
+    if isinstance(user_name, str) and isinstance(name, str) and name != user_name:
+        prefix = user_name + "."
+        if not name.startswith(prefix):
+            raise RenderError("local_name_mismatch", f"local name {name!r} does not extend {user_name!r}", side="t1")
+        suffix = name[len(prefix):]
+        if not suffix or any(part == "" or not part.isdigit() for part in suffix.split(".")):
+            raise RenderError("bad_local_projection", f"local projection suffix is not numeric: {suffix!r}", side="t1")
+        result += " " + "".join("." + part for part in suffix.split("."))
+    return result
+
+
+def render_rw(step: dict, depth: int, source_text: Any = None,
+              source_args: Any = None, operational: bool = False,
+              introduced: dict[str, int] | None = None) -> str:
     """`[← ]<term> at [pos][ with [...]]`.
 
-    The `prop` flag is the spec's `p = True` / `¬p = False` convention: simp
-    uses a Prop-valued fact as an equation, and replay writes the ordinary
-    lemma `eq_true`/`eq_false` around it. `args` are the explicit arguments the
-    recorder captured, each parenthesised when compound.
+    Legacy v1 `prop` steps use `eq_true`/`eq_false`; operational T16 derivations
+    map proposition preprocessing to T17's fixed-redex `prop_true`/`prop_false`.
+    Source-backed terms are taken verbatim from the T22 source span.
     """
-    term = check_name(step.get("name"), "rw.name")
+    derivation = step.get("derivation")
+    if operational and derivation is None:
+        raise RenderError("missing_derivation", "fresh operational theorem rw has no derivation", side="t1")
+    details = (_validate_derivation(step, derivation, source_text, source_args, operational, depth)
+               if derivation is not None else None)
+    preprocess = details["preprocess"] if details else []
+    introduced = dict(introduced or {})
+    if details and details["source"] == "simp-argument":
+        term, source_direction = source_argument(source_text, source_args, details["arg_id"])
+        term = check_term(term, "manifest simp argument")
+        if step.get("dir") not in (None, source_direction):
+            raise RenderError("direction_mismatch", "rw.dir disagrees with T22 sourceArgs.direction", side="t1")
+    else:
+        if details and details["source"] == "local-evidence":
+            term = _render_local(step, introduced)
+        else:
+            term = check_name(step.get("name"), "rw.name")
+        if details is None and step.get("prop") is not None:
+            if step["prop"] not in ("true", "false"):
+                raise RenderError("bad_prop", f"rw.prop is {step['prop']!r}, not 'true'/'false'")
+            term = ("eq_true " if step["prop"] == "true" else "eq_false ") + atomize(term)
+        # Operational theorem derivations never reuse the old recorder's
+        # guessed/pretty-printed args for declaration origins. Matched and
+        # instance binders are recovered by ExplicitRw at the fixed redex;
+        # local-evidence keeps the established local reference/projection path.
+        if details is None or details["source"] == "local-evidence":
+            for arg in step.get("args") or []:
+                term += " " + atomize(check_term(arg, "rw.args entry"))
+
     prop = step.get("prop")
-    if prop is not None:
+    projected_prop = any(op in preprocess for op in
+                         ("conjunction_left", "conjunction_right",
+                          "conjunction_projection"))
+    mapped_prop = ("true" if "prop_to_true" in preprocess
+                   else "false" if "not_to_false" in preprocess
+                   else prop if projected_prop and prop in ("true", "false")
+                   else None)
+    if mapped_prop is not None:
+        term = ("prop_true " if mapped_prop == "true" else "prop_false ") + atomize(term)
+    elif prop is not None and details is not None:
         if prop not in ("true", "false"):
             raise RenderError("bad_prop", f"rw.prop is {prop!r}, not 'true'/'false'")
+        # Legacy v1 traces use eq_true/eq_false. Operational T16 traces use
+        # the proposition-specific T17 forms above.
         term = ("eq_true " if prop == "true" else "eq_false ") + atomize(term)
-    for arg in step.get("args") or []:
-        term += " " + atomize(check_term(arg, "rw.args entry"))
 
     direction = step.get("dir", "fwd")
     if direction not in ("fwd", "rev"):
         raise RenderError("bad_dir", f"rw.dir is {direction!r}, not 'fwd'/'rev'")
+    if details and details["source"] == "simp-argument":
+        _, source_direction = source_argument(source_text, source_args, details["arg_id"])
+        direction = source_direction
+    if "reverse" in preprocess:
+        if step.get("dir") not in (None, "fwd", "rev"):
+            raise RenderError("bad_dir", f"rw.dir is {step.get('dir')!r}")
+        direction = "rev"
+    # A source argument is already written in the exact syntax supplied to
+    # `simp`; only its leading direction marker was peeled above. Do not
+    # atomize or re-pretty-print it, since this is the source-of-truth path.
     out = ("← " if direction == "rev" else "") + term + " " + render_pos(step.get("pos"))
 
     sides = step.get("side")
     if sides:
         if not isinstance(sides, list):
             raise RenderError("bad_side", f"rw.side is not a list: {sides!r}")
-        out += " with [" + ", ".join(render_side(s, depth) for s in sides) + "]"
+        out += " with [" + ", ".join(
+            render_side(s, depth, source_text=source_text, source_args=source_args,
+                        operational=operational, introduced=introduced)
+            for s in sides
+        ) + "]"
     return out
 
 
-def render_step(step: Any, depth: int = 0) -> str:
+def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
+                source_args: Any = None, operational: bool = False,
+                introduced: dict[str, int] | None = None) -> str:
     """Render one STEP of the spec into one `explicit_rw` step."""
     if not isinstance(step, dict):
         raise RenderError("bad_step", f"step is not an object: {step!r}")
@@ -264,7 +574,8 @@ def render_step(step: Any, depth: int = 0) -> str:
         raise RenderError("unknown_kind", f"step kind {kind!r} is not in the spec")
 
     if kind == "rw":
-        return render_rw(step, depth)
+        return render_rw(step, depth, source_text=source_text, source_args=source_args,
+                         operational=operational, introduced=introduced)
     if kind == "unfold":
         return "unfold " + check_name(step.get("name"), "unfold.name") + " " + render_pos(
             step.get("pos")
@@ -307,7 +618,10 @@ def render_step(step: Any, depth: int = 0) -> str:
                 f"congr nested {depth + 1} levels; the tactic grammar admits 2",
                 side="t2",
             )
-        inner = ", ".join(render_step(s, depth + 1) for s in nested)
+        inner = ", ".join(render_step(s, depth + 1, source_text=source_text,
+                                        source_args=source_args,
+                                        operational=operational,
+                                        introduced=introduced) for s in nested)
         return f"congr {arg} [{inner}] " + render_pos(step.get("pos"))
     # intro_ctx
     raise RenderError(
@@ -321,10 +635,8 @@ def render_step(step: Any, depth: int = 0) -> str:
 def collect_inaccessible(steps: list, out: list) -> None:
     """Collect, in first-use order, the `ctxIndex` of every inaccessible local.
 
-    The spec makes `ctxIndex` a `LocalDecl.index` that identifies a declaration;
-    it is explicitly *not* a `rename_i` argument. A generator derives `rename_i`
-    names from the order of inaccessible declarations in the context, so the
-    ordering here is by context index, not by first use.
+    Retained for callers that inspect old v1 traces.  T23's indexed local
+    handles mean the product renderer no longer emits ``rename_i`` names.
     """
     for step in steps:
         if not isinstance(step, dict):
@@ -340,7 +652,8 @@ def collect_inaccessible(steps: list, out: list) -> None:
         collect_inaccessible(step.get("steps") or [], out)
 
 
-def render_location(loc: dict, depth: int = 0) -> tuple[str, str | None]:
+def render_location(loc: dict, depth: int = 0, *, source_text: Any = None,
+                    source_args: Any = None, operational: bool = False) -> tuple[str, str | None]:
     """Render one location as (`explicit_rw` body, location clause or None)."""
     if not isinstance(loc, dict):
         raise RenderError("bad_location", f"location is not an object: {loc!r}")
@@ -355,7 +668,11 @@ def render_location(loc: dict, depth: int = 0) -> tuple[str, str | None]:
     steps = loc.get("steps")
     if not isinstance(steps, list):
         raise RenderError("bad_location", f"location steps is not a list: {steps!r}")
-    body = "explicit_rw [" + ", ".join(render_step(s, depth) for s in steps) + "]"
+    body = "explicit_rw [" + ", ".join(
+        render_step(s, depth, source_text=source_text, source_args=source_args,
+                    operational=operational, introduced={})
+        for s in steps
+    ) + "]"
     if clause:
         body += " " + clause
     close = loc.get("close")
@@ -374,7 +691,8 @@ def render_location(loc: dict, depth: int = 0) -> tuple[str, str | None]:
     return body, clause
 
 
-def render_trace(trace: dict) -> tuple[list[str], list[int]]:
+def render_trace(trace: dict, *, source_text: Any = None,
+                 operational: bool | None = None) -> tuple[list[str], list[int]]:
     """Render a whole trace.
 
     Returns one `explicit_rw` line per location, in order, plus the ordered
@@ -392,12 +710,18 @@ def render_trace(trace: dict) -> tuple[list[str], list[int]]:
     if not isinstance(locations, list) or not locations:
         raise RenderError("bad_trace", "trace has no locations")
 
-    inaccessible: list[int] = []
-    for loc in locations:
-        if isinstance(loc, dict):
-            collect_inaccessible(loc.get("steps") or [], inaccessible)
-    lines = [render_location(loc)[0] for loc in locations]
-    return lines, sorted(inaccessible)
+    if operational is None:
+        operational = trace.get("schema") == "simp-trace-v2"
+    source_args = None
+    site = trace.get("site")
+    if isinstance(site, dict):
+        source_args = site.get("sourceArgs")
+    lines = [render_location(loc, source_text=source_text, source_args=source_args,
+                             operational=operational)[0]
+             for loc in locations]
+    # T23 indexed local handles make inaccessible locals directly replayable;
+    # no generated rename_i names or pretty-printed local names are needed.
+    return lines, []
 
 
 def unresolved_reason(trace: dict) -> str | None:

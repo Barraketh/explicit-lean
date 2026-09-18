@@ -95,7 +95,7 @@
                      {"intros": ["hc"], "pre": "c → x = u", "post": null,
                       "steps": [{"kind": "rw", "pos": [0], "name": "hx", "dir": "fwd"}],
                       "close": {"by": "rfl"}}]},
-   "expect": "ite_congr at [] with [rfl, intro hc ; explicit_rw [hx at [0]] then rfl]"
+    "expect": "ite_congr at [] with [rfl, intro_ref 0 ; explicit_rw [hx at [0]] then rfl]"
   },
   {
    "name": "rw_side_omega",

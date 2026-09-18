@@ -11,9 +11,10 @@ Per module, in five stages:
    a fresh T4-owned run tree, redirect generated trace paths into that tree,
    compile with T1's Lean environment, and finalize only its raw outputs.
 2. **Render.** Translate each trace into replacement source text for its site:
-   the original call preserved as a comment, a `rename_i` line when any used
-   local is inaccessible, then one `explicit_rw` per location. Complete
-   multi-invocation sites are expanded into the source branch spine's leaves.
+   the original call preserved as a comment, deterministic indexed local and
+   introduced handles where provenance requires them, then one `explicit_rw`
+   per location. Complete multi-invocation sites are expanded into the source
+   branch spine's leaves.
 3. **Splice.** Write the translated module with every site replaced and
    `import ExplicitLean.ExplicitRw` added after the existing imports.
 4. **Compile.** `lake env lean` the translated file in the T2 worktree, whose
@@ -537,7 +538,10 @@ def _structural_replacement(source: str, site: S.Site,
             raise R.RenderError("unresolved:" + reason,
                                 "an invocation is unresolved: " + reason,
                                 side="t1")
-        bodies, inaccessible = R.render_trace(record)
+        bodies, inaccessible = R.render_trace(
+            record, source_text=source,
+            operational=(record.get("schema") == "simp-trace-v2")
+        )
         if inaccessible:
             raise R.RenderError("structural_refused", "inaccessible locals need branch-specific names",
                                 side="harness")
@@ -680,7 +684,9 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
         )
 
     try:
-        bodies, inaccessible = R.render_trace(trace)
+        bodies, inaccessible = R.render_trace(
+            trace, source_text=source, operational=(trace.get("schema") == "simp-trace-v2")
+        )
     except R.RenderError as exc:
         return keep_original(
             f"render_failed:{exc.reason}", exc.detail, exc.side

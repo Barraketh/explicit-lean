@@ -441,6 +441,149 @@ def mapping_tests(f: Failures) -> None:
             "an unrelated diagnostic was selected")
 
 
+def derivation_tests(f: Failures) -> None:
+    """T19's term-free theorem derivation contract and refusal fixtures."""
+    def step(op: str = "direct_eq", *, source: str | None = "simp-argument",
+             source_arg: int | None = 0, pos: list[int] | None = None,
+             redex: list[int] | None = None, extra: int = 0,
+             binders: list[dict] | None = None, discharge: list[dict] | None = None,
+             side: list[dict] | None = None, name: str = "lemma",
+             args: list[str] | None = None, direction: str = "fwd",
+             prop: str | None = None, include_derivation: bool = True) -> dict:
+        pos = [] if pos is None else pos
+        d = {"origin": "decl:lemma", "preprocess": [op], "redex": pos if redex is None else redex,
+             "extraArgs": extra, "binders": binders or [], "discharge": discharge or []}
+        if source is not None:
+            d["source"] = source
+        if source_arg is not None:
+            d["argId"] = source_arg
+        result = {"kind": "rw", "pos": pos, "name": name, "dir": direction,
+                  "side": side or [], "args": args or []}
+        if prop is not None:
+            result["prop"] = prop
+        if include_derivation:
+            result["derivation"] = d
+        return result
+
+    source = "foo, if_neg (fun h => h), H.eq, H.1, H.2"
+    source_args = [
+        {"argId": 0, "startChar": 0, "endChar": 3, "direction": "fwd"},
+        {"argId": 1, "startChar": 5, "endChar": 24, "direction": "fwd"},
+        {"argId": 2, "startChar": 26, "endChar": 30, "direction": "fwd"},
+        {"argId": 3, "startChar": 32, "endChar": 35, "direction": "fwd"},
+        {"argId": 4, "startChar": 37, "endChar": 40, "direction": "fwd"},
+    ]
+    cases = [
+        ("direct_eq", step(), "foo at []"),
+        ("iff_propext", step("iff_propext"), "foo at []"),
+        ("prop_true", step("prop_to_true", prop="true"), "prop_true foo at []"),
+        ("prop_false", step("not_to_false", prop="false"), "prop_false foo at []"),
+        ("conjunction_left", step("conjunction_left", source_arg=3), "H.1 at []"),
+        ("conjunction_right", step("conjunction_right", source_arg=4), "H.2 at []"),
+        ("reverse", dict(step("direct_eq", direction="fwd"),
+                          derivation={**step("direct_eq")["derivation"],
+                                      "preprocess": ["reverse", "direct_eq"]}), "← foo at []"),
+        ("extra_args_no_payload", step(source=None, source_arg=None, extra=1,
+                                        args=["forged_payload"]), "lemma at []"),
+        ("extra_args_option_or_else", step(source=None, source_arg=None, extra=2,
+                                            pos=[0, 1, 0, 1, 0, 0],
+                                            name="Option.orElse_eq_orElse"),
+         "Option.orElse_eq_orElse at [0, 1, 0, 1, 0, 0]"),
+        ("extra_args_function_prefix", step(source=None, source_arg=None, extra=1,
+                                             pos=[0, 1, 0], name="Function.update_of_ne"),
+         "Function.update_of_ne at [0, 1, 0]"),
+    ]
+    for name, value, expected in cases:
+        try:
+            f.equal("derivation/" + name,
+                    R.render_step(value, source_text=source, source_args=source_args,
+                                  operational=True), expected)
+        except R.RenderError as exc:
+            f.check("derivation/" + name, False, f"raised {exc}")
+
+    # Source syntax is taken verbatim, including a lambda proof; no stored args
+    # or proof expression can replace it. Named-argument syntax is deliberately
+    # refused by ExplicitRw's term whitelist.
+    source_lambda = step(source_arg=1)
+    f.equal("derivation/source_lambda_exact",
+            R.render_step(source_lambda, source_text=source, source_args=source_args,
+                          operational=True),
+            "if_neg (fun h => h) at []")
+    reversed_source = step("direct_eq", direction="fwd")
+    try:
+        R.render_step(reversed_source, source_text="← foo", source_args=[
+            {"argId": 0, "startChar": 0, "endChar": 5, "direction": "rev"}],
+            operational=True)
+        f.check("derivation/reverse_direction_mismatch", False,
+                "reversed source syntax was accepted with a forward trace direction")
+    except R.RenderError as exc:
+        f.equal("derivation/reverse_direction_mismatch", exc.reason,
+                "direction_mismatch")
+    matching_reverse = step("direct_eq", direction="rev")
+    f.equal("derivation/reverse_source_matching_direction",
+            R.render_step(matching_reverse, source_text="← foo", source_args=[
+                {"argId": 0, "startChar": 0, "endChar": 5, "direction": "rev"}],
+                operational=True),
+            "← foo at []")
+    unparseable = step(source_arg=0)
+    try:
+        R.render_step(unparseable, source_text="foo := bar", source_args=[
+            {"argId": 0, "startChar": 0, "endChar": 10, "direction": "fwd"}],
+            operational=True)
+        f.check("derivation/unparseable_source", False, "named argument was accepted")
+    except R.RenderError as exc:
+        f.equal("derivation/unparseable_source/reason", exc.reason,
+                "unparseable_source_argument")
+
+    local = step(source="local-evidence", source_arg=None, name="H.1",
+                 args=[], binders=[])
+    local["local"] = {"userName": "H", "inaccessible": False, "ctxIndex": 2}
+    f.equal("derivation/local_projection", R.render_step(local, operational=True),
+            "local_ref 2 .1 at []")
+
+    discharge = [{"id": 0, "classification": "discharge"}]
+    nested = step(binders=discharge, discharge=[{"binder": 0, "provenance": "configured-or-default"}],
+                  side=[{"pre": "p", "post": None,
+                          "steps": [step(source=None, source_arg=None, name="side")],
+                          "close": {"by": "rfl"}}])
+    f.equal("derivation/nested_discharge",
+            R.render_step(nested, source_text=source, source_args=source_args,
+                          operational=True),
+            "foo at [] with [explicit_rw [side at []] then rfl]")
+
+    refusals = [
+        ("missing", step(include_derivation=False), "missing_derivation"),
+        ("redex", step(redex=[1]), "redex_mismatch"),
+        ("duplicate_binder", step(binders=[{"id": 0, "classification": "matched"},
+                                               {"id": 0, "classification": "instance"}]), "duplicate_binder"),
+        ("binder_range", step(binders=[{"id": 1, "classification": "matched"}]), "binder_out_of_range"),
+        ("binder_class", step(binders=[{"id": 0, "classification": "other"}]), "bad_binder_classification"),
+        ("unknown_op", step("unknown"), "unknown_preprocess"),
+        ("source_ordinal", step(source_arg=8), "source_arg_identity"),
+        ("side_pairing", step(binders=[{"id": 0, "classification": "discharge"}],
+                               discharge=[{"binder": 0, "provenance": "x"}], side=[]), "side_mismatch"),
+    ]
+    for name, value, reason in refusals:
+        try:
+            R.render_step(value, source_text=source, source_args=source_args,
+                          operational=True)
+            f.check("derivation/refusal_" + name, False, "did not refuse")
+        except R.RenderError as exc:
+            f.equal("derivation/refusal_" + name, exc.reason, reason)
+
+    # Every refusal retains the original call through the pipeline site path.
+    source = "import A\nexample : True := by\n  simp [foo]\n"
+    site = S.find_sites(source)[0]
+    refused = P.render_site(site, {"schema": "simp-trace-v2", "locations": [
+        {"loc": "goal", "steps": [{**step(redex=[1])}], "close": None}
+    ]}, source)
+    f.equal("derivation/refusal_retains_original", refused["status"],
+            "render_failed:redex_mismatch")
+    f.check("derivation/refusal_original_present",
+            any(site.text in line for line in refused["lines"]),
+            "original call was not retained")
+
+
 def summary_tests(f: Failures) -> None:
     """Summary rows expose every status and reconcile to site totals."""
     report = {
@@ -766,7 +909,10 @@ def end_to_end_test(f: Failures, t1: pathlib.Path, t2: pathlib.Path) -> None:
                 f"original is {rec['original']!r}")
 
         # A clean v2 producer output authenticates and permits rendering.
-        translated = out / "Mathlib" / "Logic" / "Nontrivial" / "Defs.lean"
+        translated_candidates = list(out.glob(
+            "trace-runs/**/translated/Mathlib/Logic/Nontrivial/Defs.lean"))
+        translated = translated_candidates[0] if translated_candidates else (
+            out / "Mathlib" / "Logic" / "Nontrivial" / "Defs.lean")
         f.equal("e2e/identity_accepted_v2", mod.get("identity", {}).get("identity"), "accepted")
         f.equal("e2e/identity_render_attempted",
                 mod.get("identity", {}).get("renderAttempted"), True)
@@ -807,6 +953,7 @@ def main() -> int:
     diagnostic_tests(f)
     invocation_tests(f)
     mapping_tests(f)
+    derivation_tests(f)
     summary_tests(f)
     identity_tests(f)
     lifecycle_tests(f)
