@@ -443,7 +443,11 @@ def manual_override_tests(f: Failures) -> None:
     """The cone's source overlays enter the real replay splice path."""
     mathlib = ROOT / ".lake" / "packages" / "mathlib"
     expected = {
-        "Mathlib/Logic/Basic.lean": {"c28dd19f3d6d3d67": 1},
+        "Mathlib/Logic/Basic.lean": {
+            "c28dd19f3d6d3d67": 1,
+            "42f1163b9fd99b7b": 1,
+            "8e17e105590e562a": 1,
+        },
         "Mathlib/Logic/Function/Basic.lean": {
             "bcd40e80cbe2ffe1": 1,
             "acca7bbba4fc669d": 1,
