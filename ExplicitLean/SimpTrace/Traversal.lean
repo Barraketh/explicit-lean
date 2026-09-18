@@ -73,6 +73,9 @@ structure EvCtx where
   lctx    : LocalContext := {}
   insts   : LocalInstances := {}
   binders : Array FVarId := #[]
+  /-- Stable recorder handles for binders introduced by a dependent-forall
+  transport currently being simplified. -/
+  introduced : Array (FVarId × Nat) := #[]
   deriving Inhabited
 
 mutual
@@ -116,6 +119,16 @@ inductive Event where
   need casts; ordinary arguments stay plain `rw` steps. -/
   | congr (pos : Pos) (arg : Nat) (steps : Array Event)
           (before after : Expr) (argBefore argAfter : Expr) (ctx : EvCtx)
+  /-- Dependent-forall transport.  The proposition-valued domain was rewritten
+  by `domain` and the dependent body was simplified after an explicit cast
+  substitution.  Both event arrays are rooted at their respective child, so
+  the consumer can issue T32's `transport forall ... body ... at ...` form
+  without reconstructing a proof or searching for a congruence theorem. -/
+  | transport (pos : Pos) (handle : Nat)
+          (domain body : Array Event)
+          (before after : Expr)
+          (domainBefore domainAfter bodyBefore bodyAfter : Expr)
+          (ctx : EvCtx)
 
 /-- A discharged side condition: the side goal, the events recorded while it
 was discharged, and the closing form (`rfl` / `true_intro` / `assumption:<n>` /
@@ -172,11 +185,13 @@ partial def Event.rebase (base : Pos) : Event → Event
   | .defeq p k n b a c => .defeq (base ++ p) k n b a c
   | .introCtx p f c => .introCtx (base ++ p) f c
   | .congr p i steps b a ab aa c => .congr (base ++ p) i steps b a ab aa c
+  | .transport p h domain body b a db da bb ba c =>
+    .transport (base ++ p) h domain body b a db da bb ba c
 
 /-- The position an event was logged at. -/
 def Event.pos : Event → Pos
   | Event.rw p .. | Event.eq p .. | Event.defeq p ..
-  | Event.introCtx p .. | Event.congr p .. => p
+  | Event.introCtx p .. | Event.congr p .. | Event.transport p .. => p
 
 /-- Replace an event's position. -/
 def Event.reposition (q : Pos) : Event → Event
@@ -185,6 +200,8 @@ def Event.reposition (q : Pos) : Event → Event
   | .defeq _ k n b a c => .defeq q k n b a c
   | .introCtx _ f c => .introCtx q f c
   | .congr _ i steps b a ab aa c => .congr q i steps b a ab aa c
+  | .transport _ h domain body b a db da bb ba c =>
+    .transport q h domain body b a db da bb ba c
 
 /-- Strip `base` from the front of an event's position, when it is a prefix.
 Used to make a side trace's steps relative to the side goal. -/
@@ -237,6 +254,10 @@ structure TraceState where
   descended under, outermost first.  Only *term* binders are pushed here:
   `+contextual`'s antecedent hypotheses bind no position in the running term. -/
   binders : Array FVarId := #[]
+  /-- Active stable handles for dependent-forall transport binders. -/
+  introduced : Array (FVarId × Nat) := #[]
+  /-- Next per-call stable handle. -/
+  nextHandle : Nat := 0
   /-- Firings diverted away from the trace, innermost frame last.
 
   A generic simproc may call opaque `Simp.simp` on a subterm of its own choosing;
@@ -352,7 +373,8 @@ just before handing control to stock code (so the recorder wrapper installed on
 /-- Capture the ambient local context and the traversal's binder stack. -/
 def captureEvCtx (ref : TraceRef) : MetaM EvCtx := do
   return { lctx := ← getLCtx, insts := ← getLocalInstances,
-           binders := (← ref.get).binders }
+           binders := (← ref.get).binders,
+           introduced := (← ref.get).introduced }
 
 /-- Descend under a term binder whose bound variable the traversal replaced by
 the free variable `x`, for the duration of `k`. -/
@@ -360,6 +382,20 @@ the free variable `x`, for the duration of `k`. -/
   let saved := (← ref.get).binders
   ref.modify fun s => { s with binders := s.binders.push x.fvarId! }
   try k finally ref.modify fun s => { s with binders := saved }
+
+/-! Stable handles are allocated at the dependent-forall construction point,
+not inferred later from names or proof terms. -/
+def freshIntroduced (ref : TraceRef) : SimpM Nat := do
+  let h := (← ref.get).nextHandle
+  ref.modify fun s => { s with nextHandle := h + 1 }
+  return h
+
+@[inline] def withIntroduced (ref : TraceRef) (handle : Nat) (x : Expr)
+    (k : SimpM α) : SimpM α := do
+  let some fvarId := x.fvarId? | k
+  let saved := (← ref.get).introduced
+  ref.modify fun s => { s with introduced := s.introduced.push (fvarId, handle) }
+  try k finally ref.modify fun s => { s with introduced := saved }
 
 /-- Run `k` with every event it logs diverted away from the trace.
 
@@ -1425,7 +1461,11 @@ partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Res
     else if (← isProp e) then
       let domain := e.bindingDomain!
       if (← isProp domain) then
-        let rd ← simpT ref (pos.push 0) domain
+        -- A propositional domain rewrite changes the type of the binder.  Run
+        -- both children at fresh roots so their exact event positions can be
+        -- exported as T32's nested domain/body lists; keeping them in the
+        -- outer stream would replay the substituted proof at the wrong term.
+        let (rd, domainEvents) ← captureEvents ref (simpT ref #[] domain)
         if let some h₁ := rd.proof? then
           -- `forall_prop_domain_congr` rewrites the body under a *substituted*
           -- binder (`h₁.substr a`), so the body simp sees is not the body at
@@ -1434,23 +1474,32 @@ partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Res
           let p₁ := domain
           let p₂ := rd.expr
           let q₁ := mkLambda e.bindingName! e.bindingInfo! p₁ e.bindingBody!
+          let handle ← freshIntroduced ref
+          let outerCtx ← captureEvCtx ref
           let result ← withLocalDecl e.bindingName! e.bindingInfo! p₂ fun a =>
-            withBinder ref a <| withNewLemmasT ref #[a] do
+            withBinder ref a <| withIntroduced ref handle a <| withNewLemmasT ref #[a] do
               let prop := mkSort Level.zero
               let h₁_substr_a := mkApp6 (mkConst ``Eq.substr [Level.one]) prop
                 (mkLambda `x .default prop (mkBVar 0)) p₂ p₁ h₁ a
               let q_h₁_substr_a := e.bindingBody!.instantiate1 h₁_substr_a
               let before := q_h₁_substr_a
-              let rb ← simpT ref (pos.push 1) q_h₁_substr_a
-              unless rb.expr == before do
-                ref.modify (·.markUnresolved
-                  "rewrite under `forall_prop_domain_congr` (substituted binder)")
+              let (rb, bodyEvents) ← captureEvents ref (simpT ref #[] q_h₁_substr_a)
               let h₂ ← mkLambdaFVars #[a] (← rb.getProof)
               let q₂ ← mkLambdaFVars #[a] rb.expr
               let result ← mkForallFVars #[a] rb.expr
               let proof := mkApp6 (mkConst ``forall_prop_domain_congr) p₁ p₂ q₁ q₂ h₁ h₂
+              -- This is the actual construction point of the dependent
+              -- transport.  The event carries only recorder metadata on the
+              -- wire; its Expr fields are used by the in-tactic validator.
+              ref.modify (·.push (.transport pos handle domainEvents bodyEvents e result
+                domain rd.expr before rb.expr outerCtx))
               return { expr := result, proof? := proof }
           return result
+        else
+          -- The domain may have only definitional progress.  It was captured
+          -- at a fresh root above, so restore those ordinary events at the
+          -- actual domain child when no dependent transport is constructed.
+          appendEvents ref (domainEvents.map (Event.rebase (pos.push 0)))
       let domain ← dsimpT ref (pos.push 0) domain
       withLocalDecl e.bindingName! e.bindingInfo! domain fun x =>
         withBinder ref x <| withNewLemmasT ref #[x] do

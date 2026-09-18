@@ -147,6 +147,15 @@ structure Step where
   arg?    : Option Nat := none
   /-- `congr` steps: the nested steps, with positions relative to `arg`. -/
   steps   : Array Step := #[]
+  /-- `transport` steps: the stable handle of the binder introduced while
+  simplifying the dependent body.  The handle is local to this trace call and
+  is never recovered from a printed name. -/
+  handle? : Option Nat := none
+  /-- `transport` steps: domain steps are rooted at the forall's domain. -/
+  domain  : Array Step := #[]
+  /-- `transport` steps: body steps are rooted at the forall's body, with the
+  introduced binder available through `introduced_ref handle`. -/
+  body    : Array Step := #[]
   before? : Option String := none
   after?  : Option String := none
   /-- Side-condition sub-traces, one per discharged hypothesis. -/
@@ -291,6 +300,13 @@ partial def Step.toJson (s : Step) : String :=
     ("steps", if s.kind != "congr" then none else
       some ("[" ++ String.intercalate ","
         (s.steps.toList.map Step.toJson) ++ "]")),
+    ("handle", if s.kind != "transport" then none else s.handle?.map toString),
+    ("domain", if s.kind != "transport" then none else
+      some ("[" ++ String.intercalate ","
+        (s.domain.toList.map Step.toJson) ++ "]")),
+    ("body", if s.kind != "transport" then none else
+      some ("[" ++ String.intercalate ","
+        (s.body.toList.map Step.toJson) ++ "]")),
     ("before", s.before?.map str),
     ("after", s.after?.map str),
     ("side", if s.side.isEmpty then none else

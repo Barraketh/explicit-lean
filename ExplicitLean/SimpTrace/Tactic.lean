@@ -78,6 +78,9 @@ replayer splice it after the lemma name and `rw [l if Q then a else b b]` is a
 parse error (REVIEW-8 4). -/
 def ppArg (c : EvCtx) (e : Expr) : MetaM String :=
   withLCtx c.lctx c.insts do
+    if let some (_, handle) := c.introduced.find? (fun (f, _) =>
+        e.isFVar && e.fvarId! == f) then
+      return s!"introduced_ref {handle}"
     let s ← withOptions (fun o =>
         ((o.setBool `pp.proofs true).setBool `pp.deepTerms true)) do
       pure (← ppExpr e).pretty
@@ -329,6 +332,14 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
     let nestedSteps ← nested.filterMapM (eventToStep ur contextualFVars)
     return some { kind := "congr", pos := pos, arg? := some arg,
                   steps := nestedSteps,
+                  before? := some beforePP, after? := some afterPP }
+  | .transport pos handle domain body before after _ _ _ _ c =>
+    let beforePP ← ppIn c before
+    let afterPP ← ppIn c after
+    let domainSteps ← domain.filterMapM (eventToStep ur contextualFVars)
+    let bodySteps ← body.filterMapM (eventToStep ur contextualFVars)
+    return some { kind := "transport", pos := pos, handle? := some handle,
+                  domain := domainSteps, body := bodySteps,
                   before? := some beforePP, after? := some afterPP }
 
 /-- Convert a discharged side condition into the spec's nested trace object. -/
@@ -826,6 +837,10 @@ partial def classifyEventTree (ur : IO.Ref Unresolved) (ev : Event) :
   | .congr _ _ nested _ _ argBefore argAfter c =>
     let nestedVerdicts ← validateNested ur c nested argBefore argAfter
     return .mk none #[] nestedVerdicts
+  | .transport _ _ domain body _ _ _ _ _ _ c =>
+    let domainVerdicts ← classifyEventArray ur domain
+    let bodyVerdicts ← classifyEventArray ur body
+    return .mk none #[] (domainVerdicts ++ bodyVerdicts)
 
 /-- Classify an event array, retaining one verdict per event. -/
 partial def classifyEventArray (ur : IO.Ref Unresolved) (events : Array Event) :
@@ -850,6 +865,7 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
       | .eq pos _ b a ec _ => pure (pos, b, a, ec)
       | .defeq pos _ _ b a ec => pure (pos, b, a, ec)
       | .congr pos _ _ b a _ _ ec => pure (pos, b, a, ec)
+      | .transport pos _ _ _ b a _ _ _ _ ec => pure (pos, b, a, ec)
       | .introCtx .. => continue
     let before ← instantiateMVars before
     let after ← instantiateMVars after
@@ -877,7 +893,7 @@ end
 
 Returns one structured verdict for every event, so classifications can be
 attached recursively to the exact rendered step. -/
-def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
+partial def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
     (events : Array Event) : MetaM (Array ValidationVerdict) := do
   -- Instance arguments can still be unassigned metavariables at the moment a
   -- step is recorded and get assigned later in the run, so a recorded subterm
@@ -899,8 +915,17 @@ def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
         -- the nested steps must independently replay the *argument* from
         -- `argBefore` to `argAfter` at positions relative to it.
         pure (pos, b, a, c)
+      | .transport pos _ _ _ b a _ _ _ _ c => pure (pos, b, a, c)
       | .introCtx .. =>
         continue
+    match ev with
+    | .transport _ _ domain body _ _ domainBefore domainAfter bodyBefore bodyAfter _ =>
+      -- These runs are rooted at the two child terms and are checked with the
+      -- same event validator as a top-level location.  No proof or term is
+      -- serialized; the Expr fields are recorder-local validation evidence.
+      let _ ← validate ur domainBefore domainAfter domain
+      let _ ← validate ur bodyBefore bodyAfter body
+    | _ => pure ()
     -- The traversal observed the subterm with its enclosing binders as free
     -- variables; the running term still has loose bvars there.  The event
     -- carries exactly the variables the traversal substituted, outermost first,
@@ -950,8 +975,14 @@ partial def attachStep (st : Step) (v : ValidationVerdict) : Step :=
   let side := st.side.mapIdx fun i sd =>
     let nested := v.side.getD i #[]
     { sd with steps := attachSteps sd.steps nested }
-  let nested := if st.kind == "congr" then attachSteps st.steps v.nested else st.steps
-  { st with unresolved? := v.reason?, side := side, steps := nested }
+  if st.kind == "transport" then
+    let all := attachSteps (st.domain ++ st.body) v.nested
+    let domain := all.take st.domain.size
+    let body := all.extract st.domain.size all.size
+    { st with unresolved? := v.reason?, side := side, domain := domain, body := body }
+  else
+    let nested := if st.kind == "congr" then attachSteps st.steps v.nested else st.steps
+    { st with unresolved? := v.reason?, side := side, steps := nested }
 
 partial def attachSteps (steps : Array Step)
     (verdicts : Array ValidationVerdict) : Array Step := Id.run do

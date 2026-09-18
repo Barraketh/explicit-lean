@@ -729,6 +729,7 @@ def eventExprPair? : Event → Option (Expr × Expr)
   | .eq _ _ before after .. => some (before, after)
   | .defeq _ _ _ before after .. => some (before, after)
   | .congr _ _ _ before after .. => some (before, after)
+  | .transport _ _ _ _ before after .. => some (before, after)
   | .introCtx .. => none
 
 def replayProcCondition (goal : Expr) (nested : Array Event) :
@@ -914,6 +915,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
               | .eq _ _ b a _ _ => (some b, some a)
               | .defeq _ _ _ b a _ => (some b, some a)
               | .congr _ _ _ b a _ _ _ => (some b, some a)
+              | .transport _ _ _ _ b a _ _ _ _ _ => (some b, some a)
               | .introCtx .. => (none, none)
             match before, after with
             | some b, some a =>
