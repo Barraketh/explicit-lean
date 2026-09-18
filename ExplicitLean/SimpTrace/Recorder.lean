@@ -858,7 +858,8 @@ def inferBoundedIteSource? (e : Expr) (r : Simp.Result)
 
 def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
     (evCtx : EvCtx) (side : Array SideRec) (src? : Option Name)
-    (diverted : Array Event := #[]) (procGoal? : Option Expr := none) : Simp.SimpM Unit := do
+    (diverted : Array Event := #[]) (procGoal? : Option Expr := none)
+    (controlled : Bool := false) : Simp.SimpM Unit := do
   -- These two procedures are handled from their redex and diverted condition
   -- frame.  In particular, do this before the generic proof classifier below:
   -- their branch proof is not recorder input.
@@ -867,9 +868,12 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
       let boundedCondition? := boundedIteCondition? e r.expr
       let bounded? := match procGoal?, boundedCondition? with
         | some goal, some condition => goal == condition
-        | _, _ => false
+        | _, _ => controlled
       if bounded? then
-        emitBoundedIteStep ref pos e r evCtx side src diverted procGoal?
+        let goal? := match procGoal? with
+          | some goal => some goal
+          | none => boundedCondition?
+        emitBoundedIteStep ref pos e r evCtx side src diverted goal?
         return
   let shape ← match r.proof? with
     | some proof => classifyProof e (← instantiateMVars proof)
@@ -1067,12 +1071,14 @@ def controlledReduceIte (ref : TraceRef) : Simp.Simproc := fun e => do
       let pr := mkApp (mkApp5 (mkConst ``ite_cond_eq_true f.constLevels!) α c i tb eb)
         (← r.getProof)
       Simp.recordSimpTheorem (.decl ``reduceIte false)
+      ref.modify (·.markProcOrigin ``reduceIte)
       let step : Simp.Step := .visit { expr := tb, proof? := pr }
       return (← step.addExtraArgs extraArgs)
     if r.expr.isFalse then
       let pr := mkApp (mkApp5 (mkConst ``ite_cond_eq_false f.constLevels!) α c i tb eb)
         (← r.getProof)
       Simp.recordSimpTheorem (.decl ``reduceIte false)
+      ref.modify (·.markProcOrigin ``reduceIte)
       let step : Simp.Step := .visit { expr := eb, proof? := pr }
       return (← step.addExtraArgs extraArgs)
     return .continue
@@ -1089,6 +1095,7 @@ def controlledReduceDIte (ref : TraceRef) : Simp.Simproc := fun e => do
       let eNew := mkApp tb h |>.headBeta
       let prNew := mkApp (mkApp5 (mkConst ``dite_cond_eq_true f.constLevels!) α c i tb eb) pr
       Simp.recordSimpTheorem (.decl ``reduceDIte false)
+      ref.modify (·.markProcOrigin ``reduceDIte)
       let step : Simp.Step := .visit { expr := eNew, proof? := prNew }
       return (← step.addExtraArgs extraArgs)
     if r.expr.isFalse then
@@ -1097,6 +1104,7 @@ def controlledReduceDIte (ref : TraceRef) : Simp.Simproc := fun e => do
       let eNew := mkApp eb h |>.headBeta
       let prNew := mkApp (mkApp5 (mkConst ``dite_cond_eq_false f.constLevels!) α c i tb eb) pr
       Simp.recordSimpTheorem (.decl ``reduceDIte false)
+      ref.modify (·.markProcOrigin ``reduceDIte)
       let step : Simp.Step := .visit { expr := eNew, proof? := prNew }
       return (← step.addExtraArgs extraArgs)
     return .continue
@@ -1124,10 +1132,12 @@ def controlledDReduceIte (ref : TraceRef) : Simp.DSimproc := fun e => do
       match_expr (← whnfD i) with
       | Decidable.isTrue _ _ =>
         Simp.recordSimpTheorem (.decl ``dreduceIte false)
+        ref.modify (·.markProcOrigin ``dreduceIte)
         let step : Simp.DStep := .visit tb
         return step.addExtraArgs extraArgs
       | Decidable.isFalse _ _ =>
         Simp.recordSimpTheorem (.decl ``dreduceIte false)
+        ref.modify (·.markProcOrigin ``dreduceIte)
         let step : Simp.DStep := .visit eb
         return step.addExtraArgs extraArgs
       | _ => return .continue
@@ -1144,10 +1154,12 @@ def controlledDReduceDIte (ref : TraceRef) : Simp.DSimproc := fun e => do
       match_expr (← whnfD i) with
       | Decidable.isTrue _ h =>
         Simp.recordSimpTheorem (.decl ``dreduceDIte false)
+        ref.modify (·.markProcOrigin ``dreduceDIte)
         let step : Simp.DStep := .visit (mkApp tb h).headBeta
         return step.addExtraArgs extraArgs
       | Decidable.isFalse _ h =>
         Simp.recordSimpTheorem (.decl ``dreduceDIte false)
+        ref.modify (·.markProcOrigin ``dreduceDIte)
         let step : Simp.DStep := .visit (mkApp eb h).headBeta
         return step.addExtraArgs extraArgs
       | _ => return .continue
@@ -1205,6 +1217,9 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
     ref.set { st with
                       procEvents := st.procEvents.take (depth - 1),
                       procGoals := st.procGoals.take (depth - 1) }
+    let st ← ref.get
+    let (st, controlledOrigin?) := st.takeProcOrigin
+    ref.set st
     let usedAfter := (← get).usedTheorems
     let record (r : Simp.Result) : Simp.SimpM Unit := do
       unless r.expr == e do
@@ -1236,10 +1251,13 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         -- lemma that fired, so a single firing can add more than one origin;
         -- the rewrite we are recording is the last one registered.
         let origin? : Option (Origin × Bool) :=
-          if news.isEmpty then none
-          else match news[news.size - 1]! with
-            | .decl n p inv => some (.decl n p inv, inv)
-            | o => some (o, false)
+          match controlledOrigin? with
+          | some n => some (.decl n false false, false)
+          | none =>
+            if news.isEmpty then none
+            else match news[news.size - 1]! with
+              | .decl n p inv => some (.decl n p inv, inv)
+              | o => some (o, false)
         let origin? ← match origin? with
           | some oi => pure (some oi)
           | none => reattribute? e r.expr (tag == "post")
@@ -1257,6 +1275,7 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             -- and pairing a trimmed `e` with it would describe two different
             -- terms.
             emitProcStep ref pos e r evCtx side src rebased divertedGoal?
+              controlledOrigin?.isSome
           else
             -- `simp [h]` records the *syntax* as the origin.  Resolve it to
             -- the hypothesis for the `local` object and the `prop` flag, which
@@ -1316,9 +1335,12 @@ def instrumentD (ref : TraceRef) (p : Simp.DSimproc) : Simp.DSimproc := fun e =>
   ref.modify fun s =>
     { s with procEvents := s.procEvents.take (depthD - 1),
              procGoals := s.procGoals.take (depthD - 1) }
+  let st ← ref.get
+  let (st, controlledOrigin?) := st.takeProcOrigin
+  ref.set st
   let usedAfter := (← get).usedTheorems
   let news := newOrigins usedBefore usedAfter
-  unless news.isEmpty do
+  unless news.isEmpty && controlledOrigin?.isNone do
     let changed? : Option Expr := match stepResult with
       | .done e' => if e' == e then none else some e'
       | .visit e' => if e' == e then none else some e'
@@ -1333,9 +1355,10 @@ def instrumentD (ref : TraceRef) (p : Simp.DSimproc) : Simp.DSimproc := fun e =>
       -- a propositional `eq` or `rw` forces a replayer into a rewrite it cannot
       -- perform — T2 refused the `dreduce_ite` step outright, because its
       -- position is the domain of a dependent `∀` (REVIEW-6 4).
-      let src := match news[news.size - 1]! with
-        | .decl n _ _ => some n
-        | _ => none
+      let src := match controlledOrigin?, news[news.size - 1]? with
+        | some n, _ => some n
+        | none, some (.decl n _ _) => some n
+        | _, _ => none
       ref.modify (·.push (.defeq pos .change src e e' evCtx))
   return stepResult
 

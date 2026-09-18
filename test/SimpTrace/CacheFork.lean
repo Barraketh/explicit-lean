@@ -29,4 +29,19 @@ example (p : Prop) [Decidable p] (h : p) : (if p then 1 else 2) = 1 := by
 example (p : Prop) [Decidable p] (h : p) : (if p then 1 else 2) = 1 := by
   simp_trace (discharger := assumption) [h]
 
+-- Logic.Basic's apply_dite₂ shape: distinct dîtes share a condition, so the
+-- second conditional must still carry its own operational provenance.
+example (f : Nat → Nat → Nat) (p : Prop) [Decidable p]
+    (a b c d : Nat) :
+    f (dite p (fun _ => a) (fun _ => b))
+      (dite p (fun _ => c) (fun _ => d)) =
+      dite p (fun _ => f a c) (fun _ => f b d) := by
+  by_cases hp : p <;> simp_trace [hp]
+
+example {α β γ : Sort _} (f : α → β → γ) (p : Prop) [Decidable p]
+    (a : p → α) (b : ¬p → α) (c : p → β) (d : ¬p → β) :
+    f (dite p a b) (dite p c d) = dite p (fun h => f (a h) (c h))
+      (fun h => f (b h) (d h)) := by
+  by_cases hp : p <;> simp_trace [hp]
+
 end ExplicitLean.SimpTrace.CacheFork

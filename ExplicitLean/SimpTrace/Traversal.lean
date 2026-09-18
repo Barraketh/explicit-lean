@@ -252,6 +252,11 @@ structure TraceState where
   that term the first time it sees position `[]` inside a frame.
   `none` until then. -/
   procGoals : Array (Option Expr) := #[]
+  /-- Controlled simprocs push their declaration here when they actually
+  fire.  `usedTheorems` is a set-like array, so it cannot distinguish a
+  repeated firing of the same simproc; this stack preserves that operational
+  fact for the recorder without re-matching the result afterwards. -/
+  procOrigins : Array Name := #[]
   /-- The recorder-owned mirror of the stock simp result cache. -/
   cache : TraceCache := {}
   deriving Inhabited
@@ -279,6 +284,17 @@ def TraceState.push (s : TraceState) (ev : Event) : TraceState :=
 def TraceState.markUnresolved (s : TraceState) (reason : String) : TraceState :=
   if s.unresolved.contains reason then s else
     { s with unresolved := s.unresolved.push reason }
+
+def TraceState.markProcOrigin (s : TraceState) (name : Name) : TraceState :=
+  { s with procOrigins := s.procOrigins.push name }
+
+def TraceState.takeProcOrigin (s : TraceState) : TraceState × Option Name :=
+  if h : s.procOrigins.size > 0 then
+    let i := s.procOrigins.size - 1
+    have hi : i < s.procOrigins.size := Nat.sub_lt h (by decide)
+    ({ s with procOrigins := s.procOrigins.take i }, some (s.procOrigins[i]))
+  else
+    (s, none)
 
 def TraceState.eventSink (s : TraceState) : Array Event :=
   if s.procEvents.size > 0 then s.procEvents.getD (s.procEvents.size - 1) #[]
