@@ -250,6 +250,14 @@ syntax:max (name := explicitRwTermNumType)
 
 /-- Application, left-associated as usual. -/
 syntax:10 (name := explicitRwTermApp) explicitRwTerm:10 explicitRwTerm:max : explicitRwTerm
+/--
+One named argument in an application, preserved as Lean's own named-argument
+syntax.  This is intentionally the only simp-source syntax admitted here:
+T22 supplies the authenticated source span, and the value is still checked by
+the ordinary explicit term grammar before it is lowered to Lean's
+`namedArgument` node.  It is not a general argument serializer.
+-/
+syntax:max (name := explicitRwTermNamedArg) "(" ident " := " explicitRwTerm ")" : explicitRwTerm
 /-- Parentheses. -/
 syntax:max (name := explicitRwTermParen) "(" explicitRwTerm ")" : explicitRwTerm
 /-- A type ascription, whose type is itself whitelisted. -/
@@ -774,6 +782,14 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
       return mkExplicitApplication head args
     | none =>
       let f ← toTermCore stx[0]; let a ← toTermCore stx[1]; `($f $a)
+  | ``explicitRwTermNamedArg => do
+    -- The surrounding application is elaborated by Lean's normal term
+    -- elaborator.  Preserve this one source-level named binder by changing
+    -- only the syntax kind and recursively lowering its value; no expression
+    -- payload is serialized or inspected here.
+    let value ← toTermCore stx[3]
+    let args := stx.getArgs.set! 3 value.raw
+    return ⟨Syntax.node stx.getHeadInfo ``Lean.Parser.Term.namedArgument args⟩
   | ``explicitRwTermParen => do let t ← toTermCore stx[1]; `(($t))
   | ``explicitRwTermAscr => do
     let t ← toTermCore stx[1]; let ty ← toTermCore stx[3]; `(($t : $ty))

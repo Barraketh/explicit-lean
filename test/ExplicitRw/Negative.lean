@@ -145,7 +145,8 @@ example (p q : Prop) (r : p → Prop) (h : p = q) :
 
 Every term a trace hands to `explicit_rw` is parsed in the `explicitRwTerm`
 category, which admits identifiers, applications, literals, parentheses and
-ascriptions and nothing else. A `by` block, a macro expanding to one, and a term
+ascriptions, plus the source-preserving named-argument form `(name := value)`.
+A `by` block, a macro expanding to one, and a term
 elaborator that runs the simplifier in `MetaM` are all rejected by the
 **parser**, before any elaborator runs. Parse errors cannot be pinned with
 `#guard_msgs`, so those cases live in `test/ExplicitRw/RejectedSyntax/`, which

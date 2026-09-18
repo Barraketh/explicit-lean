@@ -134,12 +134,21 @@ def check_term(text: Any, what: str) -> str:
             "inaccessible_name", f"{what} splices an inaccessible name: {text!r}"
         )
     # These are simp-argument/configuration spellings, not terms admitted by
-    # ExplicitRw's whitelist. In particular `*`, `-foo`, and named arguments
-    # belong to simp's argument language and must not be guessed into replay.
-    if text in ("*", "_") or re.fullmatch(r"-[^\s]+", text) or ":=" in text:
+    # ExplicitRw's whitelist. In particular `*` and `-foo` belong to simp's
+    # argument language and must not be guessed into replay.  A named binder
+    # such as `(a := a)` is the one source-level exception: ExplicitRw preserves
+    # it as Lean's own named-argument syntax, while recursively checking only
+    # its value through the same closed term grammar.  Keep a bare `foo := bar`
+    # refusal so malformed source spans remain visible before parser rejection.
+    if text in ("*", "_") or re.fullmatch(r"-[^\s]+", text):
         raise RenderError(
             "unparseable_source_argument",
             f"{what} is simp syntax rather than an explicit_rw term: {text!r}",
+        )
+    if ":=" in text and not re.search(r"\([^)]*:=\s", text):
+        raise RenderError(
+            "unparseable_source_argument",
+            f"{what} is not a parenthesized named argument: {text!r}",
         )
     if "by " in text or text.strip().endswith(" by"):
         raise RenderError("term_has_by", f"{what} contains a `by` block: {text!r}")

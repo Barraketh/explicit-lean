@@ -541,8 +541,8 @@ def derivation_tests(f: Failures) -> None:
             f.check("derivation/" + name, False, f"raised {exc}")
 
     # Source syntax is taken verbatim, including a lambda proof; no stored args
-    # or proof expression can replace it. Named-argument syntax is deliberately
-    # refused by ExplicitRw's term whitelist.
+    # or proof expression can replace it. The one source-level named-argument
+    # form is preserved and lowered by ExplicitRw itself.
     source_lambda = step(source_arg=1)
     f.equal("derivation/source_lambda_exact",
             R.render_step(source_lambda, source_text=source, source_args=source_args,
@@ -554,6 +554,14 @@ def derivation_tests(f: Failures) -> None:
     ], 0)
     f.equal("derivation/source_named_argument_exact",
             (named_term, named_direction), ("heq_comm (a := a)", "fwd"))
+    named = step(source_arg=0)
+    f.equal("derivation/source_named_argument_rendered",
+            R.render_step(named, source_text=named_source,
+                          source_args=[
+                              {"argId": 0, "startChar": 0, "endChar": 17,
+                               "direction": "fwd"}],
+                          operational=True),
+            "heq_comm (a := a) at []")
     reversed_source = step("direct_eq", direction="fwd")
     try:
         R.render_step(reversed_source, source_text="← foo", source_args=[
