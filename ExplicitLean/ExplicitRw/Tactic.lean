@@ -687,6 +687,36 @@ def mkTypedExists (xs : Array Ident) (ty body : Term) : TermElabM Term := do
   return r
 
 /--
+Collect an application whose head was written with `@` in the trace term.
+
+The ordinary term parser gives `@foo a b` one application spine, so the
+explicit marker controls insertion for the whole spine.  The whitelist parser
+has an atom production for `@foo`, however, and its recursive quotation path
+would elaborate `(@foo) a b`: the marker then applies only to the parenthesised
+atom and the following arguments are elaborated as an ordinary application.
+That silently reinserts implicit binders and is observably wrong for source
+arguments such as `@xor_not_left _ b`.  Keep the source application's head and
+arguments as syntax, then rebuild one ordinary Lean application spine with the
+marker attached to its head.  No term text is parsed or reconstructed here;
+the children are the already-validated whitelist syntax nodes.
+-/
+partial def explicitAppParts? (stx : Syntax) : Option (Syntax × Array Syntax) :=
+  match stx.getKind with
+  | ``explicitRwTermApp =>
+    match explicitAppParts? stx[0] with
+    | some (head, args) => some (head, args.push stx[1])
+    | none => none
+  | ``explicitRwTermIdent =>
+    if stx[0].isNone then none else some (stx[1], #[])
+  | _ => none
+
+def mkExplicitApplication (head : Syntax) (args : Array Term) : Term := Id.run do
+  let explicitHead := (Lean.mkNode ``Lean.Parser.Term.explicit
+    #[Lean.mkAtom "@", head]).raw
+  return ⟨(Lean.mkNode ``Lean.Parser.Term.app
+    #[explicitHead, Lean.mkNullNode (args.map (·.raw))]).raw⟩
+
+/--
 Translate a whitelisted term or type into ordinary Lean syntax.
 
 The whitelist is a syntactic restriction only: once a term has been shown to be
@@ -738,7 +768,12 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
       if isType then `(Type $u) else `(Sort $u)
   -- Grouping, application, projection
   | ``explicitRwTermApp => do
-    let f ← toTermCore stx[0]; let a ← toTermCore stx[1]; `($f $a)
+    match explicitAppParts? stx with
+    | some (head, rawArgs) =>
+      let args ← rawArgs.mapM toTermCore
+      return mkExplicitApplication head args
+    | none =>
+      let f ← toTermCore stx[0]; let a ← toTermCore stx[1]; `($f $a)
   | ``explicitRwTermParen => do let t ← toTermCore stx[1]; `(($t))
   | ``explicitRwTermAscr => do
     let t ← toTermCore stx[1]; let ty ← toTermCore stx[3]; `(($t : $ty))
