@@ -388,13 +388,25 @@ def invocation_tests(f: Failures) -> None:
     f.check("invocations/group_D_order", all(name in "\n".join(d["lines"])
             for name in ("p_q", "p_nq", "np_q", "np_nq")), "nested by_cases traces missing")
 
-    non_tail = expanded("non_tail", "by_cases h : True", 2,
+    non_tail = expanded("non_tail", "by_cases h : a == b", 2,
                         suffix=" <;> simpa [I.eq_iff] using h")
-    f.check("invocations/non_tail_suffix_copied",
-            sum("simpa [I.eq_iff] using h" in line for line in non_tail["lines"]) == 2,
-            "non-tail suffix was not copied to every leaf")
-    f.check("invocations/non_tail_lint_exempt",
-            not P.lint_replacement(non_tail), "existing suffix was treated as generated simp")
+    f.equal("invocations/non_tail_continuation_rewritten", non_tail["status"], "rendered")
+    f.equal("invocations/non_tail_original_comments",
+            sum("-- Original continuation: simpa [I.eq_iff] using h" in line
+                for line in non_tail["lines"]), 2)
+    f.check("invocations/non_tail_has_ordinary_closes",
+            any("exact congrArg f (beq_iff_eq.mp h)" in line for line in non_tail["lines"])
+            and any("exact fun hab => h (beq_iff_eq.mpr ((I.eq_iff).mp hab))" in line
+                     for line in non_tail["lines"]),
+            "branch-specific ordinary continuation was not emitted")
+    f.check("invocations/non_tail_no_generated_simp_family",
+            not P.lint_replacement(non_tail),
+            "non-tail continuation still contains a generated simp-family call")
+
+    refused_suffix = expanded("unsupported_suffix", "by_cases h : True", 2,
+                              suffix=" <;> simpa using h")
+    f.equal("invocations/unsupported_simp_suffix_refused",
+            refused_suffix["status"], "structurally_refused")
 
     identical = expanded("identical", "by_cases h : True", 2, names=["same", "same"])
     f.equal("invocations/identical_step_lists_keep_leaves", identical["structural_leaf_count"], 2)

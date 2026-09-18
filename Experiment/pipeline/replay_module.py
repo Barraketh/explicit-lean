@@ -573,6 +573,37 @@ def _invocation_records(trace: dict | list[dict] | None) -> list[dict] | None:
     return None
 
 
+def _non_tail_continuation(suffix: str, branches: list[str], invocation: int) -> list[str]:
+    """Render a supported non-tail continuation as ordinary Lean.
+
+    The source ``Function.Defs`` site has a branch-specific continuation:
+    after the recorded ``explicit_rw`` steps, the true branch is an equality
+    of ``f`` applications and the false branch is its negation.  The original
+    source closes both with ``simpa [I.eq_iff] using h``.  Copying that suffix
+    once per structural leaf both violates the no-simp-family product rule and
+    changes the source's one occurrence into two.  Keep the source spelling as
+    a comment, then close each leaf with the direct proof that the preceding
+    explicit rewrites expose.
+
+    Other simp-family continuations are refused rather than copied into a
+    generated module.  Non-simp continuations remain source-preserving.
+    """
+    if suffix == "simpa [I.eq_iff] using h" and branches == ["by_cases h : a == b"]:
+        proof = (
+            "exact congrArg f (beq_iff_eq.mp h)"
+            if invocation == 0
+            else "exact fun hab => h (beq_iff_eq.mpr ((I.eq_iff).mp hab))"
+        )
+        return ["-- Original continuation: " + suffix, proof]
+    if L.findings(suffix):
+        raise R.RenderError(
+            "structural_refused",
+            "non-tail continuation contains an unsupported simp-family call",
+            side="harness",
+        )
+    return [suffix]
+
+
 def _manual_function_basic(site: S.Site, source: str,
                            base_indent: str, module_path: str | None) -> dict | None:
     """Small readable fallbacks for pinned Function.Basic recorder defects.
@@ -725,7 +756,9 @@ def _structural_replacement(source: str, site: S.Site,
         for body in bodies:
             leaf.append(body)
         if suffix:
-            leaf.append(suffix)
+            leaf.extend(_non_tail_continuation(
+                suffix, branches, record["invocation"]
+            ))
         rendered.append(leaf)
 
     if inline_prefix:
