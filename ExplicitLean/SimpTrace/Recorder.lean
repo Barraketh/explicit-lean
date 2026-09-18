@@ -771,6 +771,19 @@ def peelBoundedIteApplication (before after : Expr) :
     coreAfter := afterFn
   return some (coreBefore, coreAfter, extra)
 
+/- The bounded path is valid only when the procedure frame's observed goal is
+the conditional's actual condition.  A later `reduceIte` call can occur after
+forked traversal has already simplified that condition; such a call has no
+condition frame of its own and must use the ordinary event path below. -/
+def boundedIteCondition? (before after : Expr) : Option Expr :=
+  match peelBoundedIteApplication before after with
+  | some (coreBefore, _, _) =>
+    if coreBefore.isAppOf ``ite || coreBefore.isAppOf ``dite then
+      let args := coreBefore.getAppArgs
+      if args.size >= 2 then some args[1]! else none
+    else none
+  | none => none
+
 def emitBoundedIteStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
     (evCtx : EvCtx) (side : Array SideRec) (src : Name)
     (diverted : Array Event) (procGoal? : Option Expr) : Simp.SimpM Unit := do
@@ -850,8 +863,13 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
   -- their branch proof is not recorder input.
   if let some src := src? then
     if src == ``reduceIte || src == ``reduceDIte then
-      emitBoundedIteStep ref pos e r evCtx side src diverted procGoal?
-      return
+      let boundedCondition? := boundedIteCondition? e r.expr
+      let bounded? := match procGoal?, boundedCondition? with
+        | some goal, some condition => goal == condition
+        | _, _ => false
+      if bounded? then
+        emitBoundedIteStep ref pos e r evCtx side src diverted procGoal?
+        return
   let shape ← match r.proof? with
     | some proof => classifyProof e (← instantiateMVars proof)
     | none => pure .computed

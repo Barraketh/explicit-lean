@@ -1181,7 +1181,7 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
         { origin := "decl:" ++ c.theoremName.toString
           source? := some "congr"
           preprocess := #["congruence"]
-          redex := pos
+          redex := pos ++ Array.replicate extraArgs.size 0
           extraArgs := extraArgs.size
           binders := binders }
       -- One `rw` naming the theorem, carrying its hypotheses as `side` traces.
@@ -1192,7 +1192,7 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
             sd.evCtx sd.intros (← instantiateMVars sd.pre)
             (← sd.post?.mapM instantiateMVars))
         ref.modify (·.push
-          (.rw pos (.decl c.theoremName true false) false none e eNew
+          (.rw (pos ++ Array.replicate extraArgs.size 0) (.decl c.theoremName true false) false none e eNew
             (← captureEvCtx ref) #[] sidesFinal (some `congr)
             (.decl c.theoremName true false) "" (some derivation)))
       congrArgsT ref pos { expr := eNew, proof? := proof } extraArgs
