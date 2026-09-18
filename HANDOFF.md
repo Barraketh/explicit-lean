@@ -1,6 +1,6 @@
 # Start here: search-free Mathlib
 
-**Live state (read first): [tracking/WORKPLAN.md](tracking/WORKPLAN.md), section "Next steps", then [tracking/COORDINATION.md](tracking/COORDINATION.md).** Task branches and worktrees are listed there; T3 is merged, T1/T2/T4 are in review.
+**Live state (read first): [tracking/WORKPLAN.md](tracking/WORKPLAN.md), section "Next steps", then [tracking/COORDINATION.md](tracking/COORDINATION.md).** Task branches and worktrees are listed there; the T47 strict translated-cone milestone is integrated at `59262d7`. Broader simp-family and whole-tree work remains.
 
 **September 16 direction change:** the user reviewed the
 generated `IsEmpty.Basic` (135 source lines rendered as 7,113 lines of encoded
@@ -15,6 +15,31 @@ Consequences: the 69-module cold certification, the generated-token formatter
 and the `linter.style.longFile` allowance decision are closed as moot; the
 recorder and its reports are retained as oracle inputs, not translations;
 two `dsimp` overrides must be rewritten. Whole-tree acceptance remains zero.
+
+## Current milestone — T47 (September 17, 2026)
+
+The final integration commit is `59262d72a82255d1d4c33349617554076cc998cc`.
+At seed commit `86f90d1ca6aef852253135a52ad4cb862713efc2`, the main seed
+covered all 91/91 source identities and 113 invocation records, with zero
+replay, render, compile, or identity failures. The strict translated
+dependency cone then covered 69 modules and 134 edges: all eight builds
+passed, each emitted fresh outputs, and imports resolved from the translated
+root. Its runtime was 11.99 seconds and maximum RSS was 668,991,488 bytes.
+
+This was a local run; no cloud was used for the T47 milestone. The
+provenance-bearing simp cache fork is integrated as supporting recorder
+infrastructure, and the current manual override database contains 26 entries.
+These facts are separate from whole-Mathlib acceptance: the full-tree build,
+remaining simp-family audit, and final semantic/trust checks are still
+unclaimed. The original source calls remain adjacent comments in the accepted
+cone, and future generated output must continue to satisfy the no-simp-family
+rule and the readability requirement.
+
+Next actions are to extend the readable, source-preserving replacement beyond
+the accepted 91-site seed and 69-module cone across the broader simp family,
+then run dependency-ordered whole-tree compilation, the remaining-call audit,
+and the final semantic/trust checks. Do not treat the cone as whole-tree
+acceptance or start another cloud run without new authorization.
 
 The earlier [September 16 continuation handoff](tracking/HANDOFF-2026-09-16.md)
 and `tracking/campaign.json` record the fixes, partial cold certification,
@@ -58,10 +83,11 @@ and completed declarations. Generated output uses `simp_engine_boundary_select`.
 The tactic named `simp_engine_apply` elsewhere in the repository is the older
 schema-27 operational replay engine; do not use it as the active product.
 
-Current evidence: **83,627 calls inventoried; 529 successful module reports
-covering 2,063 calls; 62 cached failures; no accepted complete translated tree.**
-These are September 8 Mac results, rechecked at the report/hash level for this
-handoff. A prior cold-certified cone covers just 39 modules and two calls.
+Historical corpus evidence remains **83,627 calls inventoried; 529 successful
+module reports covering 2,063 calls; 62 cached failures**. These are September
+8 Mac results, rechecked at the report/hash level for this handoff. The current
+T47 cone milestone is the separate 91-site/113-invocation and 69-module/134-
+edge result recorded above; it does not establish a complete translated tree.
 
 The user merged all five supervisor commits from
 `codex/v10-allocator-pressure-relief` into this branch. There is no remaining

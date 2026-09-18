@@ -1,22 +1,52 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "simplified_v2_mapping_running_translated_tree_acceptance_pending",
+  "phase": "strict_translated_cone_accepted_broader_simp_family_and_whole_tree_pending",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-17T22:24:09Z",
+  "updatedAt": "2026-09-18T03:19:11Z",
+  "latestMilestone": {
+    "id": "T47-strict-translated-cone",
+    "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
+    "seedCommit": "86f90d1ca6aef852253135a52ad4cb862713efc2",
+    "mainSeed": {
+      "sourceIdentities": "91/91",
+      "invocationRecords": 113,
+      "replayFailures": 0,
+      "renderFailures": 0,
+      "compileFailures": 0,
+      "identityFailures": 0
+    },
+    "strictCone": {
+      "modules": 69,
+      "edges": 134,
+      "builds": 8,
+      "buildsPassed": 8,
+      "freshOutputs": true,
+      "translatedRootImportsResolved": true,
+      "runtimeSeconds": 11.99,
+      "maximumRssBytes": 668991488
+    },
+    "provenanceCacheFork": {
+      "status": "integrated_supporting_recorder_infrastructure",
+      "commit": "8e6e569d9b784b4ef71112009b6cedfb0b5b67fe"
+    },
+    "manualOverrideCount": 26,
+    "cloudUsed": false,
+    "wholeTreeAcceptance": "not_claimed"
+  },
   "resumeStatus": {
-    "review": "T2_merged_and_integration_checked; T1_simplified_v2_mapping_running; T4_baseline_accepted_and_merged; T6_structural_rendering_accepted_and_merged; T17_consumer_provenance_accepted_and_merged; T16_rule_derivations_accepted_and_merged; T18_simproc_inventory_documented_deferred; T5_cone_pending; T10_cancelled",
+    "review": "T47_strict_translated_cone_accepted; broader_simp_family_and_whole_tree_pending; T10_cancelled",
     "t2": "merged_to_main_5ec2da5_and_integration_checked",
-    "t1": "simplified_v2_mapping_implementation_running; module_char_ranges_call_text_ordinals_complete_invocations; no_hashes_nonces",
-    "t4": "baseline_accepted_and_merged; 7_of_7_modules_and_91_of_91_identity; replay_56_of_91_unresolved_1_render_failed_18_compile_failed_16; full_cone_unrun",
-    "t6": "structural_rendering_accepted_and_merged; review_3_0738ac7; implementation_through_814f274; 7_of_7_modules_and_91_of_91_identity; replay_59_unresolved_5_render_failed_6_structurally_refused_0_compile_failed_21; pipeline_checks_265; full_cone_unrun",
+    "t1": "integrated_seed_mapping; 91_source_identities_and_113_invocation_records; no_hashes_nonces",
+    "t4": "seed_accepted; 7_of_7_modules_and_91_of_91_identity; 113_invocation_records; replay_render_compile_identity_failures_zero",
+    "t6": "structural_rendering_integrated_into_accepted_seed; 91_of_91_identity; replay_render_compile_identity_failures_zero",
     "t17": "consumer_proposition_provenance_accepted_and_merged; implementation_4e102123; review_df81614; 14_focused_fixtures_including_11_site_shapes_pass; consumer_slice_only; producer_renderer_integration_and_fresh_seven_module_gate_pending",
     "t16": "theorem_rule_derivation_producer_accepted_and_merged; implementation_a9c2d4e; review_2_4a42543; 74_fixture_skeletons_pass; term_free_payload_containment_pass; no_corpus_replay_credit_until_renderer_integration_and_fresh_seven_module_gate",
     "t18": "simproc_inventory_documented_and_deferred; accepted_91_site_corpus; reduceIte_15_steps_6_sites; reduceDIte_15_steps_8_sites; eqComm_deferred; no_simproc_implementation",
     "t20": "bounded_ite_simproc_operational_model_accepted_and_merged; implementation_through_22ff7819; review_2_1ab114ca; full_checker_74_of_74; focused_observed_reduceIte_6_of_15_reduceDIte_3_of_15; cached_origin_misses_fail_closed; no_corpus_replay_credit; eqComm_deferred",
-    "t5": "strict_cone_runner_merged; seven_module_cone_pending_after_T1_T4_mapping_gate",
+    "t5": "strict_cone_accepted; 69_modules_134_edges; 8_of_8_builds_passed; fresh_outputs_and_translated_root_imports_resolved",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
@@ -113,8 +143,8 @@
   },
   "direction": {
     "userConversationDate": "2026-09-16",
-    "nextMilestone": "Integrate the accepted theorem-rule derivation producer with the renderer, then run the fresh seven-module translated dependency cone; whole-tree acceptance remains pending.",
-    "activeState": "The trusted-environment contract is intentionally narrow: T1 emits module, original character range, exact call text, site ordinal and complete invocation ordinals; T4 verifies the bijection before rendering. T6 structural rendering is accepted and merged with 7/7 modules and 91/91 identity sites: 59 replayed, 5 unresolved, 6 render_failed, 0 structurally_refused and 21 compile_failed. T17 consumer-side proposition provenance is accepted and merged with 14 focused fixtures including 11 site shapes; T16 theorem-rule operational derivations are accepted and merged with indexed/liberal lookup parity. Neither producer evidence nor T17 focused fixtures receive corpus replay credit until renderer integration and a fresh seven-module gate pass. T18 records reduceIte (15 steps/6 sites) and reduceDIte (15/8) as later bounded simproc candidates; eqComm is deferred. T1 and T2 remain integrated; the T5 translated dependency cone and whole-tree acceptance remain pending.",
+    "nextMilestone": "Extend the readable source-preserving replacement beyond the accepted 91-site seed and 69-module cone across the broader simp family, then run dependency-ordered whole-tree compilation, the remaining-call audit and final semantic/trust checks.",
+    "activeState": "T47 is integrated at 59262d7. The main seed at 86f90d1 covers 91/91 source identities and 113 invocation records with zero replay, render, compile or identity failures. The strict translated cone covers 69 modules and 134 edges; all 8 builds passed, emitted fresh outputs and resolved imports from the translated root in 11.99 seconds with 668991488 bytes maximum RSS. The provenance-bearing cache fork is integrated supporting infrastructure and the manual override database contains 26 entries. This local milestone used no cloud; whole-tree acceptance remains separate and unclaimed.",
     "designDecisions": {
       "T6": "Accepted and merged through 814f274 with REVIEW-3 0738ac7: deterministic structural bullet expansion keyed by complete invocation ordinals; safe non-tail continuations only; unsafe shapes refuse without partial replay. Fresh seven-module report: 91/91 identity, 59 replayed, 5 unresolved, 6 render_failed, 0 structurally_refused, 21 compile_failed; 265 pipeline checks passed.",
       "T7": "Optional diagnostic only: the existing source-pair declaration oracle may be used for focused semantic debugging, but it is not an acceptance gate and does not require per-site hashes.",
@@ -124,6 +154,9 @@
       "T16": "Term-free theorem-rule derivations are captured at the matcher boundary with indexed/liberal lookup parity and no proof/term serialization. Producer evidence is accepted and merged, but receives no corpus replay credit until renderer integration and a fresh seven-module gate.",
       "T18": "The accepted 91-site inventory identifies reduceIte (15 steps/6 sites) and reduceDIte (15 steps/8 sites) as later bounded simproc candidates. eqComm is deferred; no simproc implementation is part of this update.",
       "T20": "The bounded operational, term-free reduceIte/reduceDIte model is accepted and merged through 22ff7819 with REVIEW-2 1ab114ca. The full fixture checker passes 74/74; focused observed coverage is only 6/15 reduceIte and 3/15 reduceDIte. Cached-origin misses fail closed, no corpus replay credit is claimed, and eqComm remains deferred.",
+      "T47": "Strict translated-cone acceptance is recorded at integration commit 59262d7: main seed 91/91 and 113 invocation records with zero replay/render/compile/identity failures at 86f90d1; 69 modules and 134 edges; all 8 builds passed with fresh outputs and translated-root imports resolved; runtime 11.99 seconds and maximum RSS 668991488 bytes. The run was local and used no cloud.",
+      "provenanceCacheFork": "The provenance-bearing simp cache fork is integrated as supporting recorder infrastructure; it is not whole-tree acceptance evidence.",
+      "manualOverrides": "The current Experiment/simp_manual_overrides.json table contains 26 entries.",
       "acceptance": "Ultimate acceptance is source-preserving replacement of the pinned Mathlib simp family plus successful compilation of the translated dependency tree and then the full Mathlib tree. Whole-tree acceptance remains zero until those checks pass."
     },
     "pilotModules": 15,
@@ -167,13 +200,19 @@
     "verifiedTranslatedOccurrences": 0,
     "verifiedTranslatedModules": 0,
     "completeTranslatedTreeBuilt": false,
+    "acceptedSeedSourceIdentities": 91,
+    "acceptedSeedInvocationRecords": 113,
+    "acceptedTranslatedConeModules": 69,
+    "acceptedTranslatedConeEdges": 134,
+    "acceptedTranslatedConeBuilds": 8,
+    "acceptedTranslatedConeBuildsPassed": 8,
     "provisionalCachedOccurrences": 2063,
     "provisionalCachedModules": 529,
     "provisionalCachedVariants": 2227,
     "minimumAcceptedReportSchema": 13,
     "v10CachedSemanticOrUnsupportedFailures": 62,
     "v10DirectModulesWithoutSuccessfulReports": 5751,
-    "validationHold": "529 archived-v10 module reports are bounded evidence. Complete translated dependency-tree compilation, remaining-call audit, reusable-call coverage and final semantic/trust certification are incomplete. No whole-tree acceptance credit.",
+    "validationHold": "The T47 seed and strict 69-module/134-edge translated cone are accepted bounded milestones. Complete broader simp-family coverage, full translated dependency-tree compilation, remaining-call audit, reusable-call coverage and final semantic/trust certification are incomplete. No whole-tree acceptance credit.",
     "note": "Report hashes and summary flags were rechecked for the September 10 handoff; Lean compiles and all underlying evidence files were not rerun. Historical schemas and counts must not be summed."
   },
   "inventory": {
@@ -264,13 +303,13 @@
   "blockers": [
     {
       "id": "t1-simplified-v2-mapping",
-      "status": "open_implementation_in_progress",
-      "detail": "T1 is implementing the trusted-environment v2 mapping contract: module path, original character range, exact call text, source ordinal and complete invocation ordinals. Hashes, nonces, byte authentication and a neutral forgery suite are intentionally out of scope. The complete mapping and focused regressions must pass before T1 merge."
+      "status": "resolved_accepted_merged",
+      "detail": "The trusted-environment v2 mapping contract is integrated and accepted in the T47 seed: module path, original character range, exact call text, source ordinal and complete invocation ordinals cover 91/91 source identities and 113 invocation records. Hashes, nonces, byte authentication and a neutral forgery suite remain intentionally out of scope."
     },
     {
       "id": "t4-simplified-v2-mapping",
       "status": "resolved_accepted_merged",
-      "detail": "T4 REVIEW-8 at f0b59ac passed the stale-publication lifecycle gate and is merged. Fresh baseline evidence is 7/7 modules and 91/91 identity sites: 56/91 replayed, 1 unresolved, 18 render_failed and 16 compile_failed. This is not full cone or whole-tree acceptance."
+      "detail": "T4 is accepted in the T47 seed at 86f90d1: 7/7 modules and 91/91 identity sites with 113 invocation records; replay, render, compile and identity failures are all zero. The subsequent 69-module/134-edge cone is bounded evidence, not whole-tree acceptance."
     },
     {
       "id": "bounded-run-policy",
@@ -305,7 +344,7 @@
     {
       "id": "translated-tree-acceptance",
       "status": "open",
-      "detail": "Ultimate acceptance remains open: every pinned Mathlib simp-family call must be source-preservingly replaced, the translated dependency tree must compile, and full Mathlib compilation plus the remaining-call audit must pass. No acceptance credit is recorded."
+      "detail": "Ultimate acceptance remains open beyond the accepted T47 seed and strict 69-module/134-edge cone: every pinned Mathlib simp-family call must be source-preservingly replaced, the expanded translated dependency tree must compile, and full Mathlib compilation plus the remaining-call audit and semantic/trust checks must pass. Whole-tree acceptance is not claimed."
     }
   ],
   "scopeQuestion": {
@@ -315,12 +354,12 @@
     "reason": "Finite concrete proof tables cannot establish unrestricted semantics for dynamic rules/dischargers and unknown future callers. Corpus/direct/local work continues; no narrowed public-API acceptance asserted."
   },
   "nextActions": [
-    "Complete T1's simplified v2 mapping implementation and focused regressions: module path, original character range, exact call text, site ordinal and complete invocation ordinals; do not add hashes, nonces or forgery machinery.",
-    "Use the accepted T4 baseline to run the T5 seven-module translated dependency cone with source-preserving output; retain the exact 7/7, 91/91, 56/1/18/16 evidence and do not claim full-cone acceptance.",
-    "Run the T5 seven-module cone with the translated dependency-root order, then extend the same source-preserving replacement and compilation workflow to the full pinned Mathlib tree.",
-    "Use T7's declaration oracle only as an optional focused diagnostic; do not make it, per-site hashes, or a neutral T10 forgery suite acceptance prerequisites.",
-    "Record unresolved calls visibly and preserve original calls as adjacent comments; acceptance requires source preservation, translated dependency-tree compilation, full Mathlib compilation and zero remaining executable simp-family calls.",
-    "Do not provision AWS or any other host without new user authorization; preserve the closed pilot evidence and immutable deadline/authorization records."
+    "Extend the accepted readable, source-preserving replacement beyond the 91-site seed and 69-module/134-edge cone across the broader pinned simp family; keep every original call as an adjacent comment and leave unresolved calls visible.",
+    "Preserve the provenance-bearing cache fork and the 26-entry manual override identity while adding further overrides only with the same ordinary-Lean readability and kernel/build checks.",
+    "Run dependency-ordered translated builds for the expanded cone, then compile the full pinned Mathlib tree from the translated root with fresh outputs and import-resolution audits.",
+    "Complete the remaining executable simp-family call audit, reusable-call provenance checks, declaration/computational semantic checks and final trust validation; do not convert the bounded cone result into whole-tree credit.",
+    "Use the declaration oracle only as an optional focused diagnostic; do not make per-site hashes, a neutral forgery suite or other retired machinery acceptance prerequisites.",
+    "Do not provision AWS or any other host without new user authorization; the T47 milestone was local-only, and immutable deadline/authorization fields and closed pilot evidence remain unchanged."
   ],
   "work": [
     {
@@ -341,7 +380,7 @@
     {
       "id": "corpus-translation",
       "status": "in_progress",
-      "description": "529 v10 successful module reports and 42 cold receipts are recorder evidence only under the 2026-09-16 rule; accepted whole-tree coverage remains zero. Translation restarts with the readable generator."
+      "description": "T47 accepted the readable 91-site seed and strict 69-module/134-edge translated cone at 59262d7. Broader simp-family coverage and whole-tree acceptance remain in progress; global whole-tree counters remain zero."
     },
     {
       "id": "readability",
@@ -365,18 +404,28 @@
     },
     {
       "id": "translated-isempty-option-cone-2026-09-16",
-      "status": "pending_simplified_v2_mapping_and_source_preserving_cone",
-      "description": "The seven-module cone remains 69 modules and 91 calls. Historical encoded-artifact cold receipts and formatter work are closed as moot. Run the simplified v2 mapping gate, preserve original source calls as comments, and compile the translated dependency tree; whole-tree acceptance remains zero."
+      "status": "accepted_bounded_cone",
+      "description": "T47 accepted the seven target modules and 91/91 source identities with 113 invocation records, then compiled the strict 69-module/134-edge translated dependency cone. All 8 builds passed with fresh outputs and translated-root imports resolved; whole-tree acceptance remains zero."
     },
     {
       "id": "override-compliance-dsimp",
       "status": "pending",
-      "description": "Two of 21 manual overrides use dsimp (Unitization 1734864b48394331, EpiMono 3251bc59333b0c31). Rewrite with unfold/change/rw and verify."
+      "description": "The current manual override table contains 26 entries across 19 modules. Keep the two known dsimp-family cases (Unitization 1734864b48394331, EpiMono 3251bc59333b0c31) visibly pending until rewritten with unfold/change/rw and verified."
     },
     {
       "id": "sixty-nine-module-cold-certification",
       "status": "closed_moot",
       "description": "42 of 69 cold receipts produced for encoded artifacts before the ExistsUnique line-length failure; closed on 2026-09-16 because encoded artifacts are no longer the product."
+    },
+    {
+      "id": "T47-strict-translated-cone",
+      "status": "completed_bounded_milestone",
+      "description": "At seed 86f90d1, 91/91 identities and 113 invocation records passed with zero replay/render/compile/identity failures. Integration 59262d7 accepted the 69-module/134-edge strict translated cone: all 8 builds passed, fresh outputs were emitted, translated-root imports resolved, and local runtime/RSS was 11.99s/668991488 bytes. No cloud was used; this is not whole-tree acceptance."
+    },
+    {
+      "id": "provenance-cache-fork",
+      "status": "completed_supporting_infrastructure",
+      "description": "The provenance-bearing simp cache fork is integrated at 8e6e569 as recorder infrastructure for cache-hit event provenance; it is not a substitute for readable source translation or whole-tree acceptance."
     },
     {
       "id": "T1-trace-capture",
