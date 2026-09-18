@@ -38,22 +38,28 @@ rule and the readability requirement.
 
 ## Acceptance revalidation — September 18, 2026
 
-At current commit `579ccbdacfcacb24e7c84c0e517cd45b5a97957d`, with T50
-(`9fb236e`), T51 (`3a05714`) and T52 (`579ccbd`) integrated, the fresh seed
-run covered all seven modules and all 91/91 source identities (113 invocation
-records), with 91/91 replayed and zero unresolved, render, compile, identity,
-structural or probe failures. The current manual override database contains
+At current main commit `8a96a31457b10685188ef9c7d344d87e745d35ad`, with T50
+(`9fb236e4a82d42f4e9b744f8416821cdf65870ef`), T51
+(`3a05714d4ba8838ef08e78d4e61c306f219013b4`), T52
+(`579ccbdacfcacb24e7c84c0e517cd45b5a97957d`) and T54
+(`8a96a31457b10685188ef9c7d344d87e745d35ad`) integrated, the fresh seed
+pipeline covered all seven modules and all 91/91 source identities (113
+invocation records). All 91 sites replayed, with zero unresolved, render,
+compile, identity, structural or probe failures. The run took 37.87 seconds;
+the checkout was clean before and after. The manual override database contains
 21 entries across 17 modules; the only remaining override in this cone is
 `eqComm` (`bcd40e80cbe2ffe1`).
 
-The strict cone preflight found the reviewed 69 modules and 134 edges. All
-eight builds emitted fresh outputs and resolved imports from the translated
-root. The final baseline-aware strict lint failed on one newly exposed
-generated simp-family call, `simpa [I.eq_iff] using h` in
-`Mathlib/Logic/Function/Defs.lean`, after T52 removed its obsolete overlay.
-Therefore this revalidation records the 91/91 seed and the eight successful
-cone builds, but does not claim new strict-cone acceptance until that generated
-call is replaced with ordinary Lean.
+The fresh strict cone preflight found the reviewed 69 modules and 134 edges.
+All eight builds returned zero, emitted fresh outputs, and resolved imports
+from the translated root. Baseline-aware strict generated-source lint found
+101 unchanged baseline simp-family calls and zero introduced findings. The
+timed cone run took 12.26 seconds. This is the final bounded cone result; the
+whole-tree build, broader simp-family audit, and final semantic/trust checks
+remain unclaimed.
+
+Evidence is recorded in `/tmp/t55-pipeline-20260918T134224-clean/report.json`
+and `/tmp/t55-cone-run-20260918T134440-timed/manifest.json`.
 
 Next actions are to extend the readable, source-preserving replacement beyond
 the accepted 91-site seed and 69-module cone across the broader simp family,

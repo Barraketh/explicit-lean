@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "strict_translated_cone_revalidated_seed_pass_cone_lint_blocked_broader_simp_family_and_whole_tree_pending",
+  "phase": "strict_translated_cone_revalidated_seed_and_cone_pass_broader_simp_family_and_whole_tree_pending",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-18T20:30:52Z",
+  "updatedAt": "2026-09-18T20:44:30Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -37,13 +37,14 @@
     "wholeTreeAcceptance": "not_claimed"
   },
   "acceptanceRevalidation": {
-    "checkedAt": "2026-09-18T20:30:52Z",
-    "checkoutCommit": "579ccbdacfcacb24e7c84c0e517cd45b5a97957d",
+    "checkedAt": "2026-09-18T20:44:30Z",
+    "checkoutCommit": "8a96a31457b10685188ef9c7d344d87e745d35ad",
     "integratedCommits": {
       "T50": "9fb236e4a82d42f4e9b744f8416821cdf65870ef",
       "T51": "3a05714d4ba8838ef08e78d4e61c306f219013b4",
       "T52": "579ccbdacfcacb24e7c84c0e517cd45b5a97957d",
-      "current": "579ccbdacfcacb24e7c84c0e517cd45b5a97957d"
+      "T54": "8a96a31457b10685188ef9c7d344d87e745d35ad",
+      "current": "8a96a31457b10685188ef9c7d344d87e745d35ad"
     },
     "manualOverrides": {
       "entries": 21,
@@ -57,8 +58,7 @@
       "invocationRecords": 113,
       "replayed": "91/91",
       "failures": 0,
-      "runtimeSeconds": 38.97,
-      "maximumRssBytes": 764133376,
+      "runtimeSeconds": 37.87,
       "status": "passed"
     },
     "strictCone": {
@@ -68,15 +68,20 @@
       "buildsPassed": 8,
       "freshOutputs": true,
       "translatedRootImportsResolved": true,
-      "lintIntroducedFindings": 1,
-      "status": "blocked_by_generated_simp_family_lint",
-      "failure": "Mathlib/Logic/Function/Defs.lean: generated simpa [I.eq_iff] using h"
+      "lintBaselineFindings": 101,
+      "lintIntroducedFindings": 0,
+      "pipelineRuntimeSeconds": 37.87,
+      "runtimeSeconds": 12.26,
+      "status": "passed_final_bounded_cone",
+      "runnerCommit": "8a96a31457b10685188ef9c7d344d87e745d35ad",
+      "pipelineReport": "/tmp/t55-pipeline-20260918T134224-clean/report.json",
+      "manifest": "/tmp/t55-cone-run-20260918T134440-timed/manifest.json"
     },
-    "status": "seed_passed_cone_lint_blocked",
+    "status": "seed_and_cone_passed_bounded",
     "wholeTreeAcceptance": "not_claimed"
   },
   "resumeStatus": {
-    "review": "T53_seed_revalidated; strict_cone_builds_freshness_imports_passed_but_lint_blocked; broader_simp_family_and_whole_tree_pending; T10_cancelled",
+    "review": "T55_seed_and_strict_cone_revalidated; 91_of_91_and_8_of_8_passed; zero_introduced_lint; broader_simp_family_and_whole_tree_pending; T10_cancelled",
     "t2": "merged_to_main_5ec2da5_and_integration_checked",
     "t1": "integrated_seed_mapping; 91_source_identities_and_113_invocation_records; no_hashes_nonces",
     "t4": "seed_accepted; 7_of_7_modules_and_91_of_91_identity; 113_invocation_records; replay_render_compile_identity_failures_zero",
@@ -85,7 +90,7 @@
     "t16": "theorem_rule_derivation_producer_accepted_and_merged; implementation_a9c2d4e; review_2_4a42543; 74_fixture_skeletons_pass; term_free_payload_containment_pass; no_corpus_replay_credit_until_renderer_integration_and_fresh_seven_module_gate",
     "t18": "simproc_inventory_documented_and_deferred; accepted_91_site_corpus; reduceIte_15_steps_6_sites; reduceDIte_15_steps_8_sites; eqComm_deferred; no_simproc_implementation",
     "t20": "bounded_ite_simproc_operational_model_accepted_and_merged; implementation_through_22ff7819; review_2_1ab114ca; full_checker_74_of_74; focused_observed_reduceIte_6_of_15_reduceDIte_3_of_15; cached_origin_misses_fail_closed; no_corpus_replay_credit; eqComm_deferred",
-    "t5": "revalidated; 69_modules_134_edges; 8_of_8_builds_passed; fresh_outputs_and_translated_root_imports_resolved; strict_lint_blocked_by_one_generated_simpa",
+    "t5": "revalidated_final; 69_modules_134_edges; 8_of_8_builds_passed; fresh_outputs_and_translated_root_imports_resolved; baseline_aware_strict_lint_zero_introduced_findings",
     "commit": "verifier_5968c71_and_nat_fed986f_committed_published_as_5145cfb_authorization; postdispatch_docs_f144999_published",
     "natLeRecSelf": "published; fresh AWS full module and declaration checks passed; translated dependency acceptance pending",
     "fullLocalVerifierReplay": "blocked_memory_reserve",
@@ -923,6 +928,21 @@
       "report": "/private/tmp/t6-seven-review2/report.json",
       "reportSha256": "5b8e385d38aa7fb117ffa6deb5d3c9f4438016e1fd3078937bf92af4d9bd60cd",
       "detail": "python3 -B Experiment/pipeline/check_pipeline.py passed 265 checks; python3 -m py_compile Experiment/pipeline/*.py Experiment/simp_family_lint.py and git diff --check passed. Lightweight validation of the authoritative fresh report confirms 7 modules, 91/91 identities and 59 replayed, 5 unresolved, 6 render_failed, 0 structurally_refused and 21 compile_failed. Full translated cone and whole-tree acceptance remain unrun."
+    },
+    {
+      "checkedAt": "2026-09-18T20:44:30Z",
+      "scope": "T55_final_bounded_seed_and_strict_cone_acceptance",
+      "result": "passed_91_of_91_seed_and_8_of_8_cone_zero_introduced_lint",
+      "implementationCommits": {
+        "T50": "9fb236e4a82d42f4e9b744f8416821cdf65870ef",
+        "T51": "3a05714d4ba8838ef08e78d4e61c306f219013b4",
+        "T52": "579ccbdacfcacb24e7c84c0e517cd45b5a97957d",
+        "T54": "8a96a31457b10685188ef9c7d344d87e745d35ad"
+      },
+      "checkoutCommit": "8a96a31457b10685188ef9c7d344d87e745d35ad",
+      "pipelineReport": "/tmp/t55-pipeline-20260918T134224-clean/report.json",
+      "coneManifest": "/tmp/t55-cone-run-20260918T134440-timed/manifest.json",
+      "detail": "Fresh current-main pipeline passed all seven modules and 91/91 source identities (113 invocation records), with 91/91 replayed and zero unresolved, render, compile, identity, structural or probe failures in 37.87 seconds. The strict translated cone found 69 modules and 134 edges; all 8 builds returned zero, emitted fresh outputs, and resolved imports from the translated root in 12.26 seconds. Baseline-aware strict generated-source lint recorded 101 unchanged baseline findings and zero introduced findings. The manual override database remains 21 entries across 17 modules, with only eqComm:bcd40e80cbe2ffe1 remaining in the cone. Whole-tree acceptance remains not claimed."
     }
   ],
   "historicalAutomation": {
