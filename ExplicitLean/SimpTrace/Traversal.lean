@@ -141,9 +141,33 @@ def SideRec.post? : SideRec → Option Expr | SideRec.mk _ _ _ _ _ _ p => p
 
 /-- Re-root an event's position under `base`.  Used to place events captured
 relative to a subterm back at their absolute positions. -/
+def stripPosition (base p : Pos) : Pos :=
+  if base.size == 0 || base.size > p.size then p
+  else if p.extract 0 base.size != base then p
+  else p.extract base.size p.size
+
+def SimprocDerivation.rebase (base : Pos) (d : SimprocDerivation) : SimprocDerivation :=
+  { d with redex := base ++ d.redex }
+
+def SimprocDerivation.strip (base : Pos) (d : SimprocDerivation) : SimprocDerivation :=
+  { d with redex := stripPosition base d.redex }
+
+def RuleDerivation.rebase (base : Pos) (d : RuleDerivation) : RuleDerivation :=
+  { origin := d.origin, source? := d.source?, argId? := d.argId?, direction? := d.direction?,
+    preprocess := d.preprocess, redex := base ++ d.redex, extraArgs := d.extraArgs,
+    binders := d.binders, discharge := d.discharge,
+    simproc? := d.simproc?.map (SimprocDerivation.rebase base) }
+
+def RuleDerivation.strip (base : Pos) (d : RuleDerivation) : RuleDerivation :=
+  { origin := d.origin, source? := d.source?, argId? := d.argId?, direction? := d.direction?,
+    preprocess := d.preprocess,
+    redex := stripPosition base d.redex,
+    extraArgs := d.extraArgs, binders := d.binders, discharge := d.discharge,
+    simproc? := d.simproc?.map (SimprocDerivation.strip base) }
+
 partial def Event.rebase (base : Pos) : Event → Event
   | .rw p o inv pr b a c args side src lo pj d =>
-    .rw (base ++ p) o inv pr b a c args side src lo pj d
+    .rw (base ++ p) o inv pr b a c args side src lo pj (d.map (RuleDerivation.rebase base))
   | .eq p s b a c side => .eq (base ++ p) s b a c side
   | .defeq p k n b a c => .defeq (base ++ p) k n b a c
   | .introCtx p f c => .introCtx (base ++ p) f c
@@ -169,7 +193,19 @@ def Event.strip (base : Pos) : Event → Event
     let p := ev.pos
     if base.size == 0 || base.size > p.size then ev
     else if (p.extract 0 base.size) != base then ev
-    else ev.reposition (p.extract base.size p.size)
+    else
+      let q := p.extract base.size p.size
+      match ev with
+      | .rw _ o inv pr b a c args side src lo pj d =>
+        .rw q o inv pr b a c args side src lo pj (d.map (RuleDerivation.strip base))
+      | _ => ev.reposition q
+
+structure CacheEntry where
+  result : Simp.Result
+  events : Array Event := #[]
+  deriving Inhabited
+
+abbrev TraceCache := SExprMap CacheEntry
 
 /-- Mutable trace state for one traced `simp` run. -/
 structure TraceState where
@@ -203,20 +239,21 @@ structure TraceState where
   binders : Array FVarId := #[]
   /-- Firings diverted away from the trace, innermost frame last.
 
-  A simproc may call the opaque `Simp.simp` on a subterm of its own choosing —
-  `reduceIte` does exactly this on an `ite`'s condition — and that call goes to
-  *stock* `simpImpl`, not to the fork, so the firings it causes carry no
-  position of their own.  While a frame is active those firings land in it
-  rather than at the traversal's position, which would be the enclosing node's
-  and therefore wrong.  The simproc's own result is logged instead, and the
-  diverted firings become that step's `side` evidence. -/
+  A generic simproc may call opaque `Simp.simp` on a subterm of its own choosing;
+  those firings carry no position of their own.  While a frame is active they
+  land here rather than at the traversal's position, which would be the
+  enclosing node's and therefore wrong.  The conditional simprocs are routed
+  through the fork, while other opaque simprocs still use this diversion and
+  become the enclosing step's `side` evidence. -/
   procEvents : Array (Array Event) := #[]
   /-- The subterm each diverted frame's nested `simp` was started on, so the
-  side trace can name its own goal.  A simproc's nested `simp` enters stock
-  `simpImpl`, whose first `pre` call is on the whole subterm it was given; the
-  recorder notes that term the first time it sees position `[]` inside a frame.
+  side trace can name its own goal.  For an opaque simproc's nested `simp`, the
+  first `pre` call is on the whole subterm it was given; the recorder notes
+  that term the first time it sees position `[]` inside a frame.
   `none` until then. -/
   procGoals : Array (Option Expr) := #[]
+  /-- The recorder-owned mirror of the stock simp result cache. -/
+  cache : TraceCache := {}
   deriving Inhabited
 
 /-- `LocalContext` lives in `Type 1`, so the buffer is an `ST.Ref` in the
@@ -242,6 +279,50 @@ def TraceState.push (s : TraceState) (ev : Event) : TraceState :=
 def TraceState.markUnresolved (s : TraceState) (reason : String) : TraceState :=
   if s.unresolved.contains reason then s else
     { s with unresolved := s.unresolved.push reason }
+
+def TraceState.eventSink (s : TraceState) : Array Event :=
+  if s.procEvents.size > 0 then s.procEvents.getD (s.procEvents.size - 1) #[]
+  else if s.sideStack.size > 0 then s.sideStack.getD (s.sideStack.size - 1) #[]
+  else s.events
+
+def currentEvents (ref : TraceRef) : SimpM (Array Event) := return (← ref.get).eventSink
+def eventsSince (ref : TraceRef) (start : Nat) : SimpM (Array Event) := do
+  let es ← currentEvents ref
+  return es.extract (min start es.size) es.size
+def appendEvents (ref : TraceRef) (events : Array Event) : SimpM Unit := do
+  for ev in events do ref.modify (·.push ev)
+def cacheEventsForRoot (root : Pos) (events : Array Event) : Array Event :=
+  events.map (Event.strip root)
+def replayCachedEvents (ref : TraceRef) (root : Pos) (events : Array Event) : SimpM Unit :=
+  appendEvents ref (events.map (Event.rebase root))
+
+@[inline] def withFreshCacheT (ref : TraceRef) (x : SimpM α) : SimpM α := do
+  let stock := (← get).cache
+  let trace := (← ref.get).cache
+  modify fun s => { s with cache := {} }
+  ref.modify fun s => { s with cache := {} }
+  try x finally
+    modify fun s => { s with cache := stock }
+    ref.modify fun s => { s with cache := trace }
+
+def cacheResultT (ref : TraceRef) (root : Pos) (e : Expr) (cfg : Simp.Config)
+    (start : Nat) (r : Simp.Result) : SimpM Simp.Result := do
+  if cfg.memoize && r.cache then
+    let entry : CacheEntry := { result := r, events := cacheEventsForRoot root (← eventsSince ref start) }
+    modify fun s => { s with cache := s.cache.insert e r }
+    ref.modify fun s => { s with cache := s.cache.insert e entry }
+  return r
+
+@[inline] def withPreservedCacheT (ref : TraceRef) (x : SimpM α) : SimpM α := do
+  let stockMap₂ := (← get).cache.map₂
+  let stockStage₁ := (← get).cache.stage₁
+  let traceMap₂ := (← ref.get).cache.map₂
+  let traceStage₁ := (← ref.get).cache.stage₁
+  modify fun s => { s with cache := s.cache.switch }
+  ref.modify fun s => { s with cache := s.cache.switch }
+  try x finally
+    modify fun s => { s with cache.map₂ := stockMap₂, cache.stage₁ := stockStage₁ }
+    ref.modify fun s => { s with cache.map₂ := traceMap₂, cache.stage₁ := traceStage₁ }
 
 /-! ## The fork's own reader state
 
@@ -852,11 +933,9 @@ Everything that decides *what* simp does is untouched: `pre`/`post`/`dpre`/
 from `getSimpCongrTheorems`, and `Result` construction uses the same
 `mkCongr`/`mkCongrFun`/`mkCongrArg`/`mkEqTrans` helpers.
 
-Caching is disabled in the fork (`cacheResultT` is a no-op): a cached `Result`
-would be reused at a different position and its events would then be attributed
-to the wrong place — or, worse, not logged at all.  Disabling it costs time but
-never correctness, and it is the only way a position-exact trace can be built
-on top of an expression-keyed cache.
+The fork mirrors the stock expression-keyed cache with root-relative event
+slices.  A hit returns the stock `Result` without re-running matching and
+replays the slice after re-rooting it at the caller's position.
 -/
 
 mutual
@@ -1258,9 +1337,8 @@ partial def simpConstT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Resu
 /-- SOURCE: Main.lean:268-287 `Simp.withNewLemmas`. -/
 partial def withNewLemmasT (ref : TraceRef) (xs : Array Expr) (f : SimpM α) :
     SimpM α := do
-  let _ := ref
   if (← Simp.getConfig).contextual then
-    Simp.withFreshCache do
+    withFreshCacheT ref do
       let mut s ← Simp.getSimpTheorems
       let mut updated := false
       let ctx ← Simp.getContext
@@ -1275,7 +1353,7 @@ partial def withNewLemmasT (ref : TraceRef) (xs : Array Expr) (f : SimpM α) :
   else if (← Simp.getMethods).wellBehavedDischarge then
     f
   else
-    Simp.withFreshCache do f
+    withFreshCacheT ref do f
 
 /-- SOURCE: Main.lean:257-263 `Simp.lambdaTelescopeDSimp`, position-threaded.
 Each `lam` crossed pushes 1 (the body), per the spec; the binder type is
@@ -1445,25 +1523,28 @@ partial def simpStepT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Resul
 
 /-- SOURCE: Main.lean:677-712 `Simp.simpLoop`, position-threaded.
 
-`cacheResult` is dropped: a cached `Result` is keyed on the expression alone, so
-reusing it at a second position would either log that position's events nowhere
-or log them at the first position.  A position-exact trace and an
-expression-keyed result cache are incompatible; correctness wins. -/
+The recorder-owned mirror carries the complete root-relative event slice for
+each memoized stock result, allowing cache hits to replay provenance. -/
 partial def simpLoopT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Result :=
   withIncRecDepth do
     let cfg ← Simp.getConfig
+    let start ← eventCount ref
+    if cfg.memoize then
+      if let some entry := (← ref.get).cache.find? e then
+        replayCachedEvents ref pos entry.events
+        return entry.result
     if (← get).numSteps > cfg.maxSteps then
       throwError "`simp` failed: maximum number of steps exceeded"
     else
       checkSystem "simp"
       modify fun s => { s with numSteps := s.numSteps + 1 }
       match (← withPos ref pos (Simp.pre e)) with
-      | .done r  => return r
-      | .visit r => r.mkEqTrans (← simpLoopT ref pos r.expr)
-      | .continue none => visitPreContinue cfg { expr := e }
-      | .continue (some r) => visitPreContinue cfg r
+      | .done r  => cacheResultT ref pos e cfg start r
+      | .visit r => cacheResultT ref pos e cfg start (← r.mkEqTrans (← simpLoopT ref pos r.expr))
+      | .continue none => visitPreContinue cfg start { expr := e }
+      | .continue (some r) => visitPreContinue cfg start r
 where
-  visitPreContinue (cfg : Simp.Config) (r : Simp.Result) : SimpM Simp.Result := do
+  visitPreContinue (cfg : Simp.Config) (start : Nat) (r : Simp.Result) : SimpM Simp.Result := do
     -- SOURCE: Main.lean:695 — **one** `reduceStep`, not a fixpoint.  Looping to
     -- a fixpoint here would charge the `maxSteps` budget once per reduction
     -- *chain* instead of once per reduction, so a cutoff would land in a
@@ -1471,20 +1552,20 @@ where
     let eNew ← reduceOnce ref pos r.expr
     if eNew != r.expr then
       let r := { r with expr := eNew }
-      r.mkEqTrans (← simpLoopT ref pos r.expr)
+      cacheResultT ref pos e cfg start (← r.mkEqTrans (← simpLoopT ref pos r.expr))
     else
       let r ← r.mkEqTrans (← simpStepT ref pos r.expr)
-      visitPost cfg r
-  visitPost (cfg : Simp.Config) (r : Simp.Result) : SimpM Simp.Result := do
+      visitPost cfg start r
+  visitPost (cfg : Simp.Config) (start : Nat) (r : Simp.Result) : SimpM Simp.Result := do
     match (← withPos ref pos (Simp.post r.expr)) with
-    | .done r' => r.mkEqTrans r'
-    | .continue none => visitPostContinue cfg r
-    | .visit r' | .continue (some r') => visitPostContinue cfg (← r.mkEqTrans r')
-  visitPostContinue (cfg : Simp.Config) (r : Simp.Result) : SimpM Simp.Result := do
+    | .done r' => cacheResultT ref pos e cfg start (← r.mkEqTrans r')
+    | .continue none => visitPostContinue cfg start r
+    | .visit r' | .continue (some r') => visitPostContinue cfg start (← r.mkEqTrans r')
+  visitPostContinue (cfg : Simp.Config) (start : Nat) (r : Simp.Result) : SimpM Simp.Result := do
     let mut r := r
     unless cfg.singlePass || e == r.expr do
       r ← r.mkEqTrans (← simpLoopT ref pos r.expr)
-    return r
+    cacheResultT ref pos e cfg start r
 
 /-- SOURCE: Main.lean:716-720 `Simp.simpImpl`, position-threaded.  This is the
 fork's entry point and replaces every recursive `Simp.simp` call. -/

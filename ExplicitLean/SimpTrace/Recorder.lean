@@ -715,13 +715,14 @@ def checkArgsElaborate (declName : Name) (args : Array Expr) : MetaM Bool := do
 
 /-! ### Bounded operational records for `reduceIte`/`reduceDIte`
 
-The built-in procedures simplify their condition with a nested stock `simp`,
-then choose one of four fixed semantic lemmas.  The fork already diverts the
-nested events into `procEvents`; replay those events structurally to identify
-the branch, and record the constructor directly.  This deliberately does not
-look at `Simp.Result.proof?`: the result is used only for the stock parity
-check, while the derivation comes from the procedure's visible redex and the
-condition trace. -/
+The built-in procedures simplify their condition with a nested simp, then
+choose one of four fixed semantic lemmas.  The fork routes these two
+procedures through `simpT`; generic procedures still divert opaque nested
+events into `procEvents`.  Replay those events structurally to identify the
+branch, and record the constructor directly.  This deliberately does not look
+at `Simp.Result.proof?`: the result is used only for the stock parity check,
+while the derivation comes from the procedure's visible redex and condition
+trace. -/
 
 def eventExprPair? : Event → Option (Expr × Expr)
   | .rw _ _ _ _ before after .. => some (before, after)
@@ -1035,6 +1036,135 @@ where
 
 /-! ### Method instrumentation -/
 
+/-! ### Controlled conditional simprocs
+
+The built-in `reduceIte` and `reduceDIte` closures call opaque `Simp.simp` on
+their condition.  Keep their declarations and candidate registration intact,
+but erase only those two entries from the invocation array and run equivalent
+closures at the same pre-simproc boundary.  This preserves all other
+candidate order and prevents a second registration/firing. -/
+
+partial def peelConditional (e : Expr) (args : Array Expr := #[]) :
+    Option (Expr × Array Expr) :=
+  -- `Expr.isAppOf` also succeeds for an application of an `ite` result
+  -- (e.g. `(if p then f else g) x`).  Keep peeling until the complete
+  -- five-argument conditional core is exposed, exactly as the stock
+  -- simproc's `numExtraArgs` peeling does.
+  if (e.isAppOf ``ite || e.isAppOf ``dite) && e.getAppNumArgs == 5 then
+    some (e, args.reverse)
+  else
+    match e with
+    | .app f a => peelConditional f (args.push a)
+    | _ => none
+
+def controlledReduceIte (ref : TraceRef) : Simp.Simproc := fun e => do
+  match peelConditional e with
+  | none => return .continue
+  | some (core, extraArgs) =>
+    let_expr f@ite α c i tb eb ← core | return .continue
+    let r ← simpT ref #[] c
+    if r.expr.isTrue then
+      let pr := mkApp (mkApp5 (mkConst ``ite_cond_eq_true f.constLevels!) α c i tb eb)
+        (← r.getProof)
+      Simp.recordSimpTheorem (.decl ``reduceIte false)
+      let step : Simp.Step := .visit { expr := tb, proof? := pr }
+      return (← step.addExtraArgs extraArgs)
+    if r.expr.isFalse then
+      let pr := mkApp (mkApp5 (mkConst ``ite_cond_eq_false f.constLevels!) α c i tb eb)
+        (← r.getProof)
+      Simp.recordSimpTheorem (.decl ``reduceIte false)
+      let step : Simp.Step := .visit { expr := eb, proof? := pr }
+      return (← step.addExtraArgs extraArgs)
+    return .continue
+
+def controlledReduceDIte (ref : TraceRef) : Simp.Simproc := fun e => do
+  match peelConditional e with
+  | none => return .continue
+  | some (core, extraArgs) =>
+    let_expr f@dite α c i tb eb ← core | return .continue
+    let r ← simpT ref #[] c
+    if r.expr.isTrue then
+      let pr ← r.getProof
+      let h := mkApp2 (mkConst ``of_eq_true) c pr
+      let eNew := mkApp tb h |>.headBeta
+      let prNew := mkApp (mkApp5 (mkConst ``dite_cond_eq_true f.constLevels!) α c i tb eb) pr
+      Simp.recordSimpTheorem (.decl ``reduceDIte false)
+      let step : Simp.Step := .visit { expr := eNew, proof? := prNew }
+      return (← step.addExtraArgs extraArgs)
+    if r.expr.isFalse then
+      let pr ← r.getProof
+      let h := mkApp2 (mkConst ``of_eq_false) c pr
+      let eNew := mkApp eb h |>.headBeta
+      let prNew := mkApp (mkApp5 (mkConst ``dite_cond_eq_false f.constLevels!) α c i tb eb) pr
+      Simp.recordSimpTheorem (.decl ``reduceDIte false)
+      let step : Simp.Step := .visit { expr := eNew, proof? := prNew }
+      return (← step.addExtraArgs extraArgs)
+    return .continue
+
+def controlledConditionalSimprocs (ref : TraceRef) (allowIte allowDIte : Bool) : Simp.Simproc := fun e => do
+  unless Simp.simprocs.get (← getOptions) do return .continue
+  match peelConditional e with
+  | none => return .continue
+  | some (core, _) =>
+    if allowIte && core.isAppOf ``ite then
+      controlledReduceIte ref e
+    else if allowDIte && core.isAppOf ``dite then
+      controlledReduceDIte ref e
+    else
+      return .continue
+
+def controlledDReduceIte (ref : TraceRef) : Simp.DSimproc := fun e => do
+  unless (← Simp.inDSimp) do return .continue
+  match peelConditional e with
+  | none => return .continue
+  | some (core, extraArgs) =>
+    let_expr ite _ _ c i tb eb ← core | return .continue
+    let r ← simpT ref #[] c
+    if r.expr.isTrue || r.expr.isFalse then
+      match_expr (← whnfD i) with
+      | Decidable.isTrue _ _ =>
+        Simp.recordSimpTheorem (.decl ``dreduceIte false)
+        let step : Simp.DStep := .visit tb
+        return step.addExtraArgs extraArgs
+      | Decidable.isFalse _ _ =>
+        Simp.recordSimpTheorem (.decl ``dreduceIte false)
+        let step : Simp.DStep := .visit eb
+        return step.addExtraArgs extraArgs
+      | _ => return .continue
+    return .continue
+
+def controlledDReduceDIte (ref : TraceRef) : Simp.DSimproc := fun e => do
+  unless (← Simp.inDSimp) do return .continue
+  match peelConditional e with
+  | none => return .continue
+  | some (core, extraArgs) =>
+    let_expr dite _ _ c i tb eb ← core | return .continue
+    let r ← simpT ref #[] c
+    if r.expr.isTrue || r.expr.isFalse then
+      match_expr (← whnfD i) with
+      | Decidable.isTrue _ h =>
+        Simp.recordSimpTheorem (.decl ``dreduceDIte false)
+        let step : Simp.DStep := .visit (mkApp tb h).headBeta
+        return step.addExtraArgs extraArgs
+      | Decidable.isFalse _ h =>
+        Simp.recordSimpTheorem (.decl ``dreduceDIte false)
+        let step : Simp.DStep := .visit (mkApp eb h).headBeta
+        return step.addExtraArgs extraArgs
+      | _ => return .continue
+    return .continue
+
+def controlledConditionalDSimprocs (ref : TraceRef) (allowIte allowDIte : Bool) : Simp.DSimproc := fun e => do
+  unless Simp.simprocs.get (← getOptions) do return .continue
+  match peelConditional e with
+  | none => return .continue
+  | some (core, _) =>
+    if allowIte && core.isAppOf ``ite then
+      controlledDReduceIte ref e
+    else if allowDIte && core.isAppOf ``dite then
+      controlledDReduceDIte ref e
+    else
+      return .continue
+
 /-- Capture the position the traversal is currently at. -/
 @[inline] def currentPos (ref : TraceRef) : Simp.SimpM Pos :=
   return (← ref.get).pos
@@ -1287,7 +1417,7 @@ def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
     let result ←
       -- The discharger's own events are rooted at the side goal, not at the
       -- node whose condition it discharges.
-      try atSideRoot ref (d e)
+      try withPreservedCacheT ref <| atSideRoot ref (d e)
       catch ex =>
         -- Never leave a dangling frame: a discharger that throws would
         -- otherwise send every later event into the abandoned frame.
@@ -1331,23 +1461,102 @@ def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
 stock; the traversal is the fork.
 -/
 
+/-- The default discharger copied at the fork boundary.  Its only traversal
+edit is replacing the opaque nested `Simp.simp` with `simpT`; all proof
+construction and the result tests are stock. -/
+partial def isEqnThmHypothesisT (e : Expr) : Bool :=
+  e.isForall && go e
+where
+  go (e : Expr) : Bool :=
+    match e with
+    | .forallE _ d b _ => (d.isEq || d.isHEq || b.hasLooseBVar 0) && go b
+    | _ => e.isFalse
+
+def dischargeUsingAssumptionT (e : Expr) : SimpM (Option Expr) := do
+  let lctxInitIndices := (← readThe Simp.Context).lctxInitIndices
+  let contextual := (← Simp.getConfig).contextual
+  (← getLCtx).findDeclRevM? fun localDecl => do
+    if localDecl.isImplementationDetail then
+      return none
+    else if !contextual && localDecl.index >= lctxInitIndices then
+      return none
+    else if (← Simp.withSimpMetaConfig <| isDefEq e localDecl.type) then
+      return some localDecl.toExpr
+    else
+      return none
+
+partial def dischargeEqnThmHypothesisT (e : Expr) : MetaM (Option Expr) := do
+  assert! isEqnThmHypothesisT e
+  let mvar ← mkFreshExprSyntheticOpaqueMVar e
+  withCanUnfoldPred canUnfoldAtMatcher do
+    if let .none ← go? mvar.mvarId! then
+      instantiateMVars mvar
+    else
+      return none
+where
+  go? (mvarId : MVarId) : MetaM (Option MVarId) :=
+    try
+      let (fvarId, mvarId) ← mvarId.intro1
+      mvarId.withContext do
+        let localDecl ← fvarId.getDecl
+        if localDecl.type.isEq || localDecl.type.isHEq then
+          if let some { mvarId, .. } ← unifyEq? mvarId fvarId {} then
+            go? mvarId
+          else
+            return none
+        else
+          go? mvarId
+    catch _ =>
+      return some mvarId
+
+def dischargeRflT (e : Expr) : SimpM (Option Expr) := do
+  forallTelescope e fun xs e => do
+    let some (t, a, b) := e.eq? | return .none
+    unless a.getAppFn.isMVar || b.getAppFn.isMVar do return .none
+    if (← Simp.withSimpMetaConfig <| isDefEq a b) then
+      let u ← getLevel t
+      let proof := mkApp2 (.const ``rfl [u]) t a
+      let proof ← mkLambdaFVars xs proof
+      return .some proof
+    return .none
+
+def dischargeDefaultT (ref : TraceRef) (e : Expr) : Simp.SimpM (Option Expr) := do
+  let e := e.cleanupAnnotations
+  if isEqnThmHypothesisT e then
+    if let some r ← dischargeUsingAssumptionT e then return some r
+    if let some r ← dischargeEqnThmHypothesisT e then return some r
+  let r ← simpT ref #[] e
+  if let some p ← dischargeRflT r.expr then
+    return some (mkApp4 (mkConst ``Eq.mpr [Level.zero]) e r.expr (← r.getProof) p)
+  else if r.expr.isTrue then
+    return some (← mkOfEqTrue (← r.getProof))
+  else
+    return none
+
 /-- Build instrumented `Methods` around the stock defaults. -/
 def mkRecordingMethods (ref : TraceRef) (simprocs : Simp.SimprocsArray)
     (discharge? : Option Simp.Discharge) (dischargerText? : Option String) :
     Simp.Methods :=
-  let d : Simp.Discharge := discharge?.getD Simp.dischargeDefault?
+  let d : Simp.Discharge := discharge?.getD (dischargeDefaultT ref)
   -- Mirror stock simp exactly: `simpCore` uses `mkDefaultMethodsCore`
   -- (`wellBehavedDischarge := true`) when no custom discharger is given, and
   -- `false` only for a user discharger.  Hardcoding `false` would force
   -- `withFreshCache` on every implication descent, changing which subterms simp
   -- revisits and so the trace itself.
-  let base := Simp.mkMethods simprocs
+  let allowIte := simprocs.any fun s => s.simprocNames.contains ``reduceIte
+  let allowDIte := simprocs.any fun s => s.simprocNames.contains ``reduceDIte
+  let allowDReduceIte := simprocs.any fun s => s.simprocNames.contains ``dreduceIte
+  let allowDReduceDIte := simprocs.any fun s => s.simprocNames.contains ``dreduceDIte
+  let conditionalFree := simprocs.erase ``reduceIte |>.erase ``reduceDIte
+    |>.erase ``dreduceIte |>.erase ``dreduceDIte
+  let base := Simp.mkMethods conditionalFree
     (instrumentDischarge ref dischargerText? d)
     (wellBehavedDischarge := discharge?.isNone)
   let userPre := instrument ref "pre"
-    (Simp.simpMatch >> Simp.userPreSimprocs simprocs >> Simp.simpUsingDecide)
+    (Simp.simpMatch >> controlledConditionalSimprocs ref allowIte allowDIte >>
+      Simp.userPreSimprocs conditionalFree >> Simp.simpUsingDecide)
   let userPost := instrument ref "post"
-    (Simp.userPostSimprocs simprocs >> Simp.simpGround >> Simp.simpArith
+    (Simp.userPostSimprocs conditionalFree >> Simp.simpGround >> Simp.simpArith
       >> Simp.simpUsingDecide)
   { base with
     -- The theorem phase is the fork-side operational matcher.  The remaining
@@ -1355,8 +1564,10 @@ def mkRecordingMethods (ref : TraceRef) (simprocs : Simp.SimprocsArray)
     -- simprocs remain classified/unresolved exactly as before.
     pre := rewritePreOperational ref >> userPre
     post := rewritePostOperational ref >> userPost
-    dpre := instrumentD ref base.dpre
-    dpost := instrumentD ref base.dpost }
+    dpre := instrumentD ref
+      (controlledConditionalDSimprocs ref allowDReduceIte allowDReduceDIte >> base.dpre)
+    dpost := instrumentD ref
+      (controlledConditionalDSimprocs ref allowDReduceIte allowDReduceDIte >> base.dpost) }
 
 /-- Run the forked traversal on `e`, returning simp's result, the updated stats
 and the events logged at their exact positions. -/
