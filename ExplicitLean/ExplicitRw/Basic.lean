@@ -58,6 +58,98 @@ def Replacement.defeq (e : Expr) : Replacement := { newExpr := e, proof? := none
 /-- A propositional replacement carrying an `Eq` proof. -/
 def Replacement.eq (e : Expr) (h : Expr) : Replacement := { newExpr := e, proof? := some h }
 
+/-! ### Explicit dependent-forall transport
+
+`rewriteAt` deliberately refuses a propositional rewrite in the domain of a
+dependent `forall`: rebuilding that node is not an ordinary `congrArg`.  The
+recorder-facing operation below is the deliberately dumb escape hatch.  Its
+caller supplies the already-recorded domain equality and, optionally, the
+already-replayed body equality under a fresh binder.  There is no lookup or
+inference in this operation.  The numeric handle is used only to give the
+introduced binder a stable identity at the tactic boundary; it is never
+recovered from a pretty-printed name.
+-/
+
+/-- Build the equality induced by changing the domain of a dependent `forall`.
+
+The right-hand body is explicitly transported back along `domainEq`; this is
+the only cast performed here.  The `Eq.rec` motive makes the construction
+kernel-checkable without asking congruence search to guess a theorem. -/
+def dependentForallDomain (binderName : Name) (binderInfo : BinderInfo)
+    (domain body newDomain domainEq : Expr) : MetaM (Expr × Expr) := do
+  let oldForall := .forallE binderName domain body binderInfo
+  let domainType ← inferType domain
+  let .sort _ := domainType | throwError "dependent forall domain is not a sort"
+  let domainTypeType ← inferType domainType
+  let .sort eu := domainTypeType | throwError "dependent forall domain sort is ill-typed"
+  withLocalDecl `transportDomain .default domainType fun q => do
+    let eqTy := mkApp3 (.const ``Eq [eu]) domainType domain q
+    withLocalDecl `transportEquality .default eqTy fun h => do
+      withLocalDecl `transportBinder .default q fun y => do
+        let hSymm ← mkEqSymm h
+        let castArg ← mkAppM ``Eq.mp #[hSymm, y]
+        let transportedBody := body.instantiate1 castArg
+        let rhs0 ← mkForallFVars #[y] transportedBody
+        let .forallE _ _ rhsBody _ := rhs0
+          | throwError "dependent forall transport failed to abstract its binder"
+        let rhs := .forallE binderName q rhsBody binderInfo
+        let forallType ← inferType oldForall
+        let .sort _ := forallType | throwError "dependent forall is not a sort"
+        let forallTypeType ← inferType forallType
+        let .sort fu := forallTypeType | throwError "dependent forall sort is ill-typed"
+        let eqType := mkApp3 (.const ``Eq [fu]) forallType oldForall rhs
+        let motive ← mkLambdaFVars #[q, h] eqType
+        let refl ← mkEqRefl oldForall
+        let recFn ← mkAppOptM ``Eq.rec #[none, domain, motive, refl, some newDomain, some domainEq]
+        let recFn ← instantiateMVars recFn
+        let recTy ← inferType recFn
+        withLocalDecl binderName binderInfo newDomain fun targetY => do
+          let targetCast ← mkAppM ``Eq.mp #[← mkEqSymm domainEq, targetY]
+          let targetBody := body.instantiate1 targetCast
+          let targetForall0 ← mkForallFVars #[targetY] targetBody
+          let .forallE _ _ targetBody' _ := targetForall0
+            | throwError "dependent forall transport failed to build its target"
+          let targetRhs := .forallE binderName newDomain targetBody' binderInfo
+          let expected := mkApp3 (.const ``Eq [fu]) forallType oldForall targetRhs
+          unless ← isDefEq recTy expected do
+            throwError "dependent forall transport produced an ill-typed domain cast"
+          return (targetRhs, recFn)
+
+/-/ Build the exact dependent-forall replacement from explicit domain/body
+    replacements.  `bodyReplacement` is evaluated under a local whose name is
+    derived from the stable handle before this function is called. -/
+def dependentForallTransport (binderName : Name) (binderInfo : BinderInfo)
+    (domain body : Expr) (domainReplacement : Replacement)
+    (bodyLocal? : Option Expr) (bodyReplacement? : Option Replacement) : MetaM Replacement := do
+  let some domainEq := domainReplacement.proof?
+    | throwError "dependent forall transport requires a propositional domain equality"
+  let (seedForall, domainPf) ← dependentForallDomain binderName binderInfo domain body
+    domainReplacement.newExpr domainEq
+  match bodyReplacement? with
+  | none => return { newExpr := seedForall, proof? := some domainPf }
+  | some bodyReplacement =>
+    let bodyEq? := bodyReplacement.proof?
+    let some bodyLocal := bodyLocal?
+      | throwError "dependent forall transport body equality has no binder handle"
+    -- Abstract the concrete body over the stable local before placing it under
+    -- the new forall. Keeping the lambda body (rather than its fvar) avoids
+    -- leaking the temporary local into the returned expression.
+    let bodyFn ← mkLambdaFVars #[bodyLocal] bodyReplacement.newExpr
+    let .lam _ _ newBody _ := bodyFn
+      | throwError "dependent forall transport failed to abstract its body"
+    let finalForall := .forallE binderName domainReplacement.newExpr newBody binderInfo
+    match bodyEq? with
+    | none =>
+      -- A definitional body replacement still needs the domain cast proof.
+      return { newExpr := finalForall, proof? := some domainPf }
+    | some bodyEq =>
+      -- The body replacement is already checked by `rewriteAt`; abstract the
+      -- concrete equality over the stable binder explicitly.
+      let bodyLambda ← mkLambdaFVars #[bodyLocal] bodyEq
+      let forallPf ← mkForallCongr bodyLambda
+      let proof ← mkEqTrans domainPf forallPf
+      return { newExpr := finalForall, proof? := some proof }
+
 /-- Errors raised by a single step, tagged with the step index by the caller. -/
 def stepError {m : Type → Type} [Monad m] [MonadError m] {α : Type} (idx : Nat) (msg : MessageData) : m α :=
   throwError "explicit_rw: step {idx + 1}: {msg}"

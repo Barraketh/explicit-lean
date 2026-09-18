@@ -57,6 +57,7 @@ not in this table, it has no form (see "Not expressible" below).
 | `eq (lhs = rhs) by rfl at [..]`        | `eq`, `by: "rfl"`                       |
 | `eq (lhs = rhs) by decide at [..]`     | `eq`, `by: "decide"`                    |
 | `congr i [nested steps] at [..]`       | `congr` with `arg: i` and its `steps`   |
+| `transport forall h [domain] body [body] at [..]` | explicit dependent-forall domain transport |
 | `... at h`                             | location `{"hyp": "h"}`                 |
 | `... then <side proof>`                | the location's `close`                  |
 
@@ -518,12 +519,17 @@ simplifier: it lives outside `Lean.Meta.Tactic.Simp`, and
 syntax explicitRwCongr :=
   &"congr " num " [" explicitRwInnerStep,* "]" explicitRwPos
 
+/- A recorder-issued dependent-forall transport.  The first step list rewrites
+the domain; the second (under the stable binder handle) rewrites its body. -/
+syntax explicitRwTransport :=
+  &"transport " &"forall " num " [" explicitRwInnerStep,* "]" &" body " "[" explicitRwInnerStep,* "]" explicitRwPos
+
 /-- One step of an `explicit_rw` trace. The keyword-led forms are tried before
 the bare-term rewrite, so `beta at [...]` is the reduction rather than a lemma
 named `beta`. -/
 syntax explicitRwStep :=
   explicitRwUnfold <|> explicitRwRed <|> explicitRwIntroCtx <|> explicitRwChange <|>
-  explicitRwEq <|> explicitRwCongr <|> explicitRwProp <|> explicitRwRw
+  explicitRwEq <|> explicitRwCongr <|> explicitRwTransport <|> explicitRwProp <|> explicitRwRw
 
 /-- Optional closing tactic: `explicit_rw [...] then rfl`. -/
 syntax explicitRwClose := " then " explicitRwSideProof
@@ -1401,6 +1407,45 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax)
         else
           stepError idx m!"`congr {argIdx}`: the application at this position has \
             only {args.size} argument(s).")
+      (fun pfx child sub => badPosError idx pos pfx child sub)
+  | ``explicitRwTransport =>
+    -- `transport forall h [domain] body [body] at pos` is intentionally
+    -- mechanical: both nested lists are replayed at their exact locations,
+    -- and the stable handle is the only way body terms can name the newly
+    -- introduced binder.
+    let handle ← checkedHandle stx[2] "transport binder handle"
+    if handles.contains handle then
+      stepError idx m!"`transport forall {handle}` reuses an introduced handle already in scope"
+    let domainSteps := stx[4].getSepArgs
+    let bodySteps := stx[8].getSepArgs
+    let pos := parsePos stx[10]
+    rewriteAt e pos
+      (fun sub => do
+        let .forallE binderName binderType binderBody binderInfo := sub
+          | stepError idx m!"`transport forall` at position {Pos.render pos} requires a `∀`"
+        let replay (start : Expr) (steps : Array Syntax) (hs := handles) :
+            TacticM Replacement := do
+          let mut cur := start
+          let mut proof? : Option Expr := none
+          for h : j in [0 : steps.size] do
+            let r ← runStep idx cur steps[j] hs
+            let next ← instantiateMVars r.newExpr
+            match proof?, r.proof? with
+            | none, p => proof? := p
+            | some p, none => proof? := some p
+            | some p, some q => proof? := some (← mkEqTrans p q)
+            cur := next
+          return { newExpr := cur, proof? := proof? }
+        let domainR ← replay binderType domainSteps
+        let some domainEq := domainR.proof?
+          | stepError idx m!"`transport forall {handle}` needs a propositional domain equality"
+        withLocalDecl binderName binderInfo domainR.newExpr fun q => do
+          let hSymm ← mkEqSymm domainEq
+          let castArg ← mkAppM ``Eq.mp #[hSymm, q]
+          let bodySeed := binderBody.instantiate1 castArg
+          let bodyR ← replay bodySeed bodySteps (handles.insert handle q.fvarId!)
+          dependentForallTransport binderName binderInfo binderType binderBody domainR
+            (some q) (some bodyR))
       (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwIntroCtx =>
     stepError idx m!"`intro_ctx` is a recorded step kind that `explicit_rw` does not \
