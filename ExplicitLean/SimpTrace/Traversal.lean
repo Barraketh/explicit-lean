@@ -110,7 +110,11 @@ inductive Event where
   | defeq (pos : Pos) (kind : DefKind) (name? : Option Name)
           (before after : Expr) (ctx : EvCtx)
   /-- Contextual simp made an implication's antecedent available. -/
-  | introCtx (pos : Pos) (fvarId : FVarId) (ctx : EvCtx)
+  | introCtx (pos : Pos) (fvarId : FVarId) (ctx : EvCtx) (info : IntroCtxInfo)
+  /-- Explicitly closes the scope owned by an `intro_ctx` handle.  This is
+  internal recorder metadata; the source-facing step is the matching
+  `introCtx` event above. -/
+  | introCtxExit (pos : Pos) (info : IntroCtxInfo)
   /-- Dependent congruence (spec 3b17247): the application at `pos` had its
   argument `arg` rewritten by `steps` (whose positions are *relative to that
   argument*), and later arguments depending on it were cast-transported by the
@@ -141,7 +145,10 @@ inductive SideRec where
 
 end
 
-instance : Inhabited Event := ⟨Event.introCtx #[] default {}⟩
+instance : Inhabited Event :=
+  ⟨Event.introCtx #[] default {}
+    { handle := 0, operation := "intro_ctx", domain := { position := #[] },
+      scope := { id := 0, owner := "intro_ctx", enter := #[], exit := #[] } }⟩
 instance : Inhabited SideRec := ⟨SideRec.mk default #[] none {} #[] default none⟩
 
 def SideRec.goal : SideRec → Expr | SideRec.mk g _ _ _ _ _ _ => g
@@ -183,7 +190,16 @@ partial def Event.rebase (base : Pos) : Event → Event
     .rw (base ++ p) o inv pr b a c args side src lo pj (d.map (RuleDerivation.rebase base))
   | .eq p s b a c side => .eq (base ++ p) s b a c side
   | .defeq p k n b a c => .defeq (base ++ p) k n b a c
-  | .introCtx p f c => .introCtx (base ++ p) f c
+  | .introCtx p f c i =>
+    .introCtx (base ++ p) f c
+      { i with domain.position := base ++ i.domain.position,
+               scope.enter := base ++ i.scope.enter,
+               scope.exit := base ++ i.scope.exit }
+  | .introCtxExit p i =>
+    .introCtxExit (base ++ p)
+      { i with domain.position := base ++ i.domain.position,
+               scope.enter := base ++ i.scope.enter,
+               scope.exit := base ++ i.scope.exit }
   | .congr p i steps b a ab aa c => .congr (base ++ p) i steps b a ab aa c
   | .transport p h domain body b a db da bb ba c =>
     .transport (base ++ p) h domain body b a db da bb ba c
@@ -191,14 +207,15 @@ partial def Event.rebase (base : Pos) : Event → Event
 /-- The position an event was logged at. -/
 def Event.pos : Event → Pos
   | Event.rw p .. | Event.eq p .. | Event.defeq p ..
-  | Event.introCtx p .. | Event.congr p .. | Event.transport p .. => p
+  | Event.introCtx p .. | Event.introCtxExit p .. | Event.congr p .. | Event.transport p .. => p
 
 /-- Replace an event's position. -/
 def Event.reposition (q : Pos) : Event → Event
   | .rw _ o inv pr b a c args side src lo pj d => .rw q o inv pr b a c args side src lo pj d
   | .eq _ s b a c side => .eq q s b a c side
   | .defeq _ k n b a c => .defeq q k n b a c
-  | .introCtx _ f c => .introCtx q f c
+  | .introCtx _ f c i => .introCtx q f c i
+  | .introCtxExit _ i => .introCtxExit q i
   | .congr _ i steps b a ab aa c => .congr q i steps b a ab aa c
   | .transport _ h domain body b a db da bb ba c =>
     .transport q h domain body b a db da bb ba c
@@ -215,6 +232,16 @@ def Event.strip (base : Pos) : Event → Event
       match ev with
       | .rw _ o inv pr b a c args side src lo pj d =>
         .rw q o inv pr b a c args side src lo pj (d.map (RuleDerivation.strip base))
+      | .introCtx _ f c i =>
+        .introCtx q f c
+          { i with domain.position := stripPosition base i.domain.position,
+                   scope.enter := stripPosition base i.scope.enter,
+                   scope.exit := stripPosition base i.scope.exit }
+      | .introCtxExit _ i =>
+        .introCtxExit q
+          { i with domain.position := stripPosition base i.domain.position,
+                   scope.enter := stripPosition base i.scope.enter,
+                   scope.exit := stripPosition base i.scope.exit }
       | _ => ev.reposition q
 
 structure CacheEntry where
@@ -280,6 +307,11 @@ structure TraceState where
   procOrigins : Array Name := #[]
   /-- The recorder-owned mirror of the stock simp result cache. -/
   cache : TraceCache := {}
+  /-- Stable handles for contextual binders, allocated in introduction order
+  within one traced call. -/
+  nextIntroHandle : Nat := 0
+  /-- Stable ownership IDs for contextual binder scopes. -/
+  nextIntroScope : Nat := 0
   deriving Inhabited
 
 /-- `LocalContext` lives in `Type 1`, so the buffer is an `ST.Ref` in the
@@ -328,10 +360,35 @@ def eventsSince (ref : TraceRef) (start : Nat) : SimpM (Array Event) := do
   return es.extract (min start es.size) es.size
 def appendEvents (ref : TraceRef) (events : Array Event) : SimpM Unit := do
   for ev in events do ref.modify (·.push ev)
+
 def cacheEventsForRoot (root : Pos) (events : Array Event) : Array Event :=
   events.map (Event.strip root)
-def replayCachedEvents (ref : TraceRef) (root : Pos) (events : Array Event) : SimpM Unit :=
-  appendEvents ref (events.map (Event.rebase root))
+def replayCachedEvents (ref : TraceRef) (root : Pos) (events : Array Event) : SimpM Unit := do
+  -- Cached contextual introductions are real introductions at the replayed
+  -- occurrence, not aliases for the original scope.  Allocate fresh handles
+  -- while preserving the enter/exit pairing, otherwise a cache hit would
+  -- reuse a handle that belongs to a different binder scope.
+  let mut handles : Array (Nat × Nat) := #[]
+  let mut scopes : Array (Nat × Nat) := #[]
+  let mut out : Array Event := #[]
+  for ev in events.map (Event.rebase root) do
+    match ev with
+    | .introCtx p f c i =>
+      let st ← ref.get
+      let h := st.nextIntroHandle
+      let s := st.nextIntroScope
+      ref.modify fun st =>
+        { st with nextIntroHandle := h + 1, nextIntroScope := s + 1 }
+      handles := handles.push (i.handle, h)
+      scopes := scopes.push (i.scope.id, s)
+      out := out.push (.introCtx p f c
+        { i with handle := h, scope.id := s })
+    | .introCtxExit p i =>
+      let h := (handles.find? fun x => x.1 == i.handle).map (·.2) |>.getD i.handle
+      let s := (scopes.find? fun x => x.1 == i.scope.id).map (·.2) |>.getD i.scope.id
+      out := out.push (.introCtxExit p { i with handle := h, scope.id := s })
+    | ev => out := out.push ev
+  appendEvents ref out
 
 @[inline] def withFreshCacheT (ref : TraceRef) (x : SimpM α) : SimpM α := do
   let stock := (← get).cache
@@ -375,6 +432,45 @@ def captureEvCtx (ref : TraceRef) : MetaM EvCtx := do
   return { lctx := ← getLCtx, insts := ← getLocalInstances,
            binders := (← ref.get).binders,
            introduced := (← ref.get).introduced }
+
+/-! ### Contextual binder ownership -/
+
+/- Return local declaration indices used by an operational domain reference.
+The expression is inspected only in memory; no term or proof is stored. -/
+def localDependencyIndices (lctx : LocalContext) (domain : Expr) : Array Nat :=
+  (collectFVars {} domain).fvarIds.filterMap fun fvarId =>
+    lctx.find? fvarId |>.map (·.index)
+
+/-- Allocate and enter a contextual binder scope at the exact `simpArrowT`
+introduction point.  The domain is referenced by position and source/local
+dependencies only, so this remains stable under binder renaming and
+inaccessible-name generation. -/
+def enterIntroCtx (ref : TraceRef) (pos : Pos) (domain : Expr) (h : Expr) :
+    SimpM IntroCtxInfo := do
+  let st ← ref.get
+  let handle := st.nextIntroHandle
+  let scopeId := st.nextIntroScope
+  ref.modify fun s =>
+    { s with nextIntroHandle := handle + 1, nextIntroScope := scopeId + 1 }
+  let lctx ← getLCtx
+  let owner := "simpArrowT.contextual"
+  let info : IntroCtxInfo :=
+    { handle := handle,
+      operation := owner,
+      domain := { position := pos.push 0,
+                  dependencies := localDependencyIndices lctx domain },
+      scope := { id := scopeId, owner := owner, enter := pos, exit := pos } }
+  ref.modify (·.push (.introCtx pos h.fvarId! (← captureEvCtx ref) info))
+  pure info
+
+/-- Run a contextual body with explicit recorder ownership.  The matching exit
+event is emitted even when stock simp raises, so a consumer never has to infer
+scope boundaries from repeated positions. -/
+def withIntroCtxScope (ref : TraceRef) (pos : Pos) (domain : Expr) (h : Expr)
+    (k : SimpM α) : SimpM α := do
+  let info ← enterIntroCtx ref pos domain h
+  try k finally
+    ref.modify (·.push (.introCtxExit pos info))
 
 /-- Descend under a term binder whose bound variable the traversal replaced by
 the free variable `x`, for the duration of `k`. -/
@@ -1437,8 +1533,9 @@ partial def simpArrowT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Resu
   let q := e.bindingBody!
   let rp ← simpT ref (pos.push 0) p
   if (← pure (← Simp.getConfig).contextual <&&> isProp p <&&> isProp q) then
-    withLocalDeclD e.bindingName! rp.expr fun h => withNewLemmasT ref #[h] do
-      ref.modify (·.push (.introCtx pos h.fvarId! (← captureEvCtx ref)))
+    withLocalDeclD e.bindingName! rp.expr fun h =>
+      withIntroCtxScope ref pos rp.expr h do
+        withNewLemmasT ref #[h] do
       let rq ← simpT ref (pos.push 1) q
       match rq.proof? with
       | none    => Simp.mkImpCongr e rp rq

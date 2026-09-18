@@ -730,7 +730,7 @@ def eventExprPair? : Event → Option (Expr × Expr)
   | .defeq _ _ _ before after .. => some (before, after)
   | .congr _ _ _ before after .. => some (before, after)
   | .transport _ _ _ _ before after .. => some (before, after)
-  | .introCtx .. => none
+  | .introCtx .. | .introCtxExit .. => none
 
 def replayProcCondition (goal : Expr) (nested : Array Event) :
     Option (Expr × Array Event) := Id.run do
@@ -916,7 +916,7 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
               | .defeq _ _ _ b a _ => (some b, some a)
               | .congr _ _ _ b a _ _ _ => (some b, some a)
               | .transport _ _ _ _ b a _ _ _ _ _ => (some b, some a)
-              | .introCtx .. => (none, none)
+              | .introCtx .. | .introCtxExit .. => (none, none)
             match before, after with
             | some b, some a =>
               match uniqueOccurrence? cur b with

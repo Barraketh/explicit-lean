@@ -320,10 +320,12 @@ partial def eventToStep (ur : IO.Ref Unresolved) (contextualFVars : Array FVarId
       let toPP ← ppAllIn c after
       return some { step with to? := some toPP }
     return some step
-  | .introCtx pos fvarId c =>
-    let hypName ← withLCtx c.lctx c.insts do
-      pure (← ppExpr (mkFVar fvarId)).pretty
-    return some { kind := "intro_ctx", pos := pos, name? := some hypName }
+  | .introCtx pos _ _ info =>
+    -- Contextual binders have no stable source/display name.  Preserve only
+    -- the recorder's operational handle and scope/domain references; the
+    -- future renderer resolves these as `introduced_ref <handle>`.
+    return some { kind := "intro_ctx", pos := pos, intro? := some info }
+  | .introCtxExit .. => return none
   | .congr pos arg nested before after _ _ c =>
     -- Spec 3b17247: `before`/`after` describe the node at `pos`; the nested
     -- steps' positions are relative to argument `arg`.
@@ -833,7 +835,7 @@ partial def classifyEventTree (ur : IO.Ref Unresolved) (ev : Event) :
     let sideVerdicts ← sides.mapM fun sd => classifyEventArray ur sd.events
     return .mk none sideVerdicts #[]
   | .defeq .. => return .mk none #[] #[]
-  | .introCtx .. => return .mk none #[] #[]
+  | .introCtx .. | .introCtxExit .. => return .mk none #[] #[]
   | .congr _ _ nested _ _ argBefore argAfter c =>
     let nestedVerdicts ← validateNested ur c nested argBefore argAfter
     return .mk none #[] nestedVerdicts
@@ -866,7 +868,7 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
       | .defeq pos _ _ b a ec => pure (pos, b, a, ec)
       | .congr pos _ _ b a _ _ ec => pure (pos, b, a, ec)
       | .transport pos _ _ _ b a _ _ _ _ ec => pure (pos, b, a, ec)
-      | .introCtx .. => continue
+      | .introCtx .. | .introCtxExit .. => continue
     let before ← instantiateMVars before
     let after ← instantiateMVars after
     let some (sub, binderNodes) := navigate? running pos
@@ -916,7 +918,7 @@ partial def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
         -- `argBefore` to `argAfter` at positions relative to it.
         pure (pos, b, a, c)
       | .transport pos _ _ _ b a _ _ _ _ c => pure (pos, b, a, c)
-      | .introCtx .. =>
+      | .introCtx .. | .introCtxExit .. =>
         continue
     match ev with
     | .transport _ _ domain body _ _ domainBefore domainAfter bodyBefore bodyAfter _ =>
@@ -1006,7 +1008,7 @@ def buildLocation (ur : IO.Ref Unresolved)
   -- spec's separate `contextual` namespace.
   let contextualFVars : Array FVarId := events.filterMap fun ev =>
     match ev with
-    | .introCtx _ fid _ => some fid
+    | .introCtx _ fid _ _ => some fid
     | _ => none
   let rawSteps ← events.filterMapM (eventToStep ur contextualFVars)
   let steps := attachSteps rawSteps verdicts

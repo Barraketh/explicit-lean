@@ -63,6 +63,35 @@ structure DischargeDerivation where
   provenance : String
   deriving Inhabited, Repr
 
+/-! ### Contextual-introduction handles
+
+`intro_ctx` introduces a local that has no source-level name.  A pretty-printed
+inaccessible name (for example `a✝`) is not a replay identity: it can be
+reused by a later binder and changes when surrounding binders are renamed.
+The recorder therefore carries an operational reference only.  The handle is
+allocated in traversal order for one traced call; the domain is identified by
+the arrow-domain position and the local declaration indices it depends on.
+No type, proof, or expression is serialized here. -/
+
+structure IntroDomainRef where
+  position : Pos
+  dependencies : Array Nat := #[]
+  deriving Inhabited, Repr
+
+structure IntroScope where
+  id : Nat
+  owner : String
+  enter : Pos
+  exit : Pos
+  deriving Inhabited, Repr
+
+structure IntroCtxInfo where
+  handle : Nat
+  operation : String
+  domain : IntroDomainRef
+  scope : IntroScope
+  deriving Inhabited, Repr
+
 /-! ### Direct source-argument identity
 
 The source argument is registered once, before stock simp elaboration.  The
@@ -156,6 +185,10 @@ structure Step where
   /-- `transport` steps: body steps are rooted at the forall's body, with the
   introduced binder available through `introduced_ref handle`. -/
   body    : Array Step := #[]
+  /-- Operational identity for a contextual binder introduction.  This is
+  deliberately separate from `name`: no inaccessible display name is needed
+  to replay an `introduced_ref`. -/
+  intro?  : Option IntroCtxInfo := none
   before? : Option String := none
   after?  : Option String := none
   /-- Side-condition sub-traces, one per discharged hypothesis. -/
@@ -238,6 +271,18 @@ def strArray (xs : Array String) : String :=
 def posJson (p : Pos) : String :=
   "[" ++ String.intercalate "," (p.toList.map toString) ++ "]"
 
+def IntroDomainRef.toJson (d : IntroDomainRef) : String :=
+  "{\"position\":" ++ posJson d.position ++
+    ",\"dependencies\":[" ++ String.intercalate "," (d.dependencies.toList.map toString) ++ "]}"
+
+def IntroScope.toJson (s : IntroScope) : String :=
+  "{\"id\":" ++ toString s.id ++ ",\"owner\":" ++ str s.owner ++
+    ",\"enter\":" ++ posJson s.enter ++ ",\"exit\":" ++ posJson s.exit ++ "}"
+
+def IntroCtxInfo.toJson (i : IntroCtxInfo) : String :=
+  "{\"handle\":" ++ toString i.handle ++ ",\"operation\":" ++ str i.operation ++
+    ",\"domain\":" ++ i.domain.toJson ++ ",\"scope\":" ++ i.scope.toJson ++ "}"
+
 /-- Join the non-empty field renderings into an object. -/
 private def obj (fields : Array (String × Option String)) : String :=
   let parts := fields.filterMap fun (k, v?) => v?.map fun v => str k ++ ":" ++ v
@@ -307,6 +352,7 @@ partial def Step.toJson (s : Step) : String :=
     ("body", if s.kind != "transport" then none else
       some ("[" ++ String.intercalate ","
         (s.body.toList.map Step.toJson) ++ "]")),
+    ("intro", s.intro?.map IntroCtxInfo.toJson),
     ("before", s.before?.map str),
     ("after", s.after?.map str),
     ("side", if s.side.isEmpty then none else
