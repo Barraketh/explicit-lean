@@ -1634,6 +1634,46 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax)
 /-- Apply every step in order to the expression at `target`, rebuilding the goal. -/
 partial def runSteps (steps : Array Syntax) (target : Target)
     (handles : IntroducedHandles := {}) : TacticM Unit := do
+  -- Keep a hypothesis target's declaration stable while composing a multi-step
+  -- replacement.  `MVarId.replace` necessarily rebinds the declaration after a
+  -- propositional type change; continuing to read the original `FVarId` then
+  -- feeds a stale free variable into the next step (the exact failure seen when
+  -- `unfold Injective` is followed by nested `not_forall` rewrites).  Build the
+  -- complete type/equality in the original context and replace the local once.
+  -- Goal targets retain the existing per-step replacement semantics because
+  -- they do not expose a declaration whose identity can go stale.
+  if let some fvarId := target then
+    let goal ← getMainGoal
+    goal.withContext do
+      let mut current ← instantiateMVars (← fvarId.getType)
+      let mut proof? : Option Expr := none
+      for h : idx in [0 : steps.size] do
+        let stx := steps[idx]
+        let r ←
+          try
+            runStep idx current stx handles
+          catch ex => do
+            let msg ← ex.toMessageData.toString
+            if msg.startsWith "explicit_rw:" then
+              throw ex
+            else
+              stepError idx ex.toMessageData
+        let next ← instantiateMVars r.newExpr
+        match proof?, r.proof? with
+        | none, p => proof? := p
+        | some p, none => proof? := some p
+        | some p, some q => proof? := some (← mkEqTrans p q)
+        current := next
+      match proof? with
+      | none =>
+        let res ← goal.replaceLocalDeclDefEq fvarId current
+        replaceMainGoal [res]
+      | some h =>
+        let h ← instantiateMVars h
+        let newProof ← mkEqMP h (mkFVar fvarId)
+        let res ← goal.replace fvarId newProof current
+        replaceMainGoal [res.mvarId]
+    return
   for h : idx in [0 : steps.size] do
     let stx := steps[idx]
     let goal ← getMainGoal
