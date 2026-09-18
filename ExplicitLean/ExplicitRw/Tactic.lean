@@ -1128,8 +1128,16 @@ def elabProposition (idx : Nat) (stx : Term) (sub : Expr) (truth : Bool) :
   let (mvars, _, _) ← forallMetaTelescope type
   let proof' := mkAppN proof mvars
   let proofType ← instantiateMVars (← inferType proof')
+  -- A Bool in proposition position is represented by its `= true` coercion.
+  -- Keep that coercion explicit for proposition evidence so a recorded local
+  -- `h : ¬b` can be replayed as `prop_false h` while the replacement remains
+  -- the Bool constructor `false`, rather than changing a Bool into a Prop.
+  let subType ← inferType sub
+  let subIsBool ← isDefEq subType (mkConst ``Bool)
+  let proposition ←
+    if subIsBool then mkAppM ``Eq #[sub, mkConst ``true] else pure sub
   let expected :=
-    if truth then sub else mkApp (mkConst ``Not) sub
+    if truth then proposition else mkApp (mkConst ``Not) proposition
   unless ← isDefEq proofType expected do
     let expected ← instantiateMVars expected
     stepError idx m!"proposition proof `{stx}` does not match the selected proposition at \
@@ -1657,13 +1665,22 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax)
           runSideProofOn idx (some i) sideTacs[i] mid handles
         closeLemmaMVars idx m!"`{term}`" mvars
         let proof ← instantiateMVars proof
-        let eqProof ←
-          if truth then
-            mkAppM ``eq_true #[proof]
+        let subType ← inferType sub
+        let subIsBool ← isDefEq subType (mkConst ``Bool)
+        let (replacement, eqProof) ←
+          if subIsBool then
+            if truth then
+              pure (mkConst ``true, proof)
+            else
+              pure (mkConst ``false, ← mkAppM ``Bool.of_not_eq_true #[proof])
           else
-            mkAppM ``eq_false #[proof]
+            let eqProof ←
+              if truth then
+                mkAppM ``eq_true #[proof]
+              else
+                mkAppM ``eq_false #[proof]
+            pure (if truth then mkConst ``True else mkConst ``False, eqProof)
         checkNoLevelMVars idx m!"`{term}`" #[eqProof]
-        let replacement := if truth then mkConst ``True else mkConst ``False
         return Replacement.eq replacement eqProof)
       (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwRw =>

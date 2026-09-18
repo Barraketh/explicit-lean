@@ -187,6 +187,27 @@ where
           some (.decl n true false, e.getAppArgs, inv, "")
       | _ => none
 
+/- Resolve the proposition proof hidden inside a source-local simp theorem.
+   A source argument such as `h` can elaborate to a generated theorem
+   application (`Bool.of_not_eq_true h`) rather than a theorem whose head is
+   the local fvar.  The source registration already authenticated that the
+   argument head is local; within that boundary, retain the actual proposition
+   fvar instead of treating the generated wrapper as an ordinary rw lemma. -/
+partial def propositionFVar? (e : Expr) : MetaM (Option FVarId) := do
+  match e with
+  | .fvar fvarId =>
+    match (← getLCtx).find? fvarId with
+    | some localDecl =>
+      if ← isProp localDecl.type then return some fvarId
+      return none
+    | none => return none
+  | .app fn arg =>
+    match ← propositionFVar? arg with
+    | some fvarId => return some fvarId
+    | none => propositionFVar? fn
+  | .mdata _ body => propositionFVar? body
+  | _ => return none
+
 /-- Keep only those recorded arguments that sit at an *explicit* binder of the
 origin's own type, in order.  Named-argument syntax can fill an implicit binder
 (`heq_comm (a := a)`), and a replayer cannot write such an argument
@@ -221,7 +242,7 @@ syntax's characters: a character whitelist dropped every non-ASCII name (`hα`,
 `==`, because `Origin` compares its stored `Syntax` and the trace's copy is not
 the tree's.
 -/
-def resolveStxOrigin (o : Origin) :
+def resolveStxOrigin (o : Origin) (sourceHeadLocal : Bool := false) :
     Simp.SimpM (Origin × Array Expr × Bool × String) := do
   let .stx id _ := o | return (o, #[], false, "")
   for thms in (← readThe Simp.Context).simpTheorems do
@@ -230,6 +251,9 @@ def resolveStxOrigin (o : Origin) :
         if id' == id then
           match proofLocal? sthm.proof with
           | some (resolved, args, inv, proj) =>
+            if sourceHeadLocal then
+              if let some fvarId ← propositionFVar? sthm.proof then
+                return (.fvar fvarId, #[], false, proj)
             -- Keep only the arguments at *explicit* binders.  `heq_comm
             -- (a := a) (b := b)` names two of four implicit binders, and
             -- `getAppArgs` returns all four; recording them would tell a
@@ -452,9 +476,10 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     let result ← coreResult.addExtraArgs extraArgs
     let pos := (← ref.get).pos
     let redexPos := pos ++ Array.replicate numExtraArgs 0
-    let (resolvedConstructionOrigin, _, _, _) ← resolveStxOrigin thm.origin
     let env ← getEnv
     let sourceInfo? ← sourceArgInfo? ref thm.origin
+    let (resolvedConstructionOrigin, _, _, _) ←
+      resolveStxOrigin thm.origin ((sourceInfo?.map (·.headLocal)).getD false)
     let constructionOrigin := match resolvedConstructionOrigin with
       | .stx .. =>
         -- A source simp argument is stored as an already-applied theorem
@@ -499,7 +524,9 @@ def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
       let sides := (← ref.get).pendingSide
       ref.modify fun s => { s with pendingSide := #[] }
       let inv := match thm.origin with | .decl _ _ i => i | _ => false
-      let (resolved, rargs, rinv, rproj) ← resolveStxOrigin thm.origin
+      let sourceInfo? ← sourceArgInfo? ref thm.origin
+      let (resolved, rargs, rinv, rproj) ←
+        resolveStxOrigin thm.origin ((sourceInfo?.map (·.headLocal)).getD false)
       let prop? ← propFlag? resolved result.expr evCtx.lctx evCtx.insts
       ref.modify (·.push (.rw pos thm.origin (inv != rinv) prop? before after evCtx
         rargs sides none resolved rproj (some derivation)))
@@ -1285,7 +1312,9 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             -- original origin for `name` and `dir`: the syntax is what carries
             -- a leading `←`, and replacing it would silently turn a reverse
             -- rewrite into a forward one.
-            let (resolved, rargs, rinv, rproj) ← resolveStxOrigin o
+            let sourceInfo? ← sourceArgInfo? ref o
+            let (resolved, rargs, rinv, rproj) ←
+              resolveStxOrigin o ((sourceInfo?.map (·.headLocal)).getD false)
             -- Every rewrite origin must be a global constant or a local fvar.
             -- A `.stx` that resolves to neither leaves the step without the
             -- identity the spec requires, and the structural check cannot see
