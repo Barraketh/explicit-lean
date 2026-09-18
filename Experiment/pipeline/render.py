@@ -20,6 +20,8 @@ Rendering rules, in one place:
 * `change` -> `change <to> at [pos]`
 * `eq`     -> `eq (<lhs> = <rhs>) by <by> at [pos]`
 * `congr`  -> `congr <arg> [<nested steps>] at [pos]`
+* `transport` -> `transport forall <handle> [<domain steps>] body
+                 [<body steps>] at [pos]`
 * `intro_ctx` -> unrenderable; T2 documents it as recognised-but-unimplemented,
               so a trace containing one is a classified render failure rather
               than a step that silently vanishes.
@@ -38,7 +40,7 @@ from typing import Any
 # Spec step kinds. `intro_ctx` is listed so an unknown kind stays distinguishable
 # from a known-but-unrenderable one.
 REDUCTION_KINDS = ("beta", "eta", "proj", "zeta", "iota")
-KNOWN_KINDS = ("rw", "unfold", "change", "eq", "congr", "intro_ctx") + REDUCTION_KINDS
+KNOWN_KINDS = ("rw", "unfold", "change", "eq", "congr", "transport", "intro_ctx") + REDUCTION_KINDS
 
 # A name the whitelisted term grammar admits as a bare identifier: dotted
 # components of identifier characters, optionally `@`-prefixed. Lean identifiers
@@ -569,6 +571,71 @@ def render_rw(step: dict, depth: int, source_text: Any = None,
     return out
 
 
+def render_transport(step: dict, depth: int, *, source_text: Any = None,
+                     source_args: Any = None, operational: bool = False,
+                     introduced: dict[str, int] | None = None) -> str:
+    """Render T35's dependent-forall transport event.
+
+    The recorder already supplies the exact root-relative position, stable
+    binder handle, and the two child event arrays. Keep those fields opaque:
+    this function only validates their shape and recursively renders each
+    recorded step. In particular, it does not recover a binder name, splice a
+    term payload, or infer a body/domain position.
+    """
+    handle = step.get("handle")
+    if not isinstance(handle, int) or isinstance(handle, bool) or handle < 0:
+        raise RenderError(
+            "bad_transport_handle",
+            f"transport.handle is {handle!r}, not a non-negative integer",
+            side="t1",
+        )
+    domain = step.get("domain")
+    body = step.get("body")
+    if not isinstance(domain, list):
+        raise RenderError(
+            "bad_transport_domain",
+            f"transport.domain is not a list: {domain!r}",
+            side="t1",
+        )
+    if not isinstance(body, list):
+        raise RenderError(
+            "bad_transport_body",
+            f"transport.body is not a list: {body!r}",
+            side="t1",
+        )
+
+    # `explicitRwInnerStep` intentionally excludes another transport. Refuse
+    # it explicitly instead of emitting syntax the T2 parser cannot accept.
+    for field, nested in (("domain", domain), ("body", body)):
+        for nested_step in nested:
+            if isinstance(nested_step, dict) and nested_step.get("kind") == "transport":
+                raise RenderError(
+                    "nested_transport",
+                    f"transport.{field} contains a transport step, but T2's nested grammar does not admit it",
+                    side="t2",
+                )
+
+    def render_nested(nested: list[dict]) -> str:
+        rendered: list[str] = []
+        for nested_step in nested:
+            rendered.append(
+                render_step(
+                    nested_step,
+                    depth,
+                    source_text=source_text,
+                    source_args=source_args,
+                    operational=operational,
+                    introduced=introduced,
+                )
+            )
+        return ", ".join(rendered)
+
+    return (
+        f"transport forall {handle} [{render_nested(domain)}] body "
+        f"[{render_nested(body)}] {render_pos(step.get('pos'))}"
+    )
+
+
 def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
                 source_args: Any = None, operational: bool = False,
                 introduced: dict[str, int] | None = None) -> str:
@@ -631,6 +698,15 @@ def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
                                         operational=operational,
                                         introduced=introduced) for s in nested)
         return f"congr {arg} [{inner}] " + render_pos(step.get("pos"))
+    if kind == "transport":
+        return render_transport(
+            step,
+            depth,
+            source_text=source_text,
+            source_args=source_args,
+            operational=operational,
+            introduced=introduced,
+        )
     # intro_ctx
     raise RenderError(
         "intro_ctx",

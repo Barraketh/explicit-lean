@@ -228,6 +228,14 @@
    "why": "pp.all universe levels are printer metadata; elaboration recovers them",
    "step": {"kind": "change", "pos": [], "to": "Prod.{u_1, u_2} α α'"},
    "expect": "change Prod α α' at []"
+  },
+  {
+    "name": "dependent_forall_transport",
+    "why": "T35 records the exact binder handle and child-rooted domain/body steps",
+    "step": {"kind": "transport", "pos": [0, 1], "handle": 4,
+             "domain": [{"kind": "rw", "pos": [], "name": "hA", "dir": "fwd"}],
+             "body": [{"kind": "rw", "pos": [0], "name": "hB", "dir": "fwd"}]},
+    "expect": "transport forall 4 [hA at []] body [hB at [0]] at [0, 1]"
   }
  ],
 
@@ -268,6 +276,20 @@
    "step": {"kind": "rw", "pos": [0], "name": "h._@.test.M.279._hygCtx._hyg.71",
             "dir": "fwd"},
    "error": "hygienic_name", "side": "t1"
+  },
+  {
+   "name": "transport_bad_handle",
+   "why": "T35 handle is a stable non-negative integer",
+   "step": {"kind": "transport", "pos": [], "handle": "0", "domain": [], "body": []},
+   "error": "bad_transport_handle", "side": "t1"
+  },
+  {
+   "name": "transport_nested_not_inner",
+   "why": "T2's inner-step grammar does not admit recursive transport",
+   "step": {"kind": "transport", "pos": [], "handle": 0,
+            "domain": [{"kind": "transport", "pos": [], "handle": 1,
+                        "domain": [], "body": []}], "body": []},
+   "error": "nested_transport", "side": "t2"
   },
   {
    "name": "args_elided",
