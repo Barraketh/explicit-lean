@@ -15,15 +15,22 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
+import simp_engine_inventory as inventory
 import simp_family_lint
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PATH = ROOT / "Experiment" / "pipeline" / "broader_simp_family_overrides.json"
 KIND = "broader_simp_family_overrides"
 SCHEMA = 1
-TOP_LEVEL_FIELDS = frozenset({"kind", "schema", "mathlibCommit", "lean", "moduleSourceSha256", "overrides"})
+EXPECTED_MATHLIB_COMMIT = "905b95818eb32af7874a58b427f50c1711a5e96c"
+EXPECTED_LEAN_VERSION = "4.32.2"
+EXPECTED_LEAN_COMMIT = "f3b06c705e6c85f5314019d5d3baab0fec5b580c"
+TOP_LEVEL_FIELDS = frozenset({"kind", "schema", "mathlibCommit", "lean", "overrides"})
 LEAN_FIELDS = frozenset({"version", "commit"})
-ENTRY_FIELDS = frozenset({"module", "occurrence", "startByte", "endByte", "source", "replacement"})
+ENTRY_FIELDS = frozenset({
+    "module", "moduleSourceSha256", "occurrence", "startByte", "endByte",
+    "source", "replacement",
+})
 
 
 def _nonempty_string(value: object, label: str) -> str:
@@ -72,7 +79,12 @@ def load_database(path: Path = DEFAULT_PATH) -> tuple[dict[str, Any], list[dict[
         "version": _nonempty_string(environment["lean"].get("version"), "lean.version"),
         "commit": _hex(environment["lean"].get("commit"), "lean.commit", 40),
     }
-    module_hash = _hex(value.get("moduleSourceSha256"), "moduleSourceSha256", 64)
+    if environment["mathlibCommit"] != EXPECTED_MATHLIB_COMMIT:
+        raise RuntimeError("broader overlay is for a different pinned Mathlib commit")
+    if environment["lean"]["version"] != EXPECTED_LEAN_VERSION:
+        raise RuntimeError("broader overlay is for a different pinned Lean version")
+    if environment["lean"]["commit"] != EXPECTED_LEAN_COMMIT:
+        raise RuntimeError("broader overlay is for a different pinned Lean commit")
     raw = value.get("overrides")
     if not isinstance(raw, list):
         raise RuntimeError("broader overlay overrides must be an array")
@@ -104,6 +116,15 @@ def load_database(path: Path = DEFAULT_PATH) -> tuple[dict[str, Any], list[dict[
                 raise RuntimeError(f"overlapping broader overlays in {module}")
         source = _nonempty_string(entry["source"], f"entry {index} source")
         replacement = _nonempty_string(entry["replacement"], f"entry {index} replacement")
+        source_hash = _hex(
+            entry["moduleSourceSha256"], f"entry {index} moduleSourceSha256", 64
+        )
+        expected_occurrence = inventory.occurrence_id(module, start, end)
+        if occurrence != expected_occurrence:
+            raise RuntimeError(
+                f"broader overlay {occurrence} does not match deterministic occurrence "
+                f"identity {expected_occurrence}"
+            )
         if source == replacement:
             raise RuntimeError(f"broader overlay {occurrence} is unchanged")
         try:
@@ -116,32 +137,36 @@ def load_database(path: Path = DEFAULT_PATH) -> tuple[dict[str, Any], list[dict[
         entry["occurrence"] = occurrence
         entry["startByte"] = start
         entry["endByte"] = end
+        entry["moduleSourceSha256"] = source_hash
         entry["source"] = source
         entry["replacement"] = replacement
         entries.append(entry)
     if entries != _canonical(entries):
         raise RuntimeError("broader overlay entries are not in canonical module/range order")
-    return {**environment, "moduleSourceSha256": module_hash}, entries
+    return environment, entries
 
 
 def _validate_source(
     module: str,
     source: bytes,
     entries: Iterable[dict[str, Any]],
-    module_hash: str,
     protected_ranges: Iterable[tuple[int, int]] = (),
 ) -> list[dict[str, Any]]:
     selected = [entry for entry in entries if entry["module"] == module]
     if not selected:
         return []
-    if _sha256(source) != module_hash:
-        raise RuntimeError(f"broader overlay module source hash changed: {module}")
     occupied = sorted((int(start), int(end)) for start, end in protected_ranges)
     previous_end = -1
     for entry in selected:
         start, end = int(entry["startByte"]), int(entry["endByte"])
         if end > len(source):
             raise RuntimeError(f"broader overlay range exceeds source: {entry['occurrence']}")
+        if _sha256(source) != str(entry["moduleSourceSha256"]):
+            raise RuntimeError(f"broader overlay module source hash changed: {module}")
+        if str(entry["occurrence"]) != inventory.occurrence_id(module, start, end):
+            raise RuntimeError(
+                f"broader overlay occurrence identity changed: {entry['occurrence']}"
+            )
         try:
             actual = source[start:end].decode("utf-8")
         except UnicodeDecodeError as error:
@@ -157,10 +182,26 @@ def _validate_source(
     return selected
 
 
-def _comment_original(original: str) -> str:
+def _source_indent(source: bytes, start: int) -> str:
+    """Return the exact leading whitespace of the source line at ``start``."""
+    prefix = source[:start].decode("utf-8")
+    line_prefix = prefix.rsplit("\n", 1)[-1]
+    if line_prefix.strip():
+        raise RuntimeError(
+            "broader overlay range does not begin at a source indentation boundary"
+        )
+    return line_prefix
+
+
+def _comment_original(original: str, indent: str) -> str:
     return "-- Original broader simp-family call/declaration:\n" + "\n".join(
-        "-- " + line for line in original.split("\n")
+        indent + "-- " + line for line in original.split("\n")
     )
+
+
+def _indented_replacement(replacement: str, indent: str) -> str:
+    lines = replacement.split("\n")
+    return "\n".join([indent + lines[0], *lines[1:]])
 
 
 def apply_to_rendered(
@@ -177,8 +218,8 @@ def apply_to_rendered(
     match is rejected, so shifted, missing, duplicate, and unused entries never
     silently disappear.
     """
-    metadata, entries = load_database(path)
-    selected = _validate_source(module, original, entries, metadata["moduleSourceSha256"], protected_ranges)
+    _, entries = load_database(path)
+    selected = _validate_source(module, original, entries, protected_ranges)
     if not selected:
         return rendered, []
     edits: list[tuple[int, int, dict[str, Any]]] = []
@@ -205,5 +246,12 @@ def apply_to_rendered(
     for start, end, entry in reversed(edits):
         original_text = str(entry["source"])
         replacement = str(entry["replacement"])
-        result = result[:start] + _comment_original(original_text) + "\n" + replacement + result[end:]
+        indent = _source_indent(original, int(entry["startByte"]))
+        result = (
+            result[:start]
+            + _comment_original(original_text, indent)
+            + "\n"
+            + _indented_replacement(replacement, indent)
+            + result[end:]
+        )
     return result, [str(entry["occurrence"]) for entry in selected]

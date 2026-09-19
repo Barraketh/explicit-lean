@@ -6,135 +6,132 @@
     "version": "4.32.2",
     "commit": "f3b06c705e6c85f5314019d5d3baab0fec5b580c"
   },
-  "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f",
   "overrides": [
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-xor_def",
-      "startByte": 12126,
-      "endByte": 12218,
-      "source": "@[grind =] theorem xor_def {a b : Prop} : Xor a b ↔ (a ∧ ¬b) ∨ (b ∧ ¬a) := Iff.rfl",
-      "replacement": "theorem xor_def {a b : Prop} : Xor a b ↔ (a ∧ ¬b) ∨ (b ∧ ¬a) := Iff.rfl"
-    },
-    {
-      "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-xor_true",
+      "occurrence": "f4ee7b27940614bf",
       "startByte": 12319,
       "endByte": 12372,
       "source": "@[simp] theorem xor_true : Xor True = Not := by grind",
-      "replacement": "@[simp] theorem xor_true : Xor True = Not := by\n  funext b\n  apply propext\n  constructor\n  · intro h\n    rcases h with ⟨_, hb⟩ | ⟨_, hn⟩\n    · exact hb\n    · exact (hn True.intro).elim\n  · intro hb\n    exact Or.inl ⟨True.intro, hb⟩"
+      "replacement": "@[simp] theorem xor_true : Xor True = Not := by\n  funext b\n  apply propext\n  constructor\n  · intro h\n    rcases h with ⟨_, hb⟩ | ⟨_, hn⟩\n    · exact hb\n    · exact (hn True.intro).elim\n  · intro hb\n    exact Or.inl ⟨True.intro, hb⟩",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-xor_false",
+      "occurrence": "215d0979548901bc",
       "startByte": 12374,
       "endByte": 12428,
       "source": "@[simp] theorem xor_false : Xor False = id := by grind",
-      "replacement": "@[simp] theorem xor_false : Xor False = id := by\n  funext b\n  apply propext\n  constructor\n  · intro h\n    rcases h with ⟨hf, _⟩ | ⟨hb, _⟩\n    · exact False.elim hf\n    · exact hb\n  · intro hb\n    exact Or.inr ⟨hb, fun hf => hf.elim⟩"
+      "replacement": "@[simp] theorem xor_false : Xor False = id := by\n  funext b\n  apply propext\n  constructor\n  · intro h\n    rcases h with ⟨hf, _⟩ | ⟨hb, _⟩\n    · exact False.elim hf\n    · exact hb\n  · intro hb\n    exact Or.inr ⟨hb, fun hf => hf.elim⟩",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-xor_comm",
+      "occurrence": "4b6e3b5a69886210",
       "startByte": 12430,
       "endByte": 12491,
       "source": "theorem xor_comm (a b : Prop) : Xor a b = Xor b a := by grind",
-      "replacement": "theorem xor_comm (a b : Prop) : Xor a b = Xor b a := by\n  apply propext\n  constructor\n  · rintro (⟨ha, hnb⟩ | ⟨hb, hna⟩)\n    · exact Or.inr ⟨ha, hnb⟩\n    · exact Or.inl ⟨hb, hna⟩\n  · rintro (⟨hb, hna⟩ | ⟨ha, hnb⟩)\n    · exact Or.inr ⟨hb, hna⟩\n    · exact Or.inl ⟨ha, hnb⟩"
+      "replacement": "theorem xor_comm (a b : Prop) : Xor a b = Xor b a := by\n  apply propext\n  constructor\n  · rintro (⟨ha, hnb⟩ | ⟨hb, hna⟩)\n    · exact Or.inr ⟨ha, hnb⟩\n    · exact Or.inl ⟨hb, hna⟩\n  · rintro (⟨hb, hna⟩ | ⟨ha, hnb⟩)\n    · exact Or.inr ⟨hb, hna⟩\n    · exact Or.inl ⟨ha, hnb⟩",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-xor_self",
+      "occurrence": "a6ce86b9903b5ddd",
       "startByte": 12543,
       "endByte": 12608,
       "source": "@[simp] theorem xor_self (a : Prop) : Xor a a = False := by grind",
-      "replacement": "@[simp] theorem xor_self (a : Prop) : Xor a a = False := by\n  apply propext\n  constructor\n  · rintro (⟨ha, hna⟩ | ⟨ha, hna⟩)\n    · exact (hna ha).elim\n    · exact (hna ha).elim\n  · intro hf\n    exact hf.elim"
+      "replacement": "@[simp] theorem xor_self (a : Prop) : Xor a a = False := by\n  apply propext\n  constructor\n  · rintro (⟨ha, hna⟩ | ⟨ha, hna⟩)\n    · exact (hna ha).elim\n    · exact (hna ha).elim\n  · intro hf\n    exact hf.elim",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-xor_not_left",
+      "occurrence": "a10f5f1648ad8182",
       "startByte": 12610,
       "endByte": 12678,
       "source": "@[simp] theorem xor_not_left : Xor (¬a) b ↔ (a ↔ b) := by grind",
-      "replacement": "@[simp] theorem xor_not_left : Xor (¬a) b ↔ (a ↔ b) := by\n  unfold Xor\n  constructor\n  · rintro (⟨hna, hnb⟩ | ⟨hb, hnna⟩)\n    · constructor\n      · intro ha\n        exact (hna ha).elim\n      · intro hb'\n        exact (hnb hb').elim\n    · have ha : a := by\n        by_cases ha : a\n        · exact ha\n        · exact (hnna ha).elim\n      constructor\n      · intro _\n        exact hb\n      · intro _\n        exact ha\n  · intro hab\n    by_cases ha : a\n    · by_cases hb : b\n      · exact Or.inr ⟨hb, fun hna => hna ha⟩\n      · exact (hb (hab.1 ha)).elim\n    · by_cases hb : b\n      · exact (ha (hab.2 hb)).elim\n      · exact Or.inl ⟨ha, hb⟩"
+      "replacement": "@[simp] theorem xor_not_left : Xor (¬a) b ↔ (a ↔ b) := by\n  unfold Xor\n  constructor\n  · rintro (⟨hna, hnb⟩ | ⟨hb, hnna⟩)\n    · constructor\n      · intro ha\n        exact (hna ha).elim\n      · intro hb'\n        exact (hnb hb').elim\n    · have ha : a := by\n        by_cases ha : a\n        · exact ha\n        · exact (hnna ha).elim\n      constructor\n      · intro _\n        exact hb\n      · intro _\n        exact ha\n  · intro hab\n    by_cases ha : a\n    · by_cases hb : b\n      · exact Or.inr ⟨hb, fun hna => hna ha⟩\n      · exact (hb (hab.1 ha)).elim\n    · by_cases hb : b\n      · exact (ha (hab.2 hb)).elim\n      · exact Or.inl ⟨ha, hb⟩",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-xor_not_right",
+      "occurrence": "79f752df4d745039",
       "startByte": 12680,
       "endByte": 12749,
       "source": "@[simp] theorem xor_not_right : Xor a (¬b) ↔ (a ↔ b) := by grind",
-      "replacement": "@[simp] theorem xor_not_right : Xor a (¬b) ↔ (a ↔ b) := by\n  unfold Xor\n  constructor\n  · rintro (⟨ha, hnb⟩ | ⟨hb, hna⟩)\n    · have hb' : b := by\n        by_cases hb : b\n        · exact hb\n        · exact (hnb hb).elim\n      exact ⟨fun _ => hb', fun _ => ha⟩\n    · exact ⟨fun ha' => (hna ha').elim, fun hb' => (hb hb').elim⟩\n  · intro hab\n    by_cases ha : a\n    · by_cases hb : b\n      · exact Or.inl ⟨ha, fun hnb => hnb hb⟩\n      · exact (hb (hab.1 ha)).elim\n    · by_cases hb : b\n      · exact (ha (hab.2 hb)).elim\n      · exact Or.inr ⟨hb, ha⟩"
+      "replacement": "@[simp] theorem xor_not_right : Xor a (¬b) ↔ (a ↔ b) := by\n  unfold Xor\n  constructor\n  · rintro (⟨ha, hnb⟩ | ⟨hb, hna⟩)\n    · have hb' : b := by\n        by_cases hb : b\n        · exact hb\n        · exact (hnb hb).elim\n      exact ⟨fun _ => hb', fun _ => ha⟩\n    · exact ⟨fun ha' => (hna ha').elim, fun hb' => (hb hb').elim⟩\n  · intro hab\n    by_cases ha : a\n    · by_cases hb : b\n      · exact Or.inl ⟨ha, fun hnb => hnb hb⟩\n      · exact (hb (hab.1 ha)).elim\n    · by_cases hb : b\n      · exact (ha (hab.2 hb)).elim\n      · exact Or.inr ⟨hb, ha⟩",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-xor_not_not",
+      "occurrence": "00fd20ea3be89cba",
       "startByte": 12751,
       "endByte": 12812,
       "source": "theorem xor_not_not : Xor (¬a) (¬b) ↔ Xor a b := by grind",
-      "replacement": "theorem xor_not_not : Xor (¬a) (¬b) ↔ Xor a b := by\n  by_cases ha : a <;> by_cases hb : b\n  · constructor\n    · rintro (⟨hna, hnb⟩ | ⟨hnb, hna⟩)\n      · exact (hna ha).elim\n      · exact (hnb hb).elim\n    · rintro (⟨ha', hnb⟩ | ⟨hb', hna⟩)\n      · exact (hnb hb).elim\n      · exact (hna ha).elim\n  · constructor\n    · rintro (⟨hna, hnb⟩ | ⟨hnb, hna⟩)\n      · exact (hna ha).elim\n      · exact Or.inl ⟨ha, hnb⟩\n    · rintro (⟨ha', hnb'⟩ | ⟨hb', hna'⟩)\n      · exact Or.inr ⟨hb, fun hna => hna ha'⟩\n      · exact (hb hb').elim\n  · constructor\n    · rintro (⟨hna, hnb⟩ | ⟨hnb, hna⟩)\n      · exact Or.inr ⟨hb, hna⟩\n      · exact (hnb hb).elim\n    · rintro (⟨ha', hnb⟩ | ⟨hb', hna⟩)\n      · exact (ha ha').elim\n      · exact Or.inl ⟨ha, fun hnb' => hnb' hb'⟩\n  · constructor\n    · rintro (⟨hna, hnb⟩ | ⟨hnb, hna⟩)\n      · exact (hnb hb).elim\n      · exact (hna ha).elim\n    · rintro (⟨ha', hnb⟩ | ⟨hb', hna⟩)\n      · exact (ha ha').elim\n      · exact (hb hb').elim"
+      "replacement": "theorem xor_not_not : Xor (¬a) (¬b) ↔ Xor a b := by\n  by_cases ha : a <;> by_cases hb : b\n  · constructor\n    · rintro (⟨hna, hnb⟩ | ⟨hnb, hna⟩)\n      · exact (hna ha).elim\n      · exact (hnb hb).elim\n    · rintro (⟨ha', hnb⟩ | ⟨hb', hna⟩)\n      · exact (hnb hb).elim\n      · exact (hna ha).elim\n  · constructor\n    · rintro (⟨hna, hnb⟩ | ⟨hnb, hna⟩)\n      · exact (hna ha).elim\n      · exact Or.inl ⟨ha, hnb⟩\n    · rintro (⟨ha', hnb'⟩ | ⟨hb', hna'⟩)\n      · exact Or.inr ⟨hb, fun hna => hna ha'⟩\n      · exact (hb hb').elim\n  · constructor\n    · rintro (⟨hna, hnb⟩ | ⟨hnb, hna⟩)\n      · exact Or.inr ⟨hb, hna⟩\n      · exact (hnb hb).elim\n    · rintro (⟨ha', hnb⟩ | ⟨hb', hna⟩)\n      · exact (ha ha').elim\n      · exact Or.inl ⟨ha, fun hnb' => hnb' hb'⟩\n  · constructor\n    · rintro (⟨hna, hnb⟩ | ⟨hnb, hna⟩)\n      · exact (hnb hb).elim\n      · exact (hna ha).elim\n    · rintro (⟨ha', hnb⟩ | ⟨hb', hna⟩)\n      · exact (ha ha').elim\n      · exact (hb hb').elim",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-xor_or",
+      "occurrence": "637cd94dd2abf4a5",
       "startByte": 12814,
       "endByte": 12874,
       "source": "protected theorem Xor.or (h : Xor a b) : a ∨ b := by grind",
-      "replacement": "protected theorem Xor.or (h : Xor a b) : a ∨ b := by\n  rcases h with ⟨ha, _⟩ | ⟨hb, _⟩\n  · exact Or.inl ha\n  · exact Or.inr hb"
+      "replacement": "protected theorem Xor.or (h : Xor a b) : a ∨ b := by\n  rcases h with ⟨ha, _⟩ | ⟨hb, _⟩\n  · exact Or.inl ha\n  · exact Or.inr hb",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-Prop.exists_iff",
+      "occurrence": "38aab6aff9fb05cc",
       "startByte": 29281,
       "endByte": 29556,
       "source": "theorem Prop.exists_iff {p : Prop → Prop} : (∃ h, p h) ↔ p False ∨ p True :=\n  ⟨fun ⟨h₁, h₂⟩ ↦ by_cases (fun H : h₁ ↦ .inr <| by simpa only [H] using h₂)\n    (fun H ↦ .inl <| by simpa only [H] using h₂), fun h ↦ h.elim (.intro _) (.intro _)⟩",
-      "replacement": "theorem Prop.exists_iff {p : Prop → Prop} : (∃ h, p h) ↔ p False ∨ p True := by\n  constructor\n  · rintro ⟨h1, h2⟩\n    by_cases H : h1\n    · have heq : h1 = True := propext ⟨fun _ => True.intro, fun _ => H⟩\n      rw [heq] at h2\n      exact Or.inr h2\n    · have heq : h1 = False := propext ⟨fun h => (H h).elim, False.elim⟩\n      rw [heq] at h2\n      exact Or.inl h2\n  · rintro (h | h)\n    · exact ⟨False, h⟩\n    · exact ⟨True, h⟩"
+      "replacement": "theorem Prop.exists_iff {p : Prop → Prop} : (∃ h, p h) ↔ p False ∨ p True := by\n  constructor\n  · rintro ⟨h1, h2⟩\n    by_cases H : h1\n    · have heq : h1 = True := propext ⟨fun _ => True.intro, fun _ => H⟩\n      rw [heq] at h2\n      exact Or.inr h2\n    · have heq : h1 = False := propext ⟨fun h => (H h).elim, False.elim⟩\n      rw [heq] at h2\n      exact Or.inl h2\n  · rintro (h | h)\n    · exact ⟨False, h⟩\n    · exact ⟨True, h⟩",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-Prop.forall_iff",
+      "occurrence": "9ea02c946af9bc61",
       "startByte": 29558,
       "endByte": 29740,
       "source": "theorem Prop.forall_iff {p : Prop → Prop} : (∀ h, p h) ↔ p False ∧ p True :=\n  ⟨fun H ↦ ⟨H _, H _⟩, fun ⟨h₁, h₂⟩ h ↦ by by_cases H : h <;> simpa only [H]⟩",
-      "replacement": "theorem Prop.forall_iff {p : Prop → Prop} : (∀ h, p h) ↔ p False ∧ p True := by\n  constructor\n  · intro H\n    exact ⟨H False, H True⟩\n  · rintro ⟨h1, h2⟩ h\n    by_cases H : h\n    · have heq : h = True := propext ⟨fun _ => True.intro, fun _ => H⟩\n      rw [heq]\n      exact h2\n    · have heq : h = False := propext ⟨fun h' => (H h').elim, False.elim⟩\n      rw [heq]\n      exact h1"
+      "replacement": "theorem Prop.forall_iff {p : Prop → Prop} : (∀ h, p h) ↔ p False ∧ p True := by\n  constructor\n  · intro H\n    exact ⟨H False, H True⟩\n  · rintro ⟨h1, h2⟩ h\n    by_cases H : h\n    · have heq : h = True := propext ⟨fun _ => True.intro, fun _ => H⟩\n      rw [heq]\n      exact h2\n    · have heq : h = False := propext ⟨fun h' => (H h').elim, False.elim⟩\n      rw [heq]\n      exact h1",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-grind_pattern",
-      "startByte": 33543,
-      "endByte": 33587,
-      "source": "grind_pattern Exists.choose_spec => P.choose",
-      "replacement": "-- The grind pattern is metadata only and has no ordinary-Lean replacement."
-    },
-    {
-      "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-dite_ne_left_iff",
+      "occurrence": "3688e3cd95049dc7",
       "startByte": 38655,
       "endByte": 38745,
       "source": "theorem dite_ne_left_iff : dite P (fun _ ↦ a) B ≠ a ↔ ∃ h, a ≠ B h := by\n  grind",
-      "replacement": "theorem dite_ne_left_iff : dite P (fun _ ↦ a) B ≠ a ↔ ∃ h, a ≠ B h := by\n  by_cases hp : P\n  · rw [dif_pos hp]\n    constructor\n    · intro h\n      exact False.elim (h rfl)\n    · rintro ⟨hnp, _⟩\n      exact (hnp hp).elim\n  · rw [dif_neg hp]\n    constructor\n    · intro h\n      exact ⟨hp, fun hab => h hab.symm⟩\n    · rintro ⟨_, h⟩\n      exact fun hab => h hab.symm"
+      "replacement": "theorem dite_ne_left_iff : dite P (fun _ ↦ a) B ≠ a ↔ ∃ h, a ≠ B h := by\n  by_cases hp : P\n  · rw [dif_pos hp]\n    constructor\n    · intro h\n      exact False.elim (h rfl)\n    · rintro ⟨hnp, _⟩\n      exact (hnp hp).elim\n  · rw [dif_neg hp]\n    constructor\n    · intro h\n      exact ⟨hp, fun hab => h hab.symm⟩\n    · rintro ⟨_, h⟩\n      exact fun hab => h hab.symm",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-apply_ite_left",
+      "occurrence": "48f6b0b0676f60c5",
       "startByte": 41895,
       "endByte": 42076,
       "source": "theorem apply_ite_left {α β γ : Sort*} (f : α → β → γ) (P : Prop) [Decidable P]\n    (x y : α) (z : β) : f (if P then x else y) z = if P then f x z else f y z := by grind",
-      "replacement": "theorem apply_ite_left {α β γ : Sort*} (f : α → β → γ) (P : Prop) [Decidable P]\n    (x y : α) (z : β) : f (if P then x else y) z = if P then f x z else f y z := by\n  by_cases hP : P\n  · rw [if_pos hP, if_pos hP]\n  · rw [if_neg hP, if_neg hP]"
+      "replacement": "theorem apply_ite_left {α β γ : Sort*} (f : α → β → γ) (P : Prop) [Decidable P]\n    (x y : α) (z : β) : f (if P then x else y) z = if P then f x z else f y z := by\n  by_cases hP : P\n  · rw [if_pos hP, if_pos hP]\n  · rw [if_neg hP, if_neg hP]",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-dite_dite_comm",
+      "occurrence": "5bcabfca725e2441",
       "startByte": 42351,
       "endByte": 42562,
       "source": "theorem dite_dite_comm {B : Q → α} {C : ¬P → ¬Q → α} (h : P → ¬Q) :\n    (if p : P then A p else if q : Q then B q else C p q) =\n     if q : Q then B q else if p : P then A p else C p q := by\n  grind",
-      "replacement": "theorem dite_dite_comm {B : Q → α} {C : ¬P → ¬Q → α} (h : P → ¬Q) :\n    (if p : P then A p else if q : Q then B q else C p q) =\n     if q : Q then B q else if p : P then A p else C p q := by\n  by_cases hp : P\n  · have hnq : ¬Q := fun hq => h hp hq\n    rw [dif_pos hp, dif_neg hnq, dif_pos hp]\n  · rw [dif_neg hp]\n    by_cases hq : Q\n    · rw [dif_pos hq, dif_pos hq]\n    · rw [dif_neg hq, dif_neg hq, dif_neg hp]"
+      "replacement": "theorem dite_dite_comm {B : Q → α} {C : ¬P → ¬Q → α} (h : P → ¬Q) :\n    (if p : P then A p else if q : Q then B q else C p q) =\n     if q : Q then B q else if p : P then A p else C p q := by\n  by_cases hp : P\n  · have hnq : ¬Q := fun hq => h hp hq\n    rw [dif_pos hp, dif_neg hnq, dif_pos hp]\n  · rw [dif_neg hp]\n    by_cases hq : Q\n    · rw [dif_pos hq, dif_pos hq]\n    · rw [dif_neg hq, dif_neg hq, dif_neg hp]",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {
       "module": "Mathlib/Logic/Basic.lean",
-      "occurrence": "T57-Function.Injective.ite",
+      "occurrence": "5ddfd37d2f262e40",
       "startByte": 43735,
       "endByte": 44077,
       "source": "theorem Function.Injective.ite {α β : Sort*} {p : β → Prop} [DecidablePred p] {g : β → α}\n    (hg : g.Injective) {f : β → α} (hf : f.Injective) (h : ∀ x y, g x = f y → x = y) :\n    (fun x ↦ if p x then g x else f x).Injective :=\n  fun x y _ ↦ by rcases em (p x) with (hx | hx) <;> rcases em (p y) with (hy | hy) <;> grind",
-      "replacement": "theorem Function.Injective.ite {α β : Sort*} {p : β → Prop} [DecidablePred p] {g : β → α}\n    (hg : g.Injective) {f : β → α} (hf : f.Injective) (h : ∀ x y, g x = f y → x = y) :\n    (fun x ↦ if p x then g x else f x).Injective := by\n  intro x y hxy\n  change (if p x then g x else f x) = (if p y then g y else f y) at hxy\n  by_cases hx : p x\n  · by_cases hy : p y\n    · rw [if_pos hx, if_pos hy] at hxy\n      exact hg hxy\n    · rw [if_pos hx, if_neg hy] at hxy\n      exact h x y hxy\n  · by_cases hy : p y\n    · rw [if_neg hx, if_pos hy] at hxy\n      exact (h y x hxy.symm).symm\n    · rw [if_neg hx, if_neg hy] at hxy\n      exact hf hxy"
+      "replacement": "theorem Function.Injective.ite {α β : Sort*} {p : β → Prop} [DecidablePred p] {g : β → α}\n    (hg : g.Injective) {f : β → α} (hf : f.Injective) (h : ∀ x y, g x = f y → x = y) :\n    (fun x ↦ if p x then g x else f x).Injective := by\n  intro x y hxy\n  change (if p x then g x else f x) = (if p y then g y else f y) at hxy\n  by_cases hx : p x\n  · by_cases hy : p y\n    · rw [if_pos hx, if_pos hy] at hxy\n      exact hg hxy\n    · rw [if_pos hx, if_neg hy] at hxy\n      exact h x y hxy\n  · by_cases hy : p y\n    · rw [if_neg hx, if_pos hy] at hxy\n      exact (h y x hxy.symm).symm\n    · rw [if_neg hx, if_neg hy] at hxy\n      exact hf hxy",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     }
   ]
 }

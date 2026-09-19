@@ -1,40 +1,51 @@
 # T57 result
 
-Status: partial, fail-closed.  The broader-family mechanism is implemented and a
-private Logic.Basic diagnostic copy certifies; freshly generated direct-simp
-source remains blocked by the current T1/T2 trace contract.
+Status: partial, fail-closed. The accepted broader overlay now contains 14 safe
+ordinary-Lean proof replacements. The two metadata-only Logic.Basic changes are
+not accepted: `@[grind =] xor_def` and `grind_pattern Exists.choose_spec =>
+P.choose` remain visibly unresolved in the source. Full Logic.Basic
+certification is not claimed.
 
-## Fresh reproduction
+## Trust-boundary fixes
 
-- `python3 -B Experiment/pipeline/replay_module.py --module Mathlib/Logic/Basic.lean --t1 /Users/ptsier/projects/explicit-lean-worktrees/T1-trace-capture --t2 /Users/ptsier/projects/explicit-lean-worktrees/T2-explicit-rw --out $PWD/.lake/private/T57-pipeline-overlay-20260919T020142` (6.01s): 31 sites; 30 `render_failed:missing_derivation`, 1 unresolved; stock whole-module compile 0.
-- Fresh output: `.lake/private/T57-fresh-generated-cert-20260919T020210/Mathlib/Logic/Basic.lean`.
-- `run.py` on that fresh output: 45 diagnostics (31 forbidden simp-engine executions, 14 cascading unknown constants), exit 1, no olean: `.lake/private/T57-fresh-generated-cert-20260919T020210/certification.log`.
-- `python3 -B Experiment/simp_family_lint.py .lake/private/T57-fresh-generated-cert-20260919T020210/Mathlib/Logic/Basic.lean`: 33 findings (31 retained direct sites plus 2 dormant Meta bodies at source lines 56 and 87).
+- `broader_simp_family_overrides.json` no longer has a shared source hash.
+  Every entry carries and authenticates its exact `moduleSourceSha256`.
+- Occurrence values are canonical `occurrence_id(module, startByte, endByte)`
+  values, replacing all T57 labels. The loader rejects mismatched identities.
+- Mathlib `905b95818eb32af7874a58b427f50c1711a5e96c` and Lean
+  `4.32.2/f3b06c705e6c85f5314019d5d3baab0fec5b580c` are required exactly;
+  wrong-but-well-formed environment fixtures are rejected.
+- Rendering preserves the source line's indentation and checks exact original
+  text line by line. A synthetic UTF-8 fixture covers byte ranges, rendered
+  character offsets, non-ASCII prefixes, indented multi-line calls, and
+  rejection of a range splitting a code point.
+- A two-module synthetic fixture authenticates different source hashes in one
+  database. It adds no real second-module override.
 
-## Implementation and verified reduction
+## Counts and validation
 
-- Added `Experiment/pipeline/broader_overlay.py` and authenticated data
-  `Experiment/pipeline/broader_simp_family_overrides.json`: 16 Logic.Basic
-  entries (xor grind proofs/attribute, simpa declarations, grind metadata and
-  four additional grind declarations).  Each exact UTF-8 range/text is checked;
-  missing, shifted, duplicate, overlapping, protected-simp-site and unused
-  rendered entries fail closed.  Original text is an adjacent comment.
-- `python3 -B Experiment/pipeline/check_pipeline.py`: 328 checks passed.
-- `python3 -B Experiment/check_simp_family_lint.py`: 46 tests passed.
-- `python3 -B Experiment/check_explicit_rw.py`: PASS (16 fixtures, 14 rejected-syntax cases; 138-theorem axiom audit; 108 escape probes; about 293s).
-- `python3 -m py_compile Experiment/pipeline/replay_module.py Experiment/pipeline/check_pipeline.py Experiment/pipeline/broader_overlay.py`; `git diff --check`: passed.
-- Applying the overlay to a fresh private copy of the frozen T55 diagnostic
-  source (never modifying the frozen tree), then `lake env lean`: exit 0.
-  `run.py` was invoked with absolute source/output paths and explicit pinned
-  `LEAN_PATH`: exit 0, fresh olean, 1.33s. Output:
-  `.lake/private/T57-certified-overlay-20260919T020332/`.
-- No-new-axiom comparison: 15 changed declarations, no replacement axiom set
-  exceeded stock; report `.lake/private/T57-axiom-20260919T020246/no-new-axiom.json`.
+Before this round the overlay had 16 entries. After it has 14 accepted proof
+replacements and 2 unresolved metadata entries. The prior fresh generator
+reproduction still has 31 direct `simp` sites unresolved; no whole-module or
+whole-tree coverage claim is made.
 
-## Limits
+- `python3 -B Experiment/pipeline/check_pipeline.py` — PASS, 341 checks.
+- `python3 -B Experiment/check_simp_family_lint.py` — PASS, 46 tests (2
+  opt-in corpus sweeps skipped).
+- `python3 -m py_compile Experiment/pipeline/broader_overlay.py
+  Experiment/pipeline/check_pipeline.py Experiment/pipeline/replay_module.py` —
+  PASS.
+- `git diff --check` — PASS.
+- Fresh certification round 3, with the two metadata declarations restored,
+  failed closed exactly at those two metadata operations (`simpDisabled`), so
+  no invalid preservation claim is made.
+- A separate metadata-excluded diagnostic copy containing the 14 proof
+  replacements emitted a fresh olean under the pinned simp-disabled driver:
+  `.lake/private/T57-overlay-cert-round4-20260919T092058Z/Mathlib/Logic/Basic.olean`.
+  Its static lint has only the two intentionally unresolved metadata findings;
+  this is not Logic.Basic acceptance evidence.
+- Fresh no-new-axiom comparison for the same 14 proof declarations passed:
+  `.lake/private/T57-no-new-axiom-round2-20260919T092119Z/no-new-axiom.json`.
+  The overlay axiom sets introduced no axioms beyond stock.
 
-The fresh generator cannot yet authenticate T55-style operational derivations,
-so the full freshly generated Logic.Basic certification is not claimed.  The
-frozen-source overlay validation certifies the 16 broader replacements only;
-31 direct simp sites remain visibly unresolved in the fresh output.  Dormant
-Meta bodies remain source lint findings but did not execute under certification.
+Frozen evidence was only copied/read; no frozen source or receipt was modified.

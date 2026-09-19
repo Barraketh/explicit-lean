@@ -36,6 +36,7 @@ sys.path.insert(0, str(HERE))
 import render as R  # noqa: E402
 import replay_module as P  # noqa: E402
 import sites as S  # noqa: E402
+import simp_engine_inventory as I  # noqa: E402
 import broader_overlay as B  # noqa: E402
 
 CASES = ROOT / "test" / "Pipeline" / "renderer_cases.json"
@@ -497,8 +498,16 @@ def broader_overlay_tests(f: Failures) -> None:
     source = source_path.read_bytes()
     metadata, entries = B.load_database()
     selected = [entry for entry in entries if entry["module"] == "Mathlib/Logic/Basic.lean"]
-    f.equal("broader/entry_count", len(selected), 16)
-    f.equal("broader/hash", metadata["moduleSourceSha256"], B._sha256(source))
+    f.equal("broader/entry_count", len(selected), 14)
+    f.equal("broader/top_level_has_no_shared_source_hash", "moduleSourceSha256" in metadata, False)
+    f.check("broader/entry_hashes_are_source_hashes",
+            all(entry["moduleSourceSha256"] == B._sha256(source) for entry in selected),
+            "an entry does not carry the exact Logic.Basic source hash")
+    f.check("broader/deterministic_ids",
+            all(entry["occurrence"] == I.occurrence_id(
+                entry["module"], entry["startByte"], entry["endByte"]
+            ) for entry in selected),
+            "an accepted occurrence uses a free-form label")
     source_text = source.decode("utf-8")
     rendered, used = B.apply_to_rendered(
         "Mathlib/Logic/Basic.lean", source, source_text,
@@ -507,7 +516,13 @@ def broader_overlay_tests(f: Failures) -> None:
          for site in S.find_sites(source_text)],
     )
     f.equal("broader/all_entries_used", used, [entry["occurrence"] for entry in selected])
-    f.equal("broader/comments", rendered.count("-- Original broader simp-family call/declaration:"), 16)
+    f.equal("broader/comments", rendered.count("-- Original broader simp-family call/declaration:"), 14)
+    f.check("broader/metadata_entries_unresolved",
+            "@[grind =] theorem xor_def" in source_text
+            and "grind_pattern Exists.choose_spec => P.choose" in source_text
+            and all("xor_def" not in entry["source"] and "grind_pattern" not in entry["source"]
+                    for entry in selected),
+            "metadata-only declarations were silently accepted by the overlay")
     f.check("broader/replacements_linted",
             not any(P.lint_replacement({"lines": [entry["replacement"]]})
                     for entry in selected),
@@ -530,6 +545,108 @@ def broader_overlay_tests(f: Failures) -> None:
         f.check("broader/duplicate_entry", False, "duplicate rendered entry was accepted")
     except RuntimeError:
         f.passed += 1
+
+    # Synthetic entries authenticate each module independently.  In particular,
+    # a second module must not inherit the first module's source digest.
+    with tempfile.TemporaryDirectory(prefix="broader-overlay-fixture-") as tmp:
+        db_path = pathlib.Path(tmp) / "overlay.json"
+        a_module = "Mathlib/SyntheticA.lean"
+        b_module = "Mathlib/SyntheticB.lean"
+        a_source = b"  first\n    grind foo\n      continuation\n"
+        b_source = "-- λ before\n\tgrind bar\n".encode("utf-8")
+        a_start = a_source.index(b"grind foo")
+        b_start = b_source.index(b"grind bar")
+        fixture_entries = [
+            {
+                "module": a_module, "moduleSourceSha256": B._sha256(a_source),
+                "occurrence": I.occurrence_id(
+                    a_module, a_start, a_start + len(b"grind foo\n      continuation")
+                ),
+                "startByte": a_start,
+                "endByte": a_start + len(b"grind foo\n      continuation"),
+                "source": "grind foo\n      continuation", "replacement": "rfl",
+            },
+            {
+                "module": b_module, "moduleSourceSha256": B._sha256(b_source),
+                "occurrence": I.occurrence_id(
+                    b_module, b_start, b_start + len(b"grind bar")
+                ),
+                "startByte": b_start, "endByte": b_start + len(b"grind bar"),
+                "source": "grind bar", "replacement": "rfl",
+            },
+        ]
+        fixture = {
+            "kind": B.KIND, "schema": B.SCHEMA,
+            "mathlibCommit": B.EXPECTED_MATHLIB_COMMIT,
+            "lean": {"version": B.EXPECTED_LEAN_VERSION, "commit": B.EXPECTED_LEAN_COMMIT},
+            "overrides": fixture_entries,
+        }
+        db_path.write_text(json.dumps(fixture), encoding="utf-8")
+        _, loaded = B.load_database(db_path)
+        f.equal("broader/two_module_fixture", len(loaded), 2)
+        a_out, _ = B.apply_to_rendered(a_module, a_source, a_source.decode(), path=db_path)
+        b_out, _ = B.apply_to_rendered(b_module, b_source, b_source.decode(), path=db_path)
+        f.check("broader/independent_hashes", a_out.endswith("    rfl\n") and b_out.endswith("\trfl\n"),
+                f"indented fixture layout was not preserved: {a_out!r} / {b_out!r}")
+        expected_a = (
+            "  first\n    -- Original broader simp-family call/declaration:\n"
+            "    -- grind foo\n    --       continuation\n    rfl\n"
+        )
+        expected_b = (
+            "-- λ before\n\t-- Original broader simp-family call/declaration:\n"
+            "\t-- grind bar\n\trfl\n"
+        )
+        f.equal("broader/comment_line_fidelity_a", a_out, expected_a)
+        f.equal("broader/comment_line_fidelity_b", b_out, expected_b)
+
+        def rejected_fixture(name: str, mutate: object) -> None:
+            value = json.loads(db_path.read_text(encoding="utf-8"))
+            mutate(value)
+            bad = pathlib.Path(tmp) / (name + ".json")
+            bad.write_text(json.dumps(value), encoding="utf-8")
+            try:
+                B.load_database(bad)
+            except RuntimeError:
+                f.passed += 1
+            else:
+                f.check("broader/reject/" + name, False, "forged fixture was accepted")
+
+        rejected_fixture("wrong_mathlib_identity", lambda value: value.__setitem__(
+            "mathlibCommit", "a" * 40))
+        rejected_fixture("wrong_lean_version", lambda value: value["lean"].__setitem__(
+            "version", "4.32.1"))
+        rejected_fixture("wrong_lean_commit", lambda value: value["lean"].__setitem__(
+            "commit", "b" * 40))
+        rejected_fixture("mismatched_occurrence_id", lambda value: value["overrides"][0].__setitem__(
+            "occurrence", "free-form-t57-label"))
+
+        wrong_hash = json.loads(db_path.read_text(encoding="utf-8"))
+        wrong_hash["overrides"][1]["moduleSourceSha256"] = "c" * 64
+        wrong_hash_path = pathlib.Path(tmp) / "wrong-entry-hash.json"
+        wrong_hash_path.write_text(json.dumps(wrong_hash), encoding="utf-8")
+        try:
+            B.apply_to_rendered(b_module, b_source, b_source.decode(), path=wrong_hash_path)
+        except RuntimeError as error:
+            f.check("broader/reject/entry_source_hash", "source hash changed" in str(error), str(error))
+        else:
+            f.check("broader/reject/entry_source_hash", False, "a forged entry source hash was accepted")
+
+        split = json.loads(db_path.read_text(encoding="utf-8"))
+        split_entry = split["overrides"][1]
+        split_start = b_source.index("λ".encode("utf-8")) + 1
+        split_entry["startByte"] = split_start
+        split_entry["endByte"] = split_start + 2
+        split_entry["occurrence"] = I.occurrence_id(
+            b_module, split_entry["startByte"], split_entry["endByte"])
+        split_path = pathlib.Path(tmp) / "split.json"
+        split_path.write_text(json.dumps(split), encoding="utf-8")
+        split_source = b_source
+        try:
+            B.apply_to_rendered(b_module, split_source, split_source.decode(), path=split_path)
+        except RuntimeError as error:
+            f.check("broader/reject/utf8_split", "splits UTF-8" in str(error), str(error))
+        else:
+            f.check("broader/reject/utf8_split", False, "a range split a code point")
 
 
 def derivation_tests(f: Failures) -> None:
