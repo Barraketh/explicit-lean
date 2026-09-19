@@ -9,6 +9,15 @@
   "overrides": [
     {
       "module": "Mathlib/Logic/Basic.lean",
+      "occurrence": "79237ddd16d5c161",
+      "startByte": 12126,
+      "endByte": 12218,
+      "source": "@[grind =] theorem xor_def {a b : Prop} : Xor a b ↔ (a ∧ ¬b) ∨ (b ∧ ¬a) := Iff.rfl",
+      "replacement": "theorem xor_def {a b : Prop} : Xor a b ↔ (a ∧ ¬b) ∨ (b ∧ ¬a) := Iff.rfl\nexplicit_grind_eq_lhs xor_def",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
+    },
+    {
+      "module": "Mathlib/Logic/Basic.lean",
       "occurrence": "f4ee7b27940614bf",
       "startByte": 12319,
       "endByte": 12372,
@@ -95,6 +104,15 @@
       "endByte": 29740,
       "source": "theorem Prop.forall_iff {p : Prop → Prop} : (∀ h, p h) ↔ p False ∧ p True :=\n  ⟨fun H ↦ ⟨H _, H _⟩, fun ⟨h₁, h₂⟩ h ↦ by by_cases H : h <;> simpa only [H]⟩",
       "replacement": "theorem Prop.forall_iff {p : Prop → Prop} : (∀ h, p h) ↔ p False ∧ p True := by\n  constructor\n  · intro H\n    exact ⟨H False, H True⟩\n  · rintro ⟨h1, h2⟩ h\n    by_cases H : h\n    · have heq : h = True := propext ⟨fun _ => True.intro, fun _ => H⟩\n      rw [heq]\n      exact h2\n    · have heq : h = False := propext ⟨fun h' => (H h').elim, False.elim⟩\n      rw [heq]\n      exact h1",
+      "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
+    },
+    {
+      "module": "Mathlib/Logic/Basic.lean",
+      "occurrence": "965368017b80e872",
+      "startByte": 33543,
+      "endByte": 33587,
+      "source": "grind_pattern Exists.choose_spec => P.choose",
+      "replacement": "explicit_grind_pattern Exists.choose_spec => P.choose",
       "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
     },
     {

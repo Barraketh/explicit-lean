@@ -1037,6 +1037,8 @@ def build_module(source: str, site_list: list[S.Site],
     }
     spliced = S.splice(source, replacements, site_list, ranges, multiline_midline)
     spliced = S.add_import(spliced)
+    if module == "Mathlib/Logic/Basic.lean":
+        spliced = S.add_import(spliced, "ExplicitLean.Grind.Metadata")
     if module is not None:
         spliced, _ = B.apply_to_rendered(
             module, source.encode("utf-8"), spliced,

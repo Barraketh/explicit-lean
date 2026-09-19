@@ -25,7 +25,9 @@ Exit 0 when everything passes, 1 otherwise.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 
@@ -453,6 +455,54 @@ def mapping_tests(f: Failures) -> None:
             "an unrelated diagnostic was selected")
 
 
+def grind_metadata_differential_tests(f: Failures) -> None:
+    """Stock and replacement commands must write identical Grind metadata."""
+    stock = ROOT / "test" / "GrindMetadata" / "Stock.lean"
+    replacement = ROOT / "test" / "GrindMetadata" / "Replacement.lean"
+    with tempfile.TemporaryDirectory(prefix="grind-metadata-diff-") as tmp_name:
+        tmp = pathlib.Path(tmp_name)
+        helper = tmp / "ExplicitLean" / "Grind" / "Metadata.olean"
+        helper.parent.mkdir(parents=True)
+        built = subprocess.run(
+            ["lake", "env", "lean", "-o", str(helper),
+             str(ROOT / "ExplicitLean" / "Grind" / "Metadata.lean")],
+            cwd=ROOT, capture_output=True, text=True, timeout=120,
+        )
+        f.check("grind_metadata/helper_compiles", built.returncode == 0,
+                (built.stdout + built.stderr).strip())
+        if built.returncode != 0:
+            return
+        path_probe = subprocess.run(
+            ["lake", "env", "printenv", "LEAN_PATH"],
+            cwd=ROOT, capture_output=True, text=True, timeout=30,
+        )
+        f.check("grind_metadata/lean_path", path_probe.returncode == 0,
+                path_probe.stderr.strip())
+        if path_probe.returncode != 0:
+            return
+        env = dict(os.environ)
+        env["LEAN_PATH"] = str(tmp) + os.pathsep + path_probe.stdout.strip()
+
+        def run_fixture(path: pathlib.Path) -> list[str] | None:
+            result = subprocess.run(
+                ["lean", str(path)], cwd=ROOT,
+                capture_output=True, text=True, timeout=120, env=env,
+            )
+            lines = [line for line in (result.stdout + result.stderr).splitlines()
+                     if line.startswith("T58-METADATA|")]
+            f.check("grind_metadata/fixture_compiles/" + path.stem,
+                    result.returncode == 0 and not any("error:" in line for line in lines),
+                    (result.stdout + result.stderr).strip())
+            return lines if result.returncode == 0 else None
+
+        stock_lines = run_fixture(stock)
+        replacement_lines = run_fixture(replacement)
+        if stock_lines is not None and replacement_lines is not None:
+            f.equal("grind_metadata/stock_and_replacement_match",
+                    replacement_lines, stock_lines)
+            f.equal("grind_metadata/operation_count", len(replacement_lines), 2)
+
+
 def manual_override_tests(f: Failures) -> None:
     """The cone's source overlays enter the real replay splice path."""
     mathlib = ROOT / ".lake" / "packages" / "mathlib"
@@ -498,7 +548,7 @@ def broader_overlay_tests(f: Failures) -> None:
     source = source_path.read_bytes()
     metadata, entries = B.load_database()
     selected = [entry for entry in entries if entry["module"] == "Mathlib/Logic/Basic.lean"]
-    f.equal("broader/entry_count", len(selected), 14)
+    f.equal("broader/entry_count", len(selected), 16)
     f.equal("broader/top_level_has_no_shared_source_hash", "moduleSourceSha256" in metadata, False)
     f.check("broader/entry_hashes_are_source_hashes",
             all(entry["moduleSourceSha256"] == B._sha256(source) for entry in selected),
@@ -516,13 +566,14 @@ def broader_overlay_tests(f: Failures) -> None:
          for site in S.find_sites(source_text)],
     )
     f.equal("broader/all_entries_used", used, [entry["occurrence"] for entry in selected])
-    f.equal("broader/comments", rendered.count("-- Original broader simp-family call/declaration:"), 14)
-    f.check("broader/metadata_entries_unresolved",
-            "@[grind =] theorem xor_def" in source_text
-            and "grind_pattern Exists.choose_spec => P.choose" in source_text
-            and all("xor_def" not in entry["source"] and "grind_pattern" not in entry["source"]
-                    for entry in selected),
-            "metadata-only declarations were silently accepted by the overlay")
+    f.equal("broader/comments", rendered.count("-- Original broader simp-family call/declaration:"), 16)
+    metadata = {entry["source"]: entry["replacement"] for entry in selected}
+    f.equal("broader/xor_metadata_replacement",
+            metadata.get("@[grind =] theorem xor_def {a b : Prop} : Xor a b ↔ (a ∧ ¬b) ∨ (b ∧ ¬a) := Iff.rfl"),
+            "theorem xor_def {a b : Prop} : Xor a b ↔ (a ∧ ¬b) ∨ (b ∧ ¬a) := Iff.rfl\nexplicit_grind_eq_lhs xor_def")
+    f.equal("broader/choose_metadata_replacement",
+            metadata.get("grind_pattern Exists.choose_spec => P.choose"),
+            "explicit_grind_pattern Exists.choose_spec => P.choose")
     f.check("broader/replacements_linted",
             not any(P.lint_replacement({"lines": [entry["replacement"]]})
                     for entry in selected),
@@ -1179,6 +1230,7 @@ def main() -> int:
     mapping_tests(f)
     manual_override_tests(f)
     broader_overlay_tests(f)
+    grind_metadata_differential_tests(f)
     derivation_tests(f)
     summary_tests(f)
     identity_tests(f)
