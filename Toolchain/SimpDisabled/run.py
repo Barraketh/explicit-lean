@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -44,20 +43,25 @@ def verify() -> dict[str, object]:
 
 
 def command(arguments: list[str]) -> list[str]:
-    forbidden = {
-        "-DexplicitLean.simpDisabled=false",
-        "-DexplicitLean.simpDisabled=false\n",
-        "-DexplicitLean.certification=false",
-        "--incr-load",
+    protected = {
+        "explicitLean.simpDisabled=false",
+        "explicitLean.certification=false",
+        "warn.sorry=false",
     }
-    if any(argument in forbidden - {"--incr-load"} for argument in arguments):
-        raise RuntimeError("certification cannot override certification guards")
     for index, argument in enumerate(arguments):
+        assignment = None
         if argument == "-D" and index + 1 < len(arguments):
-            argument = arguments[index + 1]
-        if re.fullmatch(r"-?D?explicitLean\.simpDisabled=false", argument):
-            raise RuntimeError("certification cannot override explicitLean.simpDisabled")
-    if any(argument.startswith("--incr-load") or argument == "-Z" or argument.startswith("-Z") for argument in arguments):
+            assignment = arguments[index + 1]
+        elif argument.startswith("-D"):
+            assignment = argument[2:]
+        if assignment in protected:
+            raise RuntimeError("certification cannot override certification guards")
+    if any(
+        argument.startswith("--incr-load")
+        or argument == "-Z"
+        or argument.startswith("-Z")
+        for argument in arguments
+    ):
         raise RuntimeError("certification rejects incremental-load snapshots")
     return [
         str(_build.BINARY),
@@ -69,6 +73,13 @@ def command(arguments: list[str]) -> list[str]:
 
 
 def _fresh_output(arguments: list[str]) -> None:
+    """Require one explicit, fresh compiler output.
+
+    Certification receipts are about emitted module artifacts, not successful
+    parser-only or ``--version`` invocations.  Requiring exactly one ``-o``
+    also prevents a later output option from silently superseding the path we
+    checked.
+    """
     outputs: list[str] = []
     index = 0
     while index < len(arguments):
@@ -84,12 +95,15 @@ def _fresh_output(arguments: list[str]) -> None:
                 outputs.append(argument[len(prefix):])
                 break
         index += 1
-    for raw in outputs:
-        path = Path(raw).expanduser()
-        if not path.is_absolute():
-            path = ROOT / path
-        if path.exists():
-            raise RuntimeError(f"certification output must be fresh: {path}")
+    if len(outputs) != 1:
+        raise RuntimeError(
+            "certification requires exactly one explicit -o/--o output path"
+        )
+    path = Path(outputs[0]).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    if path.exists() or path.is_symlink():
+        raise RuntimeError(f"certification output must be fresh: {path}")
 
 
 def run(arguments: list[str]) -> subprocess.CompletedProcess[str]:

@@ -15,5 +15,18 @@ state, `EXPLICIT_LEAN_SIMP_DISABLED=1`,
 `EXPLICIT_LEAN_CERTIFICATION=1`, and `-E hasSorry`, then invokes only
 the private stage-1 binary. Private process-start snapshots defeat source-local
 option/warning changes and metaprograms that mutate the environment; a missing
-or stale artifact is an error, not a fallback. Certification output paths must
-be fresh, and incremental-load snapshots are rejected.
+or stale artifact is an error, not a fallback. Certification requires exactly
+one explicit `-o` output, that path must be fresh, and incremental-load
+snapshots are rejected.
+
+Build once, then run the driver under Lake's package search environment when a
+module imports Mathlib:
+
+```sh
+python3 -B Toolchain/SimpDisabled/build.py --json
+lake env python3 -B Toolchain/SimpDisabled/run.py -- \
+  -o .lake/certified/Target.olean path/to/Target.lean
+```
+
+The output directory must already exist. The driver does not build the private
+toolchain or fall back to stock Lean implicitly.
