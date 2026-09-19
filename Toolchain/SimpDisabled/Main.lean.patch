@@ -1,0 +1,48 @@
+--- a/Lean/AddDecl.lean
++++ b/Lean/AddDecl.lean
+@@ -68,0 +69,8 @@
++register_builtin_option explicitLean.certification : Bool := {
++  defValue := false
++  descr    := "enable fail-closed certification checks"
++}
++
++private builtin_initialize certificationProcess : IO.Ref Bool ←
++  IO.getEnv "EXPLICIT_LEAN_CERTIFICATION" >>= fun value => IO.mkRef (value == some "1")
++
+@@ -79 +87,2 @@
+-  if warn.sorry.get (← getOptions) then
++  let certification ← certificationProcess.get
++  if warn.sorry.get (← getOptions) || certification then
+--- a/Lean/Meta/Tactic/Simp/Main.lean
++++ b/Lean/Meta/Tactic/Simp/Main.lean
+@@ -16,0 +17,11 @@
++
++/-
++This option is intentionally checked at the stock engine boundary rather than
++in tactic syntax.  It therefore covers direct Meta callers and every tactic
++which reaches the ordinary simp/dsimp traversal.
++-/
++register_builtin_option explicitLean.simpDisabled : Bool := {
++    defValue := false
++    descr    := "abort when the stock simp or dsimp engine executes"
++  }
++
+@@ -19,0 +31,12 @@
++
++private builtin_initialize simpDisabledProcess : IO.Ref Bool ←
++  IO.getEnv "EXPLICIT_LEAN_SIMP_DISABLED" >>= fun value => IO.mkRef (value == some "1")
++
++private def simpDisabled : SimpM Bool := do
++  if explicitLean.simpDisabled.get (← getOptions) then
++    return true
++  return ← simpDisabledProcess.get
++
++private def abortSimpDisabled (kind : String) : SimpM α := do
++  logError m!"explicitLean.simpDisabled: stock {kind} engine execution is forbidden"
++  throw <| Exception.internal interruptExceptionId
+@@ -517,0 +541,2 @@
++  if ← simpDisabled then
++    abortSimpDisabled "dsimp"
+@@ -716,0 +742,2 @@
++  if ← simpDisabled then
++    abortSimpDisabled "simp"
