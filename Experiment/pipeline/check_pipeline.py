@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -456,7 +457,13 @@ def mapping_tests(f: Failures) -> None:
 
 
 def grind_metadata_differential_tests(f: Failures) -> None:
-    """Stock and replacement commands must write identical Grind metadata."""
+    """Stock and replacement commands must write identical Grind metadata.
+
+    Source review of these exact forms shows that both stock commands write
+    only ``grindExt.ematch``: the equality attribute takes the E-match branch,
+    and ``grind_pattern`` directly adds an E-match theorem.  Other Grind
+    extension fields are therefore not a write surface for this differential.
+    """
     stock = ROOT / "test" / "GrindMetadata" / "Stock.lean"
     replacement = ROOT / "test" / "GrindMetadata" / "Replacement.lean"
     with tempfile.TemporaryDirectory(prefix="grind-metadata-diff-") as tmp_name:
@@ -480,12 +487,55 @@ def grind_metadata_differential_tests(f: Failures) -> None:
                 path_probe.stderr.strip())
         if path_probe.returncode != 0:
             return
+        # Do not let an ambient `lean` silently run the trust-boundary
+        # differential.  Resolve the compiler through Lake, then authenticate
+        # both the release and the pinned upstream commit before any fixture.
+        prefix_probe = subprocess.run(
+            ["lake", "env", "lean", "--print-prefix"],
+            cwd=ROOT, capture_output=True, text=True, timeout=30,
+        )
+        f.check("grind_metadata/pinned_prefix_query",
+                prefix_probe.returncode == 0,
+                (prefix_probe.stdout + prefix_probe.stderr).strip())
+        if prefix_probe.returncode != 0:
+            return
+        prefix_lines = prefix_probe.stdout.splitlines()
+        f.check("grind_metadata/pinned_prefix_single_line",
+                len(prefix_lines) == 1 and bool(prefix_lines[0].strip()),
+                repr(prefix_probe.stdout))
+        if len(prefix_lines) != 1 or not prefix_lines[0].strip():
+            return
+        lean_binary = (pathlib.Path(prefix_lines[0].strip()) / "bin" / "lean").resolve()
+        f.check("grind_metadata/pinned_binary_absolute", lean_binary.is_absolute(),
+                str(lean_binary))
+        f.check("grind_metadata/pinned_binary_exists", lean_binary.is_file(),
+                str(lean_binary))
+        if not lean_binary.is_file():
+            return
+        version_probe = subprocess.run(
+            [str(lean_binary), "--version"],
+            cwd=ROOT, capture_output=True, text=True, timeout=30,
+        )
+        version_output = (version_probe.stdout + version_probe.stderr).strip()
+        f.check("grind_metadata/pinned_version_command",
+                version_probe.returncode == 0, version_output)
+        f.check("grind_metadata/pinned_compiler_version",
+                re.search(r"version 4\.32\.2(?:[, )])", version_output) is not None,
+                version_output)
+        f.check("grind_metadata/pinned_compiler_commit",
+                "commit f3b06c705e6c85f5314019d5d3baab0fec5b580c" in version_output,
+                version_output)
+        if (version_probe.returncode != 0
+                or re.search(r"version 4\.32\.2(?:[, )])", version_output) is None
+                or "commit f3b06c705e6c85f5314019d5d3baab0fec5b580c" not in version_output):
+            return
+
         env = dict(os.environ)
         env["LEAN_PATH"] = str(tmp) + os.pathsep + path_probe.stdout.strip()
 
         def run_fixture(path: pathlib.Path) -> list[str] | None:
             result = subprocess.run(
-                ["lean", str(path)], cwd=ROOT,
+                [str(lean_binary), str(path)], cwd=ROOT,
                 capture_output=True, text=True, timeout=120, env=env,
             )
             lines = [line for line in (result.stdout + result.stderr).splitlines()

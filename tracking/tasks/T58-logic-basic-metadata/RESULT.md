@@ -1,7 +1,8 @@
 # T58 result
 
-Status: completed for the two Grind metadata operations; full module acceptance is
-not claimed because the two dormant Meta `simp symmExpr` bodies remain.
+Status: completed for the two Grind metadata operations; certification passes
+with a fresh olean, but final `Mathlib.Logic.Basic` acceptance remains blocked
+by the two dormant Meta `simp symmExpr` source bodies.
 
 ## Changes
 
@@ -13,32 +14,47 @@ not claimed because the two dormant Meta `simp symmExpr` bodies remain.
   `79237ddd16d5c161` (`xor_def`) and `965368017b80e872` (`Exists.choose_spec`).
   Original operations remain adjacent comments; the theorem declaration is
   preserved.
-- Added `test/GrindMetadata/{Stock,Replacement}.lean` and a fail-closed
-  differential check in `check_pipeline.py`. It compares kind, parameter
-  count, normalized pattern, symbols, constraints and `minIndexable` for both
-  exact operations.
-- `replay_module.py` imports the helper only for generated `Mathlib.Logic.Basic`.
+- The stock/replacement fixtures now emit and compare every `EMatchTheorem`
+  field: `levelParams`, `proof`, `origin`, `kind`, `numParams`, `patterns`,
+  `symbols`, `cnstrs`, and `minIndexable`. Pretty-printed values are newline
+  escaped so the differential cannot silently truncate a multiline pattern.
+- `check_pipeline.py` now derives an absolute compiler from
+  `lake env lean --print-prefix`, fail-closes unless it reports Lean 4.32.2
+  commit `f3b06c705e6c85f5314019d5d3baab0fec5b580c`, and runs both fixtures
+  with that binary and the explicit temp-first `LEAN_PATH`.
+- Reviewed the exact stock forms: `[grind =]` takes the E-match attribute
+  branch (which adds an `.ematch` entry) and `grind_pattern` directly adds an
+  E-match theorem. Neither writes
+  `casesTypes`, `extThms`, `funCC`, or `inj`; therefore `grindExt.ematch` is the
+  complete Grind-extension write surface for this differential.
+- `replay_module.py` imports the helper only for generated
+  `Mathlib.Logic.Basic`.
 
 ## Checks
 
-- Fresh current-main replay with `--t1` and `--t2` both
-  `/Users/ptsier/projects/explicit-lean`: 31/31 direct sites, stock whole-module
-  compile exit 0, 7.12s.
-- `python3 -B Experiment/pipeline/check_pipeline.py ...`: 346 checks, 8.65s.
-- Stock seven-target strict cone preflight with baseline lint: passed; fresh
-  outputs and translated-root resolution recorded in
-  `.lake/T58-cert-cone-20260919T0320/manifest.json`.
-- Main `Toolchain/SimpDisabled/run.py` strict translated-root compile: exit 0,
-  fresh `.lake/T58-cert-cone-20260919T0320/Logic.Basic.cert-final.olean`.
-- `check_simp_family_lint.py`: 46 passed, 2 skipped. Generated target lint
-  intentionally reports exactly 2 dormant Meta bodies (lines 57 and 88).
-- Touched-declaration no-new-axiom comparison: stock/applied axiom lines match
-  for `xor_def` and `Exists.choose_spec` (2/2); `check_explicit_rw.py` also
-  passed its 138-theorem axiom audit.
-- `git diff --check`, Python compilation, and helper lint passed.
+- `python3 -B Experiment/pipeline/check_pipeline.py`: **355 checks passed**;
+  the differential passed compiler identity checks and exact stock/replacement
+  metadata equality for both operations.
+- Fresh current-main replay using `/Users/ptsier/projects/explicit-lean` as
+  both T1 and T2:
+  `python3 -B Experiment/pipeline/replay_module.py --module
+  Mathlib/Logic/Basic.lean --t1 /Users/ptsier/projects/explicit-lean --t2
+  /Users/ptsier/projects/explicit-lean --out
+  /tmp/T58-main-replay-20260919T-current` — **31/31 replayed**, whole-module
+  compile passed.
+- Rebuilt the pinned certification compiler with
+  `python3 -B Toolchain/SimpDisabled/build.py --json`, then ran the strict
+  compiler against the fresh replay source with `Toolchain/SimpDisabled/run.py`.
+  It returned **0** and emitted the fresh olean
+  `/tmp/T58-cert-current-20260919T/Logic.Basic.cert-final.olean`.
+- `python3 -B Experiment/check_simp_family_lint.py`: **46 passed, 2 skipped**;
+  the generated target still has exactly the two dormant Meta findings.
+- `python3 -m py_compile Experiment/pipeline/check_pipeline.py
+  Experiment/pipeline/replay_module.py Experiment/pipeline/broader_overlay.py`:
+  passed. `git diff --check`: passed.
 
 ## Limitations
 
-The dormant Meta bodies are outside T58 and prevent static cleanliness/final
-Logic.Basic acceptance claims. No cloud, deadline, authorization, package, or
-frozen evidence was changed.
+The two dormant Meta `simp symmExpr` bodies remain outside T58 and prevent
+static cleanliness and final `Mathlib.Logic.Basic` module acceptance claims.
+No cloud, deadline, authorization, package, or frozen evidence was changed.

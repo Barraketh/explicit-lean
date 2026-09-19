@@ -9,6 +9,16 @@ public meta import Lean.Meta.Tactic.Grind.Attr
 public section
 namespace ExplicitLean.GrindMetadata
 
+/-
+For the two exact source forms replaced here, the stock elaborators use only
+E-match paths on `grindExt`: `[grind =]` takes the E-match attribute branch and
+`grind_pattern` calls `Extension.addEMatchTheorem`.  Neither
+form adds a cases, ext, funCC, or injective entry; symbol priorities are only
+read.  Thus `grindExt.ematch` is the complete Grind-extension write surface
+for these operations (apart from the shared reset, which clears the same
+state before either fixture).
+-/
+
 open Lean Elab Command Term Meta
 open Lean.Meta
 open Lean.Meta.Grind
