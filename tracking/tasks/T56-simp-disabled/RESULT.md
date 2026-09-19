@@ -18,14 +18,14 @@ Implementation:
   `simpa`, `simp_all`, `simp_rw`,
   `field_simp`, `norm_cast`, `push_cast`, rw/exact/change/unfold/rfl, Mathlib
   import compatibility, source-local option and `warn.sorry` weakening, sorry,
-  sorryAx, output/incremental/override rejection, and the documented
-  arbitrary-axiom limitation.
+  sorryAx, output/incremental/override rejection, manifest-path tampering, and
+  the documented arbitrary-axiom limitation.
 
 Checks (fresh, 2026-09-19):
 - `python3 -B Toolchain/SimpDisabled/build.py --json`: passed, warm 0.38s.
   Initial private CMake/stage-1 build completed successfully under 30 minutes.
 - `python3 -B Experiment/check_simp_disabled.py`: passed after coordinator
-  review fixes, 90.86s.
+  review fixes, 91.16s.
 - `python3 -m py_compile Toolchain/SimpDisabled/*.py Experiment/check_simp_disabled.py`:
   passed; `git diff --check`: passed.
 

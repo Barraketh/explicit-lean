@@ -165,13 +165,18 @@ def artifact_is_fresh() -> bool:
     return (
         current.get("schema") == 1
         and current.get("sourceCommit") == EXPECTED_COMMIT
+        and current.get("leanVersion") == VERSION
         and current.get("patchSha256") == sha256(PATCH)
         and current.get("patchedSourcesSha256") == patched_sources_hash()
+        and current.get("binary") == str(BINARY)
         and current.get("binarySha256") == sha256(BINARY)
+        and current.get("runtime") == str(runtime_path())
         and current.get("runtimeSha256") == sha256(runtime_path())
+        and current.get("sysroot") == str(SYSROOT)
         and current.get("guardOption") == "explicitLean.simpDisabled=true"
         and current.get("guardArguments") == "-DexplicitLean.simpDisabled=true;-DexplicitLean.certification=true;-E hasSorry"
         and current.get("guardEnvironment") == "EXPLICIT_LEAN_SIMP_DISABLED=1;EXPLICIT_LEAN_CERTIFICATION=1"
+        and current.get("hasSorryDiagnostic") == "-E hasSorry"
     )
 
 

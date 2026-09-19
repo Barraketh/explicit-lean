@@ -14,6 +14,7 @@ BUILD = ROOT / "Toolchain" / "SimpDisabled" / "build.py"
 RUN = ROOT / "Toolchain" / "SimpDisabled" / "run.py"
 TESTS = ROOT / "test" / "SimpDisabled"
 EXPECTED_DIAGNOSTIC = "explicitLean.simpDisabled: stock"
+MANIFEST = ROOT / ".lake" / "SimpDisabled" / "manifest.json"
 
 
 def checked(command: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -151,6 +152,22 @@ def check_driver_output_contract(env: dict[str, str]) -> None:
                 )
 
 
+def check_manifest_tamper_rejected() -> None:
+    original = MANIFEST.read_bytes()
+    try:
+        value = json.loads(original)
+        value["binary"] = str(ROOT / ".lake" / "SimpDisabled" / "wrong-lean")
+        MANIFEST.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        result = checked([sys.executable, str(RUN), "--identity"])
+        if result.returncode == 0 or "missing or stale" not in result.stdout:
+            raise AssertionError(f"driver accepted a tampered artifact path:\n{result.stdout}")
+    finally:
+        MANIFEST.write_bytes(original)
+    restored = checked([sys.executable, str(RUN), "--identity"])
+    if restored.returncode != 0:
+        raise AssertionError(f"manifest restoration did not recover identity:\n{restored.stdout}")
+
+
 def compile_patched_off(manifest: dict[str, object], env: dict[str, str]) -> None:
     with tempfile.TemporaryDirectory(prefix="t56-patched-off-", dir=ROOT / ".lake" / "SimpDisabled") as raw:
         output = Path(raw) / "fresh.olean"
@@ -214,6 +231,7 @@ def main() -> int:
             "sorry_warn_disabled",
         ):
             compile_case(name, certified=True, succeeds=False, env=env)
+        check_manifest_tamper_rejected()
     except (AssertionError, OSError, RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
         print(f"simp-disabled controls failed: {error}", file=sys.stderr)
         return 1
