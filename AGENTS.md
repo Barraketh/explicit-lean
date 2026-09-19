@@ -44,13 +44,25 @@ that forbade the elaborator, implicit arguments or instance synthesis.
   all-in cap, 12-hour instance lifetime and 10-hour worker runtime. Do not add a
   second host or long campaign without new authorization; do not use
   explicit-lean-cloud implicitly. Never buy or redeem credits.
-- Delegate significant implementation work to Luna at max reasoning with strict
-  design constraints and narrow file ownership. Luna must escalate unexpected
-  Lean, semantic, security, or architectural complexity to the coordinating
-  primary agent before broadening scope.
-- Perform fix-review cycles: implement, run focused meaningful checks, review
-  the diff for correctness and scope, fix findings, and repeat before offering
-  a change for commit. Do not claim that unrun checks passed.
+- Delegate substantial coverage batches to Luna at max reasoning with explicit,
+  non-overlapping module/file ownership. Optimize for throughput: the worker
+  writes principled ordinary Lean, self-reviews its diff, runs focused checks,
+  and uses certification compilation as the primary oracle. Escalate only
+  unexpected semantic or architectural complexity before broadening scope.
+- Routine coverage batches do **not** require a separate adversarial reviewer
+  or speculative security analysis. Fix observed compiler/test failures at the
+  most general sound mechanism, rerun the affected modules and required
+  dependents, and integrate when the mechanical gates pass. Do not claim that
+  unrun checks passed.
+- Reserve independent focused review for changes to trust boundaries: the
+  patched compiler/driver, recorder semantics, source-site accounting,
+  translated-import isolation, axiom checking, and acceptance gates. The
+  coordinator may directly triage, fix, test, and integrate ordinary failures.
+- Certification compilation uses `Toolchain/SimpDisabled/run.py`: every target
+  must emit one fresh olean with stock `simp`/`dsimp` execution disabled and
+  `-E hasSorry`. Keep the separate no-new-axiom comparison; compilation does
+  not replace source-site accounting, adjacent original-call comments, strict
+  translated-root import checks, or the remaining-call audit.
 - Agents share this checkout. Respect assigned file ownership. Do not revert
   other agents' edits. The coordinator stages and commits named files.
 - Keep iteration fast: cache immutable inputs/results, compile affected modules
@@ -66,10 +78,11 @@ that forbade the elaborator, implicit arguments or instance synthesis.
   dispatch stop are obsolete; parallel work elsewhere does not consume a local
   campaign allocation. Unknown availability or an actual rate-limit/spend stop
   still means no costly dispatch. Never buy or redeem credits.
-- The original deadline is historical. The only continuation ends at the exact
-  top-level tracker `deadline`/`notAfter` boundary for the one authorized pilot.
-  Do not extend that date, bypass the guard, or dispatch from an unpublished
-  authorization checkout.
+- The original deadline is historical. The exact top-level tracker
+  `deadline`/`notAfter` boundary remains immutable for the one authorized AWS
+  pilot; do not extend it, bypass its guard, or dispatch from an unpublished
+  authorization checkout. That closed cloud boundary does not prohibit the
+  later explicitly requested local, no-cost implementation batches.
 - Count the 529 archived-v10 module reports separately from whole-tree
   acceptance (still zero). The 62 v10 cached failures are queued and therefore
   missing from `campaign_failures.py`'s queue-state-only report; use the handoff

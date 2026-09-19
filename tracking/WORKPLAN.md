@@ -17,8 +17,30 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T16-rule-derivations | Term-free theorem-rule derivations captured at the matcher boundary, preserving indexed/liberal lookup parity | T1 | **merged; accepted** | task/T16-rule-derivations | REVIEW-2 PASS at `4a42543`; implementation through `a9c2d4e`; 74 fixture skeletons pass |
 | T18-simproc-inventory | Inventory simproc steps in the accepted 91-site corpus | T6, T16 | **documented; candidates deferred** | task/T18-simproc-inventory | `d2eaf48`; reduceIte 15/6 and reduceDIte 15/8 are later bounded candidates; eqComm deferred |
 | T20-ite-simprocs | Bounded operational `reduceIte`/`reduceDIte` derivations | T1, T16, T18 | **merged; accepted** | codex/t20-ite-simprocs | implementation through `22ff7819`; REVIEW-2 `1ab114ca`; checker 74/74; focused observed coverage 6/15 and 3/15 only; cached-origin misses fail closed |
+| T56-simp-disabled | Pinned private Lean compiler that aborts executed simp/dsimp and rejects sorry | pinned Lean 4.32.2 | **merged; accepted** (`6fef7b5`, `3ec4190`, `e81e890`) | task/T56-simp-disabled | independent coordinator trust-boundary review; 23 compile cases plus driver-contract controls pass |
 
-## Next steps (written at session end, 2026-09-16)
+## Current next steps (September 19, 2026)
+
+- Use the integrated simp-disabled compiler as the primary oracle for every new
+  batch. The private main-checkout build and the full control suite pass.
+- Dispatch large non-overlapping module/failure batches to Luna at maximum
+  reasoning. Routine batches self-review and compile; no separate adversarial
+  reviewer is required.
+- Drive from actual certification failures. Fix repeated causes in the general
+  recorder/renderer mechanism; use readable ordinary-Lean overrides only for
+  exceptional proofs. Compile affected modules and required translated
+  dependents after each fix.
+- Keep mechanical gates for source-site bijection, adjacent original comments,
+  forbidden-source lint, fresh outputs, strict translated-root imports,
+  `-E hasSorry`, and no-new-axiom comparison.
+- The first certification probe of the prior T55 generated
+  `Mathlib.Logic.Basic` failed closed on executed simplifier calls, including
+  calls reached through `grind`, and emitted no olean. This is the initial
+  failure queue, not accepted coverage.
+- Reserve a fresh independent reviewer only for trust-boundary changes listed
+  in `tracking/COORDINATION.md`. Whole-tree acceptance remains zero.
+
+## Historical next steps (written at session end, 2026-09-16)
 
 ### Active resume batch (2026-09-17)
 

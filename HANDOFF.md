@@ -16,7 +16,26 @@ and the `linter.style.longFile` allowance decision are closed as moot; the
 recorder and its reports are retained as oracle inputs, not translations;
 two `dsimp` overrides must be rewritten. Whole-tree acceptance remains zero.
 
-## Current milestone — T47 (September 17, 2026)
+## Current certification toolchain — T56 (September 19, 2026)
+
+T56 is integrated through `e81e890` (`6fef7b5`, `3ec4190`, `e81e890`). It
+builds a private pinned Lean 4.32.2 stage-1 compiler under
+`.lake/SimpDisabled`, aborts any executed stock `simp` or `dsimp` engine call,
+and promotes only `hasSorry` to an error. The driver requires one fresh output,
+rejects incremental snapshots and guard overrides, verifies source/binary/runtime
+identity, and never falls back to stock Lean. The independent suite's 23
+compile cases plus driver-contract controls pass in the main checkout. An
+arbitrary new axiom is intentionally not covered by `-E hasSorry`; the separate
+no-new-axiom gate remains mandatory.
+
+The first probe of the prior T55 generated `Mathlib.Logic.Basic` failed closed
+on actual simplifier execution, including indirect calls from `grind`, and
+emitted no olean. This is useful failure discovery, not accepted module
+coverage. Routine work is now large, non-overlapping Luna batches with worker
+self-review and certification compilation; separate adversarial review is
+reserved for trust-boundary changes. See `tracking/COORDINATION.md`.
+
+## Prior bounded milestone — T47 (September 17, 2026)
 
 The final integration commit is `59262d72a82255d1d4c33349617554076cc998cc`.
 At seed commit `86f90d1ca6aef852253135a52ad4cb862713efc2`, the main seed
@@ -61,11 +80,14 @@ remain unclaimed.
 Evidence is recorded in `/tmp/t55-pipeline-20260918T134224-clean/report.json`
 and `/tmp/t55-cone-run-20260918T134440-timed/manifest.json`.
 
-Next actions are to extend the readable, source-preserving replacement beyond
-the accepted 91-site seed and 69-module cone across the broader simp family,
-then run dependency-ordered whole-tree compilation, the remaining-call audit,
-and the final semantic/trust checks. Do not treat the cone as whole-tree
-acceptance or start another cloud run without new authorization.
+Next actions are to use certification failures to extend the readable,
+source-preserving replacement beyond the accepted 91-site seed and 69-module
+cone across the broader simp family. Dispatch disjoint local batches, fix
+repeated causes at the general mechanism, and compile affected translated
+modules and dependents after each fix. Then run dependency-ordered whole-tree
+compilation, the remaining-call audit, and final semantic/trust checks. Do not
+treat the cone as whole-tree acceptance or start another cloud run without new
+authorization.
 
 The earlier [September 16 continuation handoff](tracking/HANDOFF-2026-09-16.md)
 and `tracking/campaign.json` record the fixes, partial cold certification,
