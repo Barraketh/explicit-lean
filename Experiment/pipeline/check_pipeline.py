@@ -468,6 +468,7 @@ def grind_metadata_differential_tests(f: Failures) -> None:
     replacement = ROOT / "test" / "GrindMetadata" / "Replacement.lean"
     stock_function = ROOT / "test" / "GrindMetadata" / "StockFunction.lean"
     replacement_function = ROOT / "test" / "GrindMetadata" / "ReplacementFunction.lean"
+    rejected_function = ROOT / "test" / "GrindMetadata" / "RejectedFunction.lean"
     with tempfile.TemporaryDirectory(prefix="grind-metadata-diff-") as tmp_name:
         tmp = pathlib.Path(tmp_name)
         helper = tmp / "ExplicitLean" / "Grind" / "Metadata.olean"
@@ -560,6 +561,21 @@ def grind_metadata_differential_tests(f: Failures) -> None:
                     replacement_function_lines, stock_function_lines)
             f.equal("grind_metadata/function_operation_count",
                     len(replacement_function_lines), 1)
+
+        rejected = subprocess.run(
+            [str(lean_binary), str(rejected_function)], cwd=ROOT,
+            capture_output=True, text=True, timeout=120, env=env,
+        )
+        rejected_output = rejected.stdout + rejected.stderr
+        f.check("grind_metadata/rejected_definition_fails",
+                rejected.returncode != 0,
+                rejected_output.strip())
+        f.check("grind_metadata/rejected_definition_guard",
+                "explicit_grind_def is reserved for Function.update" in rejected_output,
+                rejected_output.strip())
+        f.check("grind_metadata/rejected_definition_not_generic_equation_error",
+                "requires a definition with equations" not in rejected_output,
+                rejected_output.strip())
 
 
 def manual_override_tests(f: Failures) -> None:

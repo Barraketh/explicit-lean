@@ -39,6 +39,8 @@ private meta def addEqLhs (declName : Name) : TermElabM Unit := do
       (.eqLhs false) (minIndexable := false) (cnstrs := [])
 
 private meta def addDef (declName : Name) : TermElabM Unit := do
+  unless declName == `Function.update do
+    throwError "explicit_grind_def is reserved for Function.update"
   let some eqns ← getEqnsFor? declName
     | throwError "explicit_grind_def requires a definition with equations"
   for eqn in eqns do
