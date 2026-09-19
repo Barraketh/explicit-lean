@@ -201,7 +201,10 @@ def _comment_original(original: str, indent: str) -> str:
 
 def _indented_replacement(replacement: str, indent: str) -> str:
     lines = replacement.split("\n")
-    return "\n".join([indent + lines[0], *lines[1:]])
+    return "\n".join(
+        indent + line if line.strip() else line
+        for line in lines
+    )
 
 
 def apply_to_rendered(

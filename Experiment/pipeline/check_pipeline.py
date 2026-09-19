@@ -564,7 +564,8 @@ def broader_overlay_tests(f: Failures) -> None:
                 ),
                 "startByte": a_start,
                 "endByte": a_start + len(b"grind foo\n      continuation"),
-                "source": "grind foo\n      continuation", "replacement": "rfl",
+                "source": "grind foo\n      continuation",
+                "replacement": "rfl\n  exact True.intro",
             },
             {
                 "module": b_module, "moduleSourceSha256": B._sha256(b_source),
@@ -586,11 +587,12 @@ def broader_overlay_tests(f: Failures) -> None:
         f.equal("broader/two_module_fixture", len(loaded), 2)
         a_out, _ = B.apply_to_rendered(a_module, a_source, a_source.decode(), path=db_path)
         b_out, _ = B.apply_to_rendered(b_module, b_source, b_source.decode(), path=db_path)
-        f.check("broader/independent_hashes", a_out.endswith("    rfl\n") and b_out.endswith("\trfl\n"),
+        f.check("broader/independent_hashes", a_out.endswith("    rfl\n      exact True.intro\n") and b_out.endswith("\trfl\n"),
                 f"indented fixture layout was not preserved: {a_out!r} / {b_out!r}")
         expected_a = (
             "  first\n    -- Original broader simp-family call/declaration:\n"
             "    -- grind foo\n    --       continuation\n    rfl\n"
+            "      exact True.intro\n"
         )
         expected_b = (
             "-- λ before\n\t-- Original broader simp-family call/declaration:\n"

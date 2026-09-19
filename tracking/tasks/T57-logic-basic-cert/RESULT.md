@@ -37,13 +37,22 @@ whole-tree coverage claim is made.
   PASS.
 - `git diff --check` — PASS.
 - Fresh certification round 3, with the two metadata declarations restored,
-  failed closed exactly at those two metadata operations (`simpDisabled`), so
-  no invalid preservation claim is made.
+  failed closed exactly at those two Grind metadata operations (`simpDisabled`),
+  so no invalid preservation claim is made.
 - A separate metadata-excluded diagnostic copy containing the 14 proof
   replacements emitted a fresh olean under the pinned simp-disabled driver:
   `.lake/private/T57-overlay-cert-round4-20260919T092058Z/Mathlib/Logic/Basic.olean`.
-  Its static lint has only the two intentionally unresolved metadata findings;
-  this is not Logic.Basic acceptance evidence.
+  Independent static lint on that copy returned rc1 with exactly two findings:
+  the dormant Meta `simp symmExpr` bodies at source lines 56 and 87. These are
+  source findings, not metadata findings; omitting the two unresolved Grind
+  metadata operations was intentional for the diagnostic certification. The
+  copy is therefore not static-clean and is not Logic.Basic acceptance
+  evidence.
+- The real overlay leaves all four findings unresolved and distinct: the two
+  unchanged Grind metadata operations (`@[grind =] theorem xor_def` and
+  `grind_pattern Exists.choose_spec => P.choose`) plus the two dormant Meta
+  `simp symmExpr` bodies at lines 56 and 87. Full Logic.Basic acceptance is not
+  claimed.
 - Fresh no-new-axiom comparison for the same 14 proof declarations passed:
   `.lake/private/T57-no-new-axiom-round2-20260919T092119Z/no-new-axiom.json`.
   The overlay axiom sets introduced no axioms beyond stock.
