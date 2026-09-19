@@ -19,6 +19,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T20-ite-simprocs | Bounded operational `reduceIte`/`reduceDIte` derivations | T1, T16, T18 | **merged; accepted** | codex/t20-ite-simprocs | implementation through `22ff7819`; REVIEW-2 `1ab114ca`; checker 74/74; focused observed coverage 6/15 and 3/15 only; cached-origin misses fail closed |
 | T56-simp-disabled | Pinned private Lean compiler that aborts executed simp/dsimp and rejects sorry | pinned Lean 4.32.2 | **merged; accepted** (`6fef7b5`, `3ec4190`, `e81e890`) | task/T56-simp-disabled | independent coordinator trust-boundary review; 23 compile cases plus driver-contract controls pass |
 | T57-logic-basic-cert | Authenticated broader-family overlay and first Logic.Basic proof batch | T56, T4 | **merged; partial** (`3b5a57c`, `0f246c5`, `cbb7927`) | task/T57-logic-basic-cert | 14 ordinary proofs accepted; current-main replay is 31/31 direct sites; 2 Grind metadata operations and 2 dormant Meta bodies unresolved; no module acceptance |
+| T58-logic-basic-metadata | Preserve two Grind metadata operations without Simp execution | T57 | **merged; accepted slice** (`15f6156`, `dc7a398`) | task/T58-logic-basic-metadata | complete pinned EMatchTheorem differential passes; Logic.Basic certification emits fresh olean; 2 dormant Meta bodies block static acceptance |
 
 ## Current next steps (September 19, 2026)
 
@@ -36,9 +37,11 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
   `-E hasSorry`, and no-new-axiom comparison.
 - T57 integrated the authenticated broader-family overlay and 14 readable
   `Mathlib.Logic.Basic` proof replacements. Next resolve the two semantics-bearing
-  Grind metadata operations without deleting metadata and replace the two
-  dormant Meta simp bodies. Fresh current-main replay already covers 31/31
-  direct sites. No Logic.Basic module acceptance is claimed yet.
+  Grind metadata operations without deleting metadata; T58 completed that
+  slice and Logic.Basic now certification-compiles. Next replace the two
+  dormant Meta simp bodies while preserving simproc semantics. Fresh current-
+  main replay covers 31/31 direct sites. No final Logic.Basic source acceptance
+  is claimed yet.
 - Reserve a fresh independent reviewer only for trust-boundary changes listed
   in `tracking/COORDINATION.md`. Whole-tree acceptance remains zero.
 

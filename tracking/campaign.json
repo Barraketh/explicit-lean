@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "campaign": "search-free-mathlib-2026-08-31",
-  "phase": "simp_disabled_certification_and_first_broader_family_overlay_integrated_logic_basic_pending",
+  "phase": "logic_basic_certification_passes_two_dormant_meta_simp_bodies_pending",
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-19T09:29:25Z",
+  "updatedAt": "2026-09-19T10:35:15Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -109,15 +109,30 @@
     "pipelineChecksPassed": 341,
     "lintChecksPassed": 46,
     "noNewAxiomComparison": "passed_for_14_proof_replacements",
-    "unresolvedGrindMetadataOperations": 2,
+    "unresolvedGrindMetadataOperations": 0,
     "unresolvedDormantMetaSimpBodies": 2,
     "currentMainDirectSimpSitesReplayed": "31/31",
     "unresolvedDirectSimpSites": 0,
     "moduleAcceptance": "not_claimed",
     "wholeTreeAcceptance": "not_claimed"
   },
+  "grindMetadataPreservation": {
+    "task": "T58-logic-basic-metadata",
+    "integrationCommits": [
+      "15f6156",
+      "dc7a398"
+    ],
+    "operations": 2,
+    "completeEMatchTheoremDifferential": "passed",
+    "currentMainDirectSimpSitesReplayed": "31/31",
+    "stockWholeModuleCompile": "passed",
+    "simpDisabledCompile": "passed_fresh_olean",
+    "remainingStaticFindings": 2,
+    "remainingClass": "dormant_Meta_simp_symmExpr_bodies",
+    "moduleAcceptance": "not_claimed"
+  },
   "resumeStatus": {
-    "review": "T57_authenticated_broader_overlay_and_14_Logic.Basic_proofs_integrated; current_main_replay_31_of_31_direct_sites; two_Grind_metadata_operations_and_two_dormant_Meta_bodies_unresolved; no_module_or_whole_tree_acceptance",
+    "review": "T58_preserves_two_Grind_metadata_operations_with_complete_differential; Logic.Basic_31_of_31_replay_stock_compile_and_simp_disabled_compile_pass; two_dormant_Meta_simp_bodies_remain; no_final_module_or_whole_tree_acceptance",
     "t2": "merged_to_main_5ec2da5_and_integration_checked",
     "t1": "integrated_seed_mapping; 91_source_identities_and_113_invocation_records; no_hashes_nonces",
     "t4": "seed_accepted; 7_of_7_modules_and_91_of_91_identity; 113_invocation_records; replay_render_compile_identity_failures_zero",

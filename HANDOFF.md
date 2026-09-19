@@ -53,6 +53,20 @@ remain unchanged because deleting them would alter elaborator metadata. Static
 lint separately reports the two dormant Meta `simp symmExpr` bodies. These four
 items are the current Logic.Basic queue.
 
+## Logic.Basic metadata preservation — T58 (September 19, 2026)
+
+T58 is integrated through `dc7a398`. Two narrow commands register exactly the
+same complete Grind E-match records as stock for `xor_def` and
+`Exists.choose_spec`, but disable the pattern normalizer that executed Simp.
+Pinned stock/replacement differentials compare every `EMatchTheorem` field.
+Fresh current-main generation replays 31/31 direct sites, stock-compiles, and
+now compiles with the simp-disabled driver to a fresh olean. No new axioms were
+introduced.
+
+This is certification success, not final source acceptance: static lint still
+reports the dormant Meta `simp symmExpr` bodies in `eqComm` and `iffComm`. They
+remain the two-item Logic.Basic queue.
+
 ## Prior bounded milestone — T47 (September 17, 2026)
 
 The final integration commit is `59262d72a82255d1d4c33349617554076cc998cc`.
