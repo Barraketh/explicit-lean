@@ -21,6 +21,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T57-logic-basic-cert | Authenticated broader-family overlay and first Logic.Basic proof batch | T56, T4 | **merged; partial** (`3b5a57c`, `0f246c5`, `cbb7927`) | task/T57-logic-basic-cert | 14 ordinary proofs accepted; current-main replay is 31/31 direct sites; 2 Grind metadata operations and 2 dormant Meta bodies unresolved; no module acceptance |
 | T58-logic-basic-metadata | Preserve two Grind metadata operations without Simp execution | T57 | **merged; accepted slice** (`15f6156`, `dc7a398`) | task/T58-logic-basic-metadata | complete pinned EMatchTheorem differential passes; Logic.Basic certification emits fresh olean; 2 dormant Meta bodies block static acceptance |
 | T59-logic-basic-simprocs | Replace dormant eqComm/iffComm nested Simp calls | T58 | **blocked; proposal withheld** | task/T59-logic-basic-simprocs | continuation-only design recurses in Function.Basic `eq_update_self_iff`; no product code integrated |
+| T60-function-basic-cert | Replace Function.Basic broader-family executions and preserve Function.update Grind metadata | T56, T58 | **merged; accepted slice** (`cc242b3`, `4130888`, `6ebf743`) | task/T60-function-basic-cert | 13 authenticated replacements; 25/25 replay; 367 checks; strict module plus IsEmpty.Basic dependent pass; ExistsUnique remains unresolved |
 
 ## Current next steps (September 19, 2026)
 
@@ -45,6 +46,11 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
   was withheld after a required dependent exposed recursion; pursue a design
   that preserves `withoutTheorems`, but do not stall independent module
   batches. No final Logic.Basic source acceptance is claimed yet.
+- T60 integrated 13 readable `Function.Basic` replacements and exact
+  `Function.update` Grind metadata preservation. Fresh direct replay is 25/25;
+  strict `Logic.Basic`, `Function.Basic`, and dependent `IsEmpty.Basic` compile,
+  with 69/69 imports resolving from the exact translated root. `ExistsUnique`
+  is the next observed certification failure and remains visibly unresolved.
 - Reserve a fresh independent reviewer only for trust-boundary changes listed
   in `tracking/COORDINATION.md`. Whole-tree acceptance remains zero.
 

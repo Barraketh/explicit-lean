@@ -71,6 +71,26 @@ exact future design must preserve stock's lexical `withoutTheorems` context.
 Independent module batches should continue while this two-item blocker remains
 visible.
 
+## Function.Basic certification — T60 (September 19, 2026)
+
+T60 is integrated through `6ebf743` (`cc242b3`, `4130888`, `6ebf743`). Thirteen
+authenticated broader-family replacements remove the observed `grind`/`simpa`
+and `@[grind]` executions from `Mathlib.Logic.Function.Basic` using readable
+ordinary Lean. The replacement for `@[grind] def Function.update` preserves the
+complete pinned `EMatchTheorem` record and is restricted to that exact name.
+The focused pipeline passes 367 checks; fresh replay covers 25/25 direct sites,
+stock and simp-disabled module compilation pass, generated lint has zero
+findings, and all 13 changed declarations retain their axiom sets.
+
+A fresh exact 69-module/134-edge root then compiled `Logic.Basic`,
+`Function.Basic`, and direct dependent `Logic.IsEmpty.Basic` with the
+simp-disabled compiler; all returned zero and 69/69 first matches resolved from
+the translated root. The earlier exit-245 crash did not recur after removing a
+stale, overbroad mixed artifact root. The next module, `Logic.ExistsUnique`,
+correctly fails closed at an unresolved broader-family call, so neither the
+whole cone nor whole tree is accepted. The two T59 dormant Logic.Basic Meta
+bodies also remain unresolved.
+
 ## Prior bounded milestone — T47 (September 17, 2026)
 
 The final integration commit is `59262d72a82255d1d4c33349617554076cc998cc`.
