@@ -57,6 +57,7 @@ import render as R  # noqa: E402
 import sites as S  # noqa: E402
 import simp_family_lint as L  # noqa: E402
 import simp_manual_overrides as M  # noqa: E402
+import broader_overlay as B  # noqa: E402
 
 # The six modules T1 has traced copies for: (Mathlib path, traced module name).
 MODULES = {
@@ -1009,11 +1010,14 @@ def split_steps(text: str) -> list[str]:
 
 
 def build_module(source: str, site_list: list[S.Site],
-                 records: list[dict], only: int | None = None) -> str:
-    """Splice the module.
+                 records: list[dict], only: int | None = None,
+                 module: str | None = None) -> str:
+    """Splice the module, then apply the authenticated broader-family overlay.
 
     With `only` set, every site but that one is left as its original call, so a
-    clean compile attributes to that one site alone.
+    clean compile attributes to that one site alone.  Broader-family entries
+    are applied after this ordinary simp-site rendering and are never allowed
+    to overlap a simp site.
     """
     replacements = {
         rec["site"]: rec["lines"]
@@ -1032,7 +1036,14 @@ def build_module(source: str, site_list: list[S.Site],
         and (only is None or rec["site"] == only)
     }
     spliced = S.splice(source, replacements, site_list, ranges, multiline_midline)
-    return S.add_import(spliced)
+    spliced = S.add_import(spliced)
+    if module is not None:
+        spliced, _ = B.apply_to_rendered(
+            module, source.encode("utf-8"), spliced,
+            ((len(source[:site.start].encode("utf-8")),
+              len(source[:site.end].encode("utf-8"))) for site in site_list),
+        )
+    return spliced
 
 
 def compile_in_t2(t2: pathlib.Path, path: pathlib.Path
@@ -1252,8 +1263,10 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
     translated_root = run_root / "translated"
     translated_target = translated_root / mathlib_rel
     translated_target.parent.mkdir(parents=True, exist_ok=True)
-    translated_target.write_text(build_module(source, site_list, records),
-                                 encoding="utf-8")
+    translated_target.write_text(
+        build_module(source, site_list, records, module=mathlib_rel),
+        encoding="utf-8",
+    )
 
     code, diagnostics, compile_secs = compile_in_t2(t2, translated_target)
     compile_mode = "whole_module"
@@ -1276,7 +1289,8 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
             probe = probe.with_suffix(".lean")
             probe.parent.mkdir(parents=True, exist_ok=True)
             probe.write_text(
-                build_module(source, site_list, records, only=rec["site"]),
+                build_module(source, site_list, records, only=rec["site"],
+                             module=mathlib_rel),
                 encoding="utf-8",
             )
             pcode, pdiags, psecs = compile_in_t2(t2, probe)

@@ -36,6 +36,7 @@ sys.path.insert(0, str(HERE))
 import render as R  # noqa: E402
 import replay_module as P  # noqa: E402
 import sites as S  # noqa: E402
+import broader_overlay as B  # noqa: E402
 
 CASES = ROOT / "test" / "Pipeline" / "renderer_cases.json"
 
@@ -484,6 +485,51 @@ def manual_override_tests(f: Failures) -> None:
         f.check("manual/import/" + module,
                 "import ExplicitLean.ExplicitRw" in translated,
                 "manual replay did not use the normal ExplicitRw import path")
+
+
+def broader_overlay_tests(f: Failures) -> None:
+    """The broader-family overlay is authenticated and fail-closed."""
+    mathlib = ROOT / ".lake" / "packages" / "mathlib"
+    source_path = mathlib / "Mathlib" / "Logic" / "Basic.lean"
+    if not source_path.is_file():
+        f.check("broader/source_present", False, f"not found: {source_path}")
+        return
+    source = source_path.read_bytes()
+    metadata, entries = B.load_database()
+    selected = [entry for entry in entries if entry["module"] == "Mathlib/Logic/Basic.lean"]
+    f.equal("broader/entry_count", len(selected), 16)
+    f.equal("broader/hash", metadata["moduleSourceSha256"], B._sha256(source))
+    source_text = source.decode("utf-8")
+    rendered, used = B.apply_to_rendered(
+        "Mathlib/Logic/Basic.lean", source, source_text,
+        [(len(source_text[:site.start].encode("utf-8")),
+          len(source_text[:site.end].encode("utf-8")))
+         for site in S.find_sites(source_text)],
+    )
+    f.equal("broader/all_entries_used", used, [entry["occurrence"] for entry in selected])
+    f.equal("broader/comments", rendered.count("-- Original broader simp-family call/declaration:"), 16)
+    f.check("broader/replacements_linted",
+            not any(P.lint_replacement({"lines": [entry["replacement"]]})
+                    for entry in selected),
+            "overlay replacement contains a forbidden executable token")
+    try:
+        B.apply_to_rendered("Mathlib/Logic/Basic.lean", source, source.decode("utf-8"),
+                            [(selected[0]["startByte"], selected[0]["endByte"])])
+        f.check("broader/protected_overlap", False, "overlap was accepted")
+    except RuntimeError:
+        f.passed += 1
+    missing = source.decode("utf-8").replace(selected[0]["source"], "shifted", 1)
+    try:
+        B.apply_to_rendered("Mathlib/Logic/Basic.lean", source, missing)
+        f.check("broader/missing_entry", False, "missing rendered entry was accepted")
+    except RuntimeError:
+        f.passed += 1
+    duplicate = source.decode("utf-8") + "\n" + selected[0]["source"]
+    try:
+        B.apply_to_rendered("Mathlib/Logic/Basic.lean", source, duplicate)
+        f.check("broader/duplicate_entry", False, "duplicate rendered entry was accepted")
+    except RuntimeError:
+        f.passed += 1
 
 
 def derivation_tests(f: Failures) -> None:
@@ -1013,6 +1059,7 @@ def main() -> int:
     invocation_tests(f)
     mapping_tests(f)
     manual_override_tests(f)
+    broader_overlay_tests(f)
     derivation_tests(f)
     summary_tests(f)
     identity_tests(f)
