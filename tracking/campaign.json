@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-19T10:35:15Z",
+  "updatedAt": "2026-09-19T12:22:26Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -131,8 +131,17 @@
     "remainingClass": "dormant_Meta_simp_symmExpr_bodies",
     "moduleAcceptance": "not_claimed"
   },
+  "logicBasicSimprocBlocker": {
+    "task": "T59-logic-basic-simprocs",
+    "status": "blocked_proposal_withheld",
+    "remainingBodies": 2,
+    "failedDesign": "unconditional_Simp.Step.continue_swap",
+    "dependentFailure": "Mathlib.Logic.Function.Basic.eq_update_self_iff_maximum_recursion_depth",
+    "requiredProperty": "preserve_stock_withoutTheorems_exclusion_context",
+    "productCodeIntegrated": false
+  },
   "resumeStatus": {
-    "review": "T58_preserves_two_Grind_metadata_operations_with_complete_differential; Logic.Basic_31_of_31_replay_stock_compile_and_simp_disabled_compile_pass; two_dormant_Meta_simp_bodies_remain; no_final_module_or_whole_tree_acceptance",
+    "review": "T58_metadata_slice_passes; T59_continuation_only_eqComm_iffComm_replacement_withheld_after_Function.Basic_recursion; Logic.Basic_certification_passes_but_two_dormant_Meta_simp_bodies_remain; continue_independent_batches",
     "t2": "merged_to_main_5ec2da5_and_integration_checked",
     "t1": "integrated_seed_mapping; 91_source_identities_and_113_invocation_records; no_hashes_nonces",
     "t4": "seed_accepted; 7_of_7_modules_and_91_of_91_identity; 113_invocation_records; replay_render_compile_identity_failures_zero",

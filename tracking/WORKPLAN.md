@@ -20,6 +20,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T56-simp-disabled | Pinned private Lean compiler that aborts executed simp/dsimp and rejects sorry | pinned Lean 4.32.2 | **merged; accepted** (`6fef7b5`, `3ec4190`, `e81e890`) | task/T56-simp-disabled | independent coordinator trust-boundary review; 23 compile cases plus driver-contract controls pass |
 | T57-logic-basic-cert | Authenticated broader-family overlay and first Logic.Basic proof batch | T56, T4 | **merged; partial** (`3b5a57c`, `0f246c5`, `cbb7927`) | task/T57-logic-basic-cert | 14 ordinary proofs accepted; current-main replay is 31/31 direct sites; 2 Grind metadata operations and 2 dormant Meta bodies unresolved; no module acceptance |
 | T58-logic-basic-metadata | Preserve two Grind metadata operations without Simp execution | T57 | **merged; accepted slice** (`15f6156`, `dc7a398`) | task/T58-logic-basic-metadata | complete pinned EMatchTheorem differential passes; Logic.Basic certification emits fresh olean; 2 dormant Meta bodies block static acceptance |
+| T59-logic-basic-simprocs | Replace dormant eqComm/iffComm nested Simp calls | T58 | **blocked; proposal withheld** | task/T59-logic-basic-simprocs | continuation-only design recurses in Function.Basic `eq_update_self_iff`; no product code integrated |
 
 ## Current next steps (September 19, 2026)
 
@@ -40,8 +41,10 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
   Grind metadata operations without deleting metadata; T58 completed that
   slice and Logic.Basic now certification-compiles. Next replace the two
   dormant Meta simp bodies while preserving simproc semantics. Fresh current-
-  main replay covers 31/31 direct sites. No final Logic.Basic source acceptance
-  is claimed yet.
+  main replay covers 31/31 direct sites. T59's continuation-only replacement
+  was withheld after a required dependent exposed recursion; pursue a design
+  that preserves `withoutTheorems`, but do not stall independent module
+  batches. No final Logic.Basic source acceptance is claimed yet.
 - Reserve a fresh independent reviewer only for trust-boundary changes listed
   in `tracking/COORDINATION.md`. Whole-tree acceptance remains zero.
 

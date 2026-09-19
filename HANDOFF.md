@@ -64,8 +64,12 @@ now compiles with the simp-disabled driver to a fresh olean. No new axioms were
 introduced.
 
 This is certification success, not final source acceptance: static lint still
-reports the dormant Meta `simp symmExpr` bodies in `eqComm` and `iffComm`. They
-remain the two-item Logic.Basic queue.
+reports the dormant Meta `simp symmExpr` bodies in `eqComm` and `iffComm`. T59's
+continuation-only replacement was withheld after it caused recursion in the
+required `Mathlib.Logic.Function.Basic.eq_update_self_iff` dependent probe; an
+exact future design must preserve stock's lexical `withoutTheorems` context.
+Independent module batches should continue while this two-item blocker remains
+visible.
 
 ## Prior bounded milestone — T47 (September 17, 2026)
 
