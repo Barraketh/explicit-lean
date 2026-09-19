@@ -35,6 +35,24 @@ coverage. Routine work is now large, non-overlapping Luna batches with worker
 self-review and certification compilation; separate adversarial review is
 reserved for trust-boundary changes. See `tracking/COORDINATION.md`.
 
+## First broader-family batch — T57 (September 19, 2026)
+
+T57 is integrated through `cbb7927`. It adds a separate fail-closed overlay for
+non-`simp` source sites, authenticated by pinned environment, per-module source
+hash, exact UTF-8 range/text, and deterministic occurrence identity. Fourteen
+`Mathlib.Logic.Basic` proofs formerly using `grind` or `simpa` now have readable
+ordinary-Lean replacements; focused pipeline checks (341), lint checks (46),
+stock compilation, certification of the 14-proof diagnostic slice, and the
+no-new-axiom comparison pass.
+
+This is partial progress, not module acceptance. The semantics-bearing
+`@[grind =] xor_def` and `grind_pattern Exists.choose_spec => P.choose` remain
+unchanged because removing them would alter elaborator metadata; certification
+fails closed when they execute. The two dormant Meta `simp symmExpr` bodies and
+31 currently unresolved direct `simp` sites also remain. The current direct-site
+blocker is stale T1/T2 operational derivation compatibility, not the broader
+overlay.
+
 ## Prior bounded milestone — T47 (September 17, 2026)
 
 The final integration commit is `59262d72a82255d1d4c33349617554076cc998cc`.

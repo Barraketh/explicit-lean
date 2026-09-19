@@ -18,6 +18,7 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 | T18-simproc-inventory | Inventory simproc steps in the accepted 91-site corpus | T6, T16 | **documented; candidates deferred** | task/T18-simproc-inventory | `d2eaf48`; reduceIte 15/6 and reduceDIte 15/8 are later bounded candidates; eqComm deferred |
 | T20-ite-simprocs | Bounded operational `reduceIte`/`reduceDIte` derivations | T1, T16, T18 | **merged; accepted** | codex/t20-ite-simprocs | implementation through `22ff7819`; REVIEW-2 `1ab114ca`; checker 74/74; focused observed coverage 6/15 and 3/15 only; cached-origin misses fail closed |
 | T56-simp-disabled | Pinned private Lean compiler that aborts executed simp/dsimp and rejects sorry | pinned Lean 4.32.2 | **merged; accepted** (`6fef7b5`, `3ec4190`, `e81e890`) | task/T56-simp-disabled | independent coordinator trust-boundary review; 23 compile cases plus driver-contract controls pass |
+| T57-logic-basic-cert | Authenticated broader-family overlay and first Logic.Basic proof batch | T56, T4 | **merged; partial** (`3b5a57c`, `0f246c5`, `cbb7927`) | task/T57-logic-basic-cert | 14 ordinary proofs accepted; 2 Grind metadata operations, 2 dormant Meta bodies and 31 direct sites unresolved; no module acceptance |
 
 ## Current next steps (September 19, 2026)
 
@@ -33,10 +34,11 @@ Protocol: `tracking/COORDINATION.md`. Interface: `tracking/SIMP-TRACE-SPEC.md`.
 - Keep mechanical gates for source-site bijection, adjacent original comments,
   forbidden-source lint, fresh outputs, strict translated-root imports,
   `-E hasSorry`, and no-new-axiom comparison.
-- The first certification probe of the prior T55 generated
-  `Mathlib.Logic.Basic` failed closed on executed simplifier calls, including
-  calls reached through `grind`, and emitted no olean. This is the initial
-  failure queue, not accepted coverage.
+- T57 integrated the authenticated broader-family overlay and 14 readable
+  `Mathlib.Logic.Basic` proof replacements. Next resolve the two semantics-bearing
+  Grind metadata operations without deleting metadata, then repair the T1/T2
+  derivation mismatch blocking 31 direct sites and replace the two dormant Meta
+  simp bodies. No Logic.Basic module acceptance is claimed yet.
 - Reserve a fresh independent reviewer only for trust-boundary changes listed
   in `tracking/COORDINATION.md`. Whole-tree acceptance remains zero.
 
