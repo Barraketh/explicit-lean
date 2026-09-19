@@ -45,13 +45,13 @@ ordinary-Lean replacements; focused pipeline checks (341), lint checks (46),
 stock compilation, certification of the 14-proof diagnostic slice, and the
 no-new-axiom comparison pass.
 
-This is partial progress, not module acceptance. The semantics-bearing
-`@[grind =] xor_def` and `grind_pattern Exists.choose_spec => P.choose` remain
-unchanged because removing them would alter elaborator metadata; certification
-fails closed when they execute. The two dormant Meta `simp symmExpr` bodies and
-31 currently unresolved direct `simp` sites also remain. The current direct-site
-blocker is stale T1/T2 operational derivation compatibility, not the broader
-overlay.
+This is partial progress, not module acceptance. A fresh current-main replay
+covers all 31/31 direct `simp` sites and stock-compiles. Simp-disabled
+compilation then fails closed at exactly the semantics-bearing `@[grind =]
+xor_def` and `grind_pattern Exists.choose_spec => P.choose` operations. They
+remain unchanged because deleting them would alter elaborator metadata. Static
+lint separately reports the two dormant Meta `simp symmExpr` bodies. These four
+items are the current Logic.Basic queue.
 
 ## Prior bounded milestone — T47 (September 17, 2026)
 
