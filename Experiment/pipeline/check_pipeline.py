@@ -466,6 +466,8 @@ def grind_metadata_differential_tests(f: Failures) -> None:
     """
     stock = ROOT / "test" / "GrindMetadata" / "Stock.lean"
     replacement = ROOT / "test" / "GrindMetadata" / "Replacement.lean"
+    stock_function = ROOT / "test" / "GrindMetadata" / "StockFunction.lean"
+    replacement_function = ROOT / "test" / "GrindMetadata" / "ReplacementFunction.lean"
     with tempfile.TemporaryDirectory(prefix="grind-metadata-diff-") as tmp_name:
         tmp = pathlib.Path(tmp_name)
         helper = tmp / "ExplicitLean" / "Grind" / "Metadata.olean"
@@ -533,24 +535,31 @@ def grind_metadata_differential_tests(f: Failures) -> None:
         env = dict(os.environ)
         env["LEAN_PATH"] = str(tmp) + os.pathsep + path_probe.stdout.strip()
 
-        def run_fixture(path: pathlib.Path) -> list[str] | None:
+        def run_fixture(path: pathlib.Path, prefix: str) -> list[str] | None:
             result = subprocess.run(
                 [str(lean_binary), str(path)], cwd=ROOT,
                 capture_output=True, text=True, timeout=120, env=env,
             )
             lines = [line for line in (result.stdout + result.stderr).splitlines()
-                     if line.startswith("T58-METADATA|")]
+                     if line.startswith(prefix)]
             f.check("grind_metadata/fixture_compiles/" + path.stem,
                     result.returncode == 0 and not any("error:" in line for line in lines),
                     (result.stdout + result.stderr).strip())
             return lines if result.returncode == 0 else None
 
-        stock_lines = run_fixture(stock)
-        replacement_lines = run_fixture(replacement)
+        stock_lines = run_fixture(stock, "T58-METADATA|")
+        replacement_lines = run_fixture(replacement, "T58-METADATA|")
         if stock_lines is not None and replacement_lines is not None:
             f.equal("grind_metadata/stock_and_replacement_match",
                     replacement_lines, stock_lines)
             f.equal("grind_metadata/operation_count", len(replacement_lines), 2)
+        stock_function_lines = run_fixture(stock_function, "T60-METADATA|")
+        replacement_function_lines = run_fixture(replacement_function, "T60-METADATA|")
+        if stock_function_lines is not None and replacement_function_lines is not None:
+            f.equal("grind_metadata/function_stock_and_replacement_match",
+                    replacement_function_lines, stock_function_lines)
+            f.equal("grind_metadata/function_operation_count",
+                    len(replacement_function_lines), 1)
 
 
 def manual_override_tests(f: Failures) -> None:
@@ -628,6 +637,32 @@ def broader_overlay_tests(f: Failures) -> None:
             not any(P.lint_replacement({"lines": [entry["replacement"]]})
                     for entry in selected),
             "overlay replacement contains a forbidden executable token")
+
+    function_path = mathlib / "Mathlib" / "Logic" / "Function" / "Basic.lean"
+    function_source = function_path.read_bytes()
+    function_entries = [entry for entry in entries
+                        if entry["module"] == "Mathlib/Logic/Function/Basic.lean"]
+    f.equal("broader/function_entry_count", len(function_entries), 13)
+    f.check("broader/function_entry_hashes",
+            all(entry["moduleSourceSha256"] == B._sha256(function_source)
+                for entry in function_entries),
+            "a Function.Basic entry does not carry its exact source hash")
+    function_text = function_source.decode("utf-8")
+    function_rendered, function_used = B.apply_to_rendered(
+        "Mathlib/Logic/Function/Basic.lean", function_source, function_text,
+        [(len(function_text[:site.start].encode("utf-8")),
+          len(function_text[:site.end].encode("utf-8")))
+         for site in S.find_sites(function_text)],
+    )
+    f.equal("broader/function_all_entries_used", function_used,
+            [entry["occurrence"] for entry in function_entries])
+    f.equal("broader/function_comments",
+            function_rendered.count("-- Original broader simp-family call/declaration:"),
+            len(function_entries))
+    f.check("broader/function_replacements_linted",
+            not any(P.lint_replacement({"lines": [entry["replacement"]]})
+                    for entry in function_entries),
+            "Function.Basic replacement contains a forbidden executable token")
     try:
         B.apply_to_rendered("Mathlib/Logic/Basic.lean", source, source.decode("utf-8"),
                             [(selected[0]["startByte"], selected[0]["endByte"])])

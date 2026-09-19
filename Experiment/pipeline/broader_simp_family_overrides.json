@@ -150,6 +150,123 @@
       "source": "theorem Function.Injective.ite {α β : Sort*} {p : β → Prop} [DecidablePred p] {g : β → α}\n    (hg : g.Injective) {f : β → α} (hf : f.Injective) (h : ∀ x y, g x = f y → x = y) :\n    (fun x ↦ if p x then g x else f x).Injective :=\n  fun x y _ ↦ by rcases em (p x) with (hx | hx) <;> rcases em (p y) with (hy | hy) <;> grind",
       "replacement": "theorem Function.Injective.ite {α β : Sort*} {p : β → Prop} [DecidablePred p] {g : β → α}\n    (hg : g.Injective) {f : β → α} (hf : f.Injective) (h : ∀ x y, g x = f y → x = y) :\n    (fun x ↦ if p x then g x else f x).Injective := by\n  intro x y hxy\n  change (if p x then g x else f x) = (if p y then g y else f y) at hxy\n  by_cases hx : p x\n  · by_cases hy : p y\n    · rw [if_pos hx, if_pos hy] at hxy\n      exact hg hxy\n    · rw [if_pos hx, if_neg hy] at hxy\n      exact h x y hxy\n  · by_cases hy : p y\n    · rw [if_neg hx, if_pos hy] at hxy\n      exact (h y x hxy.symm).symm\n    · rw [if_neg hx, if_neg hy] at hxy\n      exact hf hxy",
       "moduleSourceSha256": "3273872fe0b76d4d4b60f55514e79330db78e9f7914c7183127317a08575447f"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "332be4ecba6c41f9",
+      "startByte": 3619,
+      "endByte": 3971,
+      "source": "lemma hfunext {α α' : Sort u} {β : α → Sort v} {β' : α' → Sort v} {f : ∀ a, β a} {f' : ∀ a, β' a}\n    (hα : α = α') (h : ∀ a a', a ≍ a' → f a ≍ f' a') : f ≍ f' := by\n  subst hα\n  have : ∀ a, f a ≍ f' a := fun a ↦ h a a (HEq.refl a)\n  have : β = β' := by funext a; exact type_eq_of_heq (this a)\n  subst this\n  grind",
+      "replacement": "lemma hfunext {α α' : Sort u} {β : α → Sort v} {β' : α' → Sort v} {f : ∀ a, β a} {f' : ∀ a, β' a}\n    (hα : α = α') (h : ∀ a a', a ≍ a' → f a ≍ f' a') : f ≍ f' := by\n  subst hα\n  have hpoint : ∀ a, f a ≍ f' a := fun a ↦ h a a (HEq.refl a)\n  have htype : β = β' := by funext a; exact type_eq_of_heq (hpoint a)\n  subst htype\n  exact heq_of_eq (funext fun a => eq_of_heq (hpoint a))",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "abbfba12af33c9bc",
+      "startByte": 8849,
+      "endByte": 9228,
+      "source": "lemma Injective.dite (p : α → Prop) [DecidablePred p]\n    {f : {a : α // p a} → β} {f' : {a : α // ¬ p a} → β}\n    (hf : Injective f) (hf' : Injective f')\n    (im_disj : ∀ {x x' : α} {hx : p x} {hx' : ¬ p x'}, f ⟨x, hx⟩ ≠ f' ⟨x', hx'⟩) :\n    Function.Injective (fun x ↦ if h : p x then f ⟨x, h⟩ else f' ⟨x, h⟩) := fun x₁ x₂ h => by\n  grind",
+      "replacement": "lemma Injective.dite (p : α → Prop) [DecidablePred p]\n    {f : {a : α // p a} → β} {f' : {a : α // ¬ p a} → β}\n    (hf : Injective f) (hf' : Injective f')\n    (im_disj : ∀ {x x' : α} {hx : p x} {hx' : ¬ p x'}, f ⟨x, hx⟩ ≠ f' ⟨x', hx'⟩) :\n    Function.Injective (fun x ↦ if h : p x then f ⟨x, h⟩ else f' ⟨x, h⟩) := by\n  intro x₁ x₂ h\n  change (if hx : p x₁ then f ⟨x₁, hx⟩ else f' ⟨x₁, hx⟩) =\n    (if hx : p x₂ then f ⟨x₂, hx⟩ else f' ⟨x₂, hx⟩) at h\n  by_cases hx₁ : p x₁\n  · by_cases hx₂ : p x₂\n    · rw [dif_pos hx₁, dif_pos hx₂] at h\n      exact congrArg Subtype.val (hf h)\n    · rw [dif_pos hx₁, dif_neg hx₂] at h\n      exact (im_disj h).elim\n  · by_cases hx₂ : p x₂\n    · rw [dif_neg hx₁, dif_pos hx₂] at h\n      exact (im_disj h.symm).elim\n    · rw [dif_neg hx₁, dif_neg hx₂] at h\n      exact congrArg Subtype.val (hf' h)",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "210fc4f8515e9a37",
+      "startByte": 11854,
+      "endByte": 12295,
+      "source": "theorem injective_comp_right_iff_surjective {γ : Type*} [Nontrivial γ] :\n    Injective (fun g : β → γ ↦ g ∘ f) ↔ Surjective f := by\n  refine ⟨not_imp_not.mp fun not_surj inj ↦ not_subsingleton γ ⟨fun c c' ↦ ?_⟩,\n    (·.injective_comp_right)⟩\n  have ⟨b₀, hb⟩ := not_forall.mp not_surj\n  classical have := inj (a₁ := fun _ ↦ c) (a₂ := (if · = b₀ then c' else c)) ?_\n  · simpa using congr_fun this b₀",
+      "replacement": "theorem injective_comp_right_iff_surjective {γ : Type*} [Nontrivial γ] :\n    Injective (fun g : β → γ ↦ g ∘ f) ↔ Surjective f := by\n  refine ⟨not_imp_not.mp fun not_surj inj ↦ not_subsingleton γ ⟨fun c c' ↦ ?_⟩,\n    (·.injective_comp_right)⟩\n  have ⟨b₀, hb⟩ := not_forall.mp not_surj\n  classical have hfun := inj (a₁ := fun _ ↦ c) (a₂ := (if · = b₀ then c' else c)) ?_\n  · have hc := congr_fun hfun b₀\n    rw [if_pos rfl] at hc\n    exact hc",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "d528932ce94a126b",
+      "startByte": 13293,
+      "endByte": 13736,
+      "source": "theorem Bijective.existsUnique_iff {f : α → β} (hf : Bijective f) {p : β → Prop} :\n    (∃! y, p y) ↔ ∃! x, p (f x) :=\n  ⟨fun ⟨y, hpy, hy⟩ ↦\n    let ⟨x, hx⟩ := hf.surjective y\n    ⟨x, by simpa [hx], fun z (hz : p (f z)) ↦ hf.injective <| hx.symm ▸ hy _ hz⟩,\n    fun ⟨x, hpx, hx⟩ ↦\n    ⟨f x, hpx, fun y hy ↦\n      let ⟨z, hz⟩ := hf.surjective y\n      hz ▸ congr_arg f (hx _ (by simpa [hz]))⟩⟩",
+      "replacement": "theorem Bijective.existsUnique_iff {f : α → β} (hf : Bijective f) {p : β → Prop} :\n    (∃! y, p y) ↔ ∃! x, p (f x) :=\n  ⟨fun ⟨y, hpy, hy⟩ ↦\n      let ⟨x, hx⟩ := hf.surjective y\n      ⟨x, by change p (f x); rw [hx]; exact hpy,\n        fun z (hz : p (f z)) ↦ hf.injective <| hx.symm ▸ hy _ hz⟩,\n    fun ⟨x, hpx, hx⟩ ↦\n    ⟨f x, hpx, fun y hy ↦\n      let ⟨z, hz⟩ := hf.surjective y\n      hz ▸ congr_arg f (hx _ (by change p (f z); rw [hz]; exact hy))⟩⟩",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "e615e037b9e63d90",
+      "startByte": 26343,
+      "endByte": 26469,
+      "source": "@[grind]\ndef update (f : ∀ a, β a) (a' : α) (v : β a') (a : α) : β a :=\n  if h : a = a' then Eq.ndrec v h.symm else f a",
+      "replacement": "def update (f : ∀ a, β a) (a' : α) (v : β a') (a : α) : β a :=\n  if h : a = a' then Eq.ndrec v h.symm else f a\nexplicit_grind_def update",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "8798157f679338fc",
+      "startByte": 31379,
+      "endByte": 31858,
+      "source": "lemma rec_update {ι κ : Sort*} {α : κ → Sort*} [DecidableEq ι] [DecidableEq κ]\n    {ctor : ι → κ} (_ : Function.Injective ctor)\n    (recursor : ((i : ι) → α (ctor i)) → ((i : κ) → α i))\n    (h : ∀ f i, recursor f (ctor i) = f i)\n    (h2 : ∀ f₁ f₂ k, (∀ i, ctor i ≠ k) → recursor f₁ k = recursor f₂ k)\n    (f : (i : ι) → α (ctor i)) (i : ι) (x : α (ctor i)) :\n    recursor (update f i x) = update (recursor f) (ctor i) x := by\n  grind",
+      "replacement": "lemma rec_update {ι κ : Sort*} {α : κ → Sort*} [DecidableEq ι] [DecidableEq κ]\n    {ctor : ι → κ} (hctor_inj : Function.Injective ctor)\n    (recursor : ((i : ι) → α (ctor i)) → ((i : κ) → α i))\n    (h : ∀ f i, recursor f (ctor i) = f i)\n    (h2 : ∀ f₁ f₂ k, (∀ i, ctor i ≠ k) → recursor f₁ k = recursor f₂ k)\n    (f : (i : ι) → α (ctor i)) (i : ι) (x : α (ctor i)) :\n    recursor (update f i x) = update (recursor f) (ctor i) x := by\n  funext k\n  by_cases hki : k = ctor i\n  · subst k\n    rw [h, update_self]\n    exact (update_self (ctor i) x (recursor f)).symm\n  · by_cases hk : ∃ j, ctor j = k\n    · obtain ⟨j, hj⟩ := hk\n      have hji : j ≠ i := by\n        intro hji\n        apply hki\n        rw [← hj, hji]\n      have hctor : ctor j ≠ ctor i := fun heq => hji (hctor_inj heq)\n      rw [← hj, h, update_of_ne hji, update_of_ne hctor, h]\n    · have hne : k ≠ ctor i := fun hkeq => hki hkeq\n      rw [update_of_ne hne]\n      exact h2 (update f i x) f k (fun j hjeq => hk ⟨j, hjeq⟩)",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "24db67c381b82c6b",
+      "startByte": 32258,
+      "endByte": 32493,
+      "source": "theorem apply_update {ι : Sort*} [DecidableEq ι] {α β : ι → Sort*} (f : ∀ i, α i → β i)\n    (g : ∀ i, α i) (i : ι) (v : α i) (j : ι) :\n    f j (update g i v j) = update (fun k ↦ f k (g k)) i (f i v) j := by\n  grind",
+      "replacement": "theorem apply_update {ι : Sort*} [DecidableEq ι] {α β : ι → Sort*} (f : ∀ i, α i → β i)\n    (g : ∀ i, α i) (i : ι) (v : α i) (j : ι) :\n    f j (update g i v j) = update (fun k ↦ f k (g k)) i (f i v) j := by\n  by_cases h : j = i\n  · subst j\n    rw [update_self, update_self]\n  · rw [update_of_ne h, update_of_ne h]",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "7ef3393e4f6afbc2",
+      "startByte": 32495,
+      "endByte": 32799,
+      "source": "theorem apply_update₂ {ι : Sort*} [DecidableEq ι] {α β γ : ι → Sort*} (f : ∀ i, α i → β i → γ i)\n    (g : ∀ i, α i) (h : ∀ i, β i) (i : ι) (v : α i) (w : β i) (j : ι) :\n    f j (update g i v j) (update h i w j) = update (fun k ↦ f k (g k) (h k)) i (f i v w) j := by\n  grind",
+      "replacement": "theorem apply_update₂ {ι : Sort*} [DecidableEq ι] {α β γ : ι → Sort*} (f : ∀ i, α i → β i → γ i)\n    (g : ∀ i, α i) (h : ∀ i, β i) (i : ι) (v : α i) (w : β i) (j : ι) :\n    f j (update g i v j) (update h i w j) = update (fun k ↦ f k (g k) (h k)) i (f i v w) j := by\n  by_cases hj : j = i\n  · subst j\n    rw [update_self, update_self, update_self]\n  · rw [update_of_ne hj, update_of_ne hj, update_of_ne hj]",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "3e8340010808c466",
+      "startByte": 32801,
+      "endByte": 32986,
+      "source": "theorem pred_update (P : ∀ ⦃a⦄, β a → Prop) (f : ∀ a, β a) (a' : α) (v : β a') (a : α) :\n    P (update f a' v a) ↔ a = a' ∧ P v ∨ a ≠ a' ∧ P (f a) := by\n  grind",
+      "replacement": "theorem pred_update (P : ∀ ⦃a⦄, β a → Prop) (f : ∀ a, β a) (a' : α) (v : β a') (a : α) :\n    P (update f a' v a) ↔ a = a' ∧ P v ∨ a ≠ a' ∧ P (f a) := by\n  by_cases h : a = a'\n  · subst a\n    rw [update_self]\n    constructor\n    · intro hp\n      exact Or.inl ⟨rfl, hp⟩\n    · rintro (⟨_, hp⟩ | ⟨hne, _⟩)\n      · exact hp\n      · exact (hne rfl).elim\n  · rw [update_of_ne h]\n    constructor\n    · intro hp\n      exact Or.inr ⟨h, hp⟩\n    · rintro (⟨heq, _⟩ | ⟨_, hp⟩)\n      · exact (h heq).elim\n      · exact hp",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "b73920b6d3d37669",
+      "startByte": 33177,
+      "endByte": 33377,
+      "source": "theorem update_comm {α} [DecidableEq α] {β : α → Sort*} {a b : α} (h : a ≠ b) (v : β a) (w : β b)\n    (f : ∀ a, β a) : update (update f a v) b w = update (update f b w) a v := by\n  grind",
+      "replacement": "theorem update_comm {α} [DecidableEq α] {β : α → Sort*} {a b : α} (h : a ≠ b) (v : β a) (w : β b)\n    (f : ∀ a, β a) : update (update f a v) b w = update (update f b w) a v := by\n  funext x\n  by_cases hxa : x = a\n  · subst x\n    rw [update_of_ne h, update_self, update_self]\n  · by_cases hxb : x = b\n    · subst x\n      rw [update_self, update_of_ne h.symm, update_self]\n    · rw [update_of_ne hxb, update_of_ne hxa, update_of_ne hxa, update_of_ne hxb]",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "b955f9c26cd62196",
+      "startByte": 33387,
+      "endByte": 33549,
+      "source": "theorem update_idem {α} [DecidableEq α] {β : α → Sort*} {a : α} (v w : β a) (f : ∀ a, β a) :\n    update (update f a v) a w = update f a w := by\n  grind",
+      "replacement": "theorem update_idem {α} [DecidableEq α] {β : α → Sort*} {a : α} (v w : β a) (f : ∀ a, β a) :\n    update (update f a v) a w = update f a w := by\n  funext x\n  by_cases hx : x = a\n  · subst x\n    rw [update_self, update_self]\n  · rw [update_of_ne hx, update_of_ne hx, update_of_ne hx]",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "056afc77dd9383f0",
+      "startByte": 33865,
+      "endByte": 34343,
+      "source": "theorem _root_.Pi.map_injective\n    {ι : Sort*} {α β : ι → Sort*} [∀ i, Nonempty (α i)] {f : ∀ i, α i → β i} :\n    Injective (Pi.map f) ↔ ∀ i, Injective (f i) where\n  mp h i x y hxy := by\n    classical\n    have : Inhabited (∀ i, α i) := ⟨fun _ => Classical.choice inferInstance⟩\n    replace h := @h (Function.update default i x) (Function.update default i y) ?_\n    · simpa using congrFun h i\n    rw [Pi.map_update, Pi.map_update, hxy]\n  mpr := .piMap",
+      "replacement": "theorem _root_.Pi.map_injective\n    {ι : Sort*} {α β : ι → Sort*} [∀ i, Nonempty (α i)] {f : ∀ i, α i → β i} :\n    Injective (Pi.map f) ↔ ∀ i, Injective (f i) where\n  mp h i x y hxy := by\n    classical\n    have : Inhabited (∀ i, α i) := ⟨fun _ => Classical.choice inferInstance⟩\n    replace h := @h (Function.update default i x) (Function.update default i y) ?_\n    · have hi := congrFun h i\n      rw [update_self, update_self] at hi\n      exact hi\n    rw [Pi.map_update, Pi.map_update, hxy]\n  mpr := .piMap",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
+    },
+    {
+      "module": "Mathlib/Logic/Function/Basic.lean",
+      "occurrence": "ade8e0c9b39f9340",
+      "startByte": 51578,
+      "endByte": 51822,
+      "source": "theorem Function.LeftInverse.cast_eq {γ : β → Sort v} {f : α → β} {g : β → α}\n    (h : Function.LeftInverse g f) (C : ∀ a : α, γ (f a)) (a : α) :\n    cast (congr_arg (fun a ↦ γ (f a)) (h a)) (C (g (f a))) = C a := by\n  grind",
+      "replacement": "theorem Function.LeftInverse.cast_eq {γ : β → Sort v} {f : α → β} {g : β → α}\n    (h : Function.LeftInverse g f) (C : ∀ a : α, γ (f a)) (a : α) :\n    cast (congr_arg (fun a ↦ γ (f a)) (h a)) (C (g (f a))) = C a := by\n  rw [cast_eq_iff_heq]\n  exact (eqRec_heq (congrArg f (h a)) (C (g (f a)))).symm.trans\n    (heq_of_eq (h.eq_rec_eq C a))",
+      "moduleSourceSha256": "edceb49f6bbaf313b6803a49b31d9d51aef09a85057b26d6ee3f147d281217fe"
     }
   ]
 }

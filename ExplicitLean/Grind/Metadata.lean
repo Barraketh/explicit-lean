@@ -38,8 +38,16 @@ private meta def addEqLhs (declName : Name) : TermElabM Unit := do
     Grind.grindExt.addEMatchTheorem declName xs.size [lhs.abstract xs]
       (.eqLhs false) (minIndexable := false) (cnstrs := [])
 
+private meta def addDef (declName : Name) : TermElabM Unit := do
+  let some eqns ← getEqnsFor? declName
+    | throwError "explicit_grind_def requires a definition with equations"
+  for eqn in eqns do
+    let thm ← mkEMatchEqTheorem eqn (normalizePattern := false)
+    Grind.grindExt.add (.ematch thm) .global
+
 syntax (name := explicitGrindEqLhs) "explicit_grind_eq_lhs " ident : command
 syntax (name := explicitGrindPattern) "explicit_grind_pattern " ident " => " term : command
+syntax (name := explicitGrindDef) "explicit_grind_def " ident : command
 
 @[command_elab explicitGrindEqLhs]
 meta def elabExplicitGrindEqLhs : CommandElab := fun stx =>
@@ -47,6 +55,14 @@ meta def elabExplicitGrindEqLhs : CommandElab := fun stx =>
   | `(explicit_grind_eq_lhs $thmName:ident) => liftTermElabM do
       let declName ← realizeGlobalConstNoOverloadWithInfo thmName
       addEqLhs declName
+  | _ => throwUnsupportedSyntax
+
+@[command_elab explicitGrindDef]
+meta def elabExplicitGrindDef : CommandElab := fun stx =>
+  match stx with
+  | `(explicit_grind_def $declName:ident) => liftTermElabM do
+      let declName ← realizeGlobalConstNoOverloadWithInfo declName
+      addDef declName
   | _ => throwUnsupportedSyntax
 
 @[command_elab explicitGrindPattern]
