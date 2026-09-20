@@ -35,3 +35,8 @@ supportInterpreter = true
 name = "simpEngineCommandAudit"
 root = "Experiment.SimpEngineCommandAudit"
 supportInterpreter = true
+
+[[lean_exe]]
+name = "sourceCommandExtractor"
+root = "Experiment.SourceCommandExtractor"
+supportInterpreter = true
