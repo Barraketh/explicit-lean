@@ -70,10 +70,6 @@ private partial def processCommands (commands : Array Syntax := #[]) :
     return commands
   processCommands commands
 
-private def normalizedImports (header : Lean.Elab.HeaderSyntax) : Array Lean.Import :=
-  (Lean.Elab.HeaderSyntax.imports header false).map fun imported =>
-    { module := imported.module }
-
 private unsafe def parseFileFully (path : System.FilePath) (source : String)
     (header : Lean.Elab.HeaderSyntax) (parserState : Parser.ModuleParserState)
     (headerMessages : MessageLog) : IO (Array Syntax × MessageLog) := do
@@ -99,7 +95,10 @@ private unsafe def parseFile (path : System.FilePath) (source : String) :
   let (header, parserState, headerMessages) ← Parser.parseHeader inputCtx
   if headerMessages.hasErrors then
     throw <| IO.Error.userError "Lean header parser reported an error"
-  let imports := normalizedImports header
+  -- Preserve every header modifier for the frontend environment.  The
+  -- database projects these imports to names later, but Lean's parser needs
+  -- `isMeta`, `importAll`, and `isExported` to match the source header.
+  let imports := Lean.Elab.HeaderSyntax.imports header false
   if parserState.pos.byteIdx >= inputCtx.endPos.byteIdx then
     return (#[], headerMessages, imports)
   Lean.enableInitializersExecution
