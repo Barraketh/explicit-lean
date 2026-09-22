@@ -87,7 +87,7 @@ def setup(root: Path, *, machine_type: str = "GP1-L", minimum_memory_gib: int = 
 
 class Provider:
     """Scaleway 2.61-shaped responses; never invokes the real CLI."""
-    def __init__(self, *, machine_type: str = "GP1-L", ram_gib: int = 128, arch: str = "x86_64",
+    def __init__(self, *, machine_type: str = "GP1-L", ram_gib: int = 128, arch: str = "x64",
                  volume_type: str = "l_ssd", volume_size_gb: int | None = 559,
                  volume_detail_size_gb: int | None = None,
                  volume_iops: int | None = None, volume_boot: bool = True,
@@ -336,7 +336,7 @@ def test_pop2_sbs_fallback_checks_type_ram_image_and_exact_boot_volume() -> None
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
             minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
-        blocked(lambda: ctl(root, path, Provider(machine_type=pop_type, ram_gib=128, arch="aarch64",
+        blocked(lambda: ctl(root, path, Provider(machine_type=pop_type, ram_gib=128, arch="arm64",
             volume_type="sbs_volume", volume_size_gb=None, volume_detail_size_gb=120,
             volume_iops=15000, volume_boot=False, image_type="instance_sbs"))
             .preflight(repo_root=repo, job_root=jobs))

@@ -29,7 +29,7 @@ private identity file, dedicated absolute `known_hosts_file`, and SSH source
 CIDR. Pin `machine.type`, `requirements.minimum_memory_gib`,
 `requirements.minimum_local_disk_gib`, and `requirements.root_volume`. Supported
 root formats are `local:<size>GB` and `sbs:<size>GB:<iops>`. The controller
-requires the type to report x86_64 architecture and at least the configured
+requires the type to report Scaleway's `x64` architecture value (x86_64) and at least the configured
 RAM. It requires the selected root volume to meet the configured minimum size
 and exactly match the configured size/type (and SBS IOPS). The minimum disk
 check converts the configured binary GiB minimum to bytes before comparing with

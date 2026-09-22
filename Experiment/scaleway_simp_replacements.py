@@ -455,8 +455,8 @@ class ScalewayPilot:
         selected_type = matching_types[0] if len(matching_types) == 1 else None
         if not isinstance(selected_type, dict) or selected_type.get("availability") != "available":
             raise PilotError("exact configured server type is unavailable or ambiguous in selected zone")
-        if selected_type.get("arch") != "x86_64":
-            raise PilotError("provider server type architecture is not x86_64")
+        if selected_type.get("arch") != "x64":
+            raise PilotError("provider server type architecture is not x64 (x86_64)")
         ram = selected_type.get("ram")
         if type(ram) is not int or ram < minimum_ram:
             raise PilotError("provider server type RAM is missing or below the configured minimum")

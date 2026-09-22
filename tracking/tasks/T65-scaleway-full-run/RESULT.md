@@ -60,7 +60,7 @@ the USD ceiling.
 The controller no longer assumes GP1-L or a 559 GB local disk. It reads the
 exact commercial type, minimum RAM, minimum root-disk capacity, and root-volume
 format from the authorized policy. Preflight requires provider-reported
-x86_64 architecture and RAM at or above the configured minimum; image
+x64 (x86_64) architecture and RAM at or above the configured minimum; image
 compatibility and the created server type must match the exact configured type.
 The supported root forms are `local:<size>GB` and `sbs:<size>GB:<iops>`. The
 attached root must have the exact configured type and decimal-byte size; the
@@ -70,7 +70,7 @@ the server attachment omits size. The block volume must have the matching
 `sbs_5k`/`sbs_15k` type, exact `size`, and `specs.perf_iops`; project and zone
 are checked when present. The image type must match its root kind
 (`instance_local` or `instance_sbs`). Type architecture and RAM come from the
-full `instance server-type list zone=...` response; the selected name and
+full `instance server-type list zone=...` response (`arch: x64`); the selected name and
 availability must match exactly. The ordinary boot-volume ID/flag is accepted
 as root evidence. For the observed Scaleway SBS response shape, the single
 attached volume at API slot `0` is accepted as the root when the boot reference
