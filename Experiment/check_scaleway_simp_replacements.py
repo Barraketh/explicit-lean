@@ -602,6 +602,73 @@ def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence()
         assert len(ssh_calls) == 1 and "NextElapseUSecMonotonic" in " ".join(ssh_calls[0])
 
 
+def test_failed_supervisor_bootstrap_state_can_resume_after_report_checkpoint() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
+        controller = ctl(root, path, provider)
+        controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        (root / "pilot_known_hosts").write_text(
+            "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+
+        def fail_during_bootstrap(*, job_root: Path, repo_root: Path) -> dict[str, Any]:
+            del job_root, repo_root
+            state = controller._load_state()
+            state.update({"phase": "bootstrap-started", "bootstrap_started_at": NOW.isoformat(),
+                          "guest_poweroff_watchdog_armed": True, "host_ttl_remaining_seconds": 6 * 3600})
+            controller._save(state)
+            raise pilot.PilotError("simulated bootstrap failure")
+
+        controller.run_workers = fail_during_bootstrap  # type: ignore[method-assign]
+        controller.cleanup = lambda *, confirm=False: (_ for _ in ()).throw(
+            pilot.PilotError("simulated cleanup refusal; retain host"))  # type: ignore[method-assign]
+        first = controller.supervise(job_root=jobs, repo_root=repo, output_dir=root / "first", poll_seconds=5)
+        assert not first["complete"] and first.get("cleanup_error")
+        state = controller._load_state()
+        assert state["phase"] == "bootstrap-started"
+        assert state["supervisor_report"] == first
+        legacy = dict(state, supervisor_report={"supervisor": "started"})
+        assert pilot.ScalewayPilot._bootstrap_resume_is_safe(legacy)
+        state["supervisor_report"] = {"supervisor": "started"}
+        controller._save(state)
+        del controller.run_workers
+
+        ssh_calls: list[tuple[str, ...]] = []
+
+        def ssh_fake(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            del timeout
+            ssh_calls.append(args)
+            command = " ".join(args)
+            if "NOT_LAUNCHED" in command:
+                return subprocess.CompletedProcess(args, 0, "NOT_LAUNCHED\n", "")
+            if "nohup bash -lc" in command:
+                return subprocess.CompletedProcess(args, 0, "RUNNING 4310\n", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        controller._ssh = ssh_fake  # type: ignore[method-assign]
+
+        def poll_finished() -> dict[str, Any]:
+            current = controller._load_state(); current["phase"] = "workers-finished"; controller._save(current)
+            return {"phase": "workers-finished", "jobs": []}
+
+        def collect(*, output_dir: Path) -> dict[str, Any]:
+            output_dir.mkdir(parents=True)
+            current = controller._load_state(); current["phase"] = "collected"; controller._save(current)
+            return current
+
+        def cleanup(*, confirm: bool = False) -> dict[str, Any]:
+            assert confirm
+            current = controller._load_state(); current["phase"] = "deleted"; controller._save(current)
+            return current
+
+        controller.poll_workers = poll_finished  # type: ignore[method-assign]
+        controller.collect_workers = collect  # type: ignore[method-assign]
+        controller.cleanup = cleanup  # type: ignore[method-assign]
+        resumed = controller.supervise(job_root=jobs, repo_root=repo, output_dir=root / "resumed", poll_seconds=5)
+        assert resumed["complete"] and resumed["cleanup"]["phase"] == "deleted"
+        assert any("NextElapseUSecMonotonic" in " ".join(args) for args in ssh_calls)
+        assert any("git clone --no-checkout" in " ".join(args) for args in ssh_calls)
+
+
 def test_ssh_accepts_plural_only_public_ip_and_rejects_state_or_record_mismatch() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp); repo, jobs, _, path = setup(root)
@@ -1158,6 +1225,7 @@ def main() -> None:
              test_job_root_rejects_overlap_missing_pending_modules_and_hardlinks,
              test_create_and_two_workers_launch_concurrently_with_remote_hash_check,
              test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence,
+             test_failed_supervisor_bootstrap_state_can_resume_after_report_checkpoint,
              test_ssh_accepts_plural_only_public_ip_and_rejects_state_or_record_mismatch,
              test_created_server_image_group_key_root_volume_and_ip_must_match_policy,
              test_dispatch_reconciliation_is_idempotent_at_all_crash_points,

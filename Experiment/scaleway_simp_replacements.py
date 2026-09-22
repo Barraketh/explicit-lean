@@ -969,12 +969,19 @@ class ScalewayPilot:
         if type(state.get("bootstrap_started_at")) is not str:
             return False
         report = state.get("supervisor_report")
-        if report is not None and (not isinstance(report, dict)
-                or set(report) - {"supervisor", "error", "elapsed_seconds", "complete"}
-                or report.get("supervisor") != "started" or report.get("complete") is not False
-                or type(report.get("error")) is not str
-                or type(report.get("elapsed_seconds")) is not int or report["elapsed_seconds"] < 0):
-            return False
+        if report is not None:
+            if report == {"supervisor": "started"}:
+                pass  # Legacy finally-checkpoint written before the report was finalized.
+            elif (not isinstance(report, dict)
+                  or set(report) - {"supervisor", "error", "elapsed_seconds", "complete",
+                                    "cleanup_error", "state_checkpoint_error"}
+                  or not {"supervisor", "error", "elapsed_seconds", "complete"} <= set(report)
+                  or report.get("supervisor") != "started" or report.get("complete") is not False
+                  or type(report.get("error")) is not str
+                  or type(report.get("elapsed_seconds")) is not int or report["elapsed_seconds"] < 0
+                  or any(type(report.get(key)) is not str for key in ("cleanup_error", "state_checkpoint_error")
+                         if key in report)):
+                return False
         jobs = state.get("jobs")
         if not isinstance(jobs, list) or len(jobs) != 2:
             return False
@@ -1537,13 +1544,6 @@ class ScalewayPilot:
                 except Exception:
                     cleanup_allowed = False
         finally:
-            if self.state_path.exists():
-                try:
-                    checkpoint = self._load_state()
-                    checkpoint["supervisor_report"] = final
-                    self._save(checkpoint)
-                except Exception as error:
-                    final["state_checkpoint_error"] = f"{type(error).__name__}: {error}"
             try:
                 if cleanup_allowed and self.state_path.exists() and self._load_state().get("phase") != "deleted":
                     final["cleanup"] = self.cleanup(confirm=True)
@@ -1553,6 +1553,14 @@ class ScalewayPilot:
         if failure is not None:
             final["error"] = failure
         final["complete"] = failure is None and "cleanup_error" not in final and final.get("cleanup", {}).get("phase") == "deleted"
+        if self.state_path.exists():
+            try:
+                checkpoint = self._load_state()
+                checkpoint["supervisor_report"] = final
+                self._save(checkpoint)
+            except Exception as error:
+                final["state_checkpoint_error"] = f"{type(error).__name__}: {error}"
+                final["complete"] = False
         return final
 
     def cleanup(self, *, confirm: bool = False) -> dict[str, Any]:
