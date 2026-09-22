@@ -5,7 +5,7 @@ running exactly two module workers concurrently. The checked-in policy remains
 disabled and contains no live account, network, key, job, or cost authorization
 values. The default policy keeps GP1-L with a 559 GB local root volume; an
 authorized policy can pin another exact commercial type and root volume, such
-as POP2-HM-16C-128G with `sbs:100GB:15000`.
+as POP2-HM-16C-128G with `sbs:120GB:15000`.
 
 ## Prepare and pin inputs
 
@@ -31,11 +31,21 @@ CIDR. Pin `machine.type`, `requirements.minimum_memory_gib`,
 root formats are `local:<size>GB` and `sbs:<size>GB:<iops>`. The controller
 requires the type to report x86_64 architecture and at least the configured
 RAM. It requires the selected root volume to meet the configured minimum size
-and exactly match the configured size/type (and SBS IOPS). For SBS, it retrieves
-volume details when the server attachment omits size, and recognizes API slot
-`0` as the root only when there is no usable boot-volume ID/flag; additional or
-unknown attached volumes are rejected. Price the full 12-hour host envelope, public IPv4, root storage, egress,
-and other charges. Set the all-in EUR estimate below the configured EUR cap,
+and exactly match the configured size/type (and SBS IOPS). The minimum disk
+check converts the configured binary GiB minimum to bytes before comparing with
+the root's decimal GB size. Type architecture and RAM come from the full
+`instance server-type list zone=...` response. For SBS, it retrieves details
+with positional `block volume get <id> zone=...` when the server attachment
+omits size, checks the provider's `sbs_5k`/`sbs_15k` type and
+`specs.perf_iops`, and checks project and zone when reported. The local-image
+type must match the root kind (`instance_local` or `instance_sbs`). It
+recognizes SBS API slot `0` as the root when the boot reference is absent;
+additional or unknown attached volumes are rejected. Preflight also lists SBS
+block volumes and rejects existing pilot-named/tagged orphans. SBS cleanup
+checks `block volume list` before and after server deletion, removes only the
+exact verified root volume if it remains, and requires it to disappear before
+recording cleanup complete. Price the full 12-hour host envelope, public IPv4,
+root storage, egress, and other charges. Set the all-in EUR estimate below the configured EUR cap,
 set `max_cost_usd` no higher than $20, and pin `eur_usd_rate`, `fx_checked_at`
 and `fx_source` to a current trustworthy conversion. `validate_policy` rejects
 an estimate above the EUR cap, a EUR cap that converts above the USD cap,

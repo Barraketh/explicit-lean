@@ -90,13 +90,16 @@ class Provider:
     def __init__(self, *, machine_type: str = "GP1-L", ram_gib: int = 128, arch: str = "x86_64",
                  volume_type: str = "l_ssd", volume_size_gb: int | None = 559,
                  volume_detail_size_gb: int | None = None,
-                 volume_iops: int | None = None, volume_boot: bool = True) -> None:
+                 volume_iops: int | None = None, volume_boot: bool = True,
+                 image_type: str = "instance_local") -> None:
         self.commands: list[tuple[str, ...]] = []
         self.server: dict[str, Any] | None = None
         self.ips: list[dict[str, Any]] = []
         self.volume_items: list[dict[str, Any]] = []
+        self.block_volumes: list[dict[str, Any]] = []
         self.fail_create_after_commit = False
         self.retain_ip_on_delete = False
+        self.retain_sbs_volume_after_server_delete = False
         self.bad_server_shape: str | None = None
         self.wrong_account = False
         self.machine_type = machine_type
@@ -107,6 +110,7 @@ class Provider:
         self.volume_detail_size_gb = volume_detail_size_gb if volume_detail_size_gb is not None else volume_size_gb
         self.volume_iops = volume_iops
         self.volume_boot = volume_boot
+        self.image_type = image_type
 
     def __call__(self, command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
         del timeout
@@ -135,16 +139,19 @@ class Provider:
             return self.json(args, [self.server] if self.server else [])
         if cmd[:3] == ("instance", "volume", "list"):
             return self.json(args, self.volume_items)
+        if cmd[:3] == ("block", "volume", "list"):
+            assert "project-id=" + PROJECT in cmd and "zone=nl-ams-1" in cmd
+            return self.json(args, self.block_volumes)
         if cmd[:3] == ("instance", "ip", "list"):
             return self.json(args, self.ips)
-        if cmd[:3] == ("instance", "server-type", "get"):
+        if cmd[:3] == ("instance", "server-type", "list"):
             assert "zone=nl-ams-1" in cmd
-            return self.json(args, {"servers": {self.machine_type: {"availability": "available", "arch": self.arch,
-                "ram": self.ram_gib * 1024**3}}})
+            return self.json(args, [{"name": self.machine_type, "availability": "available", "arch": self.arch,
+                "ram": self.ram_gib * 1024**3}])
         if cmd[:3] == ("marketplace", "local-image", "list"):
             assert f"image-id={IMAGE}" in cmd
             return self.json(args, [{"id": LOCAL_IMAGE, "arch": "x86_64", "zone": "nl-ams-1",
-                "label": "ubuntu_noble", "type": "instance_local", "compatible_commercial_types": [self.machine_type]}])
+                "label": "ubuntu_noble", "type": self.image_type, "compatible_commercial_types": [self.machine_type]}])
         if cmd[:3] == ("instance", "security-group", "get"):
             return self.json(args, {"id": SG, "project": PROJECT, "inbound_default_policy": "drop", "rules": None})
         if cmd[:3] == ("instance", "security-group", "list-rules"):
@@ -170,6 +177,11 @@ class Provider:
                     "volume_type": self.volume_type, "boot": self.volume_boot, "zone": "nl-ams-1"}}}
             self.ips = [dict(self.server["public_ip"], project=PROJECT, zone="nl-ams-1")]
             self.volume_items = [dict(self.server["volumes"]["0"], server={"id": SERVER}, tags=[])]
+            self.block_volumes = ([{"id": VOLUME_ID, "project_id": PROJECT, "zone": "nl-ams-1",
+                "type": "sbs_15k" if self.volume_iops == 15000 else "sbs_5k",
+                "size": self.volume_detail_size_gb * 1_000_000_000,
+                "specs": {"perf_iops": self.volume_iops}, "server": {"id": SERVER}, "tags": []}]
+                if self.volume_type == "sbs_volume" else [])
             assert f"image={LOCAL_IMAGE}" in cmd
             if self.fail_create_after_commit:
                 return subprocess.CompletedProcess(args, 124, "", "ambiguous timeout")
@@ -188,12 +200,38 @@ class Provider:
                 observed["volumes"]["0"]["size"] = 100
             elif observed is not None and self.bad_server_shape == "not_boot_volume":
                 observed["volumes"]["0"]["boot"] = False
+            elif observed is not None and self.bad_server_shape == "root_attachment_type":
+                observed["volumes"]["0"]["volume_type"] = "l_ssd"
+            elif observed is not None and self.bad_server_shape == "root_attachment_size":
+                observed["volumes"]["0"]["size"] = 99 * 1_000_000_000
             elif observed is not None and self.bad_server_shape == "wrong_boot_volume_id":
                 observed["boot_volume_id"] = IMAGE
             elif observed is not None and self.bad_server_shape == "dynamic_ip":
                 observed["public_ip"]["dynamic"] = True
                 observed["public_ips"][0]["dynamic"] = True
             return self.json(args, {"server": observed})
+        if cmd[:3] == ("block", "volume", "get"):
+            assert cmd[3] == VOLUME_ID and "zone=nl-ams-1" in cmd
+            volume = {"id": VOLUME_ID, "project_id": PROJECT, "zone": "nl-ams-1",
+                "size": self.volume_detail_size_gb * 1_000_000_000 if self.volume_detail_size_gb is not None else None,
+                "type": "sbs_15k" if self.volume_iops == 15000 else "sbs_5k",
+                "specs": {"perf_iops": self.volume_iops}}
+            if self.bad_server_shape == "root_volume_type":
+                volume["type"] = "sbs_5k"
+            elif self.bad_server_shape == "root_volume_size":
+                volume["size"] = 99 * 1_000_000_000
+            elif self.bad_server_shape == "root_volume_iops":
+                volume["specs"]["perf_iops"] = 5000
+            elif self.bad_server_shape == "root_volume_project":
+                volume["project_id"] = IMAGE
+            elif self.bad_server_shape == "root_volume_zone":
+                volume["zone"] = "fr-par-1"
+            return self.json(args, {"volume": volume})
+        if cmd[:3] == ("block", "volume", "delete"):
+            volume_id = cmd[3]
+            assert volume_id == VOLUME_ID and "zone=nl-ams-1" in cmd
+            self.block_volumes = [item for item in self.block_volumes if item.get("id") != volume_id]
+            return self.json(args, {})
         if cmd[:3] == ("instance", "volume", "get"):
             volume = {"id": VOLUME_ID,
                 "size": self.volume_detail_size_gb * 1_000_000_000 if self.volume_detail_size_gb is not None else None,
@@ -212,6 +250,8 @@ class Provider:
             if not self.retain_ip_on_delete:
                 self.ips = []
             self.volume_items = []
+            if not self.retain_sbs_volume_after_server_delete:
+                self.block_volumes = []
             return self.json(args, {})
         raise AssertionError(f"unhandled provider command {cmd}")
 
@@ -261,6 +301,10 @@ def test_machine_and_root_volume_policy_is_explicit_and_fail_closed() -> None:
         ):
             bad = deepcopy(base); mutate(bad)
             blocked(lambda: pilot.validate_policy(bad, NOW))
+        below_binary_minimum = deepcopy(base)
+        below_binary_minimum["requirements"].update(
+            minimum_local_disk_gib=100, root_volume="sbs:100GB:15000")
+        blocked(lambda: pilot.validate_policy(below_binary_minimum, NOW))
 
 
 def test_pop2_sbs_fallback_checks_type_ram_image_and_exact_boot_volume() -> None:
@@ -268,42 +312,61 @@ def test_pop2_sbs_fallback_checks_type_ram_image_and_exact_boot_volume() -> None
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         repo, jobs, _, path = setup(root, machine_type=pop_type, minimum_memory_gib=128,
-                                    minimum_local_disk_gib=100, root_volume="sbs:100GB:15000")
+                                    minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
         provider = Provider(machine_type=pop_type, ram_gib=128, volume_type="sbs_volume",
-                            volume_size_gb=None, volume_detail_size_gb=100,
-                            volume_iops=15000, volume_boot=False)
+                            volume_size_gb=None, volume_detail_size_gb=120,
+                            volume_iops=15000, volume_boot=False, image_type="instance_sbs")
         controller = ctl(root, path, provider)
         preflight = controller.preflight(repo_root=repo, job_root=jobs)
         assert preflight["machine"]["server_type"]["name"] == pop_type
         state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
         assert state["volume_ids"] == [VOLUME_ID]
         create = next(command for command in provider.commands if command[5:8] == ("instance", "server", "create"))
-        assert f"type={pop_type}" in create and "root-volume=sbs:100GB:15000" in create
-        assert any(command[5:8] == ("instance", "volume", "get") for command in provider.commands)
+        assert f"type={pop_type}" in create and "root-volume=sbs:120GB:15000" in create
+        assert any(command[5:8] == ("block", "volume", "get") for command in provider.commands)
 
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
-            minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:100GB:15000")
+            minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
         blocked(lambda: ctl(root, path, Provider(machine_type=pop_type, ram_gib=127,
-            volume_type="sbs_volume", volume_size_gb=None, volume_detail_size_gb=100,
-            volume_iops=15000, volume_boot=False))
+            volume_type="sbs_volume", volume_size_gb=None, volume_detail_size_gb=120,
+            volume_iops=15000, volume_boot=False, image_type="instance_sbs"))
             .preflight(repo_root=repo, job_root=jobs))
 
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
-            minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:100GB:15000")
+            minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
         blocked(lambda: ctl(root, path, Provider(machine_type=pop_type, ram_gib=128, arch="aarch64",
-            volume_type="sbs_volume", volume_size_gb=None, volume_detail_size_gb=100,
-            volume_iops=15000, volume_boot=False))
+            volume_type="sbs_volume", volume_size_gb=None, volume_detail_size_gb=120,
+            volume_iops=15000, volume_boot=False, image_type="instance_sbs"))
             .preflight(repo_root=repo, job_root=jobs))
 
-    for bad_volume in ("root_volume_type", "root_volume_size", "root_volume_iops"):
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
+            minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
+        blocked(lambda: ctl(root, path, Provider(machine_type=pop_type, ram_gib=128,
+            volume_type="sbs_volume", volume_size_gb=None, volume_detail_size_gb=120,
+            volume_iops=15000, volume_boot=False, image_type="instance_local"))
+            .preflight(repo_root=repo, job_root=jobs))
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
+            minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
+        provider = Provider(machine_type=pop_type, ram_gib=128, volume_type="sbs_volume",
+            volume_size_gb=None, volume_detail_size_gb=120, volume_iops=15000,
+            volume_boot=False, image_type="instance_sbs")
+        provider.block_volumes = [{"id": VOLUME_ID, "project_id": PROJECT, "zone": "nl-ams-1",
+            "name": "explicit-lean-simp-orphan", "tags": []}]
+        blocked(lambda: ctl(root, path, provider).preflight(repo_root=repo, job_root=jobs))
+
+    for bad_volume in ("root_attachment_type", "root_attachment_size", "root_volume_type", "root_volume_size", "root_volume_iops",
+                       "root_volume_project", "root_volume_zone"):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
-                minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:100GB:15000")
+                minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
             provider = Provider(machine_type=pop_type, ram_gib=128, volume_type="sbs_volume",
-                                volume_size_gb=None, volume_detail_size_gb=100,
-                                volume_iops=15000, volume_boot=False)
+                                volume_size_gb=None, volume_detail_size_gb=120,
+                                volume_iops=15000, volume_boot=False, image_type="instance_sbs")
             provider.bad_server_shape = bad_volume
             blocked(lambda: ctl(root, path, provider).create(repo_root=repo, job_root=jobs, confirm=True))
 
@@ -769,6 +832,46 @@ def test_status_marker_parsing_and_cleanup_idempotence() -> None:
         assert provider.server is None and provider.ips and controller._load_state()["phase"] != "deleted"
 
 
+def test_sbs_cleanup_lists_and_removes_exact_block_volume() -> None:
+    pop_type = "POP2-HM-16C-128G"
+
+    def make_sbs(root: Path) -> tuple[pilot.ScalewayPilot, Provider]:
+        repo, jobs, _, path = setup(root, machine_type=pop_type, minimum_memory_gib=128,
+            minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
+        provider = Provider(machine_type=pop_type, ram_gib=128, volume_type="sbs_volume",
+            volume_size_gb=None, volume_detail_size_gb=120, volume_iops=15000,
+            volume_boot=False, image_type="instance_sbs")
+        controller = ctl(root, path, provider)
+        controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        return controller, provider
+
+    with tempfile.TemporaryDirectory() as temp:
+        controller, provider = make_sbs(Path(temp))
+        provider.retain_sbs_volume_after_server_delete = True
+        deleted = controller.cleanup(confirm=True)
+        assert deleted["phase"] == "deleted" and provider.server is None and provider.block_volumes == []
+        assert deleted["attached_volume_ids"] == [VOLUME_ID]
+        assert sum(command[5:8] == ("block", "volume", "list") for command in provider.commands) >= 2
+        assert any(command[5:8] == ("block", "volume", "delete") and command[8] == VOLUME_ID
+                   for command in provider.commands)
+
+    with tempfile.TemporaryDirectory() as temp:
+        controller, provider = make_sbs(Path(temp))
+        provider.server = None; provider.volume_items = []; provider.ips = []
+        deleted = controller.cleanup(confirm=True)
+        assert deleted["phase"] == "deleted" and provider.block_volumes == []
+        assert any(command[5:8] == ("block", "volume", "delete") and command[8] == VOLUME_ID
+                   for command in provider.commands)
+
+    with tempfile.TemporaryDirectory() as temp:
+        controller, provider = make_sbs(Path(temp))
+        provider.server = None; provider.volume_items = []; provider.ips = []
+        provider.block_volumes.append({"id": IMAGE, "project_id": PROJECT, "zone": "nl-ams-1",
+            "name": "explicit-lean-simp-unexpected", "tags": ["explicit-lean-simp-pilot"]})
+        blocked(lambda: controller.cleanup(confirm=True))
+        assert any(item["id"] == IMAGE for item in provider.block_volumes)
+
+
 def test_ambiguous_create_never_retries_and_policy_default_is_disabled() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider(); provider.fail_create_after_commit = True
@@ -893,6 +996,7 @@ def main() -> None:
              test_collection_rejects_oversized_remote_archives_and_low_free_space_before_scp,
              test_collection_rejects_tar_expansion_bounds_before_extracting_any_entry,
              test_status_marker_parsing_and_cleanup_idempotence,
+             test_sbs_cleanup_lists_and_removes_exact_block_volume,
              test_ambiguous_create_never_retries_and_policy_default_is_disabled,
              test_supervisor_collects_and_cleans_even_when_dispatch_fails,
              test_supervisor_resumes_terminal_workers_before_cleanup_and_rejects_unknown_phase_safely]

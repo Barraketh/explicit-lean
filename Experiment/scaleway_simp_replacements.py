@@ -85,8 +85,12 @@ def _parse_root_volume(value: object) -> dict[str, Any]:
                 "provider_types": {"l_ssd", "local", "local_ssd"}}
     sbs = re.fullmatch(r"sbs:([1-9][0-9]*)GB:([1-9][0-9]*)", value)
     if sbs:
-        return {"kind": "sbs", "size_gib": int(sbs.group(1)), "iops": int(sbs.group(2)),
-                "provider_types": {"sbs_volume"}}
+        iops = int(sbs.group(2))
+        sbs_type = {5000: "sbs_5k", 15000: "sbs_15k"}.get(iops)
+        if sbs_type is None:
+            raise PilotError("SBS root volume IOPS must be 5000 or 15000")
+        return {"kind": "sbs", "size_gib": int(sbs.group(1)), "iops": iops,
+                "provider_types": {"sbs_volume"}, "block_types": {sbs_type}}
     raise PilotError("requirements.root_volume must be local:<size>GB or sbs:<size>GB:<iops>")
 
 
@@ -201,7 +205,9 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
         if type(requirements.get(key)) is not int or requirements[key] < 1:
             raise PilotError(f"requirements.{key} must be a positive integer")
     root_volume = _parse_root_volume(requirements.get("root_volume"))
-    if root_volume["size_gib"] < requirements["minimum_local_disk_gib"]:
+    root_size_bytes = root_volume["size_gib"] * 1_000_000_000
+    minimum_disk_bytes = requirements["minimum_local_disk_gib"] * 1024**3
+    if root_size_bytes < minimum_disk_bytes:
         raise PilotError("requirements.root_volume is smaller than minimum_local_disk_gib")
     machine = _dict(policy.get("machine"), "machine")
     profile = policy.get("cli_profile")
@@ -430,6 +436,11 @@ class ScalewayPilot:
                 raise PilotError("volume listing entry has unexpected shape")
             if NAME_PREFIX in str(volume.get("name", "")) or "explicit-lean-simp-pilot" in volume.get("tags", []):
                 matching.append(volume)
+        if checked["root_volume"]["kind"] == "sbs":
+            block_volumes = self._list_sbs_volumes(checked)
+            if any(NAME_PREFIX in str(volume.get("name", ""))
+                   or "explicit-lean-simp-pilot" in volume.get("tags", []) for volume in block_volumes):
+                raise PilotError("active orphan or duplicate pilot SBS storage exists")
         if tagged or matching:
             raise PilotError("active duplicate pilot server or attached storage exists")
         return servers, items
@@ -438,9 +449,10 @@ class ScalewayPilot:
         zone = checked["zone"]
         machine_type = checked["machine"]["type"]
         minimum_ram = checked["requirements"]["minimum_memory_gib"] * 1024**3
-        type_data = self._scw(["instance", "server-type", "get", f"zone={zone}"], policy=checked)
-        types = type_data.get("servers") if isinstance(type_data, dict) else None
-        selected_type = types.get(machine_type) if isinstance(types, dict) else None
+        type_data = self._scw(["instance", "server-type", "list", f"zone={zone}"], policy=checked)
+        type_items = _list_response(type_data, "servers", "server-type listing")
+        matching_types = [item for item in type_items if isinstance(item, dict) and item.get("name") == machine_type]
+        selected_type = matching_types[0] if len(matching_types) == 1 else None
         if not isinstance(selected_type, dict) or selected_type.get("availability") != "available":
             raise PilotError("exact configured server type is unavailable or ambiguous in selected zone")
         if selected_type.get("arch") != "x86_64":
@@ -451,12 +463,13 @@ class ScalewayPilot:
         image_data = self._scw(["marketplace", "local-image", "list", f"image-id={checked['machine']['image_id']}", f"zone={zone}"], policy=checked)
         images = _list_response(image_data, "images", "marketplace local-image listing") if isinstance(image_data, (list, dict)) else None
         image = checked["machine"]["image_id"]
+        expected_image_type = "instance_local" if checked["root_volume"]["kind"] == "local" else "instance_sbs"
         compatible = [x for x in images if isinstance(x, dict) and x.get("arch") == "x86_64"
                       and x.get("zone") == zone and x.get("label") == "ubuntu_noble"
-                      and x.get("type") == "instance_local" and isinstance(x.get("compatible_commercial_types"), list)
+                      and x.get("type") == expected_image_type and isinstance(x.get("compatible_commercial_types"), list)
                       and machine_type in x["compatible_commercial_types"]]
         if len(compatible) != 1:
-            raise PilotError("pinned Ubuntu x86_64 local image is not compatible with the configured type in the selected zone")
+            raise PilotError("pinned Ubuntu x86_64 image is not compatible with the configured type and root-volume kind")
         sg = self._scw(["instance", "security-group", "get", checked["machine"]["security_group_id"], f"zone={zone}"], policy=checked)
         group = sg.get("security_group", sg) if isinstance(sg, dict) else None
         if not isinstance(group, dict) or group.get("project") != checked["project_id"] and group.get("project_id") != checked["project_id"]:
@@ -516,6 +529,80 @@ class ScalewayPilot:
             raise PilotError("server public IP is not the requested flexible IP")
         return result
 
+    def _get_sbs_volume(self, volume_id: str, checked: Mapping[str, Any], *,
+                        expected_server_id: str | None = None,
+                        require_detached: bool = False) -> dict[str, Any]:
+        response = self._scw(["block", "volume", "get", volume_id, f"zone={checked['zone']}"], policy=checked)
+        details = response.get("volume", response) if isinstance(response, dict) else None
+        root = checked["root_volume"]
+        detail_id = details.get("id", details.get("volume_id")) if isinstance(details, dict) else None
+        if (not isinstance(details, dict) or detail_id != volume_id
+                or details.get("type") not in root["block_types"]
+                or type(details.get("size")) is not int
+                or details["size"] != root["size_gib"] * 1_000_000_000
+                or not isinstance(details.get("specs"), dict)
+                or details["specs"].get("perf_iops") != root["iops"]):
+            raise PilotError("SBS volume identity, type, exact size, or IOPS differs from policy")
+        project = details.get("project_id", details.get("project"))
+        if isinstance(project, dict):
+            project = project.get("id")
+        if project is not None and project != checked["project_id"]:
+            raise PilotError("SBS volume project differs from policy")
+        if details.get("zone") is not None and details["zone"] != checked["zone"]:
+            raise PilotError("SBS volume zone differs from policy")
+        server_ref = details.get("server_id", details.get("server"))
+        if isinstance(server_ref, dict):
+            server_ref = server_ref.get("id")
+        if server_ref is not None and (require_detached or server_ref != expected_server_id):
+            raise PilotError("SBS volume attachment identity is unexpected")
+        return details
+
+    def _list_sbs_volumes(self, checked: Mapping[str, Any]) -> list[dict[str, Any]]:
+        response = self._scw(["block", "volume", "list", f"project-id={checked['project_id']}",
+                              f"zone={checked['zone']}"], policy=checked)
+        items = _list_response(response, "volumes", "SBS volume listing")
+        volumes: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise PilotError("SBS volume listing entry has unexpected shape")
+            volume_id = item.get("id", item.get("volume_id"))
+            if type(volume_id) is not str or not ID_RE.fullmatch(volume_id):
+                raise PilotError("SBS volume listing entry lacks an exact ID")
+            project = item.get("project_id", item.get("project"))
+            if isinstance(project, dict):
+                project = project.get("id")
+            if project is not None and project != checked["project_id"]:
+                raise PilotError("SBS volume listing contains a volume from another project")
+            if item.get("zone") is not None and item["zone"] != checked["zone"]:
+                raise PilotError("SBS volume listing contains a volume from another zone")
+            if "tags" in item and not isinstance(item["tags"], list):
+                raise PilotError("SBS volume listing tags have unexpected shape")
+            volumes.append(item)
+        return volumes
+
+    def _cleanup_sbs_volumes(self, checked: Mapping[str, Any], known_ids: set[str], *,
+                             require_known_visible: bool = False) -> None:
+        if len(known_ids) > 1 or any(not ID_RE.fullmatch(volume_id) for volume_id in known_ids):
+            raise PilotError("saved SBS root-volume identity is malformed or ambiguous")
+        items = self._list_sbs_volumes(checked)
+        listed_ids = {item.get("id", item.get("volume_id")) for item in items}
+        tagged = [item for item in items if (NAME_PREFIX in str(item.get("name", ""))
+                  or "explicit-lean-simp-pilot" in item.get("tags", []))]
+        if any(item.get("id", item.get("volume_id")) not in known_ids for item in tagged):
+            raise PilotError("tagged SBS storage does not match the exact saved root volume")
+        if require_known_visible and (not known_ids or not known_ids.issubset(listed_ids)):
+            raise PilotError("exact SBS root volume is not visible in block volume listing; retry cleanup")
+        for volume_id in sorted(known_ids & listed_ids):
+            self._get_sbs_volume(volume_id, checked, require_detached=True)
+            self._scw(["block", "volume", "delete", volume_id, f"zone={checked['zone']}", "--wait"],
+                      policy=checked, timeout=300)
+        after = self._list_sbs_volumes(checked)
+        after_ids = {item.get("id", item.get("volume_id")) for item in after}
+        after_tagged = [item for item in after if (NAME_PREFIX in str(item.get("name", ""))
+                        or "explicit-lean-simp-pilot" in item.get("tags", []))]
+        if known_ids & after_ids or after_tagged:
+            raise PilotError("SBS root-volume deletion could not be confirmed")
+
     def _verify_server_identity(self, server: Mapping[str, Any], checked: Mapping[str, Any],
                                 state: Mapping[str, Any]) -> dict[str, Any]:
         tags = server.get("tags")
@@ -560,32 +647,51 @@ class ScalewayPilot:
             volume_slot = None
         else:
             raise PilotError("created server volume inventory is unavailable")
+        root_policy = checked["root_volume"]
         attached_root = volume_items[0]
         if not isinstance(attached_root, dict) or type(attached_root.get("id")) is not str or not ID_RE.fullmatch(attached_root["id"]):
             raise PilotError("created server root volume lacks an identified volume")
+        if root_policy["kind"] == "sbs" and attached_root.get("volume_type") not in root_policy["provider_types"]:
+            raise PilotError("created server root attachment is not an SBS volume")
+        if root_policy["kind"] == "sbs" and attached_root.get("size") is not None and (
+                type(attached_root["size"]) is not int
+                or attached_root["size"] != root_policy["size_gib"] * 1_000_000_000):
+            raise PilotError("created server SBS attachment reports a conflicting size")
         boot_ref = server.get("boot_volume_id", server.get("boot_volume"))
         if isinstance(boot_ref, dict):
             boot_ref = boot_ref.get("id")
         if type(boot_ref) is str:
             boot_matches = attached_root["id"] == boot_ref
         else:
+            # Scaleway's SBS server response omits boot_volume_id and reports
+            # boot=false even though the sole attachment at API slot 0 is root.
             boot_matches = attached_root.get("boot") is True or (
                 checked["root_volume"]["kind"] == "sbs" and volume_slot == "0"
                 and attached_root.get("boot") in (None, False))
         if not boot_matches:
             raise PilotError("created server root volume is not explicitly identified as the boot volume")
-        root_policy = checked["root_volume"]
         details = attached_root
-        if root_policy["kind"] == "sbs" or type(details.get("size")) is not int:
+        if root_policy["kind"] == "sbs":
+            details = self._get_sbs_volume(attached_root["id"], checked,
+                                           expected_server_id=state.get("server_id"))
+        elif type(details.get("size")) is not int:
             response = self._scw(["instance", "volume", "get", attached_root["id"], f"zone={checked['zone']}"] , policy=checked)
             details = response.get("volume", response) if isinstance(response, dict) else None
         expected_bytes = root_policy["size_gib"] * 1_000_000_000
-        if (not isinstance(details, dict) or details.get("id") != attached_root["id"]
-                or details.get("volume_type") not in root_policy["provider_types"]
+        detail_id = details.get("id", details.get("volume_id")) if isinstance(details, dict) else None
+        detail_type = details.get("volume_type") if isinstance(details, dict) else None
+        reported_project = details.get("project_id", details.get("project")) if isinstance(details, dict) else None
+        if isinstance(reported_project, dict):
+            reported_project = reported_project.get("id")
+        reported_zone = details.get("zone") if isinstance(details, dict) else None
+        if root_policy["kind"] == "local" and (not isinstance(details, dict) or detail_id != attached_root["id"]
+                or detail_type not in root_policy["provider_types"]
                 or type(details.get("size")) is not int or details["size"] != expected_bytes):
             raise PilotError("created server root volume type or exact size differs from policy")
-        if root_policy["kind"] == "sbs" and details.get("iops") != root_policy["iops"]:
-            raise PilotError("created server SBS root volume IOPS differs from policy")
+        if root_policy["kind"] == "local" and reported_project is not None and reported_project != checked["project_id"]:
+            raise PilotError("created server root volume project differs from policy")
+        if root_policy["kind"] == "local" and reported_zone is not None and reported_zone != checked["zone"]:
+            raise PilotError("created server root volume zone differs from policy")
         public_ip = self._one_public_ip(server)
         expected_ip_id = state.get("public_ip_id")
         if expected_ip_id is not None and expected_ip_id != public_ip["id"]:
@@ -1396,10 +1502,19 @@ class ScalewayPilot:
         if not any(isinstance(item, dict) and item.get("id") == state["server_id"] for item in visible_servers):
             volumes = self._scw(["instance", "volume", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
             items = _list_response(volumes, "volumes", "cleanup volume listing")
-            known_ids = set(state.get("attached_volume_ids", []))
-            if any(isinstance(item, dict) and (item.get("id") in known_ids
-                    or "explicit-lean-simp-pilot" in item.get("tags", [])) for item in items):
+            known_ids = set(state.get("attached_volume_ids", [])) | set(state.get("volume_ids", []))
+            cleanup_root = _parse_root_volume(_dict(policy.get("requirements"), "requirements").get("root_volume"))
+            lingering_instance_volumes = [item for item in items if isinstance(item, dict)
+                and ((item.get("id") in known_ids and cleanup_root["kind"] != "sbs")
+                     or ("explicit-lean-simp-pilot" in item.get("tags", [])
+                         and not (cleanup_root["kind"] == "sbs" and item.get("id") in known_ids)))]
+            if lingering_instance_volumes:
                 raise PilotError("server is absent but tagged or previously attached storage remains")
+            checked = {"project_id": project_id, "zone": zone,
+                       "root_volume": cleanup_root}
+            if checked["root_volume"]["kind"] == "sbs":
+                sbs_ids = set(state.get("attached_volume_ids", state.get("volume_ids", [])))
+                self._cleanup_sbs_volumes(checked, sbs_ids)
             ip_id = state.get("public_ip_id")
             if type(ip_id) is not str or not ID_RE.fullmatch(ip_id):
                 raise PilotError("server is absent and the exact flexible IP ID is unknown; refusing to claim cleanup")
@@ -1428,6 +1543,29 @@ class ScalewayPilot:
         state["public_ip_id"] = public_ip["id"]
         state["public_ip_address"] = public_ip["address"]
         attached: set[str] = set(state.get("attached_volume_ids", []))
+        attached.update(state.get("volume_ids", []))
+        root_policy = _parse_root_volume(_dict(policy.get("requirements"), "requirements").get("root_volume"))
+        cleanup_checked = {"project_id": project_id, "zone": zone, "root_volume": root_policy}
+        if root_policy["kind"] == "sbs":
+            server_volumes = server.get("volumes")
+            if not isinstance(server_volumes, dict) or set(server_volumes) != {"0"}:
+                raise PilotError("SBS cleanup requires exactly the known root attachment at slot 0")
+            root_attachment = server_volumes["0"]
+            if not isinstance(root_attachment, dict) or type(root_attachment.get("id")) is not str or not ID_RE.fullmatch(root_attachment["id"]):
+                raise PilotError("SBS cleanup cannot resolve the exact attached root volume ID")
+            if attached and attached != {root_attachment["id"]}:
+                raise PilotError("saved SBS root volume ID differs from the server attachment")
+            attached.add(root_attachment["id"])
+            listed_sbs = self._list_sbs_volumes(cleanup_checked)
+            if root_attachment["id"] not in {item.get("id", item.get("volume_id")) for item in listed_sbs}:
+                raise PilotError("exact SBS root volume is not visible in block volume listing; retry cleanup")
+            if any((NAME_PREFIX in str(item.get("name", ""))
+                    or "explicit-lean-simp-pilot" in item.get("tags", []))
+                   and item.get("id", item.get("volume_id")) != root_attachment["id"]
+                   for item in listed_sbs):
+                raise PilotError("unexpected tagged SBS storage exists; refusing broad cleanup")
+            self._get_sbs_volume(root_attachment["id"], cleanup_checked,
+                                 expected_server_id=state["server_id"])
         volumes_before = self._scw(["instance", "volume", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
         before_items = _list_response(volumes_before, "volumes", "pre-delete volume listing")
         for volume in before_items:
@@ -1452,6 +1590,8 @@ class ScalewayPilot:
         remaining_ids = {v.get("id") for v in items if isinstance(v, dict)}
         if any(isinstance(v, dict) and "explicit-lean-simp-pilot" in v.get("tags", []) for v in items) or attached.intersection(remaining_ids):
             raise PilotError("attached storage deletion could not be confirmed")
+        if root_policy["kind"] == "sbs":
+            self._cleanup_sbs_volumes(cleanup_checked, attached)
         ips_after = self._scw(["instance", "ip", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
         ip_items_after = _list_response(ips_after, "ips", "post-delete flexible-IP listing")
         if any(isinstance(item, dict) and item.get("id") == state["public_ip_id"] for item in ip_items_after):

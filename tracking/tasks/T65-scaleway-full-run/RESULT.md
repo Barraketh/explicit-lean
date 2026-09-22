@@ -63,24 +63,36 @@ format from the authorized policy. Preflight requires provider-reported
 x86_64 architecture and RAM at or above the configured minimum; image
 compatibility and the created server type must match the exact configured type.
 The supported root forms are `local:<size>GB` and `sbs:<size>GB:<iops>`. The
-attached root must have the exact configured type and decimal-byte size; SBS
-details are fetched from the volume endpoint when the server attachment omits
-size, and configured IOPS are checked. The ordinary boot-volume ID/flag is
-accepted as root evidence. For the observed Scaleway SBS response shape, the
-single attached volume at API slot `0` is accepted as the root when the boot
-reference is absent, even when its `boot` field is false; multiple or unknown
-attached volumes fail closed. Cleanup's ambiguous-create adoption also checks
-the exact policy type.
+attached root must have the exact configured type and decimal-byte size; the
+minimum-local-disk GiB bound is converted to binary bytes before comparison.
+SBS details are fetched with positional `block volume get <id> zone=...` when
+the server attachment omits size. The block volume must have the matching
+`sbs_5k`/`sbs_15k` type, exact `size`, and `specs.perf_iops`; project and zone
+are checked when present. The image type must match its root kind
+(`instance_local` or `instance_sbs`). Type architecture and RAM come from the
+full `instance server-type list zone=...` response; the selected name and
+availability must match exactly. The ordinary boot-volume ID/flag is accepted
+as root evidence. For the observed Scaleway SBS response shape, the single
+attached volume at API slot `0` is accepted as the root when the boot reference
+is absent, even when its `boot` field is false; multiple or unknown attached
+volumes fail closed. Preflight lists SBS block volumes and rejects existing
+pilot-named/tagged orphans. Cleanup lists block volumes before and after server
+deletion, removes only the exact verified SBS root ID if it remains, and will
+not record the terminal `deleted` phase while that ID or a tagged pilot volume
+remains. The server-absent recovery path applies the same exact-ID and
+project/zone checks. Cleanup's ambiguous-create adoption also checks the exact
+policy type.
 
 The default checked-in, launch-disabled policy remains GP1-L with its original
 559 GB local root. Mock-only regression coverage includes the POP2-HM-16C-128G
-fallback (128 GiB, x86_64, `sbs_volume`, 100 GB, 15,000 IOPS), insufficient RAM,
-wrong architecture, volume type/size/IOPS mismatch, invalid boot identity,
-and malformed policy bounds.
+fallback (128 GiB, x86_64, `sbs_volume`, 120 GB, 15,000 IOPS), insufficient RAM,
+wrong architecture/image type, decimal-GB versus binary-GiB minimum, volume
+type/size/IOPS/project/zone mismatch, invalid boot identity, orphan detection,
+and server-present/server-absent cleanup with leftover SBS storage.
 
 Verification for this addition:
 
-- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 15 mock checks passed.
+- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 16 mock checks passed.
 - `python3 -B Experiment/check_simp_replacement_jobs.py` — 10 tests passed.
 - `python3 -m py_compile Experiment/scaleway_simp_replacements.py Experiment/check_scaleway_simp_replacements.py` — passed.
 - `python3 -B Experiment/scaleway_simp_replacements.py plan` — authorized false, mutation count 0.
