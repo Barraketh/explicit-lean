@@ -177,6 +177,48 @@ volume and record that exact ID.
 
 No provider API calls or resource mutations were made during this re-review.
 
+## Final re-review of `7bdd576`
+
+Re-reviewed author change `7bdd576c3e8c5e9f0d91ec842aed93cd67f3726c`
+(cherry-picked in this review checkout as `4c5f82f`) and the accumulated
+controller changes. Verification:
+
+- `python3 -B Experiment/check_scaleway_simp_replacements.py` — all 13 mock
+  checks passed, including bounded cleanup after persistent ambiguous dispatch
+  and transient recovery that retains an already-live job and launches only
+  its untouched peer.
+- `python3 -B Experiment/check_simp_replacement_jobs.py` — all 10 preparation
+  checks passed.
+- `python3 -m py_compile Experiment/scaleway_simp_replacements.py
+  Experiment/check_scaleway_simp_replacements.py
+  Experiment/simp_replacement_jobs.py
+  Experiment/check_simp_replacement_jobs.py` — passed.
+- `git diff --check` — passed.
+- No live Scaleway calls or mutations were made.
+
+The two findings from the `97ef952` review are resolved. For persistent
+ambiguity, the supervisor retries reconciliation within the worker/host budget;
+on expiry it checkpoints the unresolved claim and possible result loss, then
+cleans up the exact owned resources. The new mock advances the supervisor to
+budget expiry and verifies that cleanup occurs. For PID reuse, both launch
+reconciliation and subsequent status polling require the saved random launch
+token to match `/proc/$pid/environ` and the process command line to identify the
+expected worker and job paths; `kill -0` alone is no longer sufficient. A
+mismatched or missing process identity remains ambiguous and is never
+relaunched. Tests also assert that the generated status and launch scripts
+carry the token checks. The procedure and result notes now describe this
+behavior and its hard-deadline cleanup tradeoff.
+
+The prior boot-volume identity, server/image/security-group/key/IP checks,
+two-shard full/disjoint baseline validation, bounded archive handling,
+bootstrap prerequisites/build, dispatch recovery, and exact cleanup checks
+remain present; the full mocked and preparation suites pass after this change.
+
+Final verdict: **PASS — no remaining launch-blocking finding identified in
+this review.** This is a static/mock review only; the reviewed command/API
+shapes and cloud cleanup behavior have not been exercised against live
+Scaleway resources.
+
 ## Final re-review of `97ef952`
 
 Re-reviewed the launch-claim and boot-volume fixes in
