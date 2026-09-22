@@ -1,4 +1,9 @@
-# Single Scaleway simp-replacement pilot
+# Historical T64 single-worker pilot
+
+This procedure was superseded by
+[`tracking/tasks/T65-scaleway-full-run/PROCEDURE.md`](../T65-scaleway-full-run/PROCEDURE.md),
+which defines the current two-worker full-run contract and policy schema. Do
+not follow this historical single-worker procedure for the current run.
 
 This procedure is for one GP1-L Linux x86_64 host and one module-list job. The
 checked-in policy is intentionally disabled. The previous AWS authorization is

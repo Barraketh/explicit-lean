@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mock-only checks for the Scaleway single-host pilot controller."""
+"""Mock-only contract tests for the two-worker Scaleway controller."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
-import tempfile
 import tarfile
+import tempfile
 from typing import Any, Sequence
 
 import scaleway_simp_replacements as pilot
@@ -20,388 +20,334 @@ NOW = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
 ORG = "11111111-1111-4111-8111-111111111111"
 PROJECT = "22222222-2222-4222-8222-222222222222"
 IMAGE = "33333333-3333-4333-8333-333333333333"
+LOCAL_IMAGE = "33333333-3333-4333-8333-333333333334"
 SG = "44444444-4444-4444-8444-444444444444"
 KEY = "55555555-5555-4555-8555-555555555555"
 SERVER = "66666666-6666-4666-8666-666666666666"
-OTHER_SERVER = "77777777-7777-4777-8777-777777777777"
 COMMIT = "a" * 40
 
 
-def require_blocked(function: Any, text: str) -> None:
+def blocked(function: Any) -> None:
     try:
         function()
     except pilot.PilotError:
         return
-    raise AssertionError(text)
-
-
-def make_policy(root: Path, job_dir: Path, identity: Path) -> dict[str, Any]:
-    manifest = job_dir / "modules.txt"
-    database = job_dir / "mathlib-db.sqlite3"
-    return {
-        "schema": 1,
-        "provider": "scaleway",
-        "launch_authorized": True,
-        "cli_profile": "test-dedicated-pilot",
-        "login_user": "ubuntu",
-        "authorization": {
-            "organization_id": ORG,
-            "project_id": PROJECT,
-            "zone": "nl-ams-1",
-            "not_after": "2026-09-22T18:00:00Z",
-            "max_instance_lifetime_seconds": 6 * 3600,
-            "max_worker_runtime_seconds": 5 * 3600,
-            "max_cost_eur": "12.00",
-            "estimated_all_in_cost_eur": "10.50",
-            "cost_checked_at": "2026-09-22T12:00:00Z",
-            "cost_source": "Scaleway official pricing snapshot",
-            "cost_components_eur": {"compute": "9.00", "public_ipv4": "1.00", "storage": "0.00", "egress_and_other": "0.50"},
-        },
-        "machine": {
-            "type": pilot.EXPECTED_TYPE,
-            "image_id": IMAGE,
-            "security_group_id": SG,
-            "ssh_key_id": KEY,
-            "ssh_identity_file": str(identity),
-            "ssh_source_cidr": "192.0.2.0/24",
-        },
-        "repository": {"url": pilot.CANONICAL_REPO, "commit": COMMIT},
-        "job": {
-            "directory": str(job_dir.resolve()),
-            "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
-            "database_sha256": pilot.sha256_file(database),
-        },
-        "requirements": {"single_host": True, "single_worker": True, "linux_x86_64": True,
-                          "minimum_memory_gib": 128, "minimum_local_disk_gib": 200,
-                          "root_volume": "local:559GB", "public_ipv4": True},
-    }
-
-
-class CliFixture:
-    def __init__(self) -> None:
-        self.commands: list[tuple[str, ...]] = []
-        self.server: dict[str, Any] | None = None
-        self.server_list: list[dict[str, Any]] = []
-        self.volume_list: list[dict[str, Any]] = []
-        self.bad_account = False
-        self.bad_sg = False
-        self.bad_image = False
-        self.fail_delete = False
-        self.fail_create_after_commit = False
-        self.wrong_server_id = False
-
-    def __call__(self, command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
-        del timeout
-        args = tuple(command)
-        self.commands.append(args)
-        if args and args[0] in {"scp", "ssh"}:
-            return subprocess.CompletedProcess(args, 0, "", "")
-        if args[:2] == ("scw", "version"):
-            return subprocess.CompletedProcess(args, 0, "Version 2.fixture\n", "")
-        if args[:4] == ("git", "rev-parse", "--verify", "HEAD"):
-            return subprocess.CompletedProcess(args, 0, COMMIT + "\n", "")
-        if args[:2] == ("git", "status"):
-            return subprocess.CompletedProcess(args, 0, "", "")
-        if args[:2] == ("git", "ls-remote"):
-            return subprocess.CompletedProcess(args, 0, f"{COMMIT}\trefs/heads/main\n", "")
-        if args[:3] == ("scw", "--output", "json"):
-            cmd = args[5:]
-            if cmd[:3] == ("account", "project", "list"):
-                project = {"id": PROJECT, "organization_id": "99999999-9999-4999-8999-999999999999" if self.bad_account else ORG}
-                return self.json(args, {"projects": [project]})
-            if cmd[:3] == ("instance", "server", "list"):
-                servers = list(self.server_list)
-                if self.server is not None and all(item.get("id") != self.server.get("id") for item in servers):
-                    servers.append(self.server)
-                return self.json(args, {"servers": servers})
-            if cmd[:3] == ("instance", "volume", "list"):
-                return self.json(args, {"volumes": self.volume_list})
-            if cmd[:3] == ("instance", "server-type", "list"):
-                return self.json(args, {"servers": [{"name": pilot.EXPECTED_TYPE, "ram": 128 * 1024**3, "ncpus": 32}]})
-            if cmd[:3] == ("instance", "image", "list"):
-                arch = "arm64" if self.bad_image else "x86_64"
-                return self.json(args, {"images": [{"id": IMAGE, "arch": arch, "name": "ubuntu-jammy"}]})
-            if cmd[:3] == ("instance", "security-group", "get"):
-                ingress = "0.0.0.0/0" if self.bad_sg else "192.0.2.0/24"
-                group = {"id": SG, "project_id": PROJECT, "inbound_default_policy": "drop", "rules": [
-                    {"direction": "inbound", "protocol": "TCP", "dest_port_from": 22, "dest_port_to": 22, "ip_range": ingress}]}
-                return self.json(args, {"security_group": group})
-            if cmd[:3] == ("scw", "iam", "ssh-key"):
-                raise AssertionError("bad command nesting")
-            if cmd[:3] == ("iam", "ssh-key", "get"):
-                return self.json(args, {"ssh_key": {"id": KEY, "project_id": PROJECT, "name": "pilot", "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE7fixture"}})
-            if cmd[:3] == ("instance", "server", "create"):
-                for arg in cmd:
-                    if arg.startswith("cloud-init=@"):
-                        cloud = Path(arg.removeprefix("cloud-init=@")).read_text()
-                        assert "ssh_authorized_keys" in cloud
-                        assert "OnCalendar=" in cloud and "Persistent=true" in cloud and "systemctl, enable, --now" in cloud
-                tags = [arg.split("=", 1)[1] for arg in cmd if arg.startswith("tags.")]
-                self.server = {"id": SERVER, "name": next(arg.split("=", 1)[1] for arg in cmd if arg.startswith("name=")),
-                               "project_id": PROJECT, "zone": "nl-ams-1", "commercial_type": pilot.EXPECTED_TYPE, "tags": tags,
-                               "public_ip": {"address": "198.51.100.4"}}
-                if self.fail_create_after_commit:
-                    return subprocess.CompletedProcess(args, 124, "", "simulated client timeout after provider commit")
-                return self.json(args, {"server": self.server})
-            if cmd[:3] == ("instance", "server", "get"):
-                observed = ({**self.server, "id": OTHER_SERVER} if self.server is not None and self.wrong_server_id else self.server)
-                return self.json(args, {"server": observed})
-            if cmd[:3] == ("instance", "server", "delete"):
-                if self.fail_delete:
-                    return subprocess.CompletedProcess(args, 1, "", "failure")
-                self.server = None
-                return self.json(args, {})
-        raise AssertionError(f"unexpected command: {args}")
-
-    @staticmethod
-    def json(args: Sequence[str], payload: Any) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+    raise AssertionError("expected fail-closed PilotError")
 
 
 def setup(root: Path) -> tuple[Path, Path, Path, Path]:
     repo = root / "repo"; repo.mkdir()
-    job = root / "job"; job.mkdir()
-    (job / "modules.txt").write_text("Mathlib.Algebra.Group.Basic\n", encoding="utf-8")
-    (job / "mathlib-db.sqlite3").write_bytes(b"sqlite-fixture")
-    identity = root / "pilot_key"; identity.write_text("fake private key fixture", encoding="utf-8")
-    identity.chmod(0o600)
-    policy_path = root / "policy.json"
-    policy_path.write_text(json.dumps(make_policy(root, job, identity)), encoding="utf-8")
-    return repo, job, identity, policy_path
+    job_root = root / "jobs"; job_root.mkdir()
+    jobs = []
+    for index, module in enumerate(("Mathlib.Algebra.Group.Basic", "Mathlib.Data.Bool.Basic")):
+        job = job_root / f"job-{index:03d}"; job.mkdir()
+        manifest = job / "modules.txt"; database = job / "mathlib-db.sqlite3"
+        manifest.write_text(module + "\n", encoding="utf-8")
+        database.write_bytes(f"sqlite-fixture-{index}".encode())
+        jobs.append({"id": f"job-{index:03d}", "directory": str(job.resolve()),
+                     "manifest_sha256": pilot.sha256_file(manifest),
+                     "database_sha256": pilot.sha256_file(database)})
+    identity = root / "pilot_key"; identity.write_text("mock private key", encoding="utf-8"); identity.chmod(0o600)
+    known_hosts = root / "pilot_known_hosts"; known_hosts.write_text("", encoding="utf-8")
+    policy = {
+        "schema": 1, "provider": "scaleway", "launch_authorized": True,
+        "cli_profile": "test-dedicated-pilot", "login_user": "ubuntu",
+        "authorization": {"organization_id": ORG, "project_id": PROJECT, "zone": "nl-ams-1",
+            "not_after": "2026-09-22T18:00:00Z", "max_instance_lifetime_seconds": 6 * 3600,
+            "max_worker_runtime_seconds": 5 * 3600, "max_cost_eur": "16.00",
+            "estimated_all_in_cost_eur": "14.00", "cost_checked_at": "2026-09-22T12:00:00Z",
+            "max_cost_usd": "20.00", "eur_usd_rate": "1.1463",
+            "fx_checked_at": "2026-09-22T12:00:00Z", "fx_source": "ECB reference rate",
+            "cost_source": "mock official pricing snapshot",
+            "cost_components_eur": {"compute": "12.00", "public_ipv4": "1.00", "storage": "0.50", "egress_and_other": "0.50"}},
+        "machine": {"type": "GP1-L", "image_id": IMAGE, "security_group_id": SG,
+            "ssh_key_id": KEY, "ssh_identity_file": str(identity), "known_hosts_file": str(known_hosts),
+            "ssh_source_cidr": "192.0.2.0/24"},
+        "repository": {"url": pilot.CANONICAL_REPO, "commit": COMMIT}, "jobs": jobs,
+        "requirements": {"single_host": True, "worker_count": 2, "linux_x86_64": True,
+            "minimum_memory_gib": 128, "minimum_local_disk_gib": 200,
+            "root_volume": "local:559GB", "public_ipv4": True},
+    }
+    policy_path = root / "policy.json"; policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    return repo, job_root, identity, policy_path
 
 
-def controller(root: Path, policy: Path, fixture: CliFixture, now: datetime = NOW) -> pilot.ScalewayPilot:
-    return pilot.ScalewayPilot(policy_path=policy, state_path=root / "state.json", runner=fixture,
+class Provider:
+    """Scaleway 2.61-shaped responses; never invokes the real CLI."""
+    def __init__(self) -> None:
+        self.commands: list[tuple[str, ...]] = []
+        self.server: dict[str, Any] | None = None
+        self.fail_create_after_commit = False
+        self.wrong_account = False
+
+    def __call__(self, command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
+        del timeout
+        args = tuple(command); self.commands.append(args)
+        if args[:2] == ("git", "rev-parse"):
+            return self.done(args, COMMIT + "\n")
+        if args[:2] == ("git", "status"):
+            return self.done(args)
+        if args[:2] == ("git", "ls-remote"):
+            return self.done(args, f"{COMMIT}\trefs/heads/main\n")
+        if args[:2] == ("scw", "version"):
+            return self.done(args, "Version 2.61.0\n")
+        if args and args[0] == "ssh-keygen":
+            known = Path(args[-1]).read_text()
+            ok = len(args) > 2 and args[2] in known
+            return subprocess.CompletedProcess(args, 0 if ok else 1, args[2] + "\n" if ok else "", "")
+        if args and args[0] in {"ssh", "scp"}:
+            return self.done(args)
+        if args[:3] != ("scw", "--output", "json"):
+            raise AssertionError(f"unexpected command {args}")
+        cmd = args[5:]
+        if cmd[:3] == ("account", "project", "list"):
+            org = "99999999-9999-4999-8999-999999999999" if self.wrong_account else ORG
+            return self.json(args, [{"id": PROJECT, "organization_id": org}])
+        if cmd[:3] == ("instance", "server", "list"):
+            return self.json(args, [self.server] if self.server else [])
+        if cmd[:3] == ("instance", "volume", "list"):
+            return self.json(args, [])
+        if cmd[:3] == ("instance", "server-type", "get"):
+            assert "zone=nl-ams-1" in cmd
+            return self.json(args, {"servers": {"GP1-L": {"availability": "available"}}})
+        if cmd[:3] == ("marketplace", "local-image", "list"):
+            assert f"image-id={IMAGE}" in cmd
+            return self.json(args, [{"id": LOCAL_IMAGE, "arch": "x86_64", "zone": "nl-ams-1",
+                "label": "ubuntu_noble", "type": "instance_local", "compatible_commercial_types": ["GP1-L"]}])
+        if cmd[:3] == ("instance", "security-group", "get"):
+            return self.json(args, {"id": SG, "project": PROJECT, "inbound_default_policy": "drop", "rules": None})
+        if cmd[:3] == ("instance", "security-group", "list-rules"):
+            return self.json(args, [{"direction": "inbound", "protocol": "TCP", "action": "accept",
+                "dest_port_from": 22, "dest_port_to": None, "ip_range": "192.0.2.0/24"}])
+        if cmd[:3] == ("iam", "ssh-key", "get"):
+            return self.json(args, {"id": KEY, "project_id": PROJECT, "name": "mock",
+                "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE7fixture"})
+        if cmd[:3] == ("instance", "server", "create"):
+            cloud = next(arg.split("=", 1)[1].removeprefix("@") for arg in cmd if arg.startswith("cloud-init=@"))
+            assert "OnCalendar=" in Path(cloud).read_text()
+            assert "tags.1=two-workers" in cmd
+            self.server = {"id": SERVER, "name": next(x.split("=", 1)[1] for x in cmd if x.startswith("name=")),
+                "project_id": PROJECT, "zone": "nl-ams-1", "commercial_type": "GP1-L",
+                "tags": ["explicit-lean-simp-pilot", "two-workers"],
+                "public_ip": {"address": "198.51.100.4"}}
+            assert f"image={LOCAL_IMAGE}" in cmd
+            if self.fail_create_after_commit:
+                return subprocess.CompletedProcess(args, 124, "", "ambiguous timeout")
+            return self.json(args, {"server": self.server})
+        if cmd[:3] == ("instance", "server", "get"):
+            return self.json(args, {"server": self.server})
+        if cmd[:3] == ("instance", "server", "delete"):
+            self.server = None
+            return self.json(args, {})
+        raise AssertionError(f"unhandled provider command {cmd}")
+
+    @staticmethod
+    def done(args: Sequence[str], stdout: str = "") -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    @staticmethod
+    def json(args: Sequence[str], data: Any) -> subprocess.CompletedProcess[str]:
+        return Provider.done(args, json.dumps(data))
+
+
+def ctl(root: Path, policy: Path, provider: Provider, now: datetime = NOW) -> pilot.ScalewayPilot:
+    return pilot.ScalewayPilot(policy_path=policy, state_path=root / "state.json", runner=provider,
                                now=lambda: now)
 
 
-def test_inactive_default_plan_and_auth_profile_guards() -> None:
-    policy = pilot._read_json(pilot.POLICY_PATH, "default policy")
-    assert policy["launch_authorized"] is False
-    assert controller(Path("."), pilot.POLICY_PATH, CliFixture()).plan()["mutation_count"] == 0
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory); repo, job, identity, _ = setup(root)
-        complete = make_policy(root, job, identity)
-        for profile in ("default", "explicit-lean-cloud", ""):
-            changed = deepcopy(complete); changed["cli_profile"] = profile
-            require_blocked(lambda changed=changed: pilot.validate_policy(changed, NOW), "unsafe CLI profile accepted")
+def test_policy_cost_deadline_worker_count_and_job_hashes_fail_closed() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); _, jobs, _, path = setup(root)
+        policy = json.loads(path.read_text())
         for change in (
-            lambda p: p["authorization"].update(not_after="2026-09-22T11:59:00Z"),
-            lambda p: p["authorization"].update(cost_checked_at="2026-09-20T12:00:00Z"),
-            lambda p: p["authorization"].update(estimated_all_in_cost_eur="12.01"),
+            lambda p: p.update(requirements={**p["requirements"], "worker_count": 1}),
+            lambda p: p.update(jobs=p["jobs"][:1]),
             lambda p: p["authorization"].update(max_instance_lifetime_seconds=13 * 3600),
-            lambda p: p["requirements"].update(single_worker=False),
+            lambda p: p["authorization"].update(estimated_all_in_cost_eur="16.01"),
+            lambda p: p["authorization"].update(max_cost_eur="17.50"),
+            lambda p: p["authorization"].update(max_cost_usd="20.01"),
+            lambda p: p["authorization"].update(fx_checked_at="2026-09-20T12:00:00Z"),
         ):
-            changed = deepcopy(complete); change(changed)
-            require_blocked(lambda changed=changed: pilot.validate_policy(changed, NOW), "invalid authorization envelope accepted")
+            bad = deepcopy(policy); change(bad)
+            blocked(lambda: pilot.validate_policy(bad, NOW))
+        (jobs / "job-001" / "modules.txt").write_text("Mathlib.Other\n")
+        blocked(lambda: pilot.validate_job_root(jobs, policy["jobs"]))
 
 
-def test_preflight_is_read_only_and_checks_exact_identity_shape_network_and_job() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory); repo, job, _, policy_path = setup(root)
-        fixture = CliFixture(); ctl = controller(root, policy_path, fixture)
-        result = ctl.preflight(repo_root=repo, job_dir=job)
-        assert result["read_only"] and result["identity"]["project_id"] == PROJECT
-        assert result["job"]["module_count"] == 1
-        assert not any("create" in command or "delete" in command for command in fixture.commands)
-        for mutation in ("bad_account", "bad_image", "bad_sg"):
-            bad = CliFixture(); setattr(bad, mutation, True)
-            require_blocked(lambda bad=bad: controller(root, policy_path, bad).preflight(repo_root=repo, job_dir=job), f"{mutation} passed preflight")
-            assert not any("server" in command and "create" in command for command in bad.commands)
-        altered = job / "modules.txt"; altered.write_text("Mathlib.Other.Module\n")
-        require_blocked(lambda: controller(root, policy_path, CliFixture()).preflight(repo_root=repo, job_dir=job), "changed manifest accepted")
+def test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
+        result = ctl(root, path, provider).preflight(repo_root=repo, job_root=jobs)
+        assert result["read_only"] and result["worker_count"] == 2 and len(result["jobs"]) == 2
+        assert result["machine"]["local_image_id"] == LOCAL_IMAGE
+        assert any(command[5:8] == ("marketplace", "local-image", "list") for command in provider.commands)
+        assert not any("create" in command or "delete" in command for command in provider.commands)
+        provider.wrong_account = True
+        blocked(lambda: ctl(root, path, provider).preflight(repo_root=repo, job_root=jobs))
 
 
-def test_unpublished_dirty_checkout_and_duplicate_block_before_creation() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory); repo, job, _, policy_path = setup(root)
-        for kind in ("dirty", "unpublished", "duplicate"):
-            fixture = CliFixture()
-            if kind == "duplicate": fixture.server_list = [{"id": SERVER, "name": pilot.NAME_PREFIX + "already", "tags": []}]
-            if kind == "dirty":
-                original = fixture
-                def dirty_runner(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
-                    if tuple(command[:2]) == ("git", "status"):
-                        return subprocess.CompletedProcess(command, 0, " M changed\n", "")
-                    return original(command, timeout)
-                fixture_call = dirty_runner
-            elif kind == "unpublished":
-                original = fixture
-                def unpublished_runner(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
-                    if tuple(command[:2]) == ("git", "ls-remote"):
-                        return subprocess.CompletedProcess(command, 0, "", "")
-                    return original(command, timeout)
-                fixture_call = unpublished_runner
-            else: fixture_call = fixture
-            ctl = pilot.ScalewayPilot(policy_path=policy_path, state_path=root / (kind + ".json"), runner=fixture_call, now=lambda: NOW)
-            require_blocked(lambda ctl=ctl: ctl.create(repo_root=repo, job_dir=job, confirm=True), f"{kind} checkout/resource gate passed")
-            assert not any("create" in command for command in fixture.commands)
-
-
-def test_explicit_create_then_readonly_status_and_expired_cleanup() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory); repo, job, _, policy_path = setup(root); fixture = CliFixture()
-        ctl = controller(root, policy_path, fixture)
-        require_blocked(lambda: ctl.create(repo_root=repo, job_dir=job), "create ran without explicit confirmation")
-        created = ctl.create(repo_root=repo, job_dir=job, confirm=True)
-        assert created["server_id"] == SERVER and created["phase"] == "created"
-        mutations = [c for c in fixture.commands if any(token in c for token in ("create", "delete"))]
-        assert len(mutations) == 1
-        snapshot = json.loads((root / "state.json").read_text())
-        fixture.server = {**fixture.server, "project_id": PROJECT}
-        status = ctl.status()
-        assert status["read_only"] and json.loads((root / "state.json").read_text()) == snapshot
-        # Cleanup remains available after authorization expiry so TTL failures do not strand storage.
-        later = NOW + timedelta(hours=7)
-        cleanup_ctl = controller(root, policy_path, fixture, now=later)
-        require_blocked(lambda: cleanup_ctl.cleanup(), "delete ran without confirmation")
-        deleted = cleanup_ctl.cleanup(confirm=True)
-        assert deleted["phase"] == "deleted" and fixture.server is None
-
-
-def test_ambiguous_create_retains_recoverable_state_and_cleanup_adopts_exact_server() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory); repo, job, _, policy_path = setup(root); fixture = CliFixture()
-        fixture.fail_create_after_commit = True
-        ctl = controller(root, policy_path, fixture)
-        require_blocked(lambda: ctl.create(repo_root=repo, job_dir=job, confirm=True),
-                        "ambiguous create outcome reported as successful")
-        pending = json.loads((root / "state.json").read_text())
-        assert pending["phase"] == "create-requested" and pending["server_id"] is None
-        assert fixture.server is not None
-        status = ctl.status()
-        assert status["read_only"] and len(status["pending_create_matches"]) == 1
-        fixture.fail_create_after_commit = False
-        deleted = ctl.cleanup(confirm=True)
-        assert deleted["phase"] == "deleted" and deleted["server_id"] == SERVER and fixture.server is None
-        assert sum("server" in command and "create" in command for command in fixture.commands) == 1
-
-
-def test_delete_failure_and_policy_mutation_fail_closed() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory); repo, job, _, policy_path = setup(root); fixture = CliFixture(); ctl = controller(root, policy_path, fixture)
-        ctl.create(repo_root=repo, job_dir=job, confirm=True)
-        fixture.fail_delete = True
-        require_blocked(lambda: ctl.cleanup(confirm=True), "failed delete reported success")
-        fixture.fail_delete = False
-        policy = json.loads(policy_path.read_text()); policy["authorization"]["project_id"] = ORG
-        policy_path.write_text(json.dumps(policy))
-        require_blocked(lambda: ctl.cleanup(confirm=True), "cleanup accepted changed identity/policy")
-
-
-def test_provider_server_response_must_match_requested_id() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory); repo, job, _, policy_path = setup(root); fixture = CliFixture()
-        ctl = controller(root, policy_path, fixture)
-        created = ctl.create(repo_root=repo, job_dir=job, confirm=True)
-        assert created["server_id"] == SERVER
-        fixture.wrong_server_id = True
+def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
+        controller = ctl(root, path, provider)
+        created = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        assert created["phase"] == "created" and len(created["jobs"]) == 2
+        (root / "pilot_known_hosts").write_text("198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
         ssh_calls: list[tuple[str, ...]] = []
-        def fake_ssh(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+        def ssh_fake(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            del timeout
             ssh_calls.append(args)
-            return subprocess.CompletedProcess(args, 0, "", "")
-        ctl._ssh = fake_ssh  # type: ignore[method-assign]
-        require_blocked(lambda: ctl.run_worker(job_dir=job, repo_root=repo), "worker trusted a mismatched provider server ID")
-        assert ssh_calls == []
-        ssh_command_count = sum(command and command[0] == "ssh" for command in fixture.commands)
-        require_blocked(lambda: pilot.ScalewayPilot._ssh(ctl, created, "true", timeout=5), "SSH trusted a mismatched provider server ID")
-        assert sum(command and command[0] == "ssh" for command in fixture.commands) == ssh_command_count
-        require_blocked(lambda: ctl.cleanup(confirm=True), "cleanup targeted a mismatched provider server ID")
-        assert not any("delete" in command for command in fixture.commands)
+            output = "4310\n" if "worker.pid" in " ".join(args) else ""
+            return subprocess.CompletedProcess(args, 0, output, "")
+        controller._ssh = ssh_fake  # type: ignore[method-assign]
+        running = controller.run_workers(job_root=jobs, repo_root=repo)
+        assert running["phase"] == "workers-running"
+        launches = [args for args in ssh_calls if "nohup bash -lc" in " ".join(args)]
+        assert len(launches) == 2
+        assert all("timeout --signal=TERM" in " ".join(args) for args in launches)
+        assert sum(command and command[0] == "scp" and "-r" in command for command in provider.commands) == 1
+        assert any("UserKnownHostsFile=" in " ".join(command) for command in provider.commands if command and command[0] == "scp")
+        state = json.loads((root / "state.json").read_text())
+        assert [job["phase"] for job in state["jobs"]] == ["running", "running"]
 
 
-def test_collection_requires_marker_and_matching_hashes() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory); repo, job, _, policy_path = setup(root)
-        policy = json.loads(policy_path.read_text())
-        marker_input = (job / "modules.txt").read_bytes()
-        result_db_bytes = b"updated-sqlite-copy"
-        marker = {"schema": 1, "exit_code": 0, "commit": COMMIT,
-                  "database_sha256": hashlib.sha256(result_db_bytes).hexdigest(),
-                  "manifest_sha256": hashlib.sha256(marker_input).hexdigest()}
-        contents = {"mathlib-db.sqlite3": result_db_bytes, "worker.log": b"worker done\n",
-                    "complete.json": json.dumps(marker).encode(), "artifacts/report.json": b"{}"}
-        archive_path = root / "remote-result.tar.gz"
-        with tarfile.open(archive_path, "w:gz") as archive:
-            for name, data in contents.items():
-                source = root / name; source.parent.mkdir(parents=True, exist_ok=True); source.write_bytes(data)
-                archive.add(source, arcname=name)
-
-        class TransferFixture(CliFixture):
-            def __call__(self, command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
-                args = tuple(command)
-                if args and args[0] == "scp":
-                    self.commands.append(args)
-                    assert args[-2].endswith("/home/ubuntu/explicit-lean-simp-job/result.tar.gz")
-                    Path(args[-1]).write_bytes(archive_path.read_bytes())
-                    return subprocess.CompletedProcess(args, 0, "", "")
-                if args and args[0] == "scw":
-                    if "server" in args and "get" in args:
-                        self.commands.append(args)
-                        return self.json(args, {"server": {"id": SERVER, "name": pilot.NAME_PREFIX + "hash",
-                                                            "project_id": PROJECT, "zone": "nl-ams-1",
-                                                            "commercial_type": pilot.EXPECTED_TYPE,
-                                                            "tags": ["explicit-lean-simp-pilot"],
-                                                            "public_ip": {"address": "198.51.100.4"}}})
-                    return super().__call__(command, timeout)
-                return super().__call__(command, timeout)
-
-        fixture = TransferFixture()
-        state = {"schema": 1, "phase": "worker-finished", "worker_exit_code": 0,
-                 "server_id": SERVER, "name": pilot.NAME_PREFIX + "hash", "zone": "nl-ams-1",
-                 "remote_job_directory": "/home/ubuntu/explicit-lean-simp-job",
-                 "project_id": PROJECT, "organization_id": ORG,
-                 "policy_sha256": hashlib.sha256(policy_path.read_bytes()).hexdigest()}
-        state_path = root / "state.json"; state_path.write_text(json.dumps(state))
-        output = root / "collected"
-        collected = pilot.ScalewayPilot(policy_path=policy_path, state_path=state_path, runner=fixture, now=lambda: NOW).collect(output_dir=output)
-        assert collected["phase"] == "collected" and collected["artifact_file_hashes"]["worker.log"] == hashlib.sha256(contents["worker.log"]).hexdigest()
-        assert (output / "mathlib-db.sqlite3").read_bytes() == result_db_bytes
-
-        # A second bundle has no completion marker and must not be accepted.
-        bad_contents = {name: data for name, data in contents.items() if name != "complete.json"}
-        with tarfile.open(archive_path, "w:gz") as archive:
-            for name, data in bad_contents.items():
-                source = root / name; source.write_bytes(data); archive.add(source, arcname=name)
-        fresh_state = {**state, "phase": "worker-finished"}
-        state_path.write_text(json.dumps(fresh_state))
-        require_blocked(lambda: pilot.ScalewayPilot(policy_path=policy_path, state_path=state_path, runner=fixture, now=lambda: NOW).collect(output_dir=root / "bad"), "missing marker accepted")
-
-        bad_marker = {**marker, "database_sha256": "0" * 64}
-        bad_contents = {**contents, "complete.json": json.dumps(bad_marker).encode()}
-        with tarfile.open(archive_path, "w:gz") as archive:
-            for name, data in bad_contents.items():
-                source = root / name; source.write_bytes(data); archive.add(source, arcname=name)
-        require_blocked(lambda: pilot.ScalewayPilot(policy_path=policy_path, state_path=state_path, runner=fixture, now=lambda: NOW).collect(output_dir=root / "checksum"), "mismatched database checksum accepted")
+def test_collection_verifies_both_result_archives_and_hashes() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider(); controller = ctl(root, path, provider)
+        policy = json.loads(path.read_text())
+        (root / "pilot_known_hosts").write_text("198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+        source_archives: dict[str, Path] = {}
+        expected_hashes = {}
+        for spec in policy["jobs"]:
+            index = 0 if spec["id"] == "job-000" else 1
+            db = f"updated-db-{index}".encode()
+            marker = {"schema": 1, "exit_code": 0, "commit": COMMIT,
+                      "database_sha256": hashlib.sha256(db).hexdigest(), "manifest_sha256": spec["manifest_sha256"]}
+            items = {"mathlib-db.sqlite3": db, "worker.log": b"completed\n",
+                     "complete.json": json.dumps(marker).encode(), "artifacts/report.json": b"{}"}
+            archive_path = root / f"{spec['id']}.tar.gz"
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for name, data in items.items():
+                    leaf = root / (spec["id"] + "-" + name.replace("/", "-")); leaf.write_bytes(data)
+                    archive.add(leaf, arcname=name)
+            source_archives[spec["id"]] = archive_path
+            expected_hashes[spec["id"]] = hashlib.sha256(db).hexdigest()
+        provider.server = {"id": SERVER, "name": pilot.NAME_PREFIX + "mock", "project_id": PROJECT,
+            "zone": "nl-ams-1", "commercial_type": "GP1-L", "tags": ["explicit-lean-simp-pilot"],
+            "public_ip": {"address": "198.51.100.4"}}
+        original = provider
+        def transfer(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
+            if command and command[0] == "scp":
+                source = next(k for k in source_archives if k in str(command[-2]))
+                Path(command[-1]).write_bytes(source_archives[source].read_bytes())
+                return subprocess.CompletedProcess(command, 0, "", "")
+            return original(command, timeout)
+        state = {"schema": 1, "phase": "workers-finished", "server_id": SERVER,
+            "name": provider.server["name"], "zone": "nl-ams-1", "project_id": PROJECT,
+            "organization_id": ORG, "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
+            "policy_sha256": pilot.sha256_file(path),
+            "jobs": [{"id": spec["id"], "phase": "finished", "exit_code": 0} for spec in policy["jobs"]]}
+        (root / "state.json").write_text(json.dumps(state))
+        output = root / "result"; got = pilot.ScalewayPilot(policy_path=path, state_path=root / "state.json",
+            runner=transfer, now=lambda: NOW).collect_workers(output_dir=output)
+        assert got["phase"] == "collected" and len(got["artifact_file_hashes"]) == 8
+        for job_id, digest in expected_hashes.items():
+            assert pilot.sha256_file(output / job_id / "mathlib-db.sqlite3") == digest
 
 
-def test_one_worker_dispatch_is_pinned_bounded_and_checkpointed() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory); repo, job, _, policy_path = setup(root); fixture = CliFixture()
-        ctl = controller(root, policy_path, fixture)
-        created = ctl.create(repo_root=repo, job_dir=job, confirm=True)
-        ssh_calls: list[tuple[str, ...]] = []
-        def fake_ssh(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
-            ssh_calls.append(args)
-            return subprocess.CompletedProcess(args, 0, "", "")
-        ctl._ssh = fake_ssh  # type: ignore[method-assign]
-        finished = ctl.run_worker(job_dir=job, repo_root=repo)
-        assert finished["server_id"] == created["server_id"] and finished["phase"] == "worker-finished"
-        assert finished["guest_poweroff_watchdog_armed"] and finished["worker_timeout_seconds"] <= 5 * 3600
-        watchdog = next(args for args in ssh_calls if "systemd-run" in args)
-        assert "poweroff" in watchdog
-        bootstrap = next(args[-1] for args in ssh_calls if "curl" in " ".join(args))
-        assert COMMIT in bootstrap and pilot.ELAN_URL in bootstrap and pilot.ELAN_SHA256 in bootstrap
-        remote_worker = next(args[-1] for args in ssh_calls if "simp_replacement_worker.py" in " ".join(args))
-        assert "--database" in remote_worker and "--manifest" in remote_worker and "--artifacts" in remote_worker
-        assert "timeout --signal=TERM" in remote_worker and "complete.json" in remote_worker
-        assert not any("simp-disabled" in " ".join(args) for args in ssh_calls)
+def test_status_marker_parsing_and_cleanup_idempotence() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); _, jobs, _, path = setup(root); provider = Provider(); controller = ctl(root, path, provider)
+        created = controller.create(repo_root=root / "repo", job_root=jobs, confirm=True)
+        state = {**created, "phase": "workers-running", "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
+                 "jobs": [{"id": "job-000", "phase": "running"}, {"id": "job-001", "phase": "running"}]}
+        (root / "state.json").write_text(json.dumps(state))
+        markers = {"job-000": json.dumps({"commit": COMMIT, "exit_code": 0, "database_sha256": "b" * 64}),
+                   "job-001": json.dumps({"commit": COMMIT, "exit_code": 2, "database_sha256": "c" * 64})}
+        controller._ssh = lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0,
+            "\n".join(f"{key}\t{value}" for key, value in markers.items()), "")  # type: ignore[method-assign]
+        snapshot = controller.poll_workers()
+        assert snapshot["phase"] == "workers-failed"
+        deleted = controller.cleanup(confirm=True)
+        assert deleted["phase"] == "deleted" and provider.server is None
+        assert controller.cleanup(confirm=True)["phase"] == "deleted"
+
+
+def test_ambiguous_create_never_retries_and_policy_default_is_disabled() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider(); provider.fail_create_after_commit = True
+        blocked(lambda: ctl(root, path, provider).create(repo_root=repo, job_root=jobs, confirm=True))
+        assert json.loads((root / "state.json").read_text())["phase"] == "create-requested"
+        assert sum("server" in command and "create" in command for command in provider.commands) == 1
+    default = pilot._read_json(pilot.POLICY_PATH, "policy")
+    assert default["launch_authorized"] is False
+    assert pilot.ScalewayPilot(policy_path=pilot.POLICY_PATH, state_path=Path("/tmp/no-state.json")).plan()["mutation_count"] == 0
+
+
+def test_supervisor_collects_and_cleans_even_when_dispatch_fails() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider(); controller = ctl(root, path, provider)
+        controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        actions: list[str] = []
+        def run_workers(*, job_root: Path, repo_root: Path) -> dict[str, Any]:
+            del job_root, repo_root
+            actions.append("dispatch")
+            state = controller._load_state(); state["phase"] = "workers-running"; controller._save(state)
+            return state
+        def poll_workers() -> dict[str, Any]:
+            actions.append("poll")
+            state = controller._load_state(); state["phase"] = "workers-finished"; controller._save(state)
+            return {"phase": "workers-finished", "jobs": []}
+        attempts = 0
+        def collect_workers(*, output_dir: Path) -> dict[str, Any]:
+            nonlocal attempts
+            attempts += 1
+            actions.append("collect")
+            if attempts == 1:
+                output_dir.mkdir()
+                (output_dir / "partial-db").write_bytes(b"partial")
+                raise pilot.PilotError("simulated transient SCP failure")
+            output_dir.mkdir()
+            state = controller._load_state(); state["phase"] = "collected"; controller._save(state)
+            return state
+        def cleanup(*, confirm: bool = False) -> dict[str, Any]:
+            assert confirm
+            actions.append("cleanup")
+            state = controller._load_state(); state["phase"] = "deleted"; controller._save(state)
+            return state
+        controller.run_workers = run_workers  # type: ignore[method-assign]
+        controller.poll_workers = poll_workers  # type: ignore[method-assign]
+        controller.collect_workers = collect_workers  # type: ignore[method-assign]
+        controller.cleanup = cleanup  # type: ignore[method-assign]
+        old_sleep = pilot.time.sleep; pilot.time.sleep = lambda _seconds: None
+        try:
+            result = controller.supervise(job_root=jobs, repo_root=repo, output_dir=root / "collected", poll_seconds=5)
+        finally:
+            pilot.time.sleep = old_sleep
+        assert result["complete"] and result["collection_attempts"] == 1
+        assert actions == ["dispatch", "poll", "collect", "collect", "cleanup"]
+        assert not list(root.glob("collected.attempt-*"))
+
+        second = ctl(root, path, provider)
+        failed: list[str] = []
+        second.run_workers = lambda **_kwargs: (_ for _ in ()).throw(pilot.PilotError("simulated dispatch failure"))  # type: ignore[method-assign]
+        second.cleanup = lambda *, confirm=False: (failed.append("cleanup") or {"phase": "deleted"})  # type: ignore[method-assign]
+        state = second._load_state(); state["phase"] = "created"; second._save(state)
+        outcome = second.supervise(job_root=jobs, repo_root=repo, output_dir=root / "failure", poll_seconds=5)
+        assert not outcome["complete"] and outcome["error"] and failed == ["cleanup"]
 
 
 def main() -> None:
-    tests = [value for name, value in sorted(globals().items()) if name.startswith("test_") and callable(value)]
-    for test in tests: test()
-    print(f"{len(tests)} Scaleway pilot mock checks passed")
+    tests = [test_policy_cost_deadline_worker_count_and_job_hashes_fail_closed,
+             test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins,
+             test_create_and_two_workers_launch_concurrently_with_remote_hash_check,
+             test_collection_verifies_both_result_archives_and_hashes,
+             test_status_marker_parsing_and_cleanup_idempotence,
+             test_ambiguous_create_never_retries_and_policy_default_is_disabled,
+             test_supervisor_collects_and_cleans_even_when_dispatch_fails]
+    for test in tests:
+        test()
+    print(f"{len(tests)} Scaleway full-run mock checks passed")
 
 
 if __name__ == "__main__":

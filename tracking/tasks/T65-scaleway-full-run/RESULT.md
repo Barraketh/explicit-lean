@@ -1,0 +1,41 @@
+# T65 implementation result
+
+Implemented an opt-in one-host, two-worker Scaleway controller and local
+supervisor. Each of two independently pinned module jobs has its own writable
+SQLite database, manifest, worker process, log and artifact directory. Remote
+input checks, per-job completion markers, result archive extraction, and
+collected database/log/artifact hashes fail closed. The controller now uses
+Scaleway CLI 2.61 response shapes reported by the coordinator: top-level arrays
+for list calls, keyed `servers` for server-type lookup, marketplace local-image
+compatibility, and separate security-group rule listing. Dedicated
+`known_hosts_file` pinning is mandatory for all SSH/SCP operations.
+
+The foreground `supervise` command polls both workers, retries result
+collection using isolated attempt directories until the host/deadline budget
+ends, atomically publishes validated results, and then deletes the exact
+instance and attached resources. It attempts cleanup after dispatch, poll,
+collection, timeout, and worker failures; it preserves retry/error information
+in the local state file. Confirmed cleanup is idempotent.
+
+Verification completed locally:
+
+- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 7 mock-only
+  checks passed, including cost/TTL/job-hash rejection, actual CLI response
+  shapes, two concurrent launch commands, dual result hash validation,
+  idempotent cleanup, ambiguous-create handling, and transient collection
+  retry before cleanup.
+- `python3 -m py_compile Experiment/scaleway_simp_replacements.py
+  Experiment/check_scaleway_simp_replacements.py` — passed.
+- `python3 -B Experiment/scaleway_simp_replacements.py plan` — reported
+  `authorized: false`, `mutation_count: 0`.
+
+The policy now hard-limits `max_cost_usd` to $20, requires a current pinned
+EUR/USD rate and source, and rejects a configured EUR cap that would exceed
+the USD ceiling.
+
+No live Scaleway call, resource creation/deletion, or credential access was
+performed. `pilot-policy.json` remains launch-disabled; it must be completed
+with a current all-in cost estimate under the user's $20 total cap before any
+run. The supervisor must remain running locally until it records validated
+collection and confirmed cleanup, or a hard host/deadline failure and cleanup
+attempt.

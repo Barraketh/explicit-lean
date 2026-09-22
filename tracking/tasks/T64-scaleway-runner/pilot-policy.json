@@ -13,6 +13,10 @@
     "max_worker_runtime_seconds": null,
     "max_cost_eur": null,
     "estimated_all_in_cost_eur": null,
+    "max_cost_usd": "20.00",
+    "eur_usd_rate": null,
+    "fx_checked_at": null,
+    "fx_source": null,
     "cost_checked_at": null,
     "cost_source": null,
     "cost_components_eur": null
@@ -23,20 +27,20 @@
     "security_group_id": null,
     "ssh_key_id": null,
     "ssh_identity_file": null,
+    "known_hosts_file": null,
     "ssh_source_cidr": null
   },
   "repository": {
     "url": "https://github.com/Barraketh/explicit-lean.git",
     "commit": null
   },
-  "job": {
-    "directory": null,
-    "manifest_sha256": null,
-    "database_sha256": null
-  },
+  "jobs": [
+    {"id": "job-000", "directory": null, "manifest_sha256": null, "database_sha256": null},
+    {"id": "job-001", "directory": null, "manifest_sha256": null, "database_sha256": null}
+  ],
   "requirements": {
     "single_host": true,
-    "single_worker": true,
+    "worker_count": 2,
     "linux_x86_64": true,
     "minimum_memory_gib": 128,
     "minimum_local_disk_gib": 200,

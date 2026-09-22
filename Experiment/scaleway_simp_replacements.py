@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed controller for one explicitly bounded Scaleway worker.
+"""Fail-closed controller for two bounded workers on one Scaleway host.
 
 The default policy is planning-only.  No paid resource can be created until a
 coordinator fills every authorization field, publishes the exact clean source
@@ -25,6 +25,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
 from typing import Any, Callable, Mapping, Sequence
 
 
@@ -34,6 +36,7 @@ CANONICAL_REPO = "https://github.com/Barraketh/explicit-lean.git"
 EXPECTED_TYPE = "GP1-L"
 HARD_MAX_LIFETIME_SECONDS = 12 * 60 * 60
 HARD_MAX_WORKER_SECONDS = 10 * 60 * 60
+HARD_MAX_COST_USD = 20.0
 NAME_PREFIX = "explicit-lean-simp-"
 ELAN_URL = "https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz"
 ELAN_SHA256 = "df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2"
@@ -65,6 +68,15 @@ def _dict(value: object, label: str) -> dict[str, Any]:
     return value
 
 
+def _list_response(value: object, key: str, label: str) -> list[Any]:
+    """Accept Scaleway CLI's actual top-level arrays or a named wrapper."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict) and isinstance(value.get(key), list):
+        return value[key]
+    raise PilotError(f"{label} response has unexpected shape")
+
+
 def _read_json(path: Path, label: str) -> dict[str, Any]:
     try:
         return _dict(json.loads(path.read_text(encoding="utf-8")), label)
@@ -94,7 +106,8 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
     if policy.get("login_user") != "ubuntu":
         raise PilotError("the pinned Ubuntu image requires login_user=ubuntu")
     auth = _dict(policy.get("authorization"), "authorization")
-    for key in ("organization_id", "project_id", "zone", "not_after", "max_cost_eur", "estimated_all_in_cost_eur", "cost_checked_at", "cost_source"):
+    for key in ("organization_id", "project_id", "zone", "not_after", "max_cost_eur", "estimated_all_in_cost_eur",
+                "cost_checked_at", "cost_source", "max_cost_usd", "eur_usd_rate", "fx_checked_at", "fx_source"):
         value = auth.get(key)
         if type(value) is not str or not value.strip():
             raise PilotError(f"authorization.{key} must be explicitly set")
@@ -121,6 +134,15 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
     if not (0 < cap < float("inf")):
         raise PilotError("max_cost_eur must be a positive finite number")
     try:
+        cap_usd = float(auth["max_cost_usd"])
+        eur_usd = float(auth["eur_usd_rate"])
+    except ValueError as error:
+        raise PilotError("USD cap and EUR/USD rate must be positive finite numbers") from error
+    if not (0 < cap_usd <= HARD_MAX_COST_USD) or not math.isfinite(eur_usd) or eur_usd <= 0:
+        raise PilotError("USD cap must be in (0, $20] and EUR/USD rate must be positive and finite")
+    if cap * eur_usd > cap_usd:
+        raise PilotError("configured EUR cost cap exceeds the explicit USD budget")
+    try:
         estimated = float(auth["estimated_all_in_cost_eur"])
     except ValueError as error:
         raise PilotError("estimated_all_in_cost_eur must be a positive finite number") from error
@@ -144,8 +166,12 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
     cost_age = (now.astimezone(timezone.utc) - cost_checked).total_seconds()
     if cost_age < 0 or cost_age > 24 * 60 * 60:
         raise PilotError("all-in cost estimate is missing, future-dated, or older than 24 hours")
+    fx_checked = parse_utc(auth["fx_checked_at"], "authorization.fx_checked_at")
+    fx_age = (now.astimezone(timezone.utc) - fx_checked).total_seconds()
+    if fx_age < 0 or fx_age > 24 * 60 * 60:
+        raise PilotError("USD/EUR conversion is missing, future-dated, or older than 24 hours")
     requirements = _dict(policy.get("requirements"), "requirements")
-    for key, expected in {"single_host": True, "single_worker": True, "linux_x86_64": True,
+    for key, expected in {"single_host": True, "worker_count": 2, "linux_x86_64": True,
                           "minimum_memory_gib": 128, "minimum_local_disk_gib": 200,
                           "root_volume": "local:559GB", "public_ipv4": True}.items():
         if type(requirements.get(key)) is not type(expected) or requirements.get(key) != expected:
@@ -156,7 +182,7 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
         raise PilotError("cli_profile must name the dedicated Scaleway pilot profile")
     if machine.get("type") != EXPECTED_TYPE:
         raise PilotError(f"machine.type must be exactly {EXPECTED_TYPE}")
-    for key in ("image_id", "security_group_id", "ssh_key_id", "ssh_identity_file", "ssh_source_cidr"):
+    for key in ("image_id", "security_group_id", "ssh_key_id", "ssh_identity_file", "ssh_source_cidr", "known_hosts_file"):
         if type(machine.get(key)) is not str or not machine[key].strip():
             raise PilotError(f"machine.{key} must be explicitly set")
     if not ID_RE.fullmatch(machine["image_id"]) or not ID_RE.fullmatch(machine["security_group_id"]) or not ID_RE.fullmatch(machine["ssh_key_id"]):
@@ -167,20 +193,32 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
         raise PilotError("ssh_source_cidr must be an explicit network CIDR") from error
     if network.prefixlen == 0:
         raise PilotError("SSH ingress from the entire Internet is forbidden")
+    if not Path(machine["known_hosts_file"]).is_absolute():
+        raise PilotError("known_hosts_file must be an absolute path")
     repo = _dict(policy.get("repository"), "repository")
     if repo.get("url") != CANONICAL_REPO or type(repo.get("commit")) is not str or not COMMIT_RE.fullmatch(repo["commit"]):
         raise PilotError("repository must specify the canonical URL and a full 40-hex commit")
-    job = _dict(policy.get("job"), "job")
-    for key in ("directory", "manifest_sha256", "database_sha256"):
-        if type(job.get(key)) is not str or not job[key].strip():
-            raise PilotError(f"job.{key} must be explicitly set")
-    if not SHA_RE.fullmatch(job["manifest_sha256"]) or not SHA_RE.fullmatch(job["database_sha256"]):
-        raise PilotError("job hashes must be lowercase SHA-256 digests")
+    jobs = policy.get("jobs")
+    if not isinstance(jobs, list) or len(jobs) != 2:
+        raise PilotError("policy must pin exactly two independent jobs")
+    seen: set[str] = set()
+    for index, value in enumerate(jobs):
+        job = _dict(value, f"jobs[{index}]")
+        if job.get("id") not in {"job-000", "job-001"} or job["id"] in seen:
+            raise PilotError("job identifiers must be unique job-000 and job-001")
+        seen.add(job["id"])
+        for key in ("directory", "manifest_sha256", "database_sha256"):
+            if type(job.get(key)) is not str or not job[key].strip():
+                raise PilotError(f"jobs[{index}].{key} must be explicitly set")
+        if not SHA_RE.fullmatch(job["manifest_sha256"]) or not SHA_RE.fullmatch(job["database_sha256"]):
+            raise PilotError("job hashes must be lowercase SHA-256 digests")
+    if seen != {"job-000", "job-001"}:
+        raise PilotError("policy must pin job-000 and job-001")
     return {"deadline": not_after, "lifetime": lifetime, "runtime": runtime, "cost_cap_eur": cap,
             "organization_id": auth["organization_id"], "project_id": auth["project_id"], "zone": zone,
-            "machine": machine, "repository": repo, "job": job, "cli_profile": profile,
+            "machine": machine, "repository": repo, "jobs": jobs, "cli_profile": profile,
             "requirements": requirements, "cost_source": auth["cost_source"],
-            "cost_components_eur": components}
+            "cost_components_eur": components, "cost_cap_usd": cap_usd, "eur_usd_rate": eur_usd}
 
 
 def validate_job(job_dir: Path, policy_job: Mapping[str, Any]) -> tuple[Path, Path, list[str]]:
@@ -201,6 +239,27 @@ def validate_job(job_dir: Path, policy_job: Mapping[str, Any]) -> tuple[Path, Pa
     if not modules or any(not MODULE_RE.fullmatch(name) for name in modules) or len(set(modules)) != len(modules):
         raise PilotError("modules.txt must contain unique Lean module names, one per line")
     return manifest, database, modules
+
+
+def validate_job_root(job_root: Path, policy_jobs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Validate exactly the two independently pinned manifest/database copies."""
+    root = job_root.resolve()
+    if root.is_symlink() or not root.is_dir():
+        raise PilotError("job root must be a real directory")
+    result = []
+    for expected_id in ("job-000", "job-001"):
+        matches = [item for item in policy_jobs if item.get("id") == expected_id]
+        if len(matches) != 1:
+            raise PilotError("policy job set is incomplete or ambiguous")
+        item = matches[0]
+        directory = (root / expected_id).resolve()
+        if Path(str(item["directory"])).resolve() != directory:
+            raise PilotError(f"{expected_id} directory differs from the approved policy")
+        manifest, database, modules = validate_job(directory, item)
+        result.append({"id": expected_id, "directory": directory, "manifest": manifest,
+                       "database": database, "modules": modules,
+                       "manifest_sha256": sha256_file(manifest), "database_sha256": sha256_file(database)})
+    return result
 
 
 def default_runner(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
@@ -268,8 +327,8 @@ class ScalewayPilot:
 
     def _identity(self, checked: Mapping[str, Any]) -> dict[str, Any]:
         projects = self._scw(["account", "project", "list", f"organization-id={checked['organization_id']}"], policy=checked)
-        items = projects.get("projects", []) if isinstance(projects, dict) else None
-        if not isinstance(items, list) or not any(item.get("id") == checked["project_id"] and item.get("organization_id") == checked["organization_id"] for item in items if isinstance(item, dict)):
+        items = _list_response(projects, "projects", "project listing")
+        if not any(item.get("id") == checked["project_id"] and item.get("organization_id") == checked["organization_id"] for item in items if isinstance(item, dict)):
             raise PilotError("authenticated organization/project identity does not match policy")
         return {"organization_id": checked["organization_id"], "project_id": checked["project_id"], "authenticated": True}
 
@@ -292,9 +351,7 @@ class ScalewayPilot:
     def _active_resources(self, checked: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         args = ["instance", "server", "list", f"project-id={checked['project_id']}", f"zone={checked['zone']}"]
         data = self._scw(args, policy=checked)
-        servers = data.get("servers", []) if isinstance(data, dict) else None
-        if not isinstance(servers, list):
-            raise PilotError("server listing has unexpected shape")
+        servers = _list_response(data, "servers", "server listing")
         tagged = []
         for server in servers:
             if not isinstance(server, dict) or not isinstance(server.get("tags", []), list):
@@ -302,9 +359,7 @@ class ScalewayPilot:
             if NAME_PREFIX in str(server.get("name", "")) or "explicit-lean-simp-pilot" in server.get("tags", []):
                 tagged.append(server)
         volumes = self._scw(["instance", "volume", "list", f"project-id={checked['project_id']}", f"zone={checked['zone']}"], policy=checked)
-        items = volumes.get("volumes", []) if isinstance(volumes, dict) else None
-        if not isinstance(items, list):
-            raise PilotError("volume listing has unexpected shape")
+        items = _list_response(volumes, "volumes", "volume listing")
         matching = []
         for volume in items:
             if not isinstance(volume, dict) or not isinstance(volume.get("tags", []), list):
@@ -317,33 +372,34 @@ class ScalewayPilot:
 
     def _check_type_image_network(self, checked: Mapping[str, Any]) -> dict[str, Any]:
         zone = checked["zone"]
-        types = self._scw(["instance", "server-type", "list", f"zone={zone}"], policy=checked)
-        type_items = types.get("servers", types.get("server_types", [])) if isinstance(types, dict) else None
-        if not isinstance(type_items, list):
-            raise PilotError("server-type listing has unexpected shape")
-        selected = [x for x in type_items if isinstance(x, dict) and x.get("name", x.get("id")) == EXPECTED_TYPE]
-        if len(selected) != 1:
+        type_data = self._scw(["instance", "server-type", "get", f"zone={zone}"], policy=checked)
+        types = type_data.get("servers") if isinstance(type_data, dict) else None
+        selected_type = types.get(EXPECTED_TYPE) if isinstance(types, dict) else None
+        if not isinstance(selected_type, dict) or selected_type.get("availability") != "available":
             raise PilotError("exact GP1-L server type is unavailable or ambiguous in selected zone")
-        ram_bytes = selected[0].get("ram")
-        if type(ram_bytes) is not int or ram_bytes < 128 * 1024**3:
-            raise PilotError("GP1-L type catalog does not confirm at least 128 GiB RAM")
-        image_data = self._scw(["instance", "image", "list", f"zone={zone}", f"project-id={checked['project_id']}"], policy=checked)
-        images = image_data.get("images", []) if isinstance(image_data, dict) else None
+        image_data = self._scw(["marketplace", "local-image", "list", f"image-id={checked['machine']['image_id']}", f"zone={zone}"], policy=checked)
+        images = _list_response(image_data, "images", "marketplace local-image listing") if isinstance(image_data, (list, dict)) else None
         image = checked["machine"]["image_id"]
-        if not isinstance(images, list) or not any(isinstance(x, dict) and x.get("id") == image and x.get("arch") in ("x86_64", "amd64") and "ubuntu" in str(x.get("name", "")).lower() for x in images):
-            raise PilotError("pinned Linux x86_64 image is not available in selected zone/project")
+        compatible = [x for x in images if isinstance(x, dict) and x.get("arch") == "x86_64"
+                      and x.get("zone") == zone and x.get("label") == "ubuntu_noble"
+                      and x.get("type") == "instance_local" and isinstance(x.get("compatible_commercial_types"), list)
+                      and EXPECTED_TYPE in x["compatible_commercial_types"]]
+        if len(compatible) != 1:
+            raise PilotError("pinned Ubuntu x86_64 local image is not compatible with GP1-L in the selected zone")
         sg = self._scw(["instance", "security-group", "get", checked["machine"]["security_group_id"], f"zone={zone}"], policy=checked)
         group = sg.get("security_group", sg) if isinstance(sg, dict) else None
         if not isinstance(group, dict) or group.get("project") != checked["project_id"] and group.get("project_id") != checked["project_id"]:
             raise PilotError("security group project identity does not match policy")
         if group.get("inbound_default_policy") != "drop":
             raise PilotError("security group default inbound policy must drop traffic")
-        rules = group.get("rules")
-        if not isinstance(rules, list):
-            raise PilotError("security group rules unavailable")
+        rules_data = self._scw(["instance", "security-group", "list-rules",
+                                f"security-group-id={checked['machine']['security_group_id']}", f"zone={zone}"], policy=checked)
+        rules = _list_response(rules_data, "rules", "security-group rule listing")
         cidr = checked["machine"]["ssh_source_cidr"]
         ssh_rules = [r for r in rules if isinstance(r, dict) and r.get("direction") == "inbound"]
-        if len(ssh_rules) != 1 or ssh_rules[0].get("protocol") not in ("TCP", "tcp") or ssh_rules[0].get("dest_port_from") != 22 or ssh_rules[0].get("dest_port_to") != 22 or ssh_rules[0].get("ip_range") != cidr:
+        if (len(ssh_rules) != 1 or ssh_rules[0].get("protocol") not in ("TCP", "tcp")
+                or ssh_rules[0].get("action") != "accept" or ssh_rules[0].get("dest_port_from") != 22
+                or ssh_rules[0].get("dest_port_to") not in (None, 22) or ssh_rules[0].get("ip_range") != cidr):
             raise PilotError("security group must allow only SSH from the approved source CIDR")
         key_data = self._scw(["iam", "ssh-key", "get", checked["machine"]["ssh_key_id"]], policy=checked)
         ssh_key = key_data.get("ssh_key", key_data) if isinstance(key_data, dict) else None
@@ -354,19 +410,31 @@ class ScalewayPilot:
             raise PilotError("configured SSH identity file is unavailable")
         if stat.S_IMODE(private_key.stat().st_mode) & 0o077:
             raise PilotError("SSH identity file permissions must exclude group and other access")
+        known_hosts = Path(checked["machine"]["known_hosts_file"])
+        if known_hosts.is_symlink() or not known_hosts.is_file() or not os.access(known_hosts, os.R_OK):
+            raise PilotError("dedicated known_hosts_file must be a readable regular file")
         if ssh_key.get("name") is None or not ssh_key.get("public_key"):
             raise PilotError("configured Scaleway SSH key has incomplete identity data")
         public_key = ssh_key.get("public_key")
         if type(public_key) is not str or not re.fullmatch(r"(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) [A-Za-z0-9+/=]+(?: .*)?", public_key):
             raise PilotError("configured SSH public key has an unsupported or malformed format")
-        return {"server_type": selected[0], "image_id": image, "security_group_id": checked["machine"]["security_group_id"],
+        return {"server_type": {"name": EXPECTED_TYPE, **selected_type}, "image_id": image,
+                "local_image_id": compatible[0].get("id"), "security_group_id": checked["machine"]["security_group_id"],
                 "ssh_key_id": checked["machine"]["ssh_key_id"], "ssh_key_name": ssh_key["name"],
                 "ssh_public_key": " ".join(public_key.split()[:2])}
 
-    def preflight(self, *, repo_root: Path, job_dir: Path) -> dict[str, Any]:
+    def _require_known_host(self, address: str, machine: Mapping[str, Any]) -> None:
+        path = Path(str(machine["known_hosts_file"]))
+        if path.is_symlink() or not path.is_file() or not os.access(path, os.R_OK):
+            raise PilotError("dedicated known_hosts_file must be a readable regular file")
+        result = self._run(["ssh-keygen", "-F", address, "-f", str(path)], 10)
+        if result.returncode != 0:
+            raise PilotError("verified server host key is absent from the dedicated known_hosts_file")
+
+    def preflight(self, *, repo_root: Path, job_root: Path) -> dict[str, Any]:
         policy, raw = self.policy()
         checked = validate_policy(policy, self.now())
-        manifest, database, modules = validate_job(job_dir, checked["job"])
+        jobs = validate_job_root(job_root, checked["jobs"])
         version = self._run(["scw", "version"], 15)
         if version.returncode:
             raise PilotError("Scaleway CLI is unavailable")
@@ -379,8 +447,9 @@ class ScalewayPilot:
         shape = self._check_type_image_network(checked)
         return {"read_only": True, "policy_sha256": sha256(raw), "cli_version": version_lines[0],
                 "identity": identity, "source": source, "machine": shape,
-                "job": {"module_count": len(modules), "manifest_sha256": sha256(manifest.read_bytes()),
-                        "database_sha256": sha256_file(database)}, "worker_count": 1,
+                "jobs": [{"id": job["id"], "module_count": len(job["modules"]),
+                          "manifest_sha256": job["manifest_sha256"],
+                          "database_sha256": job["database_sha256"]} for job in jobs], "worker_count": 2,
                 "deadline": checked["deadline"].isoformat().replace("+00:00", "Z")}
 
     def plan(self) -> dict[str, Any]:
@@ -398,7 +467,7 @@ class ScalewayPilot:
                 "policy_sha256": sha256(raw), "mutation_count": 0,
                 "blockers": blockers}
 
-    def create(self, *, repo_root: Path, job_dir: Path, confirm: bool = False) -> dict[str, Any]:
+    def create(self, *, repo_root: Path, job_root: Path, confirm: bool = False) -> dict[str, Any]:
         lock_path = self.state_path.with_suffix(self.state_path.suffix + ".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -407,16 +476,16 @@ class ScalewayPilot:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
                 raise PilotError("another local Scaleway create operation is in progress") from error
-            return self._create_locked(repo_root=repo_root, job_dir=job_dir, confirm=confirm)
+            return self._create_locked(repo_root=repo_root, job_root=job_root, confirm=confirm)
         finally:
             os.close(descriptor)
 
-    def _create_locked(self, *, repo_root: Path, job_dir: Path, confirm: bool) -> dict[str, Any]:
+    def _create_locked(self, *, repo_root: Path, job_root: Path, confirm: bool) -> dict[str, Any]:
         if not confirm:
             raise PilotError("creation requires --confirm-create")
         if self.state_path.exists():
             raise PilotError("a pilot state file already exists; this controller instance is single-use")
-        preflight = self.preflight(repo_root=repo_root, job_dir=job_dir)
+        preflight = self.preflight(repo_root=repo_root, job_root=job_root)
         policy, raw = self.policy()
         checked = validate_policy(policy, self.now())
         name = NAME_PREFIX + sha256(raw)[:12]
@@ -441,13 +510,16 @@ class ScalewayPilot:
                         "      Unit=explicit-lean-simp-pilot-ttl.service\n"
                         "      [Install]\n      WantedBy=timers.target\n"
                         "runcmd:\n  - [systemctl, daemon-reload]\n  - [systemctl, enable, --now, explicit-lean-simp-pilot-ttl.timer]\n")
-        remote_job_directory = f"/home/{login_user}/explicit-lean-simp-job"
+        remote_job_directory = f"/home/{login_user}/explicit-lean-simp-jobs"
         state = {"schema": 1, "phase": "create-requested", "server_id": None, "name": name,
                  "remote_job_directory": remote_job_directory, "zone": checked["zone"],
                  "project_id": checked["project_id"], "organization_id": checked["organization_id"],
                  "created_at": create_started.isoformat(), "deadline": host_deadline.isoformat(),
                  "lifetime_seconds": checked["lifetime"], "worker_runtime_seconds": checked["runtime"],
                  "policy_sha256": preflight["policy_sha256"], "preflight": preflight,
+                 "jobs": [{"id": job["id"], "manifest_sha256": job["manifest_sha256"],
+                           "database_sha256": job["database_sha256"], "module_count": len(job["modules"]),
+                           "phase": "pending"} for job in validate_job_root(job_root, checked["jobs"])],
                  "mutation": "server-create-requested"}
         cloud_path: Path | None = None
         try:
@@ -455,10 +527,10 @@ class ScalewayPilot:
                 handle.write(cloud_config); cloud_path = Path(handle.name)
             self._save(state)
             result = self._scw(["instance", "server", "create", f"name={name}", f"type={EXPECTED_TYPE}",
-                                f"image={checked['machine']['image_id']}", "ip=new", f"root-volume={checked['requirements']['root_volume']}",
+                                f"image={preflight['machine']['local_image_id']}", "ip=new", f"root-volume={checked['requirements']['root_volume']}",
                                 f"security-group-id={checked['machine']['security_group_id']}",
                                 f"cloud-init=@{cloud_path}", f"project-id={checked['project_id']}", f"zone={checked['zone']}",
-                                "tags.0=explicit-lean-simp-pilot", "tags.1=single-worker", "--wait"], policy=checked, timeout=300)
+                                "tags.0=explicit-lean-simp-pilot", "tags.1=two-workers", "--wait"], policy=checked, timeout=300)
         except PilotError as error:
             raise PilotError("create outcome is ambiguous; state retained; use status, then cleanup to recover any created server") from error
         finally:
@@ -491,15 +563,18 @@ class ScalewayPilot:
                         "cli_profile": policy["cli_profile"]})
         if not state.get("server_id"):
             listing = self._scw(["instance", "server", "list", f"project-id={state['project_id']}", f"zone={state['zone']}"], policy=policy)
-            servers = listing.get("servers", []) if isinstance(listing, dict) else None
-            if not isinstance(servers, list):
-                raise PilotError("pending-create server listing has unexpected shape")
+            servers = _list_response(listing, "servers", "pending-create server listing")
             candidates = [server for server in servers if isinstance(server, dict) and server.get("name") == state.get("name")]
             return {"read_only": True, "phase": state.get("phase"), "state": state, "pending_create_matches": candidates}
+        if state.get("phase") in {"workers-running", "workers-finished", "workers-failed"}:
+            workers = self.poll_workers()
+            state, policy = self._existing_context()
+        else:
+            workers = None
         server = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         if not isinstance(server, dict):
             raise PilotError("server status response has unexpected shape")
-        return {"read_only": True, "state": state, "provider": server.get("server", server)}
+        return {"read_only": True, "state": state, "workers": workers, "provider": server.get("server", server)}
 
     def _ssh(self, state: Mapping[str, Any], *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
         policy, _ = self.policy(); machine = _dict(policy.get("machine"), "machine")
@@ -511,25 +586,28 @@ class ScalewayPilot:
         address = public_ip.get("address") if isinstance(public_ip, dict) else None
         if not isinstance(address, str) or not address:
             raise PilotError("server has no public IPv4 address")
-        base = ["ssh", "-i", str(Path(machine["ssh_identity_file"]).expanduser()), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=20", f"{policy.get('login_user', 'ubuntu')}@{address}"]
+        self._require_known_host(address, machine)
+        base = ["ssh", "-i", str(Path(machine["ssh_identity_file"]).expanduser()), "-o", "BatchMode=yes",
+                "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={machine['known_hosts_file']}",
+                "-o", "ConnectTimeout=20", f"{policy.get('login_user', 'ubuntu')}@{address}"]
         return self._run([*base, *args], timeout)
 
-    def run_worker(self, *, job_dir: Path, repo_root: Path) -> dict[str, Any]:
+    def run_workers(self, *, job_root: Path, repo_root: Path) -> dict[str, Any]:
         state = self._load_state(); policy, raw = self.policy(); checked = validate_policy(policy, self.now())
         if state.get("policy_sha256") != sha256(raw):
             raise PilotError("policy changed after server creation")
         if state.get("project_id") != checked["project_id"] or state.get("organization_id") != checked["organization_id"] or state.get("zone") != checked["zone"]:
             raise PilotError("saved server identity differs from launch policy")
-        manifest, database, _ = validate_job(job_dir, checked["job"])
+        jobs = validate_job_root(job_root, checked["jobs"])
         created = datetime.fromisoformat(state["created_at"])
-        age = (self.now().astimezone(timezone.utc) - created.astimezone(timezone.utc)).total_seconds()
-        if age >= checked["lifetime"] or self.now().astimezone(timezone.utc) >= checked["deadline"]:
+        now = self.now().astimezone(timezone.utc)
+        age = (now - created.astimezone(timezone.utc)).total_seconds()
+        if age >= checked["lifetime"] or now >= checked["deadline"]:
             raise PilotError("host TTL or authorization deadline reached")
         if state.get("phase") != "created":
-            raise PilotError("worker may be dispatched once per server")
+            raise PilotError("both workers may be dispatched once per server")
         self._repo_gate(checked, repo_root)
-        self._identity(checked)
-        self._check_type_image_network(checked)
+        self._identity(checked); self._check_type_image_network(checked)
         observed = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=checked)
         observed_server = observed.get("server", observed)
         if not isinstance(observed_server, dict):
@@ -538,17 +616,16 @@ class ScalewayPilot:
         if not isinstance(observed_tags, list) or observed_server.get("id") != state["server_id"] or observed_server.get("name") != state.get("name") or observed_server.get("project_id", observed_server.get("project")) != checked["project_id"] or observed_server.get("zone") != checked["zone"] or observed_server.get("commercial_type", observed_server.get("type")) != EXPECTED_TYPE or "explicit-lean-simp-pilot" not in observed_tags:
             raise PilotError("existing server identity/shape mismatch; refusing worker dispatch")
         ttl_remaining = int(checked["lifetime"] - age)
-        cutoff_remaining = int((checked["deadline"] - self.now().astimezone(timezone.utc)).total_seconds())
-        if ttl_remaining <= 0 or cutoff_remaining <= 0:
-            raise PilotError("no host lifetime remains before TTL/deadline")
+        cutoff_remaining = int((checked["deadline"] - now).total_seconds())
+        worker_timeout = min(checked["runtime"], ttl_remaining, cutoff_remaining)
+        if worker_timeout <= 0:
+            raise PilotError("no worker runtime remains before host TTL/deadline")
         watchdog = self._ssh(state, "sudo", "systemd-run", f"--unit=explicit-lean-simp-ttl-{state['server_id']}",
                              f"--on-active={ttl_remaining}s", "/usr/bin/systemctl", "poweroff", timeout=60)
         if watchdog.returncode:
             raise PilotError("guest TTL watchdog could not be armed")
         state.update({"guest_poweroff_watchdog_armed": True, "host_ttl_remaining_seconds": ttl_remaining})
         self._save(state)
-        # Verify remote image architecture/OS via cloud-init's standard fields
-        # and clone only the exact already-published commit.
         commit = checked["repository"]["commit"]
         bootstrap = "set -eu; test \"$(uname -m)\" = x86_64; test -f /etc/os-release; " \
                     "sudo apt-get update; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 python3-pip build-essential curl; " \
@@ -560,127 +637,309 @@ class ScalewayPilot:
                     "echo " + ELAN_SHA256 + "'  /tmp/elan.tar.gz' | sha256sum -c -; " \
                     "tar -xzf /tmp/elan.tar.gz -C /tmp elan-init; /tmp/elan-init -y --default-toolchain none; " \
                     ". \"$HOME/.elan/env\"; cd /opt/explicit-lean; lake exe cache get"
-        state.update({"phase": "bootstrap-started", "bootstrap_started_at": self.now().isoformat()})
-        self._save(state)
+        state.update({"phase": "bootstrap-started", "bootstrap_started_at": now.isoformat()}); self._save(state)
         boot = self._ssh(state, "sh", "-lc", shlex.quote(bootstrap), timeout=min(1800, checked["runtime"]))
         if boot.returncode:
             raise PilotError(f"remote pinned checkout/dependency bootstrap failed (exit {boot.returncode})")
         remote = state.get("remote_job_directory")
-        if remote != "/home/ubuntu/explicit-lean-simp-job":
+        if remote != "/home/ubuntu/explicit-lean-simp-jobs":
             raise PilotError("saved remote job directory is invalid")
         mkdir = self._ssh(state, "mkdir", "-p", remote, timeout=60)
         if mkdir.returncode:
-            raise PilotError("remote job directory creation failed")
+            raise PilotError("remote jobs directory creation failed")
         machine = checked["machine"]
         server_data = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         server_obj = server_data.get("server", server_data)
         if not isinstance(server_obj, dict) or server_obj.get("id") != state["server_id"]:
             raise PilotError("server identity changed before job transfer")
         address = server_obj["public_ip"]["address"]
+        self._require_known_host(address, machine)
         target = f"{policy.get('login_user', 'ubuntu')}@{address}:{remote}/"
-        scp_base = ["scp", "-i", str(Path(machine["ssh_identity_file"]).expanduser()), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"]
-        copied = self._run([*scp_base, str(manifest), str(database), target], min(300, checked["runtime"]))
+        scp_base = ["scp", "-r", "-i", str(Path(machine["ssh_identity_file"]).expanduser()), "-o", "BatchMode=yes",
+                    "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={machine['known_hosts_file']}"]
+        copied = self._run([*scp_base, *(str(job["directory"]) for job in jobs), target], min(600, checked["runtime"]))
         if copied.returncode:
-            raise PilotError("job transfer failed")
-        remote_worker = ("set -eu; cd /opt/explicit-lean; . \"$HOME/.elan/env\"; "
-                         "mkdir -p /var/tmp/explicit-lean-simp-job/artifacts; "
-                         "set +e; timeout --signal=TERM --kill-after=30 " + str(checked["runtime"]) +
-                         " python3 -B Experiment/simp_replacement_worker.py --database " + remote + "/mathlib-db.sqlite3 --manifest " + remote + "/modules.txt --artifacts " + remote + "/artifacts > " + remote + "/worker.log 2>&1; rc=$?; set -e; "
-                         "dbhash=$(sha256sum " + remote + "/mathlib-db.sqlite3 | awk '{print $1}'); "
-                         "manifesthash=$(sha256sum " + remote + "/modules.txt | awk '{print $1}'); "
-                         "printf '{\"schema\":1,\"exit_code\":%s,\"commit\":\"%s\",\"database_sha256\":\"%s\",\"manifest_sha256\":\"%s\"}\\n' \"$rc\" " + shlex.quote(commit) + " \"$dbhash\" \"$manifesthash\" > " + remote + "/complete.json; "
-                         "tar -czf " + remote + "/result.tar.gz -C " + remote + " mathlib-db.sqlite3 worker.log complete.json artifacts; exit \"$rc\"")
-        started = self.now().astimezone(timezone.utc)
-        cutoff_remaining = int((checked["deadline"] - started).total_seconds())
-        worker_timeout = min(checked["runtime"], ttl_remaining, cutoff_remaining)
+            raise PilotError("two-job transfer failed")
+        for job in jobs:
+            remote_job = remote + "/" + job["id"]
+            verify = ("set -eu; test \"$(sha256sum " + remote_job + "/modules.txt | awk '{print $1}')\" = " +
+                      shlex.quote(job["manifest_sha256"]) + "; test \"$(sha256sum " + remote_job +
+                      "/mathlib-db.sqlite3 | awk '{print $1}')\" = " + shlex.quote(job["database_sha256"]))
+            checked_remote = self._ssh(state, "sh", "-lc", shlex.quote(verify), timeout=60)
+            if checked_remote.returncode:
+                raise PilotError(f"uploaded {job['id']} input hashes differ from policy")
+        dispatch_now = self.now().astimezone(timezone.utc)
+        elapsed = (dispatch_now - created.astimezone(timezone.utc)).total_seconds()
+        worker_timeout = min(checked["runtime"], int(checked["lifetime"] - elapsed),
+                             int((checked["deadline"] - dispatch_now).total_seconds()))
         if worker_timeout <= 0:
-            raise PilotError("no worker runtime remains before host TTL/deadline")
-        state.update({"phase": "worker-started", "worker_started_at": started.isoformat(), "worker_timeout_seconds": worker_timeout,
-                      "host_ttl_remaining_seconds": ttl_remaining})
+            raise PilotError("bootstrap and transfer consumed the remaining worker window")
+        state.update({"phase": "dispatching", "worker_started_at": dispatch_now.isoformat(),
+                      "worker_timeout_seconds": worker_timeout,
+                      "jobs": [{"id": item["id"], "manifest_sha256": item["manifest_sha256"],
+                                "database_sha256": item["database_sha256"], "module_count": item["module_count"],
+                                "phase": "starting"} for item in state["jobs"]]})
         self._save(state)
-        # Override the wrapper's timeout with the smaller remaining policy time.
-        remote_worker = remote_worker.replace(str(checked["runtime"]), str(worker_timeout), 1)
-        ran = self._ssh(state, "sh", "-lc", shlex.quote(remote_worker), timeout=worker_timeout + 120)
-        state.update({"worker_exit_code": ran.returncode, "phase": "worker-finished" if ran.returncode == 0 else "worker-failed"})
-        self._save(state)
+        for job in jobs:
+            remote_job = remote + "/" + job["id"]
+            launcher = ("set -eu; cd /opt/explicit-lean; . \"$HOME/.elan/env\"; "
+                        "mkdir -p " + remote_job + "/artifacts; "
+                        "nohup bash -lc " + shlex.quote(
+                            "set +e; timeout --signal=TERM --kill-after=30 " + str(worker_timeout) +
+                            " python3 -B Experiment/simp_replacement_worker.py --database " + remote_job +
+                            "/mathlib-db.sqlite3 --manifest " + remote_job + "/modules.txt --artifacts " + remote_job +
+                            "/artifacts > " + remote_job + "/worker.log 2>&1; rc=$?; "
+                            "dbhash=$(sha256sum " + remote_job + "/mathlib-db.sqlite3 | awk '{print $1}'); "
+                            "manifesthash=$(sha256sum " + remote_job + "/modules.txt | awk '{print $1}'); "
+                            "printf '{\"schema\":1,\"exit_code\":%s,\"commit\":\"%s\",\"database_sha256\":\"%s\",\"manifest_sha256\":\"%s\"}\\n' \"$rc\" " +
+                            shlex.quote(commit) + " \"$dbhash\" \"$manifesthash\" > " + remote_job + "/complete.json.tmp; "
+                            "mv " + remote_job + "/complete.json.tmp " + remote_job + "/complete.json; "
+                            "tar -czf " + remote_job + "/result.tar.gz -C " + remote_job + " mathlib-db.sqlite3 worker.log complete.json artifacts") +
+                        " > " + remote_job + "/launcher.log 2>&1 < /dev/null & echo $! > " + remote_job + "/worker.pid; "
+                        "cat " + remote_job + "/worker.pid")
+            launched = self._ssh(state, "sh", "-lc", shlex.quote(launcher), timeout=60)
+            if launched.returncode or not launched.stdout.strip().isdigit():
+                state["jobs"] = [{**item, "phase": "launch_failed" if item["id"] == job["id"] else item["phase"]} for item in state["jobs"]]
+                state["phase"] = "dispatch-failed"; self._save(state)
+                raise PilotError(f"{job['id']} could not be launched; cleanup is required")
+            state["jobs"] = [{**item, "phase": "running", "pid": launched.stdout.strip()} if item["id"] == job["id"] else item for item in state["jobs"]]
+            self._save(state)
+        state["phase"] = "workers-running"; self._save(state)
         return state
 
-    def collect(self, *, output_dir: Path) -> dict[str, Any]:
+    def poll_workers(self) -> dict[str, Any]:
         state, policy = self._existing_context()
-        if state.get("phase") not in {"worker-finished", "worker-failed"} or type(state.get("worker_exit_code")) is not int:
-            raise PilotError("collection requires a terminal worker state")
+        if state.get("phase") not in {"workers-running", "workers-finished", "workers-failed"}:
+            raise PilotError("worker status requires dispatched jobs")
+        remote = state.get("remote_job_directory")
+        if remote != "/home/ubuntu/explicit-lean-simp-jobs":
+            raise PilotError("saved remote jobs directory is invalid")
+        command = "set -eu; for j in job-000 job-001; do d=" + remote + "/$j; if test -f \"$d/complete.json\"; then printf '%s\\t' \"$j\"; cat \"$d/complete.json\"; else printf '%s\\tRUNNING\\n' \"$j\"; fi; done"
+        result = self._ssh(state, "sh", "-lc", shlex.quote(command), timeout=60)
+        if result.returncode:
+            raise PilotError("worker status poll failed")
+        observed: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            parts = line.split("\t", 1)
+            if len(parts) != 2 or parts[0] not in {"job-000", "job-001"} or parts[0] in observed:
+                raise PilotError("worker status response is malformed")
+            observed[parts[0]] = parts[1]
+        if set(observed) != {"job-000", "job-001"}:
+            raise PilotError("worker status response is incomplete")
+        statuses = []
+        for item in state["jobs"]:
+            text = observed[item["id"]]
+            if text == "RUNNING":
+                statuses.append({**item, "phase": "running"})
+            else:
+                try:
+                    marker = json.loads(text)
+                except json.JSONDecodeError as error:
+                    raise PilotError("worker completion marker is invalid") from error
+                if marker.get("commit") != policy["repository"]["commit"] or type(marker.get("exit_code")) is not int:
+                    raise PilotError("worker completion marker identity is invalid")
+                statuses.append({**item, "phase": "finished" if marker["exit_code"] == 0 else "failed",
+                                 "exit_code": marker["exit_code"], "database_result_sha256": marker.get("database_sha256")})
+        state["jobs"] = statuses
+        state["phase"] = "workers-running" if any(x["phase"] == "running" for x in statuses) else ("workers-finished" if all(x["phase"] == "finished" for x in statuses) else "workers-failed")
+        if state["phase"] != "workers-running":
+            state["workers_finished_at"] = self.now().isoformat()
+        self._save(state)
+        return {"read_only": True, "phase": state["phase"], "jobs": [{k: v for k, v in item.items() if k != "directory"} for item in statuses]}
+
+    def collect_workers(self, *, output_dir: Path) -> dict[str, Any]:
+        state, policy = self._existing_context()
+        if state.get("phase") not in {"workers-finished", "workers-failed"}:
+            raise PilotError("collection requires both workers to finish")
+        if output_dir.exists() and any(output_dir.iterdir()):
+            raise PilotError("result output directory must be empty")
         output_dir.mkdir(parents=True, exist_ok=True)
-        if any(output_dir.iterdir()):
-            raise PilotError("artifact output directory must be empty")
-        remote_dir = state.get("remote_job_directory")
-        if remote_dir != "/home/ubuntu/explicit-lean-simp-job":
-            raise PilotError("saved remote job directory is invalid")
-        remote = remote_dir + "/result.tar.gz"
         auth = _dict(policy.get("authorization"), "authorization")
         self._identity({"organization_id": auth["organization_id"], "project_id": auth["project_id"],
                         "cli_profile": policy["cli_profile"]})
         server_data = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         server_obj = server_data.get("server", server_data) if isinstance(server_data, dict) else None
-        if not isinstance(server_obj, dict) or server_obj.get("id") != state.get("server_id") or not isinstance(server_obj.get("public_ip"), dict) or type(server_obj["public_ip"].get("address")) is not str:
+        if not isinstance(server_obj, dict) or server_obj.get("id") != state.get("server_id") or not isinstance(server_obj.get("public_ip"), dict):
             raise PilotError("result server address response has unexpected shape")
-        address = server_obj["public_ip"]["address"]
-        server_tags = server_obj.get("tags", [])
-        if not isinstance(server_tags, list) or server_obj.get("id") != state.get("server_id") or server_obj.get("name") != state.get("name") or server_obj.get("project_id", server_obj.get("project")) != state.get("project_id") or "explicit-lean-simp-pilot" not in server_tags:
+        tags = server_obj.get("tags", [])
+        if (server_obj.get("name") != state.get("name") or server_obj.get("project_id", server_obj.get("project")) != state.get("project_id")
+                or not isinstance(tags, list) or "explicit-lean-simp-pilot" not in tags):
             raise PilotError("result server identity mismatch")
-        target = f"{policy.get('login_user', 'ubuntu')}@{address}:{remote}"
-        local_tar = output_dir / "result.tar.gz"
+        address = server_obj["public_ip"].get("address")
+        if type(address) is not str or not address:
+            raise PilotError("result server has no public IPv4 address")
         machine = _dict(policy.get("machine"), "machine")
-        proc = self._run(["scp", "-i", str(Path(machine["ssh_identity_file"]).expanduser()), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", target, str(local_tar)], 300)
-        if proc.returncode:
-            raise PilotError("artifact collection failed")
-        import tarfile
-        extracted: list[Path] = []
-        with tarfile.open(local_tar, "r:gz") as archive:
-            members = archive.getmembers()
-            names = {member.name for member in members}
-            expected = {"mathlib-db.sqlite3", "worker.log", "complete.json"}
-            allowed = lambda member: (member.name in expected or member.name == "artifacts" and member.isdir()
-                                      or member.name.startswith("artifacts/"))
-            if len(names) != len(members) or not expected.issubset(names) or any(Path(member.name).is_absolute() or ".." in Path(member.name).parts or not allowed(member) for member in members):
-                raise PilotError("artifact archive has missing or unsafe entries")
-            for member in members:
-                relative = Path(member.name)
-                if member.isdir():
-                    (output_dir / relative).mkdir(parents=True, exist_ok=True)
-                    continue
-                if not member.isfile():
-                    raise PilotError("artifact archive contains a non-regular file")
-                target = output_dir / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                source = archive.extractfile(member)
-                if source is None:
-                    raise PilotError("artifact archive entry could not be read")
-                with source, target.open("wb") as destination:
-                    shutil.copyfileobj(source, destination)
-                extracted.append(target)
-        marker = _read_json(output_dir / "complete.json", "completion marker")
-        job = _dict(policy.get("job"), "job")
-        repository = _dict(policy.get("repository"), "repository")
-        manifest, database, _ = validate_job(Path(job["directory"]), job)
-        if (type(marker.get("schema")) is not int or marker.get("schema") != 1
-                or type(marker.get("exit_code")) is not int or marker.get("exit_code") != state.get("worker_exit_code")
-                or marker.get("commit") != repository.get("commit")):
-            raise PilotError("completion marker identity or worker exit is invalid")
-        result_db = output_dir / "mathlib-db.sqlite3"
-        if not result_db.is_file() or sha256_file(result_db) != marker.get("database_sha256") or marker.get("manifest_sha256") != sha256(manifest.read_bytes()):
-            raise PilotError("completion marker checksum mismatch")
-        file_hashes = {str(path.relative_to(output_dir)): sha256_file(path) for path in extracted if path.is_file()}
-        state.update({"phase": "collected" if state["worker_exit_code"] == 0 else "collected-worker-failed",
-                      "collected_at": self.now().isoformat(), "artifact_sha256": sha256_file(local_tar),
-                      "database_sha256": sha256_file(result_db), "artifact_file_hashes": file_hashes,
-                      "output_dir": str(output_dir.resolve())})
+        self._require_known_host(address, machine)
+        login = str(policy.get("login_user", "ubuntu"))
+        remote_root = state.get("remote_job_directory")
+        if remote_root != "/home/ubuntu/explicit-lean-simp-jobs":
+            raise PilotError("saved remote jobs directory is invalid")
+        file_hashes: dict[str, str] = {}
+        job_results = []
+        for spec in policy["jobs"]:
+            job_id = spec["id"]
+            out = output_dir / job_id
+            out.mkdir()
+            remote_tar = f"{login}@{address}:{remote_root}/{job_id}/result.tar.gz"
+            local_tar = out / "result.tar.gz"
+            proc = self._run(["scp", "-i", str(Path(machine["ssh_identity_file"]).expanduser()),
+                              "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+                              "-o", f"UserKnownHostsFile={machine['known_hosts_file']}", remote_tar, str(local_tar)], 300)
+            if proc.returncode:
+                raise PilotError(f"{job_id} result transfer failed")
+            import tarfile
+            extracted: list[Path] = []
+            with tarfile.open(local_tar, "r:gz") as archive:
+                members = archive.getmembers()
+                names = {member.name for member in members}
+                required = {"mathlib-db.sqlite3", "worker.log", "complete.json"}
+                def allowed(member: Any) -> bool:
+                    return (member.name in required or member.name == "artifacts" and member.isdir()
+                            or member.name.startswith("artifacts/"))
+                if len(names) != len(members) or not required.issubset(names) or any(
+                        Path(member.name).is_absolute() or ".." in Path(member.name).parts or not allowed(member)
+                        for member in members):
+                    raise PilotError(f"{job_id} result archive has missing or unsafe entries")
+                for member in members:
+                    relative = Path(member.name)
+                    if member.isdir():
+                        (out / relative).mkdir(parents=True, exist_ok=True)
+                    elif not member.isfile():
+                        raise PilotError(f"{job_id} result archive contains a non-regular file")
+                    else:
+                        target = out / relative
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        source = archive.extractfile(member)
+                        if source is None:
+                            raise PilotError(f"{job_id} result entry could not be read")
+                        with source, target.open("wb") as destination:
+                            shutil.copyfileobj(source, destination)
+                        extracted.append(target)
+            marker = _read_json(out / "complete.json", f"{job_id} completion marker")
+            repository = _dict(policy.get("repository"), "repository")
+            if (marker.get("schema") != 1 or type(marker.get("exit_code")) is not int
+                    or marker.get("commit") != repository.get("commit")
+                    or marker.get("manifest_sha256") != spec.get("manifest_sha256")
+                    or marker.get("database_sha256") != sha256_file(out / "mathlib-db.sqlite3")):
+                raise PilotError(f"{job_id} completion marker or result hash is invalid")
+            if marker["exit_code"] != next(item.get("exit_code") for item in state["jobs"] if item["id"] == job_id):
+                raise PilotError(f"{job_id} completion marker exit does not match status")
+            file_hashes.update({f"{job_id}/{path.relative_to(out)}": sha256_file(path) for path in extracted})
+            job_results.append({"id": job_id, "exit_code": marker["exit_code"],
+                                "database_sha256": sha256_file(out / "mathlib-db.sqlite3"),
+                                "archive_sha256": sha256_file(local_tar),
+                                "artifact_file_hashes": {str(path.relative_to(out)): sha256_file(path) for path in extracted}})
+        state.update({"phase": "collected" if all(item["exit_code"] == 0 for item in job_results) else "collected-worker-failed",
+                      "collected_at": self.now().isoformat(), "output_dir": str(output_dir.resolve()),
+                      "jobs": [{**next(item for item in state["jobs"] if item["id"] == result["id"]),
+                                "phase": "collected" if result["exit_code"] == 0 else "collected-failed",
+                                "result_database_sha256": result["database_sha256"],
+                                "result_archive_sha256": result["archive_sha256"]} for result in job_results],
+                      "artifact_file_hashes": file_hashes})
         self._save(state)
         return state
+
+    def supervise(self, *, job_root: Path, repo_root: Path, output_dir: Path,
+                  poll_seconds: int = 60) -> dict[str, Any]:
+        """Run, poll, collect and always attempt exact-resource cleanup."""
+        if type(poll_seconds) is not int or not 5 <= poll_seconds <= 600:
+            raise PilotError("poll interval must be between 5 and 600 seconds")
+        started = time.monotonic()
+        final: dict[str, Any] = {"supervisor": "started"}
+        failure: str | None = None
+        try:
+            state = self._load_state()
+            if state.get("phase") == "created":
+                state = self.run_workers(job_root=job_root, repo_root=repo_root)
+            elif state.get("phase") != "workers-running":
+                raise PilotError("supervisor requires a created host or already-running workers")
+            policy, _ = self.policy()
+            checked = validate_policy(policy, self.now())
+            created = datetime.fromisoformat(state["created_at"]).astimezone(timezone.utc)
+            remaining = min(checked["lifetime"] - (self.now().astimezone(timezone.utc) - created).total_seconds(),
+                            (checked["deadline"] - self.now().astimezone(timezone.utc)).total_seconds())
+            budget = max(0, min(checked["runtime"] + 1800, int(remaining)))
+            terminal: str | None = None
+            while True:
+                try:
+                    snapshot = self.poll_workers()
+                    final["workers"] = snapshot
+                    if snapshot["phase"] in {"workers-finished", "workers-failed"}:
+                        terminal = snapshot["phase"]
+                        break
+                except Exception as error:
+                    final["last_poll_error"] = f"{type(error).__name__}: {error}"
+                if time.monotonic() - started >= budget:
+                    failure = "supervisor worker/host time budget expired"
+                    break
+                time.sleep(min(poll_seconds, max(1, budget - (time.monotonic() - started))))
+            state = self._load_state()
+            if terminal is not None:
+                attempt = 0
+                while True:
+                    attempt += 1
+                    staged_output = output_dir.with_name(output_dir.name + f".attempt-{attempt:02d}-{uuid.uuid4().hex[:8]}")
+                    try:
+                        final["collection"] = self.collect_workers(output_dir=staged_output)
+                        if output_dir.exists() and any(output_dir.iterdir()):
+                            raise PilotError("final result output directory is no longer empty")
+                        if output_dir.exists():
+                            output_dir.rmdir()
+                        os.replace(staged_output, output_dir)
+                        final["collection"]["output_dir"] = str(output_dir.resolve())
+                        collected_state = self._load_state()
+                        collected_state["output_dir"] = str(output_dir.resolve())
+                        self._save(collected_state)
+                        if collected_state.get("phase") == "collected-worker-failed":
+                            failure = "one or more jobs exited unsuccessfully; both result bundles were collected"
+                        break
+                    except Exception as error:
+                        final["collection_attempts"] = attempt
+                        final["last_collection_error"] = f"{type(error).__name__}: {error}"
+                        checkpoint = self._load_state()
+                        checkpoint["supervisor_collection_attempts"] = attempt
+                        checkpoint["supervisor_last_collection_error"] = final["last_collection_error"]
+                        checkpoint["supervisor_partial_collection_retained"] = False
+                        self._save(checkpoint)
+                        # Each tar contains a full database and artifacts. Keep
+                        # disk use bounded across repeated SCP/validation errors.
+                        if staged_output.exists():
+                            if staged_output.is_symlink() or not staged_output.is_dir():
+                                raise PilotError("failed collection staging path changed type; refusing to remove it")
+                            shutil.rmtree(staged_output)
+                        if time.monotonic() - started >= budget:
+                            failure = "result collection did not validate before the host/deadline budget expired"
+                            break
+                        time.sleep(min(poll_seconds, max(1, budget - (time.monotonic() - started))))
+            else:
+                final["supervisor_timeout"] = True
+        except Exception as error:
+            failure = f"{type(error).__name__}: {error}"
+        finally:
+            if self.state_path.exists():
+                try:
+                    checkpoint = self._load_state()
+                    checkpoint["supervisor_report"] = final
+                    self._save(checkpoint)
+                except Exception as error:
+                    final["state_checkpoint_error"] = f"{type(error).__name__}: {error}"
+            try:
+                if self.state_path.exists() and self._load_state().get("phase") != "deleted":
+                    final["cleanup"] = self.cleanup(confirm=True)
+            except Exception as error:
+                final["cleanup_error"] = f"{type(error).__name__}: {error}"
+        final["elapsed_seconds"] = int(time.monotonic() - started)
+        if failure is not None:
+            final["error"] = failure
+        final["complete"] = failure is None and "cleanup_error" not in final and final.get("cleanup", {}).get("phase") == "deleted"
+        return final
 
     def cleanup(self, *, confirm: bool = False) -> dict[str, Any]:
         if not confirm:
             raise PilotError("deletion requires --confirm-delete")
         state = self._load_state()
+        if state.get("phase") == "deleted":
+            return state
         policy, _ = self.policy()
         profile = policy.get("cli_profile")
         if type(profile) is not str or not profile.strip() or profile in {"default", "explicit-lean-cloud"}:
@@ -694,9 +953,7 @@ class ScalewayPilot:
                         "cli_profile": policy["cli_profile"]})
         if not state.get("server_id"):
             listing = self._scw(["instance", "server", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
-            servers = listing.get("servers", []) if isinstance(listing, dict) else None
-            if not isinstance(servers, list):
-                raise PilotError("cannot recover ambiguous create: server listing has unexpected shape")
+            servers = _list_response(listing, "servers", "ambiguous-create server listing")
             candidates = [server for server in servers if isinstance(server, dict)
                           and server.get("name") == state.get("name")
                           and isinstance(server.get("tags", []), list)
@@ -712,6 +969,19 @@ class ScalewayPilot:
                 raise PilotError("ambiguous create candidate identity mismatch; refusing adoption/deletion")
             state.update({"server_id": candidate_id, "phase": "create-recovered"})
             self._save(state)
+        visible = self._scw(["instance", "server", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
+        visible_servers = _list_response(visible, "servers", "cleanup server listing")
+        if not any(isinstance(item, dict) and item.get("id") == state["server_id"] for item in visible_servers):
+            volumes = self._scw(["instance", "volume", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
+            items = _list_response(volumes, "volumes", "cleanup volume listing")
+            known_ids = set(state.get("attached_volume_ids", []))
+            if any(isinstance(item, dict) and (item.get("id") in known_ids
+                    or "explicit-lean-simp-pilot" in item.get("tags", [])) for item in items):
+                raise PilotError("server is absent but tagged or previously attached storage remains")
+            state.update({"phase": "deleted", "deleted_at": self.now().isoformat(),
+                          "delete_response": "server already absent; attached storage verified absent"})
+            self._save(state)
+            return state
         current = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         server = current.get("server", current) if isinstance(current, dict) else None
         if not isinstance(server, dict) or server.get("id") != state.get("server_id"):
@@ -725,9 +995,7 @@ class ScalewayPilot:
             raise PilotError("server ownership tags mismatch; refusing deletion")
         attached: set[str] = set(state.get("attached_volume_ids", []))
         volumes_before = self._scw(["instance", "volume", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
-        before_items = volumes_before.get("volumes", []) if isinstance(volumes_before, dict) else None
-        if not isinstance(before_items, list):
-            raise PilotError("pre-delete volume listing has unexpected shape")
+        before_items = _list_response(volumes_before, "volumes", "pre-delete volume listing")
         for volume in before_items:
             if not isinstance(volume, dict):
                 continue
@@ -742,13 +1010,13 @@ class ScalewayPilot:
         # Confirm the exact server and all tagged storage are gone. Any CLI
         # failure here leaves the state nonterminal so cleanup can be retried.
         listing = self._scw(["instance", "server", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
-        servers = listing.get("servers", []) if isinstance(listing, dict) else None
-        if not isinstance(servers, list) or any(isinstance(s, dict) and s.get("id") == state["server_id"] for s in servers):
+        servers = _list_response(listing, "servers", "post-delete server listing")
+        if any(isinstance(s, dict) and s.get("id") == state["server_id"] for s in servers):
             raise PilotError("server deletion could not be confirmed")
         volumes = self._scw(["instance", "volume", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
-        items = volumes.get("volumes", []) if isinstance(volumes, dict) else None
-        remaining_ids = {v.get("id") for v in items if isinstance(v, dict)} if isinstance(items, list) else set()
-        if not isinstance(items, list) or any(isinstance(v, dict) and "explicit-lean-simp-pilot" in v.get("tags", []) for v in items) or attached.intersection(remaining_ids):
+        items = _list_response(volumes, "volumes", "post-delete volume listing")
+        remaining_ids = {v.get("id") for v in items if isinstance(v, dict)}
+        if any(isinstance(v, dict) and "explicit-lean-simp-pilot" in v.get("tags", []) for v in items) or attached.intersection(remaining_ids):
             raise PilotError("attached storage deletion could not be confirmed")
         state.update({"phase": "deleted", "deleted_at": self.now().isoformat(), "delete_response": result})
         self._save(state)
@@ -762,26 +1030,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("plan", help="show policy readiness without provider calls")
     pf = sub.add_parser("preflight", help="run read-only identity/source/image/network/storage gates")
-    pf.add_argument("--repo", type=Path, required=True); pf.add_argument("--job", type=Path, required=True)
-    launch = sub.add_parser("create", help="create the single authorized server")
-    launch.add_argument("--repo", type=Path, required=True); launch.add_argument("--job", type=Path, required=True)
+    pf.add_argument("--repo", type=Path, required=True); pf.add_argument("--jobs", type=Path, required=True)
+    launch = sub.add_parser("create", help="create the single authorized two-worker server")
+    launch.add_argument("--repo", type=Path, required=True); launch.add_argument("--jobs", type=Path, required=True)
     launch.add_argument("--confirm-create", action="store_true")
     sub.add_parser("status", help="read provider status only")
-    run = sub.add_parser("run-worker", help="bootstrap exact checkout, transfer job and run worker once")
-    run.add_argument("--repo", type=Path, required=True); run.add_argument("--job", type=Path, required=True)
-    collect = sub.add_parser("collect", help="download and verify worker results")
+    run = sub.add_parser("run-workers", help="bootstrap exact checkout, transfer two jobs and launch workers concurrently")
+    run.add_argument("--repo", type=Path, required=True); run.add_argument("--jobs", type=Path, required=True)
+    collect = sub.add_parser("collect-workers", help="download and verify both worker results")
     collect.add_argument("--output", type=Path, required=True)
+    monitor = sub.add_parser("supervise", help="poll workers, collect results and delete resources automatically")
+    monitor.add_argument("--repo", type=Path, required=True); monitor.add_argument("--jobs", type=Path, required=True)
+    monitor.add_argument("--output", type=Path, required=True); monitor.add_argument("--poll-seconds", type=int, default=60)
     cleanup = sub.add_parser("cleanup", help="delete exact pilot server, attached volume and IP")
     cleanup.add_argument("--confirm-delete", action="store_true")
     args = parser.parse_args(argv)
     ctl = ScalewayPilot(policy_path=args.policy, state_path=args.state)
     try:
         if args.command == "plan": result = ctl.plan()
-        elif args.command == "preflight": result = ctl.preflight(repo_root=args.repo, job_dir=args.job)
-        elif args.command == "create": result = ctl.create(repo_root=args.repo, job_dir=args.job, confirm=args.confirm_create)
+        elif args.command == "preflight": result = ctl.preflight(repo_root=args.repo, job_root=args.jobs)
+        elif args.command == "create": result = ctl.create(repo_root=args.repo, job_root=args.jobs, confirm=args.confirm_create)
         elif args.command == "status": result = ctl.status()
-        elif args.command == "run-worker": result = ctl.run_worker(job_dir=args.job, repo_root=args.repo)
-        elif args.command == "collect": result = ctl.collect(output_dir=args.output)
+        elif args.command == "run-workers": result = ctl.run_workers(job_root=args.jobs, repo_root=args.repo)
+        elif args.command == "collect-workers": result = ctl.collect_workers(output_dir=args.output)
+        elif args.command == "supervise":
+            result = ctl.supervise(job_root=args.jobs, repo_root=args.repo, output_dir=args.output,
+                                   poll_seconds=args.poll_seconds)
+            if not result.get("complete"):
+                print(json.dumps(result, sort_keys=True, indent=2, default=str))
+                return 2
         else: result = ctl.cleanup(confirm=args.confirm_delete)
         print(json.dumps(result, sort_keys=True, indent=2, default=str))
         return 0
