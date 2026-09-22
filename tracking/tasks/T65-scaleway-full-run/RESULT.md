@@ -25,12 +25,16 @@ shared Lean targets once before starting either worker. Cleanup preserves
 retry/error information in the local state file and is idempotent after
 confirmed deletion.
 
-Dispatch now persists an atomic per-job remote claim before launch. Restart
-reconciliation reads that claim, PID and completion marker, records remotely
-running/completed jobs, and launches only jobs with no evidence of prior launch.
-An ambiguous claim/PID state fails closed and is never relaunched. The root
-volume must match the server's explicit boot-volume ID or have `boot: true`; a
-similarly sized local data volume is insufficient.
+Dispatch now persists an atomic per-job remote claim and unique launch token
+before launch. The token is passed in the worker environment; reconciliation
+requires exact `/proc` environment and command-line evidence before treating a
+PID as the worker, preventing PID reuse from appearing live. It records remote
+running/completed jobs and launches only jobs with no evidence of prior launch.
+Ambiguous dispatch is retried until evidence resolves or the bounded
+worker/host deadline expires; at expiry it records the unresolved state and
+cleans up the exact server, volume and IP. The root volume must match the
+server's explicit boot-volume ID or have `boot: true`; a similarly sized local
+data volume is insufficient.
 
 Verification completed locally:
 
@@ -38,7 +42,8 @@ Verification completed locally:
   checks passed, including cost/TTL/job-hash rejection, complete/disjoint
   pending-queue validation and distinct DB inodes, CLI response shapes,
   server and boot-volume identity, concurrent launches, dispatch crash-point
-  reconciliation without duplicate workers, result-size/disk limits, restart-safe
+  reconciliation, persistent-ambiguity cleanup and transient recovery without
+  duplicate workers, result-size/disk limits, restart-safe
   collection, flexible-IP cleanup, idempotent cleanup, ambiguous-create
   handling, and transient collection retry before cleanup.
 - `python3 -m py_compile Experiment/scaleway_simp_replacements.py

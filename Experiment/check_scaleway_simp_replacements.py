@@ -293,6 +293,11 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
         launches = [args for args in ssh_calls if "nohup bash -lc" in " ".join(args)]
         assert len(launches) == 2
         assert all("timeout --signal=TERM" in " ".join(args) for args in launches)
+        assert all("EXPLICIT_LEAN_WORKER_TOKEN" in " ".join(args) and ".launch-claim/token" in " ".join(args)
+                   for args in launches)
+        status_checks = [" ".join(args) for args in ssh_calls if "NOT_LAUNCHED" in " ".join(args)]
+        assert len(status_checks) == 2 and all("/proc/$p/environ" in command and "/proc/$p/cmdline" in command
+                                               for command in status_checks)
         bootstrap = next(args[-1] for args in ssh_calls if "lake build ExplicitLean.SimpTrace" in " ".join(args))
         assert "apt-get install -y" in bootstrap and "zstd" in bootstrap
         assert "lake build ExplicitLean.SimpTrace ExplicitLean.ExplicitRw" in bootstrap
@@ -432,6 +437,83 @@ def test_dispatch_reconciliation_is_idempotent_at_all_crash_points() -> None:
         controller.cleanup = cleanup  # type: ignore[method-assign]
         outcome = controller.supervise(job_root=job_root, repo_root=repo, output_dir=root / "results", poll_seconds=5)
         assert outcome["complete"] and actions == ["poll", "collect", "cleanup"]
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, job_root, _, path = setup(root); provider = Provider()
+        controller = ctl(root, path, provider); state = controller.create(repo_root=repo, job_root=job_root, confirm=True)
+        state.update({"phase": "dispatch-failed", "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
+                      "worker_started_at": NOW.isoformat(), "worker_timeout_seconds": 36000,
+                      "jobs": [{**item, "phase": "starting"} for item in state["jobs"]]})
+        controller._save(state); attempts = 0; cleanup: list[str] = []
+        def persistent_ambiguity(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            nonlocal attempts
+            del timeout; attempts += 1
+            return subprocess.CompletedProcess(args, 0, "AMBIGUOUS\n", "")
+        controller._ssh = persistent_ambiguity  # type: ignore[method-assign]
+        controller.cleanup = lambda *, confirm=False: (cleanup.append("cleanup") or {"phase": "deleted"})  # type: ignore[method-assign]
+        old_monotonic, old_sleep = pilot.time.monotonic, pilot.time.sleep
+        clock = [0.0]
+        pilot.time.monotonic = lambda: clock[0]  # type: ignore[assignment]
+        pilot.time.sleep = lambda _seconds: clock.__setitem__(0, clock[0] + 1_000_000)  # type: ignore[assignment]
+        try:
+            outcome = controller.supervise(job_root=job_root, repo_root=repo, output_dir=root / "expired", poll_seconds=5)
+        finally:
+            pilot.time.monotonic, pilot.time.sleep = old_monotonic, old_sleep  # type: ignore[assignment]
+        assert not outcome["complete"] and "budget expired" in outcome["error"] and cleanup == ["cleanup"]
+        assert attempts >= 2
+        expired_state = controller._load_state()
+        assert expired_state["remote_results_may_be_lost_after_cleanup"] is True
+        assert expired_state["unrecovered_dispatch_reason"]
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, job_root, _, path = setup(root); provider = Provider()
+        controller = ctl(root, path, provider); state = controller.create(repo_root=repo, job_root=job_root, confirm=True)
+        reconcile_attempts = 0; launched: list[str] = []
+        def interrupt_after_dispatch(*, job_root: Path, repo_root: Path) -> dict[str, Any]:
+            del job_root, repo_root
+            interrupted = controller._load_state()
+            interrupted.update({"phase": "dispatch-failed", "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
+                               "worker_started_at": NOW.isoformat(), "worker_timeout_seconds": 36000,
+                               "jobs": [{**item, "phase": "starting"} for item in interrupted["jobs"]]})
+            controller._save(interrupted)
+            raise pilot.PilotError("simulated lost launch response")
+        def transient_ssh(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            nonlocal reconcile_attempts
+            command = " ".join(args); job_id = "job-000" if "job-000" in command else "job-001"
+            if "NOT_LAUNCHED" in command:
+                reconcile_attempts += 1
+                if reconcile_attempts == 1:
+                    return subprocess.CompletedProcess(args, 0, "AMBIGUOUS\n", "")
+                if job_id == "job-000":
+                    return subprocess.CompletedProcess(args, 0, "RUNNING\t4310\n", "")
+                return subprocess.CompletedProcess(args, 0, "NOT_LAUNCHED\n", "")
+            if "nohup bash -lc" in command:
+                launched.append(job_id)
+                return subprocess.CompletedProcess(args, 0, "RUNNING 4311\n", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+        controller._ssh = transient_ssh  # type: ignore[method-assign]
+        controller.run_workers = interrupt_after_dispatch  # type: ignore[method-assign]
+        actions: list[str] = []
+        def poll_after_reconcile() -> dict[str, Any]:
+            actions.append("poll")
+            updated = controller._load_state(); updated["phase"] = "workers-finished"
+            updated["jobs"] = [{**item, "phase": "finished", "exit_code": 0} for item in updated["jobs"]]
+            controller._save(updated)
+            return {"phase": "workers-finished", "jobs": updated["jobs"]}
+        def collect_after_reconcile(*, output_dir: Path) -> dict[str, Any]:
+            actions.append("collect"); output_dir.mkdir()
+            updated = controller._load_state(); updated["phase"] = "collected"; controller._save(updated)
+            return updated
+        controller.poll_workers = poll_after_reconcile  # type: ignore[method-assign]
+        controller.collect_workers = collect_after_reconcile  # type: ignore[method-assign]
+        controller.cleanup = lambda *, confirm=False: (actions.append("cleanup") or {"phase": "deleted"})  # type: ignore[method-assign]
+        old_sleep = pilot.time.sleep; pilot.time.sleep = lambda _seconds: None
+        try:
+            outcome = controller.supervise(job_root=job_root, repo_root=repo, output_dir=root / "recovered", poll_seconds=5)
+        finally:
+            pilot.time.sleep = old_sleep
+        assert outcome["complete"] and reconcile_attempts >= 3
+        assert launched == ["job-001"] and actions == ["poll", "collect", "cleanup"]
 
 
 def test_collection_verifies_both_result_archives_and_hashes() -> None:

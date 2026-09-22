@@ -83,9 +83,13 @@ provenance and local boot volume (using the boot-volume ID or explicit `boot`
 flag), and record the exact attached flexible-IP ID. Dispatch persists a
 per-job remote claim before starting either worker. A restart reconciles the
 claim, PID and completion marker; it starts only a job with no remote launch
-evidence. If a claim exists but its process/marker cannot be resolved, the
-worker is not relaunched and the host/results remain for recovery or the hard
-deadline.
+evidence. The launch token is stored in the claim and passed in the worker
+environment; reconciliation requires matching `/proc` environment and
+command-line evidence, not merely a live PID. If a claim exists but its process
+cannot be resolved, the worker is not relaunched. The supervisor retries
+ambiguous dispatch until evidence resolves or the bounded worker/host deadline
+expires; at that deadline it records the unresolved state and performs exact
+resource cleanup so a billable host/IP cannot linger.
 Collection validates both archives, module-manifest hashes, source commit,
 worker exit codes, updated DB hashes, logs and artifacts before atomically
 publishing the local output. A compressed archive is capped at 8 GiB per worker

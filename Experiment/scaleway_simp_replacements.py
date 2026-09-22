@@ -725,7 +725,7 @@ class ScalewayPilot:
         return self._run([*base, *args], timeout)
 
     def _launch_worker_once(self, state: Mapping[str, Any], job: Mapping[str, Any],
-                            worker_timeout: int, commit: str) -> subprocess.CompletedProcess[str]:
+                            worker_timeout: int, commit: str, launch_token: str) -> subprocess.CompletedProcess[str]:
         """Atomically claim a job before launch; an existing claim is never relaunched."""
         remote_job = state["remote_job_directory"] + "/" + job["id"]
         worker = ("set +e; timeout --signal=TERM --kill-after=30 " + str(worker_timeout) +
@@ -739,15 +739,21 @@ class ScalewayPilot:
                   "/complete.json.tmp; mv " + remote_job + "/complete.json.tmp " + remote_job +
                   "/complete.json; tar -czf " + remote_job + "/result.tar.gz -C " + remote_job +
                   " mathlib-db.sqlite3 worker.log complete.json artifacts")
-        script = ("set -eu; d=" + shlex.quote(remote_job) + "; mkdir -p \"$d/artifacts\"; "
+        script = ("set -eu; d=" + shlex.quote(remote_job) + "; token=" + shlex.quote(launch_token) + "; mkdir -p \"$d/artifacts\"; "
                   "if test -f \"$d/complete.json\"; then printf 'COMPLETE\\n'; exit 0; fi; "
                   "if ! mkdir \"$d/.launch-claim\" 2>/dev/null; then "
                   "p=$(cat \"$d/worker.pid\" 2>/dev/null || true); "
                   "case \"$p\" in ''|*[!0-9]*) printf 'AMBIGUOUS\\n'; exit 42;; esac; "
-                  "if kill -0 \"$p\" 2>/dev/null; then printf 'RUNNING %s\\n' \"$p\"; exit 0; fi; "
+                  "expected=$(cat \"$d/.launch-claim/token\" 2>/dev/null || true); "
+                  "if test \"$expected\" = \"$token\" && kill -0 \"$p\" 2>/dev/null "
+                  "&& tr '\\000' '\\n' < \"/proc/$p/environ\" | grep -Fx \"EXPLICIT_LEAN_WORKER_TOKEN=$token\" >/dev/null "
+                  "&& tr '\\000' ' ' < \"/proc/$p/cmdline\" | grep -F \"Experiment/simp_replacement_worker.py --database $d/mathlib-db.sqlite3 --manifest $d/modules.txt\" >/dev/null; "
+                  "then printf 'RUNNING %s\\n' \"$p\"; exit 0; fi; "
                   "printf 'AMBIGUOUS\\n'; exit 42; fi; "
+                  "printf '%s\\n' \"$token\" > \"$d/.launch-claim/token.tmp\"; "
+                  "mv \"$d/.launch-claim/token.tmp\" \"$d/.launch-claim/token\"; "
                   "cd /opt/explicit-lean; . \"$HOME/.elan/env\"; "
-                  "nohup bash -lc " + shlex.quote(worker) + " > \"$d/launcher.log\" 2>&1 < /dev/null & "
+                  "EXPLICIT_LEAN_WORKER_TOKEN=\"$token\" nohup bash -lc " + shlex.quote(worker) + " > \"$d/launcher.log\" 2>&1 < /dev/null & "
                   "p=$!; printf '%s\\n' \"$p\" > \"$d/worker.pid.tmp\"; "
                   "mv \"$d/worker.pid.tmp\" \"$d/worker.pid\"; printf 'RUNNING %s\\n' \"$p\"")
         return self._ssh(state, "sh", "-lc", shlex.quote(script), timeout=60)
@@ -770,15 +776,26 @@ class ScalewayPilot:
         status_shell = ("set -eu; d=" + remote + "/{job}; "
                         "if test -f \"$d/complete.json\"; then printf 'COMPLETE\\t'; cat \"$d/complete.json\"; "
                         "elif test -d \"$d/.launch-claim\"; then p=$(cat \"$d/worker.pid\" 2>/dev/null || true); "
+                        "token=$(cat \"$d/.launch-claim/token\" 2>/dev/null || true); expected=EXPECTED_TOKEN; "
                         "case \"$p\" in ''|*[!0-9]*) printf 'AMBIGUOUS\\n';; *) "
-                        "if kill -0 \"$p\" 2>/dev/null; then printf 'RUNNING\\t%s\\n' \"$p\"; "
+                        "if test \"$token\" = \"$expected\" && kill -0 \"$p\" 2>/dev/null "
+                        "&& tr '\\000' '\\n' < \"/proc/$p/environ\" | grep -Fx \"EXPLICIT_LEAN_WORKER_TOKEN=$expected\" >/dev/null "
+                        "&& tr '\\000' ' ' < \"/proc/$p/cmdline\" | grep -F \"Experiment/simp_replacement_worker.py --database $d/mathlib-db.sqlite3 --manifest $d/modules.txt\" >/dev/null; "
+                        "then printf 'RUNNING\\t%s\\n' \"$p\"; "
                         "else printf 'AMBIGUOUS\\n'; fi;; esac; "
                         "elif test -e \"$d/worker.pid\" || test -e \"$d/complete.json.tmp\" "
                         "|| test -e \"$d/result.tar.gz\"; then printf 'AMBIGUOUS\\n'; "
                         "else printf 'NOT_LAUNCHED\\n'; fi")
         commit = str(_dict(policy.get("repository"), "repository")["commit"])
         for job_id in ("job-000", "job-001"):
-            command = status_shell.format(job=job_id)
+            if not jobs[job_id].get("launch_token"):
+                jobs[job_id] = {**jobs[job_id], "launch_token": uuid.uuid4().hex}
+                state["jobs"] = [jobs[key] for key in ("job-000", "job-001")]
+                self._save(state)
+            launch_token = jobs[job_id]["launch_token"]
+            if not re.fullmatch(r"[0-9a-f]{32}", str(launch_token)):
+                raise PilotError(f"{job_id} launch token is malformed")
+            command = status_shell.replace("EXPECTED_TOKEN", shlex.quote(str(launch_token))).format(job=job_id)
             result = self._ssh(state, "sh", "-lc", shlex.quote(command), timeout=60)
             if result.returncode:
                 state["phase"] = "dispatch-failed"
@@ -791,7 +808,7 @@ class ScalewayPilot:
                     state["phase"] = "dispatch-failed"
                     self._save(state)
                     raise PilotError(f"{job_id} is provably not launched but no worker budget remains")
-                launched = self._launch_worker_once(state, jobs[job_id], worker_timeout, commit)
+                launched = self._launch_worker_once(state, jobs[job_id], worker_timeout, commit, str(launch_token))
                 if launched.returncode:
                     state["phase"] = "dispatch-failed"
                     state["dispatch_error"] = f"{job_id} launch outcome is ambiguous; refusing relaunch"
@@ -1113,6 +1130,7 @@ class ScalewayPilot:
         failure: str | None = None
         cleanup_allowed = False
         terminal: str | None = None
+        dispatch_expired = False
         try:
             state = self._load_state()
             phase = state.get("phase")
@@ -1123,27 +1141,64 @@ class ScalewayPilot:
                 raise PilotError("supervisor state phase is not resumable; resources and remote data are untouched")
             cleanup_allowed = phase in {"created", "bootstrap-started"}
             if phase == "created":
-                state = self.run_workers(job_root=job_root, repo_root=repo_root)
-                phase = state.get("phase")
+                try:
+                    state = self.run_workers(job_root=job_root, repo_root=repo_root)
+                    phase = state.get("phase")
+                except Exception as error:
+                    state = self._load_state()
+                    phase = state.get("phase")
+                    if phase not in {"dispatching", "dispatch-failed"}:
+                        raise
+                    final["initial_dispatch_error"] = f"{type(error).__name__}: {error}"
                 if phase in {"workers-running", "workers-finished", "workers-failed", "dispatching", "dispatch-failed"}:
                     cleanup_allowed = False
-            elif phase in {"dispatching", "dispatch-failed"}:
+            if phase in {"dispatching", "dispatch-failed"}:
                 policy, raw = self.policy()
-                checked = validate_policy(policy, self.now())
                 if state.get("policy_sha256") != sha256(raw):
                     raise PilotError("policy changed during partial worker dispatch")
-                server_data = self._scw(["instance", "server", "get", state["server_id"],
-                                         f"zone={state['zone']}"], policy=checked)
-                server = server_data.get("server", server_data)
-                if not isinstance(server, dict):
-                    raise PilotError("server details unavailable during dispatch recovery")
-                verified = self._verify_server_identity(server, checked, state)
-                if state.get("volume_ids") and verified["volume_ids"] != state["volume_ids"]:
-                    raise PilotError("created boot volume identity changed during dispatch recovery")
-                state.update(verified)
-                state = self._reconcile_dispatch(state, checked, checked)
-                phase = state.get("phase")
-                cleanup_allowed = False
+                created_at = datetime.fromisoformat(state["created_at"]).astimezone(timezone.utc)
+                hard_end = min(parse_utc(state["deadline"], "state.deadline"),
+                               created_at + timedelta(seconds=int(state["lifetime_seconds"])))
+                if self.now().astimezone(timezone.utc) >= hard_end:
+                    failure = "ambiguous worker dispatch remained unresolved at the hard host deadline"
+                    dispatch_expired = True
+                    cleanup_allowed = True
+                    state["unrecovered_dispatch_at"] = self.now().isoformat()
+                    state["unrecovered_dispatch_reason"] = "supervisor resumed at or after the hard host deadline"
+                    state["remote_results_may_be_lost_after_cleanup"] = True
+                    self._save(state)
+                else:
+                    checked = validate_policy(policy, self.now())
+                    server_data = self._scw(["instance", "server", "get", state["server_id"],
+                                             f"zone={state['zone']}"], policy=checked)
+                    server = server_data.get("server", server_data)
+                    if not isinstance(server, dict):
+                        raise PilotError("server details unavailable during dispatch recovery")
+                    verified = self._verify_server_identity(server, checked, state)
+                    if state.get("volume_ids") and verified["volume_ids"] != state["volume_ids"]:
+                        raise PilotError("created boot volume identity changed during dispatch recovery")
+                    state.update(verified)
+                    remaining = min(checked["lifetime"] - (self.now().astimezone(timezone.utc) - created_at).total_seconds(),
+                                    (checked["deadline"] - self.now().astimezone(timezone.utc)).total_seconds())
+                    dispatch_budget = max(0, min(checked["runtime"] + 1800, int(remaining)))
+                    while True:
+                        try:
+                            state = self._reconcile_dispatch(state, checked, checked)
+                            phase = state.get("phase")
+                            break
+                        except Exception as error:
+                            final["last_dispatch_error"] = f"{type(error).__name__}: {error}"
+                            if time.monotonic() - started >= dispatch_budget:
+                                failure = "ambiguous worker dispatch could not be resolved before the host/worker budget expired"
+                                dispatch_expired = True
+                                cleanup_allowed = True
+                                checkpoint = self._load_state()
+                                checkpoint["unrecovered_dispatch_at"] = self.now().isoformat()
+                                checkpoint["unrecovered_dispatch_reason"] = final["last_dispatch_error"]
+                                checkpoint["remote_results_may_be_lost_after_cleanup"] = True
+                                self._save(checkpoint)
+                                break
+                            time.sleep(min(poll_seconds, max(1, dispatch_budget - (time.monotonic() - started))))
             if phase in {"workers-finished", "workers-failed"}:
                 terminal = phase
             elif phase in {"collected", "collected-worker-failed"}:
@@ -1151,13 +1206,16 @@ class ScalewayPilot:
                 final["collection_already_validated"] = True
                 if phase == "collected-worker-failed":
                     failure = "one or more jobs had failed; previously validated result bundles are retained"
-            policy, _ = self.policy()
-            checked = validate_policy(policy, self.now())
-            created = datetime.fromisoformat(state["created_at"]).astimezone(timezone.utc)
-            remaining = min(checked["lifetime"] - (self.now().astimezone(timezone.utc) - created).total_seconds(),
-                            (checked["deadline"] - self.now().astimezone(timezone.utc)).total_seconds())
-            budget = max(0, min(checked["runtime"] + 1800, int(remaining)))
-            while terminal is None and not final.get("collection_already_validated"):
+            if dispatch_expired:
+                budget = 0
+            else:
+                policy, _ = self.policy()
+                checked = validate_policy(policy, self.now())
+                created = datetime.fromisoformat(state["created_at"]).astimezone(timezone.utc)
+                remaining = min(checked["lifetime"] - (self.now().astimezone(timezone.utc) - created).total_seconds(),
+                                (checked["deadline"] - self.now().astimezone(timezone.utc)).total_seconds())
+                budget = max(0, min(checked["runtime"] + 1800, int(remaining)))
+            while terminal is None and not final.get("collection_already_validated") and not dispatch_expired:
                 if phase not in {"created", "bootstrap-started", "dispatching", "dispatch-failed", "workers-running"}:
                     failure = "worker state is not eligible for polling or collection"
                     break
