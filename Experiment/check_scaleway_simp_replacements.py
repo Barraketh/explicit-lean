@@ -528,6 +528,9 @@ def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence()
         controller = ctl(root, path, provider)
         state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
         state["phase"] = "bootstrap-started"
+        state["bootstrap_started_at"] = NOW.isoformat()
+        state["guest_poweroff_watchdog_armed"] = True
+        state["host_ttl_remaining_seconds"] = 6 * 3600
         controller._save(state)
         (root / "pilot_known_hosts").write_text(
             "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
@@ -546,20 +549,32 @@ def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence()
         controller._ssh = ssh_fake  # type: ignore[method-assign]
         resumed = controller.run_workers(job_root=jobs, repo_root=repo)
         assert resumed["phase"] == "workers-running"
+        timer_checks = [" ".join(args) for args in ssh_calls if "NextElapseUSecMonotonic" in " ".join(args)]
+        assert len(timer_checks) == 1 and "test \"$next\" -le" in timer_checks[0]
+        assert not any("systemd-run" in args for args in ssh_calls)
         bootstrap = next(" ".join(args) for args in ssh_calls if "git clone --no-checkout" in " ".join(args))
         assert "sudo install -d -o ubuntu -g ubuntu /opt/explicit-lean" in bootstrap
         assert "git -C /opt/explicit-lean remote get-url origin" in bootstrap
 
-    for evidence in ("worker_started_at", "worker_timeout_seconds", "launch_token"):
+    evidence_cases = [
+        ("state", "worker_started_at"), ("state", "worker_timeout_seconds"),
+        ("state", "dispatch_error"), ("job", "launch_token"), ("job", "pid"),
+        ("job", "exit_code"), ("job", "database_result_sha256"),
+        ("job", "result_database_sha256"), ("job", "result_archive_sha256"),
+    ]
+    for location, evidence in evidence_cases:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
             controller = ctl(root, path, provider)
             state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
             state["phase"] = "bootstrap-started"
-            if evidence in {"worker_started_at", "worker_timeout_seconds"}:
+            state["bootstrap_started_at"] = NOW.isoformat()
+            state["guest_poweroff_watchdog_armed"] = True
+            state["host_ttl_remaining_seconds"] = 6 * 3600
+            if location == "state":
                 state[evidence] = "evidence"
             else:
-                state["jobs"][0][evidence] = "a" * 32
+                state["jobs"][0][evidence] = "worker evidence"
             controller._save(state)
             blocked(lambda: controller.run_workers(job_root=jobs, repo_root=repo))
             cleanup_calls: list[str] = []
@@ -567,6 +582,24 @@ def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence()
             outcome = controller.supervise(job_root=jobs, repo_root=repo,
                 output_dir=root / "results", poll_seconds=5)
             assert not outcome["complete"] and cleanup_calls == []
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
+        controller = ctl(root, path, provider)
+        state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        state.update({"phase": "bootstrap-started", "bootstrap_started_at": NOW.isoformat(),
+                      "guest_poweroff_watchdog_armed": True, "host_ttl_remaining_seconds": 6 * 3600})
+        controller._save(state)
+        ssh_calls: list[tuple[str, ...]] = []
+
+        def missing_watchdog(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            del timeout
+            ssh_calls.append(args)
+            return subprocess.CompletedProcess(args, 1 if "NextElapseUSecMonotonic" in " ".join(args) else 0, "", "")
+
+        controller._ssh = missing_watchdog  # type: ignore[method-assign]
+        blocked(lambda: controller.run_workers(job_root=jobs, repo_root=repo))
+        assert len(ssh_calls) == 1 and "NextElapseUSecMonotonic" in " ".join(ssh_calls[0])
 
 
 def test_ssh_accepts_plural_only_public_ip_and_rejects_state_or_record_mismatch() -> None:

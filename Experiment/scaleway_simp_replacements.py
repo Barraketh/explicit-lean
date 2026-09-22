@@ -950,7 +950,30 @@ class ScalewayPilot:
         """Only retry bootstrap while state proves dispatch has not begun."""
         if state.get("phase") != "bootstrap-started":
             return False
-        if "worker_started_at" in state or "worker_timeout_seconds" in state:
+        allowed_state_keys = {
+            "schema", "phase", "server_id", "name", "remote_job_directory", "zone", "project_id",
+            "organization_id", "created_at", "deadline", "lifetime_seconds", "worker_runtime_seconds",
+            "policy_sha256", "preflight", "local_image_id", "ssh_key_id", "ssh_public_key_sha256", "jobs",
+            "mutation", "public_ip_id", "public_ip_address", "volume_ids", "guest_poweroff_watchdog_armed",
+            "host_ttl_remaining_seconds", "bootstrap_started_at", "supervisor_report",
+        }
+        if set(state) - allowed_state_keys:
+            return False
+        required_state_keys = allowed_state_keys - {"supervisor_report"}
+        if not required_state_keys <= set(state):
+            return False
+        if state.get("guest_poweroff_watchdog_armed") is not True:
+            return False
+        if type(state.get("host_ttl_remaining_seconds")) is not int or state["host_ttl_remaining_seconds"] <= 0:
+            return False
+        if type(state.get("bootstrap_started_at")) is not str:
+            return False
+        report = state.get("supervisor_report")
+        if report is not None and (not isinstance(report, dict)
+                or set(report) - {"supervisor", "error", "elapsed_seconds", "complete"}
+                or report.get("supervisor") != "started" or report.get("complete") is not False
+                or type(report.get("error")) is not str
+                or type(report.get("elapsed_seconds")) is not int or report["elapsed_seconds"] < 0):
             return False
         jobs = state.get("jobs")
         if not isinstance(jobs, list) or len(jobs) != 2:
@@ -958,7 +981,8 @@ class ScalewayPilot:
         job_ids = [job.get("id") for job in jobs if isinstance(job, dict)]
         if len(job_ids) != 2 or any(type(job_id) is not str for job_id in job_ids) or set(job_ids) != {"job-000", "job-001"}:
             return False
-        return all(isinstance(job, dict) and job.get("phase") == "pending" and "launch_token" not in job
+        allowed_job_keys = {"id", "manifest_sha256", "database_sha256", "module_count", "phase"}
+        return all(isinstance(job, dict) and set(job) == allowed_job_keys and job.get("phase") == "pending"
                    for job in jobs)
 
     def _reconcile_dispatch(self, state: dict[str, Any], policy: Mapping[str, Any],
@@ -1079,12 +1103,28 @@ class ScalewayPilot:
         worker_timeout = min(checked["runtime"], ttl_remaining, cutoff_remaining)
         if worker_timeout <= 0:
             raise PilotError("no worker runtime remains before host TTL/deadline")
-        watchdog = self._ssh(state, "sudo", "systemd-run", f"--unit=explicit-lean-simp-ttl-{state['server_id']}",
-                             f"--on-active={ttl_remaining}s", "/usr/bin/systemctl", "poweroff", timeout=60)
-        if watchdog.returncode:
-            raise PilotError("guest TTL watchdog could not be armed")
-        state.update({"guest_poweroff_watchdog_armed": True, "host_ttl_remaining_seconds": ttl_remaining})
-        self._save(state)
+        watchdog_unit = f"explicit-lean-simp-ttl-{state['server_id']}"
+        if state.get("guest_poweroff_watchdog_armed") is True:
+            previous_ttl = state.get("host_ttl_remaining_seconds")
+            if type(previous_ttl) is not int or previous_ttl <= 0 or ttl_remaining > previous_ttl:
+                raise PilotError("saved guest TTL watchdog budget is inconsistent with remaining host TTL")
+            verify_timer = ("set -eu; unit=" + shlex.quote(watchdog_unit + ".timer") + "; "
+                            "systemctl is-active --quiet \"$unit\"; "
+                            "next=$(systemctl show --property=NextElapseUSecMonotonic --value \"$unit\"); "
+                            "now=$(awk '{printf \"%.0f\", $1 * 1000000}' /proc/uptime); "
+                            "case \"$next\" in ''|*[!0-9]*) exit 1;; esac; "
+                            "test \"$next\" -gt \"$now\"; "
+                            "test \"$next\" -le \"$((now + " + str(ttl_remaining) + " * 1000000))\"")
+            watchdog = self._ssh(state, "sh", "-lc", shlex.quote(verify_timer), timeout=60)
+            if watchdog.returncode:
+                raise PilotError("persisted guest TTL watchdog is not active within the remaining host TTL")
+        else:
+            watchdog = self._ssh(state, "sudo", "systemd-run", f"--unit={watchdog_unit}",
+                                 f"--on-active={ttl_remaining}s", "/usr/bin/systemctl", "poweroff", timeout=60)
+            if watchdog.returncode:
+                raise PilotError("guest TTL watchdog could not be armed")
+            state.update({"guest_poweroff_watchdog_armed": True, "host_ttl_remaining_seconds": ttl_remaining})
+            self._save(state)
         commit = checked["repository"]["commit"]
         bootstrap = "set -eu; test \"$(uname -m)\" = x86_64; test -f /etc/os-release; " \
                     "sudo apt-get update; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 python3-pip build-essential curl zstd; " \
