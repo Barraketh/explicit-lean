@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-19T13:40:55Z",
+  "updatedAt": "2026-09-22T22:44:16Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -483,7 +483,7 @@
     "Run dependency-ordered translated builds for the expanded cone, then compile the full pinned Mathlib tree from the translated root with fresh outputs and import-resolution audits.",
     "Complete the remaining executable simp-family call audit, reusable-call provenance checks, declaration/computational semantic checks and final trust validation; do not convert the bounded cone result into whole-tree credit.",
     "Use the declaration oracle only as an optional focused diagnostic; do not make per-site hashes, a neutral forgery suite or other retired machinery acceptance prerequisites.",
-    "Do not provision AWS or any other host without new user authorization; the T47 milestone was local-only, and immutable deadline/authorization fields and closed pilot evidence remain unchanged."
+    "Monitor the user-authorized one-host Scaleway replacement run, collect both validated job archives, and confirm exact server, SBS volume, flexible IPv4, and security-group deletion by the immutable 2026-09-23T09:50:00Z cutoff. Do not add another host or extend the cutoff; whole-tree acceptance remains unclaimed."
   ],
   "work": [
     {
@@ -1159,17 +1159,49 @@
     "design": "record simp's steps, not its output: (lemma|hypothesis|unfold|simproc-equation, position, direction, side-condition subtrace); replay positionally with re-matching",
     "recorderGap": "the boundary recorder currently captures Simp.Result and stats only; it does not hook Simp.Methods and never sees positions"
   },
+  "scalewayReplacementRun": {
+    "task": "T72-scaleway-live-run",
+    "authorizedAt": "2026-09-22",
+    "launchedAt": "2026-09-22T22:43:48Z",
+    "provider": "scaleway",
+    "zone": "nl-ams-1",
+    "instanceType": "POP2-HM-16C-128G",
+    "workerCount": 2,
+    "moduleCounts": [
+      2978,
+      2979
+    ],
+    "candidateRowsPerDatabase": 51322,
+    "sourceCommit": "1953b0721faf53b6a40adf8fadbd13bec20cfc7f",
+    "databaseBaselineSha256": "411d08771291e901988e5b9afd41a0fcc70d5d8d864e0843ce2b4a24808589f9",
+    "status": "workers_running",
+    "hostLifetimeSeconds": 43200,
+    "workerRuntimeSeconds": 36000,
+    "notAfter": "2026-09-23T09:50:00Z",
+    "hourlyComputeEur": "0.824",
+    "estimatedAllInCostEur": "12.19",
+    "maxCostEur": "17.00",
+    "maxCostUsd": "20.00",
+    "eurUsdRate": "1.1490",
+    "monitoring": {
+      "localSupervisor": "explicit-lean-scaleway-supervisor",
+      "deletionWatchdog": "explicit-lean-scaleway-watchdog",
+      "heartbeat": "monitor-scaleway-simp-replacement-run"
+    },
+    "result": "tracking/tasks/T72-scaleway-live-run/RESULT.md",
+    "wholeTreeAcceptance": "not_claimed"
+  },
   "remoteWorker": {
     "decidedAt": "2026-09-16",
     "provider": "scaleway",
-    "instanceType": "GP1-L",
-    "hourlyUsd": 0.8932,
+    "instanceType": "POP2-HM-16C-128G",
+    "hourlyEur": 0.824,
     "policy": "Try locally first (Mac, 64 GiB, 10 cores). Provision only if a local job fails on resources. Turn off and delete when not needed for an extended period; re-provision on need. No standing instance.",
     "ruledOut": {
       "aws": "not significantly cheaper (r7i.4xlarge $1.176/hr, 13% above Scaleway at 128 GB)",
       "vast": "cheapest but old hardware and reclaimable; user preferred Scaleway"
     },
     "pricingReport": "tracking/tasks/research-cloud-pricing.md",
-    "status": "not_provisioned"
+    "status": "running_authorized_full_replacement_run"
   }
 }
