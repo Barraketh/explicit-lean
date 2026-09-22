@@ -1168,7 +1168,7 @@ class ScalewayPilot:
                     "git -C /opt/explicit-lean fetch --no-tags origin " + shlex.quote(commit) + "; " \
                     "git -C /opt/explicit-lean checkout --detach " + shlex.quote(commit) + "; " \
                     "test \"$(git -C /opt/explicit-lean rev-parse HEAD)\" = " + shlex.quote(commit) + "; " \
-                    "curl --fail --silent --show-error " + ELAN_URL + " -o /tmp/elan.tar.gz; " \
+                    "curl --fail --location --silent --show-error " + ELAN_URL + " -o /tmp/elan.tar.gz; " \
                     "echo " + ELAN_SHA256 + "'  /tmp/elan.tar.gz' | sha256sum -c -; " \
                     "tar -xzf /tmp/elan.tar.gz -C /tmp elan-init; /tmp/elan-init -y --default-toolchain none; " \
                     ". \"$HOME/.elan/env\"; cd /opt/explicit-lean; lake exe cache get; " \
