@@ -105,3 +105,74 @@ project/zone filters; `instance ip list` is available; local-image and
 security-group `list-rules` commands accept the corresponding IDs and zone.
 No authenticated API response was fetched, so mocked JSON shapes are not a
 substitute for a live read-only preflight.
+
+## Final re-review of `e028bba`
+
+Re-reviewed the fixes in `e028bba0e2f1bdaa1fd3e9ad32dad362b8d3d276` (the
+implementation fix is `6e894410`). Ran:
+
+- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 12 checks
+  passed.
+- `python3 -m py_compile Experiment/scaleway_simp_replacements.py
+  Experiment/check_scaleway_simp_replacements.py` — passed.
+- `git diff --check` — passed.
+- `scw version` — CLI 2.61.0. Local help remains consistent with the server,
+  IP, volume, image, and security-group command forms above. Official
+  Scaleway schema/CLI documentation describes the server volume inventory and
+  boot-volume identity ([Instance API schemas](https://www.scaleway.com/en/developers/api/instance/~schemas),
+  [CLI v2 instance output example](https://www.scaleway.com/en/docs/instances/api-cli/creating-managing-instances-with-cliv2/)).
+
+The original findings are resolved in this diff: manifest sets must exactly
+partition both read-only pending queues, DBs must have equal baseline bytes but
+distinct inodes, collection checks compressed and extracted bounds plus free
+space, bootstrap installs `zstd` and builds/verifies the two Lean targets
+before launching either worker, and cleanup pins/checks the flexible-IP ID in
+both normal and already-absent-server paths. Terminal
+`workers-finished`/`workers-failed` states now resume collection. The new
+server verification checks the configured image ID, SG ID, key provenance,
+volume type/size and IP identity. Mocks exercise these paths, including
+retained IP rejection, low disk, archive expansion, and terminal restart.
+
+Final verdict: **FAIL — one P1 remains; do not dispatch from this controller
+until it is fixed and re-reviewed.**
+
+### P1 — a supervisor restart in `dispatching` waits out the budget then deletes results
+
+`run_workers` saves `phase="dispatching"` before launching the first worker
+and only saves `workers-running` after both remote launch requests finish
+([`Experiment/scaleway_simp_replacements.py:806-836](../../../../Experiment/scaleway_simp_replacements.py)).
+The supervisor calls this phase resumable at lines 1031-1040 and allows it in
+the polling loop at line 1056. However, `poll_workers` rejects every phase
+except `workers-running`, `workers-finished`, and `workers-failed` at lines
+839-842. If the supervisor exits during dispatch, a restart catches that
+polling error repeatedly, runs until the deadline/budget, then sets
+`cleanup_allowed=True` and deletes the server at lines 1067-1070. A worker
+launched before interruption may have valid completed results in its remote
+job directory, which this path never collects. `dispatch-failed` is also
+accepted by the loop but rejected by `poll_workers`; that phase may include
+one launched worker and the same eventual result deletion.
+
+Reproduction: persist `phase="dispatching"` (or `dispatch-failed`) with
+`server_id` and remote job directories, then invoke `supervise`. Its first
+`poll_workers` call raises "worker status requires dispatched jobs" because
+the saved phase is outside that method's accepted set. Repeated poll errors
+reach the timeout branch, which permits cleanup. The suite's restart test
+covers terminal phases, but not these intermediate dispatch phases. Resume
+must reconcile per-job remote markers/PIDs and collect any completed results;
+it must not age out to cleanup while a launched worker may have recoverable
+output.
+
+### P2 — root volume verification matches any volume, not the boot volume
+
+`_verify_server_identity` accepts any attached local volume whose size is
+within the 559 GB window at lines 524-533. It does not compare the selected
+volume ID to the server's `boot_volume_id`, nor require its volume `boot`
+field. Scaleway's server schema exposes `boot_volume_id`, and its CLI example
+includes `Volumes.*.Boot` (links above). An unexpected server with a different
+boot volume plus an additional matching-size local volume would pass this
+check and be recorded as if the requested root volume were verified. The
+mock's server includes one volume only and does not test a mismatched boot
+volume. Validate that the unique boot volume is the configured local root
+volume and record that exact ID.
+
+No provider API calls or resource mutations were made during this re-review.
