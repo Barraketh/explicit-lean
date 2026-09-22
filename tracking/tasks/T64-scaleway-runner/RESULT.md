@@ -15,10 +15,13 @@ limits runtime by worker cap, host TTL and absolute deadline. A persistent
 guest systemd timer powers off at the earlier of the authorized deadline or
 host TTL. Result collection requires a completion marker and matching source,
 manifest, worker exit and database hashes; it records hashes for the archive,
-database, log and artifacts. Cleanup targets the saved resource ID only,
-deletes the server with attached volumes and IP, then verifies server and
-storage removal. `status` is read-only. Creation is locally serialized and the
-checked-in policy is disabled by default.
+database, log and artifacts. Cleanup deletes the saved server ID with attached
+volumes and IP, then verifies server and storage removal. If the CLI times out
+after the provider may have accepted creation, a `create-requested` state is
+retained; read-only status lists exact-name candidates and confirmed cleanup
+adopts a uniquely matching name/tag/project/zone/type before deletion. It does
+not retry creation. `status` is read-only. Creation is locally serialized and
+the checked-in policy is disabled by default.
 
 Added `Experiment/check_scaleway_simp_replacements.py`, the planning-only
 `tracking/tasks/T64-scaleway-runner/pilot-policy.json`, and the operator
@@ -27,7 +30,7 @@ procedure at `tracking/tasks/T64-scaleway-runner/PROCEDURE.md`.
 Checks run:
 
 - `python3 -B -m py_compile Experiment/scaleway_simp_replacements.py Experiment/check_scaleway_simp_replacements.py`
-- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 7 mock checks passed
+- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 9 mock checks passed
 - `python3 -B Experiment/scaleway_simp_replacements.py --help`
 - `python3 -B Experiment/scaleway_simp_replacements.py plan` — reports launch disabled and zero mutations
 - `python3 -m json.tool tracking/tasks/T64-scaleway-runner/pilot-policy.json`

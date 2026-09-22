@@ -441,27 +441,34 @@ class ScalewayPilot:
                         "      Unit=explicit-lean-simp-pilot-ttl.service\n"
                         "      [Install]\n      WantedBy=timers.target\n"
                         "runcmd:\n  - [systemctl, daemon-reload]\n  - [systemctl, enable, --now, explicit-lean-simp-pilot-ttl.timer]\n")
+        remote_job_directory = f"/home/{login_user}/explicit-lean-simp-job"
+        state = {"schema": 1, "phase": "create-requested", "server_id": None, "name": name,
+                 "remote_job_directory": remote_job_directory, "zone": checked["zone"],
+                 "project_id": checked["project_id"], "organization_id": checked["organization_id"],
+                 "created_at": create_started.isoformat(), "deadline": host_deadline.isoformat(),
+                 "lifetime_seconds": checked["lifetime"], "worker_runtime_seconds": checked["runtime"],
+                 "policy_sha256": preflight["policy_sha256"], "preflight": preflight,
+                 "mutation": "server-create-requested"}
         cloud_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="scw-cloud-init-", suffix=".yaml", delete=False) as handle:
                 handle.write(cloud_config); cloud_path = Path(handle.name)
+            self._save(state)
             result = self._scw(["instance", "server", "create", f"name={name}", f"type={EXPECTED_TYPE}",
                                 f"image={checked['machine']['image_id']}", "ip=new", f"root-volume={checked['requirements']['root_volume']}",
                                 f"security-group-id={checked['machine']['security_group_id']}",
                                 f"cloud-init=@{cloud_path}", f"project-id={checked['project_id']}", f"zone={checked['zone']}",
                                 "tags.0=explicit-lean-simp-pilot", "tags.1=single-worker", "--wait"], policy=checked, timeout=300)
+        except PilotError as error:
+            raise PilotError("create outcome is ambiguous; state retained; use status, then cleanup to recover any created server") from error
         finally:
             if cloud_path is not None:
                 cloud_path.unlink(missing_ok=True)
         server = result.get("server", result) if isinstance(result, dict) else None
         server_id = server.get("id") if isinstance(server, dict) else None
         if type(server_id) is not str or not ID_RE.fullmatch(server_id):
-            raise PilotError("create response lacks a valid server ID; inspect provider before retrying")
-        state = {"schema": 1, "phase": "created", "server_id": server_id, "name": name, "zone": checked["zone"],
-                 "project_id": checked["project_id"], "organization_id": checked["organization_id"],
-                 "created_at": create_started.isoformat(), "deadline": host_deadline.isoformat(),
-                 "lifetime_seconds": checked["lifetime"], "worker_runtime_seconds": checked["runtime"],
-                 "policy_sha256": preflight["policy_sha256"], "preflight": preflight, "mutation": "server-create"}
+            raise PilotError("create response lacks a valid server ID; state retained for status/cleanup recovery")
+        state.update({"phase": "created", "server_id": server_id, "mutation": "server-create"})
         self._save(state)
         observed = self._scw(["instance", "server", "get", server_id, f"zone={checked['zone']}"], policy=checked)
         observed_server = observed.get("server", observed)
@@ -470,7 +477,7 @@ class ScalewayPilot:
         tags = observed_server.get("tags", [])
         if not isinstance(tags, list):
             raise PilotError("created server tags are missing; state retained for cleanup")
-        if (observed_server.get("name") != name or observed_server.get("project_id", observed_server.get("project")) != checked["project_id"]
+        if (observed_server.get("id") != server_id or observed_server.get("name") != name or observed_server.get("project_id", observed_server.get("project")) != checked["project_id"]
                 or observed_server.get("zone") != checked["zone"]
                 or observed_server.get("commercial_type", observed_server.get("type")) != EXPECTED_TYPE
                 or "explicit-lean-simp-pilot" not in tags):
@@ -482,6 +489,13 @@ class ScalewayPilot:
         auth = _dict(policy.get("authorization"), "authorization")
         self._identity({"organization_id": auth["organization_id"], "project_id": auth["project_id"],
                         "cli_profile": policy["cli_profile"]})
+        if not state.get("server_id"):
+            listing = self._scw(["instance", "server", "list", f"project-id={state['project_id']}", f"zone={state['zone']}"], policy=policy)
+            servers = listing.get("servers", []) if isinstance(listing, dict) else None
+            if not isinstance(servers, list):
+                raise PilotError("pending-create server listing has unexpected shape")
+            candidates = [server for server in servers if isinstance(server, dict) and server.get("name") == state.get("name")]
+            return {"read_only": True, "phase": state.get("phase"), "state": state, "pending_create_matches": candidates}
         server = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         if not isinstance(server, dict):
             raise PilotError("server status response has unexpected shape")
@@ -491,8 +505,8 @@ class ScalewayPilot:
         policy, _ = self.policy(); machine = _dict(policy.get("machine"), "machine")
         server = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         data = server.get("server", server) if isinstance(server, dict) else None
-        if not isinstance(data, dict):
-            raise PilotError("server address response has unexpected shape")
+        if not isinstance(data, dict) or data.get("id") != state.get("server_id"):
+            raise PilotError("server address response identity mismatch")
         public_ip = data.get("public_ip", {}) if isinstance(data, dict) else None
         address = public_ip.get("address") if isinstance(public_ip, dict) else None
         if not isinstance(address, str) or not address:
@@ -504,6 +518,8 @@ class ScalewayPilot:
         state = self._load_state(); policy, raw = self.policy(); checked = validate_policy(policy, self.now())
         if state.get("policy_sha256") != sha256(raw):
             raise PilotError("policy changed after server creation")
+        if state.get("project_id") != checked["project_id"] or state.get("organization_id") != checked["organization_id"] or state.get("zone") != checked["zone"]:
+            raise PilotError("saved server identity differs from launch policy")
         manifest, database, _ = validate_job(job_dir, checked["job"])
         created = datetime.fromisoformat(state["created_at"])
         age = (self.now().astimezone(timezone.utc) - created.astimezone(timezone.utc)).total_seconds()
@@ -519,7 +535,7 @@ class ScalewayPilot:
         if not isinstance(observed_server, dict):
             raise PilotError("existing server details are malformed")
         observed_tags = observed_server.get("tags", [])
-        if not isinstance(observed_tags, list) or observed_server.get("name") != state.get("name") or observed_server.get("project_id", observed_server.get("project")) != checked["project_id"] or observed_server.get("zone") != checked["zone"] or observed_server.get("commercial_type", observed_server.get("type")) != EXPECTED_TYPE or "explicit-lean-simp-pilot" not in observed_tags:
+        if not isinstance(observed_tags, list) or observed_server.get("id") != state["server_id"] or observed_server.get("name") != state.get("name") or observed_server.get("project_id", observed_server.get("project")) != checked["project_id"] or observed_server.get("zone") != checked["zone"] or observed_server.get("commercial_type", observed_server.get("type")) != EXPECTED_TYPE or "explicit-lean-simp-pilot" not in observed_tags:
             raise PilotError("existing server identity/shape mismatch; refusing worker dispatch")
         ttl_remaining = int(checked["lifetime"] - age)
         cutoff_remaining = int((checked["deadline"] - self.now().astimezone(timezone.utc)).total_seconds())
@@ -549,16 +565,17 @@ class ScalewayPilot:
         boot = self._ssh(state, "sh", "-lc", shlex.quote(bootstrap), timeout=min(1800, checked["runtime"]))
         if boot.returncode:
             raise PilotError(f"remote pinned checkout/dependency bootstrap failed (exit {boot.returncode})")
-        login_user = str(policy.get("login_user", "ubuntu"))
-        if not re.fullmatch(r"[a-z_][a-z0-9_-]*", login_user):
-            raise PilotError("login_user must be a safe Unix account name")
-        remote = f"/home/{login_user}/explicit-lean-simp-job"
+        remote = state.get("remote_job_directory")
+        if remote != "/home/ubuntu/explicit-lean-simp-job":
+            raise PilotError("saved remote job directory is invalid")
         mkdir = self._ssh(state, "mkdir", "-p", remote, timeout=60)
         if mkdir.returncode:
             raise PilotError("remote job directory creation failed")
         machine = checked["machine"]
         server_data = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         server_obj = server_data.get("server", server_data)
+        if not isinstance(server_obj, dict) or server_obj.get("id") != state["server_id"]:
+            raise PilotError("server identity changed before job transfer")
         address = server_obj["public_ip"]["address"]
         target = f"{policy.get('login_user', 'ubuntu')}@{address}:{remote}/"
         scp_base = ["scp", "-i", str(Path(machine["ssh_identity_file"]).expanduser()), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"]
@@ -595,17 +612,20 @@ class ScalewayPilot:
         output_dir.mkdir(parents=True, exist_ok=True)
         if any(output_dir.iterdir()):
             raise PilotError("artifact output directory must be empty")
-        remote = "/var/tmp/explicit-lean-simp-job/result.tar.gz"
+        remote_dir = state.get("remote_job_directory")
+        if remote_dir != "/home/ubuntu/explicit-lean-simp-job":
+            raise PilotError("saved remote job directory is invalid")
+        remote = remote_dir + "/result.tar.gz"
         auth = _dict(policy.get("authorization"), "authorization")
         self._identity({"organization_id": auth["organization_id"], "project_id": auth["project_id"],
                         "cli_profile": policy["cli_profile"]})
         server_data = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         server_obj = server_data.get("server", server_data) if isinstance(server_data, dict) else None
-        if not isinstance(server_obj, dict) or not isinstance(server_obj.get("public_ip"), dict) or type(server_obj["public_ip"].get("address")) is not str:
+        if not isinstance(server_obj, dict) or server_obj.get("id") != state.get("server_id") or not isinstance(server_obj.get("public_ip"), dict) or type(server_obj["public_ip"].get("address")) is not str:
             raise PilotError("result server address response has unexpected shape")
         address = server_obj["public_ip"]["address"]
         server_tags = server_obj.get("tags", [])
-        if not isinstance(server_tags, list) or server_obj.get("name") != state.get("name") or server_obj.get("project_id", server_obj.get("project")) != state.get("project_id") or "explicit-lean-simp-pilot" not in server_tags:
+        if not isinstance(server_tags, list) or server_obj.get("id") != state.get("server_id") or server_obj.get("name") != state.get("name") or server_obj.get("project_id", server_obj.get("project")) != state.get("project_id") or "explicit-lean-simp-pilot" not in server_tags:
             raise PilotError("result server identity mismatch")
         target = f"{policy.get('login_user', 'ubuntu')}@{address}:{remote}"
         local_tar = output_dir / "result.tar.gz"
@@ -668,14 +688,33 @@ class ScalewayPilot:
         auth = _dict(policy.get("authorization"), "authorization")
         project_id, zone = auth["project_id"], auth["zone"]
         if (state.get("organization_id") != auth.get("organization_id") or state.get("project_id") != project_id
-                or state.get("zone") != zone or not ID_RE.fullmatch(str(state.get("server_id", "")))
-                or not str(state.get("name", "")).startswith(NAME_PREFIX)):
+                or state.get("zone") != zone or not str(state.get("name", "")).startswith(NAME_PREFIX)):
             raise PilotError("saved pilot resource identity does not match cleanup policy")
         self._identity({"organization_id": auth["organization_id"], "project_id": project_id,
                         "cli_profile": policy["cli_profile"]})
+        if not state.get("server_id"):
+            listing = self._scw(["instance", "server", "list", f"project-id={project_id}", f"zone={zone}"], policy=policy)
+            servers = listing.get("servers", []) if isinstance(listing, dict) else None
+            if not isinstance(servers, list):
+                raise PilotError("cannot recover ambiguous create: server listing has unexpected shape")
+            candidates = [server for server in servers if isinstance(server, dict)
+                          and server.get("name") == state.get("name")
+                          and isinstance(server.get("tags", []), list)
+                          and "explicit-lean-simp-pilot" in server.get("tags", [])]
+            if len(candidates) != 1:
+                raise PilotError("ambiguous create remains unresolved; exact tagged server was not found uniquely; retain state and retry cleanup after provider visibility settles")
+            candidate = candidates[0]
+            candidate_id = candidate.get("id")
+            if (type(candidate_id) is not str or not ID_RE.fullmatch(candidate_id)
+                    or candidate.get("project_id", candidate.get("project")) != project_id
+                    or candidate.get("zone") != zone
+                    or candidate.get("commercial_type", candidate.get("type")) != EXPECTED_TYPE):
+                raise PilotError("ambiguous create candidate identity mismatch; refusing adoption/deletion")
+            state.update({"server_id": candidate_id, "phase": "create-recovered"})
+            self._save(state)
         current = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         server = current.get("server", current) if isinstance(current, dict) else None
-        if not isinstance(server, dict):
+        if not isinstance(server, dict) or server.get("id") != state.get("server_id"):
             raise PilotError("server details unavailable; refusing deletion")
         if server.get("project") != project_id and server.get("project_id") != project_id:
             raise PilotError("server project identity mismatch; refusing deletion")

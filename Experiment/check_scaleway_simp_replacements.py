@@ -23,6 +23,7 @@ IMAGE = "33333333-3333-4333-8333-333333333333"
 SG = "44444444-4444-4444-8444-444444444444"
 KEY = "55555555-5555-4555-8555-555555555555"
 SERVER = "66666666-6666-4666-8666-666666666666"
+OTHER_SERVER = "77777777-7777-4777-8777-777777777777"
 COMMIT = "a" * 40
 
 
@@ -86,6 +87,8 @@ class CliFixture:
         self.bad_sg = False
         self.bad_image = False
         self.fail_delete = False
+        self.fail_create_after_commit = False
+        self.wrong_server_id = False
 
     def __call__(self, command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
         del timeout
@@ -107,7 +110,10 @@ class CliFixture:
                 project = {"id": PROJECT, "organization_id": "99999999-9999-4999-8999-999999999999" if self.bad_account else ORG}
                 return self.json(args, {"projects": [project]})
             if cmd[:3] == ("instance", "server", "list"):
-                return self.json(args, {"servers": self.server_list})
+                servers = list(self.server_list)
+                if self.server is not None and all(item.get("id") != self.server.get("id") for item in servers):
+                    servers.append(self.server)
+                return self.json(args, {"servers": servers})
             if cmd[:3] == ("instance", "volume", "list"):
                 return self.json(args, {"volumes": self.volume_list})
             if cmd[:3] == ("instance", "server-type", "list"):
@@ -134,9 +140,12 @@ class CliFixture:
                 self.server = {"id": SERVER, "name": next(arg.split("=", 1)[1] for arg in cmd if arg.startswith("name=")),
                                "project_id": PROJECT, "zone": "nl-ams-1", "commercial_type": pilot.EXPECTED_TYPE, "tags": tags,
                                "public_ip": {"address": "198.51.100.4"}}
+                if self.fail_create_after_commit:
+                    return subprocess.CompletedProcess(args, 124, "", "simulated client timeout after provider commit")
                 return self.json(args, {"server": self.server})
             if cmd[:3] == ("instance", "server", "get"):
-                return self.json(args, {"server": self.server})
+                observed = ({**self.server, "id": OTHER_SERVER} if self.server is not None and self.wrong_server_id else self.server)
+                return self.json(args, {"server": observed})
             if cmd[:3] == ("instance", "server", "delete"):
                 if self.fail_delete:
                     return subprocess.CompletedProcess(args, 1, "", "failure")
@@ -250,6 +259,24 @@ def test_explicit_create_then_readonly_status_and_expired_cleanup() -> None:
         assert deleted["phase"] == "deleted" and fixture.server is None
 
 
+def test_ambiguous_create_retains_recoverable_state_and_cleanup_adopts_exact_server() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory); repo, job, _, policy_path = setup(root); fixture = CliFixture()
+        fixture.fail_create_after_commit = True
+        ctl = controller(root, policy_path, fixture)
+        require_blocked(lambda: ctl.create(repo_root=repo, job_dir=job, confirm=True),
+                        "ambiguous create outcome reported as successful")
+        pending = json.loads((root / "state.json").read_text())
+        assert pending["phase"] == "create-requested" and pending["server_id"] is None
+        assert fixture.server is not None
+        status = ctl.status()
+        assert status["read_only"] and len(status["pending_create_matches"]) == 1
+        fixture.fail_create_after_commit = False
+        deleted = ctl.cleanup(confirm=True)
+        assert deleted["phase"] == "deleted" and deleted["server_id"] == SERVER and fixture.server is None
+        assert sum("server" in command and "create" in command for command in fixture.commands) == 1
+
+
 def test_delete_failure_and_policy_mutation_fail_closed() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory); repo, job, _, policy_path = setup(root); fixture = CliFixture(); ctl = controller(root, policy_path, fixture)
@@ -260,6 +287,27 @@ def test_delete_failure_and_policy_mutation_fail_closed() -> None:
         policy = json.loads(policy_path.read_text()); policy["authorization"]["project_id"] = ORG
         policy_path.write_text(json.dumps(policy))
         require_blocked(lambda: ctl.cleanup(confirm=True), "cleanup accepted changed identity/policy")
+
+
+def test_provider_server_response_must_match_requested_id() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory); repo, job, _, policy_path = setup(root); fixture = CliFixture()
+        ctl = controller(root, policy_path, fixture)
+        created = ctl.create(repo_root=repo, job_dir=job, confirm=True)
+        assert created["server_id"] == SERVER
+        fixture.wrong_server_id = True
+        ssh_calls: list[tuple[str, ...]] = []
+        def fake_ssh(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            ssh_calls.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+        ctl._ssh = fake_ssh  # type: ignore[method-assign]
+        require_blocked(lambda: ctl.run_worker(job_dir=job, repo_root=repo), "worker trusted a mismatched provider server ID")
+        assert ssh_calls == []
+        ssh_command_count = sum(command and command[0] == "ssh" for command in fixture.commands)
+        require_blocked(lambda: pilot.ScalewayPilot._ssh(ctl, created, "true", timeout=5), "SSH trusted a mismatched provider server ID")
+        assert sum(command and command[0] == "ssh" for command in fixture.commands) == ssh_command_count
+        require_blocked(lambda: ctl.cleanup(confirm=True), "cleanup targeted a mismatched provider server ID")
+        assert not any("delete" in command for command in fixture.commands)
 
 
 def test_collection_requires_marker_and_matching_hashes() -> None:
@@ -284,6 +332,7 @@ def test_collection_requires_marker_and_matching_hashes() -> None:
                 args = tuple(command)
                 if args and args[0] == "scp":
                     self.commands.append(args)
+                    assert args[-2].endswith("/home/ubuntu/explicit-lean-simp-job/result.tar.gz")
                     Path(args[-1]).write_bytes(archive_path.read_bytes())
                     return subprocess.CompletedProcess(args, 0, "", "")
                 if args and args[0] == "scw":
@@ -300,6 +349,7 @@ def test_collection_requires_marker_and_matching_hashes() -> None:
         fixture = TransferFixture()
         state = {"schema": 1, "phase": "worker-finished", "worker_exit_code": 0,
                  "server_id": SERVER, "name": pilot.NAME_PREFIX + "hash", "zone": "nl-ams-1",
+                 "remote_job_directory": "/home/ubuntu/explicit-lean-simp-job",
                  "project_id": PROJECT, "organization_id": ORG,
                  "policy_sha256": hashlib.sha256(policy_path.read_bytes()).hexdigest()}
         state_path = root / "state.json"; state_path.write_text(json.dumps(state))

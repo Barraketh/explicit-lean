@@ -71,8 +71,11 @@ archive, database, log, and artifacts into the local state file. A missing
 marker, nonmatching checksum, dirty/unpublished checkout, stale/expired policy,
 duplicate resource, wrong account/project/zone/type/image/network, timeout, or
 cleanup failure blocks the corresponding transition. Do not retry `create`
-after an ambiguous CLI timeout until read-only status/listing confirms whether
-the resource exists.
+after an ambiguous CLI timeout. The controller retains a `create-requested`
+state before invoking the provider. Run read-only `status`; then confirmed
+`cleanup` can adopt and delete only one exact name/tag/project/zone/type match.
+If visibility is delayed or the match is not unique, cleanup refuses to guess;
+keep the state and retry status/cleanup after provider listing settles.
 
 Do not launch from this task branch: the checked-in policy is not an
 authorization. Live provisioning is outside this implementation task.
