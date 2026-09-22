@@ -11,6 +11,8 @@ DEFAULT_TRACE_ROOT = "test/SimpTrace/meas_out"
 TACTIC_RE = re.compile(r"(?<![\w?.])(simp only|simp|dsimp only|dsimp)(?![_?\w])")
 PRECEDES = ("by", ";", "<;>", "·", "|", "=>", "(", "[")
 TERM_LEVEL = ("<|", "$")
+PREFIX_TACTICS = frozenset({"all_goals", "any_goals", "try", "repeat",
+                            "repeat'", "focus"})
 
 
 @dataclass(frozen=True)
@@ -163,7 +165,7 @@ def _mask_attributes(source: str) -> str:
 
 def _mask_comments(source: str) -> str:
     chars = list(source)
-    i, depth, quoted = 0, 0, False
+    i, depth, quoted, triple_quoted = 0, 0, False, False
     while i < len(source):
         if depth:
             if source[i:i + 2] == "/-":
@@ -179,16 +181,27 @@ def _mask_comments(source: str) -> str:
                     chars[i] = " "
                 i += 1
             continue
-        if quoted:
+        if quoted or triple_quoted:
+            if source[i] != "\n":
+                chars[i] = " "
             if source[i] == "\\":
                 i += 2
-            elif source[i] == '"':
+            elif triple_quoted and source[i:i + 3] == '\"\"\"':
+                chars[i:i + 3] = [" ", " ", " "]
+                triple_quoted = False
+                i += 3
+            elif not triple_quoted and source[i] == '"':
                 quoted = False
                 i += 1
             else:
                 i += 1
             continue
-        if source[i] == '"':
+        if source[i:i + 3] == '\"\"\"':
+            chars[i:i + 3] = [" ", " ", " "]
+            triple_quoted = True
+            i += 3
+        elif source[i] == '"':
+            chars[i] = " "
             quoted = True
             i += 1
         elif source[i:i + 2] == "--":
@@ -203,6 +216,30 @@ def _mask_comments(source: str) -> str:
         else:
             i += 1
     return "".join(chars)
+
+
+def _is_tactic_start(masked_source: str, line_start: int,
+                     match_start: int) -> bool:
+    """Recognize tactic starts after punctuation and Lean tactic prefixes."""
+    before = masked_source[line_start:line_start + match_start].rstrip()
+    if before.endswith(TERM_LEVEL):
+        return False
+    # Tactic sequences commonly use layout without an explicit separator.
+    if not before:
+        return True
+    if before.endswith(tuple(x for x in PRECEDES if x != "by")):
+        return True
+    prefix_re = r"(?:^|\s)(?:" + "|".join(
+        re.escape(x) for x in sorted(PREFIX_TACTICS, key=len, reverse=True)
+    ) + r")$"
+    if re.search(r"(?:^|[\s(])by$", before) or re.search(prefix_re, before):
+        return True
+    prior = masked_source[:line_start + match_start].rstrip()
+    if not prior:
+        return False
+    if prior.endswith((";", "<;>", "·", "|", "=>", "(", "[")):
+        return True
+    return re.search(r"(?:^|[\s(])by$", prior) is not None or re.search(prefix_re, prior) is not None
 
 
 def call_end(rest: str) -> int:
@@ -260,13 +297,10 @@ def find_sites(source: str) -> list[Site]:
     for line_no, line in enumerate(source.split("\n"), start=1):
         masked_line = masked[offset:offset + len(line)]
         stripped = line.lstrip()
-        if not (stripped.startswith("attribute") or "Simp.simp" in line
-                or stripped.startswith("--") or stripped.startswith("/-")):
+        if not (stripped.startswith("attribute") or stripped.startswith("--")
+                or stripped.startswith("/-")):
             for match in TACTIC_RE.finditer(masked_line):
-                before = line[:match.start()].rstrip()
-                if before.endswith(TERM_LEVEL):
-                    continue
-                if before and not before.endswith(PRECEDES):
+                if not _is_tactic_start(masked, offset, match.start()):
                     continue
                 end = match.end() + call_end(line[match.end():])
                 text = line[match.start():end].rstrip()

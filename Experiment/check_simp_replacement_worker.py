@@ -50,6 +50,58 @@ def test_utf8_site_mapping() -> None:
     assert source[trace_sites[0].startChar:trace_sites[0].endChar] == "simp [True.intro]"
 
 
+def test_nested_tactic_contexts_and_non_targets() -> None:
+    source = '''module
+import Mathlib
+@[simp] lemma attribute_only : True := True.intro
+-- all_goals simp
+/- any_goals simp -/
+def quoted : String := "all_goals simp; try simp"
+example : True := by all_goals simp
+example : True → True := by
+  intro
+  simp
+example : True := by
+  all_goals
+    simp
+example : True := by any_goals
+  simp only [True.intro]
+example : True := by try simp
+example : True := by repeat simp
+example : True := by focus simp
+example : True := by first | simp | exact True.intro
+example : True := by
+  first
+  | any_goals
+      simp
+example : True ∧ True := by
+  constructor
+  case left => simp
+  case right => exact True.intro
+example : True ∧ True := by
+  constructor
+  · simp
+  · exact True.intro
+example : True := by simpa
+example : (fun x : Nat => x) 0 = 0 := by dsimp
+'''
+    renderer_sites, trace_sites = W.align_sites(source)
+    targets = [site for site in trace_sites if W.TARGET.match(site.callText)]
+    assert len(targets) == 11, [site.callText for site in targets]
+    assert [site.text for site in renderer_sites if W.TARGET.match(site.text)] == [
+        site.callText for site in targets
+    ]
+    assert all("simpa" not in site.callText and not site.callText.startswith("dsimp")
+               for site in targets)
+    with tempfile.TemporaryDirectory(prefix="simp-context-syntax-",
+                                     dir=W.ROOT / ".lake") as directory:
+        scratch = pathlib.Path(directory)
+        okay, detail, _ = W.compile_candidate(
+            "Mathlib/Test/SimpContextSyntax.lean", source, scratch, 0,
+        )
+        assert okay, detail
+
+
 def test_false_positive_is_atomic_noop() -> None:
     with tempfile.TemporaryDirectory(prefix="simp-worker-db-") as directory:
         root = pathlib.Path(directory)
@@ -128,7 +180,7 @@ def test_full_command_rewrite_omits_comment() -> None:
 
 def test_selected_site_record_render_compile() -> None:
     W.ensure_prerequisites()
-    source = "import Mathlib\nexample : True := by simp\n"
+    source = "import Mathlib\nexample : True := by\n  all_goals simp\n"
     renderer_sites, trace_sites = W.align_sites(source)
     selected = [site for site in trace_sites if W.TARGET.match(site.callText)]
     assert len(selected) == 1
@@ -161,10 +213,11 @@ def test_selected_site_record_render_compile() -> None:
 def main() -> int:
     test_manifest()
     test_utf8_site_mapping()
+    test_nested_tactic_contexts_and_non_targets()
     test_false_positive_is_atomic_noop()
     test_full_command_rewrite_omits_comment()
     test_selected_site_record_render_compile()
-    print("check_simp_replacement_worker: PASS (5 focused checks)")
+    print("check_simp_replacement_worker: PASS (6 focused checks)")
     return 0
 
 

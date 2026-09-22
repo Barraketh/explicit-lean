@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 TACTIC_RE = re.compile(r"(?<![\w?.])(simp only|simp|dsimp only|dsimp)(?![_?\w])")
 PRECEDES = ("by", ";", "<;>", "·", "|", "=>", "(", "[")
 TERM_LEVEL = ("<|", "$")
+PREFIX_TACTICS = frozenset({"all_goals", "any_goals", "try", "repeat",
+                            "repeat'", "focus"})
 
 MAX_LINE = 100
 
@@ -64,26 +66,51 @@ def call_end(rest: str) -> int:
     comma belonging to an enclosing term, or to a sequencing `;` or `<;>` that
     starts the next tactic.
     """
-    depth = 0
-    for i, ch in enumerate(rest):
+    depth, block_comment, quoted = 0, 0, False
+    i = 0
+    while i < len(rest):
+        ch = rest[i]
+        if block_comment:
+            if rest[i:i + 2] == "/-":
+                block_comment += 1
+                i += 2
+            elif rest[i:i + 2] == "-/":
+                block_comment -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if quoted:
+            if ch == "\\":
+                i += 2
+            else:
+                quoted = ch != '"'
+                i += 1
+            continue
+        if ch == '"':
+            quoted = True
+            i += 1
+            continue
+        if rest[i:i + 2] == "--" and depth == 0:
+            return i
+        if rest[i:i + 2] == "/-":
+            if depth == 0:
+                return i
+            block_comment = 1
+            i += 2
+            continue
         if ch in "⟨([{":
             depth += 1
         elif ch in "⟩)]}":
             if depth == 0:
                 return i
             depth -= 1
-        elif ch == "," and depth == 0:
+        elif ch in ",;:" and depth == 0:
             return i
-        elif ch == ";" and depth == 0:
+        elif rest[i:i + 3] == "<;>" and depth == 0:
             return i
-        # A top-level colon terminates a term-mode tactic ascription, e.g.
-        # ``(by simp : Nat)``.  Colons in configuration records and terms are
-        # nested and therefore remain part of the call.
-        elif ch == ":" and depth == 0:
-            return i
-        elif rest[i : i + 3] == "<;>" and depth == 0:
-            return i
-    return len(rest)
+        i += 1
+    return i
 
 
 def skip_line(line: str) -> bool:
@@ -91,7 +118,6 @@ def skip_line(line: str) -> bool:
     stripped = line.lstrip()
     return (
         stripped.startswith("attribute")
-        or "Simp.simp" in line
         or stripped.startswith("--")
         or stripped.startswith("/-")
     )
@@ -136,10 +162,95 @@ def mask_attributes(source: str) -> str:
     return "".join(chars)
 
 
+def mask_comments_and_strings(source: str) -> str:
+    """Blank comments and string literals while retaining offsets/newlines."""
+    chars = list(source)
+    i, comment_depth, quoted, triple_quoted = 0, 0, False, False
+    while i < len(source):
+        if comment_depth:
+            if source[i:i + 2] == "/-":
+                chars[i:i + 2] = [" ", " "]
+                comment_depth += 1
+                i += 2
+            elif source[i:i + 2] == "-/":
+                chars[i:i + 2] = [" ", " "]
+                comment_depth -= 1
+                i += 2
+            else:
+                if source[i] != "\n":
+                    chars[i] = " "
+                i += 1
+            continue
+        if quoted or triple_quoted:
+            if source[i] != "\n":
+                chars[i] = " "
+            if source[i] == "\\":
+                i += 2
+            elif triple_quoted and source[i:i + 3] == '\"\"\"':
+                chars[i:i + 3] = [" ", " ", " "]
+                triple_quoted = False
+                i += 3
+            elif not triple_quoted and source[i] == '"':
+                quoted = False
+                i += 1
+            else:
+                i += 1
+            continue
+        if source[i:i + 2] == "--":
+            while i < len(source) and source[i] != "\n":
+                chars[i] = " "
+                i += 1
+        elif source[i:i + 2] == "/-":
+            chars[i:i + 2] = [" ", " "]
+            comment_depth = 1
+            i += 2
+        elif source[i:i + 3] == '\"\"\"':
+            chars[i:i + 3] = [" ", " ", " "]
+            triple_quoted = True
+            i += 3
+        elif source[i] == '"':
+            chars[i] = " "
+            quoted = True
+            i += 1
+        else:
+            i += 1
+    return "".join(chars)
+
+
+def is_tactic_start(masked_source: str, line_start: int,
+                    match_start: int) -> bool:
+    """Recognize tactic starts after punctuation and Lean tactic prefixes."""
+    before = masked_source[line_start:line_start + match_start].rstrip()
+    if before.endswith(TERM_LEVEL):
+        return False
+    # A tactic may begin on a fresh layout line after another tactic; the
+    # preceding command need not end in punctuation (e.g. `intro` then `simp`).
+    if not before:
+        return True
+    if before.endswith(tuple(x for x in PRECEDES if x != "by")):
+        return True
+    if re.search(r"(?:^|[\s(])by$", before):
+        return True
+    prefix_re = r"(?:^|\s)(?:" + "|".join(
+        re.escape(x) for x in sorted(PREFIX_TACTICS, key=len, reverse=True)
+    ) + r")$"
+    if re.search(prefix_re, before):
+        return True
+
+    prior = masked_source[:line_start + match_start].rstrip()
+    if not prior:
+        return False
+    if prior.endswith((";", "<;>", "·", "|", "=>", "(", "[")):
+        return True
+    if re.search(r"(?:^|[\s(])by$", prior):
+        return True
+    return re.search(prefix_re, prior) is not None
+
+
 def find_sites(source: str) -> list[Site]:
     """Every simp-family tactic site in `source`, in source order."""
     sites: list[Site] = []
-    masked_source = mask_attributes(source)
+    masked_source = mask_comments_and_strings(mask_attributes(source))
     offset = 0
     for lineno, line in enumerate(source.split("\n"), start=1):
         if skip_line(line):
@@ -147,11 +258,9 @@ def find_sites(source: str) -> list[Site]:
             continue
         masked_line = masked_source[offset : offset + len(line)]
         for match in TACTIC_RE.finditer(masked_line):
-            before = line[: match.start()].rstrip()
-            if before.endswith(TERM_LEVEL):
+            if not is_tactic_start(masked_source, offset, match.start()):
                 continue
-            if not (before == "" or before.endswith(PRECEDES)):
-                continue
+            before = line[:match.start()].rstrip()
             rest = line[match.end() :]
             end_in_line = match.end() + call_end(rest)
             text = line[match.start() : end_in_line].rstrip()

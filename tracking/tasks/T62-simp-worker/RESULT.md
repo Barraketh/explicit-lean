@@ -22,11 +22,17 @@ worker startup. No simp-disabled or certification pass is run.
 
 ## Checks
 
-- `python3 -B Experiment/check_simp_replacement_worker.py` — passed 5 focused
-  checks, including selected-site record → identity validation → render → stock
-  compile and a transactional false-positive `noop` fixture.
+- `python3 -B Experiment/check_simp_replacement_worker.py` — passed 6 focused
+  checks, including compiled nested executable tactic contexts (`all_goals`,
+  `any_goals`, `try`, `repeat`, `focus`, `first |`, `case`, bullets, and a
+  standalone tactic after `intro`), non-target decoys, and selected-site record
+  → identity validation → render → stock compile.
 - `python3 -B test/SimpTrace/test_trace_identity.py` — passed, including
   selected noncontiguous ordinals through finalization.
+- `Experiment/pipeline/check_pipeline.py` local renderer/control fixture
+  functions — 316 passed. This covers the `(by simp : Nat)` ascription case as
+  well as existing pipeline controls; the full command still requires the
+  unavailable external T1 worktree described below.
 - `python3 -B test/SimpTrace/check_transcription.py` — all seven committed
   trace copies match their source, 91/91 sites.
 - `python3 -B Experiment/check_source_command_db.py` — passed.
@@ -39,6 +45,13 @@ worker startup. No simp-disabled or certification pass is run.
 - `lake build ExplicitLean.SimpTrace ExplicitLean.ExplicitRw` — passed (11
   jobs).
 - `git diff --check` — passed.
+
+The review correction generalized executable-site recognition in both the
+renderer and recorder identity scanner. Tactic prefixes and layout contexts
+are recognized without treating `simpa`, `dsimp`, attributes, comments, or
+string contents as targets; byte/character offsets remain based on unchanged
+source positions. Both scanners are checked for exact agreement on the new
+compiled syntax fixture.
 
 ## Limits
 
