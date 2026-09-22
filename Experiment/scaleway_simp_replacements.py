@@ -90,7 +90,7 @@ def _parse_root_volume(value: object) -> dict[str, Any]:
         if sbs_type is None:
             raise PilotError("SBS root volume IOPS must be 5000 or 15000")
         return {"kind": "sbs", "size_gib": int(sbs.group(1)), "iops": iops,
-                "provider_types": {"sbs_volume"}, "block_types": {sbs_type}}
+                "provider_types": {"sbs_volume", sbs_type}, "block_types": {sbs_type}}
     raise PilotError("requirements.root_volume must be local:<size>GB or sbs:<size>GB:<iops>")
 
 
@@ -603,6 +603,56 @@ class ScalewayPilot:
         if known_ids & after_ids or after_tagged:
             raise PilotError("SBS root-volume deletion could not be confirmed")
 
+    @staticmethod
+    def _server_root_attachment(server: Mapping[str, Any], checked: Mapping[str, Any]) -> dict[str, Any]:
+        has_upper = "Volumes" in server
+        has_lower = "volumes" in server
+        if has_upper and has_lower:
+            raise PilotError("server response has ambiguous Volumes/volumes fields")
+        volume_key = "Volumes" if has_upper else "volumes"
+        volumes = server.get(volume_key)
+        if isinstance(volumes, dict):
+            if set(volumes) != {"0"}:
+                raise PilotError("created server exposes unknown or multiple attached volumes")
+            attachment = volumes["0"]
+            slot_zero = True
+        elif isinstance(volumes, list) and len(volumes) == 1:
+            attachment = volumes[0]
+            slot_zero = has_upper
+        else:
+            raise PilotError("created server volume inventory is unavailable or ambiguous")
+        if not isinstance(attachment, dict) or type(attachment.get("id")) is not str or not ID_RE.fullmatch(attachment["id"]):
+            raise PilotError("created server root volume lacks an identified volume")
+        root = checked["root_volume"]
+        attachment_type = attachment.get("volume_type")
+        if type(attachment_type) is not str or attachment_type not in root["provider_types"]:
+            raise PilotError("created server root attachment type differs from policy")
+        expected_bytes = root["size_gib"] * 1_000_000_000
+        if attachment.get("size") is not None and (
+                type(attachment["size"]) is not int or attachment["size"] != expected_bytes):
+            raise PilotError("created server root attachment size differs from policy")
+        attachment_iops = attachment.get("iops")
+        if attachment_iops is not None:
+            expected_iops = root.get("iops")
+            if type(attachment_iops) is str:
+                actual_iops = {"5K": 5000, "15K": 15000}.get(attachment_iops)
+            elif type(attachment_iops) is int:
+                actual_iops = attachment_iops
+            else:
+                actual_iops = None
+            if type(actual_iops) is not int or actual_iops != expected_iops:
+                raise PilotError("created server root attachment IOPS differs from policy")
+        boot_ref = server.get("boot_volume_id", server.get("boot_volume"))
+        if isinstance(boot_ref, dict):
+            boot_ref = boot_ref.get("id")
+        if boot_ref is not None:
+            if type(boot_ref) is not str or attachment["id"] != boot_ref:
+                raise PilotError("created server root volume does not match its boot-volume reference")
+        elif not (attachment.get("boot") is True or (
+                root["kind"] == "sbs" and slot_zero and attachment.get("boot") in (None, False))):
+            raise PilotError("created server root volume is not explicitly identified as the boot volume")
+        return attachment
+
     def _verify_server_identity(self, server: Mapping[str, Any], checked: Mapping[str, Any],
                                 state: Mapping[str, Any]) -> dict[str, Any]:
         tags = server.get("tags")
@@ -636,40 +686,8 @@ class ScalewayPilot:
         if (state.get("ssh_key_id") != key_id or type(public_key) is not str
                 or state.get("ssh_public_key_sha256") != sha256(public_key.encode("utf-8"))):
             raise PilotError("server bootstrap SSH key provenance is not pinned")
-        volumes = server.get("volumes")
-        if isinstance(volumes, dict):
-            if set(volumes) != {"0"}:
-                raise PilotError("created server exposes unknown or multiple attached volumes")
-            volume_items = [volumes["0"]]
-            volume_slot = "0"
-        elif isinstance(volumes, list) and len(volumes) == 1:
-            volume_items = volumes
-            volume_slot = None
-        else:
-            raise PilotError("created server volume inventory is unavailable")
         root_policy = checked["root_volume"]
-        attached_root = volume_items[0]
-        if not isinstance(attached_root, dict) or type(attached_root.get("id")) is not str or not ID_RE.fullmatch(attached_root["id"]):
-            raise PilotError("created server root volume lacks an identified volume")
-        if root_policy["kind"] == "sbs" and attached_root.get("volume_type") not in root_policy["provider_types"]:
-            raise PilotError("created server root attachment is not an SBS volume")
-        if root_policy["kind"] == "sbs" and attached_root.get("size") is not None and (
-                type(attached_root["size"]) is not int
-                or attached_root["size"] != root_policy["size_gib"] * 1_000_000_000):
-            raise PilotError("created server SBS attachment reports a conflicting size")
-        boot_ref = server.get("boot_volume_id", server.get("boot_volume"))
-        if isinstance(boot_ref, dict):
-            boot_ref = boot_ref.get("id")
-        if type(boot_ref) is str:
-            boot_matches = attached_root["id"] == boot_ref
-        else:
-            # Scaleway's SBS server response omits boot_volume_id and reports
-            # boot=false even though the sole attachment at API slot 0 is root.
-            boot_matches = attached_root.get("boot") is True or (
-                checked["root_volume"]["kind"] == "sbs" and volume_slot == "0"
-                and attached_root.get("boot") in (None, False))
-        if not boot_matches:
-            raise PilotError("created server root volume is not explicitly identified as the boot volume")
+        attached_root = self._server_root_attachment(server, checked)
         details = attached_root
         if root_policy["kind"] == "sbs":
             details = self._get_sbs_volume(attached_root["id"], checked,
@@ -1547,12 +1565,7 @@ class ScalewayPilot:
         root_policy = _parse_root_volume(_dict(policy.get("requirements"), "requirements").get("root_volume"))
         cleanup_checked = {"project_id": project_id, "zone": zone, "root_volume": root_policy}
         if root_policy["kind"] == "sbs":
-            server_volumes = server.get("volumes")
-            if not isinstance(server_volumes, dict) or set(server_volumes) != {"0"}:
-                raise PilotError("SBS cleanup requires exactly the known root attachment at slot 0")
-            root_attachment = server_volumes["0"]
-            if not isinstance(root_attachment, dict) or type(root_attachment.get("id")) is not str or not ID_RE.fullmatch(root_attachment["id"]):
-                raise PilotError("SBS cleanup cannot resolve the exact attached root volume ID")
+            root_attachment = self._server_root_attachment(server, cleanup_checked)
             if attached and attached != {root_attachment["id"]}:
                 raise PilotError("saved SBS root volume ID differs from the server attachment")
             attached.add(root_attachment["id"])

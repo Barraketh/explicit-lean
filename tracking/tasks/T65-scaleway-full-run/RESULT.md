@@ -69,7 +69,11 @@ SBS details are fetched with positional `block volume get <id> zone=...` when
 the server attachment omits size. The block volume must have the matching
 `sbs_5k`/`sbs_15k` type, exact `size`, and `specs.perf_iops`; project and zone
 are checked when present. The image type must match its root kind
-(`instance_local` or `instance_sbs`). Type architecture and RAM come from the
+(`instance_local` or `instance_sbs`). The historical lowercase `volumes:
+{"0": ...}` shape and observed capital `Volumes: [...]` shape are accepted only
+when exactly one root entry exists. SBS attachments may report `sbs_volume` or
+the policy-matched class (`sbs_15k`/`sbs_5k`); any reported size or IOPS must
+agree. Type architecture and RAM come from the
 full `instance server-type list zone=...` response (`arch: x64`); the selected name and
 availability must match exactly. The ordinary boot-volume ID/flag is accepted
 as root evidence. For the observed Scaleway SBS response shape, the single
@@ -85,7 +89,8 @@ policy type.
 
 The default checked-in, launch-disabled policy remains GP1-L with its original
 559 GB local root. Mock-only regression coverage includes the POP2-HM-16C-128G
-fallback (128 GiB, x86_64, `sbs_volume`, 120 GB, 15,000 IOPS), insufficient RAM,
+fallback (128 GiB, provider arch `x64`, x86_64 image, 120 GB SBS root,
+15,000 IOPS), capital `Volumes` with `sbs_15k`/`15K` attachment, insufficient RAM,
 wrong architecture/image type, decimal-GB versus binary-GiB minimum, volume
 type/size/IOPS/project/zone mismatch, invalid boot identity, orphan detection,
 and server-present/server-absent cleanup with leftover SBS storage.

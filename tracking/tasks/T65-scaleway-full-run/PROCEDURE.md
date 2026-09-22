@@ -38,9 +38,13 @@ the root's decimal GB size. Type architecture and RAM come from the full
 with positional `block volume get <id> zone=...` when the server attachment
 omits size, checks the provider's `sbs_5k`/`sbs_15k` type and
 `specs.perf_iops`, and checks project and zone when reported. The local-image
-type must match the root kind (`instance_local` or `instance_sbs`). It
-recognizes SBS API slot `0` as the root when the boot reference is absent;
-additional or unknown attached volumes are rejected. Preflight also lists SBS
+type must match the root kind (`instance_local` or `instance_sbs`). It accepts
+the historical lowercase `volumes` object at key `0` and the observed capital
+`Volumes` array, each with exactly one root entry. SBS attachment types must be
+`sbs_volume` or the policy-matched class (`sbs_5k`/`sbs_15k`); any reported
+size or IOPS must match. It recognizes slot `0` as the root when the boot
+reference is absent and `boot` is false. Additional or unknown attached volumes
+are rejected. Preflight also lists SBS
 block volumes and rejects existing pilot-named/tagged orphans. SBS cleanup
 checks `block volume list` before and after server deletion, removes only the
 exact verified root volume if it remains, and requires it to disappear before

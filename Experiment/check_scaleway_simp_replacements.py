@@ -91,7 +91,8 @@ class Provider:
                  volume_type: str = "l_ssd", volume_size_gb: int | None = 559,
                  volume_detail_size_gb: int | None = None,
                  volume_iops: int | None = None, volume_boot: bool = True,
-                 image_type: str = "instance_local") -> None:
+                 image_type: str = "instance_local", server_volume_shape: str = "volumes",
+                 attachment_iops: int | str | None = None) -> None:
         self.commands: list[tuple[str, ...]] = []
         self.server: dict[str, Any] | None = None
         self.ips: list[dict[str, Any]] = []
@@ -111,6 +112,8 @@ class Provider:
         self.volume_iops = volume_iops
         self.volume_boot = volume_boot
         self.image_type = image_type
+        self.server_volume_shape = server_volume_shape
+        self.attachment_iops = attachment_iops
 
     def __call__(self, command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
         del timeout
@@ -164,6 +167,18 @@ class Provider:
             cloud = next(arg.split("=", 1)[1].removeprefix("@") for arg in cmd if arg.startswith("cloud-init=@"))
             assert "OnCalendar=" in Path(cloud).read_text()
             assert "tags.1=two-workers" in cmd
+            volume_entry = {"id": VOLUME_ID,
+                "size": self.volume_size_gb * 1_000_000_000 if self.volume_size_gb is not None else None,
+                "volume_type": self.volume_type, "boot": self.volume_boot, "zone": "nl-ams-1"}
+            if self.attachment_iops is not None:
+                volume_entry["iops"] = self.attachment_iops
+            if self.bad_server_shape == "root_attachment_size":
+                volume_entry["size"] = 99 * 1_000_000_000
+            if self.bad_server_shape == "root_attachment_type":
+                volume_entry["volume_type"] = "l_ssd"
+            if self.bad_server_shape == "root_attachment_iops":
+                volume_entry["iops"] = "5K"
+            server_volumes: Any = {"0": volume_entry} if self.server_volume_shape == "volumes" else [volume_entry]
             self.server = {"id": SERVER, "name": next(x.split("=", 1)[1] for x in cmd if x.startswith("name=")),
                 "project": PROJECT, "zone": "nl-ams-1", "commercial_type": self.machine_type,
                 "tags": ["explicit-lean-simp-pilot", "two-workers"],
@@ -172,22 +187,24 @@ class Provider:
                 "ssh_key_id": KEY,
                 "public_ip": {"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"},
                 "public_ips": [{"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"}],
-                "volumes": {"0": {"id": VOLUME_ID,
-                    "size": self.volume_size_gb * 1_000_000_000 if self.volume_size_gb is not None else None,
-                    "volume_type": self.volume_type, "boot": self.volume_boot, "zone": "nl-ams-1"}}}
+                self.server_volume_shape: server_volumes}
             self.ips = [dict(self.server["public_ip"], project=PROJECT, zone="nl-ams-1")]
-            self.volume_items = [dict(self.server["volumes"]["0"], server={"id": SERVER}, tags=[])]
+            self.volume_items = [dict(volume_entry, server={"id": SERVER}, tags=[])]
             self.block_volumes = ([{"id": VOLUME_ID, "project_id": PROJECT, "zone": "nl-ams-1",
                 "type": "sbs_15k" if self.volume_iops == 15000 else "sbs_5k",
                 "size": self.volume_detail_size_gb * 1_000_000_000,
                 "specs": {"perf_iops": self.volume_iops}, "server": {"id": SERVER}, "tags": []}]
-                if self.volume_type == "sbs_volume" else [])
+                if self.image_type == "instance_sbs" else [])
             assert f"image={LOCAL_IMAGE}" in cmd
             if self.fail_create_after_commit:
                 return subprocess.CompletedProcess(args, 124, "", "ambiguous timeout")
             return self.json(args, {"server": self.server})
         if cmd[:3] == ("instance", "server", "get"):
             observed = deepcopy(self.server)
+            if observed is not None:
+                volume_field = "Volumes" if "Volumes" in observed else "volumes"
+                volume_collection = observed[volume_field]
+                volume_entry = volume_collection[0] if isinstance(volume_collection, list) else volume_collection["0"]
             if observed is not None and self.bad_server_shape == "image":
                 observed["image"]["id"] = IMAGE
             elif observed is not None and self.bad_server_shape == "server_type":
@@ -197,13 +214,22 @@ class Provider:
             elif observed is not None and self.bad_server_shape == "ssh_key":
                 observed["ssh_key_id"] = IMAGE
             elif observed is not None and self.bad_server_shape == "root_volume":
-                observed["volumes"]["0"]["size"] = 100
+                volume_entry["size"] = 100
             elif observed is not None and self.bad_server_shape == "not_boot_volume":
-                observed["volumes"]["0"]["boot"] = False
+                volume_entry["boot"] = False
             elif observed is not None and self.bad_server_shape == "root_attachment_type":
-                observed["volumes"]["0"]["volume_type"] = "l_ssd"
+                volume_entry["volume_type"] = "l_ssd"
             elif observed is not None and self.bad_server_shape == "root_attachment_size":
-                observed["volumes"]["0"]["size"] = 99 * 1_000_000_000
+                volume_entry["size"] = 99 * 1_000_000_000
+            elif observed is not None and self.bad_server_shape == "root_attachment_iops":
+                volume_entry["iops"] = "5K"
+            elif observed is not None and self.bad_server_shape == "multiple_root_volumes":
+                if isinstance(observed[volume_field], list):
+                    observed[volume_field].append(dict(volume_entry, id=IMAGE))
+                else:
+                    observed[volume_field]["1"] = dict(volume_entry, id=IMAGE)
+            elif observed is not None and self.bad_server_shape == "both_volume_fields":
+                observed["volumes"] = {"0": volume_entry}
             elif observed is not None and self.bad_server_shape == "wrong_boot_volume_id":
                 observed["boot_volume_id"] = IMAGE
             elif observed is not None and self.bad_server_shape == "dynamic_ip":
@@ -359,16 +385,34 @@ def test_pop2_sbs_fallback_checks_type_ram_image_and_exact_boot_volume() -> None
             "name": "explicit-lean-simp-orphan", "tags": []}]
         blocked(lambda: ctl(root, path, provider).preflight(repo_root=repo, job_root=jobs))
 
-    for bad_volume in ("root_attachment_type", "root_attachment_size", "root_volume_type", "root_volume_size", "root_volume_iops",
+    for bad_volume in ("root_attachment_type", "root_attachment_size", "root_attachment_iops",
+                       "multiple_root_volumes", "both_volume_fields",
+                       "root_volume_type", "root_volume_size", "root_volume_iops",
                        "root_volume_project", "root_volume_zone"):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
                 minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
             provider = Provider(machine_type=pop_type, ram_gib=128, volume_type="sbs_volume",
                                 volume_size_gb=None, volume_detail_size_gb=120,
-                                volume_iops=15000, volume_boot=False, image_type="instance_sbs")
+                                volume_iops=15000, volume_boot=False, image_type="instance_sbs",
+                                server_volume_shape="Volumes" if bad_volume in {
+                                    "root_attachment_iops", "multiple_root_volumes", "both_volume_fields"} else "volumes",
+                                attachment_iops="15K" if bad_volume == "root_attachment_iops" else None)
             provider.bad_server_shape = bad_volume
             blocked(lambda: ctl(root, path, provider).create(repo_root=repo, job_root=jobs, confirm=True))
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
+            minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:120GB:15000")
+        provider = Provider(machine_type=pop_type, ram_gib=128, volume_type="sbs_15k",
+            volume_size_gb=120, volume_detail_size_gb=120, volume_iops=15000,
+            volume_boot=False, image_type="instance_sbs", server_volume_shape="Volumes",
+            attachment_iops="15K")
+        controller = ctl(root, path, provider)
+        created = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        assert created["volume_ids"] == [VOLUME_ID] and "Volumes" in provider.server
+        provider.retain_sbs_volume_after_server_delete = True
+        assert controller.cleanup(confirm=True)["phase"] == "deleted"
 
 
 def test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins() -> None:
