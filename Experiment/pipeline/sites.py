@@ -61,12 +61,11 @@ class Site:
 def call_end(rest: str) -> int:
     """How far the tactic runs from just after its keyword.
 
-    The same bracket-aware scan `make_traced.py` uses to place its `=>trace`
-    clause: the call runs to the end of the line, or to a closing bracket or
-    comma belonging to an enclosing term, or to a sequencing `;` or `<;>` that
-    starts the next tactic.
+    Balanced argument delimiters may span lines; a newline at top level ends
+    the tactic. The scan also stops at an enclosing delimiter, argument comma,
+    or tactic-sequencing operator.
     """
-    depth, block_comment, quoted = 0, 0, False
+    depth, block_comment, quoted, triple_quoted = 0, 0, False, False
     i = 0
     while i < len(rest):
         ch = rest[i]
@@ -80,19 +79,34 @@ def call_end(rest: str) -> int:
             else:
                 i += 1
             continue
-        if quoted:
+        if quoted or triple_quoted:
             if ch == "\\":
                 i += 2
-            else:
-                quoted = ch != '"'
+            elif triple_quoted and rest[i:i + 3] == '\"\"\"':
+                triple_quoted = False
+                i += 3
+            elif not triple_quoted and ch == '"':
+                quoted = False
                 i += 1
+            else:
+                i += 1
+            continue
+        if rest[i:i + 3] == '\"\"\"':
+            triple_quoted = True
+            i += 3
             continue
         if ch == '"':
             quoted = True
             i += 1
             continue
-        if rest[i:i + 2] == "--" and depth == 0:
+        if ch == "\n" and depth == 0:
             return i
+        if rest[i:i + 2] == "--":
+            if depth == 0:
+                return i
+            newline = rest.find("\n", i)
+            i = len(rest) if newline < 0 else newline
+            continue
         if rest[i:i + 2] == "/-":
             if depth == 0:
                 return i
@@ -115,12 +129,7 @@ def call_end(rest: str) -> int:
 
 def skip_line(line: str) -> bool:
     """Lines whose simp mentions are not tactic invocations."""
-    stripped = line.lstrip()
-    return (
-        stripped.startswith("attribute")
-        or stripped.startswith("--")
-        or stripped.startswith("/-")
-    )
+    return line.lstrip().startswith("attribute")
 
 
 def mask_attributes(source: str) -> str:
@@ -261,19 +270,23 @@ def find_sites(source: str) -> list[Site]:
             if not is_tactic_start(masked_source, offset, match.start()):
                 continue
             before = line[:match.start()].rstrip()
-            rest = line[match.end() :]
-            end_in_line = match.end() + call_end(rest)
-            text = line[match.start() : end_in_line].rstrip()
+            start = offset + match.start()
+            scan_end = offset + match.end() + call_end(source[offset + match.end():])
+            text = source[start:scan_end].rstrip()
+            end = start + len(text)
+            line_end = source.find("\n", end)
+            if line_end < 0:
+                line_end = len(source)
             sites.append(
                 Site(
                     index=len(sites),
-                    start=offset + match.start(),
-                    end=offset + match.start() + len(text),
+                    start=start,
+                    end=end,
                     text=text,
                     line=lineno,
                     column=match.start(),
                     alone_on_line=before == "",
-                    trailing=line[match.start() + len(text) :],
+                    trailing=source[end:line_end],
                     line_indent=line[: len(line) - len(line.lstrip())],
                 )
             )

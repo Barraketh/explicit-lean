@@ -22,11 +22,12 @@ worker startup. No simp-disabled or certification pass is run.
 
 ## Checks
 
-- `python3 -B Experiment/check_simp_replacement_worker.py` — passed 6 focused
-  checks, including compiled nested executable tactic contexts (`all_goals`,
-  `any_goals`, `try`, `repeat`, `focus`, `first |`, `case`, bullets, and a
-  standalone tactic after `intro`), non-target decoys, and selected-site record
-  → identity validation → render → stock compile.
+- `python3 -B Experiment/check_simp_replacement_worker.py` — passed 7 focused
+  checks, including compiled nested executable tactic contexts, multiline
+  `simp`/`simp only` record → identity → render → stock compilation, and a
+  queued-row check proving `/- lead -/ example ... := by simp` is not committed
+  as a noop. Non-target decoys and tactics following the multiline call are
+  also checked.
 - `python3 -B test/SimpTrace/test_trace_identity.py` — passed, including
   selected noncontiguous ordinals through finalization.
 - `Experiment/pipeline/check_pipeline.py` local renderer/control fixture
@@ -36,10 +37,6 @@ worker startup. No simp-disabled or certification pass is run.
 - `python3 -B test/SimpTrace/check_transcription.py` — all seven committed
   trace copies match their source, 91/91 sites.
 - `python3 -B Experiment/check_source_command_db.py` — passed.
-- Existing `Experiment/pipeline/check_pipeline.py` local fixture/control
-  functions — 316 passed. The full command stops at its external-worktree
-  precondition because `/Users/ptsier/projects/explicit-lean-worktrees/T1-trace-capture`
-  is absent; its end-to-end T1/T2 replay was not run.
 - `python3 -B -m py_compile` on the worker, replay module, trace identity, and
   finalizer — passed.
 - `lake build ExplicitLean.SimpTrace ExplicitLean.ExplicitRw` — passed (11
@@ -49,9 +46,14 @@ worker startup. No simp-disabled or certification pass is run.
 The review correction generalized executable-site recognition in both the
 renderer and recorder identity scanner. Tactic prefixes and layout contexts
 are recognized without treating `simpa`, `dsimp`, attributes, comments, or
-string contents as targets; byte/character offsets remain based on unchanged
-source positions. Both scanners are checked for exact agreement on the new
-compiled syntax fixture.
+string contents as targets; balanced multiline call ranges preserve Unicode
+character offsets, nested comments, and following tactic syntax. Both
+scanners are checked for exact agreement on the new compiled syntax fixture.
+In a read-only audit of the queued SQLite database, 68,281 pending target calls
+were identified: 4,691 had unmatched opening delimiters under the previous
+line-limited range detector, while none are unbalanced with the new ranges.
+The same offset-masked scanning also fixes the prior same-line block-comment
+false-negative classification.
 
 ## Limits
 

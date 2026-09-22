@@ -57,6 +57,7 @@ import Mathlib
 -- all_goals simp
 /- any_goals simp -/
 def quoted : String := "all_goals simp; try simp"
+/- lead -/ example : True := by simp
 example : True := by all_goals simp
 example : True → True := by
   intro
@@ -87,7 +88,7 @@ example : (fun x : Nat => x) 0 = 0 := by dsimp
 '''
     renderer_sites, trace_sites = W.align_sites(source)
     targets = [site for site in trace_sites if W.TARGET.match(site.callText)]
-    assert len(targets) == 11, [site.callText for site in targets]
+    assert len(targets) == 12, [site.callText for site in targets]
     assert [site.text for site in renderer_sites if W.TARGET.match(site.text)] == [
         site.callText for site in targets
     ]
@@ -180,10 +181,24 @@ def test_full_command_rewrite_omits_comment() -> None:
 
 def test_selected_site_record_render_compile() -> None:
     W.ensure_prerequisites()
-    source = "import Mathlib\nexample : True := by\n  all_goals simp\n"
+    source = """import Mathlib
+/- lead -/ example : True := by simp
+example (n : Nat) : n + 0 = n := by
+  simp only [
+    Nat.add_zero, /- [ decoy /- ] -/ -/
+  ] <;> rfl
+example (n : Nat) : n + 0 = n := by
+  simp [
+    Nat.add_zero
+  ] <;> rfl
+"""
     renderer_sites, trace_sites = W.align_sites(source)
     selected = [site for site in trace_sites if W.TARGET.match(site.callText)]
-    assert len(selected) == 1
+    assert len(selected) == 3
+    assert [site.callText.splitlines()[0] for site in selected] == [
+        "simp", "simp only [", "simp [",
+    ]
+    assert all("<;> rfl" not in site.callText for site in selected[1:])
     with tempfile.TemporaryDirectory(prefix="simp-worker-e2e-",
                                      dir=W.ROOT / ".lake") as directory:
         scratch = pathlib.Path(directory)
@@ -210,6 +225,51 @@ def test_selected_site_record_render_compile() -> None:
         assert okay, detail
 
 
+def test_leading_block_comment_candidate_is_not_noop() -> None:
+    """A comment before a declaration must not hide its queued simp site."""
+    W.ensure_prerequisites()
+    mathlib_root = W.ROOT / ".lake" / "packages" / "mathlib"
+    mathlib_modules = mathlib_root / "Mathlib"
+    source = b"import Mathlib\n/- lead -/ example : True := by simp\n"
+    with tempfile.TemporaryDirectory(prefix="T62LeadingComment", dir=mathlib_modules) as module_dir:
+        module_root = pathlib.Path(module_dir)
+        module_path = pathlib.PurePosixPath(module_root.relative_to(mathlib_root)) / "Fixture.lean"
+        module_name = "Mathlib." + ".".join(module_path.with_suffix("").parts[1:])
+        source_path = module_root / "Fixture.lean"
+        source_path.write_bytes(source)
+        with tempfile.TemporaryDirectory(prefix="simp-leading-comment-db-") as tmp:
+            root = pathlib.Path(tmp)
+            db_path = root / "worker.sqlite3"
+            db = sqlite3.connect(db_path)
+            db.executescript("""
+                CREATE TABLE modules(name TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,
+                                     source BLOB NOT NULL,source_sha256 TEXT NOT NULL);
+                CREATE TABLE commands(module_name TEXT NOT NULL,ordinal INTEGER NOT NULL,
+                    start_byte INTEGER NOT NULL,end_byte INTEGER NOT NULL,kind TEXT NOT NULL,
+                    source_sha256 TEXT NOT NULL,PRIMARY KEY(module_name,ordinal));
+                CREATE TABLE simp_replacements(module_name TEXT NOT NULL,ordinal INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',replacement_text TEXT,error TEXT,
+                    PRIMARY KEY(module_name,ordinal));
+            """)
+            db.execute("INSERT INTO modules VALUES (?,?,?,?)",
+                       (module_name, str(module_path), source, digest(source)))
+            db.execute("INSERT INTO commands VALUES (?,?,?,?,?,?)",
+                       (module_name, 0, 0, len(source), "example", digest(source)))
+            db.execute("INSERT INTO simp_replacements(module_name,ordinal) VALUES (?,?)",
+                       (module_name, 0))
+            db.commit()
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            result = W.process_module(db, module_name, artifacts)
+            row = db.execute(
+                "SELECT status,replacement_text,error FROM simp_replacements "
+                "WHERE module_name=? AND ordinal=0", (module_name,),
+            ).fetchone()
+            assert result["status"] == "committed", result
+            assert row[0] != "noop", row
+            db.close()
+
+
 def main() -> int:
     test_manifest()
     test_utf8_site_mapping()
@@ -217,7 +277,8 @@ def main() -> int:
     test_false_positive_is_atomic_noop()
     test_full_command_rewrite_omits_comment()
     test_selected_site_record_render_compile()
-    print("check_simp_replacement_worker: PASS (6 focused checks)")
+    test_leading_block_comment_candidate_is_not_noop()
+    print("check_simp_replacement_worker: PASS (7 focused checks)")
     return 0
 
 

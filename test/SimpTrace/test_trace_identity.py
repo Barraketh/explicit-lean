@@ -46,9 +46,9 @@ def main() -> int:
         assert generated.index(marker) < generated.index(comment_word)
     quoted = 'example : True := by simp [show String from "-- not a comment"] -- TODO\n'
     assert find_sites(quoted)[0].callText.startswith("simp [show String")
-    syntax_data = "example : True := by simp [show Syntax from `(foo -- data)] -- TODO\n"
+    syntax_data = "example : True := by simp [show Syntax from `(foo /- data -/)] -- TODO\n"
     syntax_sites = find_sites(syntax_data)
-    assert syntax_sites[0].callText.endswith("-- data)]")
+    assert syntax_sites[0].callText.endswith(")]")
     syntax_traced, syntax_ledger = transform_with_ledger(syntax_data, "BoundaryFixture")
     assert "=>trace \"test/SimpTrace/meas_out/BoundaryFixture_01.json\" -- TODO" in syntax_traced
     assert verify_transform(syntax_data, "BoundaryFixture", syntax_traced, syntax_sites) == syntax_ledger

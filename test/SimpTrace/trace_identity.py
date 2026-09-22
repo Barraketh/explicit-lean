@@ -51,22 +51,58 @@ def _source_args(source: str, site: Site) -> list[dict[str, Any]]:
     left = text.find("[")
     if left < 0:
         return []
+
+    def skip_lexical(text: str, index: int) -> int | None:
+        """Skip a nested comment or quoted string, if one starts here."""
+        if text[index:index + 2] == "--":
+            newline = text.find("\n", index)
+            return len(text) if newline < 0 else newline
+        if text[index:index + 2] == "/-":
+            nesting, cursor = 1, index + 2
+            while cursor < len(text) and nesting:
+                if text[cursor:cursor + 2] == "/-":
+                    nesting += 1
+                    cursor += 2
+                elif text[cursor:cursor + 2] == "-/":
+                    nesting -= 1
+                    cursor += 2
+                else:
+                    cursor += 1
+            return cursor
+        if text[index:index + 3] == '\"\"\"':
+            cursor = index + 3
+            while cursor < len(text):
+                if text[cursor] == "\\":
+                    cursor += 2
+                elif text[cursor:cursor + 3] == '\"\"\"':
+                    return cursor + 3
+                else:
+                    cursor += 1
+            return len(text)
+        if text[index] == '"':
+            cursor = index + 1
+            while cursor < len(text):
+                if text[cursor] == "\\":
+                    cursor += 2
+                elif text[cursor] == '"':
+                    return cursor + 1
+                else:
+                    cursor += 1
+            return len(text)
+        return None
+
     depth = 0
     right = -1
-    quoted = False
     i = left
     while i < len(text):
+        skipped = skip_lexical(text, i)
+        if skipped is not None:
+            i = skipped
+            continue
         ch = text[i]
-        if quoted:
-            if ch == "\\":
-                i += 2
-                continue
-            quoted = ch != '"'
-        elif ch == '"':
-            quoted = True
-        elif ch in "([{⟨":
+        if ch in "([{⟨":
             depth += 1
-        elif ch in ")]⟩":
+        elif ch in ")]}⟩":
             depth -= 1
             if depth == 0:
                 right = i
@@ -76,23 +112,20 @@ def _source_args(source: str, site: Site) -> list[dict[str, Any]]:
         raise ValueError(f"unterminated simp argument list at site {site.siteOrdinal}")
     body = text[left + 1:right]
     pieces: list[tuple[int, int]] = []
-    start, depth, quoted, i = 0, 0, False, 0
+    start, depth, i = 0, 0, 0
     while i <= len(body):
         boundary = i == len(body)
         if boundary:
             stop = i
         else:
+            skipped = skip_lexical(body, i)
+            if skipped is not None:
+                i = skipped
+                continue
             ch = body[i]
-            if quoted:
-                if ch == "\\":
-                    i += 2
-                    continue
-                quoted = ch != '"'
-            elif ch == '"':
-                quoted = True
-            elif ch in "([{⟨":
+            if ch in "([{⟨":
                 depth += 1
-            elif ch in ")]⟩":
+            elif ch in ")]}⟩":
                 depth -= 1
             elif ch == "," and depth == 0:
                 stop = i
@@ -243,7 +276,7 @@ def _is_tactic_start(masked_source: str, line_start: int,
 
 
 def call_end(rest: str) -> int:
-    depth, block_comment, quoted = 0, 0, False
+    depth, block_comment, quoted, triple_quoted = 0, 0, False, False
     i = 0
     while i < len(rest):
         ch = rest[i]
@@ -257,19 +290,34 @@ def call_end(rest: str) -> int:
             else:
                 i += 1
             continue
-        if quoted:
+        if quoted or triple_quoted:
             if ch == "\\":
                 i += 2
-            else:
-                quoted = ch != '"'
+            elif triple_quoted and rest[i:i + 3] == '\"\"\"':
+                triple_quoted = False
+                i += 3
+            elif not triple_quoted and ch == '"':
+                quoted = False
                 i += 1
+            else:
+                i += 1
+            continue
+        if rest[i:i + 3] == '\"\"\"':
+            triple_quoted = True
+            i += 3
             continue
         if ch == '"':
             quoted = True
             i += 1
             continue
-        if rest[i:i + 2] == "--" and depth == 0:
+        if ch == "\n" and depth == 0:
             return i
+        if rest[i:i + 2] == "--":
+            if depth == 0:
+                return i
+            newline = rest.find("\n", i)
+            i = len(rest) if newline < 0 else newline
+            continue
         if rest[i:i + 2] == "/-":
             if depth == 0:
                 return i
@@ -297,15 +345,15 @@ def find_sites(source: str) -> list[Site]:
     for line_no, line in enumerate(source.split("\n"), start=1):
         masked_line = masked[offset:offset + len(line)]
         stripped = line.lstrip()
-        if not (stripped.startswith("attribute") or stripped.startswith("--")
-                or stripped.startswith("/-")):
+        if not stripped.startswith("attribute"):
             for match in TACTIC_RE.finditer(masked_line):
                 if not _is_tactic_start(masked, offset, match.start()):
                     continue
-                end = match.end() + call_end(line[match.end():])
-                text = line[match.start():end].rstrip()
                 start = offset + match.start()
-                sites.append(Site(len(sites), start, start + len(text),
+                scan_end = offset + match.end() + call_end(source[offset + match.end():])
+                text = source[start:scan_end].rstrip()
+                end = start + len(text)
+                sites.append(Site(len(sites), start, end,
                                   line_no, match.start(), text))
         offset += len(line) + 1
     return sites
