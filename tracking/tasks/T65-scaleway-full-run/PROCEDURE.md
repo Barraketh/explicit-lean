@@ -56,8 +56,12 @@ Preflight is read-only. It checks the exact source HEAD and publication,
 project identity, absence of pilot resources, `GP1-L` availability,
 marketplace local-image compatibility (`ubuntu_noble`, `x86_64`,
 `instance_local`), exact SSH ingress rule, pinned job hashes, and input layout.
-The parser accepts the top-level array and keyed-object response shapes used by
-Scaleway CLI 2.61.0. The cloud-init TTL shutdown is armed before remote setup.
+It also opens the pinned databases read-only and requires that both are
+distinct regular files with distinct inodes but identical baseline bytes and
+pending queues; the two manifests must be disjoint and their union must equal
+that complete queue. The parser accepts the top-level array and keyed-object
+response shapes used by Scaleway CLI 2.61.0. The cloud-init TTL shutdown is
+armed before remote setup.
 
 After verifying/installing the new host key, run the local supervisor in a
 foreground terminal or under a process supervisor so it remains alive:
@@ -71,14 +75,27 @@ python3 -B Experiment/scaleway_simp_replacements.py supervise \
 The supervisor accepts an already-created host or resumes polling already
 running workers. It pins and uploads both jobs, verifies remote hashes, starts
 two independent Lean worker processes with separate DBs, logs and artifact
-directories, then polls both completion markers. Collection validates both
-archives, module-manifest hashes, source commit, worker exit codes, updated DB
-hashes, logs and artifacts before atomically publishing the local output. A
-transient or invalid collection is retried with separate local attempt paths
-while host time remains. The supervisor deletes the exact tagged host, attached
-storage and public IP after validated collection, or when the worker/host
-budget expires or a terminal failure cannot be recovered. The state file
-records retries, failures, checksums, cleanup, and the final report.
+directories, then polls both completion markers. Before either worker starts,
+bootstrap installs `zstd`, warms the Lake cache, and builds and verifies
+`ExplicitLean.SimpTrace` and `ExplicitLean.ExplicitRw` once. Creation and
+dispatch both validate the resultant server's image, security group, SSH-key
+provenance and local root volume, and record the exact attached flexible-IP ID.
+Collection validates both archives, module-manifest hashes, source commit,
+worker exit codes, updated DB hashes, logs and artifacts before atomically
+publishing the local output. A compressed archive is capped at 8 GiB per worker
+(16 GiB total), extraction is capped at 100,000 members, 8 GiB per member and
+32 GiB total, and local free space is checked before download and during
+extraction. Failed staging attempts are removed before retry so retries cannot
+accumulate large temporary trees. A transient or invalid collection is retried
+while host time remains. A restart from `workers-finished` or `workers-failed`
+resumes collection; it does not relaunch workers or delete remote archives.
+Uncollected terminal results are preserved on entry rejection or
+policy-validation failure. The supervisor deletes the exact tagged host,
+attached storage and recorded flexible IP only after validated collection, or
+at the hard worker/host deadline after recording that results could not be
+recovered. Cleanup verifies absence of the exact IP in Scaleway's IP list in
+both normal and already-absent-server paths. The state file records retries,
+failures, checksums, cleanup, and the final report.
 
 Useful read-only follow-up:
 

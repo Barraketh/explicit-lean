@@ -13,17 +13,26 @@ compatibility, and separate security-group rule listing. Dedicated
 The foreground `supervise` command polls both workers, retries result
 collection using isolated attempt directories until the host/deadline budget
 ends, atomically publishes validated results, and then deletes the exact
-instance and attached resources. It attempts cleanup after dispatch, poll,
-collection, timeout, and worker failures; it preserves retry/error information
-in the local state file. Confirmed cleanup is idempotent.
+instance and attached resources. Terminal `workers-finished` and
+`workers-failed` phases resume collection after restart and are not relaunched.
+Policy/entry rejection does not delete uncollected archives. Collection enforces
+compressed archive, member-count, per-member and total-extraction bounds, checks
+local disk space, and discards failed staging directories before retry. The
+created server's image, security group, key provenance and root volume are
+checked before worker launch; the exact flexible-IP ID is saved and absence is
+verified during cleanup. Bootstrap installs `zstd` and builds/verifies both
+shared Lean targets once before starting either worker. Cleanup preserves
+retry/error information in the local state file and is idempotent after
+confirmed deletion.
 
 Verification completed locally:
 
-- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 7 mock-only
-  checks passed, including cost/TTL/job-hash rejection, actual CLI response
-  shapes, two concurrent launch commands, dual result hash validation,
-  idempotent cleanup, ambiguous-create handling, and transient collection
-  retry before cleanup.
+- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 12 mock-only
+  checks passed, including cost/TTL/job-hash rejection, complete/disjoint
+  pending-queue validation and distinct DB inodes, CLI response shapes,
+  server identity, concurrent launches, result-size/disk limits, restart-safe
+  collection, flexible-IP cleanup, idempotent cleanup, ambiguous-create
+  handling, and transient collection retry before cleanup.
 - `python3 -m py_compile Experiment/scaleway_simp_replacements.py
   Experiment/check_scaleway_simp_replacements.py` — passed.
 - `python3 -B Experiment/scaleway_simp_replacements.py plan` — reported

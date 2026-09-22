@@ -9,8 +9,10 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import sqlite3
 import tarfile
 import tempfile
+from types import SimpleNamespace
 from typing import Any, Sequence
 
 import scaleway_simp_replacements as pilot
@@ -21,6 +23,8 @@ ORG = "11111111-1111-4111-8111-111111111111"
 PROJECT = "22222222-2222-4222-8222-222222222222"
 IMAGE = "33333333-3333-4333-8333-333333333333"
 LOCAL_IMAGE = "33333333-3333-4333-8333-333333333334"
+IP_ID = "33333333-3333-4333-8333-333333333335"
+VOLUME_ID = "33333333-3333-4333-8333-333333333336"
 SG = "44444444-4444-4444-8444-444444444444"
 KEY = "55555555-5555-4555-8555-555555555555"
 SERVER = "66666666-6666-4666-8666-666666666666"
@@ -38,12 +42,20 @@ def blocked(function: Any) -> None:
 def setup(root: Path) -> tuple[Path, Path, Path, Path]:
     repo = root / "repo"; repo.mkdir()
     job_root = root / "jobs"; job_root.mkdir()
+    baseline = root / "baseline.sqlite3"
+    with sqlite3.connect(baseline) as con:
+        con.execute("CREATE TABLE modules(name TEXT PRIMARY KEY)")
+        con.execute("CREATE TABLE simp_replacements(module_name TEXT NOT NULL, ordinal INTEGER NOT NULL, status TEXT NOT NULL, PRIMARY KEY(module_name, ordinal))")
+        for module in ("Mathlib.Algebra.Group.Basic", "Mathlib.Data.Bool.Basic"):
+            con.execute("INSERT INTO modules VALUES (?)", (module,))
+            con.execute("INSERT INTO simp_replacements VALUES (?, 0, 'pending')", (module,))
+    baseline_bytes = baseline.read_bytes()
     jobs = []
     for index, module in enumerate(("Mathlib.Algebra.Group.Basic", "Mathlib.Data.Bool.Basic")):
         job = job_root / f"job-{index:03d}"; job.mkdir()
         manifest = job / "modules.txt"; database = job / "mathlib-db.sqlite3"
         manifest.write_text(module + "\n", encoding="utf-8")
-        database.write_bytes(f"sqlite-fixture-{index}".encode())
+        database.write_bytes(baseline_bytes)
         jobs.append({"id": f"job-{index:03d}", "directory": str(job.resolve()),
                      "manifest_sha256": pilot.sha256_file(manifest),
                      "database_sha256": pilot.sha256_file(database)})
@@ -77,7 +89,11 @@ class Provider:
     def __init__(self) -> None:
         self.commands: list[tuple[str, ...]] = []
         self.server: dict[str, Any] | None = None
+        self.ips: list[dict[str, Any]] = []
+        self.volume_items: list[dict[str, Any]] = []
         self.fail_create_after_commit = False
+        self.retain_ip_on_delete = False
+        self.bad_server_shape: str | None = None
         self.wrong_account = False
 
     def __call__(self, command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
@@ -106,7 +122,9 @@ class Provider:
         if cmd[:3] == ("instance", "server", "list"):
             return self.json(args, [self.server] if self.server else [])
         if cmd[:3] == ("instance", "volume", "list"):
-            return self.json(args, [])
+            return self.json(args, self.volume_items)
+        if cmd[:3] == ("instance", "ip", "list"):
+            return self.json(args, self.ips)
         if cmd[:3] == ("instance", "server-type", "get"):
             assert "zone=nl-ams-1" in cmd
             return self.json(args, {"servers": {"GP1-L": {"availability": "available"}}})
@@ -127,17 +145,40 @@ class Provider:
             assert "OnCalendar=" in Path(cloud).read_text()
             assert "tags.1=two-workers" in cmd
             self.server = {"id": SERVER, "name": next(x.split("=", 1)[1] for x in cmd if x.startswith("name=")),
-                "project_id": PROJECT, "zone": "nl-ams-1", "commercial_type": "GP1-L",
+                "project": PROJECT, "zone": "nl-ams-1", "commercial_type": "GP1-L",
                 "tags": ["explicit-lean-simp-pilot", "two-workers"],
-                "public_ip": {"address": "198.51.100.4"}}
+                "image": {"id": LOCAL_IMAGE, "name": "Ubuntu 24.04 Noble Numbat", "arch": "x86_64", "zone": "nl-ams-1"},
+                "security_group": {"id": SG, "name": "pilot"},
+                "ssh_key_id": KEY,
+                "public_ip": {"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"},
+                "public_ips": [{"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"}],
+                "volumes": {"0": {"id": VOLUME_ID, "size": 559 * 1_000_000_000,
+                    "volume_type": "l_ssd", "boot": True, "zone": "nl-ams-1"}}}
+            self.ips = [dict(self.server["public_ip"], project=PROJECT, zone="nl-ams-1")]
+            self.volume_items = [dict(self.server["volumes"]["0"], server={"id": SERVER}, tags=[])]
             assert f"image={LOCAL_IMAGE}" in cmd
             if self.fail_create_after_commit:
                 return subprocess.CompletedProcess(args, 124, "", "ambiguous timeout")
             return self.json(args, {"server": self.server})
         if cmd[:3] == ("instance", "server", "get"):
-            return self.json(args, {"server": self.server})
+            observed = deepcopy(self.server)
+            if observed is not None and self.bad_server_shape == "image":
+                observed["image"]["id"] = IMAGE
+            elif observed is not None and self.bad_server_shape == "security_group":
+                observed["security_group"]["id"] = IMAGE
+            elif observed is not None and self.bad_server_shape == "ssh_key":
+                observed["ssh_key_id"] = IMAGE
+            elif observed is not None and self.bad_server_shape == "root_volume":
+                observed["volumes"]["0"]["size"] = 100
+            elif observed is not None and self.bad_server_shape == "dynamic_ip":
+                observed["public_ip"]["dynamic"] = True
+                observed["public_ips"][0]["dynamic"] = True
+            return self.json(args, {"server": observed})
         if cmd[:3] == ("instance", "server", "delete"):
             self.server = None
+            if not self.retain_ip_on_delete:
+                self.ips = []
+            self.volume_items = []
             return self.json(args, {})
         raise AssertionError(f"unhandled provider command {cmd}")
 
@@ -186,12 +227,45 @@ def test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins() -
         blocked(lambda: ctl(root, path, provider).preflight(repo_root=repo, job_root=jobs))
 
 
+def test_job_root_rejects_overlap_missing_pending_modules_and_hardlinks() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); _, jobs, _, policy_path = setup(root)
+        policy = json.loads(policy_path.read_text())
+        first = jobs / "job-000" / "modules.txt"
+        second = jobs / "job-001" / "modules.txt"
+        first.write_text("Mathlib.Algebra.Group.Basic\n", encoding="utf-8")
+        second.write_text("Mathlib.Algebra.Group.Basic\n", encoding="utf-8")
+        policy["jobs"][0]["manifest_sha256"] = pilot.sha256_file(first)
+        policy["jobs"][1]["manifest_sha256"] = pilot.sha256_file(second)
+        blocked(lambda: pilot.validate_job_root(jobs, policy["jobs"]))
+
+        second.write_text("Mathlib.Data.Bool.Basic\n", encoding="utf-8")
+        policy["jobs"][1]["manifest_sha256"] = pilot.sha256_file(second)
+        database0 = jobs / "job-000" / "mathlib-db.sqlite3"
+        database1 = jobs / "job-001" / "mathlib-db.sqlite3"
+        database1.unlink(); database1.hardlink_to(database0)
+        blocked(lambda: pilot.validate_job_root(jobs, policy["jobs"]))
+
+        database1.unlink()
+        with sqlite3.connect(database1) as con:
+            con.execute("CREATE TABLE modules(name TEXT PRIMARY KEY)")
+            con.execute("CREATE TABLE simp_replacements(module_name TEXT NOT NULL, ordinal INTEGER NOT NULL, status TEXT NOT NULL, PRIMARY KEY(module_name, ordinal))")
+            con.execute("INSERT INTO modules VALUES ('Mathlib.Algebra.Group.Basic')")
+            con.execute("INSERT INTO simp_replacements VALUES ('Mathlib.Algebra.Group.Basic', 0, 'pending')")
+            con.execute("INSERT INTO modules VALUES ('Mathlib.Data.Bool.Basic')")
+            con.execute("INSERT INTO simp_replacements VALUES ('Mathlib.Data.Bool.Basic', 0, 'success')")
+        policy["jobs"][1]["database_sha256"] = pilot.sha256_file(database1)
+        blocked(lambda: pilot.validate_job_root(jobs, policy["jobs"]))
+
+
 def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
         controller = ctl(root, path, provider)
         created = controller.create(repo_root=repo, job_root=jobs, confirm=True)
         assert created["phase"] == "created" and len(created["jobs"]) == 2
+        assert created["public_ip_id"] == IP_ID and created["local_image_id"] == LOCAL_IMAGE
+        assert created["volume_ids"] == [VOLUME_ID] and created["ssh_key_id"] == KEY
         (root / "pilot_known_hosts").write_text("198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
         ssh_calls: list[tuple[str, ...]] = []
         def ssh_fake(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -205,10 +279,25 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
         launches = [args for args in ssh_calls if "nohup bash -lc" in " ".join(args)]
         assert len(launches) == 2
         assert all("timeout --signal=TERM" in " ".join(args) for args in launches)
+        bootstrap = next(args[-1] for args in ssh_calls if "lake build ExplicitLean.SimpTrace" in " ".join(args))
+        assert "apt-get install -y" in bootstrap and "zstd" in bootstrap
+        assert "lake build ExplicitLean.SimpTrace ExplicitLean.ExplicitRw" in bootstrap
+        assert "test -s .lake/build/lib/lean/ExplicitLean/SimpTrace.olean" in bootstrap
+        assert "test -s .lake/build/lib/lean/ExplicitLean/ExplicitRw.olean" in bootstrap
         assert sum(command and command[0] == "scp" and "-r" in command for command in provider.commands) == 1
         assert any("UserKnownHostsFile=" in " ".join(command) for command in provider.commands if command and command[0] == "scp")
         state = json.loads((root / "state.json").read_text())
         assert [job["phase"] for job in state["jobs"]] == ["running", "running"]
+
+
+def test_created_server_image_group_key_root_volume_and_ip_must_match_policy() -> None:
+    for mismatch in ("image", "security_group", "ssh_key", "root_volume", "dynamic_ip"):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
+            provider.bad_server_shape = mismatch
+            blocked(lambda: ctl(root, path, provider).create(repo_root=repo, job_root=jobs, confirm=True))
+            assert provider.server is not None
+            assert not any(command and command[0] in {"ssh", "scp"} for command in provider.commands)
 
 
 def test_collection_verifies_both_result_archives_and_hashes() -> None:
@@ -232,9 +321,12 @@ def test_collection_verifies_both_result_archives_and_hashes() -> None:
                     archive.add(leaf, arcname=name)
             source_archives[spec["id"]] = archive_path
             expected_hashes[spec["id"]] = hashlib.sha256(db).hexdigest()
-        provider.server = {"id": SERVER, "name": pilot.NAME_PREFIX + "mock", "project_id": PROJECT,
+        provider.server = {"id": SERVER, "name": pilot.NAME_PREFIX + "mock", "project": PROJECT,
             "zone": "nl-ams-1", "commercial_type": "GP1-L", "tags": ["explicit-lean-simp-pilot"],
-            "public_ip": {"address": "198.51.100.4"}}
+            "public_ip": {"id": IP_ID, "address": "198.51.100.4", "family": "inet"},
+            "public_ips": [{"id": IP_ID, "address": "198.51.100.4", "family": "inet"}],
+            "image": {"id": LOCAL_IMAGE}, "security_group": {"id": SG},
+            "volumes": {"0": {"id": VOLUME_ID, "size": 559 * 1_000_000_000, "volume_type": "l_ssd"}}}
         original = provider
         def transfer(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
             if command and command[0] == "scp":
@@ -248,11 +340,92 @@ def test_collection_verifies_both_result_archives_and_hashes() -> None:
             "policy_sha256": pilot.sha256_file(path),
             "jobs": [{"id": spec["id"], "phase": "finished", "exit_code": 0} for spec in policy["jobs"]]}
         (root / "state.json").write_text(json.dumps(state))
-        output = root / "result"; got = pilot.ScalewayPilot(policy_path=path, state_path=root / "state.json",
-            runner=transfer, now=lambda: NOW).collect_workers(output_dir=output)
+        controller._ssh = lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0,
+            f"job-000\t{source_archives['job-000'].stat().st_size}\n"
+            f"job-001\t{source_archives['job-001'].stat().st_size}\n", "")  # type: ignore[method-assign]
+        controller.runner = transfer
+        output = root / "result"; got = controller.collect_workers(output_dir=output)
         assert got["phase"] == "collected" and len(got["artifact_file_hashes"]) == 8
         for job_id, digest in expected_hashes.items():
             assert pilot.sha256_file(output / job_id / "mathlib-db.sqlite3") == digest
+
+
+def collection_fixture(root: Path) -> tuple[pilot.ScalewayPilot, Provider, Path, dict[str, Any]]:
+    repo, jobs, _, path = setup(root); provider = Provider()
+    provider.server = {"id": SERVER, "name": pilot.NAME_PREFIX + "collection", "project": PROJECT,
+        "zone": "nl-ams-1", "commercial_type": "GP1-L", "tags": ["explicit-lean-simp-pilot"],
+        "public_ip": {"id": IP_ID, "address": "198.51.100.4", "family": "inet"},
+        "public_ips": [{"id": IP_ID, "address": "198.51.100.4", "family": "inet"}],
+        "image": {"id": LOCAL_IMAGE}, "security_group": {"id": SG},
+        "volumes": {"0": {"id": VOLUME_ID, "size": 559 * 1_000_000_000, "volume_type": "l_ssd"}}}
+    (root / "pilot_known_hosts").write_text("198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+    policy = json.loads(path.read_text())
+    state = {"schema": 1, "phase": "workers-finished", "server_id": SERVER,
+        "name": provider.server["name"], "zone": "nl-ams-1", "project_id": PROJECT,
+        "organization_id": ORG, "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
+        "policy_sha256": pilot.sha256_file(path),
+        "jobs": [{"id": spec["id"], "phase": "finished", "exit_code": 0} for spec in policy["jobs"]]}
+    (root / "state.json").write_text(json.dumps(state))
+    return ctl(root, path, provider), provider, path, policy
+
+
+def test_collection_rejects_oversized_remote_archives_and_low_free_space_before_scp() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); controller, provider, _, _ = collection_fixture(root)
+        scp_calls: list[tuple[str, ...]] = []
+        def runner(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
+            if command and command[0] == "scp":
+                scp_calls.append(tuple(command))
+            return provider(command, timeout)
+        controller.runner = runner
+        controller._ssh = lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0,
+            f"job-000\t{pilot.MAX_RESULT_ARCHIVE_BYTES + 1}\njob-001\t100\n", "")  # type: ignore[method-assign]
+        blocked(lambda: controller.collect_workers(output_dir=root / "too-large"))
+        assert not scp_calls
+
+        controller._ssh = lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0,
+            "job-000\t100\njob-001\t100\n", "")  # type: ignore[method-assign]
+        original_disk_usage = pilot.shutil.disk_usage
+        pilot.shutil.disk_usage = lambda _path: SimpleNamespace(total=1024, used=900, free=124)  # type: ignore[assignment]
+        try:
+            blocked(lambda: controller.collect_workers(output_dir=root / "low-space"))
+        finally:
+            pilot.shutil.disk_usage = original_disk_usage  # type: ignore[assignment]
+        assert not scp_calls
+
+
+def test_collection_rejects_tar_expansion_bounds_before_extracting_any_entry() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); controller, provider, _, policy = collection_fixture(root)
+        archives: dict[str, Path] = {}
+        for spec in policy["jobs"]:
+            marker = {"schema": 1, "exit_code": 0, "commit": COMMIT,
+                      "database_sha256": "0" * 64, "manifest_sha256": spec["manifest_sha256"]}
+            archive_path = root / f"{spec['id']}-bomb.tar.gz"
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for name, data in (("mathlib-db.sqlite3", b"db"), ("worker.log", b"log"),
+                                   ("complete.json", json.dumps(marker).encode()),
+                                   ("artifacts/bomb.bin", b"x" * 11)):
+                    leaf = root / (spec["id"] + "-" + name.replace("/", "-"))
+                    leaf.write_bytes(data); archive.add(leaf, arcname=name)
+            archives[spec["id"]] = archive_path
+        def runner(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
+            if command and command[0] == "scp":
+                job_id = next(key for key in archives if key in str(command[-2]))
+                Path(command[-1]).write_bytes(archives[job_id].read_bytes())
+                return subprocess.CompletedProcess(command, 0, "", "")
+            return provider(command, timeout)
+        controller.runner = runner
+        controller._ssh = lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0,
+            f"job-000\t{archives['job-000'].stat().st_size}\n"
+            f"job-001\t{archives['job-001'].stat().st_size}\n", "")  # type: ignore[method-assign]
+        old_limit = pilot.MAX_TAR_MEMBER_BYTES; pilot.MAX_TAR_MEMBER_BYTES = 10
+        output = root / "tar-bomb"
+        try:
+            blocked(lambda: controller.collect_workers(output_dir=output))
+        finally:
+            pilot.MAX_TAR_MEMBER_BYTES = old_limit
+        assert not (output / "job-000" / "mathlib-db.sqlite3").exists()
 
 
 def test_status_marker_parsing_and_cleanup_idempotence() -> None:
@@ -269,8 +442,26 @@ def test_status_marker_parsing_and_cleanup_idempotence() -> None:
         snapshot = controller.poll_workers()
         assert snapshot["phase"] == "workers-failed"
         deleted = controller.cleanup(confirm=True)
-        assert deleted["phase"] == "deleted" and provider.server is None
+        assert deleted["phase"] == "deleted" and provider.server is None and provider.ips == []
+        assert deleted["public_ip_id"] == IP_ID
+        assert any(command[5:8] == ("instance", "ip", "list") for command in provider.commands)
         assert controller.cleanup(confirm=True)["phase"] == "deleted"
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider(); controller = ctl(root, path, provider)
+        created = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        state = {**created, "phase": "workers-finished"}; (root / "state.json").write_text(json.dumps(state))
+        provider.server = None; provider.volume_items = []
+        blocked(lambda: controller.cleanup(confirm=True))
+        assert json.loads((root / "state.json").read_text())["phase"] != "deleted"
+        provider.ips = []
+        assert controller.cleanup(confirm=True)["phase"] == "deleted"
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider(); provider.retain_ip_on_delete = True
+        controller = ctl(root, path, provider); controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        blocked(lambda: controller.cleanup(confirm=True))
+        assert provider.server is None and provider.ips and controller._load_state()["phase"] != "deleted"
 
 
 def test_ambiguous_create_never_retries_and_policy_default_is_disabled() -> None:
@@ -337,14 +528,66 @@ def test_supervisor_collects_and_cleans_even_when_dispatch_fails() -> None:
         assert not outcome["complete"] and outcome["error"] and failed == ["cleanup"]
 
 
+def test_supervisor_resumes_terminal_workers_before_cleanup_and_rejects_unknown_phase_safely() -> None:
+    for terminal_phase in ("workers-finished", "workers-failed"):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider(); controller = ctl(root, path, provider)
+            controller.create(repo_root=repo, job_root=jobs, confirm=True)
+            state = controller._load_state(); state["phase"] = terminal_phase; controller._save(state)
+            events: list[str] = []
+            controller.run_workers = lambda **_kwargs: (_ for _ in ()).throw(AssertionError("workers relaunched"))  # type: ignore[method-assign]
+            controller.poll_workers = lambda: (_ for _ in ()).throw(AssertionError("terminal workers repolled"))  # type: ignore[method-assign]
+            def collect(*, output_dir: Path) -> dict[str, Any]:
+                events.append("collect")
+                output_dir.mkdir()
+                state = controller._load_state(); state["phase"] = "collected" if terminal_phase == "workers-finished" else "collected-worker-failed"
+                controller._save(state)
+                return state
+            def cleanup(*, confirm: bool = False) -> dict[str, Any]:
+                assert confirm and events == ["collect"]
+                events.append("cleanup")
+                return {"phase": "deleted"}
+            controller.collect_workers = collect  # type: ignore[method-assign]
+            controller.cleanup = cleanup  # type: ignore[method-assign]
+            outcome = controller.supervise(job_root=jobs, repo_root=repo, output_dir=root / "results", poll_seconds=5)
+            assert events == ["collect", "cleanup"]
+            assert outcome["cleanup"]["phase"] == "deleted"
+            assert outcome["complete"] is (terminal_phase == "workers-finished")
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider(); controller = ctl(root, path, provider)
+        controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        state = controller._load_state(); state["phase"] = "unknown"; controller._save(state)
+        called: list[str] = []
+        controller.cleanup = lambda **_kwargs: (called.append("cleanup") or {"phase": "deleted"})  # type: ignore[method-assign]
+        result = controller.supervise(job_root=jobs, repo_root=repo, output_dir=root / "results", poll_seconds=5)
+        assert not result["complete"] and called == [] and provider.server is not None
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
+        later = NOW + timedelta(hours=7)
+        controller = ctl(root, path, provider, now=later)
+        created = ctl(root, path, provider).create(repo_root=repo, job_root=jobs, confirm=True)
+        created["phase"] = "workers-finished"; (root / "state.json").write_text(json.dumps(created))
+        called: list[str] = []
+        controller.cleanup = lambda **_kwargs: (called.append("cleanup") or {"phase": "deleted"})  # type: ignore[method-assign]
+        outcome = controller.supervise(job_root=jobs, repo_root=repo, output_dir=root / "results", poll_seconds=5)
+        assert not outcome["complete"] and called == [] and provider.server is not None
+
+
 def main() -> None:
     tests = [test_policy_cost_deadline_worker_count_and_job_hashes_fail_closed,
              test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins,
+             test_job_root_rejects_overlap_missing_pending_modules_and_hardlinks,
              test_create_and_two_workers_launch_concurrently_with_remote_hash_check,
+             test_created_server_image_group_key_root_volume_and_ip_must_match_policy,
              test_collection_verifies_both_result_archives_and_hashes,
+             test_collection_rejects_oversized_remote_archives_and_low_free_space_before_scp,
+             test_collection_rejects_tar_expansion_bounds_before_extracting_any_entry,
              test_status_marker_parsing_and_cleanup_idempotence,
              test_ambiguous_create_never_retries_and_policy_default_is_disabled,
-             test_supervisor_collects_and_cleans_even_when_dispatch_fails]
+             test_supervisor_collects_and_cleans_even_when_dispatch_fails,
+             test_supervisor_resumes_terminal_workers_before_cleanup_and_rejects_unknown_phase_safely]
     for test in tests:
         test()
     print(f"{len(tests)} Scaleway full-run mock checks passed")
