@@ -945,6 +945,22 @@ class ScalewayPilot:
                   "mv \"$d/worker.pid.tmp\" \"$d/worker.pid\"; printf 'RUNNING %s\\n' \"$p\"")
         return self._ssh(state, "sh", "-lc", shlex.quote(script), timeout=60)
 
+    @staticmethod
+    def _bootstrap_resume_is_safe(state: Mapping[str, Any]) -> bool:
+        """Only retry bootstrap while state proves dispatch has not begun."""
+        if state.get("phase") != "bootstrap-started":
+            return False
+        if "worker_started_at" in state or "worker_timeout_seconds" in state:
+            return False
+        jobs = state.get("jobs")
+        if not isinstance(jobs, list) or len(jobs) != 2:
+            return False
+        job_ids = [job.get("id") for job in jobs if isinstance(job, dict)]
+        if len(job_ids) != 2 or any(type(job_id) is not str for job_id in job_ids) or set(job_ids) != {"job-000", "job-001"}:
+            return False
+        return all(isinstance(job, dict) and job.get("phase") == "pending" and "launch_token" not in job
+                   for job in jobs)
+
     def _reconcile_dispatch(self, state: dict[str, Any], policy: Mapping[str, Any],
                             checked: Mapping[str, Any]) -> dict[str, Any]:
         """Resume a partial dispatch without duplicating any potentially launched worker."""
@@ -1045,7 +1061,7 @@ class ScalewayPilot:
         age = (now - created.astimezone(timezone.utc)).total_seconds()
         if age >= checked["lifetime"] or now >= checked["deadline"]:
             raise PilotError("host TTL or authorization deadline reached")
-        if state.get("phase") != "created":
+        if state.get("phase") != "created" and not self._bootstrap_resume_is_safe(state):
             raise PilotError("both workers may be dispatched once per server")
         self._repo_gate(checked, repo_root)
         self._identity(checked); self._check_type_image_network(checked)
@@ -1073,7 +1089,12 @@ class ScalewayPilot:
         bootstrap = "set -eu; test \"$(uname -m)\" = x86_64; test -f /etc/os-release; " \
                     "sudo apt-get update; sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 python3-pip build-essential curl zstd; " \
                     "git ls-remote https://github.com/Barraketh/explicit-lean.git | awk '{print $1}' | grep -Fx " + shlex.quote(commit) + "; " \
-                    "git clone --no-checkout https://github.com/Barraketh/explicit-lean.git /opt/explicit-lean; " \
+                    "sudo install -d -o ubuntu -g ubuntu /opt/explicit-lean; " \
+                    "if test -d /opt/explicit-lean/.git; then " \
+                    "test \"$(git -C /opt/explicit-lean remote get-url origin)\" = https://github.com/Barraketh/explicit-lean.git; " \
+                    "else test -z \"$(find /opt/explicit-lean -mindepth 1 -maxdepth 1 -print -quit)\"; " \
+                    "git clone --no-checkout https://github.com/Barraketh/explicit-lean.git /opt/explicit-lean/.; fi; " \
+                    "git -C /opt/explicit-lean fetch --no-tags origin " + shlex.quote(commit) + "; " \
                     "git -C /opt/explicit-lean checkout --detach " + shlex.quote(commit) + "; " \
                     "test \"$(git -C /opt/explicit-lean rev-parse HEAD)\" = " + shlex.quote(commit) + "; " \
                     "curl --fail --silent --show-error " + ELAN_URL + " -o /tmp/elan.tar.gz; " \
@@ -1324,8 +1345,10 @@ class ScalewayPilot:
                          "collected", "collected-worker-failed"}
             if phase not in resumable:
                 raise PilotError("supervisor state phase is not resumable; resources and remote data are untouched")
+            if phase == "bootstrap-started" and not self._bootstrap_resume_is_safe(state):
+                raise PilotError("bootstrap resume refused because worker dispatch evidence exists")
             cleanup_allowed = phase in {"created", "bootstrap-started"}
-            if phase == "created":
+            if phase in {"created", "bootstrap-started"}:
                 try:
                     state = self.run_workers(job_root=job_root, repo_root=repo_root)
                     phase = state.get("phase")
@@ -1467,7 +1490,9 @@ class ScalewayPilot:
                     if failed_phase in {"workers-running", "workers-finished", "workers-failed",
                                         "dispatching", "dispatch-failed"}:
                         cleanup_allowed = False
-                    elif failed_phase in {"created", "bootstrap-started", "collected", "collected-worker-failed"}:
+                    elif failed_phase == "bootstrap-started":
+                        cleanup_allowed = self._bootstrap_resume_is_safe(self._load_state())
+                    elif failed_phase in {"created", "collected", "collected-worker-failed"}:
                         cleanup_allowed = True
                 except Exception:
                     cleanup_allowed = False

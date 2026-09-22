@@ -510,6 +510,9 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
                                                for command in status_checks)
         bootstrap = next(args[-1] for args in ssh_calls if "lake build ExplicitLean.SimpTrace" in " ".join(args))
         assert "apt-get install -y" in bootstrap and "zstd" in bootstrap
+        assert "sudo install -d -o ubuntu -g ubuntu /opt/explicit-lean" in bootstrap
+        assert "git clone --no-checkout https://github.com/Barraketh/explicit-lean.git /opt/explicit-lean/." in bootstrap
+        assert "git -C /opt/explicit-lean fetch --no-tags origin" in bootstrap
         assert "lake build ExplicitLean.SimpTrace ExplicitLean.ExplicitRw" in bootstrap
         assert "test -s .lake/build/lib/lean/ExplicitLean/SimpTrace.olean" in bootstrap
         assert "test -s .lake/build/lib/lean/ExplicitLean/ExplicitRw.olean" in bootstrap
@@ -517,6 +520,53 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
         assert any("UserKnownHostsFile=" in " ".join(command) for command in provider.commands if command and command[0] == "scp")
         state = json.loads((root / "state.json").read_text())
         assert [job["phase"] for job in state["jobs"]] == ["running", "running"]
+
+
+def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
+        controller = ctl(root, path, provider)
+        state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        state["phase"] = "bootstrap-started"
+        controller._save(state)
+        (root / "pilot_known_hosts").write_text(
+            "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+        ssh_calls: list[tuple[str, ...]] = []
+
+        def ssh_fake(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            del timeout
+            ssh_calls.append(args)
+            command = " ".join(args)
+            if "NOT_LAUNCHED" in command:
+                return subprocess.CompletedProcess(args, 0, "NOT_LAUNCHED\n", "")
+            if "nohup bash -lc" in command:
+                return subprocess.CompletedProcess(args, 0, "RUNNING 4310\n", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        controller._ssh = ssh_fake  # type: ignore[method-assign]
+        resumed = controller.run_workers(job_root=jobs, repo_root=repo)
+        assert resumed["phase"] == "workers-running"
+        bootstrap = next(" ".join(args) for args in ssh_calls if "git clone --no-checkout" in " ".join(args))
+        assert "sudo install -d -o ubuntu -g ubuntu /opt/explicit-lean" in bootstrap
+        assert "git -C /opt/explicit-lean remote get-url origin" in bootstrap
+
+    for evidence in ("worker_started_at", "worker_timeout_seconds", "launch_token"):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
+            controller = ctl(root, path, provider)
+            state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+            state["phase"] = "bootstrap-started"
+            if evidence in {"worker_started_at", "worker_timeout_seconds"}:
+                state[evidence] = "evidence"
+            else:
+                state["jobs"][0][evidence] = "a" * 32
+            controller._save(state)
+            blocked(lambda: controller.run_workers(job_root=jobs, repo_root=repo))
+            cleanup_calls: list[str] = []
+            controller.cleanup = lambda *, confirm=False: (cleanup_calls.append("cleanup") or {"phase": "deleted"})  # type: ignore[method-assign]
+            outcome = controller.supervise(job_root=jobs, repo_root=repo,
+                output_dir=root / "results", poll_seconds=5)
+            assert not outcome["complete"] and cleanup_calls == []
 
 
 def test_ssh_accepts_plural_only_public_ip_and_rejects_state_or_record_mismatch() -> None:
@@ -1074,6 +1124,7 @@ def main() -> None:
              test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins,
              test_job_root_rejects_overlap_missing_pending_modules_and_hardlinks,
              test_create_and_two_workers_launch_concurrently_with_remote_hash_check,
+             test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence,
              test_ssh_accepts_plural_only_public_ip_and_rejects_state_or_record_mismatch,
              test_created_server_image_group_key_root_volume_and_ip_must_match_policy,
              test_dispatch_reconciliation_is_idempotent_at_all_crash_points,
