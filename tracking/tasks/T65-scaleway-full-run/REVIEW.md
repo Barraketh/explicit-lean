@@ -176,3 +176,68 @@ volume. Validate that the unique boot volume is the configured local root
 volume and record that exact ID.
 
 No provider API calls or resource mutations were made during this re-review.
+
+## Final re-review of `97ef952`
+
+Re-reviewed the launch-claim and boot-volume fixes in
+`97ef952c5fb14b797ac0282d942639522acf1bb7`. Verification:
+
+- `python3 -B Experiment/check_scaleway_simp_replacements.py` — all 13
+  Scaleway mock checks passed.
+- `python3 -B Experiment/check_simp_replacement_jobs.py` — all 10 preparation
+  checks passed.
+- `python3 -m py_compile Experiment/scaleway_simp_replacements.py
+  Experiment/check_scaleway_simp_replacements.py` — passed.
+- `git diff --check` — passed.
+- No live Scaleway requests or mutations were made.
+
+The prior P1 for terminal worker restarts is resolved. Dispatch recovery now
+reconciles the two remote job states and includes tests for six restart points,
+including a live worker, a completed worker, a lost SSH launch response, and
+the ambiguous response retry. The atomic `mkdir .launch-claim` closes the
+status-to-launch race: concurrent controllers cannot both pass the claim, and
+an extant or ambiguous claim is never relaunched. The boot-volume check now
+requires the pinned 559 GB local volume to match `boot_volume_id` or
+`boot: true`; tests reject wrong boot IDs and a matching-size non-boot volume.
+
+Final verdict: **FAIL — one P1 cost-bound recovery gap remains before the
+authorized run.**
+
+### P1 — unresolved launch ambiguity ends supervision without deadline cleanup
+
+On launch-status or claim ambiguity, `_reconcile_dispatch` persists
+`dispatch-failed` and raises (for example lines 783-799 and 816-820).
+`supervise` catches that error and deliberately leaves `cleanup_allowed=False`
+for `dispatch-failed` (lines 1219-1229), then returns. No local deadline
+monitor continues. The cloud-init watchdog only powers off the server; it
+does not delete the attached flexible IP. The controller therefore leaves a
+billable IP/resource after an ambiguous outcome, with no automatic provider
+cleanup at the 12-hour deadline. This protects possibly recoverable output,
+but no longer enforces the configured all-in cost cap in that failure mode.
+
+Reproduction: make the remote claim exist but return an empty/malformed PID or
+have `kill -0` fail; `_reconcile_dispatch` records `dispatch-failed` and
+raises. `supervise` returns with no cleanup call. After the cloud-init TTL
+powers off the instance, the exact public IP remains allocated because cleanup
+never calls `instance server delete ... with-ip`. Keep a durable local
+supervisor running through the hard deadline and clean up there, or implement
+an equivalent bounded cleanup/recovery mechanism that preserves remote data
+until the deadline and verifies the IP is deleted.
+
+### P2 — `kill -0` proves only that some process owns the PID
+
+The claim reconciliation script validates that `worker.pid` contains decimal
+digits and calls `kill -0` (lines 744-748, 772-775). It does not verify the
+process start time or command line against the expected worker launcher. If
+the worker shell exits without writing `complete.json`, its PID is later
+reused, and the claim remains, an unrelated process can be classified as
+`RUNNING`. This does not cause a duplicate launch, but can leave a missing
+result unresolved until timeout. Pin process identity (for example with a
+start-time token stored atomically with the PID and checked through `/proc`),
+or ensure unresolved status enters bounded recovery/cleanup rather than
+ending supervision.
+
+The P2 does not supersede the P1: regardless of PID identity checking, an
+unresolved claim needs a persistent monitor through the authorized cleanup
+deadline. The report's earlier verdicts are historical; this section is the
+final verdict for `97ef952`.
