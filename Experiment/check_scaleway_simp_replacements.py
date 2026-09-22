@@ -120,7 +120,7 @@ class Provider:
             return self.json(args, [{"direction": "inbound", "protocol": "TCP", "action": "accept",
                 "dest_port_from": 22, "dest_port_to": None, "ip_range": "192.0.2.0/24"}])
         if cmd[:3] == ("iam", "ssh-key", "get"):
-            return self.json(args, {"id": KEY, "project_id": PROJECT, "name": "mock",
+            return self.json(args, {"id": KEY, "project": PROJECT, "name": "mock",
                 "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE7fixture"})
         if cmd[:3] == ("instance", "server", "create"):
             cloud = next(arg.split("=", 1)[1].removeprefix("@") for arg in cmd if arg.startswith("cloud-init=@"))

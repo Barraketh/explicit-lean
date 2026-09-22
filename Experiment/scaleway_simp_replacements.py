@@ -403,7 +403,8 @@ class ScalewayPilot:
             raise PilotError("security group must allow only SSH from the approved source CIDR")
         key_data = self._scw(["iam", "ssh-key", "get", checked["machine"]["ssh_key_id"]], policy=checked)
         ssh_key = key_data.get("ssh_key", key_data) if isinstance(key_data, dict) else None
-        if not isinstance(ssh_key, dict) or ssh_key.get("project_id") != checked["project_id"]:
+        if (not isinstance(ssh_key, dict)
+                or ssh_key.get("project_id", ssh_key.get("project")) != checked["project_id"]):
             raise PilotError("SSH key project identity does not match policy")
         private_key = Path(checked["machine"]["ssh_identity_file"]).expanduser()
         if not private_key.is_file() or not os.access(private_key, os.R_OK):
