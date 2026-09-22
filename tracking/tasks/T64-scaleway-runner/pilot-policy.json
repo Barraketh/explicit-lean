@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "provider": "scaleway",
+  "launch_authorized": false,
+  "cli_profile": null,
+  "login_user": "ubuntu",
+  "authorization": {
+    "organization_id": null,
+    "project_id": null,
+    "zone": null,
+    "not_after": null,
+    "max_instance_lifetime_seconds": null,
+    "max_worker_runtime_seconds": null,
+    "max_cost_eur": null,
+    "estimated_all_in_cost_eur": null,
+    "cost_checked_at": null,
+    "cost_source": null,
+    "cost_components_eur": null
+  },
+  "machine": {
+    "type": "GP1-L",
+    "image_id": null,
+    "security_group_id": null,
+    "ssh_key_id": null,
+    "ssh_identity_file": null,
+    "ssh_source_cidr": null
+  },
+  "repository": {
+    "url": "https://github.com/Barraketh/explicit-lean.git",
+    "commit": null
+  },
+  "job": {
+    "directory": null,
+    "manifest_sha256": null,
+    "database_sha256": null
+  },
+  "requirements": {
+    "single_host": true,
+    "single_worker": true,
+    "linux_x86_64": true,
+    "minimum_memory_gib": 128,
+    "minimum_local_disk_gib": 200,
+    "root_volume": "local:559GB",
+    "public_ipv4": true,
+    "ssh_ingress": "one configured IPv4 CIDR on TCP/22"
+  }
+}
