@@ -517,7 +517,17 @@ class ScalewayPilot:
         public_ips = server.get("public_ips")
         if isinstance(public_ips, list):
             candidates.extend(item for item in public_ips if isinstance(item, dict))
-        unique = {item.get("id"): item for item in candidates if type(item.get("id")) is str}
+        unique: dict[str, dict[str, Any]] = {}
+        for item in candidates:
+            item_id = item.get("id")
+            if type(item_id) is not str:
+                continue
+            previous = unique.get(item_id)
+            if previous is not None and any(
+                    previous.get(field) != item.get(field)
+                    for field in ("address", "family", "dynamic")):
+                raise PilotError("server flexible IP records disagree")
+            unique[item_id] = item
         if len(unique) != 1:
             raise PilotError("created server must expose exactly one identified flexible IP")
         result = next(iter(unique.values()))
@@ -528,6 +538,15 @@ class ScalewayPilot:
         if result.get("dynamic") not in (None, False):
             raise PilotError("server public IP is not the requested flexible IP")
         return result
+
+    @classmethod
+    def _state_pinned_public_ip(cls, server: Mapping[str, Any], state: Mapping[str, Any]) -> dict[str, Any]:
+        public_ip = cls._one_public_ip(server)
+        expected_id, expected_address = state.get("public_ip_id"), state.get("public_ip_address")
+        if (type(expected_id) is not str or expected_id != public_ip["id"]
+                or type(expected_address) is not str or expected_address != public_ip["address"]):
+            raise PilotError("server flexible IP differs from state-pinned identity")
+        return public_ip
 
     def _get_sbs_volume(self, volume_id: str, checked: Mapping[str, Any], *,
                         expected_server_id: str | None = None,
@@ -885,10 +904,7 @@ class ScalewayPilot:
         data = server.get("server", server) if isinstance(server, dict) else None
         if not isinstance(data, dict) or data.get("id") != state.get("server_id"):
             raise PilotError("server address response identity mismatch")
-        public_ip = data.get("public_ip", {}) if isinstance(data, dict) else None
-        address = public_ip.get("address") if isinstance(public_ip, dict) else None
-        if not isinstance(address, str) or not address:
-            raise PilotError("server has no public IPv4 address")
+        address = self._state_pinned_public_ip(data, state)["address"]
         self._require_known_host(address, machine)
         base = ["ssh", "-i", str(Path(machine["ssh_identity_file"]).expanduser()), "-o", "BatchMode=yes",
                 "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={machine['known_hosts_file']}",
@@ -1082,7 +1098,7 @@ class ScalewayPilot:
         server_obj = server_data.get("server", server_data)
         if not isinstance(server_obj, dict) or server_obj.get("id") != state["server_id"]:
             raise PilotError("server identity changed before job transfer")
-        address = server_obj["public_ip"]["address"]
+        address = self._state_pinned_public_ip(server_obj, state)["address"]
         self._require_known_host(address, machine)
         target = f"{policy.get('login_user', 'ubuntu')}@{address}:{remote}/"
         scp_base = ["scp", "-r", "-i", str(Path(machine["ssh_identity_file"]).expanduser()), "-o", "BatchMode=yes",
@@ -1164,15 +1180,13 @@ class ScalewayPilot:
                         "cli_profile": policy["cli_profile"]})
         server_data = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=policy)
         server_obj = server_data.get("server", server_data) if isinstance(server_data, dict) else None
-        if not isinstance(server_obj, dict) or server_obj.get("id") != state.get("server_id") or not isinstance(server_obj.get("public_ip"), dict):
+        if not isinstance(server_obj, dict) or server_obj.get("id") != state.get("server_id"):
             raise PilotError("result server address response has unexpected shape")
         tags = server_obj.get("tags", [])
         if (server_obj.get("name") != state.get("name") or server_obj.get("project_id", server_obj.get("project")) != state.get("project_id")
                 or not isinstance(tags, list) or "explicit-lean-simp-pilot" not in tags):
             raise PilotError("result server identity mismatch")
-        address = server_obj["public_ip"].get("address")
-        if type(address) is not str or not address:
-            raise PilotError("result server has no public IPv4 address")
+        address = self._state_pinned_public_ip(server_obj, state)["address"]
         machine = _dict(policy.get("machine"), "machine")
         self._require_known_host(address, machine)
         login = str(policy.get("login_user", "ubuntu"))

@@ -92,8 +92,10 @@ class Provider:
                  volume_detail_size_gb: int | None = None,
                  volume_iops: int | None = None, volume_boot: bool = True,
                  image_type: str = "instance_local", server_volume_shape: str = "volumes",
-                 attachment_iops: int | str | None = None) -> None:
+                 attachment_iops: int | str | None = None,
+                 public_ip_shape: str = "both") -> None:
         self.commands: list[tuple[str, ...]] = []
+        self.external_commands: list[tuple[str, ...]] = []
         self.server: dict[str, Any] | None = None
         self.ips: list[dict[str, Any]] = []
         self.volume_items: list[dict[str, Any]] = []
@@ -114,6 +116,7 @@ class Provider:
         self.image_type = image_type
         self.server_volume_shape = server_volume_shape
         self.attachment_iops = attachment_iops
+        self.public_ip_shape = public_ip_shape
 
     def __call__(self, command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
         del timeout
@@ -131,6 +134,7 @@ class Provider:
             ok = len(args) > 2 and args[2] in known
             return subprocess.CompletedProcess(args, 0 if ok else 1, args[2] + "\n" if ok else "", "")
         if args and args[0] in {"ssh", "scp"}:
+            self.external_commands.append(args)
             return self.done(args)
         if args[:3] != ("scw", "--output", "json"):
             raise AssertionError(f"unexpected command {args}")
@@ -179,16 +183,19 @@ class Provider:
             if self.bad_server_shape == "root_attachment_iops":
                 volume_entry["iops"] = "5K"
             server_volumes: Any = {"0": volume_entry} if self.server_volume_shape == "volumes" else [volume_entry]
+            ip_record = {"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"}
             self.server = {"id": SERVER, "name": next(x.split("=", 1)[1] for x in cmd if x.startswith("name=")),
                 "project": PROJECT, "zone": "nl-ams-1", "commercial_type": self.machine_type,
                 "tags": ["explicit-lean-simp-pilot", "two-workers"],
                 "image": {"id": LOCAL_IMAGE, "name": "Ubuntu 24.04 Noble Numbat", "arch": "x86_64", "zone": "nl-ams-1"},
                 "security_group": {"id": SG, "name": "pilot"},
                 "ssh_key_id": KEY,
-                "public_ip": {"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"},
-                "public_ips": [{"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"}],
                 self.server_volume_shape: server_volumes}
-            self.ips = [dict(self.server["public_ip"], project=PROJECT, zone="nl-ams-1")]
+            if self.public_ip_shape in {"both", "singular"}:
+                self.server["public_ip"] = dict(ip_record)
+            if self.public_ip_shape in {"both", "plural"}:
+                self.server["public_ips"] = [dict(ip_record)]
+            self.ips = [dict(ip_record, project=PROJECT, zone="nl-ams-1")]
             self.volume_items = [dict(volume_entry, server={"id": SERVER}, tags=[])]
             self.block_volumes = ([{"id": VOLUME_ID, "project_id": PROJECT, "zone": "nl-ams-1",
                 "type": "sbs_15k" if self.volume_iops == 15000 else "sbs_5k",
@@ -233,8 +240,13 @@ class Provider:
             elif observed is not None and self.bad_server_shape == "wrong_boot_volume_id":
                 observed["boot_volume_id"] = IMAGE
             elif observed is not None and self.bad_server_shape == "dynamic_ip":
-                observed["public_ip"]["dynamic"] = True
-                observed["public_ips"][0]["dynamic"] = True
+                if "public_ip" in observed:
+                    observed["public_ip"]["dynamic"] = True
+                if "public_ips" in observed:
+                    observed["public_ips"][0]["dynamic"] = True
+            elif observed is not None and self.bad_server_shape == "conflicting_ip_records":
+                if "public_ips" in observed:
+                    observed["public_ips"][0]["address"] = "198.51.100.99"
             return self.json(args, {"server": observed})
         if cmd[:3] == ("block", "volume", "get"):
             assert cmd[3] == VOLUME_ID and "zone=nl-ams-1" in cmd
@@ -460,7 +472,7 @@ def test_job_root_rejects_overlap_missing_pending_modules_and_hardlinks() -> Non
 
 def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> None:
     with tempfile.TemporaryDirectory() as temp:
-        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
+        root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider(public_ip_shape="plural")
         controller = ctl(root, path, provider)
         created = controller.create(repo_root=repo, job_root=jobs, confirm=True)
         assert created["phase"] == "created" and len(created["jobs"]) == 2
@@ -486,6 +498,8 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
         controller._ssh = ssh_fake  # type: ignore[method-assign]
         running = controller.run_workers(job_root=jobs, repo_root=repo)
         assert running["phase"] == "workers-running"
+        uploads = [command for command in provider.external_commands if command[0] == "scp"]
+        assert len(uploads) == 1 and "ubuntu@198.51.100.4:/home/ubuntu/explicit-lean-simp-jobs/" in uploads[0][-1]
         launches = [args for args in ssh_calls if "nohup bash -lc" in " ".join(args)]
         assert len(launches) == 2
         assert all("timeout --signal=TERM" in " ".join(args) for args in launches)
@@ -503,6 +517,28 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
         assert any("UserKnownHostsFile=" in " ".join(command) for command in provider.commands if command and command[0] == "scp")
         state = json.loads((root / "state.json").read_text())
         assert [job["phase"] for job in state["jobs"]] == ["running", "running"]
+
+
+def test_ssh_accepts_plural_only_public_ip_and_rejects_state_or_record_mismatch() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root)
+        provider = Provider(public_ip_shape="plural")
+        controller = ctl(root, path, provider)
+        state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        (root / "pilot_known_hosts").write_text(
+            "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+        controller._ssh(state, "true", timeout=5)
+        ssh_calls = [command for command in provider.external_commands if command[0] == "ssh"]
+        assert len(ssh_calls) == 1 and "ubuntu@198.51.100.4" in ssh_calls[0]
+
+        wrong_address = dict(state, public_ip_address="198.51.100.99")
+        blocked(lambda: controller._ssh(wrong_address, "true", timeout=5))
+        provider.bad_server_shape = "conflicting_ip_records"
+        provider.public_ip_shape = "both"
+        provider.server["public_ip"] = {"id": IP_ID, "address": "198.51.100.4", "family": "inet"}
+        provider.server["public_ips"] = [{"id": IP_ID, "address": "198.51.100.4", "family": "inet"}]
+        blocked(lambda: controller._ssh(state, "true", timeout=5))
+        assert len([command for command in provider.external_commands if command[0] == "ssh"]) == 1
 
 
 def test_created_server_image_group_key_root_volume_and_ip_must_match_policy() -> None:
@@ -718,6 +754,7 @@ def test_collection_verifies_both_result_archives_and_hashes() -> None:
         policy = json.loads(path.read_text())
         (root / "pilot_known_hosts").write_text("198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
         source_archives: dict[str, Path] = {}
+        download_commands: list[tuple[str, ...]] = []
         expected_hashes = {}
         for spec in policy["jobs"]:
             index = 0 if spec["id"] == "job-000" else 1
@@ -735,19 +772,20 @@ def test_collection_verifies_both_result_archives_and_hashes() -> None:
             expected_hashes[spec["id"]] = hashlib.sha256(db).hexdigest()
         provider.server = {"id": SERVER, "name": pilot.NAME_PREFIX + "mock", "project": PROJECT,
             "zone": "nl-ams-1", "commercial_type": "GP1-L", "tags": ["explicit-lean-simp-pilot"],
-            "public_ip": {"id": IP_ID, "address": "198.51.100.4", "family": "inet"},
             "public_ips": [{"id": IP_ID, "address": "198.51.100.4", "family": "inet"}],
             "image": {"id": LOCAL_IMAGE}, "security_group": {"id": SG},
             "volumes": {"0": {"id": VOLUME_ID, "size": 559 * 1_000_000_000, "volume_type": "l_ssd"}}}
         original = provider
         def transfer(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
             if command and command[0] == "scp":
+                download_commands.append(tuple(command))
                 source = next(k for k in source_archives if k in str(command[-2]))
                 Path(command[-1]).write_bytes(source_archives[source].read_bytes())
                 return subprocess.CompletedProcess(command, 0, "", "")
             return original(command, timeout)
         state = {"schema": 1, "phase": "workers-finished", "server_id": SERVER,
             "name": provider.server["name"], "zone": "nl-ams-1", "project_id": PROJECT,
+            "public_ip_id": IP_ID, "public_ip_address": "198.51.100.4",
             "organization_id": ORG, "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
             "policy_sha256": pilot.sha256_file(path),
             "jobs": [{"id": spec["id"], "phase": "finished", "exit_code": 0} for spec in policy["jobs"]]}
@@ -758,6 +796,8 @@ def test_collection_verifies_both_result_archives_and_hashes() -> None:
         controller.runner = transfer
         output = root / "result"; got = controller.collect_workers(output_dir=output)
         assert got["phase"] == "collected" and len(got["artifact_file_hashes"]) == 8
+        assert len(download_commands) == 2
+        assert all("ubuntu@198.51.100.4:" in command[-2] for command in download_commands)
         for job_id, digest in expected_hashes.items():
             assert pilot.sha256_file(output / job_id / "mathlib-db.sqlite3") == digest
 
@@ -766,7 +806,6 @@ def collection_fixture(root: Path) -> tuple[pilot.ScalewayPilot, Provider, Path,
     repo, jobs, _, path = setup(root); provider = Provider()
     provider.server = {"id": SERVER, "name": pilot.NAME_PREFIX + "collection", "project": PROJECT,
         "zone": "nl-ams-1", "commercial_type": "GP1-L", "tags": ["explicit-lean-simp-pilot"],
-        "public_ip": {"id": IP_ID, "address": "198.51.100.4", "family": "inet"},
         "public_ips": [{"id": IP_ID, "address": "198.51.100.4", "family": "inet"}],
         "image": {"id": LOCAL_IMAGE}, "security_group": {"id": SG},
         "volumes": {"0": {"id": VOLUME_ID, "size": 559 * 1_000_000_000, "volume_type": "l_ssd"}}}
@@ -774,6 +813,7 @@ def collection_fixture(root: Path) -> tuple[pilot.ScalewayPilot, Provider, Path,
     policy = json.loads(path.read_text())
     state = {"schema": 1, "phase": "workers-finished", "server_id": SERVER,
         "name": provider.server["name"], "zone": "nl-ams-1", "project_id": PROJECT,
+        "public_ip_id": IP_ID, "public_ip_address": "198.51.100.4",
         "organization_id": ORG, "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
         "policy_sha256": pilot.sha256_file(path),
         "jobs": [{"id": spec["id"], "phase": "finished", "exit_code": 0} for spec in policy["jobs"]]}
@@ -1034,6 +1074,7 @@ def main() -> None:
              test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins,
              test_job_root_rejects_overlap_missing_pending_modules_and_hardlinks,
              test_create_and_two_workers_launch_concurrently_with_remote_hash_check,
+             test_ssh_accepts_plural_only_public_ip_and_rejects_state_or_record_mismatch,
              test_created_server_image_group_key_root_volume_and_ip_must_match_policy,
              test_dispatch_reconciliation_is_idempotent_at_all_crash_points,
              test_collection_verifies_both_result_archives_and_hashes,
