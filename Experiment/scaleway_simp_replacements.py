@@ -992,6 +992,21 @@ class ScalewayPilot:
         return all(isinstance(job, dict) and set(job) == allowed_job_keys and job.get("phase") == "pending"
                    for job in jobs)
 
+    @staticmethod
+    def _parse_systemd_utc_timestamp(value: object) -> datetime:
+        if type(value) is not str:
+            raise PilotError("systemd timer deadline is missing")
+        match = re.fullmatch(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC", value)
+        if match is None:
+            raise PilotError("systemd timer deadline has an unsupported timestamp format")
+        try:
+            parsed = datetime.strptime(match.group(2), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError as error:
+            raise PilotError("systemd timer deadline is malformed") from error
+        if parsed.strftime("%a") != match.group(1):
+            raise PilotError("systemd timer weekday does not match its date")
+        return parsed
+
     def _reconcile_dispatch(self, state: dict[str, Any], policy: Mapping[str, Any],
                             checked: Mapping[str, Any]) -> dict[str, Any]:
         """Resume a partial dispatch without duplicating any potentially launched worker."""
@@ -1115,16 +1130,25 @@ class ScalewayPilot:
             previous_ttl = state.get("host_ttl_remaining_seconds")
             if type(previous_ttl) is not int or previous_ttl <= 0 or ttl_remaining > previous_ttl:
                 raise PilotError("saved guest TTL watchdog budget is inconsistent with remaining host TTL")
-            verify_timer = ("set -eu; unit=" + shlex.quote(watchdog_unit + ".timer") + "; "
-                            "systemctl is-active --quiet \"$unit\"; "
-                            "next=$(systemctl show --property=NextElapseUSecMonotonic --value \"$unit\"); "
-                            "now=$(awk '{printf \"%.0f\", $1 * 1000000}' /proc/uptime); "
-                            "case \"$next\" in ''|*[!0-9]*) exit 1;; esac; "
-                            "test \"$next\" -gt \"$now\"; "
-                            "test \"$next\" -le \"$((now + " + str(ttl_remaining) + " * 1000000))\"")
-            watchdog = self._ssh(state, "sh", "-lc", shlex.quote(verify_timer), timeout=60)
-            if watchdog.returncode:
-                raise PilotError("persisted guest TTL watchdog is not active within the remaining host TTL")
+            expected_deadline = min(checked["deadline"], created.astimezone(timezone.utc)
+                                    + timedelta(seconds=checked["lifetime"]))
+            if parse_utc(state.get("deadline"), "state.deadline") != expected_deadline:
+                raise PilotError("saved host deadline differs from the immutable policy TTL")
+            timer = self._ssh(state, "systemctl", "show", "explicit-lean-simp-pilot-ttl.timer",
+                              "--property=ActiveState", "--property=NextElapseUSecRealtime", timeout=60)
+            if timer.returncode:
+                raise PilotError("persistent guest TTL timer could not be verified")
+            timer_properties: dict[str, str] = {}
+            for line in timer.stdout.splitlines():
+                key, separator, value = line.partition("=")
+                if not separator or key not in {"ActiveState", "NextElapseUSecRealtime"} or key in timer_properties:
+                    raise PilotError("persistent guest TTL timer response is malformed")
+                timer_properties[key] = value
+            if set(timer_properties) != {"ActiveState", "NextElapseUSecRealtime"} or timer_properties["ActiveState"] != "active":
+                raise PilotError("persistent guest TTL timer is not active")
+            timer_deadline = self._parse_systemd_utc_timestamp(timer_properties["NextElapseUSecRealtime"])
+            if timer_deadline <= now or timer_deadline > expected_deadline:
+                raise PilotError("persistent guest TTL timer does not expire within the immutable policy deadline")
         else:
             watchdog = self._ssh(state, "sudo", "systemd-run", f"--unit={watchdog_unit}",
                                  f"--on-active={ttl_remaining}s", "/usr/bin/systemctl", "poweroff", timeout=60)

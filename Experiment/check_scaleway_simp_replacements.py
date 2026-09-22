@@ -525,12 +525,18 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
 def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
-        controller = ctl(root, path, provider)
+        policy = json.loads(path.read_text())
+        policy["authorization"]["not_after"] = "2026-09-23T09:50:00Z"
+        policy["authorization"]["max_instance_lifetime_seconds"] = 12 * 3600
+        policy["authorization"]["max_worker_runtime_seconds"] = 10 * 3600
+        path.write_text(json.dumps(policy))
+        controller = ctl(root, path, provider, now=datetime(2026, 9, 22, 21, 50, tzinfo=timezone.utc))
         state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
         state["phase"] = "bootstrap-started"
-        state["bootstrap_started_at"] = NOW.isoformat()
+        state["bootstrap_started_at"] = "2026-09-22T21:50:00+00:00"
         state["guest_poweroff_watchdog_armed"] = True
-        state["host_ttl_remaining_seconds"] = 6 * 3600
+        state["host_ttl_remaining_seconds"] = 12 * 3600
+        state["supervisor_report"] = {"supervisor": "started"}
         controller._save(state)
         (root / "pilot_known_hosts").write_text(
             "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
@@ -540,6 +546,9 @@ def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence()
             del timeout
             ssh_calls.append(args)
             command = " ".join(args)
+            if args and args[0] == "systemctl":
+                return subprocess.CompletedProcess(args, 0,
+                    "ActiveState=active\nNextElapseUSecRealtime=Wed 2026-09-23 09:50:00 UTC\n", "")
             if "NOT_LAUNCHED" in command:
                 return subprocess.CompletedProcess(args, 0, "NOT_LAUNCHED\n", "")
             if "nohup bash -lc" in command:
@@ -549,8 +558,8 @@ def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence()
         controller._ssh = ssh_fake  # type: ignore[method-assign]
         resumed = controller.run_workers(job_root=jobs, repo_root=repo)
         assert resumed["phase"] == "workers-running"
-        timer_checks = [" ".join(args) for args in ssh_calls if "NextElapseUSecMonotonic" in " ".join(args)]
-        assert len(timer_checks) == 1 and "test \"$next\" -le" in timer_checks[0]
+        timer_checks = [args for args in ssh_calls if args and args[0] == "systemctl"]
+        assert len(timer_checks) == 1 and any("NextElapseUSecRealtime" in item for item in timer_checks[0])
         assert not any("systemd-run" in args for args in ssh_calls)
         bootstrap = next(" ".join(args) for args in ssh_calls if "git clone --no-checkout" in " ".join(args))
         assert "sudo install -d -o ubuntu -g ubuntu /opt/explicit-lean" in bootstrap
@@ -595,11 +604,14 @@ def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence()
         def missing_watchdog(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
             del timeout
             ssh_calls.append(args)
-            return subprocess.CompletedProcess(args, 1 if "NextElapseUSecMonotonic" in " ".join(args) else 0, "", "")
+            if args and args[0] == "systemctl":
+                return subprocess.CompletedProcess(args, 0,
+                    "ActiveState=inactive\nNextElapseUSecRealtime=Wed 2026-09-23 09:50:00 UTC\n", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
 
         controller._ssh = missing_watchdog  # type: ignore[method-assign]
         blocked(lambda: controller.run_workers(job_root=jobs, repo_root=repo))
-        assert len(ssh_calls) == 1 and "NextElapseUSecMonotonic" in " ".join(ssh_calls[0])
+        assert len(ssh_calls) == 1 and ssh_calls[0][0] == "systemctl"
 
 
 def test_failed_supervisor_bootstrap_state_can_resume_after_report_checkpoint() -> None:
@@ -638,6 +650,9 @@ def test_failed_supervisor_bootstrap_state_can_resume_after_report_checkpoint() 
             del timeout
             ssh_calls.append(args)
             command = " ".join(args)
+            if args and args[0] == "systemctl":
+                return subprocess.CompletedProcess(args, 0,
+                    "ActiveState=active\nNextElapseUSecRealtime=Tue 2026-09-22 18:00:00 UTC\n", "")
             if "NOT_LAUNCHED" in command:
                 return subprocess.CompletedProcess(args, 0, "NOT_LAUNCHED\n", "")
             if "nohup bash -lc" in command:
@@ -665,7 +680,8 @@ def test_failed_supervisor_bootstrap_state_can_resume_after_report_checkpoint() 
         controller.cleanup = cleanup  # type: ignore[method-assign]
         resumed = controller.supervise(job_root=jobs, repo_root=repo, output_dir=root / "resumed", poll_seconds=5)
         assert resumed["complete"] and resumed["cleanup"]["phase"] == "deleted"
-        assert any("NextElapseUSecMonotonic" in " ".join(args) for args in ssh_calls)
+        assert any(args and args[0] == "systemctl"
+                   and any("NextElapseUSecRealtime" in item for item in args) for args in ssh_calls)
         assert any("git clone --no-checkout" in " ".join(args) for args in ssh_calls)
 
 
