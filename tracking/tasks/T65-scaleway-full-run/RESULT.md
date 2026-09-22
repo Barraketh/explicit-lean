@@ -55,6 +55,39 @@ The policy now hard-limits `max_cost_usd` to $20, requires a current pinned
 EUR/USD rate and source, and rejects a configured EUR cap that would exceed
 the USD ceiling.
 
+## Policy-selected machine and root-volume shapes
+
+The controller no longer assumes GP1-L or a 559 GB local disk. It reads the
+exact commercial type, minimum RAM, minimum root-disk capacity, and root-volume
+format from the authorized policy. Preflight requires provider-reported
+x86_64 architecture and RAM at or above the configured minimum; image
+compatibility and the created server type must match the exact configured type.
+The supported root forms are `local:<size>GB` and `sbs:<size>GB:<iops>`. The
+attached root must have the exact configured type and decimal-byte size; SBS
+details are fetched from the volume endpoint when the server attachment omits
+size, and configured IOPS are checked. The ordinary boot-volume ID/flag is
+accepted as root evidence. For the observed Scaleway SBS response shape, the
+single attached volume at API slot `0` is accepted as the root when the boot
+reference is absent, even when its `boot` field is false; multiple or unknown
+attached volumes fail closed. Cleanup's ambiguous-create adoption also checks
+the exact policy type.
+
+The default checked-in, launch-disabled policy remains GP1-L with its original
+559 GB local root. Mock-only regression coverage includes the POP2-HM-16C-128G
+fallback (128 GiB, x86_64, `sbs_volume`, 100 GB, 15,000 IOPS), insufficient RAM,
+wrong architecture, volume type/size/IOPS mismatch, invalid boot identity,
+and malformed policy bounds.
+
+Verification for this addition:
+
+- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 15 mock checks passed.
+- `python3 -B Experiment/check_simp_replacement_jobs.py` — 10 tests passed.
+- `python3 -m py_compile Experiment/scaleway_simp_replacements.py Experiment/check_scaleway_simp_replacements.py` — passed.
+- `python3 -B Experiment/scaleway_simp_replacements.py plan` — authorized false, mutation count 0.
+- `git diff --check` — passed.
+
+No live Scaleway calls were made.
+
 No live Scaleway call, resource creation/deletion, or credential access was
 performed. `pilot-policy.json` remains launch-disabled; it must be completed
 with a current all-in cost estimate under the user's $20 total cap before any

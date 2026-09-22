@@ -1,9 +1,11 @@
 # T65 two-worker Scaleway run
 
-T65 extends the T64 controller to one GP1-L Linux x86_64 host running exactly
-two module workers concurrently. It is still a single host. The checked-in
-policy remains disabled and contains no live account, network, key, job, or
-cost authorization values.
+T65 extends the T64 controller to one policy-pinned Scaleway Linux x86_64 host
+running exactly two module workers concurrently. The checked-in policy remains
+disabled and contains no live account, network, key, job, or cost authorization
+values. The default policy keeps GP1-L with a 559 GB local root volume; an
+authorized policy can pin another exact commercial type and root volume, such
+as POP2-HM-16C-128G with `sbs:100GB:15000`.
 
 ## Prepare and pin inputs
 
@@ -22,9 +24,17 @@ in the policy. The source commit must be the full published commit that owns
 the controller, worker, and Lean project.
 
 Before authorization, fill the dedicated profile, organization/project/zone,
-GP1-L-compatible Ubuntu Noble x86_64 global image ID, security group, SSH key,
+type-compatible Ubuntu Noble x86_64 global image ID, security group, SSH key,
 private identity file, dedicated absolute `known_hosts_file`, and SSH source
-CIDR. Price the full 12-hour host envelope, public IPv4, root storage, egress,
+CIDR. Pin `machine.type`, `requirements.minimum_memory_gib`,
+`requirements.minimum_local_disk_gib`, and `requirements.root_volume`. Supported
+root formats are `local:<size>GB` and `sbs:<size>GB:<iops>`. The controller
+requires the type to report x86_64 architecture and at least the configured
+RAM. It requires the selected root volume to meet the configured minimum size
+and exactly match the configured size/type (and SBS IOPS). For SBS, it retrieves
+volume details when the server attachment omits size, and recognizes API slot
+`0` as the root only when there is no usable boot-volume ID/flag; additional or
+unknown attached volumes are rejected. Price the full 12-hour host envelope, public IPv4, root storage, egress,
 and other charges. Set the all-in EUR estimate below the configured EUR cap,
 set `max_cost_usd` no higher than $20, and pin `eur_usd_rate`, `fx_checked_at`
 and `fx_source` to a current trustworthy conversion. `validate_policy` rejects
@@ -53,8 +63,8 @@ python3 -B Experiment/scaleway_simp_replacements.py create \
 ```
 
 Preflight is read-only. It checks the exact source HEAD and publication,
-project identity, absence of pilot resources, `GP1-L` availability,
-marketplace local-image compatibility (`ubuntu_noble`, `x86_64`,
+project identity, absence of pilot resources, exact configured type availability,
+provider-reported type architecture and RAM, marketplace local-image compatibility (`ubuntu_noble`, `x86_64`,
 `instance_local`), exact SSH ingress rule, pinned job hashes, and input layout.
 It also opens the pinned databases read-only and requires that both are
 distinct regular files with distinct inodes but identical baseline bytes and

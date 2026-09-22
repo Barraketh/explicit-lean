@@ -34,7 +34,7 @@ from typing import Any, Callable, Mapping, Sequence
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "tracking/tasks/T64-scaleway-runner/pilot-policy.json"
 CANONICAL_REPO = "https://github.com/Barraketh/explicit-lean.git"
-EXPECTED_TYPE = "GP1-L"
+DEFAULT_MACHINE_TYPE = "GP1-L"
 HARD_MAX_LIFETIME_SECONDS = 12 * 60 * 60
 HARD_MAX_WORKER_SECONDS = 10 * 60 * 60
 HARD_MAX_COST_USD = 20.0
@@ -73,6 +73,21 @@ def _dict(value: object, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PilotError(f"{label} must be an object")
     return value
+
+
+def _parse_root_volume(value: object) -> dict[str, Any]:
+    """Parse only the local and SBS root-volume forms explicitly supported."""
+    if type(value) is not str:
+        raise PilotError("requirements.root_volume must be a supported volume string")
+    local = re.fullmatch(r"local:([1-9][0-9]*)GB", value)
+    if local:
+        return {"kind": "local", "size_gib": int(local.group(1)), "iops": None,
+                "provider_types": {"l_ssd", "local", "local_ssd"}}
+    sbs = re.fullmatch(r"sbs:([1-9][0-9]*)GB:([1-9][0-9]*)", value)
+    if sbs:
+        return {"kind": "sbs", "size_gib": int(sbs.group(1)), "iops": int(sbs.group(2)),
+                "provider_types": {"sbs_volume"}}
+    raise PilotError("requirements.root_volume must be local:<size>GB or sbs:<size>GB:<iops>")
 
 
 def _list_response(value: object, key: str, label: str) -> list[Any]:
@@ -178,17 +193,22 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
     if fx_age < 0 or fx_age > 24 * 60 * 60:
         raise PilotError("USD/EUR conversion is missing, future-dated, or older than 24 hours")
     requirements = _dict(policy.get("requirements"), "requirements")
-    for key, expected in {"single_host": True, "worker_count": 2, "linux_x86_64": True,
-                          "minimum_memory_gib": 128, "minimum_local_disk_gib": 200,
-                          "root_volume": "local:559GB", "public_ipv4": True}.items():
+    for key, expected in {"single_host": True, "worker_count": 2,
+                          "linux_x86_64": True, "public_ipv4": True}.items():
         if type(requirements.get(key)) is not type(expected) or requirements.get(key) != expected:
-            raise PilotError(f"requirements.{key} does not match the one-host GP1-L envelope")
+            raise PilotError(f"requirements.{key} does not match the one-host envelope")
+    for key in ("minimum_memory_gib", "minimum_local_disk_gib"):
+        if type(requirements.get(key)) is not int or requirements[key] < 1:
+            raise PilotError(f"requirements.{key} must be a positive integer")
+    root_volume = _parse_root_volume(requirements.get("root_volume"))
+    if root_volume["size_gib"] < requirements["minimum_local_disk_gib"]:
+        raise PilotError("requirements.root_volume is smaller than minimum_local_disk_gib")
     machine = _dict(policy.get("machine"), "machine")
     profile = policy.get("cli_profile")
     if type(profile) is not str or not profile.strip() or profile in {"default", "explicit-lean-cloud"}:
         raise PilotError("cli_profile must name the dedicated Scaleway pilot profile")
-    if machine.get("type") != EXPECTED_TYPE:
-        raise PilotError(f"machine.type must be exactly {EXPECTED_TYPE}")
+    if type(machine.get("type")) is not str or not re.fullmatch(r"[A-Z0-9]+(?:-[A-Z0-9]+)*", machine["type"]):
+        raise PilotError("machine.type must be an exact Scaleway commercial type")
     for key in ("image_id", "security_group_id", "ssh_key_id", "ssh_identity_file", "ssh_source_cidr", "known_hosts_file"):
         if type(machine.get(key)) is not str or not machine[key].strip():
             raise PilotError(f"machine.{key} must be explicitly set")
@@ -225,6 +245,7 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
             "organization_id": auth["organization_id"], "project_id": auth["project_id"], "zone": zone,
             "machine": machine, "repository": repo, "jobs": jobs, "cli_profile": profile,
             "requirements": requirements, "cost_source": auth["cost_source"],
+            "root_volume": root_volume,
             "cost_components_eur": components, "cost_cap_usd": cap_usd, "eur_usd_rate": eur_usd}
 
 
@@ -415,20 +436,27 @@ class ScalewayPilot:
 
     def _check_type_image_network(self, checked: Mapping[str, Any]) -> dict[str, Any]:
         zone = checked["zone"]
+        machine_type = checked["machine"]["type"]
+        minimum_ram = checked["requirements"]["minimum_memory_gib"] * 1024**3
         type_data = self._scw(["instance", "server-type", "get", f"zone={zone}"], policy=checked)
         types = type_data.get("servers") if isinstance(type_data, dict) else None
-        selected_type = types.get(EXPECTED_TYPE) if isinstance(types, dict) else None
+        selected_type = types.get(machine_type) if isinstance(types, dict) else None
         if not isinstance(selected_type, dict) or selected_type.get("availability") != "available":
-            raise PilotError("exact GP1-L server type is unavailable or ambiguous in selected zone")
+            raise PilotError("exact configured server type is unavailable or ambiguous in selected zone")
+        if selected_type.get("arch") != "x86_64":
+            raise PilotError("provider server type architecture is not x86_64")
+        ram = selected_type.get("ram")
+        if type(ram) is not int or ram < minimum_ram:
+            raise PilotError("provider server type RAM is missing or below the configured minimum")
         image_data = self._scw(["marketplace", "local-image", "list", f"image-id={checked['machine']['image_id']}", f"zone={zone}"], policy=checked)
         images = _list_response(image_data, "images", "marketplace local-image listing") if isinstance(image_data, (list, dict)) else None
         image = checked["machine"]["image_id"]
         compatible = [x for x in images if isinstance(x, dict) and x.get("arch") == "x86_64"
                       and x.get("zone") == zone and x.get("label") == "ubuntu_noble"
                       and x.get("type") == "instance_local" and isinstance(x.get("compatible_commercial_types"), list)
-                      and EXPECTED_TYPE in x["compatible_commercial_types"]]
+                      and machine_type in x["compatible_commercial_types"]]
         if len(compatible) != 1:
-            raise PilotError("pinned Ubuntu x86_64 local image is not compatible with GP1-L in the selected zone")
+            raise PilotError("pinned Ubuntu x86_64 local image is not compatible with the configured type in the selected zone")
         sg = self._scw(["instance", "security-group", "get", checked["machine"]["security_group_id"], f"zone={zone}"], policy=checked)
         group = sg.get("security_group", sg) if isinstance(sg, dict) else None
         if not isinstance(group, dict) or group.get("project") != checked["project_id"] and group.get("project_id") != checked["project_id"]:
@@ -462,7 +490,7 @@ class ScalewayPilot:
         public_key = ssh_key.get("public_key")
         if type(public_key) is not str or not re.fullmatch(r"(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) [A-Za-z0-9+/=]+(?: .*)?", public_key):
             raise PilotError("configured SSH public key has an unsupported or malformed format")
-        return {"server_type": {"name": EXPECTED_TYPE, **selected_type}, "image_id": image,
+        return {"server_type": {"name": machine_type, **selected_type}, "image_id": image,
                 "local_image_id": compatible[0].get("id"), "security_group_id": checked["machine"]["security_group_id"],
                 "ssh_key_id": checked["machine"]["ssh_key_id"], "ssh_key_name": ssh_key["name"],
                 "ssh_public_key": " ".join(public_key.split()[:2])}
@@ -494,7 +522,7 @@ class ScalewayPilot:
         if (server.get("id") != state.get("server_id") or server.get("name") != state.get("name")
                 or server.get("project", server.get("project_id")) != checked["project_id"]
                 or server.get("zone") != checked["zone"]
-                or server.get("commercial_type", server.get("type")) != EXPECTED_TYPE
+                or server.get("commercial_type", server.get("type")) != checked["machine"]["type"]
                 or not isinstance(tags, list) or "explicit-lean-simp-pilot" not in tags):
             raise PilotError("server identity/ownership tags do not match the authorized run")
         image = server.get("image")
@@ -522,23 +550,42 @@ class ScalewayPilot:
                 or state.get("ssh_public_key_sha256") != sha256(public_key.encode("utf-8"))):
             raise PilotError("server bootstrap SSH key provenance is not pinned")
         volumes = server.get("volumes")
-        volume_items = list(volumes.values()) if isinstance(volumes, dict) else volumes if isinstance(volumes, list) else None
-        if not isinstance(volume_items, list) or not volume_items:
+        if isinstance(volumes, dict):
+            if set(volumes) != {"0"}:
+                raise PilotError("created server exposes unknown or multiple attached volumes")
+            volume_items = [volumes["0"]]
+            volume_slot = "0"
+        elif isinstance(volumes, list) and len(volumes) == 1:
+            volume_items = volumes
+            volume_slot = None
+        else:
             raise PilotError("created server volume inventory is unavailable")
-        required_bytes = 559 * 1_000_000_000
-        local_volumes = [item for item in volume_items if isinstance(item, dict)
-                        and item.get("volume_type") in {"l_ssd", "local", "local_ssd"}
-                        and type(item.get("size")) is int and required_bytes <= item["size"] <= 560 * 1024**3]
+        attached_root = volume_items[0]
+        if not isinstance(attached_root, dict) or type(attached_root.get("id")) is not str or not ID_RE.fullmatch(attached_root["id"]):
+            raise PilotError("created server root volume lacks an identified volume")
         boot_ref = server.get("boot_volume_id", server.get("boot_volume"))
         if isinstance(boot_ref, dict):
             boot_ref = boot_ref.get("id")
         if type(boot_ref) is str:
-            root_volumes = [item for item in local_volumes if item.get("id") == boot_ref]
+            boot_matches = attached_root["id"] == boot_ref
         else:
-            root_volumes = [item for item in local_volumes if item.get("boot") is True]
-        if (len(root_volumes) != 1 or type(root_volumes[0].get("id")) is not str
-                or not ID_RE.fullmatch(root_volumes[0]["id"])):
-            raise PilotError("created server does not expose exactly one identified 559GB local boot volume")
+            boot_matches = attached_root.get("boot") is True or (
+                checked["root_volume"]["kind"] == "sbs" and volume_slot == "0"
+                and attached_root.get("boot") in (None, False))
+        if not boot_matches:
+            raise PilotError("created server root volume is not explicitly identified as the boot volume")
+        root_policy = checked["root_volume"]
+        details = attached_root
+        if root_policy["kind"] == "sbs" or type(details.get("size")) is not int:
+            response = self._scw(["instance", "volume", "get", attached_root["id"], f"zone={checked['zone']}"] , policy=checked)
+            details = response.get("volume", response) if isinstance(response, dict) else None
+        expected_bytes = root_policy["size_gib"] * 1_000_000_000
+        if (not isinstance(details, dict) or details.get("id") != attached_root["id"]
+                or details.get("volume_type") not in root_policy["provider_types"]
+                or type(details.get("size")) is not int or details["size"] != expected_bytes):
+            raise PilotError("created server root volume type or exact size differs from policy")
+        if root_policy["kind"] == "sbs" and details.get("iops") != root_policy["iops"]:
+            raise PilotError("created server SBS root volume IOPS differs from policy")
         public_ip = self._one_public_ip(server)
         expected_ip_id = state.get("public_ip_id")
         if expected_ip_id is not None and expected_ip_id != public_ip["id"]:
@@ -546,7 +593,7 @@ class ScalewayPilot:
         if state.get("public_ip_address") is not None and state["public_ip_address"] != public_ip["address"]:
             raise PilotError("server flexible IP address changed from the created resource")
         return {"public_ip_id": public_ip["id"], "public_ip_address": public_ip["address"],
-                "volume_ids": sorted(item["id"] for item in root_volumes if type(item.get("id")) is str)}
+                "volume_ids": [attached_root["id"]]}
 
     def _require_known_host(self, address: str, machine: Mapping[str, Any]) -> None:
         path = Path(str(machine["known_hosts_file"]))
@@ -654,7 +701,7 @@ class ScalewayPilot:
             with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix="scw-cloud-init-", suffix=".yaml", delete=False) as handle:
                 handle.write(cloud_config); cloud_path = Path(handle.name)
             self._save(state)
-            result = self._scw(["instance", "server", "create", f"name={name}", f"type={EXPECTED_TYPE}",
+            result = self._scw(["instance", "server", "create", f"name={name}", f"type={checked['machine']['type']}",
                                 f"image={preflight['machine']['local_image_id']}", "ip=new", f"root-volume={checked['requirements']['root_volume']}",
                                 f"security-group-id={checked['machine']['security_group_id']}",
                                 f"cloud-init=@{cloud_path}", f"project-id={checked['project_id']}", f"zone={checked['zone']}",
@@ -1316,6 +1363,10 @@ class ScalewayPilot:
         if type(profile) is not str or not profile.strip() or profile in {"default", "explicit-lean-cloud"}:
             raise PilotError("cleanup requires the dedicated Scaleway pilot profile")
         auth = _dict(policy.get("authorization"), "authorization")
+        machine = _dict(policy.get("machine"), "machine")
+        expected_type = machine.get("type")
+        if type(expected_type) is not str or not expected_type:
+            raise PilotError("cleanup policy lacks an exact machine.type")
         project_id, zone = auth["project_id"], auth["zone"]
         if (state.get("organization_id") != auth.get("organization_id") or state.get("project_id") != project_id
                 or state.get("zone") != zone or not str(state.get("name", "")).startswith(NAME_PREFIX)):
@@ -1336,7 +1387,7 @@ class ScalewayPilot:
             if (type(candidate_id) is not str or not ID_RE.fullmatch(candidate_id)
                     or candidate.get("project_id", candidate.get("project")) != project_id
                     or candidate.get("zone") != zone
-                    or candidate.get("commercial_type", candidate.get("type")) != EXPECTED_TYPE):
+                    or candidate.get("commercial_type", candidate.get("type")) != expected_type):
                 raise PilotError("ambiguous create candidate identity mismatch; refusing adoption/deletion")
             state.update({"server_id": candidate_id, "phase": "create-recovered"})
             self._save(state)
@@ -1368,7 +1419,7 @@ class ScalewayPilot:
             raise PilotError("server project identity mismatch; refusing deletion")
         server_tags = server.get("tags", [])
         if not isinstance(server_tags, list) or (server.get("name") != state["name"] or server.get("zone") != zone
-                or server.get("commercial_type", server.get("type")) != EXPECTED_TYPE
+                or server.get("commercial_type", server.get("type")) != expected_type
                 or "explicit-lean-simp-pilot" not in server_tags):
             raise PilotError("server ownership tags mismatch; refusing deletion")
         public_ip = self._one_public_ip(server)

@@ -39,7 +39,8 @@ def blocked(function: Any) -> None:
     raise AssertionError("expected fail-closed PilotError")
 
 
-def setup(root: Path) -> tuple[Path, Path, Path, Path]:
+def setup(root: Path, *, machine_type: str = "GP1-L", minimum_memory_gib: int = 128,
+          minimum_local_disk_gib: int = 200, root_volume: str = "local:559GB") -> tuple[Path, Path, Path, Path]:
     repo = root / "repo"; repo.mkdir()
     job_root = root / "jobs"; job_root.mkdir()
     baseline = root / "baseline.sqlite3"
@@ -72,13 +73,13 @@ def setup(root: Path) -> tuple[Path, Path, Path, Path]:
             "fx_checked_at": "2026-09-22T12:00:00Z", "fx_source": "ECB reference rate",
             "cost_source": "mock official pricing snapshot",
             "cost_components_eur": {"compute": "12.00", "public_ipv4": "1.00", "storage": "0.50", "egress_and_other": "0.50"}},
-        "machine": {"type": "GP1-L", "image_id": IMAGE, "security_group_id": SG,
+        "machine": {"type": machine_type, "image_id": IMAGE, "security_group_id": SG,
             "ssh_key_id": KEY, "ssh_identity_file": str(identity), "known_hosts_file": str(known_hosts),
             "ssh_source_cidr": "192.0.2.0/24"},
         "repository": {"url": pilot.CANONICAL_REPO, "commit": COMMIT}, "jobs": jobs,
         "requirements": {"single_host": True, "worker_count": 2, "linux_x86_64": True,
-            "minimum_memory_gib": 128, "minimum_local_disk_gib": 200,
-            "root_volume": "local:559GB", "public_ipv4": True},
+            "minimum_memory_gib": minimum_memory_gib, "minimum_local_disk_gib": minimum_local_disk_gib,
+            "root_volume": root_volume, "public_ipv4": True},
     }
     policy_path = root / "policy.json"; policy_path.write_text(json.dumps(policy), encoding="utf-8")
     return repo, job_root, identity, policy_path
@@ -86,7 +87,10 @@ def setup(root: Path) -> tuple[Path, Path, Path, Path]:
 
 class Provider:
     """Scaleway 2.61-shaped responses; never invokes the real CLI."""
-    def __init__(self) -> None:
+    def __init__(self, *, machine_type: str = "GP1-L", ram_gib: int = 128, arch: str = "x86_64",
+                 volume_type: str = "l_ssd", volume_size_gb: int | None = 559,
+                 volume_detail_size_gb: int | None = None,
+                 volume_iops: int | None = None, volume_boot: bool = True) -> None:
         self.commands: list[tuple[str, ...]] = []
         self.server: dict[str, Any] | None = None
         self.ips: list[dict[str, Any]] = []
@@ -95,6 +99,14 @@ class Provider:
         self.retain_ip_on_delete = False
         self.bad_server_shape: str | None = None
         self.wrong_account = False
+        self.machine_type = machine_type
+        self.ram_gib = ram_gib
+        self.arch = arch
+        self.volume_type = volume_type
+        self.volume_size_gb = volume_size_gb
+        self.volume_detail_size_gb = volume_detail_size_gb if volume_detail_size_gb is not None else volume_size_gb
+        self.volume_iops = volume_iops
+        self.volume_boot = volume_boot
 
     def __call__(self, command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
         del timeout
@@ -127,11 +139,12 @@ class Provider:
             return self.json(args, self.ips)
         if cmd[:3] == ("instance", "server-type", "get"):
             assert "zone=nl-ams-1" in cmd
-            return self.json(args, {"servers": {"GP1-L": {"availability": "available"}}})
+            return self.json(args, {"servers": {self.machine_type: {"availability": "available", "arch": self.arch,
+                "ram": self.ram_gib * 1024**3}}})
         if cmd[:3] == ("marketplace", "local-image", "list"):
             assert f"image-id={IMAGE}" in cmd
             return self.json(args, [{"id": LOCAL_IMAGE, "arch": "x86_64", "zone": "nl-ams-1",
-                "label": "ubuntu_noble", "type": "instance_local", "compatible_commercial_types": ["GP1-L"]}])
+                "label": "ubuntu_noble", "type": "instance_local", "compatible_commercial_types": [self.machine_type]}])
         if cmd[:3] == ("instance", "security-group", "get"):
             return self.json(args, {"id": SG, "project": PROJECT, "inbound_default_policy": "drop", "rules": None})
         if cmd[:3] == ("instance", "security-group", "list-rules"):
@@ -145,15 +158,16 @@ class Provider:
             assert "OnCalendar=" in Path(cloud).read_text()
             assert "tags.1=two-workers" in cmd
             self.server = {"id": SERVER, "name": next(x.split("=", 1)[1] for x in cmd if x.startswith("name=")),
-                "project": PROJECT, "zone": "nl-ams-1", "commercial_type": "GP1-L",
+                "project": PROJECT, "zone": "nl-ams-1", "commercial_type": self.machine_type,
                 "tags": ["explicit-lean-simp-pilot", "two-workers"],
                 "image": {"id": LOCAL_IMAGE, "name": "Ubuntu 24.04 Noble Numbat", "arch": "x86_64", "zone": "nl-ams-1"},
                 "security_group": {"id": SG, "name": "pilot"},
                 "ssh_key_id": KEY,
                 "public_ip": {"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"},
                 "public_ips": [{"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"}],
-                "volumes": {"0": {"id": VOLUME_ID, "size": 559 * 1_000_000_000,
-                    "volume_type": "l_ssd", "boot": True, "zone": "nl-ams-1"}}}
+                "volumes": {"0": {"id": VOLUME_ID,
+                    "size": self.volume_size_gb * 1_000_000_000 if self.volume_size_gb is not None else None,
+                    "volume_type": self.volume_type, "boot": self.volume_boot, "zone": "nl-ams-1"}}}
             self.ips = [dict(self.server["public_ip"], project=PROJECT, zone="nl-ams-1")]
             self.volume_items = [dict(self.server["volumes"]["0"], server={"id": SERVER}, tags=[])]
             assert f"image={LOCAL_IMAGE}" in cmd
@@ -164,6 +178,8 @@ class Provider:
             observed = deepcopy(self.server)
             if observed is not None and self.bad_server_shape == "image":
                 observed["image"]["id"] = IMAGE
+            elif observed is not None and self.bad_server_shape == "server_type":
+                observed["commercial_type"] = "GP1-S"
             elif observed is not None and self.bad_server_shape == "security_group":
                 observed["security_group"]["id"] = IMAGE
             elif observed is not None and self.bad_server_shape == "ssh_key":
@@ -178,6 +194,19 @@ class Provider:
                 observed["public_ip"]["dynamic"] = True
                 observed["public_ips"][0]["dynamic"] = True
             return self.json(args, {"server": observed})
+        if cmd[:3] == ("instance", "volume", "get"):
+            volume = {"id": VOLUME_ID,
+                "size": self.volume_detail_size_gb * 1_000_000_000 if self.volume_detail_size_gb is not None else None,
+                "volume_type": self.volume_type}
+            if self.volume_iops is not None:
+                volume["iops"] = self.volume_iops
+            if self.bad_server_shape == "root_volume_type":
+                volume["volume_type"] = "l_ssd"
+            elif self.bad_server_shape == "root_volume_size":
+                volume["size"] = 99 * 1_000_000_000
+            elif self.bad_server_shape == "root_volume_iops":
+                volume["iops"] = 5000
+            return self.json(args, {"volume": volume})
         if cmd[:3] == ("instance", "server", "delete"):
             self.server = None
             if not self.retain_ip_on_delete:
@@ -217,6 +246,66 @@ def test_policy_cost_deadline_worker_count_and_job_hashes_fail_closed() -> None:
             blocked(lambda: pilot.validate_policy(bad, NOW))
         (jobs / "job-001" / "modules.txt").write_text("Mathlib.Other\n")
         blocked(lambda: pilot.validate_job_root(jobs, policy["jobs"]))
+
+
+def test_machine_and_root_volume_policy_is_explicit_and_fail_closed() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); _, _, _, path = setup(root)
+        base = json.loads(path.read_text())
+        for mutate in (
+            lambda p: p["requirements"].update(minimum_memory_gib=0),
+            lambda p: p["requirements"].update(minimum_local_disk_gib="100"),
+            lambda p: p["requirements"].update(root_volume="sbs:100GB:0"),
+            lambda p: p["requirements"].update(root_volume="local:100GB"),
+            lambda p: p["machine"].update(type=""),
+        ):
+            bad = deepcopy(base); mutate(bad)
+            blocked(lambda: pilot.validate_policy(bad, NOW))
+
+
+def test_pop2_sbs_fallback_checks_type_ram_image_and_exact_boot_volume() -> None:
+    pop_type = "POP2-HM-16C-128G"
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        repo, jobs, _, path = setup(root, machine_type=pop_type, minimum_memory_gib=128,
+                                    minimum_local_disk_gib=100, root_volume="sbs:100GB:15000")
+        provider = Provider(machine_type=pop_type, ram_gib=128, volume_type="sbs_volume",
+                            volume_size_gb=None, volume_detail_size_gb=100,
+                            volume_iops=15000, volume_boot=False)
+        controller = ctl(root, path, provider)
+        preflight = controller.preflight(repo_root=repo, job_root=jobs)
+        assert preflight["machine"]["server_type"]["name"] == pop_type
+        state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        assert state["volume_ids"] == [VOLUME_ID]
+        create = next(command for command in provider.commands if command[5:8] == ("instance", "server", "create"))
+        assert f"type={pop_type}" in create and "root-volume=sbs:100GB:15000" in create
+        assert any(command[5:8] == ("instance", "volume", "get") for command in provider.commands)
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
+            minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:100GB:15000")
+        blocked(lambda: ctl(root, path, Provider(machine_type=pop_type, ram_gib=127,
+            volume_type="sbs_volume", volume_size_gb=None, volume_detail_size_gb=100,
+            volume_iops=15000, volume_boot=False))
+            .preflight(repo_root=repo, job_root=jobs))
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
+            minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:100GB:15000")
+        blocked(lambda: ctl(root, path, Provider(machine_type=pop_type, ram_gib=128, arch="aarch64",
+            volume_type="sbs_volume", volume_size_gb=None, volume_detail_size_gb=100,
+            volume_iops=15000, volume_boot=False))
+            .preflight(repo_root=repo, job_root=jobs))
+
+    for bad_volume in ("root_volume_type", "root_volume_size", "root_volume_iops"):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); repo, jobs, _, path = setup(root, machine_type=pop_type,
+                minimum_memory_gib=128, minimum_local_disk_gib=100, root_volume="sbs:100GB:15000")
+            provider = Provider(machine_type=pop_type, ram_gib=128, volume_type="sbs_volume",
+                                volume_size_gb=None, volume_detail_size_gb=100,
+                                volume_iops=15000, volume_boot=False)
+            provider.bad_server_shape = bad_volume
+            blocked(lambda: ctl(root, path, provider).create(repo_root=repo, job_root=jobs, confirm=True))
 
 
 def test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins() -> None:
@@ -310,7 +399,7 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
 
 
 def test_created_server_image_group_key_root_volume_and_ip_must_match_policy() -> None:
-    for mismatch in ("image", "security_group", "ssh_key", "root_volume", "not_boot_volume",
+    for mismatch in ("image", "server_type", "security_group", "ssh_key", "root_volume", "not_boot_volume",
                      "wrong_boot_volume_id", "dynamic_ip"):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
@@ -793,6 +882,8 @@ def test_supervisor_resumes_terminal_workers_before_cleanup_and_rejects_unknown_
 
 def main() -> None:
     tests = [test_policy_cost_deadline_worker_count_and_job_hashes_fail_closed,
+             test_machine_and_root_volume_policy_is_explicit_and_fail_closed,
+             test_pop2_sbs_fallback_checks_type_ram_image_and_exact_boot_volume,
              test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins,
              test_job_root_rejects_overlap_missing_pending_modules_and_hardlinks,
              test_create_and_two_workers_launch_concurrently_with_remote_hash_check,
