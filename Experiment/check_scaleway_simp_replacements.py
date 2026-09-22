@@ -170,6 +170,10 @@ class Provider:
                 observed["ssh_key_id"] = IMAGE
             elif observed is not None and self.bad_server_shape == "root_volume":
                 observed["volumes"]["0"]["size"] = 100
+            elif observed is not None and self.bad_server_shape == "not_boot_volume":
+                observed["volumes"]["0"]["boot"] = False
+            elif observed is not None and self.bad_server_shape == "wrong_boot_volume_id":
+                observed["boot_volume_id"] = IMAGE
             elif observed is not None and self.bad_server_shape == "dynamic_ip":
                 observed["public_ip"]["dynamic"] = True
                 observed["public_ips"][0]["dynamic"] = True
@@ -268,10 +272,20 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
         assert created["volume_ids"] == [VOLUME_ID] and created["ssh_key_id"] == KEY
         (root / "pilot_known_hosts").write_text("198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
         ssh_calls: list[tuple[str, ...]] = []
+        remote_state: dict[str, tuple[str, str]] = {}
         def ssh_fake(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
             del timeout
             ssh_calls.append(args)
-            output = "4310\n" if "worker.pid" in " ".join(args) else ""
+            command = " ".join(args)
+            job_id = "job-000" if "job-000" in command else "job-001" if "job-001" in command else ""
+            if "NOT_LAUNCHED" in command:
+                status, pid = remote_state.get(job_id, ("NOT_LAUNCHED", ""))
+                output = f"RUNNING {pid}\n" if status == "RUNNING" else status + "\n"
+            elif "nohup bash -lc" in command:
+                remote_state[job_id] = ("RUNNING", "4310")
+                output = "RUNNING 4310\n"
+            else:
+                output = ""
             return subprocess.CompletedProcess(args, 0, output, "")
         controller._ssh = ssh_fake  # type: ignore[method-assign]
         running = controller.run_workers(job_root=jobs, repo_root=repo)
@@ -291,13 +305,133 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
 
 
 def test_created_server_image_group_key_root_volume_and_ip_must_match_policy() -> None:
-    for mismatch in ("image", "security_group", "ssh_key", "root_volume", "dynamic_ip"):
+    for mismatch in ("image", "security_group", "ssh_key", "root_volume", "not_boot_volume",
+                     "wrong_boot_volume_id", "dynamic_ip"):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); repo, jobs, _, path = setup(root); provider = Provider()
             provider.bad_server_shape = mismatch
             blocked(lambda: ctl(root, path, provider).create(repo_root=repo, job_root=jobs, confirm=True))
             assert provider.server is not None
             assert not any(command and command[0] in {"ssh", "scp"} for command in provider.commands)
+
+
+def test_dispatch_reconciliation_is_idempotent_at_all_crash_points() -> None:
+    cases = [
+        # Crash after dispatching state is saved but before any launch.
+        ({}, {}, 2, "workers-running"),
+        # Remote job-000 started, but its local state update was lost.
+        ({}, {"job-000": ("RUNNING", "4310")}, 1, "workers-running"),
+        # Crash after the first per-job state save.
+        ({"job-000": {"phase": "running", "pid": "4310"}},
+         {"job-000": ("RUNNING", "4310")}, 1, "workers-running"),
+        # Both remote starts and per-job saves landed; overall phase update did not.
+        ({"job-000": {"phase": "running", "pid": "4310"},
+          "job-001": {"phase": "running", "pid": "4311"}},
+         {"job-000": ("RUNNING", "4310"), "job-001": ("RUNNING", "4311")}, 0, "workers-running"),
+        # `dispatch-failed`: reconcile a live job and only start its untouched peer.
+        ({}, {"job-000": ("RUNNING", "4310")}, 1, "workers-running"),
+        # `dispatch-failed`: a completed first job is retained; start only peer.
+        ({}, {"job-000": ("COMPLETE", json.dumps({"schema": 1, "exit_code": 0,
+            "commit": COMMIT, "database_sha256": "a" * 64,
+            "manifest_sha256": hashlib.sha256(b"Mathlib.Algebra.Group.Basic\n").hexdigest()}))},
+         1, "workers-running"),
+    ]
+    for index, (local_jobs, remote_jobs, expected_launches, expected_phase) in enumerate(cases):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); repo, job_root, _, path = setup(root); provider = Provider()
+            controller = ctl(root, path, provider)
+            state = controller.create(repo_root=repo, job_root=job_root, confirm=True)
+            policy, _ = controller.policy()
+            checked = pilot.validate_policy(policy, NOW)
+            state.update({"phase": "dispatch-failed" if index >= 4 else "dispatching",
+                          "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
+                          "worker_started_at": NOW.isoformat(), "worker_timeout_seconds": 36000,
+                          "jobs": [{**item, **local_jobs.get(item["id"], {"phase": "starting"})}
+                                   for item in state["jobs"]]})
+            controller._save(state)
+            launches: list[str] = []
+            def ssh_fake(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+                del timeout
+                command = " ".join(args)
+                job_id = "job-000" if "job-000" in command else "job-001" if "job-001" in command else ""
+                observed = remote_jobs.get(job_id)
+                if "NOT_LAUNCHED" in command:
+                    if observed is None:
+                        output = "NOT_LAUNCHED\n"
+                    elif observed[0] == "RUNNING":
+                        output = f"RUNNING\t{observed[1]}\n"
+                    else:
+                        output = "COMPLETE\t" + observed[1] + "\n"
+                elif "nohup bash -lc" in command:
+                    launches.append(job_id)
+                    remote_jobs[job_id] = ("RUNNING", str(4310 + len(launches)))
+                    output = f"RUNNING {remote_jobs[job_id][1]}\n"
+                else:
+                    output = ""
+                return subprocess.CompletedProcess(args, 0, output, "")
+            controller._ssh = ssh_fake  # type: ignore[method-assign]
+            resumed = controller._reconcile_dispatch(state, checked, checked)
+            assert len(launches) == expected_launches, (index, launches)
+            assert resumed["phase"] == expected_phase
+            assert [item["phase"] for item in resumed["jobs"]].count("running") >= 1
+            if index == 5:
+                assert next(item for item in resumed["jobs"] if item["id"] == "job-000")["phase"] == "finished"
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, job_root, _, path = setup(root); provider = Provider()
+        controller = ctl(root, path, provider); state = controller.create(repo_root=repo, job_root=job_root, confirm=True)
+        policy, _ = controller.policy(); checked = pilot.validate_policy(policy, NOW)
+        state.update({"phase": "dispatching", "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
+                      "worker_started_at": NOW.isoformat(), "worker_timeout_seconds": 36000,
+                      "jobs": [{**item, "phase": "starting"} for item in state["jobs"]]})
+        controller._save(state); remote: dict[str, str] = {}; launched: list[str] = []
+        def ambiguous_ssh(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            del timeout
+            command = " ".join(args); job_id = "job-000" if "job-000" in command else "job-001"
+            if "NOT_LAUNCHED" in command:
+                return subprocess.CompletedProcess(args, 0, remote.get(job_id, "NOT_LAUNCHED") + "\n", "")
+            if "nohup bash -lc" in command:
+                launched.append(job_id); remote[job_id] = "RUNNING 4310"
+                if job_id == "job-000" and launched.count(job_id) == 1:
+                    return subprocess.CompletedProcess(args, 255, "", "connection reset")
+                return subprocess.CompletedProcess(args, 0, "RUNNING 4311\n", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+        controller._ssh = ambiguous_ssh  # type: ignore[method-assign]
+        blocked(lambda: controller._reconcile_dispatch(state, checked, checked))
+        resumed = controller._reconcile_dispatch(controller._load_state(), checked, checked)
+        assert launched.count("job-000") == 1 and launched.count("job-001") == 1
+        assert resumed["phase"] == "workers-running"
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, job_root, _, path = setup(root); provider = Provider()
+        controller = ctl(root, path, provider); state = controller.create(repo_root=repo, job_root=job_root, confirm=True)
+        state.update({"phase": "dispatching", "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
+                      "worker_started_at": NOW.isoformat(), "worker_timeout_seconds": 36000,
+                      "jobs": [{**item, "phase": "starting"} for item in state["jobs"]]})
+        controller._save(state); (root / "pilot_known_hosts").write_text(
+            "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+        controller._ssh = lambda _state, *args, timeout: subprocess.CompletedProcess(args, 0,
+            "RUNNING\t4310\n" if "NOT_LAUNCHED" in " ".join(args) else "", "")  # type: ignore[method-assign]
+        actions: list[str] = []
+        def poll_workers() -> dict[str, Any]:
+            actions.append("poll")
+            updated = controller._load_state(); updated["phase"] = "workers-finished"
+            updated["jobs"] = [{**item, "phase": "finished", "exit_code": 0} for item in updated["jobs"]]
+            controller._save(updated)
+            return {"phase": "workers-finished", "jobs": updated["jobs"]}
+        def collect_workers(*, output_dir: Path) -> dict[str, Any]:
+            actions.append("collect"); output_dir.mkdir()
+            updated = controller._load_state(); updated["phase"] = "collected"; controller._save(updated)
+            return updated
+        def cleanup(*, confirm: bool = False) -> dict[str, Any]:
+            assert confirm and actions == ["poll", "collect"]
+            actions.append("cleanup")
+            return {"phase": "deleted"}
+        controller.poll_workers = poll_workers  # type: ignore[method-assign]
+        controller.collect_workers = collect_workers  # type: ignore[method-assign]
+        controller.cleanup = cleanup  # type: ignore[method-assign]
+        outcome = controller.supervise(job_root=job_root, repo_root=repo, output_dir=root / "results", poll_seconds=5)
+        assert outcome["complete"] and actions == ["poll", "collect", "cleanup"]
 
 
 def test_collection_verifies_both_result_archives_and_hashes() -> None:
@@ -581,6 +715,7 @@ def main() -> None:
              test_job_root_rejects_overlap_missing_pending_modules_and_hardlinks,
              test_create_and_two_workers_launch_concurrently_with_remote_hash_check,
              test_created_server_image_group_key_root_volume_and_ip_must_match_policy,
+             test_dispatch_reconciliation_is_idempotent_at_all_crash_points,
              test_collection_verifies_both_result_archives_and_hashes,
              test_collection_rejects_oversized_remote_archives_and_low_free_space_before_scp,
              test_collection_rejects_tar_expansion_bounds_before_extracting_any_entry,

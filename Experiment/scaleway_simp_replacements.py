@@ -526,11 +526,19 @@ class ScalewayPilot:
         if not isinstance(volume_items, list) or not volume_items:
             raise PilotError("created server volume inventory is unavailable")
         required_bytes = 559 * 1_000_000_000
-        root_volumes = [item for item in volume_items if isinstance(item, dict)
+        local_volumes = [item for item in volume_items if isinstance(item, dict)
                         and item.get("volume_type") in {"l_ssd", "local", "local_ssd"}
                         and type(item.get("size")) is int and required_bytes <= item["size"] <= 560 * 1024**3]
-        if not root_volumes:
-            raise PilotError("created server does not expose the configured 559GB local root volume")
+        boot_ref = server.get("boot_volume_id", server.get("boot_volume"))
+        if isinstance(boot_ref, dict):
+            boot_ref = boot_ref.get("id")
+        if type(boot_ref) is str:
+            root_volumes = [item for item in local_volumes if item.get("id") == boot_ref]
+        else:
+            root_volumes = [item for item in local_volumes if item.get("boot") is True]
+        if (len(root_volumes) != 1 or type(root_volumes[0].get("id")) is not str
+                or not ID_RE.fullmatch(root_volumes[0]["id"])):
+            raise PilotError("created server does not expose exactly one identified 559GB local boot volume")
         public_ip = self._one_public_ip(server)
         expected_ip_id = state.get("public_ip_id")
         if expected_ip_id is not None and expected_ip_id != public_ip["id"]:
@@ -716,6 +724,111 @@ class ScalewayPilot:
                 "-o", "ConnectTimeout=20", f"{policy.get('login_user', 'ubuntu')}@{address}"]
         return self._run([*base, *args], timeout)
 
+    def _launch_worker_once(self, state: Mapping[str, Any], job: Mapping[str, Any],
+                            worker_timeout: int, commit: str) -> subprocess.CompletedProcess[str]:
+        """Atomically claim a job before launch; an existing claim is never relaunched."""
+        remote_job = state["remote_job_directory"] + "/" + job["id"]
+        worker = ("set +e; timeout --signal=TERM --kill-after=30 " + str(worker_timeout) +
+                  " python3 -B Experiment/simp_replacement_worker.py --database " + remote_job +
+                  "/mathlib-db.sqlite3 --manifest " + remote_job + "/modules.txt --artifacts " + remote_job +
+                  "/artifacts > " + remote_job + "/worker.log 2>&1; rc=$?; "
+                  "dbhash=$(sha256sum " + remote_job + "/mathlib-db.sqlite3 | awk '{print $1}'); "
+                  "manifesthash=$(sha256sum " + remote_job + "/modules.txt | awk '{print $1}'); "
+                  "printf '{\"schema\":1,\"exit_code\":%s,\"commit\":\"%s\",\"database_sha256\":\"%s\",\"manifest_sha256\":\"%s\"}\\n' \"$rc\" " +
+                  shlex.quote(commit) + " \"$dbhash\" \"$manifesthash\" > " + remote_job +
+                  "/complete.json.tmp; mv " + remote_job + "/complete.json.tmp " + remote_job +
+                  "/complete.json; tar -czf " + remote_job + "/result.tar.gz -C " + remote_job +
+                  " mathlib-db.sqlite3 worker.log complete.json artifacts")
+        script = ("set -eu; d=" + shlex.quote(remote_job) + "; mkdir -p \"$d/artifacts\"; "
+                  "if test -f \"$d/complete.json\"; then printf 'COMPLETE\\n'; exit 0; fi; "
+                  "if ! mkdir \"$d/.launch-claim\" 2>/dev/null; then "
+                  "p=$(cat \"$d/worker.pid\" 2>/dev/null || true); "
+                  "case \"$p\" in ''|*[!0-9]*) printf 'AMBIGUOUS\\n'; exit 42;; esac; "
+                  "if kill -0 \"$p\" 2>/dev/null; then printf 'RUNNING %s\\n' \"$p\"; exit 0; fi; "
+                  "printf 'AMBIGUOUS\\n'; exit 42; fi; "
+                  "cd /opt/explicit-lean; . \"$HOME/.elan/env\"; "
+                  "nohup bash -lc " + shlex.quote(worker) + " > \"$d/launcher.log\" 2>&1 < /dev/null & "
+                  "p=$!; printf '%s\\n' \"$p\" > \"$d/worker.pid.tmp\"; "
+                  "mv \"$d/worker.pid.tmp\" \"$d/worker.pid\"; printf 'RUNNING %s\\n' \"$p\"")
+        return self._ssh(state, "sh", "-lc", shlex.quote(script), timeout=60)
+
+    def _reconcile_dispatch(self, state: dict[str, Any], policy: Mapping[str, Any],
+                            checked: Mapping[str, Any]) -> dict[str, Any]:
+        """Resume a partial dispatch without duplicating any potentially launched worker."""
+        remote = state.get("remote_job_directory")
+        if remote != "/home/ubuntu/explicit-lean-simp-jobs":
+            raise PilotError("saved remote jobs directory is invalid")
+        jobs = {item["id"]: item for item in state.get("jobs", [])}
+        if set(jobs) != {"job-000", "job-001"}:
+            raise PilotError("saved dispatch job set is incomplete")
+        created = datetime.fromisoformat(state["created_at"]).astimezone(timezone.utc)
+        hard_end = min(created + timedelta(seconds=checked["lifetime"]), checked["deadline"])
+        worker_end = datetime.fromisoformat(state["worker_started_at"]).astimezone(timezone.utc) + timedelta(
+            seconds=int(state["worker_timeout_seconds"]))
+        now = self.now().astimezone(timezone.utc)
+        worker_timeout = int((min(hard_end, worker_end) - now).total_seconds())
+        status_shell = ("set -eu; d=" + remote + "/{job}; "
+                        "if test -f \"$d/complete.json\"; then printf 'COMPLETE\\t'; cat \"$d/complete.json\"; "
+                        "elif test -d \"$d/.launch-claim\"; then p=$(cat \"$d/worker.pid\" 2>/dev/null || true); "
+                        "case \"$p\" in ''|*[!0-9]*) printf 'AMBIGUOUS\\n';; *) "
+                        "if kill -0 \"$p\" 2>/dev/null; then printf 'RUNNING\\t%s\\n' \"$p\"; "
+                        "else printf 'AMBIGUOUS\\n'; fi;; esac; "
+                        "elif test -e \"$d/worker.pid\" || test -e \"$d/complete.json.tmp\" "
+                        "|| test -e \"$d/result.tar.gz\"; then printf 'AMBIGUOUS\\n'; "
+                        "else printf 'NOT_LAUNCHED\\n'; fi")
+        commit = str(_dict(policy.get("repository"), "repository")["commit"])
+        for job_id in ("job-000", "job-001"):
+            command = status_shell.format(job=job_id)
+            result = self._ssh(state, "sh", "-lc", shlex.quote(command), timeout=60)
+            if result.returncode:
+                state["phase"] = "dispatch-failed"
+                state["dispatch_error"] = f"could not reconcile {job_id}; outcome remains unknown"
+                self._save(state)
+                raise PilotError(state["dispatch_error"])
+            observed = result.stdout.strip()
+            if observed == "NOT_LAUNCHED":
+                if worker_timeout <= 0:
+                    state["phase"] = "dispatch-failed"
+                    self._save(state)
+                    raise PilotError(f"{job_id} is provably not launched but no worker budget remains")
+                launched = self._launch_worker_once(state, jobs[job_id], worker_timeout, commit)
+                if launched.returncode:
+                    state["phase"] = "dispatch-failed"
+                    state["dispatch_error"] = f"{job_id} launch outcome is ambiguous; refusing relaunch"
+                    self._save(state)
+                    raise PilotError(state["dispatch_error"])
+                observed = launched.stdout.strip()
+            if observed.startswith("RUNNING ") or observed.startswith("RUNNING\t"):
+                pid = observed.split(maxsplit=1)[1]
+                if not pid.isdigit():
+                    raise PilotError(f"{job_id} returned an invalid worker PID")
+                jobs[job_id] = {**jobs[job_id], "phase": "running", "pid": pid}
+            elif observed.startswith("COMPLETE\t"):
+                try:
+                    marker = json.loads(observed.split("\t", 1)[1])
+                except (json.JSONDecodeError, IndexError) as error:
+                    raise PilotError(f"{job_id} completion marker is malformed") from error
+                if (marker.get("commit") != commit or marker.get("manifest_sha256") != jobs[job_id].get("manifest_sha256")
+                        or type(marker.get("exit_code")) is not int or not re.fullmatch(r"[0-9a-f]{64}", str(marker.get("database_sha256")))):
+                    raise PilotError(f"{job_id} completion marker does not match its pinned job")
+                jobs[job_id] = {**jobs[job_id], "phase": "finished" if marker["exit_code"] == 0 else "failed",
+                                "exit_code": marker["exit_code"], "database_result_sha256": marker["database_sha256"]}
+            else:
+                state.update({"phase": "dispatch-failed", "jobs": [jobs[key] for key in ("job-000", "job-001")],
+                              "dispatch_error": f"{job_id} launch state is ambiguous; refusing to start another worker"})
+                self._save(state)
+                raise PilotError(state["dispatch_error"])
+            state["jobs"] = [jobs[key] for key in ("job-000", "job-001")]
+            self._save(state)
+        phases = [jobs[key]["phase"] for key in ("job-000", "job-001")]
+        state["phase"] = ("workers-running" if "running" in phases else
+                           "workers-finished" if all(value == "finished" for value in phases) else "workers-failed")
+        if state["phase"] != "workers-running":
+            state["workers_finished_at"] = self.now().isoformat()
+        state.pop("dispatch_error", None)
+        self._save(state)
+        return state
+
     def run_workers(self, *, job_root: Path, repo_root: Path) -> dict[str, Any]:
         state = self._load_state(); policy, raw = self.policy(); checked = validate_policy(policy, self.now())
         if state.get("policy_sha256") != sha256(raw):
@@ -809,32 +922,7 @@ class ScalewayPilot:
                                 "database_sha256": item["database_sha256"], "module_count": item["module_count"],
                                 "phase": "starting"} for item in state["jobs"]]})
         self._save(state)
-        for job in jobs:
-            remote_job = remote + "/" + job["id"]
-            launcher = ("set -eu; cd /opt/explicit-lean; . \"$HOME/.elan/env\"; "
-                        "mkdir -p " + remote_job + "/artifacts; "
-                        "nohup bash -lc " + shlex.quote(
-                            "set +e; timeout --signal=TERM --kill-after=30 " + str(worker_timeout) +
-                            " python3 -B Experiment/simp_replacement_worker.py --database " + remote_job +
-                            "/mathlib-db.sqlite3 --manifest " + remote_job + "/modules.txt --artifacts " + remote_job +
-                            "/artifacts > " + remote_job + "/worker.log 2>&1; rc=$?; "
-                            "dbhash=$(sha256sum " + remote_job + "/mathlib-db.sqlite3 | awk '{print $1}'); "
-                            "manifesthash=$(sha256sum " + remote_job + "/modules.txt | awk '{print $1}'); "
-                            "printf '{\"schema\":1,\"exit_code\":%s,\"commit\":\"%s\",\"database_sha256\":\"%s\",\"manifest_sha256\":\"%s\"}\\n' \"$rc\" " +
-                            shlex.quote(commit) + " \"$dbhash\" \"$manifesthash\" > " + remote_job + "/complete.json.tmp; "
-                            "mv " + remote_job + "/complete.json.tmp " + remote_job + "/complete.json; "
-                            "tar -czf " + remote_job + "/result.tar.gz -C " + remote_job + " mathlib-db.sqlite3 worker.log complete.json artifacts") +
-                        " > " + remote_job + "/launcher.log 2>&1 < /dev/null & echo $! > " + remote_job + "/worker.pid; "
-                        "cat " + remote_job + "/worker.pid")
-            launched = self._ssh(state, "sh", "-lc", shlex.quote(launcher), timeout=60)
-            if launched.returncode or not launched.stdout.strip().isdigit():
-                state["jobs"] = [{**item, "phase": "launch_failed" if item["id"] == job["id"] else item["phase"]} for item in state["jobs"]]
-                state["phase"] = "dispatch-failed"; self._save(state)
-                raise PilotError(f"{job['id']} could not be launched; cleanup is required")
-            state["jobs"] = [{**item, "phase": "running", "pid": launched.stdout.strip()} if item["id"] == job["id"] else item for item in state["jobs"]]
-            self._save(state)
-        state["phase"] = "workers-running"; self._save(state)
-        return state
+        return self._reconcile_dispatch(state, checked, checked)
 
     def poll_workers(self) -> dict[str, Any]:
         state, policy = self._existing_context()
@@ -1039,6 +1127,23 @@ class ScalewayPilot:
                 phase = state.get("phase")
                 if phase in {"workers-running", "workers-finished", "workers-failed", "dispatching", "dispatch-failed"}:
                     cleanup_allowed = False
+            elif phase in {"dispatching", "dispatch-failed"}:
+                policy, raw = self.policy()
+                checked = validate_policy(policy, self.now())
+                if state.get("policy_sha256") != sha256(raw):
+                    raise PilotError("policy changed during partial worker dispatch")
+                server_data = self._scw(["instance", "server", "get", state["server_id"],
+                                         f"zone={state['zone']}"], policy=checked)
+                server = server_data.get("server", server_data)
+                if not isinstance(server, dict):
+                    raise PilotError("server details unavailable during dispatch recovery")
+                verified = self._verify_server_identity(server, checked, state)
+                if state.get("volume_ids") and verified["volume_ids"] != state["volume_ids"]:
+                    raise PilotError("created boot volume identity changed during dispatch recovery")
+                state.update(verified)
+                state = self._reconcile_dispatch(state, checked, checked)
+                phase = state.get("phase")
+                cleanup_allowed = False
             if phase in {"workers-finished", "workers-failed"}:
                 terminal = phase
             elif phase in {"collected", "collected-worker-failed"}:

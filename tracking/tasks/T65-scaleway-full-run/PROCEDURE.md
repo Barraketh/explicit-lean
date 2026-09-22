@@ -79,7 +79,13 @@ directories, then polls both completion markers. Before either worker starts,
 bootstrap installs `zstd`, warms the Lake cache, and builds and verifies
 `ExplicitLean.SimpTrace` and `ExplicitLean.ExplicitRw` once. Creation and
 dispatch both validate the resultant server's image, security group, SSH-key
-provenance and local root volume, and record the exact attached flexible-IP ID.
+provenance and local boot volume (using the boot-volume ID or explicit `boot`
+flag), and record the exact attached flexible-IP ID. Dispatch persists a
+per-job remote claim before starting either worker. A restart reconciles the
+claim, PID and completion marker; it starts only a job with no remote launch
+evidence. If a claim exists but its process/marker cannot be resolved, the
+worker is not relaunched and the host/results remain for recovery or the hard
+deadline.
 Collection validates both archives, module-manifest hashes, source commit,
 worker exit codes, updated DB hashes, logs and artifacts before atomically
 publishing the local output. A compressed archive is capped at 8 GiB per worker

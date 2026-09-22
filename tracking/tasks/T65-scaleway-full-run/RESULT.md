@@ -25,12 +25,20 @@ shared Lean targets once before starting either worker. Cleanup preserves
 retry/error information in the local state file and is idempotent after
 confirmed deletion.
 
+Dispatch now persists an atomic per-job remote claim before launch. Restart
+reconciliation reads that claim, PID and completion marker, records remotely
+running/completed jobs, and launches only jobs with no evidence of prior launch.
+An ambiguous claim/PID state fails closed and is never relaunched. The root
+volume must match the server's explicit boot-volume ID or have `boot: true`; a
+similarly sized local data volume is insufficient.
+
 Verification completed locally:
 
-- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 12 mock-only
+- `python3 -B Experiment/check_scaleway_simp_replacements.py` — 13 mock-only
   checks passed, including cost/TTL/job-hash rejection, complete/disjoint
   pending-queue validation and distinct DB inodes, CLI response shapes,
-  server identity, concurrent launches, result-size/disk limits, restart-safe
+  server and boot-volume identity, concurrent launches, dispatch crash-point
+  reconciliation without duplicate workers, result-size/disk limits, restart-safe
   collection, flexible-IP cleanup, idempotent cleanup, ambiguous-create
   handling, and transient collection retry before cleanup.
 - `python3 -m py_compile Experiment/scaleway_simp_replacements.py
