@@ -1171,7 +1171,7 @@ class ScalewayPilot:
                     "curl --fail --location --silent --show-error " + ELAN_URL + " -o /tmp/elan.tar.gz; " \
                     "echo " + ELAN_SHA256 + "'  /tmp/elan.tar.gz' | sha256sum -c -; " \
                     "tar -xzf /tmp/elan.tar.gz -C /tmp elan-init; /tmp/elan-init -y --default-toolchain none; " \
-                    ". \"$HOME/.elan/env\"; cd /opt/explicit-lean; lake exe cache get; " \
+                    ". \"$HOME/.elan/env\"; cd /opt/explicit-lean; lake --no-cache exe cache get; " \
                     "lake build ExplicitLean.SimpTrace ExplicitLean.ExplicitRw; " \
                     "test -s .lake/build/lib/lean/ExplicitLean/SimpTrace.olean; " \
                     "test -s .lake/build/lib/lean/ExplicitLean/ExplicitRw.olean"

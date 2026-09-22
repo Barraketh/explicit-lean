@@ -515,6 +515,7 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
         assert "git -C /opt/explicit-lean fetch --no-tags origin" in bootstrap
         assert "curl --fail --location --silent --show-error " + pilot.ELAN_URL in bootstrap
         assert pilot.ELAN_SHA256 in bootstrap and "sha256sum -c -" in bootstrap
+        assert "; lake --no-cache exe cache get;" in bootstrap
         assert "lake build ExplicitLean.SimpTrace ExplicitLean.ExplicitRw" in bootstrap
         assert "test -s .lake/build/lib/lean/ExplicitLean/SimpTrace.olean" in bootstrap
         assert "test -s .lake/build/lib/lean/ExplicitLean/ExplicitRw.olean" in bootstrap
