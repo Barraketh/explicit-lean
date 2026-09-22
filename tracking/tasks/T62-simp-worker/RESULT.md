@@ -53,7 +53,12 @@ In a read-only audit of the queued SQLite database, 68,281 pending target calls
 were identified: 4,691 had unmatched opening delimiters under the previous
 line-limited range detector, while none are unbalanced with the new ranges.
 The same offset-masked scanning also fixes the prior same-line block-comment
-false-negative classification.
+false-negative classification. Attribute recognition now runs only after
+comments and strings have been masked, matching the recorder's lexical order;
+this prevents a comment-contained `@[` from swallowing later live code. The
+read-only alignment audit covered 5,957 pending modules and found 80,633
+executable target sites in their sources, including 68,281 owned by pending
+queue rows, with zero renderer/recorder mismatches.
 
 ## Limits
 

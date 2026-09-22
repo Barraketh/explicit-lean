@@ -57,6 +57,9 @@ import Mathlib
 -- all_goals simp
 /- any_goals simp -/
 def quoted : String := "all_goals simp; try simp"
+/- decoy @[ without a closing bracket
+-/
+example : True := by simp
 /- lead -/ example : True := by simp
 example : True := by all_goals simp
 example : True → True := by
@@ -88,7 +91,7 @@ example : (fun x : Nat => x) 0 = 0 := by dsimp
 '''
     renderer_sites, trace_sites = W.align_sites(source)
     targets = [site for site in trace_sites if W.TARGET.match(site.callText)]
-    assert len(targets) == 12, [site.callText for site in targets]
+    assert len(targets) == 13, [site.callText for site in targets]
     assert [site.text for site in renderer_sites if W.TARGET.match(site.text)] == [
         site.callText for site in targets
     ]
@@ -182,6 +185,8 @@ def test_full_command_rewrite_omits_comment() -> None:
 def test_selected_site_record_render_compile() -> None:
     W.ensure_prerequisites()
     source = """import Mathlib
+/- decoy @[ without a closing bracket
+-/
 /- lead -/ example : True := by simp
 example (n : Nat) : n + 0 = n := by
   simp only [

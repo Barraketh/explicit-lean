@@ -259,7 +259,9 @@ def is_tactic_start(masked_source: str, line_start: int,
 def find_sites(source: str) -> list[Site]:
     """Every simp-family tactic site in `source`, in source order."""
     sites: list[Site] = []
-    masked_source = mask_comments_and_strings(mask_attributes(source))
+    # Remove comments/strings before scanning attributes so a decoy `@[` in
+    # either cannot open an attribute span that consumes later source.
+    masked_source = mask_attributes(mask_comments_and_strings(source))
     offset = 0
     for lineno, line in enumerate(source.split("\n"), start=1):
         if skip_line(line):
