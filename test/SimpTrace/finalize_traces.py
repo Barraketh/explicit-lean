@@ -34,7 +34,17 @@ def finalize_paths(traced_path: pathlib.Path, manifest_path: pathlib.Path,
     module_path = value.get("modulePath", "")
     if not isinstance(module_path, str) or not module_path:
         raise ValueError("manifest has invalid modulePath")
-    sites = find_sites(source)
+    all_sites = find_sites(source)
+    ordinals = [site.get("siteOrdinal") for site in value.get("sites", [])]
+    if (any(not isinstance(ordinal, int) or isinstance(ordinal, bool)
+            for ordinal in ordinals)
+            or len(set(ordinals)) != len(ordinals)
+            or ordinals != sorted(ordinals)):
+        raise ValueError("manifest selected site ordinals are invalid")
+    by_ordinal = {site.siteOrdinal: site for site in all_sites}
+    if any(ordinal not in by_ordinal for ordinal in ordinals):
+        raise ValueError("manifest selected site ordinal is outside source sites")
+    sites = [by_ordinal[ordinal] for ordinal in ordinals]
     if value != manifest(module_path, source, sites):
         raise ValueError("manifest/source range or callText mismatch")
     validate_source_args(value, source)
@@ -60,11 +70,11 @@ def finalize_paths(traced_path: pathlib.Path, manifest_path: pathlib.Path,
         files.append((path, int(match.group("site")) - 1,
                       int(match.group("run") or 0)))
     groups: dict[int, list[tuple[pathlib.Path, int]]] = {}
+    expected_sites = {site.siteOrdinal for site in sites}
     for path, site, run in files:
-        if site < 0 or site >= len(sites):
+        if site not in expected_sites:
             raise ValueError(f"trace site ordinal out of range: {site}")
         groups.setdefault(site, []).append((path, run))
-    expected_sites = set(range(len(sites)))
     if set(groups) != expected_sites:
         raise ValueError(f"manifest/output mismatch missing={sorted(expected_sites - set(groups))} "
                          f"extra={sorted(set(groups) - expected_sites)}")
@@ -91,7 +101,10 @@ def finalize_paths(traced_path: pathlib.Path, manifest_path: pathlib.Path,
             if "invocation" in raw or "invocations" in raw:
                 raise ValueError(f"raw invocation metadata is malformed: {path.name}")
             records.append({"invocation": invocation, "invocations": total})
-            s = value["sites"][site]
+            s = next((entry for entry in value["sites"]
+                      if entry["siteOrdinal"] == site), None)
+            if s is None:
+                raise ValueError(f"trace site has no selected manifest entry: {site}")
             final = {"schema": "simp-trace-v2", "modulePath": module_path,
                      "site": {"siteOrdinal": s["siteOrdinal"],
                               "startChar": s["startChar"], "endChar": s["endChar"],

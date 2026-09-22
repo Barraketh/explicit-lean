@@ -184,20 +184,26 @@ def render_manual_override(site: S.Site, entry: dict, source: str) -> dict:
 def build_manifest(module_path: str, source: str,
                    site_list: list[S.Site]) -> dict:
     """Build the v2 manifest from the exact original source text."""
-    return {
-        "modulePath": module_path,
-        "sites": [
-            {
-                "siteOrdinal": site.index,
-                "startChar": site.start,
-                "endChar": site.end,
-                "line": site.line,
-                "column": site.column,
-                "callText": source[site.start:site.end],
-            }
-            for site in site_list
-        ],
-    }
+    def values(site: Any) -> tuple[int, int, int, int, int, str]:
+        # T1 source-site records use camelCase names; the older replay scanner
+        # uses short snake_case fields. Both are tied to the same exact text.
+        ordinal = getattr(site, "siteOrdinal", getattr(site, "index", None))
+        start = getattr(site, "startChar", getattr(site, "start", None))
+        end = getattr(site, "endChar", getattr(site, "end", None))
+        call_text = getattr(site, "callText", getattr(site, "text", None))
+        return ordinal, start, end, site.line, site.column, call_text
+
+    entries = []
+    for site in site_list:
+        ordinal, start, end, line, column, call_text = values(site)
+        if not isinstance(start, int) or not isinstance(end, int) or not (0 <= start < end <= len(source)):
+            raise ValueError("source-site range is invalid")
+        if source[start:end] != call_text:
+            raise ValueError(f"source-site text mismatch at ordinal {ordinal}")
+        entries.append({"siteOrdinal": ordinal, "startChar": start,
+                        "endChar": end, "line": line, "column": column,
+                        "callText": call_text})
+    return {"modulePath": module_path, "sites": entries}
 
 
 def _identity_descriptor(site: dict) -> dict:
@@ -801,7 +807,9 @@ def _structural_replacement(source: str, site: S.Site,
 
 
 def render_site(site: S.Site, trace: dict | list[dict] | None,
-                source: str | None = None) -> dict:
+                source: str | None = None,
+                include_original_comment: bool = True,
+                use_manual_overrides: bool = True) -> dict:
     """Render one site, returning its record.
 
     Four outcomes, and the record's `lines` are what gets spliced in every one:
@@ -829,7 +837,7 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
         record["status"] = status
         record["detail"] = detail
         record["attribution"] = side
-        if extra:
+        if extra and include_original_comment:
             # A marker must remain a standalone comment even when the call is
             # mid-line (notably after `<;>`). `splice` moves the comment to the
             # enclosing line's start while retaining the original call below.
@@ -844,7 +852,8 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
         module_path = trace[0].get("modulePath")
     else:
         module_path = None
-    manual = _manual_function_basic(site, source or "", line_indent, module_path)
+    manual = (_manual_function_basic(site, source or "", line_indent, module_path)
+              if use_manual_overrides else None)
     if manual is not None:
         record.update(manual)
         record["attribution"] = "manual_override"
@@ -935,7 +944,8 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
         record["lines"] = [bodies[0]]
         return record
 
-    lines = S.comment_original(site.text, indent)
+    lines = (S.comment_original(site.text, indent)
+             if include_original_comment else [])
     if inaccessible:
         # The spec: a generator derives `rename_i` names from the order of the
         # inaccessible declarations in the context. Their `ctxIndex` identifies

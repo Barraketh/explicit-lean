@@ -61,6 +61,19 @@ def main() -> int:
     traced, ledger = transform_with_ledger(unicode, "UnicodeFixture")
     assert "simp_trace" in traced
     assert verify_transform(unicode, "UnicodeFixture", traced, find_sites(unicode)) == ledger
+    selected_source = "-- λ before\nexample : True := by simp\nexample : True := by simp\n"
+    all_selected_source_sites = find_sites(selected_source)
+    selected = [all_selected_source_sites[1]]
+    selected_trace, selected_ledger = transform_with_ledger(
+        selected_source, "SelectedFixture", "private/raw", selected
+    )
+    assert selected_trace.count("simp_trace") == 1
+    assert '=>trace "private/raw/SelectedFixture_02.json"' in selected_trace
+    assert "example : True := by simp\n" in selected_trace
+    assert verify_transform(selected_source, "SelectedFixture", selected_trace,
+                            selected, "private/raw") == selected_ledger
+    selected_manifest = manifest("Mathlib/Test/Selected.lean", selected_source, selected)
+    assert [s["siteOrdinal"] for s in selected_manifest["sites"]] == [1]
     m = manifest("Mathlib/Test/UnicodeFixture.lean", unicode, sites)
     assert m["sites"][0]["callText"] == "simp [p]"
     validate_source_args(m, unicode)
@@ -150,6 +163,31 @@ def main() -> int:
             pass
         else:
             raise AssertionError("accepted staged trace clauses rooted outside --raw-dir")
+        selected_original = root / "selected-source.lean"
+        selected_traced = root / "SelectedTraced.lean"
+        selected_manifest_path = root / "SelectedTraced.manifest.json"
+        selected_raw = root / "selected-raw"
+        selected_final = root / "selected-final"
+        selected_source = "example : True := by simp\nexample : True := by simp\n"
+        selected_original.write_text(selected_source, encoding="utf-8")
+        selected_source_sites = find_sites(selected_source)
+        selected_only = [selected_source_sites[1]]
+        selected_raw.mkdir()
+        selected_traced.write_text(
+            transform_with_ledger(selected_source, "SelectedTraced", str(selected_raw),
+                                  selected_only)[0], encoding="utf-8")
+        selected_manifest_path.write_text(json.dumps(
+            manifest("Mathlib/Test/Selected.lean", selected_source, selected_only),
+            sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        (selected_raw / "SelectedTraced_02.json").write_text(json.dumps({
+            "schema": "simp-trace-v1",
+            "call": f'simp_trace =>trace "{selected_raw}/SelectedTraced_02.json"',
+            "occurrence": "9", "locations": []}), encoding="utf-8")
+        assert finalize_paths(selected_traced, selected_manifest_path, selected_original,
+                              selected_raw, selected_final) == 0
+        selected_result = json.loads(
+            (selected_final / "SelectedTraced_02.json").read_text(encoding="utf-8"))
+        assert selected_result["site"]["siteOrdinal"] == 1
     print("OK: T9 attributes, comments, same-line, identical, Unicode, and ordinal regressions")
     return 0
 

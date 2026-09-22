@@ -316,9 +316,23 @@ def _trace_clause_path(trace_root: str, traced_name: str, site_ordinal: int) -> 
 
 
 def transform_with_ledger(
-    source: str, traced_name: str, trace_root: str = DEFAULT_TRACE_ROOT
+    source: str, traced_name: str, trace_root: str = DEFAULT_TRACE_ROOT,
+    selected_sites: list[Site] | None = None,
 ) -> tuple[str, list[Edit]]:
-    sites = find_sites(source)
+    # Callers may instrument a selected subset (for example, commands leased
+    # from the simp replacement queue). Keep their source ordinals and ranges
+    # intact: trace identity is always checked against the complete source,
+    # never inferred from a compacted list position.
+    sites = find_sites(source) if selected_sites is None else list(selected_sites)
+    all_sites = find_sites(source)
+    by_ordinal = {site.siteOrdinal: site for site in all_sites}
+    if len({site.siteOrdinal for site in sites}) != len(sites):
+        raise ValueError("selected site ordinals are duplicated")
+    for site in sites:
+        if by_ordinal.get(site.siteOrdinal) != site:
+            raise ValueError(f"selected site is not from source at ordinal {site.siteOrdinal}")
+    if sites != sorted(sites, key=lambda site: site.siteOrdinal):
+        raise ValueError("selected sites are not in source order")
     parts: list[str] = []
     edits: list[Edit] = []
     cursor = 0
@@ -338,13 +352,32 @@ def transform_with_ledger(
     parts.append(source[cursor:])
     traced = "".join(parts)
     if "ExplicitLean.SimpTrace" not in traced:
-        match = re.search(r"^public import .*?$", traced, re.M)
+        match = re.search(r"^(?:public\s+)?(?:meta\s+)?import\b.*?$", traced, re.M)
+        module_match = re.search(r"^module\s*$", traced, re.M)
+        module_mode = module_match is not None
+        import_text = ("public meta import ExplicitLean.SimpTrace" if module_mode
+                       else "import ExplicitLean.SimpTrace")
+        insertion = "\n" + import_text
         if match:
-            insertion = "\npublic meta import ExplicitLean.SimpTrace"
-            traced = traced[:match.end()] + insertion + traced[match.end():]
+            at = match.end()
+            traced = traced[:at] + insertion + traced[at:]
             edits = [Edit(e.siteOrdinal, e.sourceStart, e.sourceEnd,
-                          e.outputStart + (len(insertion) if e.outputStart >= match.end() else 0),
-                          e.outputEnd + (len(insertion) if e.outputStart >= match.end() else 0),
+                          e.outputStart + (len(insertion) if e.outputStart >= at else 0),
+                          e.outputEnd + (len(insertion) if e.outputStart >= at else 0),
+                          e.replacement) for e in edits]
+        elif module_match:
+            at = module_match.end()
+            traced = traced[:at] + insertion + traced[at:]
+            edits = [Edit(e.siteOrdinal, e.sourceStart, e.sourceEnd,
+                          e.outputStart + (len(insertion) if e.outputStart >= at else 0),
+                          e.outputEnd + (len(insertion) if e.outputStart >= at else 0),
+                          e.replacement) for e in edits]
+        else:
+            import_text += "\n"
+            traced = import_text + traced
+            edits = [Edit(e.siteOrdinal, e.sourceStart, e.sourceEnd,
+                          e.outputStart + len(import_text),
+                          e.outputEnd + len(import_text),
                           e.replacement) for e in edits]
     return traced, edits
 
@@ -358,7 +391,7 @@ def transform(source: str, traced_name: str,
 def verify_transform(source: str, traced_name: str, traced: str,
                      sites: list[Site],
                      trace_root: str = DEFAULT_TRACE_ROOT) -> list[Edit]:
-    expected, edits = transform_with_ledger(source, traced_name, trace_root)
+    expected, edits = transform_with_ledger(source, traced_name, trace_root, sites)
     if traced != expected:
         raise ValueError("traced source differs from deterministic transform")
     if len(edits) != len(sites):
