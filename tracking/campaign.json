@@ -175,7 +175,8 @@
       "edf2690",
       "ac6a8a4",
       "82c33bf",
-      "273c4fb"
+      "273c4fb",
+      "b676829"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -194,7 +195,8 @@
       "exact_path_tagged_binder_spine_validation",
       "authenticated_source_application_validation_witness",
       "temporary_metavariable_event_snapshot_boundary",
-      "class_valued_explicit_argument_validator_parity"
+      "class_valued_explicit_argument_validator_parity",
+      "exact_opaque_simproc_attribution_with_isolated_probes"
     ],
     "checks": {
       "isolatedCompile": 19,
@@ -209,6 +211,7 @@
       "sourceAppliedArguments": "passed_global_method_projection_applied_if_neg_and_bare_if_neg_missing_side_rejection",
       "eventMetavariableSnapshot": "passed_assigned_term_and_universe_child_rejection_outer_retention_local_context_instances_and_real_nested_ne_eq_validation",
       "classExplicitArguments": "passed_iInf_pos_and_fail_closed_nonclass_value_binder",
+      "opaqueSimprocAttribution": "passed_real_cmpLE_swap_nested_local_evidence_false_outer_attribution_rejection_and_probe_state_isolation",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
       "independentTrustReview": "passed"
     },
@@ -239,8 +242,8 @@
       "modules": 1662,
       "rows": 13102,
       "manifestsDisjoint": true,
-      "runningWorkers": ["000", "001"],
-      "preparedWorkers": ["002", "003"],
+      "runningWorkers": ["000", "001", "002", "003"],
+      "preparedWorkers": [],
       "fastPathRestartedAt": "2026-09-23T06:27:03Z",
       "maximumConcurrentLocalCampaignWorkers": 6,
       "cloudUsed": false

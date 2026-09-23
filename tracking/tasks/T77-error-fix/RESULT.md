@@ -108,6 +108,11 @@ Subsequent reviewed mechanism commits:
   explicit binders: ordinary instance synthesis must fill the exact binder,
   while an arbitrary explicit value binder still fails closed. Missing source
   statements also fail closed instead of being accepted.
+- Opaque simproc theorem attribution now treats `usedTheorems` additions as
+  candidates rather than causal proof. Each candidate must reproduce the exact
+  observed before/after pair in an isolated diagnostic probe whose Meta, Simp,
+  and recorder state is restored. Unverifiable enclosing changes remain visible
+  genuine blockers instead of being falsely attributed to nested local rewrites.
 
 ## Verified checks
 
@@ -152,6 +157,13 @@ Subsequent reviewed mechanism commits:
   fail-closed validation of an ordinary `Nat` binder, and the corresponding
   `explicit_rw` negative. The SimpTrace build and the source-application and
   exact-binder-spine regressions also passed.
+- The opaque-simproc attribution fixture passed the real `cmpLE_swap` shape:
+  the genuine nested rewrite by local `yx` remains in the trace, while the
+  distinct enclosing match change is not mislabelled as `yx`. The fixture also
+  verifies that attribution probes cannot leak metavariable assignments,
+  `usedTheorems`, or side evidence into the next recorded event. The opaque
+  wrapper remains an explicitly classified blocker pending a sound operational
+  replay model.
 - T9 trace identity tests and T22 source-argument tests.
 - 316 pipeline checks excluding the unavailable historical T1/T2
   worktree-dependent site-count and end-to-end checks.
@@ -205,10 +217,8 @@ Run root:
 
 The four manifests are pairwise disjoint and cover 1,662 modules / 13,102
 baseline-pending rows. Each worker has its own one-link database copy. Workers
-000 and 001 are active in detached screen sessions; workers 002 and 003 are
-prepared and will start one-for-one as a local slot becomes available, with a
-hard ceiling of six concurrent campaign workers. The original four T76 workers
-remain active and untouched.
+000 through 003 are active in detached screen sessions, with no additional
+shards permitted and a hard ceiling of six concurrent campaign workers.
 
 Workers 000 and 001 were interrupted with targeted `SIGINT` after the fast path
 passed review. Their SQLite transactions remained consistent; pre-restart
@@ -216,9 +226,9 @@ logs/completion/exit markers are preserved under `prebatch-79b2f6a` names.
 Both resumed from their existing databases at the fast-path commit, reusing
 already authenticated site traces and completed command results.
 
-The `monitor-isolated-trace-compile` heartbeat now monitors both runs, launches
-only the two prepared local shards as slots free, validates and merges into new
-copies, and then retries audited T76 failures using the reviewed implementation.
+The `monitor-isolated-trace-compile` heartbeat now monitors both runs, validates
+and merges into new copies, and then retries audited failures using only the
+reviewed implementation.
 It is forbidden from provisioning cloud resources or mutating any original,
 baseline, or frozen database.
 
