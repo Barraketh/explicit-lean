@@ -163,6 +163,7 @@
   "isolatedRecovery20260923": {
     "task": "T77-error-fix",
     "implementationCommit": "79b2f6aa7f854f2a4ef6b06b0ba8e436c6d06682",
+    "fastPathCommit": "78189c32636004d62e50b611e6f2c997456960ac",
     "status": "active_local_disjoint_runs",
     "principledFixes": [
       "authenticated_theorem_lemma_body_boundary",
@@ -173,7 +174,7 @@
     ],
     "checks": {
       "isolatedCompile": 19,
-      "retry": 18,
+      "retry": 25,
       "renderer": 15,
       "replacementWorker": 11,
       "pipelineWithoutUnavailableWorktreeChecks": 316,
@@ -181,8 +182,9 @@
     },
     "realSmoke": {
       "module": "Mathlib.NumberTheory.NumberField.CanonicalEmbedding.NormLeOne",
-      "ordinals": [35, 36],
-      "compiledSuccesses": 2,
+      "ordinals": [35, 36, 37, 69],
+      "compiledSuccesses": 4,
+      "bulkRecordAndBatchCompileSuccesses": 2,
       "databaseIntegrity": "ok",
       "unsafeTokens": 0
     },
@@ -193,6 +195,7 @@
       "manifestsDisjoint": true,
       "runningWorkers": ["000", "001"],
       "preparedWorkers": ["002", "003"],
+      "fastPathRestartedAt": "2026-09-23T06:27:03Z",
       "maximumConcurrentLocalCampaignWorkers": 6,
       "cloudUsed": false
     },

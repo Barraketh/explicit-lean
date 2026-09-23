@@ -2,6 +2,8 @@
 
 Status: active local campaign. Implementation commit:
 `79b2f6aa7f854f2a4ef6b06b0ba8e436c6d06682`.
+Exact bulk-record/batch-compile fast path commit:
+`78189c32636004d62e50b611e6f2c997456960ac`.
 
 ## Implemented controls and principled fixes
 
@@ -18,6 +20,12 @@ Status: active local campaign. Implementation commit:
   then compiles one full command replacement at a time. Manifest ownership,
   source hashes, command ownership, status transitions, and all database writes
   are checked transactionally.
+- An unbounded module first attempts one exact multi-site recorder invocation.
+  It accepts the result only if the source-site key set and full trace identity
+  exactly match the request; any defect discards the entire batch and retries
+  every site independently. Rendered commands likewise get one exact combined
+  module compile; a failure falls back to isolation from the already-compiled
+  baseline and accumulates only individually compiling commands.
 - Module-absolute T22 `sourceArgs` spans are compared for exact equality with a
   canonical manifest derived from the pinned original source for every
   invocation record, then deep-copied and rebased to command-local Unicode
@@ -33,7 +41,7 @@ Status: active local campaign. Implementation commit:
 ## Verified checks
 
 - 19 isolated-compile focused tests.
-- 18 per-site retry focused tests.
+- 25 per-site/batch retry focused tests.
 - 15 renderer regressions.
 - 11 replacement-worker checks, including real recorder and Lean compile
   fixtures.
@@ -48,14 +56,16 @@ Status: active local campaign. Implementation commit:
 
 The disposable database
 `.lake/private/T77-error-fix-20260923/post-review-smoke/mathlib-db.sqlite3`
-was copied from the stopped-run baseline. Two commands in
+was copied from the stopped-run baseline. Four commands in
 `Mathlib.NumberTheory.NumberField.CanonicalEmbedding.NormLeOne` were recorded
 per site and stock-compiled as full-command replacements:
 
 - ordinal 35: `compiled_success`, 519-byte replacement;
 - ordinal 36: `compiled_success`, 463-byte replacement.
+- ordinals 37 and 69: one authenticated two-site bulk recording and one
+  combined candidate compile produced two further `compiled_success` rows.
 
-Both replacements are nonblank ordinary `explicit_rw`, contain no executable
+All replacements are nonblank ordinary `explicit_rw`, contain no executable
 `simp`/`simpa`/`dsimp`, and contain no `sorry`/`admit`. Database integrity is
 `ok`. This is stock isolated compilation, not simp-disabled certification.
 
@@ -70,6 +80,12 @@ baseline-pending rows. Each worker has its own one-link database copy. Workers
 prepared and will start one-for-one as a local slot becomes available, with a
 hard ceiling of six concurrent campaign workers. The original four T76 workers
 remain active and untouched.
+
+Workers 000 and 001 were interrupted with targeted `SIGINT` after the fast path
+passed review. Their SQLite transactions remained consistent; pre-restart
+logs/completion/exit markers are preserved under `prebatch-79b2f6a` names.
+Both resumed from their existing databases at the fast-path commit, reusing
+already authenticated site traces and completed command results.
 
 The `monitor-isolated-trace-compile` heartbeat now monitors both runs, launches
 only the two prepared local shards as slots free, validates and merges into new
