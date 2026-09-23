@@ -806,7 +806,13 @@ def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
         # malformed name while turning it into a different step kind.
         if kind == "zeta" and "name" in step:
             check_name(step.get("name"), "zeta.name")
-            if isinstance(step.get("local"), dict):
+            if "local" in step:
+                if not isinstance(step["local"], dict):
+                    raise RenderError(
+                        "bad_local_ref",
+                        "named zeta local reference is not an object",
+                        side="t1",
+                    )
                 if step["local"].get("contextual") is True:
                     raise RenderError(
                         "bad_local_ref",

@@ -400,6 +400,19 @@
    "error": "name_is_syntax", "side": "t1"
   },
   {
+   "name": "zeta_delta_malformed_local_ref",
+   "why": "a present but malformed local reference must not downgrade to legacy body replay",
+   "step": {"kind": "zeta", "pos": [1, 0], "name": "g", "local": null, "after": "x"},
+   "error": "bad_local_ref", "side": "t1"
+  },
+  {
+   "name": "zeta_delta_contextual_local_ref",
+   "why": "a contextual local cannot be addressed by a top-level local_ref index",
+   "step": {"kind": "zeta", "pos": [1, 0], "name": "g",
+            "local": {"contextual": true, "ctxIndex": 4, "handle": 0}, "after": "x"},
+   "error": "bad_local_ref", "side": "t1"
+  },
+  {
    "name": "beta_with_name",
    "why": "only the recorder's zetaDelta event defines a reduction name",
    "step": {"kind": "beta", "pos": [1], "name": "g"},
