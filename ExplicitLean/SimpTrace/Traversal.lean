@@ -38,6 +38,7 @@ module
 
 public meta import Lean
 public meta import ExplicitLean.SimpTrace.Types
+public meta import ExplicitLean.SimpTrace.Position
 
 public meta section
 
@@ -142,7 +143,9 @@ inductive Event where
   | introCtxExit (pos : Pos) (info : IntroCtxInfo)
   /-- Dependent congruence (spec 3b17247): the application at `pos` had its
   argument `arg` rewritten by `steps` (whose positions are *relative to that
-  argument*), and later arguments depending on it were cast-transported by the
+  argument*); `argBefore` is the exact root expression those steps were
+  captured from and is checked against argument `arg` in `before`. Later
+  arguments depending on it were cast-transported by the
   auto-generated congruence theorem for the head.  Emitted only when a
   `CongrArgKind.cast` dependent is present, so plain positional rewriting would
   need casts; ordinary arguments stay plain `rw` steps. -/
@@ -486,14 +489,61 @@ def Event.strip (base : Pos) : Event → Event
           { i with domain.position := stripPosition base i.domain.position,
                    scope.enter := stripPosition base i.scope.enter,
                    scope.exit := stripPosition base i.scope.exit }
-      | .congr _ i steps b a ab aa c =>
-        .congr q i steps b a ab aa (c.strip base)
+      | .congr _ i steps b a ab aa c => .congr q i steps b a ab aa (c.strip base)
       | .transport _ h domain body b a db da bb ba c =>
         .transport q h domain body b a db da bb ba (c.strip base)
 
+/-! ### Cached event-slice roots
+
+The stock result cache is expression-keyed, but a recorder event slice is only
+reusable when every nested congruence slice still belongs to the exact
+argument expression from which it was captured. Check that the stored
+root-to-argument identity and every path are present before replay; cache hits
+that cannot prove this are recomputed with fresh caches. -/
+
+partial def eventSliceRootsValid (root : Expr) (events : Array Event) : Bool := Id.run do
+  let mut running := root
+  for ev in events do
+    let some (atPos, _) := navigate? running ev.pos | return false
+    match ev with
+    | .congr pos arg nested before after argBefore _ _ =>
+      if atPos != before then return false
+      let args := before.getAppArgs
+      if h : arg < args.size then
+        if args[arg] != argBefore then return false
+      else
+        return false
+      if !eventSliceRootsValid argBefore nested then return false
+      let some next := replaceAt? running pos after | return false
+      running := next
+    | .rw pos _ _ _ before after .. =>
+      if atPos != before then return false
+      let some next := replaceAt? running pos after | return false
+      running := next
+    | .eq pos _ before after .. =>
+      if atPos != before then return false
+      let some next := replaceAt? running pos after | return false
+      running := next
+    | .defeq pos _ _ before after .. =>
+      if atPos != before then return false
+      let some next := replaceAt? running pos after | return false
+      running := next
+    | .transport pos _ domain body before after domainBefore _ bodyBefore _ _ =>
+      if atPos != before then return false
+      if !eventSliceRootsValid domainBefore domain then return false
+      if !eventSliceRootsValid bodyBefore body then return false
+      let some next := replaceAt? running pos after | return false
+      running := next
+    | .introCtx .. | .introCtxExit .. => pure ()
+  return true
+
 structure CacheEntry where
+  /-- Exact expression this trace slice was captured from. -/
+  root : Expr
   result : Simp.Result
   events : Array Event := #[]
+  /-- Cached events are reused only if their nested-root and path checks passed. -/
+  eventsRooted : Bool := false
   deriving Inhabited
 
 abbrev TraceCache := SExprMap CacheEntry
@@ -590,6 +640,11 @@ may also request a liveness check while that depth is still active; ordinary
 outer-depth events retain their valid unassigned metavariables. -/
 def recordEvent (ref : TraceRef) (ev : Event) (rejectAssignable := false) : SimpM Unit := do
   let ev ← Event.instantiateAssignments ev
+  -- Assignment snapshots can collapse a provisional definitional event to an
+  -- exact no-op. Such an event has no replay semantics, and retaining its
+  -- pre-snapshot position can make an otherwise rooted slice fail validation.
+  if let .defeq _ _ _ before after _ := ev then
+    if before == after then return
   if rejectAssignable then
     if ← ev.hasAssignablePayload then
       ref.modify (·.markUnresolved
@@ -664,7 +719,10 @@ def replayCachedEvents (ref : TraceRef) (root : Pos) (events : Array Event) : Si
 def cacheResultT (ref : TraceRef) (root : Pos) (e : Expr) (cfg : Simp.Config)
     (start : Nat) (r : Simp.Result) : SimpM Simp.Result := do
   if cfg.memoize && r.cache then
-    let entry : CacheEntry := { result := r, events := cacheEventsForRoot root (← eventsSince ref start) }
+    let events := cacheEventsForRoot root (← eventsSince ref start)
+    let entry : CacheEntry :=
+      { root := e, result := r, events,
+        eventsRooted := eventSliceRootsValid e events }
     modify fun s => { s with cache := s.cache.insert e r }
     ref.modify fun s => { s with cache := s.cache.insert e entry }
   return r
@@ -784,23 +842,42 @@ belong.  `tryAutoCongrTheoremT?` uses this because whether an argument's
 rewrites keep their own absolute positions or become a `congr` step's nested
 steps is only known after every argument has been visited (a `cast` dependent
 may appear later in the argument list). -/
-def captureEvents (ref : TraceRef) (k : SimpM α) :
-    SimpM (α × Array Event × Array BinderSlot) := do
-  let parentSpine := (← ref.get).binderSpine
-  ref.modify fun s => { s with procEvents := s.procEvents.push #[], binderSpine := #[] }
+def captureEvents (ref : TraceRef) (root : Expr)
+    (k : Expr → SimpM α) :
+    SimpM (α × Expr × Array Event × Array BinderSlot) := do
+  let parent ← ref.get
+  let parentSpine := parent.binderSpine
+  ref.modify fun s =>
+    { s with procEvents := s.procEvents.push #[], binderSpine := #[] }
   let depth := (← ref.get).procEvents.size
   let a ←
-    try k
+    try k root
     catch ex =>
-      ref.modify fun s => { s with procEvents := s.procEvents.take (depth - 1), binderSpine := parentSpine }
+      ref.modify fun s =>
+        { s with procEvents := s.procEvents.take (depth - 1), binderSpine := parentSpine, pos := parent.pos }
       throw ex
   let st ← ref.get
   let evs :=
     if depth > 0 && depth <= st.procEvents.size then
       st.procEvents.getD (depth - 1) #[]
     else #[]
-  ref.set { st with procEvents := st.procEvents.take (depth - 1), binderSpine := parentSpine }
-  return (a, evs, parentSpine)
+  unless eventSliceRootsValid root evs do
+    let firstSummary := match evs[0]? with
+      | none => "empty event slice"
+      | some ev => match ev with
+        | .rw pos _ _ _ before _ .. => s!"rw at {pos}; before={reprStr before}"
+        | .eq pos _ before _ _ _ => s!"eq at {pos}; before={reprStr before}"
+        | .defeq pos kind _ before _ _ =>
+          s!"defeq:{kind.toString} at {pos}; before={reprStr before}"
+        | .congr pos .. => s!"congr at {pos}"
+        | .transport pos .. => s!"transport at {pos}"
+        | .introCtx pos .. => s!"introCtx at {pos}"
+        | .introCtxExit pos .. => s!"introCtxExit at {pos}"
+    throwError "capture-root diagnostic: unrooted slice, \
+      parentProcDepth={parent.procEvents.size}, callerPos={parent.pos}, \
+      root={reprStr root}, events={evs.size}; first={firstSummary}"
+  ref.set { st with procEvents := st.procEvents.take (depth - 1), binderSpine := parentSpine, pos := parent.pos }
+  return (a, root, evs, parentSpine)
 
 /-- How many events the innermost active frame currently holds.  Comparing this
 across a stock-method call says whether that call logged anything. -/
@@ -1460,8 +1537,9 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
       -- transport a `cast` dependent, they become a `congr` step's nested
       -- `steps` (rooted at the argument) instead of steps at their own absolute
       -- positions, which plain positional rewriting could not replay.
-      let (argResult, evs, parentSpine) ← captureEvents ref (simpT ref #[] arg)
-      eqArgEvents := eqArgEvents.push (i, arg, argResult.expr, evs, parentSpine)
+      let (argResult, capturedRoot, evs, parentSpine) ←
+        captureEvents ref arg fun root => simpT ref #[] root
+      eqArgEvents := eqArgEvents.push (i, capturedRoot, argResult.expr, evs, parentSpine)
       argResults := argResults.push argResult
       argsNew    := argsNew.push argResult.expr
       if argResult.proof?.isSome then hasProof := true
@@ -1577,7 +1655,8 @@ partial def processCongrHypothesisT (ref : TraceRef) (thmName : Name)
     let lhs ← instantiateMVars hType.appFn!.appArg!
     -- The hypothesis's steps are relative to its own left-hand side, which is
     -- what the side trace's goal names, so the sub-run starts at the root.
-    let (r, evs, _) ← captureEvents ref (simpT ref #[] lhs)
+    let (r, _, evs, _) ← captureEvents ref lhs
+      fun root => simpT ref #[] root
     let rhs := hType.appArg!
     rhs.withApp fun m zs => do
       let val ← mkLambdaFVars zs r.expr
@@ -1835,7 +1914,8 @@ partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Res
         -- both children at fresh roots so their exact event positions can be
         -- exported as T32's nested domain/body lists; keeping them in the
         -- outer stream would replay the substituted proof at the wrong term.
-        let (rd, domainEvents, domainParentSpine) ← captureEvents ref (simpT ref #[] domain)
+        let (rd, _, domainEvents, domainParentSpine) ←
+          captureEvents ref domain fun root => simpT ref #[] root
         if let some h₁ := rd.proof? then
           -- `forall_prop_domain_congr` rewrites the body under a *substituted*
           -- binder (`h₁.substr a`), so the body simp sees is not the body at
@@ -1853,7 +1933,9 @@ partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Res
                 (mkLambda `x .default prop (mkBVar 0)) p₂ p₁ h₁ a
               let q_h₁_substr_a := e.bindingBody!.instantiate1 h₁_substr_a
               let before := q_h₁_substr_a
-              let (rb, bodyEvents, _) ← captureEvents ref (simpT ref #[] q_h₁_substr_a)
+              let (rb, _, bodyEvents, _) ←
+                captureEvents ref q_h₁_substr_a
+                  fun root => simpT ref #[] root
               let h₂ ← mkLambdaFVars #[a] (← rb.getProof)
               let q₂ ← mkLambdaFVars #[a] rb.expr
               let result ← mkForallFVars #[a] rb.expr
@@ -1966,8 +2048,16 @@ partial def simpLoopT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Resul
     let start ← eventCount ref
     if cfg.memoize then
       if let some entry := (← ref.get).cache.find? e then
-        replayCachedEvents ref pos entry.events
-        return entry.result
+        if entry.root == e && entry.eventsRooted && eventSliceRootsValid e entry.events then
+          replayCachedEvents ref pos entry.events
+          return entry.result
+        else
+          -- A memoized result is still valid as a term, but its provenance
+          -- cannot be reused unless its event slice is rooted at this exact
+          -- expression and every nested congruence argument is authenticated.
+          -- Recompute both result and events with empty caches; never guess a
+          -- new path or retain stale nested positions.
+          return ← withFreshCacheT ref (simpLoopT ref pos e)
     if (← get).numSteps > cfg.maxSteps then
       throwError "`simp` failed: maximum number of steps exceeded"
     else

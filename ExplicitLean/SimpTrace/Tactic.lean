@@ -900,12 +900,16 @@ partial def classifyEventTree (ur : IO.Ref Unresolved) (ev : Event) :
     return .mk none sideVerdicts #[]
   | .defeq .. => return .mk none #[] #[]
   | .introCtx .. | .introCtxExit .. => return .mk none #[] #[]
-  | .congr _ _ nested _ _ argBefore argAfter c =>
-    let nestedVerdicts ← validateNested ur c nested argBefore argAfter
+  | .congr _ arg nested before _ argBefore argAfter c =>
+    let nestedVerdicts ← validateNested ur c arg before nested argBefore argAfter
     return .mk none #[] nestedVerdicts
-  | .transport _ _ domain body _ _ _ _ _ _ c =>
-    let domainVerdicts ← classifyEventArray ur domain
-    let bodyVerdicts ← classifyEventArray ur body
+  | .transport _ _ domain body _ _ domainBefore domainAfter bodyBefore bodyAfter _ =>
+    -- Transport children are independent event runs rooted at their captured
+    -- domain/body terms. Replay them here (rather than merely classifying their
+    -- leaves), so this remains true when the transport is itself nested under
+    -- a congruence argument.
+    let domainVerdicts ← validate ur domainBefore domainAfter domain
+    let bodyVerdicts ← validate ur bodyBefore bodyAfter body
     return .mk none #[] (domainVerdicts ++ bodyVerdicts)
 
 /-- Classify an event array, retaining one verdict per event. -/
@@ -919,10 +923,20 @@ partial def classifyEventArray (ur : IO.Ref Unresolved) (events : Array Event) :
 /- Replay a `congr` step's nested steps against the argument they describe.
 Positions are relative to the argument, per the spec. -/
 partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
-    (nested : Array Event) (argBefore argAfter : Expr) :
+    (arg : Nat) (congrBefore : Expr) (nested : Array Event)
+    (argBefore argAfter : Expr) :
     MetaM (Array ValidationVerdict) := do
-  let mut running ← instantiateMVars argBefore
+  let congrArgs := congrBefore.getAppArgs
+  unless arg < congrArgs.size && congrArgs[arg]! == argBefore do
+    throwError "simp_trace: validation failed: nested congruence root does not match the recorded application argument"
+  -- The event paths belong to the exact expression captured by Traversal.
+  -- Keep that raw syntax as the navigation/replacement tree: instantiating a
+  -- metavariable before following a path can expose a different subtree and
+  -- silently invalidate the recorded position.  Instantiate only the
+  -- compared expressions below, not the tree that gives positions meaning.
+  let mut running := argBefore
   let mut verdicts : Array ValidationVerdict := #[]
+  let mut lastStep? : Option (Pos × Expr × Expr) := none
   for ev in nested do
     let verdict ← classifyEventTree ur ev
     verdicts := verdicts.push verdict
@@ -933,12 +947,25 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
       | .congr pos _ _ b a _ _ ec => pure (pos, b, a, ec)
       | .transport pos _ _ _ b a _ _ _ _ ec => pure (pos, b, a, ec)
       | .introCtx .. | .introCtxExit .. => continue
-    let before ← instantiateMVars before
-    let after ← instantiateMVars after
+    let priorSummary := match lastStep? with
+      | some (p, b, a) => s!"pos={p}; before={reprStr b}; after={reprStr a}"
+      | none => "none"
+    let eventKind := match ev with
+      | .rw .. => "rw"
+      | .eq .. => "eq"
+      | .defeq _ kind .. => s!"defeq:{kind.toString}"
+      | .congr .. => "congr"
+      | .transport .. => "transport"
+      | .introCtx .. => "introCtx"
+      | .introCtxExit .. => "introCtxExit"
     let some (sub, binderNodes) := navigate? running pos
       | throwError "simp_trace: validation failed: `congr` nested step has no \
-          subterm at relative position {pos}\n  in: {running}"
+          subterm at relative position {pos} ({eventKind})\n  in: {running}\n  running raw: {reprStr running}\n\
+          recorded before: {before}\n  before raw: {reprStr before}\n\
+          prior event: {priorSummary}"
     let expected ← abstractSimpFVars before ec.binderSpine pos binderNodes
+    let sub ← instantiateMVars sub
+    let expected ← instantiateMVars expected
     unless (← withLCtx ec.lctx ec.insts (eqUpToProofs sub expected)) do
       throwError "simp_trace: validation failed: `congr` nested subterm at \
         relative {pos} is\n{sub}\nbut the step's `before` is\n{expected}"
@@ -946,14 +973,14 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
     let some next := replaceAt? running pos replacement
       | throwError "simp_trace: validation failed: `congr` nested step cannot \
           replace at relative {pos}"
-    running ← instantiateMVars next
+    running := next
+    lastStep? := some (pos, before, after)
+  let replayed ← instantiateMVars running
   let argAfter ← instantiateMVars argAfter
-  unless (← withLCtx c.lctx c.insts (eqUpToProofs running argAfter)) do
+  unless (← withLCtx c.lctx c.insts (eqUpToProofs replayed argAfter)) do
     throwError "simp_trace: validation failed: `congr` nested steps do not \
-      reach the argument's result\nreplayed: {running}\nactual:   {argAfter}"
+      reach the argument's result\nreplayed: {replayed}\nactual:   {argAfter}"
   return verdicts
-
-end
 
 /-- Replay `steps` structurally from `pre`, checking every position.
 
@@ -984,14 +1011,6 @@ partial def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
       | .transport pos _ _ _ b a _ _ _ _ c => pure (pos, b, a, c)
       | .introCtx .. | .introCtxExit .. =>
         continue
-    match ev with
-    | .transport _ _ domain body _ _ domainBefore domainAfter bodyBefore bodyAfter _ =>
-      -- These runs are rooted at the two child terms and are checked with the
-      -- same event validator as a top-level location.  No proof or term is
-      -- serialized; the Expr fields are recorder-local validation evidence.
-      let _ ← validate ur domainBefore domainAfter domain
-      let _ ← validate ur bodyBefore bodyAfter body
-    | _ => pure ()
     -- The traversal observed the subterm with enclosing term binders as free
     -- variables; the running term still has loose bvars there. Each crossed
     -- binder has a path-tagged slot, including non-dependent arrows, so their
@@ -1026,6 +1045,8 @@ positions checked, proof identity not")
     throwError "simp_trace: validation failed: replayed term does not match \
       simp's result\nreplayed: {running}\nactual:   {result}"
   return verdicts
+
+end
 
 /-! ### The tactic -/
 
