@@ -96,6 +96,20 @@ theorem proj_function_shape : (Pair.mk 3 4).fst = 3 := by
   guard_target =ₛ 3 = 3
   rfl
 
+/-- A projection also reduces when its structure argument is exposed by WHNF. -/
+def makePair (a b : Nat) : Pair := ⟨a, b⟩
+
+theorem proj_function_whnf_major : (makePair 3 4).fst = 3 := by
+  explicit_rw [proj at [0, 1]]
+  guard_target =ₛ 3 = 3
+  rfl
+
+/- `proj` still refuses a stuck structure argument rather than unfolding it. -/
+/-- error: explicit_rw: step 1: `proj` at this position: the projection's argument is not a constructor application, so there is nothing to reduce. -/
+#guard_msgs in
+example (p : Pair) : p.fst = p.fst := by
+  explicit_rw [proj at [0, 1]]
+
 theorem proj_function_shape_conv : (Pair.mk 3 4).fst = 3 := by
   conv => lhs; whnf
 

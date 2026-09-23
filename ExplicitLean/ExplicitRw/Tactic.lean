@@ -1293,10 +1293,14 @@ def projReduce (idx : Nat) (sub : Expr) : TacticM Expr := do
   let some structArg := structArg?
     | stepError idx m!"`proj` at this position: the projection is not applied to a \
         structure argument."
-  let isCtor ←
-    match (← whnfCore structArg).getAppFn with
-    | .const c _ => pure ((env.find? c).any (· matches .ctorInfo _))
-    | _ => pure false
+  -- A projection may be recorded after its major argument has reduced through
+  -- a definition to a constructor. `whnfCore` does not delta-reduce constants,
+  -- so it rejects those genuine projection redexes even though the projection
+  -- reducer below (and the kernel's definitional equality) can expose them.
+  -- Use `whnf` here, then check for a complete constructor application before
+  -- allowing `proj` to proceed. This remains restricted to projection redexes.
+  let structArg ← whnf structArg
+  let isCtor ← isConstructorApp structArg
   unless isCtor do
     stepError idx m!"`proj` at this position: the projection's argument is not a \
       constructor application, so there is nothing to reduce."
