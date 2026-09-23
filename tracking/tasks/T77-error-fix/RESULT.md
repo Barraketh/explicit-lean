@@ -98,6 +98,16 @@ Subsequent reviewed mechanism commits:
   recorder's local context. The renderer still emits only the authenticated
   source text. A bare conditional theorem remains valid only with its recorded
   proof-side trace.
+- Events crossing a temporary metavariable depth now snapshot assigned term
+  and universe metavariables, including local declaration and local-instance
+  payloads. Unassigned child-depth payloads fail closed without changing the
+  successful simplifier result; live outer-depth metavariables remain valid.
+  This removes the false `unreplayable_rw:ne_eq` classification caused by dead
+  metavariable identifiers rather than by a rewrite mismatch.
+- LHS-only validation now matches `explicit_rw` for remaining class-valued
+  explicit binders: ordinary instance synthesis must fill the exact binder,
+  while an arbitrary explicit value binder still fails closed. Missing source
+  statements also fail closed instead of being accepted.
 
 ## Verified checks
 
@@ -132,6 +142,16 @@ Subsequent reviewed mechanism commits:
   side from a bare `if_neg` trace was rejected. The SimpTrace build and
   independent trust review passed; validator-only evidence does not occur in
   trace JSON.
+- The event-snapshot build and focused fixture passed assigned term/universe
+  freezing, unassigned child-depth term/universe rejection, valid outer-depth
+  retention, LocalContext/LocalInstances preservation, direct `ne_eq`
+  validation, and a real nested `div_self` side trace. Independent static
+  review passed after finding and correcting two universe-specific liveness
+  gaps.
+- The class-valued explicit-argument fixture passed `iInf_pos`, direct
+  fail-closed validation of an ordinary `Nat` binder, and the corresponding
+  `explicit_rw` negative. The SimpTrace build and the source-application and
+  exact-binder-spine regressions also passed.
 - T9 trace identity tests and T22 source-argument tests.
 - 316 pipeline checks excluding the unavailable historical T1/T2
   worktree-dependent site-count and end-to-end checks.
