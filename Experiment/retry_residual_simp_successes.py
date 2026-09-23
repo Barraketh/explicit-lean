@@ -53,7 +53,20 @@ def _sha256_file(path: pathlib.Path) -> str:
 
 
 def _read_only_uri(path: pathlib.Path) -> str:
-    return path.as_uri() + "?mode=ro"
+    # The pinned digest authenticates the SQLite main file.  Immutable mode
+    # prevents backup() from silently incorporating WAL state that is not
+    # covered by that digest; _ensure_no_sqlite_sidecars also fails closed if
+    # such state is present.
+    return path.as_uri() + "?mode=ro&immutable=1"
+
+
+def _ensure_no_sqlite_sidecars(path: pathlib.Path) -> None:
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = path.with_name(path.name + suffix)
+        if sidecar.exists() or sidecar.is_symlink():
+            raise ResidualRetryError(
+                f"validated T77 source database has SQLite sidecar state: {sidecar}"
+            )
 
 
 def _run_directory(run_id: str) -> pathlib.Path:
@@ -96,6 +109,7 @@ def _validate_source_database() -> pathlib.Path:
                      source.parent):
         if ancestor.is_symlink() or not ancestor.is_dir() or ancestor.resolve() != ancestor:
             raise ResidualRetryError(f"validated T77 source directory is indirect: {ancestor}")
+    _ensure_no_sqlite_sidecars(source)
     if _sha256_file(source) != SOURCE_DATABASE_SHA256:
         raise ResidualRetryError("validated T77 source database SHA-256 changed")
     return source
@@ -125,6 +139,7 @@ def _create_database_copy(run_id: str) -> tuple[pathlib.Path, pathlib.Path]:
         finally:
             target_db.close()
             source_db.close()
+        _ensure_no_sqlite_sidecars(source)
         if _sha256_file(source) != SOURCE_DATABASE_SHA256:
             raise ResidualRetryError("source database changed during read-only backup")
         copied_hash = _sha256_file(temporary_database)

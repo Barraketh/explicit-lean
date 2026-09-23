@@ -402,11 +402,29 @@ def copy_boundary_checks() -> None:
             )
 
 
+def source_sidecar_checks() -> None:
+    with tempfile.TemporaryDirectory(prefix="residual-simp-source-sidecar-") as directory:
+        database = Path(directory) / "baseline.sqlite3"
+        database.write_bytes(b"pinned main database bytes")
+        residual._ensure_no_sqlite_sidecars(database)
+        for suffix in ("-wal", "-shm", "-journal"):
+            sidecar = database.with_name(database.name + suffix)
+            sidecar.write_bytes(b"unhashed SQLite state")
+            try:
+                residual._ensure_no_sqlite_sidecars(database)
+            except residual.ResidualRetryError as error:
+                assert str(sidecar) in str(error)
+            else:
+                raise AssertionError(f"SQLite sidecar was accepted: {sidecar.name}")
+            sidecar.unlink()
+
+
 def main() -> int:
     selection_checks()
     persist_success_checks()
     evidence_validation_checks()
     copy_boundary_checks()
+    source_sidecar_checks()
     print("check_retry_residual_simp_successes: PASS (selection, copy-boundary, and transaction controls)")
     return 0
 
