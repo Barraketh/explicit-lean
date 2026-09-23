@@ -51,6 +51,7 @@ class MissingTraceRetryTests(unittest.TestCase):
                 db.execute("INSERT INTO simp_replacements VALUES(?,?,?,NULL,'old failure')",
                            ("Mathlib.X", ordinal, status))
             db.execute(retry.RETRY_SCHEMA)
+            db.execute(retry.RETRY_HISTORY_SCHEMA)
             db.execute(retry.COMMAND_SCHEMA)
             db.commit()
             stack = contextlib.ExitStack()
@@ -309,7 +310,7 @@ class MissingTraceRetryTests(unittest.TestCase):
             self.assertIn("by exact h2", batch_module)
 
     def test_every_bulk_defect_falls_back_for_all_sites(self) -> None:
-        for defect in ("missing", "extra", "identity", "exception"):
+        for defect in ("missing", "extra", "identity", "exception", "bool_key", "float_key"):
             with self.subTest(defect=defect), self.process_fixture() as case:
                 valid = {site.siteOrdinal: [self.trace_record(case["module_path"], site)]
                          for site in case["sites"]}
@@ -327,16 +328,26 @@ class MissingTraceRetryTests(unittest.TestCase):
                             return {1: valid[1]}, ""
                         if defect == "identity":
                             return valid, ""
+                        if defect == "bool_key":
+                            return {True: valid[1], 2: valid[2]}, ""
+                        if defect == "float_key":
+                            return {1.0: valid[1], 2: valid[2]}, ""
                         return {**valid, 9: [self.trace_record(case["module_path"], extra_site)]}, ""
                     site = selected[0]
                     return {site.siteOrdinal: valid[site.siteOrdinal]}, ""
 
                 compiler = mock.Mock(return_value=(True, "", None))
-                identity_result = (({"identity": "rejected"}, {}) if defect == "identity"
-                                   else ({"identity": "accepted"}, valid))
+                identity_result = mock.Mock(side_effect=(
+                    [({"identity": "rejected"}, {}),
+                     ({"identity": "accepted"}, {1: valid[1]}),
+                     ({"identity": "accepted"}, {2: valid[2]})]
+                    if defect == "identity" else
+                    [({"identity": "accepted"}, {1: valid[1]}),
+                     ({"identity": "accepted"}, {2: valid[2]})]
+                ))
                 with mock.patch.object(retry.worker, "record_sites", side_effect=record_sites), \
                         mock.patch.object(retry.worker.replay, "validate_identity",
-                                          return_value=identity_result) as identity, \
+                                          identity_result) as identity, \
                         mock.patch.object(retry.worker, "compile_candidate", compiler), \
                         mock.patch.object(retry, "_render_command",
                                           side_effect=lambda _src, row, _pairs, _traces:
@@ -346,10 +357,7 @@ class MissingTraceRetryTests(unittest.TestCase):
                         retry_failed=False, site_limit=None)
 
                 self.assertEqual(calls, [[1, 2], [1], [2]])
-                if defect == "identity":
-                    identity.assert_called_once()
-                else:
-                    identity.assert_not_called()
+                self.assertEqual(identity.call_count, 3 if defect == "identity" else 2)
                 self.assertEqual(result["attempted"], 2)
                 self.assertEqual(result["recorded"], 2)
                 self.assertEqual(result["failed"], 0)
@@ -404,6 +412,189 @@ class MissingTraceRetryTests(unittest.TestCase):
                 "SELECT status,replacement_text FROM simp_replacements ORDER BY ordinal"
             ).fetchall(), [("success", "by exact h1"), ("success", "by exact h2")])
             self.assertEqual(result["commandResults"], {"compiled_success": 2})
+
+    def test_refresh_ignores_stale_bundle_and_uses_fresh_records(self) -> None:
+        with self.process_fixture(old_traces=True) as case:
+            fresh = {site.siteOrdinal: [self.trace_record(case["module_path"], site)]
+                     for site in case["sites"]}
+            for records in fresh.values():
+                records[0]["occurrence"] = "fresh-recorder-result"
+            recorder = mock.Mock(return_value=(fresh, ""))
+            identity = mock.Mock(return_value=({"identity": "accepted"}, fresh))
+            rendered_traces: list[dict[int, list[dict]]] = []
+
+            def render(_source, _row, _pairs, traces):
+                rendered_traces.append(traces)
+                return "by exact h", None
+
+            with mock.patch.object(retry.worker, "record_sites", recorder), \
+                    mock.patch.object(retry.worker.replay, "validate_identity", identity), \
+                    mock.patch.object(retry.worker, "compile_candidate",
+                                      return_value=(True, "", None)), \
+                    mock.patch.object(retry, "_render_command", side_effect=render):
+                result = retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=None, refresh_recorded=True)
+
+            self.assertEqual(recorder.call_count, 1)
+            self.assertEqual(result["recorded"], 2)
+            self.assertTrue(rendered_traces)
+            self.assertTrue(all(
+                trace["occurrence"] == "fresh-recorder-result"
+                for traces in rendered_traces for records in traces.values()
+                for trace in records
+            ))
+            self.assertEqual(identity.call_count, 1)  # exact bulk batch
+
+    def test_refresh_failure_archives_old_trace_and_keeps_command_status(self) -> None:
+        with self.process_fixture(old_traces=False) as case:
+            site = case["sites"][0]
+            old_record = self.trace_record(case["module_path"], site)
+            old_json = retry.json.dumps([old_record], sort_keys=True)
+            retry._persist_site(case["db"], (
+                "Mathlib.X", 1, site.siteOrdinal, "a" * 64, site.callText,
+                "recorded", old_json, None, "old-time"))
+            calls: list[list[int]] = []
+
+            def fail_record(_source, _module, _pinned, selected, _work_dir):
+                calls.append([s.siteOrdinal for s in selected])
+                if len(selected) > 1:
+                    raise RuntimeError("fresh bulk trace failed")
+                raise RuntimeError("fresh site trace failed")
+
+            with mock.patch.object(retry.worker, "record_sites", side_effect=fail_record), \
+                    mock.patch.object(retry.worker, "compile_candidate",
+                                      return_value=(True, "", None)):
+                result = retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=True, site_limit=1, refresh_recorded=True)
+
+            self.assertEqual(calls, [[1]])
+            self.assertEqual(result["failed"], 1)
+            self.assertEqual(case["db"].execute(
+                "SELECT status,trace_json FROM isolated_trace_site_retry "
+                "WHERE site_ordinal=1").fetchone(), ("record_failed", None))
+            self.assertEqual(case["db"].execute(
+                "SELECT status,trace_json,error FROM isolated_trace_site_retry_history "
+                "WHERE site_ordinal=1").fetchone(), ("recorded", old_json, None))
+            self.assertEqual(case["db"].execute(
+                "SELECT status FROM simp_replacements WHERE ordinal=1").fetchone(),
+                ("record_failed",))
+
+    def test_single_site_wrong_extra_missing_and_identity_records_fail_closed(self) -> None:
+        for defect in ("wrong", "extra", "missing", "identity", "bool_key", "float_key"):
+            with self.subTest(defect=defect), self.process_fixture() as case:
+                site = case["sites"][0]
+                valid = self.trace_record(case["module_path"], site)
+                other_site = SimpleNamespace(siteOrdinal=9, startChar=9, endChar=10,
+                                             callText="simp [other]")
+                extra = self.trace_record(case["module_path"], other_site)
+                if defect == "wrong":
+                    returned = {9: [extra]}
+                elif defect == "extra":
+                    returned = {site.siteOrdinal: [valid], 9: [extra]}
+                elif defect == "missing":
+                    returned = {}
+                elif defect == "bool_key":
+                    returned = {True: [valid]}
+                elif defect == "float_key":
+                    returned = {1.0: [valid]}
+                else:
+                    invalid = dict(valid)
+                    invalid["site"] = dict(valid["site"], siteOrdinal=9)
+                    returned = {site.siteOrdinal: [invalid]}
+
+                with mock.patch.object(retry.worker, "record_sites",
+                                      return_value=(returned, "")), \
+                        mock.patch.object(retry.worker.replay, "validate_identity",
+                                          return_value=({"identity": "rejected"}, {})), \
+                        mock.patch.object(retry.worker, "compile_candidate",
+                                          return_value=(True, "", None)):
+                    result = retry.process_module(
+                        case["db"], "Mathlib.X", [case["targets"][0]], {},
+                        case["scratch"], retry_failed=False, site_limit=1,
+                        refresh_recorded=True)
+
+                self.assertEqual(result["failed"], 1)
+                self.assertEqual(case["db"].execute(
+                    "SELECT status,trace_json FROM isolated_trace_site_retry "
+                    "WHERE site_ordinal=1").fetchone(), ("record_failed", None))
+
+    def test_limited_failed_refresh_shadows_all_old_bundle_sites_on_default_retry(self) -> None:
+        with self.process_fixture(old_traces=True) as case:
+            first_recorder = mock.Mock(side_effect=RuntimeError("refresh recorder failed"))
+            with mock.patch.object(retry.worker, "record_sites", first_recorder), \
+                    mock.patch.object(retry.worker, "compile_candidate",
+                                      return_value=(True, "", None)):
+                first = retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=1, refresh_recorded=True)
+
+            self.assertEqual(first["failed"], 1)
+            self.assertEqual(first["deferred"], 1)
+            self.assertEqual(case["db"].execute(
+                "SELECT site_ordinal,status,error FROM isolated_trace_site_retry "
+                "ORDER BY site_ordinal").fetchall(), [
+                    (1, "record_failed", "RuntimeError: refresh recorder failed"),
+                    (2, "record_failed", "recorded trace refresh deferred by site limit"),
+                ])
+
+            stale_recorder = mock.Mock(side_effect=AssertionError(
+                "default retry must not retry or reuse shadowed traces"))
+            render = mock.Mock(side_effect=AssertionError(
+                "default retry must not render from stale bundle traces"))
+            with mock.patch.object(retry.worker, "record_sites", stale_recorder), \
+                    mock.patch.object(retry, "_render_command", render), \
+                    mock.patch.object(retry.worker, "compile_candidate",
+                                      return_value=(True, "", None)):
+                second = retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=None, refresh_recorded=False)
+
+            stale_recorder.assert_not_called()
+            render.assert_not_called()
+            self.assertEqual(second["recorded"], 0)
+            self.assertEqual(case["db"].execute(
+                "SELECT status,replacement_text FROM simp_replacements ORDER BY ordinal"
+            ).fetchall(), [("record_failed", None), ("record_failed", None)])
+            self.assertEqual(case["db"].execute(
+                "SELECT result_status FROM isolated_trace_command_retry ORDER BY ordinal"
+            ).fetchall(), [("trace_failed",), ("trace_failed",)])
+
+    def test_refresh_shadow_set_is_atomic(self) -> None:
+        with self.process_fixture(old_traces=False) as case:
+            for ordinal, site in enumerate(case["sites"], 1):
+                record = self.trace_record(case["module_path"], site)
+                retry._persist_site(case["db"], (
+                    "Mathlib.X", ordinal, site.siteOrdinal, "a" * 64,
+                    site.callText, "recorded",
+                    retry.json.dumps([record], sort_keys=True), None, "old-time"))
+            case["db"].execute(
+                "CREATE TRIGGER abort_second_refresh BEFORE UPDATE "
+                "ON isolated_trace_site_retry "
+                "WHEN NEW.site_ordinal=2 AND NEW.status='record_failed' "
+                "BEGIN SELECT RAISE(ABORT, 'injected interruption'); END"
+            )
+            case["db"].commit()
+
+            recorder = mock.Mock(side_effect=AssertionError(
+                "recorder must start only after the complete shadow set commits"))
+            with mock.patch.object(retry.worker, "record_sites", recorder), \
+                    self.assertRaises(retry.sqlite3.IntegrityError):
+                retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=None, refresh_recorded=True)
+
+            recorder.assert_not_called()
+            self.assertEqual(case["db"].execute(
+                "SELECT site_ordinal,status,error FROM isolated_trace_site_retry "
+                "ORDER BY site_ordinal").fetchall(), [
+                    (1, "recorded", None),
+                    (2, "recorded", None),
+                ])
+            self.assertEqual(case["db"].execute(
+                "SELECT count(*) FROM isolated_trace_site_retry_history"
+            ).fetchone(), (0,))
 
     def test_batch_compile_failure_credits_only_isolated_successes(self) -> None:
         with self.process_fixture(old_traces=True) as case:

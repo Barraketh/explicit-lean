@@ -53,6 +53,20 @@ CREATE TABLE IF NOT EXISTS isolated_trace_site_retry (
   PRIMARY KEY(module_name, ordinal, site_ordinal, source_sha256)
 )
 """
+RETRY_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS isolated_trace_site_retry_history (
+  attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  module_name TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  site_ordinal INTEGER NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  call_text TEXT NOT NULL,
+  status TEXT NOT NULL,
+  trace_json TEXT,
+  error TEXT,
+  updated_at TEXT NOT NULL
+)
+"""
 COMMAND_SCHEMA = """
 CREATE TABLE IF NOT EXISTS isolated_trace_command_retry (
   module_name TEXT NOT NULL,
@@ -244,25 +258,55 @@ def _safe_detail(value: object, limit: int = 2000) -> str:
     return PLACEHOLDER_RE.sub("[filtered-token]", text)
 
 
-def _persist_site(db: sqlite3.Connection, values: tuple[Any, ...]) -> None:
-    for value in values[4:8]:
-        if value is not None and placeholder_token(str(value)):
-            raise RetryError("refusing to persist a Lean proof-hole token")
+def _persist_sites(db: sqlite3.Connection,
+                   rows: list[tuple[Any, ...]]) -> None:
+    """Archive and replace one or more site rows in one transaction.
+
+    Refresh uses this for its complete selected-site shadow set.  No observer
+    may see only a prefix of that set: an interruption rolls the whole intent
+    back, while a commit durably excludes every selected stale bundle trace.
+    """
+    if not rows:
+        return
+    for values in rows:
+        if len(values) != 9:
+            raise RetryError("site retry row has the wrong arity")
+        for value in values[4:8]:
+            if value is not None and placeholder_token(str(value)):
+                raise RetryError("refusing to persist a Lean proof-hole token")
     db.execute("BEGIN IMMEDIATE")
     try:
-        db.execute(
-            "INSERT INTO isolated_trace_site_retry "
-            "(module_name,ordinal,site_ordinal,source_sha256,call_text,status,trace_json,error,updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(module_name,ordinal,site_ordinal,source_sha256) "
-            "DO UPDATE SET call_text=excluded.call_text,status=excluded.status,"
-            "trace_json=excluded.trace_json,error=excluded.error,"
-            "updated_at=excluded.updated_at",
-            values,
-        )
+        for values in rows:
+            prior = db.execute(
+                "SELECT module_name,ordinal,site_ordinal,source_sha256,call_text,status,"
+                "trace_json,error,updated_at FROM isolated_trace_site_retry "
+                "WHERE module_name=? AND ordinal=? AND site_ordinal=? AND source_sha256=?",
+                values[:4],
+            ).fetchone()
+            if prior is not None:
+                db.execute(
+                    "INSERT INTO isolated_trace_site_retry_history "
+                    "(module_name,ordinal,site_ordinal,source_sha256,call_text,status,"
+                    "trace_json,error,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    prior,
+                )
+            db.execute(
+                "INSERT INTO isolated_trace_site_retry "
+                "(module_name,ordinal,site_ordinal,source_sha256,call_text,status,trace_json,error,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(module_name,ordinal,site_ordinal,source_sha256) "
+                "DO UPDATE SET call_text=excluded.call_text,status=excluded.status,"
+                "trace_json=excluded.trace_json,error=excluded.error,"
+                "updated_at=excluded.updated_at",
+                values,
+            )
         db.commit()
     except Exception:
         db.rollback()
         raise
+
+
+def _persist_site(db: sqlite3.Connection, values: tuple[Any, ...]) -> None:
+    _persist_sites(db, [values])
 
 
 def _load_retried_traces(
@@ -306,6 +350,46 @@ def _load_retried_traces(
             )
         result[site_ordinal] = grouped[site_ordinal]
     return result
+
+
+def _load_retry_site_statuses(
+    db: sqlite3.Connection,
+    module: str,
+    source_hash: str,
+    owner_by_site: dict[int, int],
+    sites_by_ordinal: dict[int, Any],
+) -> dict[int, tuple[str, str | None]]:
+    """Load exact-source retry markers, including durable stale-trace shadows."""
+    result: dict[int, tuple[str, str | None]] = {}
+    for site_ordinal, command_ordinal, call_text, status, trace_json, error in db.execute(
+        "SELECT site_ordinal,ordinal,call_text,status,trace_json,error "
+        "FROM isolated_trace_site_retry "
+        "WHERE module_name=? AND source_sha256=?",
+        (module, source_hash),
+    ):
+        if type(site_ordinal) is not int or type(command_ordinal) is not int:
+            raise RetryError("persisted retry site key is not an integer source identity")
+        site = sites_by_ordinal.get(site_ordinal)
+        if site is None:
+            raise RetryError(f"persisted retry site is absent from current source: {site_ordinal}")
+        if owner_by_site.get(site_ordinal) != command_ordinal:
+            raise RetryError(f"persisted retry command owner mismatch at site {site_ordinal}")
+        if call_text != site.callText:
+            raise RetryError(f"persisted retry call text mismatch at site {site_ordinal}")
+        if status not in {"recorded", "record_failed"}:
+            raise RetryError(f"unknown persisted retry status at site {site_ordinal}: {status}")
+        if ((status == "recorded" and
+             (not isinstance(trace_json, str) or not trace_json.strip()))
+                or (status == "record_failed" and trace_json is not None)):
+            raise RetryError(f"persisted retry status/trace mismatch at site {site_ordinal}")
+        result[site_ordinal] = (str(status), str(error) if error is not None else None)
+    return result
+
+
+def _exact_site_keys(value: object, expected: set[int]) -> bool:
+    return (isinstance(value, dict)
+            and all(type(key) is int for key in value)
+            and set(value) == expected)
 
 
 def _existing_success_replacements(
@@ -437,6 +521,7 @@ def process_module(
     *,
     retry_failed: bool,
     site_limit: int | None = None,
+    refresh_recorded: bool = False,
 ) -> dict[str, Any]:
     module_path, source_bytes, source, commands = worker.module_rows(db, module)
     pinned_path = (ROOT / ".lake" / "packages" / "mathlib" / module_path).resolve()
@@ -461,13 +546,27 @@ def process_module(
     existing_retry = _load_retried_traces(
         db, module, source_hash, module_path, source,
         owner_by_site, sites_by_ordinal)
-    combined_traces = {**old_traces, **existing_retry}
+    persisted_site_statuses = _load_retry_site_statuses(
+        db, module, source_hash, owner_by_site, sites_by_ordinal)
+    shadowed_site_ids = {site for site, (status, _) in persisted_site_statuses.items()
+                         if status == "record_failed"}
     selected_command_ordinals = {ordinal for _, ordinal, _, _ in target_rows}
     by_command: dict[int, list[int]] = {}
     for site_ordinal, command_ordinal in owner_by_site.items():
         if command_ordinal in selected_command_ordinals:
             by_command.setdefault(command_ordinal, []).append(site_ordinal)
     effective_target_rows, no_site_rows = partition_source_site_rows(target_rows, by_command)
+    refresh_site_ids = ({site for _, ordinal, _, _ in effective_target_rows
+                         for site in by_command.get(ordinal, [])}
+                        if refresh_recorded else set())
+    # Old bundle and retry-table traces remain immutable evidence, but selected
+    # sites must be freshly recorded and must not participate in this attempt.
+    combined_traces = {
+        **{site: records for site, records in old_traces.items()
+           if site not in refresh_site_ids and site not in shadowed_site_ids},
+        **{site: records for site, records in existing_retry.items()
+           if site not in refresh_site_ids and site not in shadowed_site_ids},
+    }
     for _, ordinal, state, _ in no_site_rows:
         _persist_command_result(db, module, ordinal, source_hash, state,
                                 "noop", None, None, None)
@@ -498,8 +597,14 @@ def process_module(
         # source/manifest/raw authentication, regardless of the row-level T76
         # classification. A `no_trace` row may share a module bundle that does
         # contain a trace for this exact source site.
-        trusted_for_command = old_sites.intersection(expected) if old_error is None else set()
+        trusted_for_command = (old_sites.intersection(expected)
+                               if old_error is None else set())
+        trusted_for_command -= shadowed_site_ids
+        if refresh_recorded:
+            trusted_for_command -= refresh_site_ids
         missing = missing_site_ordinals(expected, trusted_for_command, done)
+        if refresh_recorded:
+            missing = [site for site in expected if site in refresh_site_ids]
         skipped += len(expected) - len(missing)
         pending_sites.extend((ordinal, site_ordinal) for site_ordinal in missing)
         missing_before_limit += len(missing)
@@ -510,7 +615,27 @@ def process_module(
     selected_pairs = set(pending_sites)
     deferred_site_ids = {site for _, site in all_candidate_pairs - selected_pairs}
 
-    selected_lookup = {site.siteOrdinal: site for site in worker.align_sites(source)[1]}
+    if refresh_recorded:
+        # Persist a shadow before invoking the recorder. A crash or a site
+        # limit must not let a later default retry silently reuse old bundle
+        # evidence for any site explicitly selected for refresh.
+        pending_ids = {site for _, site in pending_sites}
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        shadow_rows: list[tuple[Any, ...]] = []
+        for ordinal, site_ordinal in sorted(all_candidate_pairs):
+            site = sites_by_ordinal.get(site_ordinal)
+            if site is None or owner_by_site.get(site_ordinal) != ordinal:
+                raise RetryError(f"refresh site/command identity mismatch: {module}:{ordinal}:{site_ordinal}")
+            detail = ("recorded trace refresh pending" if site_ordinal in pending_ids
+                      else "recorded trace refresh deferred by site limit")
+            shadow_rows.append((module, ordinal, site_ordinal, source_hash,
+                                site.callText, "record_failed", None, detail, now))
+        _persist_sites(db, shadow_rows)
+        for _, _, site_ordinal, *_ in shadow_rows:
+            shadowed_site_ids.add(site_ordinal)
+            combined_traces.pop(site_ordinal, None)
+
+    selected_lookup = sites_by_ordinal
     selected_sites: list[Any] = []
     for ordinal, site_ordinal in pending_sites:
         site = selected_lookup.get(site_ordinal)
@@ -535,7 +660,7 @@ def process_module(
                 prefix=f"{module.replace('.', '_')}-sites-bulk-", dir=scratch_root))
             returned, _ = worker.record_sites(
                 source, module_path, pinned_path, selected_sites, bulk_dir)
-            if not isinstance(returned, dict) or set(returned) != set(requested_ordinals):
+            if not _exact_site_keys(returned, set(requested_ordinals)):
                 raise RetryError("bulk recorder returned missing or unexpected source sites")
             flattened: list[dict] = []
             for site_ordinal in requested_ordinals:
@@ -589,11 +714,25 @@ def process_module(
             error = None
             try:
                 traces, _ = worker.record_sites(source, module_path, pinned_path, [site], work_dir)
+                if not _exact_site_keys(traces, {site_ordinal}):
+                    raise RetryError(
+                        f"single-site recorder returned unexpected sites: "
+                        f"{list(traces) if isinstance(traces, dict) else type(traces).__name__}"
+                    )
                 records = traces.get(site_ordinal)
-                if not records:
+                if (not isinstance(records, list) or not records
+                        or any(not isinstance(record, dict) for record in records)):
                     raise RetryError("single-site recorder returned no invocation records")
-                if set(traces) != {site_ordinal}:
-                    raise RetryError(f"single-site recorder returned unexpected sites: {sorted(traces)}")
+                identity, authenticated = worker.replay.validate_identity(
+                    module_path, source, [site], records)
+                if (identity.get("identity") != "accepted"
+                        or set(authenticated) != {site_ordinal}
+                        or not authenticated[site_ordinal]):
+                    raise RetryError(
+                        "single-site recorder trace identity rejected: "
+                        + json.dumps(identity, ensure_ascii=False)[:1200]
+                    )
+                records = authenticated[site_ordinal]
                 trace_json = json.dumps(records, ensure_ascii=False, sort_keys=True,
                                         separators=(",", ":"))
                 if placeholder_token(trace_json):
@@ -725,6 +864,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="bounded smoke: at most this many missing sites")
     parser.add_argument("--retry-failed", action="store_true",
                         help="retry prior per-site record_failed rows")
+    parser.add_argument("--refresh-recorded", action="store_true",
+                        help="freshly record every source site in selected commands, ignoring prior traces for this attempt")
     args = parser.parse_args(argv)
     if args.manifest is None and not args.module:
         parser.error("provide --manifest or at least one exact --module")
@@ -749,6 +890,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute(RETRY_SCHEMA)
+            db.execute(RETRY_HISTORY_SCHEMA)
             db.execute(COMMAND_SCHEMA)
             db.commit()
             selected_ordinals = set(args.ordinal or [])
@@ -785,7 +927,8 @@ def main(argv: list[str] | None = None) -> int:
                     result = process_module(
                         db, module, module_rows, bundle_index,
                         args.scratch.resolve(), retry_failed=args.retry_failed,
-                        site_limit=site_budget)
+                        site_limit=site_budget,
+                        refresh_recorded=args.refresh_recorded)
                     print(json.dumps(result, ensure_ascii=False), flush=True)
                     if site_budget is not None:
                         site_budget -= result["attempted"]
