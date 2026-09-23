@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-23T15:01:28Z",
+  "updatedAt": "2026-09-23T15:03:13Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -352,13 +352,13 @@
       "fastPathRestartedAt": "2026-09-23T06:27:03Z",
       "maximumConcurrentLocalCampaignWorkers": 6,
       "cloudUsed": false,
-      "nonterminalSnapshotAt": "2026-09-23T14:06:47Z",
+      "nonterminalSnapshotAt": "2026-09-23T15:03:13Z",
       "nonterminalTransitions": {
-        "pending_to_success": 3180,
-        "pending_to_noop": 602,
-        "pending_to_record_failed": 2085,
-        "pending_to_render_failed": 357,
-        "pending_to_compile_failed": 608
+        "pending_to_success": 3635,
+        "pending_to_noop": 651,
+        "pending_to_record_failed": 2225,
+        "pending_to_render_failed": 418,
+        "pending_to_compile_failed": 696
       }
     },
     "namedZetaRetryRun": {
@@ -408,12 +408,12 @@
         "Mathlib.Algebra.Group.UniqueProds.Basic"
       ],
       "knownModuleErrorClassification": "Lean full-module parser recovery; deliberately fail-closed pending an authenticated parser-context contract",
-      "nonterminalSnapshotAt": "2026-09-23T14:06:47Z",
+      "nonterminalSnapshotAt": "2026-09-23T15:03:13Z",
       "nonterminalTransitionsToSuccess": {
-        "compile_failed": 95,
-        "record_failed": 38,
-        "render_failed": 167,
-        "total": 300
+        "compile_failed": 217,
+        "record_failed": 58,
+        "render_failed": 288,
+        "total": 563
       },
       "cloudUsed": false
     },

@@ -458,10 +458,10 @@ are only a moving snapshot; the selector and six-way success anti-join must be
 rerun against each terminal owner database before dispatch, so no manifest or
 coverage claim is frozen from this snapshot.
 
-At `2026-09-23T14:06:47Z`, the still-running pending shards had moved 3,180
-owned rows to success, 602 to noop, 2,085 to record failure, 357 to render
-failure, and 608 to compile failure. The two broad failure-retry shards had
-added 300 successes: 95 from compile failure, 38 from record failure, and 167
+At `2026-09-23T15:03:13Z`, the still-running pending shards had moved 3,635
+owned rows to success, 651 to noop, 2,225 to record failure, 418 to render
+failure, and 696 to compile failure. The two broad failure-retry shards had
+added 563 successes: 217 from compile failure, 58 from record failure, and 288
 from render failure. These are nonterminal snapshots, not merged results. The
 only new max-retry module error is
 `Mathlib.Algebra.Group.UniqueProds.Basic`, whose full-module parser reports
