@@ -845,11 +845,25 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
               let statement? ← match sourceValue? with
                 | some value => rwStatementFromValue? value prop?
                 | none => rwStatement? o args prop? proj
-              let some (l, r, unf) := statement? | pure true
+              let some (l, r, unf) := statement? | pure false
               -- The side `rw` matches against, in the recorded direction.
               let matched := if inv then r else l
               if ← isDefEq matched beforeCore then
-                unf.allM fun m => return !(← instantiateMVars m).isMVar
+                -- Keep validator parity with `explicit_rw`: after matching the
+                -- selected side, its evaluator synthesizes any remaining
+                -- class-typed arguments (including explicit class-valued
+                -- binders), then checks the result.  Do not extend this to
+                -- arbitrary explicit arguments: a leftover non-class binder
+                -- still has no authenticated value for a replayer to write.
+                unf.allM fun m => do
+                  let m ← instantiateMVars m
+                  if !m.isMVar then return true
+                  let ty ← instantiateMVars (← inferType m)
+                  if !(← isClass? ty).isSome then
+                    return false
+                  match ← trySynthInstance ty with
+                  | .some value => isDefEq m value
+                  | .undef | .none => return false
               else pure true
           unless lhsOnly do
             return some s!"unassigned_explicit_argument:{name}"
