@@ -397,12 +397,19 @@ where
       if ← go fn false then return true
       let mut type ← try inferType fn catch _ => return true
       for arg in args do
-        type ← try whnf type catch _ => return true
+        -- Source terms can apply evidence through a membership definition
+        -- (`h x` when `h` proves membership in a family of predicates). Under
+        -- simp transparency, that application type may remain a partially
+        -- applied projection rather than exposing its Π binder.
+        -- Inspect the binder at ordinary transparency so we can distinguish
+        -- a real explicit metavariable hole from that definitional wrapper.
+        type ← try withTransparency .default <| whnf type catch _ => return true
         match type with
         | .forallE _ _ body bi =>
           if ← go arg (bi.isImplicit || bi.isInstImplicit) then return true
           type := body.instantiate1 arg
-        | _ => return true
+        | _ =>
+          return true
       return false
     | .lam _ domain body _ | .forallE _ domain body _ =>
       if ← go domain false then return true
