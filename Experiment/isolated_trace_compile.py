@@ -660,6 +660,34 @@ def process_module(db: sqlite3.Connection, module: str, artifacts_root: pathlib.
             # interaction only in the audit column for each attempted command.
             detail = (final_detail or detail)[:2000]
 
+    successful_ordinals = {
+        ordinal for ordinal, (status, _) in compile_status.items()
+        if status == "success"
+    }
+    if successful_ordinals:
+        successful_replacements = dict(existing)
+        successful_replacements.update({
+            ordinal: rendered[ordinal]
+            for ordinal in successful_ordinals
+        })
+        candidate_text = _apply_edits(
+            source, db_commands, successful_replacements, {})
+        try:
+            TSA.assert_success_commands_have_no_simp(
+                module=module_name,
+                original_source=source,
+                candidate_source=candidate_text,
+                expected_source_sha256=source_hash,
+                command_rows=db_commands,
+                success_ordinals=successful_ordinals,
+                repo_root=ROOT,
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            detail = "direct simp command postcondition failed closed: " + \
+                f"{type(error).__name__}: {error}"
+            for ordinal in successful_ordinals:
+                compile_status[ordinal] = ("render_failed", detail[:2000])
+
     outcomes: dict[int, tuple[str, str | None, str, str | None]] = {}
     for ordinal in candidate_ordinals:
         if ordinal in failures:

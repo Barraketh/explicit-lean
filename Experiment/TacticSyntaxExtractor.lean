@@ -90,7 +90,14 @@ private unsafe def parseModule (path : System.FilePath) (source : String) :
   }
   let (commands, state) ← (processCommands.run { inputCtx }).run initialState
   if state.commandState.messages.hasErrors then
-    throw <| IO.Error.userError "Lean module parser reported an error or recovery"
+    let mut details := #[]
+    for message in state.commandState.messages.toList do
+      if message.severity == .error then
+        let text ← message.data.toString
+        details := details.push <|
+          s!"{message.fileName}:{message.pos.line}:{message.pos.column}: {text}"
+    throw <| IO.Error.userError <| "Lean module parser reported an error or recovery" ++
+      (if details.isEmpty then "" else ":\n" ++ String.intercalate "\n" details.toList)
   return (commands, state.commandState.messages)
 
 private def rangeOf (stx : Syntax) : Option (Nat × Nat) := do
@@ -297,6 +304,52 @@ private partial def findSyntax (stx : Syntax) (targetStart targetEnd : Nat) :
     Array (Array Syntax) :=
   findEnclosing stx targetStart targetEnd
 
+private partial def collectSimpSites (stx : Syntax) : Array Syntax := Id.run do
+  let mut sites := if isSimpSiteNode stx then #[stx] else #[]
+  for child in stx.getArgs do
+    sites := sites ++ collectSimpSites child
+  return sites
+
+private def simpSyntaxInventoryJson (moduleName : String)
+    (commands : Array Syntax) : Json := Id.run do
+  let mut entries := #[]
+  let mut refused := #[]
+  for commandIndex in [:commands.size] do
+    let command := commands[commandIndex]!
+    let commandRange := rangeOf command
+    let mut sites := #[]
+    for site in collectSimpSites command do
+      match rangeOf site, commandRange with
+      | some (start, stop), some (commandStart, commandStop) =>
+        if commandStart <= start && stop <= commandStop then
+          sites := sites.push <| jsonRange site
+        else
+          refused := refused.push <| Json.mkObj [
+            ("commandOrdinal", toJson commandIndex),
+            ("reason", toJson "simp_site_outside_command_range"),
+            ("site", jsonRange site),
+            ("command", jsonRange command)]
+      | _, _ =>
+        refused := refused.push <| Json.mkObj [
+          ("commandOrdinal", toJson commandIndex),
+          ("reason", toJson "simp_site_or_command_without_source_range"),
+          ("site", jsonRange site),
+          ("command", jsonRange command)]
+    let fields := match commandRange with
+      | some (start, stop) => [
+          ("startByte", toJson start), ("endByte", toJson stop)]
+      | none => []
+    entries := entries.push <| Json.mkObj <| [
+      ("commandOrdinal", toJson commandIndex),
+      ("kind", toJson (kindString command)),
+      ("simpSites", Json.arr sites)] ++ fields
+  return Json.mkObj [
+    ("module", toJson moduleName),
+    ("status", toJson (if refused.isEmpty then "ok" else "refused")),
+    ("reason", toJson (if refused.isEmpty then "complete_simp_syntax_inventory" else "incomplete_simp_syntax_inventory")),
+    ("refusals", Json.arr refused),
+    ("commands", Json.arr entries)]
+
 private def extractRange (moduleName : String) (commands : Array Syntax)
     (targetStart targetEnd : Nat) : Json := Id.run do
   let mut candidates := #[]
@@ -356,6 +409,40 @@ unsafe def runArgs (args : List String) : IO UInt32 := do
     catch error =>
       IO.eprintln s!"Lean proof-hole audit failed closed for {moduleName}: {error}"
       return 1
+  | moduleName :: path :: "--simp-inventory" :: [] => do
+    Lean.initSearchPath (← Lean.findSysroot)
+    Lean.enableInitializersExecution
+    let path := System.FilePath.mk path
+    let source ← IO.FS.readFile path
+    try
+      let (commands, _) ← parseModule path source
+      IO.println (simpSyntaxInventoryJson moduleName commands |>.compress)
+      return 0
+    catch error =>
+      IO.eprintln s!"Lean simp syntax inventory failed closed for {moduleName}: {error}"
+      return 1
+  | "--simp-inventory-batch" :: inputArgs => do
+    if inputArgs.length % 2 != 0 then
+      IO.eprintln "Lean simp syntax inventory batch requires module/path pairs"
+      return 1
+    Lean.initSearchPath (← Lean.findSysroot)
+    Lean.enableInitializersExecution
+    let inputs := inputArgs.toArray
+    let mut results := #[]
+    for pairIndex in [:inputs.size / 2] do
+      let moduleName := inputs[pairIndex * 2]!
+      let path := System.FilePath.mk inputs[pairIndex * 2 + 1]!
+      try
+        let source ← IO.FS.readFile path
+        let (commands, _) ← parseModule path source
+        results := results.push <| simpSyntaxInventoryJson moduleName commands
+      catch error =>
+        results := results.push <| Json.mkObj [
+          ("module", toJson moduleName),
+          ("status", toJson "failed"),
+          ("reason", toJson error.toString)]
+    IO.println (Json.arr results |>.compress)
+    return 0
   | moduleName :: path :: rangeArgs => do
     if rangeArgs.isEmpty || rangeArgs.length % 2 != 0 then return 2
     Lean.initSearchPath (← Lean.findSysroot)

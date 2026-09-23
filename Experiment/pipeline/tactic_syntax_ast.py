@@ -189,6 +189,289 @@ def extract_tactic_ancestries(
     return results
 
 
+def inventory_simp_tactics(
+    *,
+    module: str,
+    source: str,
+    expected_source_sha256: str,
+    repo_root: str | Path = ROOT,
+) -> dict[str, Any]:
+    """Return every parsed ``Lean.Parser.Tactic.simp`` node with its command owner.
+
+    The complete source is authenticated by its UTF-8 digest and parsed with
+    Lean's module parser. Comments, strings, attributes, and tactic-configuration
+    identifiers do not become ``Lean.Parser.Tactic.simp`` nodes. A parser or
+    range refusal is an error; callers must not treat missing inventory as an
+    empty inventory.
+    """
+    try:
+        source_bytes = source.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise ValueError("module source is not valid UTF-8") from error
+    digest = hashlib.sha256(source_bytes).hexdigest()
+    if digest != expected_source_sha256:
+        raise ValueError("module source SHA-256 does not match authenticated digest")
+    if not module.startswith("Mathlib."):
+        raise ValueError("module must be a fully qualified pinned Mathlib module")
+
+    with tempfile.TemporaryDirectory(prefix="lean-simp-inventory-") as temp_dir:
+        source_snapshot = Path(temp_dir) / (module.rsplit(".", 1)[-1] + ".lean")
+        source_snapshot.write_bytes(source_bytes)
+        command = [
+            "lake", "env", "lean", "--run", str(EXTRACTOR), module,
+            str(source_snapshot), "--simp-inventory",
+        ]
+        try:
+            completed = subprocess.run(
+                command, cwd=Path(repo_root), text=True,
+                capture_output=True, check=False, timeout=300,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("Lean simp syntax inventory timed out") from error
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Lean simp syntax inventory failed closed: " +
+            (completed.stderr.strip() or completed.stdout.strip())
+        )
+    try:
+        result = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Lean simp syntax inventory returned invalid JSON") from error
+    return _validate_simp_inventory_result(
+        result, module=module, source=source, source_bytes=source_bytes, digest=digest,
+    )
+
+
+def _validate_simp_inventory_result(
+    result: Any,
+    *,
+    module: str,
+    source: str,
+    source_bytes: bytes,
+    digest: str,
+    allow_parse_failure: bool = False,
+) -> dict[str, Any]:
+    if (not isinstance(result, dict) or result.get("module") != module
+            or not isinstance(result.get("status"), str)):
+        raise SyntaxExtractionError(
+            "Lean simp syntax inventory was incomplete or malformed: " +
+            json.dumps(result, ensure_ascii=False, sort_keys=True)[:2000]
+        )
+    if result.get("status") != "ok":
+        if allow_parse_failure:
+            result["moduleSourceSha256"] = digest
+            return result
+        raise SyntaxExtractionError(
+            "Lean simp syntax inventory was incomplete or malformed: " +
+            json.dumps(result, ensure_ascii=False, sort_keys=True)[:2000]
+        )
+    if not isinstance(result.get("commands"), list):
+        raise SyntaxExtractionError("Lean simp syntax inventory has no command array")
+    _annotate_scalar_ranges(result, source_bytes)
+
+    commands = result["commands"]
+    all_sites: list[tuple[int, int, int]] = []
+    previous_command_end = 0
+    for ordinal, entry in enumerate(commands):
+        if (not isinstance(entry, dict) or entry.get("commandOrdinal") != ordinal
+                or not isinstance(entry.get("kind"), str)
+                or not isinstance(entry.get("simpSites"), list)):
+            raise SyntaxExtractionError("Lean simp syntax inventory has malformed command ownership")
+        start, stop = entry.get("startChar"), entry.get("endChar")
+        if (not isinstance(start, int) or isinstance(start, bool)
+                or not isinstance(stop, int) or isinstance(stop, bool)
+                or not (previous_command_end <= start < stop <= len(source))):
+            raise SyntaxExtractionError(
+                f"Lean command range is invalid or overlapping at ordinal {ordinal}"
+            )
+        previous_command_end = stop
+        for site in entry["simpSites"]:
+            if (not isinstance(site, dict)
+                    or site.get("kind") != "Lean.Parser.Tactic.simp"):
+                raise SyntaxExtractionError("Lean simp syntax inventory contains an unexpected node")
+            site_start, site_stop = site.get("startChar"), site.get("endChar")
+            if (not isinstance(site_start, int) or isinstance(site_start, bool)
+                    or not isinstance(site_stop, int) or isinstance(site_stop, bool)
+                    or not (start <= site_start < site_stop <= stop)
+                    or not source[site_start:site_stop].lstrip().startswith("simp")):
+                raise SyntaxExtractionError(
+                    f"Lean simp syntax range is invalid at command ordinal {ordinal}"
+                )
+            all_sites.append((site_start, site_stop, ordinal))
+    if all_sites != sorted(all_sites):
+        raise SyntaxExtractionError("Lean simp syntax ranges are not in source order")
+    result["moduleSourceSha256"] = digest
+    return result
+
+
+def inventory_simp_tactics_batch(
+    modules: list[dict[str, str]],
+    *,
+    repo_root: str | Path = ROOT,
+    timeout_seconds: int = 300,
+) -> list[dict[str, Any]]:
+    """Parse multiple authenticated module snapshots in one Lean process.
+
+    Each entry has ``module``, ``source``, and ``expected_source_sha256``.
+    Per-module parser refusals are returned with a non-``ok`` status so audit
+    callers can report exactly which sources were not classifiable.
+    """
+    if not modules:
+        return []
+    if type(timeout_seconds) is not int or timeout_seconds <= 0:
+        raise ValueError("batch simp inventory timeout must be a positive integer")
+    snapshots: list[tuple[str, str, bytes, str]] = []
+    for ordinal, entry in enumerate(modules):
+        module = entry.get("module")
+        source = entry.get("source")
+        expected = entry.get("expected_source_sha256")
+        if not isinstance(module, str) or not module.startswith("Mathlib."):
+            raise ValueError(f"batch module {ordinal} is not a fully qualified Mathlib name")
+        if not isinstance(source, str) or not isinstance(expected, str):
+            raise ValueError(f"batch module {module} lacks source or authenticated digest")
+        try:
+            source_bytes = source.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as error:
+            raise ValueError(f"module source is not valid UTF-8: {module}") from error
+        digest = hashlib.sha256(source_bytes).hexdigest()
+        if digest != expected:
+            raise ValueError(f"module source SHA-256 does not match authenticated digest: {module}")
+        snapshots.append((module, source, source_bytes, digest))
+
+    with tempfile.TemporaryDirectory(prefix="lean-simp-inventory-batch-") as temp_dir:
+        arguments = ["lake", "env", "lean", "--run", str(EXTRACTOR),
+                     "--simp-inventory-batch"]
+        for ordinal, (module, _, source_bytes, _) in enumerate(snapshots):
+            path = Path(temp_dir) / f"module-{ordinal:04}.lean"
+            path.write_bytes(source_bytes)
+            arguments.extend((module, str(path)))
+        try:
+            completed = subprocess.run(
+                arguments, cwd=Path(repo_root), text=True,
+                capture_output=True, check=False, timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("Lean batched simp syntax inventory timed out") from error
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Lean batched simp syntax inventory failed closed: " +
+            (completed.stderr.strip() or completed.stdout.strip())
+        )
+    try:
+        raw_results = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Lean batched simp syntax inventory returned invalid JSON") from error
+    if not isinstance(raw_results, list) or len(raw_results) != len(snapshots):
+        raise SyntaxExtractionError("Lean batched simp syntax inventory returned the wrong result count")
+    return [
+        _validate_simp_inventory_result(
+            result, module=module, source=source,
+            source_bytes=source_bytes, digest=digest,
+            allow_parse_failure=True,
+        )
+        for result, (module, source, source_bytes, digest) in zip(raw_results, snapshots)
+    ]
+
+
+def assert_success_commands_have_no_simp(
+    *,
+    module: str,
+    original_source: str,
+    candidate_source: str,
+    expected_source_sha256: str,
+    command_rows: list[dict[str, Any]],
+    success_ordinals: set[int],
+    repo_root: str | Path = ROOT,
+) -> None:
+    """Refuse success persistence while any owned command still parses simp.
+
+    The original DB command rows are authenticated against the complete source
+    digest, exact byte ranges, command kinds, and per-command digests.  The
+    candidate is parsed as a complete module and must preserve the DB command
+    ordinal/kind sequence.  Only exact ``Lean.Parser.Tactic.simp`` nodes in
+    commands being marked successful are forbidden.  Configuration syntax
+    such as ``aesop (add simp ...)`` is intentionally outside this predicate.
+    """
+    if not success_ordinals:
+        return
+
+    candidate = authenticated_candidate_simp_inventory(
+        module=module,
+        original_source=original_source,
+        candidate_source=candidate_source,
+        expected_source_sha256=expected_source_sha256,
+        command_rows=command_rows,
+        repo_root=repo_root,
+    )
+    candidate_commands = candidate["commands"]
+    if any(type(ordinal) is not int or ordinal < 0 or ordinal >= len(candidate_commands)
+           for ordinal in success_ordinals):
+        raise SyntaxExtractionError("success ordinal is outside the authenticated command inventory")
+    for ordinal in success_ordinals:
+        after = candidate_commands[ordinal]
+        if after["simpSites"]:
+            sites = [
+                {"startChar": site["startChar"], "endChar": site["endChar"]}
+                for site in after["simpSites"]
+            ]
+            raise SyntaxExtractionError(
+                f"success command {ordinal} still owns executable simp tactic node(s): "
+                + json.dumps(sites, sort_keys=True)
+            )
+
+
+def authenticated_candidate_simp_inventory(
+    *,
+    module: str,
+    original_source: str,
+    candidate_source: str,
+    expected_source_sha256: str,
+    command_rows: list[dict[str, Any]],
+    repo_root: str | Path = ROOT,
+) -> dict[str, Any]:
+    """Parse a candidate and authenticate its command ordinals to source DB rows."""
+    try:
+        original_bytes = original_source.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise ValueError("original module source is not valid UTF-8") from error
+    if hashlib.sha256(original_bytes).hexdigest() != expected_source_sha256:
+        raise ValueError("original module source SHA-256 does not match authenticated digest")
+    previous_end = 0
+    for ordinal, row in enumerate(command_rows):
+        start = row.get("start", row.get("start_byte"))
+        stop = row.get("end", row.get("end_byte"))
+        digest = row.get("sha256", row.get("source_sha256", row.get("sha")))
+        kind = row.get("kind")
+        if (type(row.get("ordinal")) is not int or row.get("ordinal") != ordinal
+                or not isinstance(start, int) or isinstance(start, bool)
+                or not isinstance(stop, int) or isinstance(stop, bool)
+                or not (previous_end <= start < stop <= len(original_bytes))
+                or not isinstance(kind, str) or not kind
+                or not isinstance(digest, str)
+                or hashlib.sha256(original_bytes[start:stop]).hexdigest() != digest):
+            raise SyntaxExtractionError(
+                f"source-command DB identity is not authenticated at ordinal {ordinal}"
+            )
+    candidate_digest = hashlib.sha256(candidate_source.encode("utf-8", errors="strict")).hexdigest()
+    candidate = inventory_simp_tactics(
+        module=module,
+        source=candidate_source,
+        expected_source_sha256=candidate_digest,
+        repo_root=repo_root,
+    )
+    candidate_commands = candidate["commands"]
+    if len(candidate_commands) != len(command_rows):
+        raise SyntaxExtractionError(
+            "candidate command count differs from authenticated source-command DB"
+        )
+    for ordinal, (row, after) in enumerate(zip(command_rows, candidate_commands)):
+        if row["kind"] != after["kind"] or after["commandOrdinal"] != ordinal:
+            raise SyntaxExtractionError(
+                f"candidate command kind/ordinal differs from authenticated DB owner at ordinal {ordinal}"
+            )
+    return candidate
+
+
 def inspect_term_elaboration_boundary(
     *,
     module: str,

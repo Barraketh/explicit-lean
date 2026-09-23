@@ -791,9 +791,19 @@ class MissingTraceRetryTests(unittest.TestCase):
         db.execute("INSERT INTO simp_replacements VALUES('Mathlib.X',2,'pending',NULL,NULL)")
         db.execute(retry.COMMAND_SCHEMA)
         db.commit()
-        retry._persist_command_result(db, "Mathlib.X", 1, "a" * 64, "pending",
-                                      "compiled_success", "by exact h", None, None,
-                                      proof_hole_audited=True)
+        with self.assertRaisesRegex(retry.RetryError, "direct simp AST postcondition"):
+            retry._persist_command_result(db, "Mathlib.X", 1, "a" * 64, "pending",
+                                          "compiled_success", "by exact h", None, None,
+                                          proof_hole_audited=True)
+        self.assertEqual(db.execute(
+            "SELECT COUNT(*) FROM isolated_trace_command_retry").fetchone()[0], 0)
+        with mock.patch.object(retry.TSA, "assert_success_commands_have_no_simp"):
+            retry._persist_command_result(db, "Mathlib.X", 1, "a" * 64, "pending",
+                                          "compiled_success", "by exact h", None, None,
+                                          proof_hole_audited=True,
+                                          original_source="authenticated source",
+                                          candidate_source="authenticated candidate",
+                                          command_rows=[])
         self.assertEqual(db.execute(
             "SELECT status,replacement_text,error FROM simp_replacements "
             "WHERE module_name='Mathlib.X' AND ordinal=1").fetchone(),

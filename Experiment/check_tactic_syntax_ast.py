@@ -34,6 +34,36 @@ theorem corpusApply : True := by apply And.intro <;> simp
 theorem corpusSplit : True := by split_ifs <;> simp [ite_true] <;> tauto
 '''
 
+SIMP_INVENTORY_FIXTURE = '''import Mathlib
+
+def decoyText : String := "simp aesop (add simp)"
+-- simp
+attribute [simp] True.intro
+
+theorem body : True := by
+  simp
+
+theorem only : True := by
+  simp only [True.intro]
+
+def recursive (n : Nat) : Nat := recursive (n - 1)
+termination_by n
+decreasing_by
+  simp
+
+theorem nested : True := by
+  all_goals
+    first | exact True.intro | simp
+
+theorem configured : True := by
+  aesop (add simp [True.intro])
+
+example : True := by
+  fun_prop (disch := simp)
+
+theorem multi : True := by simp; simp
+'''
+
 
 class TacticSyntaxAstChecks(unittest.TestCase):
     @classmethod
@@ -67,6 +97,19 @@ class TacticSyntaxAstChecks(unittest.TestCase):
         )
         cls.valid_results = results[:len(cls.sites)]
         cls.decoy_results = results[len(cls.sites):]
+        cls.simp_inventory_digest = hashlib.sha256(
+            SIMP_INVENTORY_FIXTURE.encode("utf-8")).hexdigest()
+        cls.simp_candidate_with_import = S.add_import(SIMP_INVENTORY_FIXTURE)
+        cls.simp_candidate_digest = hashlib.sha256(
+            cls.simp_candidate_with_import.encode("utf-8")).hexdigest()
+        cls.simp_inventory, cls.simp_candidate_inventory = ast.inventory_simp_tactics_batch([
+            {"module": "Mathlib.SimpCommandInventoryFixture",
+             "source": SIMP_INVENTORY_FIXTURE,
+             "expected_source_sha256": cls.simp_inventory_digest},
+            {"module": "Mathlib.SimpCommandInventoryFixture",
+             "source": cls.simp_candidate_with_import,
+             "expected_source_sha256": cls.simp_candidate_digest},
+        ])
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -301,6 +344,96 @@ def tokenAuditAdmit : Nat := admit
         self.assertEqual(dirty_result["status"], "refused", dirty_result)
         self.assertEqual([item["token"] for item in dirty_result["proofHoles"]],
                          ["sorry", "admit"])
+
+    def test_direct_simp_inventory_covers_executable_command_contexts_only(self) -> None:
+        commands = self.simp_inventory["commands"]
+        body = next(command for command in commands
+                    if "theorem body" in SIMP_INVENTORY_FIXTURE[
+                        command["startChar"]:command["endChar"]])
+        only = next(command for command in commands
+                    if "theorem only" in SIMP_INVENTORY_FIXTURE[
+                        command["startChar"]:command["endChar"]])
+        decreasing = next(command for command in commands
+                           if "decreasing_by" in SIMP_INVENTORY_FIXTURE[
+                               command["startChar"]:command["endChar"]])
+        nested = next(command for command in commands
+                      if "theorem nested" in SIMP_INVENTORY_FIXTURE[
+                          command["startChar"]:command["endChar"]])
+        configured = next(command for command in commands
+                          if "theorem configured" in SIMP_INVENTORY_FIXTURE[
+                              command["startChar"]:command["endChar"]])
+        disch = next(command for command in commands
+                     if "fun_prop (disch := simp)" in SIMP_INVENTORY_FIXTURE[
+                         command["startChar"]:command["endChar"]])
+        multi = next(command for command in commands
+                     if "theorem multi" in SIMP_INVENTORY_FIXTURE[
+                         command["startChar"]:command["endChar"]])
+        self.assertEqual(len(body["simpSites"]), 1)
+        self.assertEqual(len(only["simpSites"]), 1)
+        only_site = only["simpSites"][0]
+        self.assertTrue(SIMP_INVENTORY_FIXTURE[
+            only_site["startChar"]:only_site["endChar"]].startswith("simp only"))
+        self.assertEqual(len(decreasing["simpSites"]), 1)
+        self.assertEqual(len(nested["simpSites"]), 1)
+        self.assertEqual(len(configured["simpSites"]), 0)
+        self.assertEqual(len(disch["simpSites"]), 1)
+        self.assertEqual(len(multi["simpSites"]), 2)
+        direct_spans = [
+            SIMP_INVENTORY_FIXTURE[site["startChar"]:site["endChar"]]
+            for command in commands for site in command["simpSites"]
+        ]
+        self.assertEqual(sum(len(command["simpSites"]) for command in commands), 7)
+        self.assertEqual(direct_spans.count("simp"), 6)
+        self.assertEqual(sum(span.startswith("simp only") for span in direct_spans), 1)
+
+    def test_success_postcondition_checks_the_full_owned_command(self) -> None:
+        source = SIMP_INVENTORY_FIXTURE
+        inventory = self.simp_inventory
+        command_rows = []
+        source_bytes = source.encode("utf-8")
+        for command in inventory["commands"]:
+            start, stop = command["startByte"], command["endByte"]
+            command_rows.append({
+                "ordinal": command["commandOrdinal"],
+                "start": start,
+                "end": stop,
+                "kind": command["kind"],
+                "sha256": hashlib.sha256(source_bytes[start:stop]).hexdigest(),
+            })
+        body_ordinal = next(command["commandOrdinal"] for command in inventory["commands"]
+                            if "theorem body" in source[
+                                command["startChar"]:command["endChar"]])
+        config_ordinal = next(command["commandOrdinal"] for command in inventory["commands"]
+                              if "theorem configured" in source[
+                                  command["startChar"]:command["endChar"]])
+        def cached_inventory(*, module: str, source: str,
+                             expected_source_sha256: str, repo_root=ast.ROOT):
+            self.assertEqual(module, "Mathlib.SimpCommandInventoryFixture")
+            if source == SIMP_INVENTORY_FIXTURE:
+                self.assertEqual(expected_source_sha256, self.simp_inventory_digest)
+                return inventory
+            self.assertEqual(source, self.simp_candidate_with_import)
+            self.assertEqual(expected_source_sha256, self.simp_candidate_digest)
+            return self.simp_candidate_inventory
+
+        with patch.object(ast, "inventory_simp_tactics", side_effect=cached_inventory):
+            with self.assertRaisesRegex(ast.SyntaxExtractionError, "still owns executable simp"):
+                ast.assert_success_commands_have_no_simp(
+                    module="Mathlib.SimpCommandInventoryFixture",
+                    original_source=source,
+                    candidate_source=source,
+                    expected_source_sha256=self.simp_inventory_digest,
+                    command_rows=command_rows,
+                    success_ordinals={body_ordinal},
+                )
+            ast.assert_success_commands_have_no_simp(
+                module="Mathlib.SimpCommandInventoryFixture",
+                original_source=source,
+                candidate_source=self.simp_candidate_with_import,
+                expected_source_sha256=self.simp_inventory_digest,
+                command_rows=command_rows,
+                success_ordinals={config_ordinal},
+            )
 
 
 if __name__ == "__main__":

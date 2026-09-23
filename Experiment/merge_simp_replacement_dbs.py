@@ -11,6 +11,10 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "pipeline"))
+import sites as source_sites  # noqa: E402
+import tactic_syntax_ast as TSA  # noqa: E402
+
 
 DB_NAME = "mathlib-db.sqlite3"
 MANIFEST_NAME = "modules.txt"
@@ -28,6 +32,24 @@ REQUIRED_TABLES = (*BASE_TABLES, "simp_replacements")
 
 class MergeError(ValueError):
     pass
+
+
+def _candidate_with_replacements(
+    source: bytes,
+    commands: list[dict[str, Any]],
+    replacements: dict[int, str],
+) -> str:
+    edits: list[tuple[int, int, bytes]] = []
+    for command in commands:
+        replacement = replacements.get(command["ordinal"])
+        if replacement is not None:
+            edits.append((command["start"], command["end"], replacement.encode("utf-8")))
+    for start, stop, replacement in sorted(edits, reverse=True):
+        source = source[:start] + replacement + source[stop:]
+    try:
+        return source_sites.add_import(source.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, ValueError) as error:
+        raise MergeError(f"cannot construct authenticated replacement module: {error}") from error
 
 
 def open_rw(path: Path) -> sqlite3.Connection:
@@ -158,6 +180,52 @@ def prepare_job(primary: sqlite3.Connection, job_dir: Path, seen_modules: set[st
                 raise MergeError(f"queue row set differs for assigned module {module} in {job_dir}")
             for key, result in incoming_rows.items():
                 validate_result(*result, key, str(job_dir))
+            changed_successes = {
+                key[1] for key, result in incoming_rows.items()
+                if result[0] == "success" and result != primary_rows[key]
+            }
+            if changed_successes:
+                module_data = primary.execute(
+                    "SELECT source,source_sha256 FROM modules WHERE name=?", (module,)
+                ).fetchone()
+                if module_data is None:
+                    raise MergeError(f"module source row is missing for {module}")
+                source = bytes(module_data[0])
+                source_hash = str(module_data[1])
+                command_rows = [
+                    {"ordinal": ordinal, "start": start, "end": end,
+                     "kind": kind, "source_sha256": digest}
+                    for ordinal, start, end, kind, digest in primary.execute(
+                        "SELECT ordinal,start_byte,end_byte,kind,source_sha256 "
+                        "FROM commands WHERE module_name=? ORDER BY ordinal", (module,)
+                    )
+                ]
+                replacement_rows = {
+                    ordinal: result[1]
+                    for (_, ordinal), result in primary_rows.items()
+                    if result[0] == "success" and result[1] is not None
+                }
+                replacement_rows.update({
+                    ordinal: result[1]
+                    for (_, ordinal), result in incoming_rows.items()
+                    if result[0] == "success" and result[1] is not None
+                })
+                candidate = _candidate_with_replacements(
+                    source, command_rows, replacement_rows)
+                try:
+                    TSA.assert_success_commands_have_no_simp(
+                        module=module,
+                        original_source=source.decode("utf-8", errors="strict"),
+                        candidate_source=candidate,
+                        expected_source_sha256=source_hash,
+                        command_rows=command_rows,
+                        success_ordinals=changed_successes,
+                    )
+                except (OSError, RuntimeError, UnicodeError, ValueError) as error:
+                    raise MergeError(
+                        f"{job_dir}: direct simp command postcondition failed closed "
+                        f"for {module}: {type(error).__name__}: {error}"
+                    ) from error
         # The copy may differ only in simp_replacements rows assigned by this job.
         assigned = set(modules)
         primary_keys = {

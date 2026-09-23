@@ -431,11 +431,32 @@ def _persist_command_result(
     compile_error: str | None,
     *,
     proof_hole_audited: bool = False,
+    original_source: str | None = None,
+    candidate_source: str | None = None,
+    command_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     if result_status == "compiled_success" and (replacement is None or not replacement.strip()):
         raise RetryError("compiled_success requires a nonblank replacement")
     if result_status == "compiled_success" and not proof_hole_audited:
         raise RetryError("compiled_success requires an authenticated executable proof-hole AST audit")
+    if result_status == "compiled_success":
+        if original_source is None or candidate_source is None or command_rows is None:
+            raise RetryError("compiled_success requires an authenticated direct simp AST postcondition")
+        try:
+            TSA.assert_success_commands_have_no_simp(
+                module=module,
+                original_source=original_source,
+                candidate_source=candidate_source,
+                expected_source_sha256=source_hash,
+                command_rows=command_rows,
+                success_ordinals={ordinal},
+                repo_root=ROOT,
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            raise RetryError(
+                "direct simp command postcondition failed closed: "
+                f"{type(error).__name__}: {error}"
+            ) from error
     db.execute("BEGIN IMMEDIATE")
     try:
         if result_status == "compiled_success":
@@ -927,7 +948,10 @@ def process_module(
             for ordinal, original_status, rendered in rendered_candidates:
                 _persist_command_result(db, module, ordinal, source_hash, original_status,
                                         "compiled_success", rendered, None, None,
-                                        proof_hole_audited=True)
+                                        proof_hole_audited=True,
+                                        original_source=source,
+                                        candidate_source=batch_candidate,
+                                        command_rows=commands)
                 diagnostic_counts["compiled_success"] = diagnostic_counts.get(
                     "compiled_success", 0) + 1
         else:
@@ -946,7 +970,10 @@ def process_module(
                 if okay:
                     _persist_command_result(db, module, ordinal, source_hash, original_status,
                                             "compiled_success", rendered, None, None,
-                                            proof_hole_audited=True)
+                                            proof_hole_audited=True,
+                                            original_source=source,
+                                            candidate_source=candidate,
+                                            command_rows=commands)
                     accepted[ordinal] = rendered
                     result_status = "compiled_success"
                 else:

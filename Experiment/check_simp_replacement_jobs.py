@@ -29,13 +29,25 @@ def make_db(path: Path, candidate_counts: tuple[int, ...] = (1, 1, 1, 1)) -> Non
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
     for index, count in enumerate(candidate_counts):
-        name = f"M{index:02d}"
-        source = (f"-- {name}\n" + "x" * ((index + 1) * 100)).encode()
-        con.execute("INSERT INTO modules VALUES (?, ?, ?, ?)", (name, f"{name}.lean", source, hashlib.sha256(source).hexdigest()))
-        con.execute("INSERT INTO imports VALUES (?, ?)", (name, "Base"))
+        name = module_name(index)
+        source_text = "import Mathlib\n\n"
+        command_rows = []
         for ordinal in range(count):
             command = f"theorem t{ordinal} : True := by simp"
-            con.execute("INSERT INTO commands VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (name, ordinal, 0, len(command.encode()), "lemma", hashlib.sha256(command.encode()).hexdigest(), command, "simp"))
+            start = len(source_text.encode("utf-8"))
+            source_text += command + "\n\n"
+            stop = start + len(command.encode("utf-8"))
+            command_rows.append((ordinal, start, stop, "Lean.Parser.Command.declaration",
+                                 hashlib.sha256(command.encode("utf-8")).hexdigest(),
+                                 command, "simp"))
+        source = source_text.encode("utf-8")
+        path_value = name.replace(".", "/") + ".lean"
+        con.execute("INSERT INTO modules VALUES (?, ?, ?, ?)", (name, path_value, source, hashlib.sha256(source).hexdigest()))
+        con.execute("INSERT INTO imports VALUES (?, ?)", (name, "Mathlib"))
+        for row in command_rows:
+            ordinal, start, stop, kind, digest, command, body = row
+            con.execute("INSERT INTO commands VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (name, ordinal, start, stop, kind, digest, command, body))
             con.execute("INSERT INTO simp_replacements(module_name, ordinal) VALUES (?, ?)", (name, ordinal))
     con.commit()
     con.close()
@@ -49,10 +61,16 @@ def state(path: Path) -> list[tuple]:
 
 
 def dummy_update(job_dir: Path, module: str, ordinal: int, status: str, replacement: str | None = None, error: str | None = None) -> None:
+    if replacement == "by exact True.intro":
+        replacement = f"theorem t{ordinal} : True := by exact True.intro"
     con = sqlite3.connect(job_dir / jobs.DB_NAME)
     con.execute("UPDATE simp_replacements SET status=?, replacement_text=?, error=? WHERE module_name=? AND ordinal=?", (status, replacement, error, module, ordinal))
     con.commit()
     con.close()
+
+
+def module_name(index: int) -> str:
+    return f"Mathlib.Test.SimpReplacementJobs.M{index:02d}"
 
 
 class SimpReplacementJobsTests(unittest.TestCase):
@@ -112,7 +130,17 @@ class SimpReplacementJobsTests(unittest.TestCase):
         # Unfinished manifest rows stay pending and are discoverable for resume.
         retry = self.root / "retry.txt"
         retry_modules = jobs.write_retry_manifest(self.primary, retry, ("pending",))
-        self.assertEqual(set(retry_modules), {"M00", "M01", "M02", "M03"} - {module0, module1})
+        self.assertEqual(set(retry_modules), {module_name(i) for i in range(4)} - {module0, module1})
+
+    def test_merge_refuses_success_with_an_owned_direct_simp_node(self) -> None:
+        output, _ = self.prepare(1)
+        job = output / "job-000"
+        module = (job / jobs.MANIFEST_NAME).read_text().splitlines()[0]
+        dummy_update(job, module, 0, "success", "theorem t0 : True := by simp")
+        before = state(self.primary)
+        with self.assertRaisesRegex(merger.MergeError, "still owns executable simp"):
+            merger.merge(self.primary, [job])
+        self.assertEqual(before, state(self.primary))
 
     def test_interrupted_job_pending_result_does_not_reset_terminal_primary(self) -> None:
         output, _ = self.prepare(2)
@@ -147,35 +175,35 @@ class SimpReplacementJobsTests(unittest.TestCase):
         con = sqlite3.connect(self.primary)
         con.execute(
             "UPDATE simp_replacements SET status='record_failed', error='old trace failure' "
-            "WHERE module_name='M00' AND ordinal=0"
+            "WHERE module_name=? AND ordinal=0", (module_name(0),)
         )
         con.commit()
         con.close()
         output, _ = self.prepare(1, ("pending", "record_failed"))
         job = output / "job-000"
-        dummy_update(job, "M00", 0, "success", "by exact True.intro")
+        dummy_update(job, module_name(0), 0, "success", "by exact True.intro")
 
         with redirect_stdout(io.StringIO()):
             exit_code = merger.main([
                 "--database", str(self.primary), "--replace-status", "record_failed", str(job)
             ])
         self.assertEqual(exit_code, 0)
-        self.assertEqual(state(self.primary)[0][2:], ("success", "by exact True.intro", None))
+        self.assertEqual(state(self.primary)[0][2:], ("success", "theorem t0 : True := by exact True.intro", None))
         repeated = merger.merge(self.primary, [job], replace_status={"record_failed"})
         self.assertEqual(repeated["identical_existing"], 1)
-        self.assertEqual(state(self.primary)[0][2:], ("success", "by exact True.intro", None))
+        self.assertEqual(state(self.primary)[0][2:], ("success", "theorem t0 : True := by exact True.intro", None))
 
     def test_authorized_record_failed_refinement_to_failure(self) -> None:
         con = sqlite3.connect(self.primary)
         con.execute(
             "UPDATE simp_replacements SET status='record_failed', error='old trace failure' "
-            "WHERE module_name='M00' AND ordinal=0"
+            "WHERE module_name=? AND ordinal=0", (module_name(0),)
         )
         con.commit()
         con.close()
         output, _ = self.prepare(1, ("pending", "record_failed"))
         job = output / "job-000"
-        dummy_update(job, "M00", 0, "compile_failed", error="fresh compile failure")
+        dummy_update(job, module_name(0), 0, "compile_failed", error="fresh compile failure")
 
         merged = merger.merge(self.primary, [job], replace_status={"record_failed"})
         self.assertEqual(merged["merged"], 1)
@@ -185,13 +213,13 @@ class SimpReplacementJobsTests(unittest.TestCase):
         con = sqlite3.connect(self.primary)
         con.execute(
             "UPDATE simp_replacements SET status='record_failed', error='old trace failure' "
-            "WHERE module_name='M00' AND ordinal=0"
+            "WHERE module_name=? AND ordinal=0", (module_name(0),)
         )
         con.commit()
         con.close()
         output, _ = self.prepare(1, ("pending", "record_failed"))
         job = output / "job-000"
-        dummy_update(job, "M00", 0, "success", "by exact True.intro")
+        dummy_update(job, module_name(0), 0, "success", "by exact True.intro")
         before = state(self.primary)
 
         with self.assertRaises(merger.MergeError):
@@ -230,7 +258,7 @@ class SimpReplacementJobsTests(unittest.TestCase):
         jobs.prepare(self.primary, output2, 2)
         job2 = output2 / "job-000"
         con = sqlite3.connect(job2 / jobs.DB_NAME)
-        con.execute("UPDATE modules SET source=? WHERE name=?", (b"drift", "M00"))
+        con.execute("UPDATE modules SET source=? WHERE name=?", (b"drift", module_name(0)))
         con.commit()
         con.close()
         with self.assertRaises(merger.MergeError):
@@ -239,7 +267,7 @@ class SimpReplacementJobsTests(unittest.TestCase):
     def test_unassigned_mutation_and_missing_queue_row_reject(self) -> None:
         output, assignments = self.prepare(2)
         job = output / "job-000"
-        unassigned = next(m for m in (f"M{i:02d}" for i in range(4)) if m not in assignments[0])
+        unassigned = next(m for m in (module_name(i) for i in range(4)) if m not in assignments[0])
         con = sqlite3.connect(job / jobs.DB_NAME)
         con.execute("UPDATE simp_replacements SET status='noop' WHERE module_name=?", (unassigned,))
         con.commit()

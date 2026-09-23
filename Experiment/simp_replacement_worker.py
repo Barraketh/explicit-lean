@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "test" / "SimpTrace"))
 
 import replay_module as replay  # noqa: E402
 import sites as S  # noqa: E402
+import tactic_syntax_ast as TSA  # noqa: E402
 import trace_identity as TI  # noqa: E402
 
 STATUSES = {
@@ -596,6 +597,33 @@ def process_module(db: sqlite3.Connection, module: str, artifacts: pathlib.Path)
             if row["ordinal"] not in results:
                 results[row["ordinal"]] = ("worker_failed", None,
                                             "worker did not classify candidate")
+        success_ordinals = {
+            ordinal for ordinal, (status, _, _) in results.items()
+            if status == "success"
+        }
+        if success_ordinals:
+            success_replacements = dict(existing_successes)
+            success_replacements.update({
+                ordinal: replacement
+                for ordinal, (status, replacement, _) in results.items()
+                if status == "success" and replacement is not None
+            })
+            candidate_source = module_with_replacements(
+                source, commands, success_replacements)
+            try:
+                TSA.assert_success_commands_have_no_simp(
+                    module=module,
+                    original_source=source,
+                    candidate_source=candidate_source,
+                    expected_source_sha256=sha256(source_bytes),
+                    command_rows=commands,
+                    success_ordinals=success_ordinals,
+                    repo_root=ROOT,
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                detail = f"direct simp command postcondition failed closed: {type(exc).__name__}: {exc}"[:2000]
+                for ordinal in success_ordinals:
+                    results[ordinal] = ("render_failed", None, detail)
         if any(status not in STATUSES - {"pending"}
                for status, _, _ in results.values()):
             raise WorkerError("worker generated an invalid terminal status")
