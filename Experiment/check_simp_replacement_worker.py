@@ -229,6 +229,20 @@ def test_render_command_rebases_unicode_source_arg_and_preserves_direction() -> 
         _unicode_source_argument_fixture()
     original = invocation()
     absolute_span = (source_arg["startChar"], source_arg["endChar"])
+    command_start_char = W.byte_to_char(source, command["start"])
+    command_end_char = W.byte_to_char(source, command["end"])
+    command_text = source[command_start_char:command_end_char]
+    # Recorder coordinates are authenticated module-relative Unicode scalar
+    # offsets. Passing them straight to the command-local renderer reproduces
+    # the historical failure instead of guessing an argument from its text.
+    unrebased = W.replay.render_site(
+        W.local_site(renderer_site, source, command_start_char, 0),
+        original,
+        command_text,
+        include_original_comment=False,
+        use_manual_overrides=False,
+    )
+    assert unrebased["status"] == "render_failed:bad_source_span", unrebased
     rewritten, error = W.render_command(
         source, command, [(ti_site, renderer_site)],
         {ti_site.siteOrdinal: [original]},
