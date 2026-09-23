@@ -406,7 +406,9 @@
       "refreshRecorded": true,
       "retryFailed": true,
       "knownModuleErrors": [
-        "Mathlib.Algebra.Group.UniqueProds.Basic"
+        "Mathlib.Algebra.Group.UniqueProds.Basic",
+        "Mathlib.Algebra.Homology.Factorizations.CM5a",
+        "Mathlib.Algebra.Module.Injective"
       ],
       "knownModuleErrorClassification": "Lean full-module parser recovery; deliberately fail-closed pending an authenticated parser-context contract",
       "nonterminalSnapshotAt": "2026-09-23T15:03:13Z",

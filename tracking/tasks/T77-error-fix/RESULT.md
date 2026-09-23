@@ -464,10 +464,11 @@ owned rows to success, 651 to noop, 2,225 to record failure, 418 to render
 failure, and 696 to compile failure. The two broad failure-retry shards had
 added 563 successes: 217 from compile failure, 58 from record failure, and 288
 from render failure. These are nonterminal snapshots, not merged results. The
-only new max-retry module error is
-`Mathlib.Algebra.Group.UniqueProds.Basic`, whose full-module parser reports
-recovery; it remains deliberately unprocessed rather than weakening the AST
-gate.
+current max-retry module errors are
+`Mathlib.Algebra.Group.UniqueProds.Basic`,
+`Mathlib.Algebra.Homology.Factorizations.CM5a`, and
+`Mathlib.Algebra.Module.Injective`; their full-module parser reports recovery,
+so they remain deliberately unprocessed rather than weakening the AST gate.
 
 ## Named-zeta retry run
 
