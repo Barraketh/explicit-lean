@@ -4,6 +4,7 @@ prelude
 public import Init.Prelude
 public import ExplicitLean.SimpEngine.IR
 public import ExplicitLean.SimpEngine.Fingerprint
+public import ExplicitLean.SimpOperations.IR
 
 public section
 
@@ -20,6 +21,11 @@ structure RecorderState where
   eventCursor : Nat := 0
   structuralCursor : Nat := 0
   path : ExecutionPath := {}
+  /-- Raw `Expr` child path for the readable operational trace.  `none` marks
+      a traversal whose exact source position is not yet represented; it must
+      remain a residual rather than trigger a search. -/
+  operationPosition : Option (Array Nat) := some #[]
+  operationalEvents : Array Operations.Event := #[]
   phase : Phase := .pre
   phaseInvocationOrdinal : Nat := 0
   currentPhaseInvocationOrdinal : Nat := 0

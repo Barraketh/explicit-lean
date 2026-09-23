@@ -276,6 +276,40 @@ private def getOperationSourceContext : EngineM Context := do
     try x finally
       runtime.state.modify fun current => { current with path := previous.path }
 
+/-- Enter a semantic recorder path and the corresponding raw expression-child
+path.  Passing `none` records that this traversal has no principled raw-path
+mapping yet; consumers must leave any events beneath it unresolved. -/
+@[inline] def withOperationPath (step : PathStep) (delta : Option (Array Nat))
+    (x : EngineM α) : EngineM α := do
+  let runtime ← getRuntime
+  if runtime.mode == .reference then
+    x
+  else
+    let previous ← runtime.state.get
+    let position := match previous.operationPosition, delta with
+      | some base, some suffix => some (base ++ suffix)
+      | _, _ => none
+    runtime.state.set {
+      previous with
+      path.steps := previous.path.steps.push step
+      operationPosition := position
+    }
+    try x finally
+      runtime.state.modify fun current => {
+        current with
+        path := previous.path
+        operationPosition := previous.operationPosition
+      }
+
+private def appFunctionPosition (numArgs : Nat) : Array Nat :=
+  Array.replicate numArgs 0
+
+private def appArgumentPosition (numArgs index : Nat) : Array Nat :=
+  (Array.replicate (numArgs - index - 1) 0).push 1
+
+private def nestedFieldPosition (depth bodyChild fieldChild : Nat) : Array Nat :=
+  (Array.replicate depth bodyChild).push fieldChild
+
 @[inline] def withPhase (phase : Phase) (x : EngineM α) : EngineM α := do
   let runtime ← getRuntime
   if runtime.mode == .reference then
@@ -310,6 +344,43 @@ def emitStructural (witness : Structural) : EngineM Unit := do
       throwError "replay_structural_mismatch at {state.structuralCursor}: expected {repr expected}, got {repr item}"
     runtime.state.set { state with structuralCursor := state.structuralCursor + 1 }
 
+private def sourceRuleOrigin : RuleOrigin → Operations.RuleOrigin
+  | .decl name => .decl name
+  | .equation declaration index => .equation declaration index
+  | .local subject => .local subject.contextIndex
+  | .syntax _ => .syntax
+  | .other name => .other name
+
+private def sourceReduction : Reduction → Operations.Reduction
+  | .instantiateMVars => .instantiateMVars
+  | .beta => .beta
+  | .projection structureName field => .projection structureName field
+  | .projectionFunction name branch => .projectionFunction name branch
+  | .iota => .iota
+  | .zetaUsed zetaHave => .zetaUsed zetaHave
+  | .zetaUnused => .zetaUnused
+  | .delta name strategy => .delta name strategy
+  | .foldRawNatLit => .foldRawNatLit
+  | .localDef subject reason => .localDef subject.contextIndex reason
+
+private def sourceAction? (operation : Operation) : Option Operations.Action :=
+  match operation with
+  | .rewrite rule _ premises => some <| .rewrite {
+      origin := sourceRuleOrigin rule.origin
+      inverse := rule.inverse
+      phase := rule.phase
+      variant := rule.variant
+      numExtraArgs := rule.numExtraArgs
+    } (premises.map fun premise => {
+      terminal := premise.terminal
+      operationCount := premise.program.events.size
+    })
+  | .rewriteAttemptFailed .. => none
+  | .reduce reduction => some (.reduce (sourceReduction reduction))
+  | .builtin builtin => some (.builtin builtin)
+  | .semanticSimproc fold =>
+      some <| .simproc (fold.candidates.map fun candidate => toString candidate.declaration)
+
 def emitEvent (input output : Expr) (operation : Operation)
     (stepDisposition : StepDisposition) : EngineM Unit := do
   let runtime ← getRuntime
@@ -327,7 +398,18 @@ def emitEvent (input output : Expr) (operation : Operation)
       stepDisposition
     }
     if runtime.mode == .record then
-      runtime.state.set { state with program.events := state.program.events.push event }
+      let operationalEvents := match sourceAction? operation with
+        | some action => state.operationalEvents.push {
+            position := state.operationPosition
+            phase := state.phase
+            action
+          }
+        | none => state.operationalEvents
+      runtime.state.set {
+        state with
+        program.events := state.program.events.push event
+        operationalEvents
+      }
     else
       let some expected := state.program.events[state.eventCursor]?
         | throwError "replay_program_exhausted: unexpected event {repr event}"
@@ -1010,12 +1092,13 @@ where
   go (xs : Array Expr) (e : Expr) : EngineM α := do
     match e with
     | .lam n d b c =>
-      let d ← withPath (.lambdaDomain xs.size) <| dsimp d
+      let d ← withOperationPath (.lambdaDomain xs.size)
+        (some <| nestedFieldPosition xs.size 1 0) <| dsimp d
       withLocalDecl n c d fun x => go (xs.push x) (b.instantiate1 x)
     | e =>
       emitStructural (.lambdaTelescope xs.size)
       recordBranch "struct.lambdaTelescope"
-      withPath .lambdaBody <| k xs e
+      withOperationPath .lambdaBody (some <| Array.replicate xs.size 1) <| k xs e
 
 private def scopedLocalRef (ordinal : Nat) (expression : Expr) : EngineM ScopedLocalRef := do
   return {
@@ -1056,7 +1139,7 @@ local instance : MonadSimp EngineM where
     let path? := state.pendingMonadSimpPaths[0]?
     modifyRecorderState fun current => { current with pendingMonadSimpPaths := #[] }
     let r ← match path? with
-      | some path => withPath path <| simp e
+      | some path => withOperationPath path none <| simp e
       | none => simp e
     modifyRecorderState fun current => {
       current with pendingMonadSimpPaths := state.pendingMonadSimpPaths.drop 1
@@ -1070,7 +1153,7 @@ local instance : MonadSimp EngineM where
     let path? := state.pendingMonadSimpPaths[0]?
     modifyRecorderState fun current => { current with pendingMonadSimpPaths := #[] }
     let result ← match path? with
-      | some path => withPath path <| dsimp e
+      | some path => withOperationPath path none <| dsimp e
       | none => dsimp e
     modifyRecorderState fun current => {
       current with pendingMonadSimpPaths := state.pendingMonadSimpPaths.drop 1
@@ -1102,15 +1185,20 @@ def congrArgs (r : Result) (args : Array Expr) : EngineM Result := do
           -/
           r ← mkCongrFun r arg
         else if !info.hasFwdDeps then
-          r ← mkCongr r (← withPath (.autoCongrArgument i .simp) <| simp arg)
+          r ← mkCongr r (← withOperationPath (.autoCongrArgument i .simp)
+            (some <| appArgumentPosition args.size i) <| simp arg)
         else if (← whnfD (← inferType r.expr)).isArrow then
-          r ← mkCongr r (← withPath (.autoCongrArgument i .simp) <| simp arg)
+          r ← mkCongr r (← withOperationPath (.autoCongrArgument i .simp)
+            (some <| appArgumentPosition args.size i) <| simp arg)
         else
-          r ← mkCongrFun r (← withPath (.autoCongrArgument i .dsimp) <| dsimp arg)
+          r ← mkCongrFun r (← withOperationPath (.autoCongrArgument i .dsimp)
+            (some <| appArgumentPosition args.size i) <| dsimp arg)
       else if (← whnfD (← inferType r.expr)).isArrow then
-        r ← mkCongr r (← withPath (.autoCongrArgument i .simp) <| simp arg)
+        r ← mkCongr r (← withOperationPath (.autoCongrArgument i .simp)
+          (some <| appArgumentPosition args.size i) <| simp arg)
       else
-        r ← mkCongrFun r (← withPath (.autoCongrArgument i .dsimp) <| dsimp arg)
+        r ← mkCongrFun r (← withOperationPath (.autoCongrArgument i .dsimp)
+          (some <| appArgumentPosition args.size i) <| dsimp arg)
       i := i + 1
     return r
 
@@ -1185,7 +1273,7 @@ def simpAppUsingCongr (e : Expr) (invocationOrdinal : Nat) : EngineM Result := d
   recordBranch "struct.congruence.generic"
   let rec visit (e : Expr) (i : Nat) : EngineM Result := do
     if i == 0 then
-      withPath .appFunction <| simp f
+      withOperationPath .appFunction (some <| appFunctionPosition numArgs) <| simp f
     else
       checkSystem "simp"
       let i := i - 1
@@ -1202,15 +1290,20 @@ def simpAppUsingCongr (e : Expr) (invocationOrdinal : Nat) : EngineM Result := d
           -/
           mkCongrFun' e fr a
         else if !info.hasFwdDeps then
-          mkCongr' e fr (← withPath (.appArgument i .simp) <| simp a)
+          mkCongr' e fr (← withOperationPath (.appArgument i .simp)
+            (some <| appArgumentPosition numArgs i) <| simp a)
         else if (← whnfD (← inferType f)).isArrow then
-          mkCongr' e fr (← withPath (.appArgument i .simp) <| simp a)
+          mkCongr' e fr (← withOperationPath (.appArgument i .simp)
+            (some <| appArgumentPosition numArgs i) <| simp a)
         else
-          mkCongrFun' e fr (← withPath (.appArgument i .dsimp) <| dsimp a)
+          mkCongrFun' e fr (← withOperationPath (.appArgument i .dsimp)
+            (some <| appArgumentPosition numArgs i) <| dsimp a)
       else if (← whnfD (← inferType f)).isArrow then
-        mkCongr' e fr (← withPath (.appArgument i .simp) <| simp a)
+        mkCongr' e fr (← withOperationPath (.appArgument i .simp)
+          (some <| appArgumentPosition numArgs i) <| simp a)
       else
-        mkCongrFun' e fr (← withPath (.appArgument i .dsimp) <| dsimp a)
+        mkCongrFun' e fr (← withOperationPath (.appArgument i .dsimp)
+          (some <| appArgumentPosition numArgs i) <| dsimp a)
   visit e numArgs
 
 
@@ -1264,14 +1357,16 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
         continue
     match kind with
     | CongrArgKind.fixed =>
-      let argNew ← withPath (.autoCongrArgument i .dsimp) <| dsimp arg
+      let argNew ← withOperationPath (.autoCongrArgument i .dsimp)
+        (some <| appArgumentPosition args.size i) <| dsimp arg
       if arg != argNew then
         simplified := true
       argsNew := argsNew.push argNew
     | CongrArgKind.cast  => hasCast := true; argsNew := argsNew.push arg
     | CongrArgKind.subsingletonInst => argsNew := argsNew.push arg
     | CongrArgKind.eq =>
-      let argResult ← withPath (.autoCongrArgument i .simp) <| simp arg
+      let argResult ← withOperationPath (.autoCongrArgument i .simp)
+        (some <| appArgumentPosition args.size i) <| simp arg
       argResults := argResults.push argResult
       argsNew    := argsNew.push argResult.expr
       if argResult.proof?.isSome then hasProof := true
@@ -1391,7 +1486,7 @@ def simpProj (e : Expr) : EngineM Result := do
       let .proj structureName field _ := e | unreachable!
       emitStructural (.projectionMajor structureName field .simp)
       recordBranch "struct.projectionMajor.simp"
-      let r ← withPath (.projectionMajor .simp) <| simp s
+      let r ← withOperationPath (.projectionMajor .simp) (some #[0]) <| simp s
       let eNew := e.updateProj! r.expr
       match r.proof? with
       | none => return { expr := eNew }
@@ -1402,7 +1497,7 @@ def simpProj (e : Expr) : EngineM Result := do
       let .proj structureName field _ := e | unreachable!
       emitStructural (.projectionMajor structureName field .dsimp)
       recordBranch "struct.projectionMajor.dsimp"
-      return { expr := (← withPath (.projectionMajor .dsimp) <| dsimp e) }
+      return { expr := (← withOperationPath (.projectionMajor .dsimp) (some #[]) <| dsimp e) }
 
 def simpConst (e : Expr) : EngineM Result :=
   return { expr := (← reduce e) }
@@ -1416,14 +1511,14 @@ def simpArrow (e : Expr) : EngineM Result := do
   trace[Debug.Meta.Tactic.simp] "arrow {e}"
   let p := e.bindingDomain!
   let q := e.bindingBody!
-  let rp ← withPath .implicationDomain <| simp p
+  let rp ← withOperationPath .implicationDomain (some #[0]) <| simp p
   trace[Debug.Meta.Tactic.simp] "arrow [{(← getConfig).contextual}] {p} [{← isProp p}] -> {q} [{← isProp q}]"
   if (← pure (← getConfig).contextual <&&> isProp p <&&> isProp q) then
     emitStructural (.forallBranch .implicationContextual)
     recordBranch "struct.forall.implicationContextual"
     trace[Debug.Meta.Tactic.simp] "ctx arrow {rp.expr} -> {q}"
     withLocalDeclD e.bindingName! rp.expr fun h => withNewLemmas #[h] do
-      let rq ← withPath .implicationBody <| simp q
+      let rq ← withOperationPath .implicationBody (some #[1]) <| simp q
       match rq.proof? with
       | none    => mkImpCongr e rp rq
       | some hq =>
@@ -1446,7 +1541,7 @@ def simpArrow (e : Expr) : EngineM Result := do
   else
     emitStructural (.forallBranch .implicationPlain)
     recordBranch "struct.forall.implicationPlain"
-    mkImpCongr e rp (← withPath .implicationBody <| simp q)
+    mkImpCongr e rp (← withOperationPath .implicationBody (some #[1]) <| simp q)
 
 def simpForall (e : Expr) : EngineM Result := withParent e do
   trace[Debug.Meta.Tactic.simp] "forall {e}"
@@ -1460,7 +1555,7 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
       The domain of the forall is also a proposition, and we can use `forall_prop_domain_congr`
       IF we can simplify the domain.
       -/
-      let rd ← withPath (.forallDomain 0) <| simp domain
+      let rd ← withOperationPath (.forallDomain 0) (some #[0]) <| simp domain
       if let some h₁ := rd.proof? then
         emitStructural (.forallBranch .propositionDomainTransport)
         recordBranch "struct.forall.propositionDomainTransport"
@@ -1481,7 +1576,7 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
           let prop := mkSort Level.zero
           let h₁_substr_a := mkApp6 (mkConst ``Eq.substr [Level.one]) prop (mkLambda `x .default prop (mkBVar 0)) p₂ p₁ h₁ a
           let q_h₁_substr_a := e.bindingBody!.instantiate1 h₁_substr_a
-          let rb ← withPath .forallBody <| simp q_h₁_substr_a
+          let rb ← withOperationPath .forallBody (some #[1]) <| simp q_h₁_substr_a
           let h₂ ← mkLambdaFVars #[a] (← rb.getProof)
           let q₂ ← mkLambdaFVars #[a] rb.expr
           let result ← mkForallFVars #[a] rb.expr
@@ -1490,10 +1585,10 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
         return result
     emitStructural (.forallBranch .propositionDomainDSimp)
     recordBranch "struct.forall.propositionDomainDSimp"
-    let domain ← withPath (.forallDomain 0) <| dsimp domain
+    let domain ← withOperationPath (.forallDomain 0) (some #[0]) <| dsimp domain
     withLocalDecl e.bindingName! e.bindingInfo! domain fun x => withNewLemmas #[x] do
       let b := e.bindingBody!.instantiate1 x
-      let rb ← withPath .forallBody <| simp b
+      let rb ← withOperationPath .forallBody (some #[1]) <| simp b
       let eNew ← mkForallFVars #[x] rb.expr
       match rb.proof? with
       | none   => return { expr := eNew }
@@ -1689,12 +1784,14 @@ where
     match e with
     | .lam name domain body binderInfo =>
       let index := fvars.size
-      let (domain, cache) ← withPath (.lambdaDomain index) <|
+      let (domain, cache) ← withOperationPath (.lambdaDomain index)
+        (some <| nestedFieldPosition index 1 0) <|
         visit (domain.instantiateRev fvars) cache
       withLocalDecl name binderInfo domain fun x =>
         visitLambda (fvars.push x) body cache
     | expression =>
-      let (body, cache) ← withPath .lambdaBody <|
+      let (body, cache) ← withOperationPath .lambdaBody
+        (some <| Array.replicate fvars.size 1) <|
         visit (expression.instantiateRev fvars) cache
       let result ← mkLambdaFVars (usedLetOnly := usedLetOnly) fvars body
       visitPost result cache
@@ -1704,12 +1801,14 @@ where
     match e with
     | .forallE name domain body binderInfo =>
       let index := fvars.size
-      let (domain, cache) ← withPath (.forallDomain index) <|
+      let (domain, cache) ← withOperationPath (.forallDomain index)
+        (some <| nestedFieldPosition index 1 0) <|
         visit (domain.instantiateRev fvars) cache
       withLocalDecl name binderInfo domain fun x =>
         visitForall (fvars.push x) body cache
     | expression =>
-      let (body, cache) ← withPath .forallBody <|
+      let (body, cache) ← withOperationPath .forallBody
+        (some <| Array.replicate fvars.size 1) <|
         visit (expression.instantiateRev fvars) cache
       let result ← mkForallFVars (usedLetOnly := usedLetOnly) fvars body
       visitPost result cache
@@ -1719,14 +1818,17 @@ where
     match e with
     | .letE name type value body nondep =>
       let index := fvars.size
-      let (type, cache) ← withPath (.letType index) <|
+      let (type, cache) ← withOperationPath (.letType index)
+        (some <| nestedFieldPosition index 2 0) <|
         visit (type.instantiateRev fvars) cache
-      let (value, cache) ← withPath (.letValue index .dsimp) <|
+      let (value, cache) ← withOperationPath (.letValue index .dsimp)
+        (some <| nestedFieldPosition index 2 1) <|
         visit (value.instantiateRev fvars) cache
       withLetDecl name type value (nondep := nondep) fun x =>
         visitLet (fvars.push x) body cache
     | expression =>
-      let (body, cache) ← withPath .letBody <|
+      let (body, cache) ← withOperationPath .letBody
+        (some <| Array.replicate fvars.size 2) <|
         visit (expression.instantiateRev fvars) cache
       let result ← mkLetFVars (usedLetOnly := usedLetOnly)
         (generalizeNondepLet := false) fvars body
@@ -1735,13 +1837,15 @@ where
   visitApp (e : Expr) (cache : ExprStructMap Expr) : EngineM (Expr × ExprStructMap Expr) := do
     let fn := e.getAppFn
     let args := e.getAppArgs
-    let (fn, cache) ← withPath .appFunction <| visit fn cache
+    let (fn, cache) ← withOperationPath .appFunction
+      (some <| appFunctionPosition args.size) <| visit fn cache
     let mut cache := cache
     let mut argsNew := args
     let infos ← if skipInstances then pure (← getFunInfoNArgs fn args.size).paramInfo else pure #[]
     for h : index in *...args.size do
       if skipInstances && index < infos.size && infos[index]!.isInstance then continue
-      let (arg, cacheNew) ← withPath (.appArgument index .dsimp) <| visit args[index] cache
+      let (arg, cacheNew) ← withOperationPath (.appArgument index .dsimp)
+        (some <| appArgumentPosition args.size index) <| visit args[index] cache
       argsNew := argsNew.setIfInBounds index arg
       cache := cacheNew
     visitPost (mkAppN fn argsNew) cache
@@ -1759,10 +1863,11 @@ where
       | .app .. => visitApp expression cache
       | .mdata metadata body =>
         recordBranch "struct.metadataBody"
-        let (body, cache) ← withPath .metadataBody <| visit body cache
+        let (body, cache) ← withOperationPath .metadataBody (some #[0]) <| visit body cache
         visitPost (expression.updateMData! body) cache
       | .proj structureName field major =>
-        let (major, cache) ← withPath (.projectionMajor .dsimp) <| visit major cache
+        let (major, cache) ← withOperationPath (.projectionMajor .dsimp) (some #[0]) <|
+          visit major cache
         visitPost (.proj structureName field major) cache
       | _ => visitPost expression cache
 
@@ -2099,7 +2204,7 @@ private def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr)
       let hType ← instantiateMVars (← inferType h)
       let hType ← if thmHasBinderNameHint then hType.resolveBinderNameHint else pure hType
       try
-        if (← withPath (.userCongrHypothesis c.theoremName i) <|
+        if (← withOperationPath (.userCongrHypothesis c.theoremName i) none <|
             processCongrHypothesis h hType) then
           modified := true
       catch ex =>
@@ -2224,7 +2329,7 @@ def simpStep (e : Expr) (simpStepOrdinal : Nat) : EngineM Result := do
   match e with
   | .mdata m e   =>
       recordBranch "struct.metadataBody"
-      let r ← withPath .metadataBody <| simp e
+      let r ← withOperationPath .metadataBody (some #[0]) <| simp e
       return { r with expr := mkMData m r.expr }
   | .proj ..     => simpProj e
   | .app ..      => simpApp e
@@ -2410,6 +2515,26 @@ private def finishRecording (runtime : Runtime) (finalExpr : Expr) : MetaM Recor
     simprocs := { observations := state.committedSimprocs }
     coveredBranches := observations.coveredBranches
   }
+
+/-- Record the legacy validation certificate and, separately, the term-free
+operation stream used by readable source rendering. -/
+def mainCoreOperationalRecording (e : Expr) (ctx : Context) (s : State := {})
+    (methods : Methods := {}) : MetaM (Result × State × Recording × Operations.Trace) := do
+  let initialFingerprint ← exprFingerprintHash e
+  let runtime ← Runtime.record initialFingerprint
+  let (result, state) ← EngineM.runWithRuntime runtime ctx s methods <|
+    withCatchingRuntimeEx <| simp e
+  recordSimpUses state
+  let recording ← finishRecording runtime result.expr
+  let recorderState ← runtime.state.get
+  let terminal := if result.expr.isConstOf ``True then
+    Operations.Terminal.trueIntro
+  else
+    Operations.Terminal.open
+  return (result, state, recording, {
+    events := recorderState.operationalEvents
+    terminal
+  })
 
 def mainCoreRecording (e : Expr) (ctx : Context) (s : State := {})
     (methods : Methods := {}) : MetaM (Result × State × Recording) := do
@@ -3671,15 +3796,18 @@ def simpMatchDiscrs? (info : MatcherInfo) (e : Expr) : EngineM (Option Result) :
   for i in *...info.numDiscrs do
     let arg := args[i]!
     if i < infos.size && !infos[i]!.hasFwdDeps then
-      let argNew ← withPath (.matchDiscriminant i .simp) <| simp arg
+      let argNew ← withOperationPath (.matchDiscriminant i .simp)
+        (some <| appArgumentPosition numArgs (prefixSize + i)) <| simp arg
       if argNew.expr != arg then modified := true
       r ← mkCongr r argNew
     else if (← whnfD (← inferType r.expr)).isArrow then
-      let argNew ← withPath (.matchDiscriminant i .simp) <| simp arg
+      let argNew ← withOperationPath (.matchDiscriminant i .simp)
+        (some <| appArgumentPosition numArgs (prefixSize + i)) <| simp arg
       if argNew.expr != arg then modified := true
       r ← mkCongr r argNew
     else
-      let argNew ← withPath (.matchDiscriminant i .dsimp) <| dsimp arg
+      let argNew ← withOperationPath (.matchDiscriminant i .dsimp)
+        (some <| appArgumentPosition numArgs (prefixSize + i)) <| dsimp arg
       if argNew != arg then modified := true
       r ← mkCongrFun r argNew
   unless modified do

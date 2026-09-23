@@ -1,0 +1,92 @@
+module
+prelude
+
+public import ExplicitLean.SimpEngine.IR
+
+public section
+
+namespace Lean.Meta.Simp.Operations
+
+open Engine
+
+/-- A rewrite operand stripped down to source-replayable identity.  In
+particular, local operands carry only their stable context index: no type,
+value, expression, proof, or fingerprint crosses this boundary. -/
+inductive RuleOrigin where
+  | decl (name : Name)
+  | equation (declaration : Name) (index : Nat)
+  | local (contextIndex : Nat)
+  | syntax
+  | other (name : Name)
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/-- A definitional operation stripped of legacy validation payloads. -/
+inductive Reduction where
+  | instantiateMVars
+  | beta
+  | projection (structureName : Name) (field : Nat)
+  | projectionFunction (name : Name) (branch : ProjectionBranch)
+  | iota
+  | zetaUsed (zetaHave : Bool)
+  | zetaUnused
+  | delta (name : Name) (strategy : DeltaStrategy)
+  | foldRawNatLit
+  | localDef (contextIndex : Nat) (reason : LocalDefReason)
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/-- The identity operands needed to reapply one already-selected rewrite rule.
+No instantiated expression, proof term, fingerprint, or simp-table snapshot is
+part of this source-facing record. -/
+structure Rule where
+  origin : RuleOrigin
+  inverse : Bool
+  phase : Phase
+  variant : Nat
+  numExtraArgs : Nat
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/-- Term-free summary of one rewrite premise.  Premises with nested operations
+remain visible as residuals until the recursive v2 premise syntax lands. -/
+structure Premise where
+  terminal : PremiseTerminal
+  operationCount : Nat
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/-- A source-facing operation.  Failed candidates are deliberately absent:
+they do not transform the expression and require no replay action. -/
+inductive Action where
+  | rewrite (rule : Rule) (premises : Array Premise)
+  | reduce (reduction : Reduction)
+  | builtin (builtin : Builtin)
+  | simproc (declarations : Array String)
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/--
+One operation committed by the simplifier, expressed without an elaborated
+term or proof payload.  `position` is the raw `Expr` child path at which the
+operation ran.  A missing position is an explicit unsupported boundary; a
+consumer must not search for a matching redex.
+-/
+structure Event where
+  position : Option (Array Nat)
+  phase : Phase
+  action : Action
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/-- Term-free action needed after the expression operations.  `trueIntro`
+corresponds to the ordinary goal-level step used when simp changes a target to
+`True`; no proof expression is serialized. -/
+inductive Terminal where
+  | open
+  | trueIntro
+  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/-- The committed operations in execution order. -/
+structure Trace where
+  events : Array Event := #[]
+  terminal : Terminal := .open
+  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+instance : Inhabited Trace := ⟨{}⟩
+
+end Lean.Meta.Simp.Operations
