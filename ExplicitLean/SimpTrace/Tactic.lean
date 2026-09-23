@@ -798,30 +798,14 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
         -- argument".  Re-check the explicit binders against the LHS alone; a
         -- step carrying `side` traces is exempt, since discharging such an
         -- argument is what a side trace is for (REVIEW-9 2).
-        -- A Prop-valued local rewrites as `eq_true h` / `eq_false h`, which
-        -- applies `h` *unapplied*: an explicit binder of its own (`h : ∀ n,
-        -- ¬ f n`) can never be recovered by unification the way `rw [h]` would
-        -- recover it, because the replayer never gets to match `h`'s own
-        -- statement against the subterm.  Such an argument has to be in `args`
-        -- (REVIEW-9 residual risk r4).
-        if prop?.isSome && args.isEmpty && !hasSides then
-          -- Count the *syntactic* binders only.  `forallTelescopeReducing`
-          -- unfolds `¬P` to `P → False` and reports one explicit binder for a
-          -- hypothesis that has no quantifier at all, which would classify
-          -- `h : ¬P` -- a step that replays perfectly well.  An *implicit*
-          -- binder is fine: `rw` recovers it by unification.
-          let rec explicitBinders : Expr → Nat
-            | .forallE _ _ body bi =>
-              (if bi.isExplicit then 1 else 0) + explicitBinders body
-            | _ => 0
-          let type? : Option Expr ← match o with
-            | .fvar fvarId => pure ((← getLCtx).find? fvarId |>.map (·.type))
-            | .decl declName _ _ =>
-              pure ((← getEnv).find? declName |>.map (·.type))
-            | _ => pure none
-          if let some ty := type? then
-            if explicitBinders ty > 0 then
-              return some s!"unapplied_quantified_prop:{name}"
+        -- Proposition steps are replayed by `ExplicitRw.elabProposition`,
+        -- which opens the proof's complete telescope and matches the resulting
+        -- proposition against the selected redex.  Validate the same contract
+        -- below: every binder not supplied in `args` must be fixed by matching
+        -- the proposition itself.  An earlier guard rejected every explicit
+        -- binder before performing this check; that guard predated quantified
+        -- proposition replay and incorrectly classified rules such as
+        -- `Std.le_refl`, `exists_apply_eq_apply`, and quantified local evidence.
         unless hasSides do
           let lhsOnly ← withoutModifyingState do
             withReducibleAndInstances do
