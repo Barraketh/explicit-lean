@@ -40,6 +40,13 @@ def main() -> None:
     ]
     if len(traces) != 5:
         raise RuntimeError(f"expected five traces, got {len(traces)}\n{output}")
+    tagged = [line.split("SIMP_OPERATIONS_SITE ", 1)[1]
+              for line in output.splitlines() if "SIMP_OPERATIONS_SITE " in line]
+    if len(tagged) != 1 or not tagged[0].startswith("17 {"):
+        raise RuntimeError(f"expected one source-labelled trace for site 17: {tagged!r}\n{output}")
+    tagged_trace = json.loads(tagged[0].split(" ", 1)[1])
+    if tagged_trace != traces[0]:
+        raise RuntimeError("source-site log label changed the operation trace payload")
     first_positions = [event["position"] for event in traces[0]["events"]]
     second_positions = [event["position"] for event in traces[1]["events"]]
     if first_positions != [[0, 1], []]:

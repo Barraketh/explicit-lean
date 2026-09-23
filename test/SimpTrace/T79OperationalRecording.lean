@@ -10,6 +10,12 @@ example (n : Nat) : n + 0 = n := by
   simp_operations_observe only [Nat.add_zero]
   exact Nat.add_zero n
 
+/- The database retry path labels a trace with the exact source-site ordinal.
+   The label is a log prefix, not part of the serialized operation record. -/
+example (n : Nat) : n + 0 = n := by
+  simp_operations_observe_at 17 only [Nat.add_zero]
+  exact Nat.add_zero n
+
 /- A nested occurrence exercises the raw application-child position recorder. -/
 example (n : Nat) : (n + 0, n) = (n, n) := by
   simp_operations_observe only [Nat.add_zero]
