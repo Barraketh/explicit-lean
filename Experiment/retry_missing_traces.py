@@ -434,13 +434,15 @@ def _persist_command_result(
     original_source: str | None = None,
     candidate_source: str | None = None,
     command_rows: list[dict[str, Any]] | None = None,
+    candidate_replacements: dict[int, str] | None = None,
 ) -> None:
     if result_status == "compiled_success" and (replacement is None or not replacement.strip()):
         raise RetryError("compiled_success requires a nonblank replacement")
     if result_status == "compiled_success" and not proof_hole_audited:
         raise RetryError("compiled_success requires an authenticated executable proof-hole AST audit")
     if result_status == "compiled_success":
-        if original_source is None or candidate_source is None or command_rows is None:
+        if (original_source is None or candidate_source is None or command_rows is None
+                or candidate_replacements is None):
             raise RetryError("compiled_success requires an authenticated direct simp AST postcondition")
         try:
             TSA.assert_success_commands_have_no_simp(
@@ -450,6 +452,7 @@ def _persist_command_result(
                 expected_source_sha256=source_hash,
                 command_rows=command_rows,
                 success_ordinals={ordinal},
+                candidate_replacements=candidate_replacements,
                 repo_root=ROOT,
             )
         except (OSError, RuntimeError, ValueError) as error:
@@ -951,7 +954,8 @@ def process_module(
                                         proof_hole_audited=True,
                                         original_source=source,
                                         candidate_source=batch_candidate,
-                                        command_rows=commands)
+                                        command_rows=commands,
+                                        candidate_replacements=batch_replacements)
                 diagnostic_counts["compiled_success"] = diagnostic_counts.get(
                     "compiled_success", 0) + 1
         else:
@@ -973,7 +977,8 @@ def process_module(
                                             proof_hole_audited=True,
                                             original_source=source,
                                             candidate_source=candidate,
-                                            command_rows=commands)
+                                            command_rows=commands,
+                                            candidate_replacements=candidate_replacements)
                     accepted[ordinal] = rendered
                     result_status = "compiled_success"
                 else:

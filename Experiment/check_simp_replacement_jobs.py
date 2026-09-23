@@ -104,7 +104,8 @@ class SimpReplacementJobsTests(unittest.TestCase):
         before = state(self.primary)
         output, assignments = self.prepare(2)
         self.assertEqual(before, state(self.primary))
-        self.assertEqual(sorted(name for part in assignments for name in part), [f"M{i:02d}" for i in range(4)])
+        self.assertEqual(sorted(name for part in assignments for name in part),
+                         [module_name(i) for i in range(4)])
         for i, part in enumerate(assignments):
             directory = output / f"job-{i:03d}"
             self.assertEqual((directory / jobs.MANIFEST_NAME).read_text().splitlines(), sorted(part))

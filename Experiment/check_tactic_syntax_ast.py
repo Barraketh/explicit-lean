@@ -406,34 +406,42 @@ def tokenAuditAdmit : Nat := admit
         config_ordinal = next(command["commandOrdinal"] for command in inventory["commands"]
                               if "theorem configured" in source[
                                   command["startChar"]:command["endChar"]])
-        def cached_inventory(*, module: str, source: str,
-                             expected_source_sha256: str, repo_root=ast.ROOT):
-            self.assertEqual(module, "Mathlib.SimpCommandInventoryFixture")
-            if source == SIMP_INVENTORY_FIXTURE:
-                self.assertEqual(expected_source_sha256, self.simp_inventory_digest)
-                return inventory
-            self.assertEqual(source, self.simp_candidate_with_import)
-            self.assertEqual(expected_source_sha256, self.simp_candidate_digest)
-            return self.simp_candidate_inventory
+        def cached_inventory(modules, *, repo_root=ast.ROOT):
+            self.assertEqual([entry["module"] for entry in modules], [
+                "Mathlib.SimpCommandInventoryFixture",
+                "Mathlib.SimpCommandInventoryFixture",
+            ])
+            self.assertEqual([entry["source"] for entry in modules], [
+                source, self.simp_candidate_with_import,
+            ])
+            return [self.simp_inventory, self.simp_candidate_inventory]
 
-        with patch.object(ast, "inventory_simp_tactics", side_effect=cached_inventory):
+        with patch.object(ast, "inventory_simp_tactics_batch", side_effect=cached_inventory):
             with self.assertRaisesRegex(ast.SyntaxExtractionError, "still owns executable simp"):
                 ast.assert_success_commands_have_no_simp(
                     module="Mathlib.SimpCommandInventoryFixture",
                     original_source=source,
-                    candidate_source=source,
+                    candidate_source=self.simp_candidate_with_import,
                     expected_source_sha256=self.simp_inventory_digest,
                     command_rows=command_rows,
                     success_ordinals={body_ordinal},
+                    candidate_replacements={body_ordinal: source_bytes[
+                        command_rows[body_ordinal]["start"]:
+                        command_rows[body_ordinal]["end"]
+                    ].decode("utf-8")},
                 )
             ast.assert_success_commands_have_no_simp(
                 module="Mathlib.SimpCommandInventoryFixture",
                 original_source=source,
                 candidate_source=self.simp_candidate_with_import,
-                expected_source_sha256=self.simp_inventory_digest,
-                command_rows=command_rows,
-                success_ordinals={config_ordinal},
-            )
+                    expected_source_sha256=self.simp_inventory_digest,
+                    command_rows=command_rows,
+                    success_ordinals={config_ordinal},
+                    candidate_replacements={config_ordinal: source_bytes[
+                        command_rows[config_ordinal]["start"]:
+                        command_rows[config_ordinal]["end"]
+                    ].decode("utf-8")},
+                )
 
 
 if __name__ == "__main__":

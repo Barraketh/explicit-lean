@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "pipeline"))
-import sites as source_sites  # noqa: E402
 import tactic_syntax_ast as TSA  # noqa: E402
 
 
@@ -47,7 +46,7 @@ def _candidate_with_replacements(
     for start, stop, replacement in sorted(edits, reverse=True):
         source = source[:start] + replacement + source[stop:]
     try:
-        return source_sites.add_import(source.decode("utf-8", errors="strict"))
+        return TSA.add_recorder_import(source.decode("utf-8", errors="strict"))
     except (UnicodeDecodeError, ValueError) as error:
         raise MergeError(f"cannot construct authenticated replacement module: {error}") from error
 
@@ -220,6 +219,7 @@ def prepare_job(primary: sqlite3.Connection, job_dir: Path, seen_modules: set[st
                         expected_source_sha256=source_hash,
                         command_rows=command_rows,
                         success_ordinals=changed_successes,
+                        candidate_replacements=replacement_rows,
                     )
                 except (OSError, RuntimeError, UnicodeError, ValueError) as error:
                     raise MergeError(

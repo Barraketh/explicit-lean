@@ -803,7 +803,8 @@ class MissingTraceRetryTests(unittest.TestCase):
                                           proof_hole_audited=True,
                                           original_source="authenticated source",
                                           candidate_source="authenticated candidate",
-                                          command_rows=[])
+                                          command_rows=[],
+                                          candidate_replacements={})
         self.assertEqual(db.execute(
             "SELECT status,replacement_text,error FROM simp_replacements "
             "WHERE module_name='Mathlib.X' AND ordinal=1").fetchone(),

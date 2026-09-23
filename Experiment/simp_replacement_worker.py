@@ -618,6 +618,7 @@ def process_module(db: sqlite3.Connection, module: str, artifacts: pathlib.Path)
                     expected_source_sha256=sha256(source_bytes),
                     command_rows=commands,
                     success_ordinals=success_ordinals,
+                    candidate_replacements=success_replacements,
                     repo_root=ROOT,
                 )
             except (OSError, RuntimeError, ValueError) as exc:

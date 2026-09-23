@@ -310,7 +310,7 @@ private partial def collectSimpSites (stx : Syntax) : Array Syntax := Id.run do
     sites := sites ++ collectSimpSites child
   return sites
 
-private def simpSyntaxInventoryJson (moduleName : String)
+private def simpSyntaxInventoryJson (moduleName requestId : String)
     (commands : Array Syntax) : Json := Id.run do
   let mut entries := #[]
   let mut refused := #[]
@@ -345,6 +345,7 @@ private def simpSyntaxInventoryJson (moduleName : String)
       ("simpSites", Json.arr sites)] ++ fields
   return Json.mkObj [
     ("module", toJson moduleName),
+    ("requestId", toJson requestId),
     ("status", toJson (if refused.isEmpty then "ok" else "refused")),
     ("reason", toJson (if refused.isEmpty then "complete_simp_syntax_inventory" else "incomplete_simp_syntax_inventory")),
     ("refusals", Json.arr refused),
@@ -409,36 +410,38 @@ unsafe def runArgs (args : List String) : IO UInt32 := do
     catch error =>
       IO.eprintln s!"Lean proof-hole audit failed closed for {moduleName}: {error}"
       return 1
-  | moduleName :: path :: "--simp-inventory" :: [] => do
+  | moduleName :: path :: requestId :: "--simp-inventory" :: [] => do
     Lean.initSearchPath (← Lean.findSysroot)
     Lean.enableInitializersExecution
     let path := System.FilePath.mk path
     let source ← IO.FS.readFile path
     try
       let (commands, _) ← parseModule path source
-      IO.println (simpSyntaxInventoryJson moduleName commands |>.compress)
+      IO.println (simpSyntaxInventoryJson moduleName requestId commands |>.compress)
       return 0
     catch error =>
       IO.eprintln s!"Lean simp syntax inventory failed closed for {moduleName}: {error}"
       return 1
   | "--simp-inventory-batch" :: inputArgs => do
-    if inputArgs.length % 2 != 0 then
-      IO.eprintln "Lean simp syntax inventory batch requires module/path pairs"
+    if inputArgs.length % 3 != 0 then
+      IO.eprintln "Lean simp syntax inventory batch requires module/path/requestId triples"
       return 1
     Lean.initSearchPath (← Lean.findSysroot)
     Lean.enableInitializersExecution
     let inputs := inputArgs.toArray
     let mut results := #[]
-    for pairIndex in [:inputs.size / 2] do
-      let moduleName := inputs[pairIndex * 2]!
-      let path := System.FilePath.mk inputs[pairIndex * 2 + 1]!
+    for pairIndex in [:inputs.size / 3] do
+      let moduleName := inputs[pairIndex * 3]!
+      let path := System.FilePath.mk inputs[pairIndex * 3 + 1]!
+      let requestId := inputs[pairIndex * 3 + 2]!
       try
         let source ← IO.FS.readFile path
         let (commands, _) ← parseModule path source
-        results := results.push <| simpSyntaxInventoryJson moduleName commands
+        results := results.push <| simpSyntaxInventoryJson moduleName requestId commands
       catch error =>
         results := results.push <| Json.mkObj [
           ("module", toJson moduleName),
+          ("requestId", toJson requestId),
           ("status", toJson "failed"),
           ("reason", toJson error.toString)]
     IO.println (Json.arr results |>.compress)
