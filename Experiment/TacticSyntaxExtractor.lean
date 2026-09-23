@@ -73,7 +73,7 @@ private partial def processCommands (commands : Array Syntax := #[]) :
   processCommands commands
 
 private unsafe def parseModule (path : System.FilePath) (source : String) :
-    IO (Array Syntax × MessageLog) := do
+    IO (Array Syntax × MessageLog × Environment) := do
   let inputCtx := Parser.mkInputContext source path.toString
   let (header, parserState, headerMessages) ← Parser.parseHeader inputCtx
   if headerMessages.hasErrors then
@@ -98,7 +98,7 @@ private unsafe def parseModule (path : System.FilePath) (source : String) :
           s!"{message.fileName}:{message.pos.line}:{message.pos.column}: {text}"
     throw <| IO.Error.userError <| "Lean module parser reported an error or recovery" ++
       (if details.isEmpty then "" else ":\n" ++ String.intercalate "\n" details.toList)
-  return (commands, state.commandState.messages)
+  return (commands, state.commandState.messages, state.commandState.env)
 
 private def rangeOf (stx : Syntax) : Option (Nat × Nat) := do
   let start ← stx.getPos? (canonicalOnly := true)
@@ -137,38 +137,86 @@ private partial def hasTermCategoryAfterColon (stx : Syntax) : Bool := Id.run do
     if hasTermCategoryAfterColon child then return true
   return false
 
-private partial def hasMacroAttributeSyntax (stx : Syntax) : Bool :=
-  kindString stx == "Lean.Parser.Attr.macro" ||
-    stx.getArgs.any hasMacroAttributeSyntax
+private def sourceAttributeName? (stx : Syntax) : Option Name := Id.run do
+  -- `macro` has a dedicated attribute parser; other extension-point
+  -- attributes use `Attr.simple` and carry their resolved name as the first
+  -- identifier. Do not search arbitrary identifiers in declaration bodies.
+  if kindString stx == "Lean.Parser.Attr.macro" then return some `macro
+  if kindString stx != "Lean.Parser.Attr.simple" then return none
+  let first : Option Syntax := stx.getArgs[0]?
+  match first with
+  | some ident =>
+    match ident with
+    | Syntax.ident _ _ value _ => return some value
+    | _ => return none
+  | _ => return none
 
-private def sourceExtensionAttribute? (command : Syntax) : Option (String × String) := Id.run do
-  let kind := kindString command
-  if kind != "Lean.Parser.Command.declaration" &&
-      kind != "Lean.Parser.Command.attribute" then
-    return none
-  -- These attributes register code that can run while terms, tactics,
-  -- commands, or `do` elements are elaborated.  In particular, a command
-  -- elaborator can invoke Meta.Simp even though no term-level extension is
-  -- declared.  Include the builtin spellings because they register the same
-  -- executable extension points with builtin priority.
-  let attributes : Array (String × String) := #[
-    ("term_elab", "source_term_elab_attribute"),
-    ("builtin_term_elab", "source_term_elab_attribute"),
-    ("command_elab", "source_command_elab_attribute"),
-    ("builtin_command_elab", "source_command_elab_attribute"),
-    ("tactic", "source_tactic_elab_attribute"),
-    ("builtin_tactic", "source_tactic_elab_attribute"),
-    ("macro", "source_macro_attribute"),
-    ("builtin_macro", "source_macro_attribute"),
-    ("doElem_elab", "source_do_elab_attribute"),
-    ("builtin_doElem_elab", "source_do_elab_attribute")]
-  for (attributeName, reason) in attributes do
-    if hasIdentifier command attributeName ||
-        (attributeName == "macro" && hasMacroAttributeSyntax command) then
-      return some (attributeName, reason)
+private def sourceExtensionAttributeReason? (env : Environment) (name : Name) :
+    Option String := Id.run do
+  let leaf := (name.toString.splitOn ".").getLast!
+  match Lean.getAttributeImpl env name with
+  | .error _ => return none
+  | .ok attributeImpl =>
+    let descr := attributeImpl.descr
+    -- Some built-in elaboration attributes are registered by specialized
+    -- tables rather than through `mkElabAttribute`, so classify their parsed
+    -- names only after confirming this exact attribute is registered. This
+    -- avoids treating an unrelated user attribute with a matching leaf name
+    -- as an elaborator hook.
+    match leaf with
+    | "term_elab" | "builtin_term_elab" => return some "source_term_elab_attribute"
+    | "command_elab" | "builtin_command_elab" => return some "source_command_elab_attribute"
+    | "tactic" | "builtin_tactic" => return some "source_tactic_elab_attribute"
+    | "macro" | "builtin_macro" => return some "source_macro_attribute"
+    | "doElem_elab" | "builtin_doElem_elab" => return some "source_do_elab_attribute"
+    | "inductive_elab" | "builtin_inductive_elab" => return some "source_inductive_elab_attribute"
+    | "grind_tactic" | "builtin_grind_tactic" => return some "source_grind_tactic_attribute"
+    | "try_tactic" | "builtin_try_tactic" => return some "source_try_tactic_attribute"
+    | "sym_simproc" | "builtin_sym_simproc" => return some "source_sym_simproc_attribute"
+    | "sym_discharger" | "builtin_sym_discharger" => return some "source_sym_discharger_attribute"
+    | "sym_dsimproc" | "builtin_sym_dsimproc" => return some "source_sym_dsimproc_attribute"
+    | "doElem_control_info" | "builtin_doElem_control_info" =>
+      return some "source_do_control_info_attribute"
+    | "quot_precheck" | "builtin_quot_precheck" =>
+      return some "source_quotation_precheck_attribute"
+    | "try_suggestion" => return some "source_try_suggestion_attribute"
+    | _ => pure ()
+    -- Attribute descriptions are supplied by Lean's registered extension
+    -- implementation. They catch fully-qualified spellings and aliases of
+    -- the built-in keyed elaborator attributes without relying on suffixes in
+    -- source identifiers.
+    if descr == "parser" || descr == "Builtin parser" then
+      return some "source_parser_attribute"
+    if descr.contains "parser attributes" && descr.contains "hooks" then
+      return some "source_parser_attribute_hook"
+    if descr.endsWith " elaborator" || descr.startsWith "Register an elaborator for " then
+      return some "source_elaborator_attribute"
+    if descr.contains "control info inference" then return some "source_do_control_info_attribute"
+    if descr.contains "quotation pre-check" then return some "source_quotation_precheck_attribute"
+    if descr.contains "tactic suggestion generator" then return some "source_try_suggestion_attribute"
   return none
 
-private def termElaborationRisk (command : Syntax) : Option String := Id.run do
+private partial def findSourceExtensionAttribute? (env : Environment) (stx : Syntax) :
+    Option (String × String) := Id.run do
+  -- Quoted attributes are data, not active extension registrations. The
+  -- generated AST for a syntax quotation contains Attr.simple nodes, so stop
+  -- at the quote boundary instead of misclassifying examples or stored ASTs.
+  if kindString stx == "Lean.Parser.Term.dynamicQuot" then return none
+  if let some name := sourceAttributeName? stx then
+    if let some reason := sourceExtensionAttributeReason? env name then
+      return some (name.toString, reason)
+  for child in stx.getArgs do
+    if let some result := findSourceExtensionAttribute? env child then return some result
+  return none
+
+private def sourceExtensionAttribute? (env : Environment) (command : Syntax) :
+    Option (String × String) := Id.run do
+  if kindString command != "Lean.Parser.Command.declaration" &&
+      kindString command != "Lean.Parser.Command.attribute" then
+    return none
+  findSourceExtensionAttribute? env command
+
+private def termElaborationRisk (env : Environment) (command : Syntax) : Option String := Id.run do
   let kind := kindString command
   -- These are command AST nodes, not source-text matches.  Refuse rather than
   -- executing or recompiling source-local extension code while recording a
@@ -198,7 +246,7 @@ private def termElaborationRisk (command : Syntax) : Option String := Id.run do
     -- diagnostic label where applicable; every category is refused.
     if hasIdentifier command "term" then return some "source_term_macro_rules"
     return some "source_macro_rules_any_category"
-  if let some (_, reason) := sourceExtensionAttribute? command then
+  if let some (_, reason) := sourceExtensionAttribute? env command then
     return some reason
   -- Initializers and run_cmd can register executable parser/elaboration
   -- callbacks through APIs instead of the surface `elab`/attribute commands.
@@ -210,9 +258,10 @@ private def termElaborationRisk (command : Syntax) : Option String := Id.run do
     return some "source_command_can_register_term_extension"
   return none
 
-private partial def inventoryTermElaborationRisks (stx : Syntax) : Array Json := Id.run do
+private partial def inventoryTermElaborationRisks (env : Environment) (stx : Syntax) : Array Json := Id.run do
+  if kindString stx == "Lean.Parser.Term.dynamicQuot" then return #[]
   let mut risks := #[]
-  if let some reason := termElaborationRisk stx then
+  if let some reason := termElaborationRisk env stx then
     let rangeFields := match rangeOf stx with
       | some (start, stop) => [
           ("startByte", toJson start), ("endByte", toJson stop)]
@@ -226,21 +275,21 @@ private partial def inventoryTermElaborationRisks (stx : Syntax) : Array Json :=
       | some category => [("category", toJson category)]
       | none => []
     else []
-    let attributeFields := match sourceExtensionAttribute? stx with
+    let attributeFields := match sourceExtensionAttribute? env stx with
       | some (attributeName, _) => [("attribute", toJson attributeName)]
       | none => []
     risks := risks.push <| Json.mkObj <| [
       ("kind", toJson (kindString stx)), ("reason", toJson reason)] ++
       categoryFields ++ attributeFields ++ rangeFields
   for child in stx.getArgs do
-    risks := risks ++ inventoryTermElaborationRisks child
+    risks := risks ++ inventoryTermElaborationRisks env child
   return risks
 
-private def termElaborationInventoryJson (moduleName : String)
+private def termElaborationInventoryJson (moduleName : String) (env : Environment)
     (commands : Array Syntax) : Json := Id.run do
   let mut risks := #[]
   for command in commands do
-    risks := risks ++ inventoryTermElaborationRisks command
+    risks := risks ++ inventoryTermElaborationRisks env command
   return Json.mkObj [
     ("module", toJson moduleName),
     ("status", toJson (if risks.isEmpty then "ok" else "refused")),
@@ -435,7 +484,7 @@ unsafe def runArgs (args : List String) : IO UInt32 := do
     let path := System.FilePath.mk path
     let source ← IO.FS.readFile path
     try
-      let (commands, _) ← parseModule path source
+      let (commands, _, _) ← parseModule path source
       IO.println (Json.arr (commands.map debugSyntax) |>.compress)
       return 0
     catch error =>
@@ -447,8 +496,8 @@ unsafe def runArgs (args : List String) : IO UInt32 := do
     let path := System.FilePath.mk path
     let source ← IO.FS.readFile path
     try
-      let (commands, _) ← parseModule path source
-      IO.println (termElaborationInventoryJson moduleName commands |>.compress)
+      let (commands, _, env) ← parseModule path source
+      IO.println (termElaborationInventoryJson moduleName env commands |>.compress)
       return 0
     catch error =>
       IO.eprintln s!"Lean term-elaboration gate failed closed for {moduleName}: {error}"
@@ -459,7 +508,7 @@ unsafe def runArgs (args : List String) : IO UInt32 := do
     let path := System.FilePath.mk path
     let source ← IO.FS.readFile path
     try
-      let (commands, _) ← parseModule path source
+      let (commands, _, _) ← parseModule path source
       IO.println (proofHoleAuditJson moduleName commands |>.compress)
       return 0
     catch error =>
@@ -471,7 +520,7 @@ unsafe def runArgs (args : List String) : IO UInt32 := do
     let path := System.FilePath.mk path
     let source ← IO.FS.readFile path
     try
-      let (commands, _) ← parseModule path source
+      let (commands, _, _) ← parseModule path source
       IO.println (simpSyntaxInventoryJson moduleName requestId commands |>.compress)
       return 0
     catch error =>
@@ -491,7 +540,7 @@ unsafe def runArgs (args : List String) : IO UInt32 := do
       let requestId := inputs[pairIndex * 3 + 2]!
       try
         let source ← IO.FS.readFile path
-        let (commands, _) ← parseModule path source
+        let (commands, _, _) ← parseModule path source
         results := results.push <| simpSyntaxInventoryJson moduleName requestId commands
       catch error =>
         results := results.push <| Json.mkObj [
@@ -508,7 +557,7 @@ unsafe def runArgs (args : List String) : IO UInt32 := do
     let path := System.FilePath.mk path
     let source ← IO.FS.readFile path
     try
-      let (commands, _) ← parseModule path source
+      let (commands, _, _) ← parseModule path source
       let mut results := #[]
       let mut remaining := rangeArgs
       while !remaining.isEmpty do

@@ -542,6 +542,8 @@ macro_rules
 elab "t77TermElab" : term => `(0)
 elab "t77CommandElab" : command => pure ()
 elab "t77TacticElab" : tactic => throwUnsupportedSyntax
+elab "t77DoElemElab" : doElem => throwUnsupportedSyntax
+elab "t77UnknownCategoryElab" : t77UnknownCategory => throwUnsupportedSyntax
 syntax "t77CommandElabRules" : command
 syntax "t77TacticElabRules" : tactic
 elab_rules : command
@@ -561,6 +563,8 @@ elab_rules : tactic
                 ("source_term_macro_or_elaborator", "term"),
                 ("source_command_macro_or_elaborator", "command"),
                 ("source_tactic_macro_or_elaborator", "tactic"),
+                ("source_doElem_macro_or_elaborator", "doElem"),
+                ("source_t77UnknownCategory_macro_or_elaborator", "t77UnknownCategory"),
                 ("source_command_macro_or_elaborator", "command"),
                 ("source_tactic_macro_or_elaborator", "tactic"),
             ],
@@ -589,14 +593,123 @@ attribute [macro t77AttributeCommandKind] t77CommandExtension
             ],
         )
 
+    def test_specialized_elaborator_attributes_are_refused(self) -> None:
+        source = '''import Lean
+@[builtin_inductive_elab Lean.Parser.Command.inductive]
+def t77BuiltinInductiveExtension : Lean.Elab.Command.InductiveElabDescr := default
+attribute [inductive_elab Lean.Parser.Command.structure] t77BuiltinInductiveExtension
+attribute [builtin_doElem_control_info Lean.Parser.Term.doExpr] t77BuiltinInductiveExtension
+attribute [doElem_control_info Lean.Parser.Term.doExpr] t77BuiltinInductiveExtension
+attribute [quot_precheck Lean.Parser.Term.num] t77BuiltinInductiveExtension
+attribute [builtin_quot_precheck Lean.Parser.Term.num] t77BuiltinInductiveExtension
+attribute [grind_tactic Lean.Parser.Tactic.Grind.atom] t77BuiltinInductiveExtension
+attribute [builtin_grind_tactic Lean.Parser.Tactic.Grind.atom] t77BuiltinInductiveExtension
+attribute [try_tactic Lean.Parser.Tactic.exact] t77BuiltinInductiveExtension
+attribute [builtin_try_tactic Lean.Parser.Tactic.exact] t77BuiltinInductiveExtension
+attribute [sym_simproc Lean.Parser.Sym.Simp.control] t77BuiltinInductiveExtension
+attribute [builtin_sym_simproc Lean.Parser.Sym.Simp.control] t77BuiltinInductiveExtension
+attribute [sym_discharger Lean.Parser.Sym.Simp.control] t77BuiltinInductiveExtension
+attribute [builtin_sym_discharger Lean.Parser.Sym.Simp.control] t77BuiltinInductiveExtension
+attribute [sym_dsimproc Lean.Parser.Sym.Simp.control] t77BuiltinInductiveExtension
+attribute [builtin_sym_dsimproc Lean.Parser.Sym.Simp.control] t77BuiltinInductiveExtension
+attribute [try_suggestion] t77BuiltinInductiveExtension
+'''
+        result = self._inspect("Mathlib.T77SpecializedExtensionAttributes", source)
+        self.assertEqual(result["status"], "refused", result)
+        self.assertEqual(
+            [(risk["reason"], risk.get("attribute")) for risk in result["risks"]],
+            [
+                ("source_inductive_elab_attribute", "builtin_inductive_elab"),
+                ("source_inductive_elab_attribute", "inductive_elab"),
+                ("source_do_control_info_attribute", "builtin_doElem_control_info"),
+                ("source_do_control_info_attribute", "doElem_control_info"),
+                ("source_quotation_precheck_attribute", "quot_precheck"),
+                ("source_quotation_precheck_attribute", "builtin_quot_precheck"),
+                ("source_grind_tactic_attribute", "grind_tactic"),
+                ("source_grind_tactic_attribute", "builtin_grind_tactic"),
+                ("source_try_tactic_attribute", "try_tactic"),
+                ("source_try_tactic_attribute", "builtin_try_tactic"),
+                ("source_sym_simproc_attribute", "sym_simproc"),
+                ("source_sym_simproc_attribute", "builtin_sym_simproc"),
+                ("source_sym_discharger_attribute", "sym_discharger"),
+                ("source_sym_discharger_attribute", "builtin_sym_discharger"),
+                ("source_sym_dsimproc_attribute", "sym_dsimproc"),
+                ("source_sym_dsimproc_attribute", "builtin_sym_dsimproc"),
+                ("source_try_suggestion_attribute", "try_suggestion"),
+            ],
+        )
+
     def test_passive_command_and_tactic_syntax_remain_allowed(self) -> None:
         source = '''import Lean
 syntax "t77ParserOnlyCommand" : command
 syntax "t77ParserOnlyTactic" : tactic
+def parserNameIsOnlyAValue (term_parser : Nat) : Nat := term_parser
+def term_elab : Nat := 1
+def command_elab : Nat := term_elab
+def quotedParserAttribute := `(attr| term_parser)
+def quotedElaboratorAttribute := `(attr| command_elab)
 '''
         result = self._inspect("Mathlib.T77ParserOnly", source)
         self.assertEqual(result["status"], "ok", result)
         self.assertEqual(result["risks"], [])
+
+    def test_parser_registration_and_hook_attributes_are_refused(self) -> None:
+        source = '''import Lean
+@[builtin_term_parser] def t77HiddenTermParser : Lean.Parser.Parser :=
+  leading_parser:leadPrec "t77_hidden_term"
+def t77HiddenCommandParser : Lean.Parser.Parser :=
+  leading_parser "t77_hidden_command"
+attribute [command_parser] t77HiddenCommandParser
+attribute [builtin_command_parser] t77HiddenCommandParser
+attribute [term_parser] t77HiddenCommandParser
+def t77HiddenTacticParser : Lean.Parser.Parser :=
+  leading_parser "t77_hidden_tactic"
+attribute [builtin_tactic_parser] t77HiddenTacticParser
+attribute [tactic_parser] t77HiddenTacticParser
+def t77HiddenDoElemParser : Lean.Parser.Parser :=
+  leading_parser "t77_hidden_doElem"
+attribute [doElem_parser] t77HiddenDoElemParser
+attribute [builtin_doElem_parser] t77HiddenDoElemParser
+attribute [builtin_level_parser] t77HiddenDoElemParser
+attribute [builtin_syntax_parser] t77HiddenDoElemParser
+attribute [stx_parser] t77HiddenDoElemParser
+attribute [builtin_prec_parser] t77HiddenDoElemParser
+attribute [prec_parser] t77HiddenDoElemParser
+attribute [builtin_attr_parser] t77HiddenDoElemParser
+attribute [attr_parser] t77HiddenDoElemParser
+attribute [builtin_prio_parser] t77HiddenDoElemParser
+attribute [prio_parser] t77HiddenDoElemParser
+attribute [builtin_structInstFieldDecl_parser] t77HiddenDoElemParser
+attribute [run_parser_attribute_hooks] t77HiddenTermParser
+attribute [run_builtin_parser_attribute_hooks] t77HiddenTermParser
+'''
+        result = self._inspect("Mathlib.T77ParserRegistrationAttributes", source)
+        self.assertEqual(result["status"], "refused", result)
+        self.assertEqual(
+            [(risk["reason"], risk.get("attribute")) for risk in result["risks"]],
+            [
+                ("source_parser_attribute", "builtin_term_parser"),
+                ("source_parser_attribute", "command_parser"),
+                ("source_parser_attribute", "builtin_command_parser"),
+                ("source_parser_attribute", "term_parser"),
+                ("source_parser_attribute", "builtin_tactic_parser"),
+                ("source_parser_attribute", "tactic_parser"),
+                ("source_parser_attribute", "doElem_parser"),
+                ("source_parser_attribute", "builtin_doElem_parser"),
+                ("source_parser_attribute", "builtin_level_parser"),
+                ("source_parser_attribute", "builtin_syntax_parser"),
+                ("source_parser_attribute", "stx_parser"),
+                ("source_parser_attribute", "builtin_prec_parser"),
+                ("source_parser_attribute", "prec_parser"),
+                ("source_parser_attribute", "builtin_attr_parser"),
+                ("source_parser_attribute", "attr_parser"),
+                ("source_parser_attribute", "builtin_prio_parser"),
+                ("source_parser_attribute", "prio_parser"),
+                ("source_parser_attribute", "builtin_structInstFieldDecl_parser"),
+                ("source_parser_attribute_hook", "run_parser_attribute_hooks"),
+                ("source_parser_attribute_hook", "run_builtin_parser_attribute_hooks"),
+            ],
+        )
 
 
 if __name__ == "__main__":
