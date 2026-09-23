@@ -127,6 +127,7 @@ inductive Event where
        (args : Array Expr) (side : Array SideRec) (source? : Option Name)
        (localOrigin : Origin) (proj : String)
        (derivation? : Option RuleDerivation := none)
+       (sourceValue? : Option Expr := none)
   /-- A simproc firing (or any procedure-computed equation). -/
   | eq (pos : Pos) (source? : Option Name) (before after : Expr)
        (ctx : EvCtx) (side : Array SideRec)
@@ -210,9 +211,9 @@ def RuleDerivation.strip (base : Pos) (d : RuleDerivation) : RuleDerivation :=
     simproc? := d.simproc?.map (SimprocDerivation.strip base) }
 
 partial def Event.rebase (base : Pos) (ancestors : Array BinderSlot := #[]) : Event → Event
-  | .rw p o inv pr b a c args side src lo pj d =>
+  | .rw p o inv pr b a c args side src lo pj d sourceValue? =>
     .rw (base ++ p) o inv pr b a (c.rebase base ancestors) args side src lo pj
-      (d.map (RuleDerivation.rebase base))
+      (d.map (RuleDerivation.rebase base)) sourceValue?
   | .eq p s b a c side => .eq (base ++ p) s b a (c.rebase base ancestors) side
   | .defeq p k n b a c => .defeq (base ++ p) k n b a (c.rebase base ancestors)
   | .introCtx p f c i =>
@@ -237,7 +238,8 @@ def Event.pos : Event → Pos
 
 /-- Replace an event's position. -/
 def Event.reposition (q : Pos) : Event → Event
-  | .rw _ o inv pr b a c args side src lo pj d => .rw q o inv pr b a c args side src lo pj d
+  | .rw _ o inv pr b a c args side src lo pj d sourceValue? =>
+    .rw q o inv pr b a c args side src lo pj d sourceValue?
   | .eq _ s b a c side => .eq q s b a c side
   | .defeq _ k n b a c => .defeq q k n b a c
   | .introCtx _ f c i => .introCtx q f c i
@@ -256,9 +258,9 @@ def Event.strip (base : Pos) : Event → Event
     else
       let q := p.extract base.size p.size
       match ev with
-      | .rw _ o inv pr b a c args side src lo pj d =>
+      | .rw _ o inv pr b a c args side src lo pj d sourceValue? =>
         .rw q o inv pr b a (c.strip base) args side src lo pj
-          (d.map (RuleDerivation.strip base))
+          (d.map (RuleDerivation.strip base)) sourceValue?
       | .eq _ s b a c side => .eq q s b a (c.strip base) side
       | .defeq _ k n b a c => .defeq q k n b a (c.strip base)
       | .introCtx _ f c i =>

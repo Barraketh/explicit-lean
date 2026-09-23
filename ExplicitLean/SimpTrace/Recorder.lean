@@ -333,6 +333,68 @@ def sourceArgInfo? (ref : TraceRef) (o : Origin) : Simp.SimpM (Option SourceArg)
     if arg.startByte == start && arg.endByte == stop then return some arg
   return none
 
+/-- Detect metavariable holes occupying explicit binders in an elaborated
+source application. Implicit and instance-implicit metavariables are
+intentionally allowed: the redex supplies those in ordinary Lean elaboration.
+A hole occupying an explicit binder is not accepted as evidence that the
+source supplied that argument. Recurse into nested applications and consult
+each binder's actual `BinderInfo`, rather than searching source text or names.
+
+This is a binder-level check, not a claim about how the hole was spelled: an
+explicitly written `@lemma _` still occupies an implicit binder. -/
+partial def hasExplicitSourceHole (e : Expr) : Simp.SimpM Bool := go e false
+where
+  go (e : Expr) (allowRootMVar : Bool) : Simp.SimpM Bool := do
+    match e with
+    | .mvar _ => return !allowRootMVar
+    | .app .. =>
+      let fn := e.getAppFn
+      let args := e.getAppArgs
+      if ← go fn false then return true
+      let mut type ← try inferType fn catch _ => return true
+      for arg in args do
+        type ← try whnf type catch _ => return true
+        match type with
+        | .forallE _ _ body bi =>
+          if ← go arg (bi.isImplicit || bi.isInstImplicit) then return true
+          type := body.instantiate1 arg
+        | _ => return true
+      return false
+    | .lam _ domain body _ | .forallE _ domain body _ =>
+      if ← go domain false then return true
+      go body false
+    | .letE _ type value body _ =>
+      if ← go type false then return true
+      if ← go value false then return true
+      go body false
+    | .mdata _ body => go body allowRootMVar
+    | .proj _ _ value => go value false
+    | .bvar _ | .fvar _ | .sort _ | .const .. | .lit _ => return false
+
+partial def instantiateSourceLevel (mctx : MetavarContext) : Level → Level
+  | .mvar id =>
+    match mctx.lAssignment.find? id with
+    | some level => instantiateSourceLevel mctx level
+    | none => .mvar id
+  | .succ level => .succ (instantiateSourceLevel mctx level)
+  | .max lhs rhs => .max (instantiateSourceLevel mctx lhs) (instantiateSourceLevel mctx rhs)
+  | .imax lhs rhs => .imax (instantiateSourceLevel mctx lhs) (instantiateSourceLevel mctx rhs)
+  | .zero => .zero
+  | .param name => .param name
+
+/-- Instantiate universe assignments through an Expr before its temporary
+metavariable context is popped. Expr-level term instantiation alone leaves
+universe mvars intact, which would make validator evidence refer to dead ids. -/
+def instantiateSourceValueLevels (e : Expr) : Simp.SimpM Expr := do
+  let mctx ← getMCtx
+  return e.replaceLevel fun level =>
+    match level with
+    | .mvar id =>
+      match mctx.lAssignment.find? id with
+      | some _ => some (instantiateSourceLevel mctx level)
+      | none => none
+    | _ => none
+
 def originalType? (o : Origin) : Simp.SimpM (Option Expr) := do
   match o with
   | .decl n _ _ => return (← getEnv).find? n |>.map (·.type)
@@ -441,9 +503,19 @@ def derivationFor (_ref : TraceRef) (o : Origin) (constructionOrigin : Origin)
 /-- A copy of `Simp.tryTheoremCore` with event-time provenance capture. -/
 def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     (thm : SimpTheorem) (numExtraArgs : Nat) (rflOnly : Bool) :
-    Simp.SimpM (Option (Simp.Result × RuleDerivation × Pos × Expr × Expr)) := do
+    Simp.SimpM (Option (Simp.Result × RuleDerivation × Pos × Expr × Expr × Option Expr)) := do
   withNewMCtxDepth do
     let val ← thm.getValue
+    let sourceInfo? ← sourceArgInfo? ref thm.origin
+    -- Snapshot the source elaboration *before* matcher unification can fill
+    -- any metavariables from the redex. The expression may still contain
+    -- implicit/typeclass metavariables that ordinary elaboration resolves from
+    -- the matched proposition; these remain internal and are never printed.
+    let sourceValue? ← match thm.origin with
+      | .stx .. => do
+        let value ← instantiateMVars val
+        if ← hasExplicitSourceHole value then pure none else pure (some value)
+      | _ => pure none
     let type ← inferType val
     let (xs, bis, type) ← forallMetaTelescopeReducing type
     let type ← whnf (← instantiateMVars type)
@@ -477,7 +549,6 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     let pos := (← ref.get).pos
     let redexPos := pos ++ Array.replicate numExtraArgs 0
     let env ← getEnv
-    let sourceInfo? ← sourceArgInfo? ref thm.origin
     let (resolvedConstructionOrigin, _, _, _) ←
       resolveStxOrigin thm.origin ((sourceInfo?.map (·.headLocal)).getD false)
     let constructionOrigin := match resolvedConstructionOrigin with
@@ -506,8 +577,19 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
       | o => o
     let derivation ← derivationFor ref thm.origin constructionOrigin type redexPos
       numExtraArgs binders discharges
+    -- Resolve only assignments Lean made while matching/synthesizing the
+    -- source theorem, without reconstructing or appending any argument. Do not
+    -- let metavariable ids created at this local depth escape into the event.
+    let sourceValue? ← match sourceValue? with
+      | some value => do
+        let value ← instantiateMVars value
+        let value ← instantiateSourceValueLevels value
+        if value.hasLevelMVar then pure none
+        else if ← hasAssignableMVar value then pure none
+        else pure (some value)
+      | none => pure none
     Simp.recordSimpTheorem thm.origin
-    return some (result, derivation, redexPos, core, rhs)
+    return some (result, derivation, redexPos, core, rhs, sourceValue?)
 
 def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
     (tree : SimpTheoremTree) (erased : PHashSet Origin) (rflOnly : Bool) :
@@ -518,7 +600,7 @@ def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
     if erased.contains thm.origin then return none
     if rflOnly && !(thm.rfl || (useBackward && thm.backwardRfl)) then
       return none
-    if let some (result, derivation, pos, before, after) ←
+    if let some (result, derivation, pos, before, after, sourceValue?) ←
         tryTheoremOperational? ref tag e thm extra rflOnly then
       let evCtx ← captureEvCtx ref
       let sides := (← ref.get).pendingSide
@@ -529,7 +611,7 @@ def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
         resolveStxOrigin thm.origin ((sourceInfo?.map (·.headLocal)).getD false)
       let prop? ← propFlag? resolved result.expr evCtx.lctx evCtx.insts
       ref.modify (·.push (.rw pos thm.origin (inv != rinv) prop? before after evCtx
-        rargs sides none resolved rproj (some derivation)))
+        rargs sides none resolved rproj (some derivation) sourceValue?))
       return some result
     return none
   if (← Simp.getConfig).index then

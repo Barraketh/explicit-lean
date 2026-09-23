@@ -237,7 +237,7 @@ partial def eventToStep (ur : IO.Ref Unresolved)
     (contextualFVars : Array (FVarId × Nat))
     (ev : Event) : MetaM (Option Step) := do
   match ev with
-  | .rw pos o inv prop? before after c args side src? localO proj derivation? =>
+  | .rw pos o inv prop? before after c args side src? localO proj derivation? _sourceValue? =>
     let beforePP ← ppIn c before
     let afterPP ← ppIn c after
     -- `dir` still comes from the written syntax, which is what carries a
@@ -675,6 +675,35 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
       return some (lhs, rhs, unfilled)
     return none
 
+/-- Read the actual theorem application supplied by a directly authenticated
+source argument. Its explicit arguments are already part of `value`; opening
+its remaining telescope therefore leaves only the parameters that simp matched
+or discharged. This expression is validator-only and is never serialized. -/
+def rwStatementFromValue? (value : Expr) (prop? : Option Bool) :
+    MetaM (Option (Expr × Expr × Array Expr)) := do
+  -- Do not let ambient matching fill holes in an incompletely elaborated source
+  -- argument. Only an exact elaborated term is suitable as source evidence.
+  if ← hasAssignableMVar value then return none
+  let (mvars, bis, concl) ← forallMetaTelescope (← inferType value)
+  let mut unfilled : Array Expr := #[]
+  for mvar in mvars, bi in bis do
+    if bi == .default then unfilled := unfilled.push mvar
+  let concl ← instantiateMVars concl
+  match prop? with
+  | some true => return some (concl, mkConst ``True, unfilled)
+  | some false =>
+    if let some p := concl.not? then return some (p, mkConst ``False, unfilled)
+    let unfolded ← whnfR concl
+    if let some p := unfolded.not? then return some (p, mkConst ``False, unfilled)
+    return some (concl, mkConst ``False, unfilled)
+  | none =>
+    if let some (_, lhs, rhs) := concl.eq? then return some (lhs, rhs, unfilled)
+    if let some (lhs, rhs) := concl.iff? then return some (lhs, rhs, unfilled)
+    let concl ← whnfR concl
+    if let some (_, lhs, rhs) := concl.eq? then return some (lhs, rhs, unfilled)
+    if let some (lhs, rhs) := concl.iff? then return some (lhs, rhs, unfilled)
+    return none
+
 /-- The origin to *validate* against: a `.stx` names no declaration, so
 `rwStatement?` cannot read a statement from it and the step went unchecked
 entirely -- which is how `dif_pos`, whose explicit condition proof `rw` cannot
@@ -694,7 +723,8 @@ Returns `none` on success, or a classified reason.
 -/
 def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
     (prop? : Option Bool) (before after : Expr) (c : EvCtx)
-    (hasSides : Bool := false) (proj : String := "") : MetaM (Option String) :=
+    (hasSides : Bool) (proj : String) (sourceValue? : Option Expr) :
+    MetaM (Option String) :=
   withLCtx c.lctx c.insts do
 
     let name ← match o with
@@ -706,7 +736,10 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
       | .other n => pure n.toString
     try
       withoutModifyingState do
-        let some (lhs, rhs, unfilled) ← rwStatement? o args prop? proj
+        let statement? ← match sourceValue? with
+          | some value => rwStatementFromValue? value prop?
+          | none => rwStatement? o args prop? proj
+        let some (lhs, rhs, unfilled) := statement?
           -- No statement to read means the step cannot be verified at all.
           -- Round 7 made an unresolvable *origin* classified; this is the other
           -- half — a resolvable origin whose statement we cannot read — and
@@ -809,7 +842,10 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
         unless hasSides do
           let lhsOnly ← withoutModifyingState do
             withReducibleAndInstances do
-              let some (l, r, unf) ← rwStatement? o args prop? proj | pure true
+              let statement? ← match sourceValue? with
+                | some value => rwStatementFromValue? value prop?
+                | none => rwStatement? o args prop? proj
+              let some (l, r, unf) := statement? | pure true
               -- The side `rw` matches against, in the recorded direction.
               let matched := if inv then r else l
               if ← isDefEq matched beforeCore then
@@ -827,9 +863,21 @@ mutual
 partial def classifyEventTree (ur : IO.Ref Unresolved) (ev : Event) :
     MetaM ValidationVerdict := do
   match ev with
-  | .rw _ o inv prop? b a c args sides _ lo pj _ =>
-    let reason? ← checkRwStep (resolvedOrigin o lo) args inv prop? b a c
-      (!sides.isEmpty) pj
+  | .rw _ o inv prop? b a c args sides _ lo pj derivation? sourceValue? =>
+    let sourceKind? := derivation?.bind fun d => d.source?
+    let sourceArgId? := derivation?.bind fun d => d.argId?
+    let sourceMarked := sourceKind? == some "simp-argument"
+    let sourceError? :=
+      if sourceMarked && sourceArgId?.isNone then some "unauthenticated_source_application"
+      else if sourceMarked && sourceValue?.isNone then some "missing_source_application"
+      else if !sourceMarked && sourceValue?.isSome then some "untrusted_source_application"
+      else none
+    let reason? ← match sourceError? with
+      | some reason => pure (some reason)
+      | none => do
+        let hasSides := !sides.isEmpty
+        let value? := if sourceMarked then sourceValue? else none
+        checkRwStep (resolvedOrigin o lo) args inv prop? b a c hasSides pj value?
     if let some reason := reason? then ur.modify (·.add reason)
     let sideVerdicts ← sides.mapM fun sd => classifyEventArray ur sd.events
     return .mk reason? sideVerdicts #[]
@@ -909,7 +957,7 @@ partial def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
     let verdict ← classifyEventTree ur ev
     verdicts := verdicts.push verdict
     let (pos, before, after, c) ← match ev with
-      | .rw pos _ _ _ b a c _ _ _ _ _ _ =>
+      | .rw pos _ _ _ b a c .. =>
         pure (pos, b, a, c)
       | .eq pos _ b a c _ => pure (pos, b, a, c)
       | .defeq pos _ _ b a c => pure (pos, b, a, c)
