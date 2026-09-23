@@ -665,7 +665,11 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
     if let some p := concl.not? then return some (p, mkConst ``False, unfilled)
     let unfolded ← whnfR concl
     if let some p := unfolded.not? then return some (p, mkConst ``False, unfilled)
-    return some (concl, mkConst ``False, unfilled)
+    -- `prop:false` records evidence for `¬ p` (or its `p = False`
+    -- conversion), never an arbitrary proof of `p`. Treating an unrelated
+    -- proposition proof as `(p, False)` would make e.g. `True.intro` appear to
+    -- justify rewriting `True` to `False`.
+    return none
   | none =>
     -- Read the statement as written first.  Unfolding is only a fallback, for a
     -- conclusion hidden behind an abbreviation; applying it eagerly rewrites
@@ -720,7 +724,9 @@ def rwStatementFromValue? (value : Expr) (prop? : Option Bool) :
     if let some p := concl.not? then return some (p, mkConst ``False, unfilled)
     let unfolded ← whnfR concl
     if let some p := unfolded.not? then return some (p, mkConst ``False, unfilled)
-    return some (concl, mkConst ``False, unfilled)
+    -- Match the proposition-proof contract in `elabProposition`: a proof of
+    -- an arbitrary proposition cannot justify replacing it by `False`.
+    return none
   | none =>
     if let some (_, lhs, rhs) := concl.eq? then return some (lhs, rhs, unfilled)
     if let some (lhs, rhs) := concl.iff? then return some (lhs, rhs, unfilled)

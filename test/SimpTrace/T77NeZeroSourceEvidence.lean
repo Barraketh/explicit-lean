@@ -40,4 +40,17 @@ run_cmd do
     unless reason.any (String.startsWith · "unassigned_explicit_argument:") do
       throwError "expected a missing explicit argument to fail closed, got {reason}"
 
+/- A proof of an arbitrary proposition is not evidence that it is false. -/
+run_cmd do
+  Lean.Elab.Command.liftTermElabM do
+    let reason ← checkRwStep (.decl ``True.intro true false) #[] false
+      (some false) (mkConst ``True) (mkConst ``False) {} false ""
+      (some (mkConst ``True.intro))
+    unless reason.any (String.startsWith · "unreadable_rw_statement:") do
+      throwError "a proof of True was accepted as evidence that True is false: {reason}"
+    let declarationReason ← checkRwStep (.decl ``True.intro true false) #[] false
+      (some false) (mkConst ``True) (mkConst ``False) {} false "" none
+    unless declarationReason.any (String.startsWith · "unreadable_rw_statement:") do
+      throwError "a declaration proof of True was accepted as evidence that True is false: {declarationReason}"
+
 end ExplicitLean.SimpTrace.T77NeZeroSourceEvidence
