@@ -467,6 +467,50 @@
    "expect": ["explicit_rw [foo at []] at h"]
   },
   {
+   "name": "hypothesis_close_absurd",
+   "why": "a hypothesis rewrite is followed by the exact goal closer as an ordinary tactic",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo] at h",
+             "locations": [{"loc": {"hyp": "h"}, "pre": "P", "post": "False",
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd"}],
+                            "close": {"by": "absurd:h"}}]},
+   "expect": ["explicit_rw [foo at []] at h; exact h.elim"]
+  },
+  {
+   "name": "hypothesis_close_assumption",
+   "why": "a recorded assumption closer follows the hypothesis rewrite without guessing",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo] at h",
+             "locations": [{"loc": {"hyp": "h"}, "pre": "P", "post": "P",
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd"}],
+                            "close": {"by": "assumption:h"}}]},
+   "expect": ["explicit_rw [foo at []] at h; exact h"]
+  },
+  {
+   "name": "hypothesis_close_true_intro",
+   "why": "true_intro uses the same exact close mapping after a hypothesis rewrite",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo] at h",
+             "locations": [{"loc": {"hyp": "h"}, "pre": "P", "post": "True",
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd"}],
+                            "close": {"by": "true_intro"}}]},
+   "expect": ["explicit_rw [foo at []] at h; exact True.intro"]
+  },
+  {
+   "name": "hypothesis_close_rfl",
+   "why": "rfl uses the same exact close mapping after a hypothesis rewrite",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo] at h",
+             "locations": [{"loc": {"hyp": "h"}, "pre": "P", "post": "P",
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd"}],
+                            "close": {"by": "rfl"}}]},
+   "expect": ["explicit_rw [foo at []] at h; rfl"]
+  },
+  {
    "name": "multi_location",
    "why": "spec: `at h ⊢` and `at *` become one explicit_rw per location, in order",
    "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
@@ -480,6 +524,21 @@
                             "close": {"by": "true_intro"}}]},
    "expect": ["explicit_rw [foo at []] at h",
               "explicit_rw [← bar at [1]] then exact True.intro"]
+  },
+  {
+   "name": "multi_location_terminal_hypothesis_close",
+   "why": "non-closing locations run first, and the unique hypothesis closer is last",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo] at h1 h2",
+             "locations": [{"loc": {"hyp": "h1"}, "pre": "P", "post": "Q",
+                            "steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                       "dir": "fwd"}], "close": null},
+                           {"loc": {"hyp": "h2"}, "pre": "R", "post": "False",
+                            "steps": [{"kind": "rw", "pos": [], "name": "bar",
+                                       "dir": "fwd"}],
+                            "close": {"by": "absurd:h2"}}]},
+   "expect": ["explicit_rw [foo at []] at h1",
+              "explicit_rw [bar at []] at h2; exact h2.elim"]
   },
   {
    "name": "no_close_leaves_goal_open",
@@ -504,6 +563,21 @@
    "name": "no_locations",
    "trace": {"schema": "simp-trace-v1", "locations": []},
    "error": "bad_trace"
+  },
+  {
+   "name": "nonterminal_location_close",
+   "trace": {"schema": "simp-trace-v1",
+             "locations": [{"loc": "goal", "steps": [], "close": {"by": "rfl"}},
+                           {"loc": {"hyp": "h"}, "steps": [], "close": null}]},
+   "error": "nonterminal_location_close"
+  },
+  {
+   "name": "multiple_location_closes",
+   "trace": {"schema": "simp-trace-v1",
+             "locations": [{"loc": {"hyp": "h"}, "steps": [],
+                            "close": {"by": "absurd:h"}},
+                           {"loc": "goal", "steps": [], "close": {"by": "rfl"}}]},
+   "error": "multiple_location_closes"
   }
  ],
 

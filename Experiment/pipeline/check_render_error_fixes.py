@@ -122,6 +122,33 @@ def main() -> int:
     assert "eq_self at [] ]" in output, output
     assert "eq_self at []]" not in output, output
 
+    # A hypothesis close is rendered as an `at h` rewrite followed by the
+    # exact recorded ordinary goal closer, and the source-splice formatter
+    # keeps both tactics in the generated proof.
+    hyp_close_source = (
+        "example (P : Prop) (h : P) (hFalse : P = False) : False := by\n"
+        "  simp at h\n"
+    )
+    hyp_close_trace = {
+        "schema": "simp-trace-v1",
+        "module": "Fixture",
+        "occurrence": "1",
+        "invocation": 0,
+        "invocations": 1,
+        "locations": [{
+            "loc": {"hyp": "h"},
+            "pre": "P",
+            "post": "False",
+            "steps": [{"kind": "rw", "pos": [], "name": "hFalse", "dir": "fwd"}],
+            "close": {"by": "absurd:h"},
+        }],
+    }
+    hyp_close = rendered(hyp_close_source, hyp_close_trace)
+    assert hyp_close["status"] == "rendered", hyp_close
+    assert hyp_close["lines"][-1] == (
+        "  explicit_rw [hFalse at [] ] at h; exact h.elim"
+    ), hyp_close["lines"]
+
     # Preserve fail-closed behavior when source after the call is outside the
     # exact branch-spine grammar.
     unsupported = rendered(
@@ -168,7 +195,7 @@ def main() -> int:
     )
     assert alternative["status"] == "structurally_refused", alternative
 
-    print(f"passed {len(fail_closed) + 11} focused renderer regressions")
+    print(f"passed {len(fail_closed) + 12} focused renderer regressions")
     return 0
 
 

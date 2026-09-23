@@ -903,16 +903,12 @@ def render_location(loc: dict, depth: int = 0, *, source_text: Any = None,
     close = loc.get("close")
     if close is not None:
         if clause is not None:
-            # T2 is explicit that the `then` clause applies to the goal; a
-            # hypothesis rewrite leaves its closer to the next line. Nothing in
-            # this corpus exercises it, so refuse rather than guess.
-            raise RenderError(
-                "close_on_hyp",
-                "location rewrites a hypothesis and also carries a close; the "
-                "tactic's `then` clause applies to the goal only",
-                side="t2",
-            )
-        body += " then " + render_close(close)
+            # `then` belongs to explicit_rw's goal-closing syntax, not to an
+            # `at h` rewrite.  Sequence the exact recorded goal closer after
+            # the hypothesis rewrite as a separate ordinary tactic.
+            body += "; " + render_close(close)
+        else:
+            body += " then " + render_close(close)
     return body, clause
 
 
@@ -920,10 +916,11 @@ def render_trace(trace: dict, *, source_text: Any = None,
                  operational: bool | None = None) -> tuple[list[str], list[int]]:
     """Render a whole trace.
 
-    Returns one `explicit_rw` line per location, in order, plus the ordered
+    Returns one tactic string per location, in order, plus the ordered
     `ctxIndex` list of inaccessible locals the caller turns into `rename_i`.
     The spec's multi-location forms (`at h ⊢`, `at *`) become one `explicit_rw`
-    per location; they are separate tactics because each names its own location.
+    per location. A location close is unique and terminal: closes cannot be
+    followed by another location's tactics.
     """
     if not isinstance(trace, dict):
         raise RenderError("bad_trace", "trace is not an object")
@@ -934,6 +931,21 @@ def render_trace(trace: dict, *, source_text: Any = None,
     locations = trace.get("locations")
     if not isinstance(locations, list) or not locations:
         raise RenderError("bad_trace", "trace has no locations")
+
+    closing = [index for index, loc in enumerate(locations)
+               if isinstance(loc, dict) and loc.get("close") is not None]
+    if len(closing) > 1:
+        raise RenderError(
+            "multiple_location_closes",
+            "trace has multiple location closes; their goal-closing order is ambiguous",
+            side="t2",
+        )
+    if closing and closing[0] != len(locations) - 1:
+        raise RenderError(
+            "nonterminal_location_close",
+            "a location close is followed by later location tactics",
+            side="t2",
+        )
 
     if operational is None:
         operational = trace.get("schema") == "simp-trace-v2"
