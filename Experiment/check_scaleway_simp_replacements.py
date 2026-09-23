@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mock-only contract tests for the two-worker Scaleway controller."""
+"""Mock-only contract tests for the bounded multi-worker Scaleway controller."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import sqlite3
+import shutil
 import tarfile
 import tempfile
 from types import SimpleNamespace
@@ -42,6 +44,9 @@ def blocked(function: Any) -> None:
 def setup(root: Path, *, machine_type: str = "GP1-L", minimum_memory_gib: int = 128,
           minimum_local_disk_gib: int = 200, root_volume: str = "local:559GB") -> tuple[Path, Path, Path, Path]:
     repo = root / "repo"; repo.mkdir()
+    (repo / "Experiment").mkdir()
+    (repo / "Experiment" / "simp_replacement_worker.py").write_text("# mock worker script\n", encoding="utf-8")
+    (repo / "Experiment" / "retry_missing_traces.py").write_text("# mock retry worker script\n", encoding="utf-8")
     job_root = root / "jobs"; job_root.mkdir()
     baseline = root / "baseline.sqlite3"
     with sqlite3.connect(baseline) as con:
@@ -83,6 +88,51 @@ def setup(root: Path, *, machine_type: str = "GP1-L", minimum_memory_gib: int = 
     }
     policy_path = root / "policy.json"; policy_path.write_text(json.dumps(policy), encoding="utf-8")
     return repo, job_root, identity, policy_path
+
+
+def configure_generic_jobs(root: Path, *, count: int = 8) -> tuple[Path, Path, Path, list[str]]:
+    repo, job_root, _identity, policy_path = setup(root)
+    if not 2 <= count <= pilot.MAX_INITIAL_WORKERS:
+        raise AssertionError("invalid generic test job count")
+    for entry in list(job_root.iterdir()):
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+    modules = [f"Mathlib.Test.Job{index:03d}" for index in range(count)]
+    baseline = root / "generic-baseline.sqlite3"
+    with sqlite3.connect(baseline) as con:
+        con.execute("CREATE TABLE modules(name TEXT PRIMARY KEY)")
+        con.execute("CREATE TABLE simp_replacements(module_name TEXT NOT NULL, ordinal INTEGER NOT NULL, status TEXT NOT NULL, PRIMARY KEY(module_name, ordinal))")
+        for module in modules:
+            con.execute("INSERT INTO modules VALUES (?)", (module,))
+            con.execute("INSERT INTO simp_replacements VALUES (?, 0, 'record_failed')", (module,))
+    baseline_bytes = baseline.read_bytes()
+    jobs = []
+    for index, module in enumerate(modules):
+        job_dir = job_root / f"job-{index:03d}"; job_dir.mkdir()
+        manifest = job_dir / "modules.txt"; manifest.write_text(module + "\n", encoding="utf-8")
+        database = job_dir / "mathlib-db.sqlite3"; database.write_bytes(baseline_bytes)
+        traces = job_dir / "trace-artifacts"; traces.mkdir()
+        nested = traces / "subset"; nested.mkdir()
+        (nested / f"trace-{index:03d}.json").write_text(json.dumps({"module": module}), encoding="utf-8")
+        inputs = [{"path": "trace-artifacts", "sha256": pilot._input_tree_digest(traces)}]
+        jobs.append({"id": f"job-{index:03d}", "directory": str(job_dir.resolve()),
+                     "manifest_sha256": pilot.sha256_file(manifest),
+                     "database_sha256": pilot.sha256_file(database), "inputs": inputs})
+    policy = json.loads(policy_path.read_text())
+    policy["jobs"] = jobs
+    policy["requirements"]["worker_count"] = count
+    policy["worker_argv"] = [
+        "python3", "-B", "Experiment/retry_missing_traces.py",
+        "--database", "{database}", "--manifest", "{manifest}",
+        "--artifacts-root", "{job_dir}/trace-artifacts", "--scratch", "{scratch}",
+        "--statuses", "record_failed,render_failed,compile_failed", "--retry-failed",
+        "--refresh-recorded",
+    ]
+    policy["workset"] = {"module_count": count, "modules_sha256": pilot.module_set_sha256(modules)}
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    return repo, job_root, policy_path, modules
 
 
 class Provider:
@@ -170,7 +220,7 @@ class Provider:
         if cmd[:3] == ("instance", "server", "create"):
             cloud = next(arg.split("=", 1)[1].removeprefix("@") for arg in cmd if arg.startswith("cloud-init=@"))
             assert "OnCalendar=" in Path(cloud).read_text()
-            assert "tags.1=two-workers" in cmd
+            worker_tag = next(arg for arg in cmd if arg.startswith("tags.1="))
             volume_entry = {"id": VOLUME_ID,
                 "size": self.volume_size_gb * 1_000_000_000 if self.volume_size_gb is not None else None,
                 "volume_type": self.volume_type, "boot": self.volume_boot, "zone": "nl-ams-1"}
@@ -186,7 +236,7 @@ class Provider:
             ip_record = {"id": IP_ID, "address": "198.51.100.4", "family": "inet", "state": "attached"}
             self.server = {"id": SERVER, "name": next(x.split("=", 1)[1] for x in cmd if x.startswith("name=")),
                 "project": PROJECT, "zone": "nl-ams-1", "commercial_type": self.machine_type,
-                "tags": ["explicit-lean-simp-pilot", "two-workers"],
+                "tags": ["explicit-lean-simp-pilot", worker_tag.split("=", 1)[1]],
                 "image": {"id": LOCAL_IMAGE, "name": "Ubuntu 24.04 Noble Numbat", "arch": "x86_64", "zone": "nl-ams-1"},
                 "security_group": {"id": SG, "name": "pilot"},
                 "ssh_key_id": KEY,
@@ -324,6 +374,46 @@ def test_policy_cost_deadline_worker_count_and_job_hashes_fail_closed() -> None:
             blocked(lambda: pilot.validate_policy(bad, NOW))
         (jobs / "job-001" / "modules.txt").write_text("Mathlib.Other\n")
         blocked(lambda: pilot.validate_job_root(jobs, policy["jobs"]))
+
+
+def test_generic_policy_pins_disjoint_workset_inputs_and_bounded_remote_space() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, policy_path, modules = configure_generic_jobs(root)
+        policy = json.loads(policy_path.read_text())
+        checked = pilot.validate_policy(policy, NOW)
+        result = pilot.validate_job_root(jobs, checked["jobs"], workset=checked["workset"])
+        assert len(result) == 8 and {module for job in result for module in job["modules"]} == set(modules)
+        assert checked["generic_worker"] and checked["worker_count"] == 8
+        assert all(job["inputs_sha256"] == pilot.job_inputs_sha256(job["inputs"]) for job in result)
+        assert pilot.aggregate_archive_limit_bytes(8) == pilot.MAX_TOTAL_ARCHIVE_BYTES == 32 * 1024**3
+        assert pilot.worker_output_limit_bytes(8) == 4 * 1024**3
+        assert pilot.worker_output_mount_bytes(8) == 4 * 1024**3 - pilot.WORKER_LOG_MAX_BYTES - pilot.COMPLETE_MARKER_MAX_BYTES
+        assert pilot.worker_archive_limit_bytes(8) == 4 * 1024**3
+        assert 8 * (pilot.worker_output_mount_bytes(8) + pilot.WORKER_LOG_MAX_BYTES
+                   + pilot.COMPLETE_MARKER_MAX_BYTES) <= pilot.MAX_TOTAL_EXTRACTED_BYTES
+        remote_job = pilot.expected_remote_job_directory(checked) + "/job-000"
+        argv = pilot.expand_worker_argv(checked["worker_argv"], remote_job)
+        database_path = argv[argv.index("--database") + 1]
+        assert database_path == remote_job + "/.worker-output/mathlib-db.sqlite3"
+        assert "/.lake/private/T77-error-fix-20260923/" in database_path
+        assert pilot.remote_output_reserve_bytes(8) == (
+            pilot.MAX_TOTAL_EXTRACTED_BYTES + 32 * 1024**3 + pilot.REMOTE_OPERATIONAL_RESERVE_BYTES)
+        assert pilot.remote_output_reserve_bytes(8) == 80 * 1024**3
+        assert pilot.remote_output_reserve_bytes(8) + sum(job["input_bytes"] for job in result) > pilot.remote_output_reserve_bytes(8)
+
+        scratch = jobs / "job-000" / "scratch"; scratch.mkdir()
+        policy["jobs"][0]["inputs"].append({"path": "scratch", "sha256": pilot._input_tree_digest(scratch)})
+        policy["jobs"][0]["inputs"].sort(key=lambda item: item["path"])
+        blocked(lambda: pilot.validate_policy(policy, NOW))
+        shutil.rmtree(scratch)
+
+        # The policy hash authenticates exact shared and per-job immutable inputs;
+        # a changed trace byte is rejected before launch.
+        policy = json.loads(policy_path.read_text())
+        trace = jobs / "job-003" / "trace-artifacts" / "subset" / "trace-003.json"
+        trace.write_text('{"module":"tampered"}\n', encoding="utf-8")
+        blocked(lambda: pilot.validate_job_root(jobs, policy["jobs"],
+                                                workset=policy["workset"]))
 
 
 def test_machine_and_root_volume_policy_is_explicit_and_fail_closed() -> None:
@@ -523,6 +613,102 @@ def test_create_and_two_workers_launch_concurrently_with_remote_hash_check() -> 
         assert any("UserKnownHostsFile=" in " ".join(command) for command in provider.commands if command and command[0] == "scp")
         state = json.loads((root / "state.json").read_text())
         assert [job["phase"] for job in state["jobs"]] == ["running", "running"]
+
+
+def test_eight_generic_workers_launch_with_authenticated_inputs_and_disk_gate() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, path, _ = configure_generic_jobs(root, count=8)
+        provider = Provider(); controller = ctl(root, path, provider)
+        state = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        (root / "pilot_known_hosts").write_text(
+            "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+        ssh_calls: list[tuple[str, ...]] = []
+        launches: list[str] = []
+        immutable_calls: list[str] = []
+
+        def ssh_fake(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            del timeout
+            ssh_calls.append(args)
+            command = " ".join(args)
+            if "verify_job_inputs" in command:
+                assert "cd /opt/explicit-lean &&" in command, "remote verifier omitted pinned checkout cwd"
+            if "chmod a-w" in command:
+                immutable_calls.append(command)
+            if "REMOTE_FREE_BYTES=" in command:
+                output = f"REMOTE_FREE_BYTES={200 * 1024**3}\n"
+            elif "NOT_LAUNCHED" in command:
+                output = "NOT_LAUNCHED\n"
+            elif "nohup bash -lc" in command:
+                shell_args = shlex.split(args[-1])
+                assert len(shell_args) == 1
+                syntax = subprocess.run(["sh", "-n", "-c", shell_args[0]],
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                assert syntax.returncode == 0, syntax.stderr.decode(errors="replace")
+                launches.append(command)
+                output = f"RUNNING {4310 + len(launches)}\n"
+            else:
+                output = ""
+            return subprocess.CompletedProcess(args, 0, output, "")
+
+        controller._ssh = ssh_fake  # type: ignore[method-assign]
+        running = controller.run_workers(job_root=jobs, repo_root=repo)
+        assert running["phase"] == "workers-running" and len(running["jobs"]) == 8
+        uploads = [command for command in provider.external_commands if command[0] == "scp"]
+        assert len(uploads) == 1 and sum(str(jobs / f"job-{index:03d}") in arg
+                                         for index in range(8) for arg in uploads[0]) == 8
+        assert uploads[0][-1].endswith(
+            "@198.51.100.4:/opt/explicit-lean/.lake/private/T77-error-fix-20260923/remote-jobs/")
+        assert sum("REMOTE_FREE_BYTES=" in " ".join(args) for args in ssh_calls) == 2
+        assert len(launches) == 8
+        assert len(immutable_calls) == 8
+        assert all("trace-artifacts" in command and "modules.txt" in command
+                   and "mathlib-db.sqlite3" in command for command in immutable_calls)
+        for index, command in enumerate(launches):
+            job_id = f"job-{index:03d}"
+            assert job_id in command and "Experiment/retry_missing_traces.py" in command
+            remote_job = "/opt/explicit-lean/.lake/private/T77-error-fix-20260923/remote-jobs/" + job_id
+            assert "--artifacts-root " + remote_job + "/trace-artifacts" in command
+            assert "--scratch " + remote_job + "/.worker-output/scratch" in command
+            assert "size=" + str(pilot.worker_output_mount_bytes(8)) in command
+            assert "nr_inodes=" + str(pilot.MAX_TAR_MEMBERS // 8) in command
+            assert "finalize-worker" in command
+            assert "EXPLICIT_LEAN_WORKER_ARGV_SHA256=" in command and "/proc/$p/cmdline" in command
+        saved = json.loads((root / "state.json").read_text())
+        assert [job["phase"] for job in saved["jobs"]] == ["running"] * 8
+        assert all(job["inputs_sha256"] and job["worker_argv_sha256"] for job in saved["jobs"])
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, path, _ = configure_generic_jobs(root, count=2)
+        provider = Provider(); controller = ctl(root, path, provider)
+        controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        (root / "pilot_known_hosts").write_text(
+            "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+        checked = pilot.validate_policy(json.loads(path.read_text()), NOW)
+        inputs = pilot.validate_job_root(jobs, checked["jobs"], workset=checked["workset"])
+        too_small = pilot.remote_output_reserve_bytes(2) + sum(job["input_bytes"] for job in inputs) - 1
+        controller._ssh = lambda _state, *args, timeout: subprocess.CompletedProcess(  # type: ignore[method-assign]
+            args, 0, f"REMOTE_FREE_BYTES={too_small}\n" if "REMOTE_FREE_BYTES=" in " ".join(args) else "", "")
+        blocked(lambda: controller.run_workers(job_root=jobs, repo_root=repo))
+        assert not any(command[0] == "scp" for command in provider.external_commands)
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, path, _ = configure_generic_jobs(root, count=2)
+        provider = Provider(); controller = ctl(root, path, provider)
+        controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        (root / "pilot_known_hosts").write_text(
+            "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+        checked = pilot.validate_policy(json.loads(path.read_text()), NOW)
+        inputs = pilot.validate_job_root(jobs, checked["jobs"], workset=checked["workset"])
+        free_values = [pilot.remote_output_reserve_bytes(2) + sum(job["input_bytes"] for job in inputs),
+                       pilot.remote_output_reserve_bytes(2) - 1]
+        def lose_reserve_after_upload(_state: Any, *args: str, timeout: int) -> subprocess.CompletedProcess[str]:
+            del timeout
+            if "REMOTE_FREE_BYTES=" in " ".join(args):
+                return subprocess.CompletedProcess(args, 0, f"REMOTE_FREE_BYTES={free_values.pop(0)}\n", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+        controller._ssh = lose_reserve_after_upload  # type: ignore[method-assign]
+        blocked(lambda: controller.run_workers(job_root=jobs, repo_root=repo))
+        assert len([command for command in provider.external_commands if command[0] == "scp"]) == 1
 
 
 def test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence() -> None:
@@ -971,8 +1157,152 @@ def test_collection_verifies_both_result_archives_and_hashes() -> None:
             assert pilot.sha256_file(output / job_id / "mathlib-db.sqlite3") == digest
 
 
-def collection_fixture(root: Path) -> tuple[pilot.ScalewayPilot, Provider, Path, dict[str, Any]]:
-    repo, jobs, _, path = setup(root); provider = Provider()
+def test_generic_collection_validates_and_preserves_worker_scratch() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); repo, jobs, path, _ = configure_generic_jobs(root, count=2)
+        provider = Provider(); controller = ctl(root, path, provider)
+        created = controller.create(repo_root=repo, job_root=jobs, confirm=True)
+        (root / "pilot_known_hosts").write_text(
+            "198.51.100.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIverified\n")
+        policy = json.loads(path.read_text())
+        remote_root = pilot.expected_remote_job_directory(pilot.validate_policy(policy, NOW))
+        archives: dict[str, Path] = {}
+        result_hashes: dict[str, str] = {}
+        for spec in policy["jobs"]:
+            database = ("updated " + spec["id"]).encode()
+            result_hashes[spec["id"]] = hashlib.sha256(database).hexdigest()
+            argv_hash = pilot.worker_argv_sha256(policy["worker_argv"], remote_root + "/" + spec["id"])
+            input_hash = pilot.job_inputs_sha256(spec["inputs"])
+            marker = {"schema": 1, "exit_code": 0, "commit": COMMIT,
+                      "database_sha256": result_hashes[spec["id"]],
+                      "manifest_sha256": spec["manifest_sha256"],
+                      "worker_argv_sha256": argv_hash, "inputs_sha256": input_hash,
+                      "archive_kind": "result"}
+            archive_path = root / f"{spec['id']}-generic.tar.gz"
+            items = {"mathlib-db.sqlite3": database, "worker.log": b"completed\n",
+                     "complete.json": json.dumps(marker).encode(),
+                     "scratch/trace-index.json": ("scratch " + spec["id"]).encode(),
+                     "artifacts/report.json": b"{\"ok\":true}"}
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for name, data in items.items():
+                    leaf = root / (spec["id"] + "-" + name.replace("/", "-"))
+                    leaf.write_bytes(data); archive.add(leaf, arcname=name)
+                for directory in ("scratch", "artifacts"):
+                    info = tarfile.TarInfo(directory)
+                    info.type = tarfile.DIRTYPE
+                    archive.addfile(info)
+            archives[spec["id"]] = archive_path
+
+        def transfer(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
+            if command and command[0] == "scp":
+                job_id = next(key for key in archives if key in str(command[-2]))
+                Path(command[-1]).write_bytes(archives[job_id].read_bytes())
+                return subprocess.CompletedProcess(command, 0, "", "")
+            return provider(command, timeout)
+
+        controller.runner = transfer
+        state = {**created, "phase": "workers-finished",
+                 "remote_job_directory": remote_root,
+                 "jobs": [{**job, "phase": "finished", "exit_code": 0}
+                          for job in created["jobs"]]}
+        controller._save(state)
+        controller._ssh = lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0,
+            "".join(f"{job_id}\t{archive.stat().st_size}\n" for job_id, archive in archives.items()), "")  # type: ignore[method-assign]
+        output = root / "generic-result"
+        collected = controller.collect_workers(output_dir=output)
+        assert collected["phase"] == "collected" and len(collected["jobs"]) == 2
+        for job_id, digest in result_hashes.items():
+            assert pilot.sha256_file(output / job_id / "mathlib-db.sqlite3") == digest
+            assert (output / job_id / "scratch" / "trace-index.json").read_text() == "scratch " + job_id
+            assert f"{job_id}/scratch/trace-index.json" in collected["artifact_file_hashes"]
+
+
+def test_worker_output_caps_diagnostic_fallback_and_archive_space_gate() -> None:
+    def make_worker(root: Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+        _repo, jobs, policy_path, _modules = configure_generic_jobs(root, count=8)
+        policy = json.loads(policy_path.read_text())
+        checked = pilot.validate_policy(policy, NOW)
+        spec = policy["jobs"][0]
+        job = jobs / spec["id"]
+        output = job / pilot.REMOTE_WORKER_OUTPUT_DIRECTORY
+        output.mkdir()
+        shutil.copy2(job / "mathlib-db.sqlite3", output / "mathlib-db.sqlite3")
+        shutil.copytree(job / "trace-artifacts", output / "artifacts")
+        (output / "scratch").mkdir()
+        (output / "tmp").mkdir()
+        (job / "worker.log").write_text("worker complete\n", encoding="utf-8")
+        return job, spec, checked
+
+    def finalize(root: Path, job: Path, spec: dict[str, Any], checked: dict[str, Any]) -> dict[str, Any]:
+        remote = pilot.expected_remote_job_directory(checked) + "/" + spec["id"]
+        return pilot.finalize_worker_result(
+            job, spec["inputs"], 8, commit=COMMIT, exit_code=0,
+            argv_sha256=pilot.worker_argv_sha256(checked["worker_argv"], remote),
+            inputs_sha256=pilot.job_inputs_sha256(spec["inputs"]))
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        job, spec, checked = make_worker(root)
+        marker = finalize(root, job, spec, checked)
+        assert marker["archive_kind"] == "result" and marker["exit_code"] == 0
+        assert marker["database_sha256"] == pilot.sha256_file(
+            job / pilot.REMOTE_WORKER_OUTPUT_DIRECTORY / "mathlib-db.sqlite3")
+        with tarfile.open(job / "result.tar.gz", "r:gz") as archive:
+            archived_marker = json.loads(archive.extractfile("complete.json").read())  # type: ignore[union-attr]
+            assert archived_marker["database_sha256"] == marker["database_sha256"]
+
+    for oversized in ("scratch", "database"):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            job, spec, checked = make_worker(root)
+            output = job / pilot.REMOTE_WORKER_OUTPUT_DIRECTORY
+            target = output / "scratch" / "oversized.bin" if oversized == "scratch" else output / "mathlib-db.sqlite3"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("ab") as stream:
+                stream.truncate(pilot.worker_output_limit_bytes(8) + 1)
+            marker = finalize(root, job, spec, checked)
+            assert marker["archive_kind"] == "diagnostic" and marker["exit_code"] != 0
+            assert "per-job extracted-output limit" in marker["archive_error"]
+            with tarfile.open(job / "result.tar.gz", "r:gz") as archive:
+                assert set(archive.getnames()) == {"mathlib-db.sqlite3", "worker.log", "complete.json"}
+                db_member = archive.extractfile("mathlib-db.sqlite3")
+                assert db_member is not None
+                assert hashlib.sha256(db_member.read()).hexdigest() == pilot.sha256_file(job / "mathlib-db.sqlite3")
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        job, spec, checked = make_worker(root)
+        original_disk_usage = pilot.shutil.disk_usage
+        pilot.shutil.disk_usage = lambda _path: SimpleNamespace(
+            total=100 * 1024**3, used=99 * 1024**3, free=1 * 1024**3)  # type: ignore[assignment]
+        try:
+            marker = finalize(root, job, spec, checked)
+        finally:
+            pilot.shutil.disk_usage = original_disk_usage  # type: ignore[assignment]
+        assert marker["archive_kind"] == "diagnostic" and marker["exit_code"] != 0
+        assert "insufficient remote free space" in marker["archive_error"]
+        assert (job / "result.tar.gz").stat().st_size <= 128 * 1024**2
+        with tarfile.open(job / "result.tar.gz", "r:gz") as archive:
+            assert set(archive.getnames()) == {"mathlib-db.sqlite3", "worker.log", "complete.json"}
+
+
+def test_worker_log_drain_is_bounded_and_drains_the_pipe() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        log = Path(temp) / "worker.log"
+        proc = subprocess.run(["python3", "-B", "-c", pilot.worker_log_drain_code(), str(log), "128"],
+                              input=b"x" * 1_000_000, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert proc.returncode == 0 and proc.stdout == proc.stderr == b""
+        content = log.read_bytes()
+        assert len(content) <= 128 and content.endswith(b"\n")
+        assert b"log truncated" in content
+
+
+def collection_fixture(root: Path, *, generic_count: int | None = None) -> tuple[pilot.ScalewayPilot, Provider, Path, dict[str, Any]]:
+    if generic_count is None:
+        _repo, jobs, _, path = setup(root)
+    else:
+        _repo, jobs, path, _modules = configure_generic_jobs(root, count=generic_count)
+    provider = Provider()
     provider.server = {"id": SERVER, "name": pilot.NAME_PREFIX + "collection", "project": PROJECT,
         "zone": "nl-ams-1", "commercial_type": "GP1-L", "tags": ["explicit-lean-simp-pilot"],
         "public_ips": [{"id": IP_ID, "address": "198.51.100.4", "family": "inet"}],
@@ -983,7 +1313,8 @@ def collection_fixture(root: Path) -> tuple[pilot.ScalewayPilot, Provider, Path,
     state = {"schema": 1, "phase": "workers-finished", "server_id": SERVER,
         "name": provider.server["name"], "zone": "nl-ams-1", "project_id": PROJECT,
         "public_ip_id": IP_ID, "public_ip_address": "198.51.100.4",
-        "organization_id": ORG, "remote_job_directory": "/home/ubuntu/explicit-lean-simp-jobs",
+        "organization_id": ORG, "remote_job_directory": pilot.expected_remote_job_directory(
+            pilot.validate_policy(policy, NOW)),
         "policy_sha256": pilot.sha256_file(path),
         "jobs": [{"id": spec["id"], "phase": "finished", "exit_code": 0} for spec in policy["jobs"]]}
     (root / "state.json").write_text(json.dumps(state))
@@ -1012,6 +1343,22 @@ def test_collection_rejects_oversized_remote_archives_and_low_free_space_before_
             blocked(lambda: controller.collect_workers(output_dir=root / "low-space"))
         finally:
             pilot.shutil.disk_usage = original_disk_usage  # type: ignore[assignment]
+        assert not scp_calls
+
+
+def test_eight_worker_collection_enforces_aggregate_archive_cap_before_transfer() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp); controller, provider, _, policy = collection_fixture(root, generic_count=8)
+        scp_calls: list[tuple[str, ...]] = []
+        original = provider
+        def runner(command: Sequence[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
+            if command and command[0] == "scp":
+                scp_calls.append(tuple(command))
+            return original(command, timeout)
+        controller.runner = runner
+        sizes = "".join(f"{spec['id']}\t{5 * 1024**3}\n" for spec in policy["jobs"])
+        controller._ssh = lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, sizes, "")  # type: ignore[method-assign]
+        blocked(lambda: controller.collect_workers(output_dir=root / "aggregate-too-large"))
         assert not scp_calls
 
 
@@ -1107,6 +1454,9 @@ def test_sbs_cleanup_lists_and_removes_exact_block_volume() -> None:
         assert sum(command[5:8] == ("block", "volume", "list") for command in provider.commands) >= 2
         assert any(command[5:8] == ("block", "volume", "delete") and command[8] == VOLUME_ID
                    for command in provider.commands)
+        block_calls = [command for command in provider.commands if command[5:6] == ("block",)]
+        assert block_calls and all(command[3:5] == ("--profile", "test-dedicated-pilot")
+                                   for command in block_calls)
 
     with tempfile.TemporaryDirectory() as temp:
         controller, provider = make_sbs(Path(temp))
@@ -1115,6 +1465,9 @@ def test_sbs_cleanup_lists_and_removes_exact_block_volume() -> None:
         assert deleted["phase"] == "deleted" and provider.block_volumes == []
         assert any(command[5:8] == ("block", "volume", "delete") and command[8] == VOLUME_ID
                    for command in provider.commands)
+        block_calls = [command for command in provider.commands if command[5:6] == ("block",)]
+        assert block_calls and all(command[3:5] == ("--profile", "test-dedicated-pilot")
+                                   for command in block_calls)
 
     with tempfile.TemporaryDirectory() as temp:
         controller, provider = make_sbs(Path(temp))
@@ -1238,18 +1591,24 @@ def test_supervisor_resumes_terminal_workers_before_cleanup_and_rejects_unknown_
 
 def main() -> None:
     tests = [test_policy_cost_deadline_worker_count_and_job_hashes_fail_closed,
+             test_generic_policy_pins_disjoint_workset_inputs_and_bounded_remote_space,
              test_machine_and_root_volume_policy_is_explicit_and_fail_closed,
              test_pop2_sbs_fallback_checks_type_ram_image_and_exact_boot_volume,
              test_read_only_preflight_uses_real_cli_response_shapes_and_two_hash_pins,
              test_job_root_rejects_overlap_missing_pending_modules_and_hardlinks,
              test_create_and_two_workers_launch_concurrently_with_remote_hash_check,
+             test_eight_generic_workers_launch_with_authenticated_inputs_and_disk_gate,
+             test_worker_output_caps_diagnostic_fallback_and_archive_space_gate,
+             test_worker_log_drain_is_bounded_and_drains_the_pipe,
              test_bootstrap_started_can_resume_only_before_any_worker_dispatch_evidence,
              test_failed_supervisor_bootstrap_state_can_resume_after_report_checkpoint,
              test_ssh_accepts_plural_only_public_ip_and_rejects_state_or_record_mismatch,
              test_created_server_image_group_key_root_volume_and_ip_must_match_policy,
              test_dispatch_reconciliation_is_idempotent_at_all_crash_points,
              test_collection_verifies_both_result_archives_and_hashes,
+             test_generic_collection_validates_and_preserves_worker_scratch,
              test_collection_rejects_oversized_remote_archives_and_low_free_space_before_scp,
+             test_eight_worker_collection_enforces_aggregate_archive_cap_before_transfer,
              test_collection_rejects_tar_expansion_bounds_before_extracting_any_entry,
              test_status_marker_parsing_and_cleanup_idempotence,
              test_sbs_cleanup_lists_and_removes_exact_block_volume,

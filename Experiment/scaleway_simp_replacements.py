@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone
 import fcntl
+import gzip
 import hashlib
 import ipaddress
 import json
@@ -38,12 +39,17 @@ DEFAULT_MACHINE_TYPE = "GP1-L"
 HARD_MAX_LIFETIME_SECONDS = 12 * 60 * 60
 HARD_MAX_WORKER_SECONDS = 10 * 60 * 60
 HARD_MAX_COST_USD = 20.0
+MAX_INITIAL_WORKERS = 8
 MAX_RESULT_ARCHIVE_BYTES = 8 * 1024**3
-MAX_TOTAL_ARCHIVE_BYTES = 16 * 1024**3
+MAX_TOTAL_ARCHIVE_BYTES = 32 * 1024**3
 MAX_TAR_MEMBERS = 100_000
 MAX_TAR_MEMBER_BYTES = 8 * 1024**3
 MAX_TOTAL_EXTRACTED_BYTES = 32 * 1024**3
 COLLECTION_DISK_RESERVE_BYTES = 4 * 1024**3
+REMOTE_OPERATIONAL_RESERVE_BYTES = 16 * 1024**3
+WORKER_LOG_MAX_BYTES = 64 * 1024**2
+COMPLETE_MARKER_MAX_BYTES = 1024**2
+REMOTE_WORKER_OUTPUT_DIRECTORY = ".worker-output"
 NAME_PREFIX = "explicit-lean-simp-"
 ELAN_URL = "https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz"
 ELAN_SHA256 = "df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2"
@@ -51,6 +57,11 @@ COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 MODULE_RE = re.compile(r"^[A-Za-z0-9_.]+$")
+DEFAULT_WORKER_ARGV = [
+    "python3", "-B", "Experiment/simp_replacement_worker.py",
+    "--database", "{database}", "--manifest", "{manifest}", "--artifacts", "{artifacts}",
+]
+WORKER_TEMPLATE_FIELDS = {"job_dir", "database", "manifest", "artifacts", "scratch"}
 
 
 class PilotError(RuntimeError):
@@ -108,6 +119,421 @@ def _read_json(path: Path, label: str) -> dict[str, Any]:
         return _dict(json.loads(path.read_text(encoding="utf-8")), label)
     except (OSError, json.JSONDecodeError) as error:
         raise PilotError(f"cannot read {label}: {path}") from error
+
+
+def module_set_sha256(modules: Sequence[str]) -> str:
+    """Hash a canonical, sorted, newline-terminated module-name set."""
+    if len(set(modules)) != len(modules) or any(not MODULE_RE.fullmatch(name) for name in modules):
+        raise PilotError("module workset must contain unique Lean module names")
+    return sha256(("\n".join(sorted(modules)) + "\n").encode("utf-8"))
+
+
+def _safe_input_relative_path(value: object) -> Path:
+    if type(value) is not str or not value or "\\" in value:
+        raise PilotError("job input path must be a nonempty relative POSIX path")
+    path = Path(value)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise PilotError("job input path must stay beneath its job directory")
+    if path.as_posix() != value or value in {"modules.txt", "mathlib-db.sqlite3"}:
+        raise PilotError("job input path is noncanonical or overlaps a standard job input")
+    if path.parts[0] in {"artifacts", "scratch", REMOTE_WORKER_OUTPUT_DIRECTORY}:
+        raise PilotError("immutable job inputs may not overlap a worker output directory")
+    return path
+
+
+def _input_tree_digest(path: Path) -> str:
+    """Hash one regular file or a symlink-free directory tree deterministically."""
+    if path.is_symlink():
+        raise PilotError(f"job input is a symlink: {path.name}")
+    try:
+        mode = path.stat(follow_symlinks=False).st_mode
+    except OSError as error:
+        raise PilotError(f"job input is missing: {path.name}") from error
+    if stat.S_ISREG(mode):
+        entries: list[dict[str, str]] = [{"path": "", "kind": "file", "sha256": sha256_file(path)}]
+    elif stat.S_ISDIR(mode):
+        entries = []
+        for parent, dirs, files in os.walk(path, topdown=True, followlinks=False):
+            parent_path = Path(parent)
+            dirs.sort()
+            files.sort()
+            for name in list(dirs):
+                child = parent_path / name
+                if child.is_symlink() or not stat.S_ISDIR(child.stat(follow_symlinks=False).st_mode):
+                    raise PilotError(f"job input tree contains a symlink or non-directory: {name}")
+                entries.append({"path": child.relative_to(path).as_posix(), "kind": "directory"})
+            for name in files:
+                child = parent_path / name
+                if child.is_symlink() or not stat.S_ISREG(child.stat(follow_symlinks=False).st_mode):
+                    raise PilotError(f"job input tree contains a symlink or non-regular file: {name}")
+                entries.append({"path": child.relative_to(path).as_posix(), "kind": "file",
+                                "sha256": sha256_file(child)})
+        entries.sort(key=lambda entry: entry["path"])
+    else:
+        raise PilotError(f"job input is not a regular file or directory: {path.name}")
+    encoded = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return sha256(encoded)
+
+
+def _validate_job_input_specs(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        raise PilotError("job inputs must be a list of path/hash objects")
+    specs: list[dict[str, str]] = []
+    seen: list[Path] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise PilotError("each job input must contain exactly path and sha256")
+        relative = _safe_input_relative_path(item["path"])
+        digest = item["sha256"]
+        if type(digest) is not str or not SHA_RE.fullmatch(digest):
+            raise PilotError("job input hash must be lowercase SHA-256")
+        if any(relative == prior or relative in prior.parents or prior in relative.parents for prior in seen):
+            raise PilotError("job input paths overlap")
+        seen.append(relative)
+        specs.append({"path": relative.as_posix(), "sha256": digest})
+    if specs != sorted(specs, key=lambda item: item["path"]):
+        raise PilotError("job input specifications must be sorted by path")
+    return specs
+
+
+def job_inputs_sha256(specs: Sequence[Mapping[str, str]]) -> str:
+    encoded = json.dumps(list(specs), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return sha256(encoded)
+
+
+def _path_size_bytes(path: Path) -> int:
+    if path.is_symlink():
+        raise PilotError("job inputs may not contain symlinks")
+    mode = path.stat(follow_symlinks=False).st_mode
+    if stat.S_ISREG(mode):
+        return path.stat(follow_symlinks=False).st_size
+    if not stat.S_ISDIR(mode):
+        raise PilotError("job input is not a regular file or directory")
+    size = 0
+    for parent, dirs, files in os.walk(path, topdown=True, followlinks=False):
+        parent_path = Path(parent)
+        for name in [*dirs, *files]:
+            child = parent_path / name
+            if child.is_symlink():
+                raise PilotError("job inputs may not contain symlinks")
+            child_mode = child.stat(follow_symlinks=False).st_mode
+            if stat.S_ISREG(child_mode):
+                size += child.stat(follow_symlinks=False).st_size
+            elif not stat.S_ISDIR(child_mode):
+                raise PilotError("job input tree contains a non-regular entry")
+    return size
+
+
+def aggregate_archive_limit_bytes(worker_count: int) -> int:
+    if type(worker_count) is not int or not 2 <= worker_count <= MAX_INITIAL_WORKERS:
+        raise PilotError("worker count is outside the supported archive bound")
+    return min(worker_count * MAX_RESULT_ARCHIVE_BYTES, MAX_TOTAL_ARCHIVE_BYTES)
+
+
+def worker_output_limit_bytes(worker_count: int) -> int:
+    """Per-job extracted payload cap, including the bounded log and marker."""
+    if type(worker_count) is not int or not 2 <= worker_count <= MAX_INITIAL_WORKERS:
+        raise PilotError("worker count is outside the supported output bound")
+    return min(MAX_TOTAL_EXTRACTED_BYTES // worker_count, MAX_TAR_MEMBER_BYTES)
+
+
+def worker_output_mount_bytes(worker_count: int) -> int:
+    """tmpfs cap for DB, scratch, copied artifacts and worker temporary files."""
+    return worker_output_limit_bytes(worker_count) - WORKER_LOG_MAX_BYTES - COMPLETE_MARKER_MAX_BYTES
+
+
+def worker_archive_limit_bytes(worker_count: int) -> int:
+    return aggregate_archive_limit_bytes(worker_count) // worker_count
+
+
+def worker_output_inode_limit(worker_count: int) -> int:
+    if type(worker_count) is not int or not 2 <= worker_count <= MAX_INITIAL_WORKERS:
+        raise PilotError("worker count is outside the supported inode bound")
+    return MAX_TAR_MEMBERS // worker_count - 2  # worker.log and complete.json are outside the tmpfs
+
+
+def worker_log_drain_code() -> str:
+    """Python pipe sink that drains all worker output but persists at most its cap."""
+    return ("import sys; p=sys.argv[1]; cap=int(sys.argv[2]); kept=0; truncated=False; f=open(p,'wb')\n"
+            "while True:\n b=sys.stdin.buffer.read(65536)\n if not b: break\n n=max(0,min(len(b),cap-kept-96))\n if n: f.write(b[:n]); kept+=n\n if n<len(b): truncated=True\n"
+            "if truncated: f.write(b'\\n[worker log truncated at configured 64 MiB limit]\\n')\nf.flush()\n")
+
+
+def output_reserve_bytes(worker_count: int) -> int:
+    return worker_count * worker_output_limit_bytes(worker_count)
+
+
+def remote_output_reserve_bytes(worker_count: int) -> int:
+    """Reserve tmpfs output caps, compressed results, and an operational margin."""
+    return output_reserve_bytes(worker_count) + aggregate_archive_limit_bytes(worker_count) + REMOTE_OPERATIONAL_RESERVE_BYTES
+
+
+def expected_remote_job_directory(checked: Mapping[str, Any]) -> str:
+    if checked["generic_worker"]:
+        return "/opt/explicit-lean/.lake/private/T77-error-fix-20260923/remote-jobs"
+    return "/home/ubuntu/explicit-lean-simp-jobs"
+
+
+def _worker_output_tree(job_dir: Path) -> tuple[int, int]:
+    output = job_dir / REMOTE_WORKER_OUTPUT_DIRECTORY
+    if output.is_symlink() or not output.is_dir():
+        raise PilotError("worker output must be a real directory")
+    size = entries = 0
+    for parent, dirs, files in os.walk(output, topdown=True, followlinks=False):
+        parent_path = Path(parent)
+        for name in [*dirs, *files]:
+            child = parent_path / name
+            entries += 1
+            if child.is_symlink():
+                raise PilotError(f"worker output contains a symlink: {child.relative_to(output)}")
+            mode = child.stat(follow_symlinks=False).st_mode
+            if stat.S_ISREG(mode):
+                size += child.stat(follow_symlinks=False).st_size
+            elif not stat.S_ISDIR(mode):
+                raise PilotError(f"worker output contains a non-regular entry: {child.relative_to(output)}")
+    return size, entries
+
+
+class _CappedWriter:
+    """A seek-free file writer that makes the compressed archive cap hard."""
+    def __init__(self, stream: Any, limit: int) -> None:
+        self.stream = stream
+        self.limit = limit
+        self.written = 0
+
+    def write(self, data: bytes) -> int:
+        if self.written + len(data) > self.limit:
+            raise PilotError("result archive exceeded its per-job compressed-size cap")
+        count = self.stream.write(data)
+        self.written += count
+        return count
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+    def tell(self) -> int:
+        return self.written
+
+
+def _write_worker_archive(job_dir: Path, archive_path: Path, archive_limit: int,
+                          marker_path: Path, *, diagnostic: bool = False) -> int:
+    import tarfile
+
+    output = job_dir / REMOTE_WORKER_OUTPUT_DIRECTORY
+    database_path = job_dir / "mathlib-db.sqlite3" if diagnostic else output / "mathlib-db.sqlite3"
+    paths = [(database_path, "mathlib-db.sqlite3"),
+             (job_dir / "worker.log", "worker.log"), (marker_path, "complete.json")]
+    if not diagnostic:
+        paths.extend(((output / "artifacts", "artifacts"), (output / "scratch", "scratch")))
+    temp = archive_path.with_name(archive_path.name + ".tmp")
+    temp.unlink(missing_ok=True)
+    try:
+        with temp.open("wb") as raw:
+            capped = _CappedWriter(raw, archive_limit)
+            with gzip.GzipFile(fileobj=capped, mode="wb", mtime=0) as compressed:
+                with tarfile.open(fileobj=compressed, mode="w") as archive:
+                    for path, name in paths:
+                        if path.is_symlink() or not path.exists():
+                            raise PilotError(f"worker archive input is missing or a symlink: {name}")
+                        archive.add(path, arcname=name, recursive=True)
+                compressed.flush()
+            raw.flush()
+            os.fsync(raw.fileno())
+        temp.replace(archive_path)
+        return archive_path.stat().st_size
+    except Exception:
+        temp.unlink(missing_ok=True)
+        raise
+
+
+def finalize_worker_result(job_dir: Path, specs: object, worker_count: int, *,
+                           commit: str, exit_code: int, argv_sha256: str,
+                           inputs_sha256: str) -> dict[str, Any]:
+    """Bound, authenticate, archive and publish one terminal worker result."""
+    if type(exit_code) is not int or not 0 <= exit_code <= 255:
+        raise PilotError("worker exit code is invalid")
+    output = job_dir / REMOTE_WORKER_OUTPUT_DIRECTORY
+    canonical_specs = _validate_job_input_specs(specs)
+    inputs_hash = job_inputs_sha256(canonical_specs)
+    if inputs_sha256 != inputs_hash or not SHA_RE.fullmatch(argv_sha256) or not COMMIT_RE.fullmatch(commit):
+        raise PilotError("worker finalizer command or immutable-input identity is invalid")
+    try:
+        verify_job_inputs(job_dir, canonical_specs, allow_worker_outputs=True)
+    except PilotError as error:
+        inputs_error = str(error)
+    else:
+        inputs_error = ""
+    marker: dict[str, Any] = {"schema": 1, "exit_code": exit_code, "commit": commit,
+                              "manifest_sha256": sha256_file(job_dir / "modules.txt"),
+                              "worker_argv_sha256": argv_sha256,
+                              "inputs_sha256": inputs_hash, "archive_kind": "result"}
+    log = job_dir / "worker.log"
+    if log.is_symlink() or not log.is_file() or log.stat().st_size > WORKER_LOG_MAX_BYTES:
+        marker["exit_code"] = 86
+        marker["archive_kind"] = "diagnostic"
+        marker["archive_error"] = "worker log missing or exceeded bound"
+    marker_tmp = job_dir / "complete.json.tmp"
+    marker_tmp.write_text(json.dumps(marker, sort_keys=True, separators=(",", ":")) + "\n",
+                          encoding="utf-8")
+    try:
+        if inputs_error:
+            raise PilotError("immutable input verification failed: " + inputs_error)
+        if marker["archive_kind"] == "result":
+            verify_worker_output(job_dir, specs, worker_count)
+            marker["database_sha256"] = sha256_file(output / "mathlib-db.sqlite3")
+        else:
+            raise PilotError(marker["archive_error"])
+    except (PilotError, OSError) as error:
+        marker["exit_code"] = 86
+        marker["archive_kind"] = "diagnostic"
+        marker["archive_error"] = str(error)[:1000]
+        marker["database_sha256"] = sha256_file(job_dir / "mathlib-db.sqlite3")
+    marker_tmp.write_text(json.dumps(marker, sort_keys=True, separators=(",", ":")) + "\n",
+                          encoding="utf-8")
+
+    archive = job_dir / "result.tar.gz"
+    archive_cap = worker_archive_limit_bytes(worker_count)
+    operational_margin = max(128 * 1024**2, REMOTE_OPERATIONAL_RESERVE_BYTES // worker_count)
+    try:
+        if shutil.disk_usage(job_dir).free < archive_cap + operational_margin:
+            raise PilotError("insufficient remote free space for a bounded result archive")
+        _write_worker_archive(job_dir, archive, archive_cap, marker_tmp,
+                              diagnostic=marker["archive_kind"] == "diagnostic")
+    except (PilotError, OSError, EOFError) as error:
+        archive.unlink(missing_ok=True)
+        marker["exit_code"] = 86
+        marker["archive_kind"] = "diagnostic"
+        marker["archive_error"] = str(error)[:1000]
+        marker["database_sha256"] = sha256_file(job_dir / "mathlib-db.sqlite3")
+        marker_tmp.write_text(json.dumps(marker, sort_keys=True, separators=(",", ":")) + "\n",
+                              encoding="utf-8")
+        try:
+            diagnostic_cap = min(128 * 1024**2, archive_cap)
+            if shutil.disk_usage(job_dir).free < diagnostic_cap + 64 * 1024**2:
+                raise PilotError("insufficient remote space for bounded diagnostic archive")
+            _write_worker_archive(job_dir, archive, diagnostic_cap, marker_tmp, diagnostic=True)
+        except (PilotError, OSError, EOFError):
+            archive.unlink(missing_ok=True)
+    marker_tmp.replace(job_dir / "complete.json")
+    return marker
+
+
+def verify_worker_output(job_dir: Path, specs: object, worker_count: int) -> tuple[int, int]:
+    """Recheck authenticated inputs and enforce archive byte/member ceilings."""
+    verify_job_inputs(job_dir, specs, allow_worker_outputs=True)
+    output = job_dir / REMOTE_WORKER_OUTPUT_DIRECTORY
+    size, entries = _worker_output_tree(job_dir)
+    for name, bound in (("worker.log", WORKER_LOG_MAX_BYTES),
+                        ("complete.json", COMPLETE_MARKER_MAX_BYTES)):
+        path = job_dir / name
+        if name == "complete.json" and not path.exists():
+            path = job_dir / "complete.json.tmp"
+        if path.is_symlink() or not path.is_file() or not stat.S_ISREG(path.stat(follow_symlinks=False).st_mode):
+            raise PilotError(f"worker {name} must be a regular file")
+        actual = path.stat(follow_symlinks=False).st_size
+        if actual > bound:
+            raise PilotError(f"worker {name} exceeds its configured bound")
+        size += actual
+        entries += 1
+    if size > worker_output_limit_bytes(worker_count):
+        raise PilotError("worker result exceeds its per-job extracted-output limit")
+    if entries > worker_output_inode_limit(worker_count) + 2:
+        raise PilotError("worker result exceeds its per-job archive-entry limit")
+    for name in ("mathlib-db.sqlite3", "scratch", "artifacts"):
+        path = output / name
+        if path.is_symlink() or not (path.is_file() if name == "mathlib-db.sqlite3" else path.is_dir()):
+            raise PilotError(f"worker output lacks a valid {name} entry")
+    database = output / "mathlib-db.sqlite3"
+    if database.stat(follow_symlinks=False).st_nlink != 1:
+        raise PilotError("worker database copy must have exactly one hard link")
+    if any((output / (database.name + suffix)).exists() for suffix in ("-wal", "-shm", "-journal")):
+        raise PilotError("worker database has an uncheckpointed SQLite sidecar")
+    return size, entries
+
+
+def verify_job_inputs(job_dir: Path, specs: object, *, allow_worker_outputs: bool = False) -> str:
+    """Verify immutable extra job inputs and return their authenticated manifest digest."""
+    if job_dir.is_symlink() or not job_dir.is_dir():
+        raise PilotError("job directory must be a real directory")
+    canonical = _validate_job_input_specs(specs)
+    root = job_dir.resolve()
+    relative_inputs = [_safe_input_relative_path(item["path"]) for item in canonical]
+    for item in canonical:
+        relative = _safe_input_relative_path(item["path"])
+        candidate = root / relative
+        cursor = root
+        for part in relative.parts:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                raise PilotError(f"job input path traverses a symlink: {item['path']}")
+        resolved = candidate.resolve()
+        if resolved != candidate.absolute() or root not in resolved.parents:
+            raise PilotError("job input resolves outside its job directory")
+        if _input_tree_digest(candidate) != item["sha256"]:
+            raise PilotError(f"job input hash differs from policy: {item['path']}")
+    for parent, dirs, files in os.walk(root, topdown=True, followlinks=False):
+        parent_path = Path(parent)
+        for name in [*dirs, *files]:
+            child = parent_path / name
+            relative = child.relative_to(root)
+            if child.is_symlink():
+                raise PilotError(f"job directory contains an unpinned symlink: {relative.as_posix()}")
+            mode = child.stat(follow_symlinks=False).st_mode
+            if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+                raise PilotError(f"job directory contains a non-regular entry: {relative.as_posix()}")
+            if relative.as_posix() in {"modules.txt", "mathlib-db.sqlite3"}:
+                if not stat.S_ISREG(mode):
+                    raise PilotError(f"standard job input is not a regular file: {relative.as_posix()}")
+                continue
+            worker_controls = {".launch-claim", "worker.pid", "launcher.log", "worker.log",
+                               "complete.json", "complete.json.tmp", "result.tar.gz",
+                               "result.tar.gz.tmp"}
+            if allow_worker_outputs and (relative == Path(REMOTE_WORKER_OUTPUT_DIRECTORY)
+                                         or Path(REMOTE_WORKER_OUTPUT_DIRECTORY) in relative.parents
+                                         or relative.parts[0] in worker_controls):
+                continue
+            if not any(relative == item or relative in item.parents or item in relative.parents
+                       for item in relative_inputs):
+                raise PilotError(f"job directory contains an unpinned input: {relative.as_posix()}")
+    return job_inputs_sha256(canonical)
+
+
+def _worker_argv_template(value: object, *, require_scratch: bool = False) -> list[str]:
+    if not isinstance(value, list) or len(value) < 4 or any(type(part) is not str or not part for part in value):
+        raise PilotError("worker_argv must be a nonempty argv array")
+    if value[0:2] != ["python3", "-B"]:
+        raise PilotError("worker_argv must invoke python3 -B")
+    script = Path(value[2])
+    if (script.is_absolute() or script.as_posix() != value[2] or script.suffix != ".py"
+            or not script.parts or script.parts[0] != "Experiment"
+            or any(part in {".", ".."} for part in script.parts)):
+        raise PilotError("worker_argv must name a repository-relative Experiment/*.py script")
+    joined = "\0".join(value)
+    fields = re.findall(r"\{([a-z_]+)\}", joined)
+    if re.search(r"\{[^}]*\}", re.sub(r"\{[a-z_]+\}", "", joined)):
+        raise PilotError("worker_argv contains a malformed template field")
+    if (set(fields) - WORKER_TEMPLATE_FIELDS or fields.count("database") != 1
+            or fields.count("manifest") != 1 or fields.count("scratch") > 1
+            or require_scratch and fields.count("scratch") != 1):
+        raise PilotError("worker_argv has unsupported fields or missing required database, manifest, or scratch paths")
+    return list(value)
+
+
+def expand_worker_argv(template: Sequence[str], remote_job: str) -> list[str]:
+    output = remote_job + "/" + REMOTE_WORKER_OUTPUT_DIRECTORY
+    values = {"job_dir": remote_job, "database": output + "/mathlib-db.sqlite3",
+              "manifest": remote_job + "/modules.txt", "artifacts": output + "/artifacts",
+              "scratch": output + "/scratch"}
+    return [part.format_map(values) for part in template]
+
+
+def worker_argv_sha256(template: Sequence[str], remote_job: str) -> str:
+    encoded = json.dumps(expand_worker_argv(template, remote_job), separators=(",", ":")).encode("utf-8")
+    return sha256(encoded)
+
+
+def expected_job_ids(count: int) -> tuple[str, ...]:
+    return tuple(f"job-{index:03d}" for index in range(count))
 
 
 def parse_utc(value: object, label: str) -> datetime:
@@ -197,10 +623,12 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
     if fx_age < 0 or fx_age > 24 * 60 * 60:
         raise PilotError("USD/EUR conversion is missing, future-dated, or older than 24 hours")
     requirements = _dict(policy.get("requirements"), "requirements")
-    for key, expected in {"single_host": True, "worker_count": 2,
-                          "linux_x86_64": True, "public_ipv4": True}.items():
+    for key, expected in {"single_host": True, "linux_x86_64": True, "public_ipv4": True}.items():
         if type(requirements.get(key)) is not type(expected) or requirements.get(key) != expected:
             raise PilotError(f"requirements.{key} does not match the one-host envelope")
+    worker_count = requirements.get("worker_count")
+    if type(worker_count) is not int or not 2 <= worker_count <= MAX_INITIAL_WORKERS:
+        raise PilotError(f"requirements.worker_count must be between 2 and {MAX_INITIAL_WORKERS}")
     for key in ("minimum_memory_gib", "minimum_local_disk_gib"):
         if type(requirements.get(key)) is not int or requirements[key] < 1:
             raise PilotError(f"requirements.{key} must be a positive integer")
@@ -231,26 +659,42 @@ def validate_policy(policy: Mapping[str, Any], now: datetime) -> dict[str, Any]:
     repo = _dict(policy.get("repository"), "repository")
     if repo.get("url") != CANONICAL_REPO or type(repo.get("commit")) is not str or not COMMIT_RE.fullmatch(repo["commit"]):
         raise PilotError("repository must specify the canonical URL and a full 40-hex commit")
+    generic_worker = "worker_argv" in policy
+    worker_argv = _worker_argv_template(policy.get("worker_argv", DEFAULT_WORKER_ARGV),
+                                        require_scratch=generic_worker)
+    workset: dict[str, Any] | None = None
+    if generic_worker:
+        raw_workset = _dict(policy.get("workset"), "workset")
+        if (set(raw_workset) != {"module_count", "modules_sha256"}
+                or type(raw_workset.get("module_count")) is not int or raw_workset["module_count"] < 1
+                or type(raw_workset.get("modules_sha256")) is not str
+                or not SHA_RE.fullmatch(raw_workset["modules_sha256"])):
+            raise PilotError("generic workers require a module-count and SHA-256 pinned workset")
+        workset = raw_workset
     jobs = policy.get("jobs")
-    if not isinstance(jobs, list) or len(jobs) != 2:
-        raise PilotError("policy must pin exactly two independent jobs")
+    if not isinstance(jobs, list) or len(jobs) != worker_count:
+        raise PilotError("policy jobs must match requirements.worker_count")
     seen: set[str] = set()
+    allowed_ids = set(expected_job_ids(worker_count))
     for index, value in enumerate(jobs):
         job = _dict(value, f"jobs[{index}]")
-        if job.get("id") not in {"job-000", "job-001"} or job["id"] in seen:
-            raise PilotError("job identifiers must be unique job-000 and job-001")
+        if job.get("id") not in allowed_ids or job["id"] in seen:
+            raise PilotError("job identifiers must be unique contiguous job-NNN values")
         seen.add(job["id"])
         for key in ("directory", "manifest_sha256", "database_sha256"):
             if type(job.get(key)) is not str or not job[key].strip():
                 raise PilotError(f"jobs[{index}].{key} must be explicitly set")
         if not SHA_RE.fullmatch(job["manifest_sha256"]) or not SHA_RE.fullmatch(job["database_sha256"]):
             raise PilotError("job hashes must be lowercase SHA-256 digests")
-    if seen != {"job-000", "job-001"}:
-        raise PilotError("policy must pin job-000 and job-001")
+        if generic_worker or "inputs" in job:
+            _validate_job_input_specs(job.get("inputs"))
+    if seen != allowed_ids:
+        raise PilotError("policy jobs must pin every contiguous job id")
     return {"deadline": not_after, "lifetime": lifetime, "runtime": runtime, "cost_cap_eur": cap,
             "organization_id": auth["organization_id"], "project_id": auth["project_id"], "zone": zone,
             "machine": machine, "repository": repo, "jobs": jobs, "cli_profile": profile,
-            "requirements": requirements, "cost_source": auth["cost_source"],
+            "requirements": requirements, "worker_count": worker_count, "worker_argv": worker_argv,
+            "generic_worker": generic_worker, "workset": workset, "cost_source": auth["cost_source"],
             "root_volume": root_volume,
             "cost_components_eur": components, "cost_cap_usd": cap_usd, "eur_usd_rate": eur_usd}
 
@@ -268,6 +712,8 @@ def validate_job(job_dir: Path, policy_job: Mapping[str, Any]) -> tuple[Path, Pa
     manifest_bytes = manifest.read_bytes()
     if sha256(manifest_bytes) != policy_job["manifest_sha256"] or sha256_file(database) != policy_job["database_sha256"]:
         raise PilotError("job manifest or database hash differs from the approved policy")
+    if "inputs" in policy_job:
+        verify_job_inputs(job_dir, policy_job["inputs"])
     try:
         lines = manifest_bytes.decode("utf-8").splitlines()
     except UnicodeDecodeError as error:
@@ -278,13 +724,15 @@ def validate_job(job_dir: Path, policy_job: Mapping[str, Any]) -> tuple[Path, Pa
     return manifest, database, modules
 
 
-def validate_job_root(job_root: Path, policy_jobs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Check two independent DB copies form an exact pending-module partition."""
+def validate_job_root(job_root: Path, policy_jobs: Sequence[Mapping[str, Any]], *,
+                      workset: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Check authenticated job copies form a disjoint exact work partition."""
     if job_root.is_symlink() or not job_root.is_dir():
         raise PilotError("job root must be a real directory")
     root = job_root.resolve()
     result = []
-    for expected_id in ("job-000", "job-001"):
+    ids = expected_job_ids(len(policy_jobs))
+    for expected_id in ids:
         matches = [item for item in policy_jobs if item.get("id") == expected_id]
         if len(matches) != 1:
             raise PilotError("policy job set is incomplete or ambiguous")
@@ -298,13 +746,44 @@ def validate_job_root(job_root: Path, policy_jobs: Sequence[Mapping[str, Any]]) 
         manifest, database, modules = validate_job(directory, item)
         result.append({"id": expected_id, "directory": directory, "manifest": manifest,
                        "database": database, "modules": modules,
-                       "manifest_sha256": sha256_file(manifest), "database_sha256": sha256_file(database)})
-    db0, db1 = (item["database"] for item in result)
-    stat0, stat1 = db0.stat(follow_symlinks=False), db1.stat(follow_symlinks=False)
-    if (stat0.st_dev, stat0.st_ino) == (stat1.st_dev, stat1.st_ino):
+                       "manifest_sha256": sha256_file(manifest), "database_sha256": sha256_file(database),
+                       "inputs": _validate_job_input_specs(item.get("inputs", [])),
+                       "inputs_sha256": job_inputs_sha256(_validate_job_input_specs(item.get("inputs", []))),
+                       "input_bytes": (_path_size_bytes(manifest) + _path_size_bytes(database)
+                                       + sum(_path_size_bytes(directory / spec["path"])
+                                             for spec in _validate_job_input_specs(item.get("inputs", []))))})
+    database_stats = [item["database"].stat(follow_symlinks=False) for item in result]
+    identities = {(item.st_dev, item.st_ino) for item in database_stats}
+    if len(identities) != len(result):
         raise PilotError("job databases must be distinct regular files, not hard links")
-    if result[0]["database_sha256"] != result[1]["database_sha256"]:
+    if len({item["database_sha256"] for item in result}) != 1:
         raise PilotError("job databases do not match the same approved baseline bytes")
+    if workset is not None and any(_path_size_bytes(item["database"]) > worker_output_mount_bytes(len(result))
+                                   for item in result):
+        raise PilotError("generic-worker baseline database exceeds the per-job writable-output cap")
+    assigned_sets = [set(job["modules"]) for job in result]
+    for index, assigned in enumerate(assigned_sets):
+        if any(assigned.intersection(other) for other in assigned_sets[index + 1:]):
+            raise PilotError("job manifests overlap")
+    assigned = set().union(*assigned_sets)
+    if workset is not None:
+        if len(assigned) != workset["module_count"] or module_set_sha256(sorted(assigned)) != workset["modules_sha256"]:
+            raise PilotError("job manifests do not exactly match the policy-pinned module workset")
+        job = result[0]
+        uri = f"file:{job['database'].resolve().as_posix()}?mode=ro"
+        try:
+            con = sqlite3.connect(uri, uri=True)
+            try:
+                existing = {str(row[0]) for row in con.execute(
+                    "SELECT DISTINCT r.module_name FROM simp_replacements AS r "
+                    "JOIN modules AS m ON m.name=r.module_name")}
+            finally:
+                con.close()
+        except sqlite3.Error as error:
+            raise PilotError("job database lacks a readable simp replacement baseline") from error
+        if not assigned <= existing:
+            raise PilotError("policy-pinned workset includes modules absent from the job database")
+        return result
     queues: list[set[str]] = []
     for job in result:
         uri = f"file:{job['database'].resolve().as_posix()}?mode=ro"
@@ -321,10 +800,6 @@ def validate_job_root(job_root: Path, policy_jobs: Sequence[Mapping[str, Any]]) 
         queues.append(names)
     if queues[0] != queues[1]:
         raise PilotError("job database pending queues differ")
-    assigned0, assigned1 = set(result[0]["modules"]), set(result[1]["modules"])
-    if assigned0.intersection(assigned1):
-        raise PilotError("job manifests overlap")
-    assigned = assigned0.union(assigned1)
     if assigned != queues[0]:
         missing = queues[0] - assigned
         extra = assigned - queues[0]
@@ -749,7 +1224,10 @@ class ScalewayPilot:
     def preflight(self, *, repo_root: Path, job_root: Path) -> dict[str, Any]:
         policy, raw = self.policy()
         checked = validate_policy(policy, self.now())
-        jobs = validate_job_root(job_root, checked["jobs"])
+        jobs = validate_job_root(job_root, checked["jobs"], workset=checked["workset"])
+        worker_script = repo_root / checked["worker_argv"][2]
+        if worker_script.is_symlink() or not worker_script.is_file():
+            raise PilotError("policy-pinned worker script is not a regular file in the approved checkout")
         version = self._run(["scw", "version"], 15)
         if version.returncode:
             raise PilotError("Scaleway CLI is unavailable")
@@ -764,7 +1242,14 @@ class ScalewayPilot:
                 "identity": identity, "source": source, "machine": shape,
                 "jobs": [{"id": job["id"], "module_count": len(job["modules"]),
                           "manifest_sha256": job["manifest_sha256"],
-                          "database_sha256": job["database_sha256"]} for job in jobs], "worker_count": 2,
+                          "database_sha256": job["database_sha256"],
+                          "inputs_sha256": job["inputs_sha256"],
+                          "input_bytes": job["input_bytes"],
+                          "worker_argv_sha256": worker_argv_sha256(
+                              checked["worker_argv"], expected_remote_job_directory(checked) + "/" + job["id"])}
+                         for job in jobs], "worker_count": checked["worker_count"],
+                "aggregate_archive_limit_bytes": aggregate_archive_limit_bytes(checked["worker_count"]),
+                "remote_output_reserve_bytes": remote_output_reserve_bytes(checked["worker_count"]),
                 "deadline": checked["deadline"].isoformat().replace("+00:00", "Z")}
 
     def plan(self) -> dict[str, Any]:
@@ -825,7 +1310,7 @@ class ScalewayPilot:
                         "      Unit=explicit-lean-simp-pilot-ttl.service\n"
                         "      [Install]\n      WantedBy=timers.target\n"
                         "runcmd:\n  - [systemctl, daemon-reload]\n  - [systemctl, enable, --now, explicit-lean-simp-pilot-ttl.timer]\n")
-        remote_job_directory = f"/home/{login_user}/explicit-lean-simp-jobs"
+        remote_job_directory = expected_remote_job_directory(checked)
         state = {"schema": 1, "phase": "create-requested", "server_id": None, "name": name,
                  "remote_job_directory": remote_job_directory, "zone": checked["zone"],
                  "project_id": checked["project_id"], "organization_id": checked["organization_id"],
@@ -837,7 +1322,11 @@ class ScalewayPilot:
                  "ssh_public_key_sha256": sha256(preflight["machine"]["ssh_public_key"].encode("utf-8")),
                  "jobs": [{"id": job["id"], "manifest_sha256": job["manifest_sha256"],
                            "database_sha256": job["database_sha256"], "module_count": len(job["modules"]),
-                           "phase": "pending"} for job in validate_job_root(job_root, checked["jobs"])],
+                           "inputs_sha256": job["inputs_sha256"],
+                           "worker_argv_sha256": worker_argv_sha256(
+                               checked["worker_argv"], remote_job_directory + "/" + job["id"]),
+                           "phase": "pending"}
+                          for job in validate_job_root(job_root, checked["jobs"], workset=checked["workset"])],
                  "mutation": "server-create-requested"}
         cloud_path: Path | None = None
         try:
@@ -848,7 +1337,8 @@ class ScalewayPilot:
                                 f"image={preflight['machine']['local_image_id']}", "ip=new", f"root-volume={checked['requirements']['root_volume']}",
                                 f"security-group-id={checked['machine']['security_group_id']}",
                                 f"cloud-init=@{cloud_path}", f"project-id={checked['project_id']}", f"zone={checked['zone']}",
-                                "tags.0=explicit-lean-simp-pilot", "tags.1=two-workers", "--wait"], policy=checked, timeout=300)
+                                "tags.0=explicit-lean-simp-pilot",
+                                f"tags.1=workers-{checked['worker_count']}", "--wait"], policy=checked, timeout=300)
         except PilotError as error:
             raise PilotError("create outcome is ambiguous; state retained; use status, then cleanup to recover any created server") from error
         finally:
@@ -911,22 +1401,87 @@ class ScalewayPilot:
                 "-o", "ConnectTimeout=20", f"{policy.get('login_user', 'ubuntu')}@{address}"]
         return self._run([*base, *args], timeout)
 
+    def _remote_free_bytes(self, state: Mapping[str, Any], remote_path: str,
+                           checked: Mapping[str, Any]) -> int:
+        if remote_path != expected_remote_job_directory(checked):
+            raise PilotError("remote disk check path is not the pinned jobs directory")
+        command = ("set -eu; n=$(df --output=avail -B1 " + shlex.quote(remote_path)
+                   + " | tail -n 1 | tr -d '[:space:]'); case \"$n\" in ''|*[!0-9]*) exit 42;; esac; "
+                   "printf 'REMOTE_FREE_BYTES=%s\\n' \"$n\"")
+        result = self._ssh(state, "sh", "-lc", shlex.quote(command), timeout=60)
+        if result.returncode:
+            raise PilotError("remote disk free-space check failed")
+        match = re.fullmatch("REMOTE_FREE_BYTES=([0-9]+)\\n?", result.stdout)
+        if match is None:
+            raise PilotError("remote disk free-space response is malformed")
+        return int(match.group(1))
+
+    @staticmethod
+    def _remote_input_check(remote_job: str, specs: Sequence[Mapping[str, str]], *,
+                            allow_worker_outputs: bool = False) -> str:
+        artifact_option = ", allow_worker_outputs=True" if allow_worker_outputs else ""
+        snippet = ("import json,sys; from pathlib import Path; "
+                   "from Experiment.scaleway_simp_replacements import verify_job_inputs; "
+                   "verify_job_inputs(Path(sys.argv[1]), json.loads(sys.argv[2])" + artifact_option + ")")
+        encoded_specs = json.dumps(list(specs), sort_keys=True, separators=(",", ":"))
+        return ("cd /opt/explicit-lean && python3 -B -c " + shlex.quote(snippet) + " " + shlex.quote(remote_job) + " "
+                + shlex.quote(encoded_specs))
+
+    @staticmethod
+    def _remote_output_check(remote_job: str, specs: Sequence[Mapping[str, str]], worker_count: int) -> str:
+        snippet = ("import json,sys; from pathlib import Path; "
+                   "from Experiment.scaleway_simp_replacements import verify_worker_output; "
+                   "verify_worker_output(Path(sys.argv[1]), json.loads(sys.argv[2]), int(sys.argv[3]))")
+        encoded_specs = json.dumps(list(specs), sort_keys=True, separators=(",", ":"))
+        return ("cd /opt/explicit-lean && python3 -B -c " + shlex.quote(snippet) + " " + shlex.quote(remote_job) + " "
+                + shlex.quote(encoded_specs) + " " + str(worker_count))
+
     def _launch_worker_once(self, state: Mapping[str, Any], job: Mapping[str, Any],
+                            policy_job: Mapping[str, Any], checked: Mapping[str, Any],
                             worker_timeout: int, commit: str, launch_token: str) -> subprocess.CompletedProcess[str]:
         """Atomically claim a job before launch; an existing claim is never relaunched."""
         remote_job = state["remote_job_directory"] + "/" + job["id"]
-        worker = ("set +e; timeout --signal=TERM --kill-after=30 " + str(worker_timeout) +
-                  " python3 -B Experiment/simp_replacement_worker.py --database " + remote_job +
-                  "/mathlib-db.sqlite3 --manifest " + remote_job + "/modules.txt --artifacts " + remote_job +
-                  "/artifacts > " + remote_job + "/worker.log 2>&1; rc=$?; "
-                  "dbhash=$(sha256sum " + remote_job + "/mathlib-db.sqlite3 | awk '{print $1}'); "
-                  "manifesthash=$(sha256sum " + remote_job + "/modules.txt | awk '{print $1}'); "
-                  "printf '{\"schema\":1,\"exit_code\":%s,\"commit\":\"%s\",\"database_sha256\":\"%s\",\"manifest_sha256\":\"%s\"}\\n' \"$rc\" " +
-                  shlex.quote(commit) + " \"$dbhash\" \"$manifesthash\" > " + remote_job +
-                  "/complete.json.tmp; mv " + remote_job + "/complete.json.tmp " + remote_job +
-                  "/complete.json; tar -czf " + remote_job + "/result.tar.gz -C " + remote_job +
-                  " mathlib-db.sqlite3 worker.log complete.json artifacts")
-        script = ("set -eu; d=" + shlex.quote(remote_job) + "; token=" + shlex.quote(launch_token) + "; mkdir -p \"$d/artifacts\"; "
+        argv = expand_worker_argv(checked["worker_argv"], remote_job)
+        argv_digest = worker_argv_sha256(checked["worker_argv"], remote_job)
+        inputs = _validate_job_input_specs(policy_job.get("inputs", []))
+        inputs_digest = job_inputs_sha256(inputs)
+        command = shlex.join(argv)
+        input_check = self._remote_input_check(remote_job, inputs)
+        baseline_check = ("test \"$(sha256sum " + remote_job + "/modules.txt | awk '{print $1}')\" = " +
+                          shlex.quote(str(job["manifest_sha256"])) + "; test \"$(sha256sum " + remote_job +
+                          "/mathlib-db.sqlite3 | awk '{print $1}')\" = " + shlex.quote(str(job["database_sha256"])) +
+                          "; " + input_check)
+        out = remote_job + "/" + REMOTE_WORKER_OUTPUT_DIRECTORY
+        output_size = worker_output_mount_bytes(checked["worker_count"])
+        output_inodes = MAX_TAR_MEMBERS // checked["worker_count"]
+        specs_json = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
+        drain = worker_log_drain_code()
+        finalize = ("python3 -B Experiment/scaleway_simp_replacements.py finalize-worker "
+                    "--job-dir \"$d\" --inputs-json " + shlex.quote(specs_json) +
+                    " --worker-count " + str(checked["worker_count"]) + " --commit " + shlex.quote(commit) +
+                    " --exit-code \"$rc\" --argv-sha256 " + shlex.quote(argv_digest) +
+                    " --inputs-sha256 " + shlex.quote(inputs_digest))
+        sources = " ".join(shlex.quote(remote_job + "/" + Path(item["path"]).as_posix()) for item in inputs)
+        copy_inputs = ("for source in " + sources + "; do if test -d \"$source\"; then "
+                       "cp -a \"$source/.\" \"$out/artifacts/\" || setup_rc=1; "
+                       "elif test -f \"$source\"; then cp \"$source\" \"$out/artifacts/\" || setup_rc=1; fi; done; ")
+        worker = "".join([
+            "set +e; d=" + shlex.quote(remote_job) + "; out=" + shlex.quote(out) + "; rc=86; ",
+            "mkdir -p \"$out\"; uid=$(id -u); gid=$(id -g); ",
+            "if sudo mount -t tmpfs -o size=" + str(output_size) + ",nr_inodes=" + str(output_inodes) +
+            ",mode=0770,uid=$uid,gid=$gid,nosuid,nodev tmpfs \"$out\"; then ",
+            "setup_rc=0; mkdir -p \"$out/tmp\" \"$out/scratch\" \"$out/artifacts\" || setup_rc=1; ",
+            "cp \"$d/mathlib-db.sqlite3\" \"$out/mathlib-db.sqlite3\" || setup_rc=1; ", copy_inputs,
+            "if test \"$setup_rc\" = 0 && ", baseline_check, "; then ",
+            "export TMPDIR=\"$out/tmp\" TMP=\"$out/tmp\" TEMP=\"$out/tmp\"; ",
+            "timeout --signal=TERM --kill-after=30 " + str(worker_timeout) + " " + command,
+            " 2>&1 | python3 -B -c " + shlex.quote(drain) + " \"$d/worker.log\" " +
+            str(WORKER_LOG_MAX_BYTES) + "; rc=${PIPESTATUS[0]}; ",
+            "else printf 'worker setup or pinned input verification failed\\n' > \"$d/worker.log\"; rc=86; fi; ",
+            "else printf 'per-job bounded tmpfs mount failed\\n' > \"$d/worker.log\"; rc=86; fi; ",
+            finalize, "; sudo umount \"$out\" 2>/dev/null || true",
+        ])
+        script = ("set -eu; d=" + shlex.quote(remote_job) + "; token=" + shlex.quote(launch_token) + "; "
                   "if test -f \"$d/complete.json\"; then printf 'COMPLETE\\n'; exit 0; fi; "
                   "if ! mkdir \"$d/.launch-claim\" 2>/dev/null; then "
                   "p=$(cat \"$d/worker.pid\" 2>/dev/null || true); "
@@ -934,13 +1489,17 @@ class ScalewayPilot:
                   "expected=$(cat \"$d/.launch-claim/token\" 2>/dev/null || true); "
                   "if test \"$expected\" = \"$token\" && kill -0 \"$p\" 2>/dev/null "
                   "&& tr '\\000' '\\n' < \"/proc/$p/environ\" | grep -Fx \"EXPLICIT_LEAN_WORKER_TOKEN=$token\" >/dev/null "
-                  "&& tr '\\000' ' ' < \"/proc/$p/cmdline\" | grep -F \"Experiment/simp_replacement_worker.py --database $d/mathlib-db.sqlite3 --manifest $d/modules.txt\" >/dev/null; "
+                  "&& tr '\\000' '\\n' < \"/proc/$p/environ\" | grep -Fx " +
+                  shlex.quote("EXPLICIT_LEAN_WORKER_ARGV_SHA256=" + argv_digest) + " >/dev/null "
+                  "&& tr '\\000' ' ' < \"/proc/$p/cmdline\" | grep -F -- " + shlex.quote(command) + " >/dev/null; "
                   "then printf 'RUNNING %s\\n' \"$p\"; exit 0; fi; "
                   "printf 'AMBIGUOUS\\n'; exit 42; fi; "
                   "printf '%s\\n' \"$token\" > \"$d/.launch-claim/token.tmp\"; "
                   "mv \"$d/.launch-claim/token.tmp\" \"$d/.launch-claim/token\"; "
                   "cd /opt/explicit-lean; . \"$HOME/.elan/env\"; "
-                  "EXPLICIT_LEAN_WORKER_TOKEN=\"$token\" nohup bash -lc " + shlex.quote(worker) + " > \"$d/launcher.log\" 2>&1 < /dev/null & "
+                  "EXPLICIT_LEAN_WORKER_TOKEN=\"$token\" EXPLICIT_LEAN_WORKER_ARGV_SHA256=" +
+                  shlex.quote(argv_digest) + " nohup bash -lc " + shlex.quote(worker) +
+                  " > \"$d/launcher.log\" 2>&1 < /dev/null & "
                   "p=$!; printf '%s\\n' \"$p\" > \"$d/worker.pid.tmp\"; "
                   "mv \"$d/worker.pid.tmp\" \"$d/worker.pid\"; printf 'RUNNING %s\\n' \"$p\"")
         return self._ssh(state, "sh", "-lc", shlex.quote(script), timeout=60)
@@ -983,14 +1542,16 @@ class ScalewayPilot:
                          if key in report)):
                 return False
         jobs = state.get("jobs")
-        if not isinstance(jobs, list) or len(jobs) != 2:
+        if not isinstance(jobs, list) or not 2 <= len(jobs) <= MAX_INITIAL_WORKERS:
             return False
         job_ids = [job.get("id") for job in jobs if isinstance(job, dict)]
-        if len(job_ids) != 2 or any(type(job_id) is not str for job_id in job_ids) or set(job_ids) != {"job-000", "job-001"}:
+        if (len(job_ids) != len(jobs) or any(type(job_id) is not str for job_id in job_ids)
+                or job_ids != list(expected_job_ids(len(jobs)))):
             return False
-        allowed_job_keys = {"id", "manifest_sha256", "database_sha256", "module_count", "phase"}
-        return all(isinstance(job, dict) and set(job) == allowed_job_keys and job.get("phase") == "pending"
-                   for job in jobs)
+        base_job_keys = {"id", "manifest_sha256", "database_sha256", "module_count", "phase"}
+        pinned_job_keys = base_job_keys | {"inputs_sha256", "worker_argv_sha256"}
+        return all(isinstance(job, dict) and frozenset(job) in {frozenset(base_job_keys), frozenset(pinned_job_keys)}
+                   and job.get("phase") == "pending" for job in jobs)
 
     @staticmethod
     def _parse_systemd_utc_timestamp(value: object) -> datetime:
@@ -1011,10 +1572,11 @@ class ScalewayPilot:
                             checked: Mapping[str, Any]) -> dict[str, Any]:
         """Resume a partial dispatch without duplicating any potentially launched worker."""
         remote = state.get("remote_job_directory")
-        if remote != "/home/ubuntu/explicit-lean-simp-jobs":
+        if remote != expected_remote_job_directory(checked):
             raise PilotError("saved remote jobs directory is invalid")
         jobs = {item["id"]: item for item in state.get("jobs", [])}
-        if set(jobs) != {"job-000", "job-001"}:
+        ids = expected_job_ids(len(jobs))
+        if not 2 <= len(jobs) <= MAX_INITIAL_WORKERS or set(jobs) != set(ids):
             raise PilotError("saved dispatch job set is incomplete")
         created = datetime.fromisoformat(state["created_at"]).astimezone(timezone.utc)
         hard_end = min(created + timedelta(seconds=checked["lifetime"]), checked["deadline"])
@@ -1022,29 +1584,39 @@ class ScalewayPilot:
             seconds=int(state["worker_timeout_seconds"]))
         now = self.now().astimezone(timezone.utc)
         worker_timeout = int((min(hard_end, worker_end) - now).total_seconds())
-        status_shell = ("set -eu; d=" + remote + "/{job}; "
-                        "if test -f \"$d/complete.json\"; then printf 'COMPLETE\\t'; cat \"$d/complete.json\"; "
-                        "elif test -d \"$d/.launch-claim\"; then p=$(cat \"$d/worker.pid\" 2>/dev/null || true); "
-                        "token=$(cat \"$d/.launch-claim/token\" 2>/dev/null || true); expected=EXPECTED_TOKEN; "
-                        "case \"$p\" in ''|*[!0-9]*) printf 'AMBIGUOUS\\n';; *) "
-                        "if test \"$token\" = \"$expected\" && kill -0 \"$p\" 2>/dev/null "
-                        "&& tr '\\000' '\\n' < \"/proc/$p/environ\" | grep -Fx \"EXPLICIT_LEAN_WORKER_TOKEN=$expected\" >/dev/null "
-                        "&& tr '\\000' ' ' < \"/proc/$p/cmdline\" | grep -F \"Experiment/simp_replacement_worker.py --database $d/mathlib-db.sqlite3 --manifest $d/modules.txt\" >/dev/null; "
-                        "then printf 'RUNNING\\t%s\\n' \"$p\"; "
-                        "else printf 'AMBIGUOUS\\n'; fi;; esac; "
-                        "elif test -e \"$d/worker.pid\" || test -e \"$d/complete.json.tmp\" "
-                        "|| test -e \"$d/result.tar.gz\"; then printf 'AMBIGUOUS\\n'; "
-                        "else printf 'NOT_LAUNCHED\\n'; fi")
+        policy_jobs = {str(item["id"]): item for item in checked["jobs"]}
+        if set(policy_jobs) != set(ids):
+            raise PilotError("policy and saved dispatch job sets differ")
         commit = str(_dict(policy.get("repository"), "repository")["commit"])
-        for job_id in ("job-000", "job-001"):
+        for job_id in ids:
             if not jobs[job_id].get("launch_token"):
                 jobs[job_id] = {**jobs[job_id], "launch_token": uuid.uuid4().hex}
-                state["jobs"] = [jobs[key] for key in ("job-000", "job-001")]
+                state["jobs"] = [jobs[key] for key in ids]
                 self._save(state)
             launch_token = jobs[job_id]["launch_token"]
             if not re.fullmatch(r"[0-9a-f]{32}", str(launch_token)):
                 raise PilotError(f"{job_id} launch token is malformed")
-            command = status_shell.replace("EXPECTED_TOKEN", shlex.quote(str(launch_token))).format(job=job_id)
+            remote_job = remote + "/" + job_id
+            argv = expand_worker_argv(checked["worker_argv"], remote_job)
+            argv_digest = worker_argv_sha256(checked["worker_argv"], remote_job)
+            worker_command = shlex.join(argv)
+            status_shell = ("set -eu; d=" + shlex.quote(remote_job) + "; "
+                            "if test -f \"$d/complete.json\"; then printf 'COMPLETE\\t'; cat \"$d/complete.json\"; "
+                            "elif test -d \"$d/.launch-claim\"; then p=$(cat \"$d/worker.pid\" 2>/dev/null || true); "
+                            "token=$(cat \"$d/.launch-claim/token\" 2>/dev/null || true); expected=EXPECTED_TOKEN; "
+                            "case \"$p\" in ''|*[!0-9]*) printf 'AMBIGUOUS\\n';; *) "
+                            "if test \"$token\" = \"$expected\" && kill -0 \"$p\" 2>/dev/null "
+                            "&& tr '\\000' '\\n' < \"/proc/$p/environ\" | grep -Fx \"EXPLICIT_LEAN_WORKER_TOKEN=$expected\" >/dev/null "
+                            "&& tr '\\000' '\\n' < \"/proc/$p/environ\" | grep -Fx " +
+                            shlex.quote("EXPLICIT_LEAN_WORKER_ARGV_SHA256=" + argv_digest) + " >/dev/null "
+                            "&& tr '\\000' ' ' < \"/proc/$p/cmdline\" | grep -F -- " +
+                            shlex.quote(worker_command) + " >/dev/null; "
+                            "then printf 'RUNNING\\t%s\\n' \"$p\"; "
+                            "else printf 'AMBIGUOUS\\n'; fi;; esac; "
+                            "elif test -e \"$d/worker.pid\" || test -e \"$d/complete.json.tmp\" "
+                            "|| test -e \"$d/result.tar.gz.tmp\" || test -e \"$d/result.tar.gz\"; then printf 'AMBIGUOUS\\n'; "
+                            "else printf 'NOT_LAUNCHED\\n'; fi")
+            command = status_shell.replace("EXPECTED_TOKEN", shlex.quote(str(launch_token)))
             result = self._ssh(state, "sh", "-lc", shlex.quote(command), timeout=60)
             if result.returncode:
                 state["phase"] = "dispatch-failed"
@@ -1057,7 +1629,8 @@ class ScalewayPilot:
                     state["phase"] = "dispatch-failed"
                     self._save(state)
                     raise PilotError(f"{job_id} is provably not launched but no worker budget remains")
-                launched = self._launch_worker_once(state, jobs[job_id], worker_timeout, commit, str(launch_token))
+                launched = self._launch_worker_once(state, jobs[job_id], policy_jobs[job_id], checked,
+                                                    worker_timeout, commit, str(launch_token))
                 if launched.returncode:
                     state["phase"] = "dispatch-failed"
                     state["dispatch_error"] = f"{job_id} launch outcome is ambiguous; refusing relaunch"
@@ -1074,19 +1647,27 @@ class ScalewayPilot:
                     marker = json.loads(observed.split("\t", 1)[1])
                 except (json.JSONDecodeError, IndexError) as error:
                     raise PilotError(f"{job_id} completion marker is malformed") from error
+                expected_argv_sha256 = worker_argv_sha256(checked["worker_argv"], remote + "/" + job_id)
+                expected_inputs_sha256 = job_inputs_sha256(_validate_job_input_specs(
+                    policy_jobs[job_id].get("inputs", [])))
+                generic_marker_mismatch = checked["generic_worker"] and (
+                    marker.get("worker_argv_sha256") != expected_argv_sha256
+                    or marker.get("inputs_sha256") != expected_inputs_sha256)
                 if (marker.get("commit") != commit or marker.get("manifest_sha256") != jobs[job_id].get("manifest_sha256")
                         or type(marker.get("exit_code")) is not int or not re.fullmatch(r"[0-9a-f]{64}", str(marker.get("database_sha256")))):
                     raise PilotError(f"{job_id} completion marker does not match its pinned job")
+                if generic_marker_mismatch:
+                    raise PilotError(f"{job_id} completion marker does not authenticate its worker command and inputs")
                 jobs[job_id] = {**jobs[job_id], "phase": "finished" if marker["exit_code"] == 0 else "failed",
                                 "exit_code": marker["exit_code"], "database_result_sha256": marker["database_sha256"]}
             else:
-                state.update({"phase": "dispatch-failed", "jobs": [jobs[key] for key in ("job-000", "job-001")],
+                state.update({"phase": "dispatch-failed", "jobs": [jobs[key] for key in ids],
                               "dispatch_error": f"{job_id} launch state is ambiguous; refusing to start another worker"})
                 self._save(state)
                 raise PilotError(state["dispatch_error"])
-            state["jobs"] = [jobs[key] for key in ("job-000", "job-001")]
+            state["jobs"] = [jobs[key] for key in ids]
             self._save(state)
-        phases = [jobs[key]["phase"] for key in ("job-000", "job-001")]
+        phases = [jobs[key]["phase"] for key in ids]
         state["phase"] = ("workers-running" if "running" in phases else
                            "workers-finished" if all(value == "finished" for value in phases) else "workers-failed")
         if state["phase"] != "workers-running":
@@ -1101,14 +1682,14 @@ class ScalewayPilot:
             raise PilotError("policy changed after server creation")
         if state.get("project_id") != checked["project_id"] or state.get("organization_id") != checked["organization_id"] or state.get("zone") != checked["zone"]:
             raise PilotError("saved server identity differs from launch policy")
-        jobs = validate_job_root(job_root, checked["jobs"])
+        jobs = validate_job_root(job_root, checked["jobs"], workset=checked["workset"])
         created = datetime.fromisoformat(state["created_at"])
         now = self.now().astimezone(timezone.utc)
         age = (now - created.astimezone(timezone.utc)).total_seconds()
         if age >= checked["lifetime"] or now >= checked["deadline"]:
             raise PilotError("host TTL or authorization deadline reached")
         if state.get("phase") != "created" and not self._bootstrap_resume_is_safe(state):
-            raise PilotError("both workers may be dispatched once per server")
+            raise PilotError("worker dispatch may occur only once per server")
         self._repo_gate(checked, repo_root)
         self._identity(checked); self._check_type_image_network(checked)
         observed = self._scw(["instance", "server", "get", state["server_id"], f"zone={state['zone']}"], policy=checked)
@@ -1180,7 +1761,7 @@ class ScalewayPilot:
         if boot.returncode:
             raise PilotError(f"remote pinned checkout/dependency bootstrap failed (exit {boot.returncode})")
         remote = state.get("remote_job_directory")
-        if remote != "/home/ubuntu/explicit-lean-simp-jobs":
+        if remote != expected_remote_job_directory(checked):
             raise PilotError("saved remote job directory is invalid")
         mkdir = self._ssh(state, "mkdir", "-p", remote, timeout=60)
         if mkdir.returncode:
@@ -1192,20 +1773,46 @@ class ScalewayPilot:
             raise PilotError("server identity changed before job transfer")
         address = self._state_pinned_public_ip(server_obj, state)["address"]
         self._require_known_host(address, machine)
+        if checked["generic_worker"]:
+            # Bootstrap may take minutes; rehash the exact upload tree immediately
+            # before sizing it so the remote-space estimate does not rely only on
+            # the earlier preflight snapshot.
+            jobs = validate_job_root(job_root, checked["jobs"], workset=checked["workset"])
+            uploaded_bytes = sum(job["input_bytes"] for job in jobs)
+            reserve = remote_output_reserve_bytes(checked["worker_count"])
+            free_before_upload = self._remote_free_bytes(state, remote, checked)
+            if free_before_upload < uploaded_bytes + reserve:
+                raise PilotError("remote free disk is below uploaded inputs plus the bounded worker/result reserve")
         target = f"{policy.get('login_user', 'ubuntu')}@{address}:{remote}/"
         scp_base = ["scp", "-r", "-i", str(Path(machine["ssh_identity_file"]).expanduser()), "-o", "BatchMode=yes",
                     "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={machine['known_hosts_file']}"]
         copied = self._run([*scp_base, *(str(job["directory"]) for job in jobs), target], min(600, checked["runtime"]))
         if copied.returncode:
-            raise PilotError("two-job transfer failed")
+            raise PilotError("job transfer failed")
+        if checked["generic_worker"] and self._remote_free_bytes(state, remote, checked) < remote_output_reserve_bytes(checked["worker_count"]):
+            raise PilotError("remote free disk fell below the bounded worker/result reserve after upload")
         for job in jobs:
             remote_job = remote + "/" + job["id"]
             verify = ("set -eu; test \"$(sha256sum " + remote_job + "/modules.txt | awk '{print $1}')\" = " +
                       shlex.quote(job["manifest_sha256"]) + "; test \"$(sha256sum " + remote_job +
-                      "/mathlib-db.sqlite3 | awk '{print $1}')\" = " + shlex.quote(job["database_sha256"]))
+                      "/mathlib-db.sqlite3 | awk '{print $1}')\" = " + shlex.quote(job["database_sha256"]) + "; " +
+                      self._remote_input_check(remote_job, job["inputs"]))
             checked_remote = self._ssh(state, "sh", "-lc", shlex.quote(verify), timeout=60)
             if checked_remote.returncode:
                 raise PilotError(f"uploaded {job['id']} input hashes differ from policy")
+            if checked["generic_worker"]:
+                readonly_paths = [remote_job + "/modules.txt", remote_job + "/mathlib-db.sqlite3"]
+                readonly_paths.extend(remote_job + "/" + Path(item["path"]).as_posix()
+                                      for item in job["inputs"])
+                chmod = "chmod a-w " + " ".join(shlex.quote(path) for path in readonly_paths)
+                readonly_trees = [shlex.quote(remote_job + "/" + Path(item["path"]).as_posix())
+                                  for item in job["inputs"]
+                                  if (Path(job["directory"]) / item["path"]).is_dir()]
+                if readonly_trees:
+                    chmod += " && chmod -R a-w " + " ".join(readonly_trees)
+                readonly = self._ssh(state, "sh", "-lc", shlex.quote(chmod), timeout=60)
+                if readonly.returncode:
+                    raise PilotError(f"uploaded {job['id']} immutable inputs could not be made read-only")
         dispatch_now = self.now().astimezone(timezone.utc)
         elapsed = (dispatch_now - created.astimezone(timezone.utc)).total_seconds()
         worker_timeout = min(checked["runtime"], int(checked["lifetime"] - elapsed),
@@ -1216,30 +1823,38 @@ class ScalewayPilot:
                       "worker_timeout_seconds": worker_timeout,
                       "jobs": [{"id": item["id"], "manifest_sha256": item["manifest_sha256"],
                                 "database_sha256": item["database_sha256"], "module_count": item["module_count"],
+                                "inputs_sha256": item["inputs_sha256"],
+                                "worker_argv_sha256": worker_argv_sha256(
+                                    checked["worker_argv"], remote + "/" + item["id"]),
                                 "phase": "starting"} for item in state["jobs"]]})
         self._save(state)
         return self._reconcile_dispatch(state, checked, checked)
 
     def poll_workers(self) -> dict[str, Any]:
         state, policy = self._existing_context()
+        checked = validate_policy(policy, self.now())
         if state.get("phase") not in {"workers-running", "workers-finished", "workers-failed"}:
             raise PilotError("worker status requires dispatched jobs")
         remote = state.get("remote_job_directory")
-        if remote != "/home/ubuntu/explicit-lean-simp-jobs":
+        if remote != expected_remote_job_directory(checked):
             raise PilotError("saved remote jobs directory is invalid")
-        command = "set -eu; for j in job-000 job-001; do d=" + remote + "/$j; if test -f \"$d/complete.json\"; then printf '%s\\t' \"$j\"; cat \"$d/complete.json\"; else printf '%s\\tRUNNING\\n' \"$j\"; fi; done"
+        ids = expected_job_ids(checked["worker_count"])
+        if [item.get("id") for item in state.get("jobs", [])] != list(ids):
+            raise PilotError("saved worker job set differs from policy")
+        command = "set -eu; for j in " + " ".join(ids) + "; do d=" + remote + "/$j; if test -f \"$d/complete.json\"; then printf '%s\\t' \"$j\"; cat \"$d/complete.json\"; else printf '%s\\tRUNNING\\n' \"$j\"; fi; done"
         result = self._ssh(state, "sh", "-lc", shlex.quote(command), timeout=60)
         if result.returncode:
             raise PilotError("worker status poll failed")
         observed: dict[str, str] = {}
         for line in result.stdout.splitlines():
             parts = line.split("\t", 1)
-            if len(parts) != 2 or parts[0] not in {"job-000", "job-001"} or parts[0] in observed:
+            if len(parts) != 2 or parts[0] not in ids or parts[0] in observed:
                 raise PilotError("worker status response is malformed")
             observed[parts[0]] = parts[1]
-        if set(observed) != {"job-000", "job-001"}:
+        if set(observed) != set(ids):
             raise PilotError("worker status response is incomplete")
         statuses = []
+        policy_jobs = {item["id"]: item for item in checked["jobs"]}
         for item in state["jobs"]:
             text = observed[item["id"]]
             if text == "RUNNING":
@@ -1249,8 +1864,23 @@ class ScalewayPilot:
                     marker = json.loads(text)
                 except json.JSONDecodeError as error:
                     raise PilotError("worker completion marker is invalid") from error
-                if marker.get("commit") != policy["repository"]["commit"] or type(marker.get("exit_code")) is not int:
+                if (marker.get("commit") != policy["repository"]["commit"]
+                        or type(marker.get("exit_code")) is not int
+                        or not SHA_RE.fullmatch(str(marker.get("database_sha256")))):
                     raise PilotError("worker completion marker identity is invalid")
+                if checked["generic_worker"] and (
+                        marker.get("archive_kind") not in {"result", "diagnostic"}
+                        or marker.get("archive_kind") == "diagnostic" and marker["exit_code"] == 0):
+                    raise PilotError("worker completion marker has an invalid result/diagnostic classification")
+                if checked["generic_worker"]:
+                    expected_argv = worker_argv_sha256(
+                        checked["worker_argv"], remote + "/" + item["id"])
+                    expected_inputs = job_inputs_sha256(_validate_job_input_specs(
+                        policy_jobs[item["id"]].get("inputs", [])))
+                    if (marker.get("manifest_sha256") != item.get("manifest_sha256")
+                            or marker.get("worker_argv_sha256") != expected_argv
+                            or marker.get("inputs_sha256") != expected_inputs):
+                        raise PilotError("worker completion marker does not authenticate its inputs and command")
                 statuses.append({**item, "phase": "finished" if marker["exit_code"] == 0 else "failed",
                                  "exit_code": marker["exit_code"], "database_result_sha256": marker.get("database_sha256")})
         state["jobs"] = statuses
@@ -1262,8 +1892,12 @@ class ScalewayPilot:
 
     def collect_workers(self, *, output_dir: Path) -> dict[str, Any]:
         state, policy = self._existing_context()
+        checked = validate_policy(policy, self.now())
+        ids = expected_job_ids(checked["worker_count"])
         if state.get("phase") not in {"workers-finished", "workers-failed"}:
-            raise PilotError("collection requires both workers to finish")
+            raise PilotError("collection requires every worker to finish")
+        if [item.get("id") for item in state.get("jobs", [])] != list(ids):
+            raise PilotError("saved worker job set differs from policy")
         if output_dir.exists() and any(output_dir.iterdir()):
             raise PilotError("result output directory must be empty")
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1283,23 +1917,33 @@ class ScalewayPilot:
         self._require_known_host(address, machine)
         login = str(policy.get("login_user", "ubuntu"))
         remote_root = state.get("remote_job_directory")
-        if remote_root != "/home/ubuntu/explicit-lean-simp-jobs":
+        if remote_root != expected_remote_job_directory(checked):
             raise PilotError("saved remote jobs directory is invalid")
         output_dir.parent.mkdir(parents=True, exist_ok=True)
-        size_command = ("set -eu; for j in job-000 job-001; do f=" + remote_root +
-                        "/$j/result.tar.gz; test -f \"$f\"; printf '%s\\t%s\\n' \"$j\" \"$(stat -c %s \"$f\")\"; done")
+        size_command = ("set -eu; for j in " + " ".join(ids) + "; do f=" + remote_root +
+                        "/$j/result.tar.gz; if test -f \"$f\"; then printf '%s\\t%s\\n' \"$j\" "
+                        "\"$(stat -c %s \"$f\")\"; else printf '%s\\tMISSING\\n' \"$j\"; fi; done")
         size_result = self._ssh(state, "sh", "-lc", shlex.quote(size_command), timeout=60)
         if size_result.returncode:
             raise PilotError("remote result archive sizing failed")
         remote_sizes: dict[str, int] = {}
+        missing_archives: set[str] = set()
         for line in size_result.stdout.splitlines():
             parts = line.split("\t")
-            if len(parts) != 2 or parts[0] not in {"job-000", "job-001"} or parts[0] in remote_sizes or not parts[1].isdigit():
+            if len(parts) != 2 or parts[0] not in ids or parts[0] in remote_sizes or parts[0] in missing_archives:
                 raise PilotError("remote result archive sizes are malformed")
-            remote_sizes[parts[0]] = int(parts[1])
-        if set(remote_sizes) != {"job-000", "job-001"}:
+            if parts[1] == "MISSING":
+                missing_archives.add(parts[0])
+            elif parts[1].isdigit():
+                remote_sizes[parts[0]] = int(parts[1])
+            else:
+                raise PilotError("remote result archive size is malformed")
+        if set(remote_sizes) | missing_archives != set(ids):
             raise PilotError("remote result archive size list is incomplete")
-        if any(size <= 0 or size > MAX_RESULT_ARCHIVE_BYTES for size in remote_sizes.values()) or sum(remote_sizes.values()) > MAX_TOTAL_ARCHIVE_BYTES:
+        aggregate_archive_limit = aggregate_archive_limit_bytes(checked["worker_count"])
+        per_job_archive_limit = worker_archive_limit_bytes(checked["worker_count"])
+        if (any(size <= 0 or size > per_job_archive_limit for size in remote_sizes.values())
+                or sum(remote_sizes.values()) > aggregate_archive_limit):
             raise PilotError("remote result archive exceeds the configured compressed-size bound")
         free_before = shutil.disk_usage(output_dir.parent).free
         if free_before < sum(remote_sizes.values()) + MAX_TOTAL_EXTRACTED_BYTES + COLLECTION_DISK_RESERVE_BYTES:
@@ -1311,28 +1955,90 @@ class ScalewayPilot:
             job_id = spec["id"]
             out = output_dir / job_id
             out.mkdir()
-            remote_tar = f"{login}@{address}:{remote_root}/{job_id}/result.tar.gz"
             local_tar = out / "result.tar.gz"
+            free_for_extract = shutil.disk_usage(output_dir.parent).free
+            if free_for_extract < MAX_TOTAL_EXTRACTED_BYTES + COLLECTION_DISK_RESERVE_BYTES:
+                raise PilotError("local free disk fell below the bounded extraction reserve")
+            import tarfile
+            extracted: list[Path] = []
+            if job_id in missing_archives:
+                remote_base = f"{login}@{address}:{remote_root}/{job_id}/"
+                diagnostic_sources = [remote_base + name for name in
+                                      ("mathlib-db.sqlite3", "worker.log", "complete.json")]
+                proc = self._run(["scp", "-i", str(Path(machine["ssh_identity_file"]).expanduser()),
+                                  "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+                                  "-o", f"UserKnownHostsFile={machine['known_hosts_file']}",
+                                  *diagnostic_sources, str(out)], 300)
+                if proc.returncode:
+                    raise PilotError(f"{job_id} bounded diagnostic transfer failed")
+                marker = _read_json(out / "complete.json", f"{job_id} completion marker")
+                expected_argv = worker_argv_sha256(checked["worker_argv"], remote_root + "/" + job_id)
+                expected_inputs = job_inputs_sha256(_validate_job_input_specs(spec.get("inputs", [])))
+                expected_exit = next(item.get("exit_code") for item in state["jobs"] if item["id"] == job_id)
+                if (marker.get("archive_kind") != "diagnostic" or marker.get("exit_code") == 0
+                        or marker.get("schema") != 1 or type(marker.get("exit_code")) is not int
+                        or marker.get("exit_code") != expected_exit
+                        or marker.get("commit") != policy["repository"]["commit"]
+                        or marker.get("manifest_sha256") != spec["manifest_sha256"]
+                        or marker.get("worker_argv_sha256") != expected_argv
+                        or marker.get("inputs_sha256") != expected_inputs
+                        or marker.get("database_sha256") != sha256_file(out / "mathlib-db.sqlite3")
+                        or sha256_file(out / "mathlib-db.sqlite3") != spec["database_sha256"]
+                        ):
+                    raise PilotError(f"{job_id} no-archive diagnostic did not authenticate its baseline")
+                log_size = (out / "worker.log").stat().st_size
+                marker_size = (out / "complete.json").stat().st_size
+                if log_size > WORKER_LOG_MAX_BYTES or marker_size > COMPLETE_MARKER_MAX_BYTES:
+                    raise PilotError(f"{job_id} no-archive diagnostic exceeded its transfer bounds")
+                extracted = [out / name for name in ("mathlib-db.sqlite3", "worker.log", "complete.json")]
+                digest = sha256_file(out / "mathlib-db.sqlite3")
+                file_hashes.update({f"{job_id}/{path.name}": sha256_file(path) for path in extracted})
+                job_results.append({"id": job_id, "exit_code": marker["exit_code"],
+                                    "database_sha256": digest, "archive_sha256": None,
+                                    "artifact_file_hashes": {}, "archive_kind": "diagnostic"})
+                total_extracted += sum(path.stat().st_size for path in extracted)
+                if total_extracted > MAX_TOTAL_EXTRACTED_BYTES:
+                    raise PilotError("diagnostic collection exceeded the cumulative extraction bound")
+                continue
+            remote_tar = f"{login}@{address}:{remote_root}/{job_id}/result.tar.gz"
             proc = self._run(["scp", "-i", str(Path(machine["ssh_identity_file"]).expanduser()),
                               "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
                               "-o", f"UserKnownHostsFile={machine['known_hosts_file']}", remote_tar, str(local_tar)], 300)
             if proc.returncode:
                 raise PilotError(f"{job_id} result transfer failed")
             actual_archive_size = local_tar.stat().st_size
-            if actual_archive_size <= 0 or actual_archive_size > MAX_RESULT_ARCHIVE_BYTES or actual_archive_size != remote_sizes[job_id]:
+            if actual_archive_size <= 0 or actual_archive_size > per_job_archive_limit or actual_archive_size != remote_sizes[job_id]:
                 raise PilotError(f"{job_id} downloaded archive size differs from its bounded remote size")
-            free_for_extract = shutil.disk_usage(output_dir.parent).free
-            if free_for_extract < MAX_TOTAL_EXTRACTED_BYTES + COLLECTION_DISK_RESERVE_BYTES:
-                raise PilotError("local free disk fell below the bounded extraction reserve")
-            import tarfile
-            extracted: list[Path] = []
             with tarfile.open(local_tar, "r:gz") as archive:
                 members = archive.getmembers()
                 names = {member.name for member in members}
+                marker_member = next((member for member in members if member.name == "complete.json"), None)
+                if marker_member is None or not marker_member.isfile():
+                    raise PilotError(f"{job_id} archive lacks a regular completion marker")
+                marker_stream = archive.extractfile(marker_member)
+                if marker_stream is None:
+                    raise PilotError(f"{job_id} completion marker could not be read")
+                try:
+                    marker_bytes = marker_stream.read(COMPLETE_MARKER_MAX_BYTES + 1)
+                    if len(marker_bytes) > COMPLETE_MARKER_MAX_BYTES:
+                        raise PilotError(f"{job_id} completion marker exceeds its configured bound")
+                    archive_marker = json.loads(marker_bytes)
+                except json.JSONDecodeError as error:
+                    raise PilotError(f"{job_id} completion marker is invalid") from error
+                if not isinstance(archive_marker, dict):
+                    raise PilotError(f"{job_id} completion marker is not an object")
+                archive_kind = archive_marker.get("archive_kind", "result")
+                if archive_kind not in {"result", "diagnostic"}:
+                    raise PilotError(f"{job_id} archive result classification is invalid")
+                if archive_kind == "diagnostic" and (not checked["generic_worker"]
+                                                       or archive_marker.get("exit_code") == 0):
+                    raise PilotError(f"{job_id} diagnostic archive is inconsistent with worker status")
                 required = {"mathlib-db.sqlite3", "worker.log", "complete.json"}
+                if checked["generic_worker"] and archive_kind == "result":
+                    required.update({"scratch", "artifacts"})
                 def allowed(member: Any) -> bool:
-                    return (member.name in required or member.name == "artifacts" and member.isdir()
-                            or member.name.startswith("artifacts/"))
+                    return (member.name in required or member.name in {"artifacts", "scratch"} and member.isdir()
+                            or member.name.startswith("artifacts/") or member.name.startswith("scratch/"))
                 member_total = sum(member.size for member in members if member.isfile())
                 if (len(members) > MAX_TAR_MEMBERS or member_total > MAX_TOTAL_EXTRACTED_BYTES
                         or any(member.size < 0 or member.size > MAX_TAR_MEMBER_BYTES for member in members)
@@ -1341,6 +2047,10 @@ class ScalewayPilot:
                         Path(member.name).is_absolute() or ".." in Path(member.name).parts or not allowed(member)
                         for member in members)):
                     raise PilotError(f"{job_id} result archive has missing or unsafe entries")
+                if archive_kind == "diagnostic" and names != required:
+                    raise PilotError(f"{job_id} diagnostic archive contains unexpected payload")
+                if any(member.name in {"artifacts", "scratch"} and not member.isdir() for member in members):
+                    raise PilotError(f"{job_id} result output directory entry is not a directory")
                 if shutil.disk_usage(output_dir.parent).free < member_total + COLLECTION_DISK_RESERVE_BYTES:
                     raise PilotError("local free disk is insufficient for declared result members and reserve")
                 for member in members:
@@ -1375,17 +2085,25 @@ class ScalewayPilot:
                         extracted.append(target)
             marker = _read_json(out / "complete.json", f"{job_id} completion marker")
             repository = _dict(policy.get("repository"), "repository")
+            expected_argv = worker_argv_sha256(
+                checked["worker_argv"], remote_root + "/" + job_id)
+            expected_inputs = job_inputs_sha256(_validate_job_input_specs(spec.get("inputs", [])))
             if (marker.get("schema") != 1 or type(marker.get("exit_code")) is not int
                     or marker.get("commit") != repository.get("commit")
                     or marker.get("manifest_sha256") != spec.get("manifest_sha256")
                     or marker.get("database_sha256") != sha256_file(out / "mathlib-db.sqlite3")):
                 raise PilotError(f"{job_id} completion marker or result hash is invalid")
+            if checked["generic_worker"] and (
+                    marker.get("worker_argv_sha256") != expected_argv
+                    or marker.get("inputs_sha256") != expected_inputs):
+                raise PilotError(f"{job_id} completion marker does not authenticate its command or immutable inputs")
             if marker["exit_code"] != next(item.get("exit_code") for item in state["jobs"] if item["id"] == job_id):
                 raise PilotError(f"{job_id} completion marker exit does not match status")
             file_hashes.update({f"{job_id}/{path.relative_to(out)}": sha256_file(path) for path in extracted})
             job_results.append({"id": job_id, "exit_code": marker["exit_code"],
                                 "database_sha256": sha256_file(out / "mathlib-db.sqlite3"),
                                 "archive_sha256": sha256_file(local_tar),
+                                "archive_kind": marker.get("archive_kind", "result"),
                                 "artifact_file_hashes": {str(path.relative_to(out)): sha256_file(path) for path in extracted}})
         state.update({"phase": "collected" if all(item["exit_code"] == 0 for item in job_results) else "collected-worker-failed",
                       "collected_at": self.now().isoformat(), "output_dir": str(output_dir.resolve()),
@@ -1639,7 +2357,7 @@ class ScalewayPilot:
                          and not (cleanup_root["kind"] == "sbs" and item.get("id") in known_ids)))]
             if lingering_instance_volumes:
                 raise PilotError("server is absent but tagged or previously attached storage remains")
-            checked = {"project_id": project_id, "zone": zone,
+            checked = {"project_id": project_id, "zone": zone, "cli_profile": policy["cli_profile"],
                        "root_volume": cleanup_root}
             if checked["root_volume"]["kind"] == "sbs":
                 sbs_ids = set(state.get("attached_volume_ids", state.get("volume_ids", [])))
@@ -1674,7 +2392,8 @@ class ScalewayPilot:
         attached: set[str] = set(state.get("attached_volume_ids", []))
         attached.update(state.get("volume_ids", []))
         root_policy = _parse_root_volume(_dict(policy.get("requirements"), "requirements").get("root_volume"))
-        cleanup_checked = {"project_id": project_id, "zone": zone, "root_volume": root_policy}
+        cleanup_checked = {"project_id": project_id, "zone": zone, "cli_profile": policy["cli_profile"],
+                           "root_volume": root_policy}
         if root_policy["kind"] == "sbs":
             root_attachment = self._server_root_attachment(server, cleanup_checked)
             if attached and attached != {root_attachment["id"]}:
@@ -1733,14 +2452,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub.add_parser("plan", help="show policy readiness without provider calls")
     pf = sub.add_parser("preflight", help="run read-only identity/source/image/network/storage gates")
     pf.add_argument("--repo", type=Path, required=True); pf.add_argument("--jobs", type=Path, required=True)
-    launch = sub.add_parser("create", help="create the single authorized two-worker server")
+    launch = sub.add_parser("create", help="create the single authorized bounded-worker server")
     launch.add_argument("--repo", type=Path, required=True); launch.add_argument("--jobs", type=Path, required=True)
     launch.add_argument("--confirm-create", action="store_true")
     sub.add_parser("status", help="read provider status only")
-    run = sub.add_parser("run-workers", help="bootstrap exact checkout, transfer two jobs and launch workers concurrently")
+    run = sub.add_parser("run-workers", help="bootstrap exact checkout, transfer pinned jobs and launch workers concurrently")
     run.add_argument("--repo", type=Path, required=True); run.add_argument("--jobs", type=Path, required=True)
     collect = sub.add_parser("collect-workers", help="download and verify both worker results")
     collect.add_argument("--output", type=Path, required=True)
+    finalize = sub.add_parser("finalize-worker", help=argparse.SUPPRESS)
+    finalize.add_argument("--job-dir", type=Path, required=True)
+    finalize.add_argument("--inputs-json", required=True)
+    finalize.add_argument("--worker-count", type=int, required=True)
+    finalize.add_argument("--commit", required=True)
+    finalize.add_argument("--exit-code", type=int, required=True)
+    finalize.add_argument("--argv-sha256", required=True)
+    finalize.add_argument("--inputs-sha256", required=True)
     monitor = sub.add_parser("supervise", help="poll workers, collect results and delete resources automatically")
     monitor.add_argument("--repo", type=Path, required=True); monitor.add_argument("--jobs", type=Path, required=True)
     monitor.add_argument("--output", type=Path, required=True); monitor.add_argument("--poll-seconds", type=int, default=60)
@@ -1749,7 +2476,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     ctl = ScalewayPilot(policy_path=args.policy, state_path=args.state)
     try:
-        if args.command == "plan": result = ctl.plan()
+        if args.command == "finalize-worker":
+            result = finalize_worker_result(args.job_dir, json.loads(args.inputs_json), args.worker_count,
+                                            commit=args.commit, exit_code=args.exit_code,
+                                            argv_sha256=args.argv_sha256, inputs_sha256=args.inputs_sha256)
+        elif args.command == "plan": result = ctl.plan()
         elif args.command == "preflight": result = ctl.preflight(repo_root=args.repo, job_root=args.jobs)
         elif args.command == "create": result = ctl.create(repo_root=args.repo, job_root=args.jobs, confirm=args.confirm_create)
         elif args.command == "status": result = ctl.status()
