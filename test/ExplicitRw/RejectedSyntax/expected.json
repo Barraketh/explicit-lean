@@ -13,5 +13,6 @@
   "exact_elab_tactic.lean": "unexpected token 'SmuggleRun'; expected explicitRwTerm",
   "with_simp.lean": "unexpected identifier; expected ']'",
   "local_ref_outside.lean": "unexpected token 'local_ref'; expected term",
-  "lean_term_by.lean": "contains a `by` block"
+  "lean_term_by.lean": "contains a `by` block",
+  "lean_term_macro.lean": "contains a `by` block"
 }

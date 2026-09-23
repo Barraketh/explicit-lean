@@ -99,6 +99,54 @@ def check_name(name: Any, what: str) -> str:
     return name
 
 
+def _lean_code_without_literals_or_comments(text: str) -> str:
+    """Blank strings and Lean comments before checking recorder-only markers."""
+    chars = list(text)
+    i = 0
+    while i < len(text):
+        if text.startswith("/-", i):
+            start = i
+            depth = 1
+            i += 2
+            while i < len(text) and depth:
+                if text.startswith("/-", i):
+                    depth += 1
+                    i += 2
+                elif text.startswith("-/", i):
+                    depth -= 1
+                    i += 2
+                else:
+                    i += 1
+            for j in range(start, i):
+                if chars[j] != "\n":
+                    chars[j] = " "
+            continue
+        if text.startswith("--", i):
+            start = i
+            while i < len(text) and text[i] != "\n":
+                i += 1
+            for j in range(start, i):
+                chars[j] = " "
+            continue
+        if text[i] == '"':
+            start = i
+            i += 1
+            while i < len(text):
+                if text[i] == "\\":
+                    i += 2
+                elif text[i] == '"':
+                    i += 1
+                    break
+                else:
+                    i += 1
+            for j in range(start, min(i, len(text))):
+                if chars[j] != "\n":
+                    chars[j] = " "
+            continue
+        i += 1
+    return "".join(chars)
+
+
 def check_term(text: Any, what: str) -> str:
     """Validate a spec field a replayer splices as a *term*.
 
@@ -111,21 +159,22 @@ def check_term(text: Any, what: str) -> str:
     """
     if not isinstance(text, str) or not text.strip():
         raise RenderError("bad_term", f"{what} is not a non-empty string: {text!r}")
-    if "⋯" in text:
-        raise RenderError("elided_term", f"{what} contains the elision marker ⋯: {text!r}")
     if "\n" in text:
         raise RenderError("multiline_term", f"{what} contains a newline: {text!r}")
+    code = _lean_code_without_literals_or_comments(text)
+    if "⋯" in code:
+        raise RenderError("elided_term", f"{what} contains the elision marker ⋯: {text!r}")
     # Fresh recorder output uses ordinary Lean surface syntax and explicitly
     # disables universe printing.  Do not normalize the authenticated text:
     # even punctuation that resembles a pp.all annotation may occur inside a
     # string literal and must be preserved byte-for-byte.  Keep stale
     # `nat_lit` output rejected; it is an internal constructor, not a term.
-    if re.search(r"(?<![\w.])nat_lit\b", text):
+    if re.search(r"(?<![\w.])nat_lit\b", code):
         raise RenderError(
             "pp_all_term",
             f"{what} is pp.all output (nat_lit): {text!r}",
         )
-    if "✝" in text:
+    if "✝" in code:
         raise RenderError(
             "inaccessible_name", f"{what} splices an inaccessible name: {text!r}"
         )
@@ -139,7 +188,7 @@ def check_term(text: Any, what: str) -> str:
             "unparseable_source_argument",
             f"{what} is simp syntax rather than an explicit_rw term: {text!r}",
         )
-    if "by " in text or checked.endswith(" by"):
+    if re.search(r"(?<![\w.])by(?:\s|$)", code):
         raise RenderError("term_has_by", f"{what} contains a `by` block: {text!r}")
     return text
 
@@ -258,10 +307,10 @@ def source_argument(source_text: Any, source_args: Any, arg_id: Any) -> tuple[st
     if direction not in ("fwd", "rev"):
         raise RenderError("bad_source_direction", f"sourceArgs[{arg_id}].direction is {direction!r}")
     term = source_text[start:end].strip()
-    # Source syntax accepts Unicode `↦`, while ExplicitRw's term grammar
-    # admits the equivalent ASCII lambda arrow. This is a syntax-only
-    # normalization of the authenticated direct span, not reconstruction.
-    term = term.replace("↦", "=>")
+    # Keep the authenticated source span byte-for-byte except for the leading
+    # direction marker. `lean_term(...)` uses Lean's ordinary term parser, so
+    # there is no need to normalize Unicode lambda arrows here. In particular,
+    # a blind replacement would also change `↦` inside string literals.
     if direction == "rev":
         if term.startswith("←"):
             term = term[1:].lstrip()
@@ -585,6 +634,12 @@ def render_rw(step: dict, depth: int, source_text: Any = None,
         if step.get("dir") not in (None, "fwd", "rev"):
             raise RenderError("bad_dir", f"rw.dir is {step.get('dir')!r}")
         direction = "rev"
+    if wrapped_as_prop_step and direction == "rev":
+        raise RenderError(
+            "reverse_prop_rule",
+            "prop_true/prop_false are forward-only and cannot render a reversed simp argument",
+            side="t1",
+        )
     # A source argument is still written in the exact syntax supplied to
     # `simp`; only its leading direction marker was peeled above. The
     # `lean_term(...)` wrapper delimits it but does not rewrite its contents.

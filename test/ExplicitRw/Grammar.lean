@@ -229,4 +229,51 @@ theorem let_binding_in_general_term : 1 = 1 := by
   explicit_rw [change lean_term((let x := 1; x) = 1) at []]
   rfl
 
+set_option linter.unusedTactic false in
+theorem by_text_in_string_literal : "by simp" = "by simp" := by
+  explicit_rw [change lean_term("by simp" = "by simp") at []]
+  rfl
+
+set_option linter.unusedTactic false in
+theorem unicode_lambda_arrow : (fun x : Nat => x) 1 = 1 := by
+  explicit_rw [change lean_term((fun x : Nat ↦ x) 1 = 1) at []]
+  rfl
+
+theorem delimited_proposition_proof (p : Prop) (hp : p) : p = True := by
+  explicit_rw [prop_true lean_term(hp) at [0, 1]]
+  rfl
+
+theorem delimited_named_arguments (a b : Nat) : a + b = b + a := by
+  explicit_rw [lean_term(Nat.add_comm (n := a) (m := b)) at [0, 1]]
+  rfl
+
+structure DelimitedRecord where
+  value : Nat
+
+set_option linter.unusedTactic false in
+theorem delimited_record_update (x : DelimitedRecord) :
+    {x with value := 1}.value = 1 := by
+  explicit_rw [change lean_term(({x with value := 1}.value) = 1) at []]
+  rfl
+
+set_option linter.unusedTactic false in
+theorem delimited_show_from : 1 = 1 := by
+  explicit_rw [change lean_term((show Nat from 1) = 1) at []]
+  rfl
+
+set_option linter.unusedTactic false in
+theorem delimited_match : 1 = 1 := by
+  explicit_rw [change lean_term((match (0 : Nat) with | 0 => 1 | _ => 2) = 1) at []]
+  rfl
+
+set_option linter.unusedTactic false in
+theorem delimited_do : 1 = 1 := by
+  explicit_rw [change lean_term((Id.run do pure 1) = 1) at []]
+  rfl
+
+set_option linter.unusedTactic false in
+theorem delimited_block_comment : "by simp" = "by simp" := by
+  explicit_rw [change lean_term((/- ) by simp -/ "by simp") = "by simp") at []]
+  rfl
+
 end ExplicitRwTest.Grammar

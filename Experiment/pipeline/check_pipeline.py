@@ -1031,6 +1031,15 @@ def derivation_tests(f: Failures) -> None:
                 {"argId": 0, "startChar": 0, "endChar": 5, "direction": "rev"}],
                 operational=True),
             "← lean_term(foo) at []")
+    reversed_prop = step("prop_to_true", prop="true", direction="rev")
+    try:
+        R.render_step(reversed_prop, source_text="← foo", source_args=[
+            {"argId": 0, "startChar": 0, "endChar": 5, "direction": "rev"}],
+            operational=True)
+        f.check("derivation/reverse_prop_rule", False,
+                "a forward-only proposition rule was rendered backwards")
+    except R.RenderError as exc:
+        f.equal("derivation/reverse_prop_rule", exc.reason, "reverse_prop_rule")
     source_record_update = step(source_arg=0)
     f.equal("derivation/source_named_argument_is_delimited",
             R.render_step(source_record_update, source_text="foo (a := bar)",
@@ -1038,6 +1047,47 @@ def derivation_tests(f: Failures) -> None:
                                         "endChar": 14, "direction": "fwd"}],
                           operational=True),
             "lean_term(foo (a := bar)) at []")
+    # The recorder-authenticated source span must stay unchanged inside the
+    # explicit term delimiter. In particular, `↦` is valid Lean syntax and may
+    # also occur in a string literal; replacing it globally would change the
+    # meaning of a recorded simp argument.
+    lambda_and_string = 'fun x ↦ x, "↦"'
+    lambda_arg, _ = R.source_argument(lambda_and_string, [
+        {"argId": 0, "startChar": 0, "endChar": 9, "direction": "fwd"},
+    ], 0)
+    f.equal("derivation/source_unicode_lambda_exact", lambda_arg,
+            "fun x ↦ x")
+    unicode_string = step(source_arg=0)
+    f.equal("derivation/source_unicode_string_rendered",
+            R.render_step(unicode_string, source_text=lambda_and_string,
+                          source_args=[{"argId": 0, "startChar": 11,
+                                        "endChar": 14, "direction": "fwd"}],
+                          operational=True),
+            'lean_term("↦") at []')
+    by_string = '"by simp"'
+    by_string_term, _ = R.source_argument(by_string, [
+        {"argId": 0, "startChar": 0, "endChar": len(by_string),
+         "direction": "fwd"},
+    ], 0)
+    f.equal("derivation/source_by_string_rendered",
+            R.render_step(step(source_arg=0), source_text=by_string,
+                          source_args=[{"argId": 0, "startChar": 0,
+                                        "endChar": len(by_string),
+                                        "direction": "fwd"}],
+                          operational=True),
+            f'lean_term({by_string_term}) at []')
+    marker_string = '"⋯ nat_lit h✝ by simp"'
+    f.equal("derivation/recorder_markers_in_string_are_terms",
+            R.check_term(marker_string, "fixture"), marker_string)
+    comment = "foo /- ⋯ nat_lit h✝ by simp -/"
+    f.equal("derivation/recorder_markers_in_comment_are_ignored",
+            R.check_term(comment, "fixture"), comment)
+    try:
+        R.check_term("(by simp)", "fixture")
+        f.check("derivation/term_by_still_rejected", False,
+                "a tactic block passed the renderer's lexical precheck")
+    except R.RenderError as exc:
+        f.equal("derivation/term_by_still_rejected", exc.reason, "term_has_by")
 
     local = step(source="local-evidence", source_arg=None, name="H.1",
                  args=[], binders=[])
