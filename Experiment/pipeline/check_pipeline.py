@@ -447,6 +447,15 @@ def invocation_tests(f: Failures) -> None:
         start = sum(len(chunk) for chunk in chunks)
         chunks.append(declaration)
         case_ranges[name] = (start, start + len(declaration))
+    broadcast_declaration = (
+        "theorem branch_broadcast : True := by\n"
+        "  ext; all_goals simp\n"
+    )
+    broadcast_start = sum(len(chunk) for chunk in chunks)
+    chunks.append(broadcast_declaration)
+    case_ranges["broadcast"] = (
+        broadcast_start, broadcast_start + len(broadcast_declaration)
+    )
     fixture_source = "".join(chunks)
     fixture_sites = S.find_sites(fixture_source)
     fixture_path: pathlib.Path | None = None
@@ -541,6 +550,27 @@ def invocation_tests(f: Failures) -> None:
     refused_suffix = expanded("unsupported_suffix", 2)
     f.equal("invocations/unsupported_simp_suffix_refused",
             refused_suffix["status"], "structurally_refused")
+
+    # A recorded invocation list does not identify its goals when the source
+    # delegates to `all_goals` without a parser-authenticated `<;>` branch
+    # spine.  Keep that ownership gap fail-closed even when its cardinality
+    # happens to match the number of broadcast goals.
+    broadcast_site, broadcast_syntax = fixture("broadcast")
+    broadcast_kinds = [node.get("kind") for node in broadcast_syntax["ancestry"]]
+    f.check("invocations/broadcast_ast_has_all_goals_without_apply_all_spine",
+            "Lean.Parser.Tactic.allGoals" in broadcast_kinds
+            and not any("tactic_<;>_" in kind for kind in broadcast_kinds),
+            repr(broadcast_kinds))
+    broadcast_two = expanded("broadcast", 2)
+    f.equal("invocations/broadcast_two_goals_stays_unresolved",
+            broadcast_two["status"], "structurally_refused")
+    f.check("invocations/broadcast_two_original_kept",
+            any(line.strip() == broadcast_site.text
+                for line in broadcast_two["lines"]),
+            "the original source call was not retained")
+    broadcast_three = expanded("broadcast", 3)
+    f.equal("invocations/broadcast_count_does_not_infer_goal_spine",
+            broadcast_three["status"], "structurally_refused")
 
     identical = expanded("identical", 2, names=["same", "same"])
     f.equal("invocations/identical_step_lists_keep_leaves", identical["structural_leaf_count"], 2)
