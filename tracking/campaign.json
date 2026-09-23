@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-23T03:41:06Z",
+  "updatedAt": "2026-09-23T04:05:33Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -1229,6 +1229,34 @@
       "securityGroup": "absent"
     },
     "result": "tracking/tasks/T72-scaleway-live-run/RESULT.md",
+    "wholeTreeAcceptance": "not_claimed"
+  },
+  "isolatedTraceCompileRun": {
+    "task": "T76-isolated-trace-compile",
+    "status": "running_local_four_disjoint_workers",
+    "launchedAt": "2026-09-23T04:05:33Z",
+    "harnessCommit": "f13aa0f19feeff474b340ed8fb82a0d12c0972c6",
+    "cloudUsed": false,
+    "workerCount": 4,
+    "moduleCounts": [
+      717,
+      717,
+      717,
+      716
+    ],
+    "sourceStatus": "record_failed",
+    "candidateRows": 30057,
+    "manifestUnionModules": 2867,
+    "manifestsDisjoint": true,
+    "databaseBaselineSha256": "59ce60baa642d759e09f1b9b481354c229b399018d0a41497ba0d6ad92f2e55d",
+    "artifactsRoot": ".lake/private/T65-scaleway-full-20260922/results-stopped-analysis",
+    "runRoot": ".lake/private/T76-isolated-trace-20260923",
+    "scratchOnlyProofMask": "by sorry for failed theorem/lemma bodies only",
+    "persistenceGuard": "reject sorry/admit tokens before SQLite update",
+    "stockCompile": true,
+    "simpDisabledCertification": "deferred",
+    "originalDatabaseOverwritten": false,
+    "result": "tracking/tasks/T76-isolated-trace-compile/RESULT.md",
     "wholeTreeAcceptance": "not_claimed"
   },
   "remoteWorker": {
