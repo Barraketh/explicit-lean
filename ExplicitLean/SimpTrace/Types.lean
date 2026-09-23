@@ -170,7 +170,8 @@ structure Step where
   rhs?    : Option String := none
   by_?    : Option String := none
   source? : Option String := none
-  /-- `change` steps: the `pp.all` target term. -/
+  /-- `change` steps: an ordinary Lean surface term, elaborated in the
+  captured context. -/
   to?     : Option String := none
   /-- `congr` steps: which argument of the application was rewritten. -/
   arg?    : Option Nat := none

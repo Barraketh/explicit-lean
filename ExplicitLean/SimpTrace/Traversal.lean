@@ -873,7 +873,7 @@ def dsimpReduceT (ref : TraceRef) (pos : Pos) : DSimproc := fun e => do
 
 /-- Log a change produced by a stock `dpre`/`dpost` procedure at `pos`.  These
 are definitional by construction; we classify them the same way `reduceStepC`
-does, falling back to `change` (with a `pp.all` term supplied later). -/
+does, falling back to `change` with ordinary Lean surface syntax supplied later. -/
 def classifyDefChange (before after : Expr) : DefKind :=
   if before.isApp && before.getAppFn.isLambda && before.headBeta == after then .beta
   else if before.isLet then .zeta

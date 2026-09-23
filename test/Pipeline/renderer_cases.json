@@ -225,9 +225,15 @@
   },
   {
    "name": "change_universe_annotations",
-   "why": "pp.all universe levels are printer metadata; elaboration recovers them",
+   "why": "renderer preserves the exact trace text; fresh recorder output hides universes",
    "step": {"kind": "change", "pos": [], "to": "Prod.{u_1, u_2} α α'"},
-   "expect": "change Prod α α' at []"
+   "expect": "change Prod.{u_1, u_2} α α' at []"
+  },
+  {
+   "name": "change_string_with_universe_like_text",
+   "why": "universe-like punctuation inside an ordinary string literal is preserved exactly",
+   "step": {"kind": "change", "pos": [], "to": "\"literal.{abc}\""},
+   "expect": "change \"literal.{abc}\" at []"
   },
   {
     "name": "dependent_forall_transport",

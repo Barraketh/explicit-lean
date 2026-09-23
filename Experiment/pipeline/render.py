@@ -104,7 +104,7 @@ def check_term(text: Any, what: str) -> str:
     term grammar. Three shapes are known not to survive it and are refused by
     name rather than shipped into a parse error: the elision marker `⋯` (which
     is pretty-printer output, not a term), embedded newlines or `have`/`let`
-    telescopes, and `pp.all` universe/`nat_lit` annotations.
+    telescopes, and the stale `pp.all` `nat_lit` annotation.
     """
     if not isinstance(text, str) or not text.strip():
         raise RenderError("bad_term", f"{what} is not a non-empty string: {text!r}")
@@ -116,18 +116,15 @@ def check_term(text: Any, what: str) -> str:
         raise RenderError(
             "non_term_syntax", f"{what} carries tactic/telescope syntax: {text!r}"
         )
-    # The recorder's `pp.all` printer annotates every declaration reference
-    # with universe levels (for example `Prod.{u_1, u_2}`), but those levels
-    # are recovered by ordinary elaboration and are not part of ExplicitRw's
-    # source grammar.  Erase only the printer annotation; this is a lexical
-    # normalization of the authenticated field, not term parsing or inference.
-    # Keep `nat_lit` rejected: it is an internal constructor, rather than a
-    # surface spelling whose omitted information elaboration can recover.
-    text = re.sub(r"\.\{[^{}]*\}", "", text)
+    # Fresh recorder output uses ordinary Lean surface syntax and explicitly
+    # disables universe printing.  Do not normalize the authenticated text:
+    # even punctuation that resembles a pp.all annotation may occur inside a
+    # string literal and must be preserved byte-for-byte.  Keep stale
+    # `nat_lit` output rejected; it is an internal constructor, not a term.
     if re.search(r"(?<![\w.])nat_lit\b", text):
         raise RenderError(
             "pp_all_term",
-            f"{what} is pp.all output (universe levels / nat_lit): {text!r}",
+            f"{what} is pp.all output (nat_lit): {text!r}",
         )
     if "✝" in text:
         raise RenderError(
@@ -140,19 +137,20 @@ def check_term(text: Any, what: str) -> str:
     # it as Lean's own named-argument syntax, while recursively checking only
     # its value through the same closed term grammar.  Keep a bare `foo := bar`
     # refusal so malformed source spans remain visible before parser rejection.
-    if text in ("*", "_") or re.fullmatch(r"-[^\s]+", text):
+    checked = text.strip()
+    if checked in ("*", "_") or re.fullmatch(r"-[^\s]+", checked):
         raise RenderError(
             "unparseable_source_argument",
             f"{what} is simp syntax rather than an explicit_rw term: {text!r}",
         )
-    if ":=" in text and not re.search(r"\([^)]*:=\s", text):
+    if ":=" in text and not re.search(r"\([^)]*:=\s", checked):
         raise RenderError(
             "unparseable_source_argument",
             f"{what} is not a parenthesized named argument: {text!r}",
         )
-    if "by " in text or text.strip().endswith(" by"):
+    if "by " in text or checked.endswith(" by"):
         raise RenderError("term_has_by", f"{what} contains a `by` block: {text!r}")
-    return text.strip()
+    return text
 
 
 def render_pos(pos: Any) -> str:

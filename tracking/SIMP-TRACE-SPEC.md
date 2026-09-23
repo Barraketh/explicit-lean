@@ -77,11 +77,13 @@ form for `reduceCtorEq`-style side conditions.
 - `{"kind":"beta"|"eta"|"proj"|"zeta"|"iota", "pos": POS, "before": ..., "after": ...}` Definitional
   reductions simp performs silently (`zeta` = `let x := v; b` to `b[v/x]`;
   `iota` = matcher/recursor application to a constructor, reduced one step).
-- `{"kind":"change", "pos": POS, "to": "<pp.all term>", "before": ..., "source": "<dsimproc name>" (optional)}`
+- `{"kind":"change", "pos": POS, "to": "<ordinary Lean surface term>", "before": ..., "source": "<dsimproc name>" (optional)}`
   Definitional replacement when no named kind applies, including any
   dsimproc firing (`dreduceIte`, `Nat.reduceAdd` in dsimp mode, ...), which is
   definitional by construction and must not be recorded as a propositional
-  `eq`; replay checks defeq.
+  `eq`; replay checks defeq. The recorder prints `to` as ordinary Lean surface
+  syntax in the captured local context; implicit arguments, instances and
+  universe levels are left for elaboration.
 - `{"kind":"eq", "pos": POS, "lhs": "<pp>", "rhs": "<pp>", "by": "rfl"|"decide",
    "source": "<simproc name>"}` A simproc-computed equation whose proof is by
   kernel computation. Replay proves it with the named ordinary tactic, never

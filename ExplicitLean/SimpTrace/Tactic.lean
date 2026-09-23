@@ -88,18 +88,32 @@ def ppArg (c : EvCtx) (e : Expr) : MetaM String :=
     let atomic := !s.any (fun ch => ch == ' ')
     return if atomic then s else "(" ++ s ++ ")"
 
-/-- Pretty-print with `pp.all` for `change` steps. -/
-def ppAllIn (c : EvCtx) (e : Expr) : MetaM String :=
+/-- Pretty-print the target of a `change` step as ordinary Lean source.
+
+This text is consumed by the elaborator in the captured context, so implicit
+arguments, instances and universe levels must remain implicit.  Proofs and
+deep terms are enabled to avoid the pretty-printer's non-source elision forms;
+we do not enable `pp.all`, which exposes implementation names such as
+`nat_lit` and inaccessible instance details.  Newlines emitted for layout are
+collapsed deterministically because the renderer splices this term into a
+single `change` tactic.  We do not rename or sanitize free variables: an
+inaccessible local that has no ordinary source name remains a replay failure. -/
+def ppChangeTo (c : EvCtx) (e : Expr) : MetaM String :=
   withLCtx c.lctx c.insts do
-    -- A `change` step's `to` is spliced into a tactic verbatim, so it must be
-    -- one line.  A wide format width stops the printer wrapping, but `pp.all`
-    -- still breaks a `let`/`have` body onto its own line structurally, so the
-    -- remaining whitespace is collapsed: whether a multi-line term parses
-    -- depends on the indentation it lands in, which a generator cannot know
-    -- (REVIEW-9 7).
-    withOptions (fun o => (o.setBool `pp.all true).set `format.width (10000 : Nat)) do
+    withOptions (fun o =>
+        let o := o.setBool `pp.all false
+        let o := o.setBool `pp.explicit false
+        let o := o.setBool `pp.universes false
+        let o := o.setBool `pp.instances false
+        let o := o.setBool `pp.natLit false
+        let o := o.setBool `pp.numericTypes false
+        let o := o.setBool `pp.notation true
+        let o := o.setBool `pp.proofs true
+        let o := o.setBool `pp.deepTerms true
+        o.set `format.width (10000 : Nat)) do
       let txt := (← ppExpr e).pretty
-      return " ".intercalate (txt.splitOn "\n" |>.map (·.trim) |>.filter (!·.isEmpty))
+      return " ".intercalate
+        (txt.splitOn "\n" |>.map (·.trimAscii.toString) |>.filter (!·.isEmpty))
 
 /-! ### Classifying an `eq` step's proving tactic -/
 
@@ -305,7 +319,7 @@ partial def eventToStep (ur : IO.Ref Unresolved)
         { kind := "unfold", pos := pos, name? := unfolded.map toString,
           before? := some beforePP, after? := some afterPP }
       | .change =>
-        -- Filled in below; `pp.all` needs the monad.  `name?` carries the
+        -- Filled in below; printing `change.to` needs the monad.  `name?` carries the
         -- dsimproc's name here, which the spec renders as `source` (e95c745).
         { kind := "change", pos := pos, source? := unfolded.map toString,
           before? := some beforePP, after? := some afterPP }
@@ -318,8 +332,9 @@ partial def eventToStep (ur : IO.Ref Unresolved)
         { kind := k.toString, pos := pos,
           before? := some beforePP, after? := some afterPP }
     if kind == .change then
-      -- Last resort per the spec: a definitional `change` carrying `pp.all`.
-      let toPP ← ppAllIn c after
+      -- Last resort per the spec: a definitional `change` carrying ordinary
+      -- Lean surface syntax, elaborated in the exact captured local context.
+      let toPP ← ppChangeTo c after
       return some { step with to? := some toPP }
     return some step
   | .introCtx pos _ _ info =>
