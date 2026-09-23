@@ -424,8 +424,39 @@ not claimed complete.
 The validated named-zeta database contains 37 success rows with 40 textual
 simp-family findings. Lean AST classification identifies 26 rows / 28 direct
 `simp` sites, 9 rows / 10 Aesop-configuration-only findings, and 2 rows whose
-module parser context refuses recovery. No row was mutated. A new-copy,
-opt-in retry mechanism for the 26 authenticated residual rows is under review.
+module parser context refuses recovery. No row was mutated. The reviewed
+new-copy retry path is integrated through `429982c`: it AST-selects only owned
+direct `simp` nodes, is capped at eight modules / 32 rows, reauthenticates
+source and candidate identities before and after copying, archives prior
+success evidence transactionally, and makes terminal failures visible. An
+independent review found and fixed a provenance gap where SQLite WAL state
+could have escaped the pinned main-file hash; the source is now immutable
+read-only and any WAL, SHM, or journal sidecar refuses the copy. The residual
+retry is ready but has not launched because all six campaign process slots are
+occupied.
+
+The module-risk gate is hardened through `7f96f6f`. Review reproduced a real
+bypass: a command-category elaborator could call `Lean.Meta.simp` during
+candidate compilation while the older term-only classifier returned `ok`.
+The reviewed gate now refuses executable command/tactic/term/macro/do-element
+macro and elaborator registrations, parser registration attributes, and the
+specialized registered callback attributes exercised by Lean. Passive syntax
+declarations and passive quoted attribute syntax remain allowed. Independent
+review found and fixed missed parser and inductive-elaborator attributes plus
+two false-positive name matches. The focused seven-test extension suite passes
+on main. The full extractor suite, whose setup imports all Mathlib, was
+interrupted rather than competing with the six corpus workers and is not
+claimed.
+
+A read-only structured-evidence sweep identified two source-application retry
+classes likely unlocked by `f008408`: 83 current failed site records with
+exact `missing_source_application` classification and manifest/source-argument
+alignment, plus 22 `unassigned_explicit_argument` command rows whose raw step
+is tied to the exact simp-lemma `argId`. Twenty-five looser records were
+excluded, and no `missing_local_evidence` target was established. These counts
+are only a moving snapshot; the selector and six-way success anti-join must be
+rerun against each terminal owner database before dispatch, so no manifest or
+coverage claim is frozen from this snapshot.
 
 At `2026-09-23T14:06:47Z`, the still-running pending shards had moved 3,180
 owned rows to success, 602 to noop, 2,085 to record failure, 357 to render
