@@ -70,8 +70,10 @@ run_cmd do
     throwError "snapshotted ne_eq step did not validate: {reason}"
 
 /- `recordEvent` checks liveness only when called at an identified temporary
-depth boundary. It rejects child-depth term and universe metavariables, but it
-must preserve an enclosing-depth metavariable and ordinary outer-depth events. -/
+depth boundary. The before/after expressions below are definitionally equal but
+structurally distinct, so the test reaches the gate instead of no-op elision. It
+rejects child-depth term and universe metavariables, but preserves valid
+enclosing-depth metavariables and ordinary outer-depth events. -/
 run_cmd do
   Lean.Elab.Command.liftTermElabM do
     let ref : TraceRef ← ST.mkRef ({} : ExplicitLean.SimpTrace.TraceState)
@@ -80,27 +82,45 @@ run_cmd do
     let assignedLevelRef : TraceRef ← ST.mkRef ({} : ExplicitLean.SimpTrace.TraceState)
     let outerLevelRef : TraceRef ← ST.mkRef ({} : ExplicitLean.SimpTrace.TraceState)
     let outer ← mkFreshExprMVar (mkConst ``Nat)
+    let .mvar outerTermId := outer | throwError "expected enclosing term metavariable"
     let outerLevel ← mkFreshLevelMVar
     let simpCtx ← Simp.Context.mkDefault
     let (_, _) ← Simp.SimpM.run simpCtx {} {} do
       withNewMCtxDepth do
-        recordEvent ref (.defeq #[] .change none outer outer {}) true
+        unless !(← outerTermId.isAssignable) do
+          throwError "enclosing term metavariable became assignable at child depth"
+        unless !(← isLevelMVarAssignable outerLevel.mvarId!) do
+          throwError "enclosing universe metavariable became assignable at child depth"
+        let outerApplied := mkApp (mkConst ``id [.succ .zero]) outer
+        recordEvent ref (.defeq #[] .change none outerApplied outer {}) true
         let outerUniverseTerm := mkConst ``List [outerLevel]
+        let outerUniverseApplied := mkApp
+          (mkConst ``id [.succ outerLevel]) outerUniverseTerm
         recordEvent outerLevelRef
-          (.defeq #[] .change none outerUniverseTerm outerUniverseTerm {}) true
+          (.defeq #[] .change none outerUniverseApplied outerUniverseTerm {}) true
         let innerTerm ← mkFreshExprMVar (mkConst ``Nat)
-        recordEvent termRef (.defeq #[] .change none innerTerm innerTerm {}) true
+        unless (← innerTerm.mvarId!.isAssignable) do
+          throwError "child term metavariable is not assignable at child depth"
+        let innerApplied := mkApp (mkConst ``id [.succ .zero]) innerTerm
+        recordEvent termRef (.defeq #[] .change none innerApplied innerTerm {}) true
         let innerLevel ← mkFreshLevelMVar
+        unless (← isLevelMVarAssignable innerLevel.mvarId!) do
+          throwError "child universe metavariable is not assignable at child depth"
         let innerUniverseTerm := mkConst ``List [innerLevel]
+        let innerUniverseApplied := mkApp
+          (mkConst ``id [.succ innerLevel]) innerUniverseTerm
         recordEvent levelRef
-          (.defeq #[] .change none innerUniverseTerm innerUniverseTerm {}) true
+          (.defeq #[] .change none innerUniverseApplied innerUniverseTerm {}) true
         let assignedLevel ← mkFreshLevelMVar
         assignLevelMVar assignedLevel.mvarId! .zero
         let assignedUniverseTerm := mkConst ``List [assignedLevel]
+        let assignedUniverseApplied := mkApp
+          (mkConst ``id [.succ assignedLevel]) assignedUniverseTerm
         recordEvent assignedLevelRef
-          (.defeq #[] .change none assignedUniverseTerm assignedUniverseTerm {}) true
+          (.defeq #[] .change none assignedUniverseApplied assignedUniverseTerm {}) true
       let outerTerm ← mkFreshExprMVar (mkConst ``Nat)
-      recordEvent ref (.defeq #[] .change none outerTerm outerTerm {})
+      let outerApplied := mkApp (mkConst ``id [.succ .zero]) outerTerm
+      recordEvent ref (.defeq #[] .change none outerApplied outerTerm {})
     let state ← ref.get
     let termState ← termRef.get
     let levelState ← levelRef.get
@@ -118,17 +138,19 @@ run_cmd do
       throwError "assigned temporary universe metavariable was rejected"
     let .defeq _ _ _ assignedUniverseSnapshot _ _ := assignedLevelState.events[0]!
       | throwError "expected the assigned universe-only event"
-    unless assignedUniverseSnapshot == mkConst ``List [.zero] do
+    unless assignedUniverseSnapshot ==
+        mkApp (mkConst ``id [.succ .zero]) (mkConst ``List [.zero]) do
       throwError "assigned temporary universe level was not snapshotted"
     unless outerLevelState.events.size == 1 && outerLevelState.unresolved.isEmpty do
       throwError "valid enclosing universe metavariable was rejected"
     let .defeq _ _ _ retainedOuterLevel _ _ := outerLevelState.events[0]!
       | throwError "expected the enclosing universe event"
-    unless retainedOuterLevel == mkConst ``List [outerLevel] do
+    unless retainedOuterLevel ==
+        mkApp (mkConst ``id [.succ outerLevel]) (mkConst ``List [outerLevel]) do
       throwError "enclosing universe metavariable was not retained"
     let .defeq _ _ _ retainedOuter _ _ := state.events[0]!
       | throwError "expected the outer-depth event first"
-    unless retainedOuter == outer do
+    unless retainedOuter == mkApp (mkConst ``id [.succ .zero]) outer do
       throwError "temporary-depth check discarded a valid enclosing metavariable"
     let .defeq _ _ _ retainedCurrent _ _ := state.events[1]!
       | throwError "expected the ordinary outer-depth event second"
