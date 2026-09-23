@@ -199,7 +199,8 @@
       "dcd2031",
       "f183fdf",
       "02125c2",
-      "306505e"
+      "306505e",
+      "3c77e1f"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -260,6 +261,7 @@
       "termElaborationAstGate": "passed_12_syntax_31_retry_20_isolated_trace_checks_and_fail_closed_direct_Meta_Simp_elaborator_controls",
       "executableProofHoleAstAudit": "passed_sorry_admit_syntax_rejection_with_comment_docstring_string_controls_and_candidate_persistence_gate",
       "sourceSpanRebaseHistoricalControl": "passed_unrebased_T76_failure_and_current_canonical_whole_source_copy_rebase_success",
+      "allGoalsSourceOwnership": "passed_current_tactic_semicolon_AST_and_fail_closed_no_tactic_less_than_semicolon_all_goals_ownership_with_29_invocation_12_AST_checks",
       "currentEventMetavariableSnapshot": "passed_after_test_only_fix_00b83af_the_recorder_gate_was_correct_and_the_old_fixture_was_elided_as_an_identical_defeq_noop",
       "nestedDischargeOwnership": "passed_real_Finsupp_sum_sum_index_four_rewrites_two_ordered_sides_each",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
@@ -280,6 +282,13 @@
         "diagnosis": "the typed local snapshot alone cannot justify skipping explicit-binder validation because an unrelated binder can produce the same shallow application shape",
         "requiredFix": "share exact rewrite matching and metavariable-closing semantics between recorder validation and explicit_rw replay",
         "unsafeShortcutRejected": "blanket trust of a local evidence snapshot accepts unrelated explicit binders"
+      },
+      "allGoalsWithoutApplyAllAncestry": {
+        "representative": "ext; all_goals simp",
+        "classification": "sequential all_goals source has no authenticated tactic_<;> owner",
+        "diagnosis": "the invocation records do not identify which generated proof belongs to which goal",
+        "requiredFix": "fresh source contract that authenticates all_goals child ownership and continuation semantics",
+        "unsafeShortcutRejected": "inferring branch ownership from record count"
       }
     },
     "realSmoke": {
@@ -310,6 +319,13 @@
       "rows": 13102,
       "manifestsDisjoint": true,
       "runningWorkers": ["000", "001", "002", "003"],
+      "knownModuleErrors": [
+        "Mathlib.Order.Grade",
+        "Mathlib.Probability.Independence.Integration",
+        "Mathlib.RingTheory.Extension.Presentation.Submersive"
+      ],
+      "knownModuleErrorClassification": "historical whole-module proof-hole regex false positives in documentation comments or fenced documentation code",
+      "postMergeRetry": "retry owned pending rows for known module errors under reviewed AST executable-hole audit",
       "preparedWorkers": [],
       "fastPathRestartedAt": "2026-09-23T06:27:03Z",
       "maximumConcurrentLocalCampaignWorkers": 6,

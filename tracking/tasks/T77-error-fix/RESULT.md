@@ -41,6 +41,8 @@ Subsequent reviewed mechanism commits:
   executable proof-hole syntax.
 - `306505e`: explicit regression for the historical module-to-command
   `sourceArgs` coordinate mismatch.
+- `3c77e1f`: fail-closed ownership regression for sequential
+  `all_goals simp` without authenticated `<;>` ancestry.
 
 ## Implemented controls and principled fixes
 
@@ -275,6 +277,12 @@ Subsequent reviewed mechanism commits:
   module-relative Unicode scalar offsets were applied to a sliced command.
   Current code performs canonical whole-source validation and a checked
   copy-only rebase; the focused controls and 30 retry checks passed.
+- Historical binary `<;>` failures predate the reviewed parsed-AST path:
+  current `cases l <;> simp` exposes exact left/right ownership and renders two
+  leaves. In contrast, `ext; all_goals simp` has no `tactic_<;>` node, so the
+  renderer still refuses rather than inferring goal ownership from record
+  count. The private 29 invocation checks, 12 AST checks, and apply-all Lean
+  fixture passed.
 
 ## Real smoke evidence
 
@@ -345,6 +353,11 @@ would be unsound: an unrelated quantified local can present the same shallow
 application shape. No bypass was integrated; the fix requires sharing the
 replayer's exact matching and metavariable-closing semantics.
 
+Sequential `all_goals simp` without `<;>` ancestry is also a genuine source
+ownership blocker. Existing invocation records do not authenticate which
+generated proof belongs to which goal; matching the number of records to the
+number of goals would be a heuristic and remains rejected.
+
 ## Active pending run
 
 Run root:
@@ -360,6 +373,15 @@ passed review. Their SQLite transactions remained consistent; pre-restart
 logs/completion/exit markers are preserved under `prebatch-79b2f6a` names.
 Both resumed from their existing databases at the fast-path commit, reusing
 already authenticated site traces and completed command results.
+
+The old whole-file proof-hole regex has produced three known module-level
+false positives in this run: `Mathlib.Order.Grade` and
+`Mathlib.RingTheory.Extension.Presentation.Submersive` use the English word
+`admit` in documentation, while
+`Mathlib.Probability.Independence.Integration` has explanatory `sorry` tokens
+inside a fenced documentation example. Their owned pending rows remain
+unprocessed and will be retried after merge under the reviewed executable-AST
+audit; they are not Lean failures.
 
 The `monitor-isolated-trace-compile` heartbeat now monitors both runs, validates
 and merges into new copies, and then retries audited failures using only the
