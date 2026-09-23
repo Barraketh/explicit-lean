@@ -371,29 +371,8 @@ where
     | .proj _ _ value => go value false
     | .bvar _ | .fvar _ | .sort _ | .const .. | .lit _ => return false
 
-partial def instantiateSourceLevel (mctx : MetavarContext) : Level → Level
-  | .mvar id =>
-    match mctx.lAssignment.find? id with
-    | some level => instantiateSourceLevel mctx level
-    | none => .mvar id
-  | .succ level => .succ (instantiateSourceLevel mctx level)
-  | .max lhs rhs => .max (instantiateSourceLevel mctx lhs) (instantiateSourceLevel mctx rhs)
-  | .imax lhs rhs => .imax (instantiateSourceLevel mctx lhs) (instantiateSourceLevel mctx rhs)
-  | .zero => .zero
-  | .param name => .param name
-
-/-- Instantiate universe assignments through an Expr before its temporary
-metavariable context is popped. Expr-level term instantiation alone leaves
-universe mvars intact, which would make validator evidence refer to dead ids. -/
 def instantiateSourceValueLevels (e : Expr) : Simp.SimpM Expr := do
-  let mctx ← getMCtx
-  return e.replaceLevel fun level =>
-    match level with
-    | .mvar id =>
-      match mctx.lAssignment.find? id with
-      | some _ => some (instantiateSourceLevel mctx level)
-      | none => none
-    | _ => none
+  instantiateEventAssignments e
 
 def originalType? (o : Origin) : Simp.SimpM (Option Expr) := do
   match o with
@@ -503,8 +482,12 @@ def derivationFor (_ref : TraceRef) (o : Origin) (constructionOrigin : Origin)
 /-- A copy of `Simp.tryTheoremCore` with event-time provenance capture. -/
 def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     (thm : SimpTheorem) (numExtraArgs : Nat) (rflOnly : Bool) :
-    Simp.SimpM (Option (Simp.Result × RuleDerivation × Pos × Expr × Expr × Option Expr)) := do
+    Simp.SimpM (Option (Simp.Result ×
+      Option (RuleDerivation × Pos × Expr × Expr × Option Expr))) := do
   withNewMCtxDepth do
+    -- A discharger can run nested simp while an enclosing rewrite already has
+    -- pending side records. Only this candidate's appended suffix is checked.
+    let pendingSideStart := (← ref.get).pendingSide.size
     let val ← thm.getValue
     let sourceInfo? ← sourceArgInfo? ref thm.origin
     -- Snapshot the source elaboration *before* matcher unification can fill
@@ -534,11 +517,11 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     let (ok, binders, discharges) ← synthesizeArgsOperational thm.origin bis xs
     unless ok do return none
     let proof ← instantiateMVars (mkAppN val xs)
-    if ← hasAssignableMVar proof then return none
+    if ← hasAssignableTermOrLevelMVar proof then return none
     let rhs := (← instantiateMVars type).appArg!
     if (← instantiateMVars core) == rhs then return none
     if thm.perm && !(← acLt rhs core .reduceSimpleOnly) then return none
-    if ← hasAssignableMVar rhs then return none
+    if ← hasAssignableTermOrLevelMVar rhs then return none
     let rhs ← if type.hasBinderNameHint then rhs.resolveBinderNameHint else pure rhs
     let implicitDefEq := thm.rfl ||
       (thm.backwardRfl && backward.defeqAttrib.useBackward.get (← getOptions))
@@ -577,6 +560,10 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
       | o => o
     let derivation ← derivationFor ref thm.origin constructionOrigin type redexPos
       numExtraArgs binders discharges
+    -- These expressions are returned across `withNewMCtxDepth`; freeze every
+    -- assignment owned by this rewrite before that temporary context closes.
+    let coreSnapshot ← instantiateEventAssignments core
+    let rhsSnapshot ← instantiateEventAssignments rhs
     -- Resolve only assignments Lean made while matching/synthesizing the
     -- source theorem, without reconstructing or appending any argument. Do not
     -- let metavariable ids created at this local depth escape into the event.
@@ -584,12 +571,31 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
       | some value => do
         let value ← instantiateMVars value
         let value ← instantiateSourceValueLevels value
-        if value.hasLevelMVar then pure none
-        else if ← hasAssignableMVar value then pure none
+        if ← hasAssignableTermOrLevelMVar value then pure none
         else pure (some value)
       | none => pure none
     Simp.recordSimpTheorem thm.origin
-    return some (result, derivation, redexPos, core, rhs, sourceValue?)
+    let pending := (← ref.get).pendingSide
+    let pending := pending.extract (min pendingSideStart pending.size) pending.size
+    let mut unsafePayload := false
+    if ← hasAssignableTermOrLevelMVar coreSnapshot then
+      unsafePayload := true
+    if !unsafePayload then
+      if ← hasAssignableTermOrLevelMVar rhsSnapshot then
+        unsafePayload := true
+    if !unsafePayload then
+      for side in pending do
+        if ← SideRec.hasAssignablePayload side then
+          unsafePayload := true
+          break
+    if unsafePayload then
+      ref.modify (·.markUnresolved
+        "rewrite_result_has_unassigned_temporary_metavariable")
+      -- Keep the successful Lean result below, but don't let the unresolved
+      -- temporary-depth payload escape into a trace event.
+      return some (result, none)
+    return some (result, some (derivation, redexPos, coreSnapshot, rhsSnapshot,
+      sourceValue?))
 
 def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
     (tree : SimpTheoremTree) (erased : PHashSet Origin) (rflOnly : Bool) :
@@ -600,20 +606,36 @@ def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
     if erased.contains thm.origin then return none
     if rflOnly && !(thm.rfl || (useBackward && thm.backwardRfl)) then
       return none
-    if let some (result, derivation, pos, before, after, sourceValue?) ←
+    -- Keep any prefix owned by an enclosing rewrite. Failed candidates discard
+    -- only their own appended side-condition records below.
+    let pendingSideStart := (← ref.get).pendingSide.size
+    if let some (result, traceData?) ←
         tryTheoremOperational? ref tag e thm extra rflOnly then
-      let evCtx ← captureEvCtx ref
-      let sides := (← ref.get).pendingSide
-      ref.modify fun s => { s with pendingSide := #[] }
-      let inv := match thm.origin with | .decl _ _ i => i | _ => false
-      let sourceInfo? ← sourceArgInfo? ref thm.origin
-      let (resolved, rargs, rinv, rproj) ←
-        resolveStxOrigin thm.origin ((sourceInfo?.map (·.headLocal)).getD false)
-      let prop? ← propFlag? resolved result.expr evCtx.lctx evCtx.insts
-      ref.modify (·.push (.rw pos thm.origin (inv != rinv) prop? before after evCtx
-        rargs sides none resolved rproj (some derivation) sourceValue?))
+      if let some (derivation, pos, before, after, sourceValue?) := traceData? then
+        let evCtx ← captureEvCtx ref
+        let pending := (← ref.get).pendingSide
+        let sides := pending.extract (min pendingSideStart pending.size) pending.size
+        ref.modify fun s => { s with
+          pendingSide := s.pendingSide.take pendingSideStart }
+        let inv := match thm.origin with | .decl _ _ i => i | _ => false
+        let sourceInfo? ← sourceArgInfo? ref thm.origin
+        let (resolved, rargs, rinv, rproj) ←
+          resolveStxOrigin thm.origin ((sourceInfo?.map (·.headLocal)).getD false)
+        let prop? ← propFlag? resolved result.expr evCtx.lctx evCtx.insts
+        recordEvent ref (.rw pos thm.origin (inv != rinv) prop? before after evCtx
+          rargs sides none resolved rproj (some derivation) sourceValue?)
+      else
+        -- The theorem fired, but the temporary-depth trace payload did not
+        -- pass its liveness gate. Preserve simp's result and omit that event.
+        ref.modify fun s => { s with
+          pendingSide := s.pendingSide.take pendingSideStart }
       return some result
-    return none
+    else
+      -- A failed candidate must not leave its attempted discharger traces for
+      -- the next theorem candidate.
+      ref.modify fun s => { s with
+        pendingSide := s.pendingSide.take pendingSideStart }
+      return none
   if (← Simp.getConfig).index then
     let candidates ← Simp.withSimpIndexConfig <| tree.getMatchWithExtra e
     let candidates := candidates.insertionSort fun a b => a.1.priority > b.1.priority
@@ -947,8 +969,8 @@ def emitBoundedIteStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
       simproc? := some
         { source := src.toString, redex := corePos, extraArgs := extraArgs, branch := branch,
           constructor := constructor.toString } }
-  ref.modify (·.push (.rw corePos origin false none coreBefore coreAfter ctx args
-    (side.push conditionSide) source origin "" (some derivation)))
+  recordEvent ref (.rw corePos origin false none coreBefore coreAfter ctx args
+    (side.push conditionSide) source origin "" (some derivation))
 
 /- A cached simproc origin is not added to `usedTheorems` again.  The nested
 condition frame is the identifying signal we retain for these two fixed
@@ -1086,10 +1108,10 @@ def emitProcStep (ref : TraceRef) (pos : Pos) (e : Expr) (r : Simp.Result)
       ref.modify (·.markUnresolved
         s!"simproc:{(src?.map toString).getD declName.toString} lemma \
 `{declName}` applied to its recorded arguments does not re-elaborate")
-    ref.modify (·.push (.rw pos (.decl declName true false) inv none
-      e r.expr evCtx explicitArgs sides src? (.decl declName true false) ""))
+    recordEvent ref (.rw pos (.decl declName true false) inv none
+      e r.expr evCtx explicitArgs sides src? (.decl declName true false) "")
   | .computed =>
-    ref.modify (·.push (.eq pos src? e r.expr evCtx side))
+    recordEvent ref (.eq pos src? e r.expr evCtx side)
 where
   /-- Name the close form a condition proof corresponds to, or `none` when no
   spec form describes it.  simp wraps a hypothesis `h : c` as `eq_true h` to
@@ -1413,9 +1435,9 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
             let (pos, e, rExpr) :=
               descendToRewritten (arity.getD e.getAppNumArgs) pos e r.expr
             -- A wrapper that reverses the statement (`h.symm`) flips `dir`.
-            ref.modify (·.push
+            recordEvent ref
               (.rw pos o (inv != rinv) prop? e rExpr evCtx rargs side none
-                resolved rproj))
+                resolved rproj)
         | none =>
           -- No origin at all: a simproc that registered nothing (`simpUsingDecide`
           -- and the ground arithmetic/matcher simprocs).  Same classification.
@@ -1472,7 +1494,7 @@ def instrumentD (ref : TraceRef) (p : Simp.DSimproc) : Simp.DSimproc := fun e =>
         | some n, _ => some n
         | none, some (.decl n _ _) => some n
         | _, _ => none
-      ref.modify (·.push (.defeq pos .change src e e' evCtx))
+      recordEvent ref (.defeq pos .change src e e' evCtx)
   return stepResult
 
 /-! ### Dischargers
@@ -1586,6 +1608,7 @@ def instrumentDischarge (ref : TraceRef) (dischargerText? : Option String)
       if let some reason := unresolved? then
         ref.modify (·.markUnresolved reason)
       let rec_ : SideRec := .mk e kept (some by_) evCtx #[] e none
+      let rec_ ← SideRec.instantiateAssignments rec_
       ref.modify fun s => { s with pendingSide := s.pendingSide.push rec_ }
       return some proof
 

@@ -170,6 +170,219 @@ inductive SideRec where
 
 end
 
+/-! ### Event metavariable snapshots
+
+Trace events outlive the temporary metavariable contexts in which simp often
+constructs them.  Resolve assignments before an event crosses that boundary,
+but retain still-unassigned metavariables from the surrounding context: those
+remain valid and may be assigned later by the caller. -/
+
+partial def instantiateAssignedLevel (mctx : MetavarContext) : Level → Level
+  | .mvar id =>
+    match mctx.lAssignment.find? id with
+    | some level => instantiateAssignedLevel mctx level
+    | none => .mvar id
+  | .succ level => .succ (instantiateAssignedLevel mctx level)
+  | .max lhs rhs => .max (instantiateAssignedLevel mctx lhs)
+      (instantiateAssignedLevel mctx rhs)
+  | .imax lhs rhs => .imax (instantiateAssignedLevel mctx lhs)
+      (instantiateAssignedLevel mctx rhs)
+  | .zero => .zero
+  | .param name => .param name
+
+def instantiateEventAssignments (e : Expr) : MetaM Expr := do
+  if !e.hasExprMVar && !e.hasLevelMVar then return e
+  let e ← instantiateMVars e
+  if !e.hasLevelMVar then return e
+  let mctx ← getMCtx
+  return e.replaceLevel fun level =>
+    match level with
+    | .mvar id =>
+      match mctx.lAssignment.find? id with
+      | some _ => some (instantiateAssignedLevel mctx level)
+      | none => none
+    | _ => none
+
+/-- Detect assignable term or universe metavariables at the current MetaM
+depth. `hasAssignableMVar` handles term metavariables; scan level metavariable
+ids explicitly as well, so universe-only expressions are not mistaken for
+closed terms and valid enclosing-depth levels remain non-assignable. -/
+def hasAssignableTermOrLevelMVar (e : Expr) : MetaM Bool := do
+  -- Assigned child-depth levels can still look assignable by depth alone.
+  -- Remove all available assignments first, then inspect only what remains.
+  let e ← instantiateEventAssignments e
+  if e.hasExprMVar then
+    if ← hasAssignableMVar e then return true
+  if !e.hasLevelMVar then return false
+  let levelMVars := (collectLevelMVars {} e).result
+  for mvarId in levelMVars do
+    if ← isLevelMVarAssignable mvarId then return true
+  return false
+
+def instantiateLocalDeclAssignments (decl : LocalDecl) :
+    MetaM (LocalDecl × Bool) := do
+  match decl with
+  | .cdecl index fvarId userName type bi kind =>
+    let type' ← instantiateEventAssignments type
+    if type' == type then return (decl, false)
+    return (.cdecl index fvarId userName type' bi kind, true)
+  | .ldecl index fvarId userName type value nondep kind =>
+    let type' ← instantiateEventAssignments type
+    let value' ← instantiateEventAssignments value
+    if type' == type && value' == value then return (decl, false)
+    return (.ldecl index fvarId userName type' value' nondep kind, true)
+
+def LocalDecl.hasAssignablePayload (decl : LocalDecl) : MetaM Bool := do
+  match decl with
+  | .cdecl _ _ _ type _ _ => hasAssignableTermOrLevelMVar type
+  | .ldecl _ _ _ type value _ _ =>
+    if ← hasAssignableTermOrLevelMVar type then return true
+    hasAssignableTermOrLevelMVar value
+
+def EvCtx.instantiateAssignments (ctx : EvCtx) : MetaM EvCtx := do
+  let mut lctx := ctx.lctx
+  let mut lctxChanged := false
+  for decl in ctx.lctx do
+    let (decl', changed) ← instantiateLocalDeclAssignments decl
+    if changed then
+      lctxChanged := true
+      lctx := { lctx with
+        fvarIdToDecl := lctx.fvarIdToDecl.insert decl'.fvarId decl'
+        decls := lctx.decls.set decl'.index (some decl') }
+  let mut insts := ctx.insts
+  let mut instsChanged := false
+  for h : i in [:ctx.insts.size] do
+    let inst := ctx.insts[i]
+    let fvar ← instantiateEventAssignments inst.fvar
+    if fvar != inst.fvar then
+      instsChanged := true
+      insts := insts.set! i { inst with fvar := fvar }
+  if !lctxChanged && !instsChanged then return ctx
+  return { ctx with lctx := lctx, insts := insts }
+
+def EvCtx.hasAssignablePayload (ctx : EvCtx) : MetaM Bool := do
+  for decl in ctx.lctx do
+    if ← LocalDecl.hasAssignablePayload decl then return true
+  for inst in ctx.insts do
+    if ← hasAssignableTermOrLevelMVar inst.fvar then return true
+  return false
+
+def hasAssignableExprs (es : Array Expr) : MetaM Bool := do
+  for e in es do
+    if ← hasAssignableTermOrLevelMVar e then return true
+  return false
+
+mutual
+
+-- Nested Event/SideRec arrays are composed only from events already passed
+-- through `recordEvent`; keep those immutable snapshots shared here instead
+-- of recursively copying the same trees. The temporary-depth validator below
+-- still descends through them when a boundary requires a complete check.
+partial def Event.instantiateAssignments (ev : Event) : MetaM Event := do
+  match ev with
+  | .rw pos origin inv prop? before after ctx args side source localOrigin proj derivation?
+      sourceValue? =>
+    return .rw pos origin inv prop?
+      (← instantiateEventAssignments before) (← instantiateEventAssignments after)
+      (← ctx.instantiateAssignments) (← args.mapM instantiateEventAssignments)
+      (← side.mapM SideRec.instantiateAssignments) source localOrigin proj derivation?
+      (← sourceValue?.mapM instantiateEventAssignments)
+  | .eq pos source before after ctx side =>
+    return .eq pos source (← instantiateEventAssignments before)
+      (← instantiateEventAssignments after) (← ctx.instantiateAssignments)
+      (← side.mapM SideRec.instantiateAssignments)
+  | .defeq pos kind name before after ctx =>
+    return .defeq pos kind name (← instantiateEventAssignments before)
+      (← instantiateEventAssignments after) (← ctx.instantiateAssignments)
+  | .introCtx pos fvar ctx info =>
+    return .introCtx pos fvar (← ctx.instantiateAssignments) info
+  | .introCtxExit pos info => return .introCtxExit pos info
+  | .congr pos arg nested before after argBefore argAfter ctx =>
+    return .congr pos arg nested
+      (← instantiateEventAssignments before) (← instantiateEventAssignments after)
+      (← instantiateEventAssignments argBefore) (← instantiateEventAssignments argAfter)
+      (← ctx.instantiateAssignments)
+  | .transport pos handle domain body before after domainBefore domainAfter
+      bodyBefore bodyAfter ctx =>
+    return .transport pos handle domain body
+      (← instantiateEventAssignments before) (← instantiateEventAssignments after)
+      (← instantiateEventAssignments domainBefore)
+      (← instantiateEventAssignments domainAfter)
+      (← instantiateEventAssignments bodyBefore)
+      (← instantiateEventAssignments bodyAfter) (← ctx.instantiateAssignments)
+
+partial def SideRec.instantiateAssignments (side : SideRec) : MetaM SideRec := do
+  match side with
+  | .mk goal events by_ ctx intros pre post? =>
+    return .mk (← instantiateEventAssignments goal)
+      events by_
+      (← ctx.instantiateAssignments) intros
+      (← instantiateEventAssignments pre)
+      (← post?.mapM instantiateEventAssignments)
+
+partial def Event.hasAssignablePayload (ev : Event) : MetaM Bool := do
+  match ev with
+  | .rw _ _ _ _ before after ctx args side _ _ _ _ sourceValue? => do
+    if ← hasAssignableTermOrLevelMVar before then return true
+    if ← hasAssignableTermOrLevelMVar after then return true
+    if ← ctx.hasAssignablePayload then return true
+    if ← hasAssignableExprs args then return true
+    for sideRec in side do
+      if ← SideRec.hasAssignablePayload sideRec then return true
+    if let some value := sourceValue? then
+      hasAssignableTermOrLevelMVar value
+    else pure false
+  | .eq _ _ before after ctx side => do
+    if ← hasAssignableTermOrLevelMVar before then return true
+    if ← hasAssignableTermOrLevelMVar after then return true
+    if ← ctx.hasAssignablePayload then return true
+    for sideRec in side do
+      if ← SideRec.hasAssignablePayload sideRec then return true
+    return false
+  | .defeq _ _ _ before after ctx => do
+    if ← hasAssignableTermOrLevelMVar before then return true
+    if ← hasAssignableTermOrLevelMVar after then return true
+    ctx.hasAssignablePayload
+  | .introCtx _ _ ctx _ => ctx.hasAssignablePayload
+  | .introCtxExit _ _ => return false
+  | .congr _ _ nested before after argBefore argAfter ctx => do
+    if ← hasAssignableTermOrLevelMVar before then return true
+    if ← hasAssignableTermOrLevelMVar after then return true
+    if ← hasAssignableTermOrLevelMVar argBefore then return true
+    if ← hasAssignableTermOrLevelMVar argAfter then return true
+    if ← ctx.hasAssignablePayload then return true
+    for nestedEvent in nested do
+      if ← nestedEvent.hasAssignablePayload then return true
+    return false
+  | .transport _ _ domain body before after domainBefore domainAfter
+      bodyBefore bodyAfter ctx => do
+    if ← hasAssignableTermOrLevelMVar before then return true
+    if ← hasAssignableTermOrLevelMVar after then return true
+    if ← hasAssignableTermOrLevelMVar domainBefore then return true
+    if ← hasAssignableTermOrLevelMVar domainAfter then return true
+    if ← hasAssignableTermOrLevelMVar bodyBefore then return true
+    if ← hasAssignableTermOrLevelMVar bodyAfter then return true
+    if ← ctx.hasAssignablePayload then return true
+    for nestedEvent in domain do
+      if ← nestedEvent.hasAssignablePayload then return true
+    for nestedEvent in body do
+      if ← nestedEvent.hasAssignablePayload then return true
+    return false
+
+partial def SideRec.hasAssignablePayload (side : SideRec) : MetaM Bool := do
+  match side with
+  | .mk goal events _ ctx _ pre post? => do
+    if ← hasAssignableTermOrLevelMVar goal then return true
+    if ← ctx.hasAssignablePayload then return true
+    if ← hasAssignableTermOrLevelMVar pre then return true
+    if let some post := post? then
+      if ← hasAssignableTermOrLevelMVar post then return true
+    for ev in events do
+      if ← ev.hasAssignablePayload then return true
+    return false
+
+end
+
 instance : Inhabited Event :=
   ⟨Event.introCtx #[] default {}
     { handle := 0, operation := "intro_ctx", domain := { position := #[] },
@@ -371,6 +584,21 @@ def TraceState.markUnresolved (s : TraceState) (reason : String) : TraceState :=
   if s.unresolved.contains reason then s else
     { s with unresolved := s.unresolved.push reason }
 
+/-- Snapshot all currently assigned term and universe metavariables before the
+event is put in a trace frame. At a known `withNewMCtxDepth` boundary, callers
+may also request a liveness check while that depth is still active; ordinary
+outer-depth events retain their valid unassigned metavariables. -/
+def recordEvent (ref : TraceRef) (ev : Event) (rejectAssignable := false) : SimpM Unit := do
+  let ev ← Event.instantiateAssignments ev
+  if rejectAssignable then
+    if ← ev.hasAssignablePayload then
+      ref.modify (·.markUnresolved
+        "trace_event_has_unassigned_temporary_metavariable")
+    else
+      ref.modify (·.push ev)
+  else
+    ref.modify (·.push ev)
+
 def TraceState.markProcOrigin (s : TraceState) (name : Name) : TraceState :=
   { s with procOrigins := s.procOrigins.push name }
 
@@ -392,7 +620,7 @@ def eventsSince (ref : TraceRef) (start : Nat) : SimpM (Array Event) := do
   let es ← currentEvents ref
   return es.extract (min start es.size) es.size
 def appendEvents (ref : TraceRef) (events : Array Event) : SimpM Unit := do
-  for ev in events do ref.modify (·.push ev)
+  for ev in events do recordEvent ref ev
 
 def cacheEventsForRoot (root : Pos) (events : Array Event) : Array Event :=
   events.map (Event.strip root)
@@ -494,7 +722,7 @@ def enterIntroCtx (ref : TraceRef) (pos : Pos) (domain : Expr) (h : Expr) :
       domain := { position := pos.push 0,
                   dependencies := localDependencyIndices lctx domain },
       scope := { id := scopeId, owner := owner, enter := pos, exit := pos } }
-  ref.modify (·.push (.introCtx pos h.fvarId! (← captureEvCtx ref) info))
+  recordEvent ref (.introCtx pos h.fvarId! (← captureEvCtx ref) info)
   pure info
 
 /-- Run a contextual body with explicit recorder ownership.  The matching exit
@@ -504,7 +732,7 @@ def withIntroCtxScope (ref : TraceRef) (pos : Pos) (domain : Expr) (h : Expr)
     (k : SimpM α) : SimpM α := do
   let info ← enterIntroCtx ref pos domain h
   try k finally
-    ref.modify (·.push (.introCtxExit pos info))
+    recordEvent ref (.introCtxExit pos info)
 
 /-- Descend under a term binder whose bound variable the traversal replaced by
 the free variable `x`, for the duration of `k`. -/
@@ -789,7 +1017,7 @@ def reduceStepC (e : Expr) : SimpM (Option Reduction) := do
 /-- Log one reduction at `pos`, then return its expression. -/
 def logReduction (ref : TraceRef) (pos : Pos) (e : Expr) (r : Reduction) :
     SimpM Expr := do
-  ref.modify (·.push (.defeq pos r.kind r.name? e r.expr (← captureEvCtx ref)))
+  recordEvent ref (.defeq pos r.kind r.name? e r.expr (← captureEvCtx ref))
   return r.expr
 
 /-- SOURCE: Main.lean:213-244 — a single `reduceStep`, logged.  `simpLoop` takes
@@ -909,7 +1137,7 @@ def dsimpReduceT (ref : TraceRef) (pos : Pos) : DSimproc := fun e => do
       let unfolded ← match eNew with
         | .fvar fvarId => do pure (some (← fvarId.getDecl).userName)
         | _ => pure none
-      ref.modify (·.push (.defeq pos .zeta unfolded eNew eNew' (← captureEvCtx ref)))
+      recordEvent ref (.defeq pos .zeta unfolded eNew eNew' (← captureEvCtx ref))
       eNew := eNew'
   if eNew != e then return .visit eNew else return .done e
 
@@ -932,7 +1160,7 @@ def logDStep (ref : TraceRef) (pos : Pos) (e : Expr) (s : TransformStep) :
       let name? := if kind == .unfold then
           match e.getAppFn with | .const n _ => some n | _ => none
         else none
-      ref.modify (·.push (.defeq pos kind name? e e' (← captureEvCtx ref)))
+      recordEvent ref (.defeq pos kind name? e e' (← captureEvCtx ref))
   match s with
   | .done e' => record e'; return s
   | .visit e' => record e'; return s
@@ -1258,14 +1486,14 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
           let nodeBefore := mkAppN f nodeArgs
           nodeArgs := nodeArgs.set ai aAfter
           let nodeAfter := mkAppN f nodeArgs
-          ref.modify (·.push
-            (.congr pos ai evs nodeBefore nodeAfter aBefore aAfter evCtx))
+          recordEvent ref
+            (.congr pos ai evs nodeBefore nodeAfter aBefore aAfter evCtx)
   else
     -- No cast: the arguments are ordinary, so their rewrites keep their own
     -- absolute positions and stay plain steps, exactly as before.
     for (ai, _, _, evs, parentSpine) in eqArgEvents do
       for ev in evs do
-        ref.modify (·.push (ev.rebase (argPos pos numArgs ai) parentSpine))
+        recordEvent ref (ev.rebase (argPos pos numArgs ai) parentSpine)
   if !hasProof && !hasCast then
     return some { expr := mkAppN f argsNew }
   let mut proof := cgrThm.proof
@@ -1437,7 +1665,8 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
       if isIff then
         try proof ← mkAppM ``propext #[proof]
         catch _ => return none
-      if (← hasAssignableMVar proof <||> hasAssignableMVar eNew) then
+      if (← hasAssignableTermOrLevelMVar proof <||>
+          hasAssignableTermOrLevelMVar eNew) then
         return none
       let binders := xs.mapIdx fun i _ =>
         if c.hypothesesPos.contains i then
@@ -1460,10 +1689,10 @@ partial def trySimpCongrTheoremT? (ref : TraceRef) (pos : Pos)
           pure (SideRec.mk (← instantiateMVars sd.goal) sd.events sd.by_
             sd.evCtx sd.intros (← instantiateMVars sd.pre)
             (← sd.post?.mapM instantiateMVars))
-        ref.modify (·.push
-          (.rw (pos ++ Array.replicate extraArgs.size 0) (.decl c.theoremName true false) false none e eNew
-            (← captureEvCtx ref) #[] sidesFinal (some `congr)
-            (.decl c.theoremName true false) "" (some derivation)))
+        recordEvent ref
+          (.rw (pos ++ Array.replicate extraArgs.size 0) (.decl c.theoremName true false)
+            false none e eNew (← captureEvCtx ref) #[] sidesFinal (some `congr)
+            (.decl c.theoremName true false) "" (some derivation)) true
       congrArgsT ref pos { expr := eNew, proof? := proof } extraArgs
         origNumArgs numArgs
     else
@@ -1495,7 +1724,7 @@ node has child 0, per the spec. -/
 partial def simpProjT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Result := do
   match (← Simp.withSimpMetaConfig <| reduceProj? e) with
   | some e' =>
-    ref.modify (·.push (.defeq pos .proj none e e' (← captureEvCtx ref)))
+    recordEvent ref (.defeq pos .proj none e e' (← captureEvCtx ref))
     return { expr := e' }
   | none =>
     let s := e.projExpr!
@@ -1632,8 +1861,8 @@ partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Res
               -- This is the actual construction point of the dependent
               -- transport.  The event carries only recorder metadata on the
               -- wire; its Expr fields are used by the in-tactic validator.
-              ref.modify (·.push (.transport pos handle domainEvents bodyEvents e result
-                domain rd.expr before rb.expr outerCtx))
+              recordEvent ref (.transport pos handle domainEvents bodyEvents e result
+                domain rd.expr before rb.expr outerCtx)
               return { expr := result, proof? := proof }
           return result
         else
@@ -1681,7 +1910,7 @@ partial def simpLetT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Result
         let eNew ← letToHave e
         unless eNew == e do
           -- A definitional conversion at this position; never a silent desync.
-          ref.modify (·.push (.defeq pos .change none e eNew (← captureEvCtx ref)))
+          recordEvent ref (.defeq pos .change none e eNew (← captureEvCtx ref))
         if eNew.isLet && eNew.letNondep! then
           return ← haveTelescope pos eNew
         pure eNew
@@ -1697,7 +1926,7 @@ where
     -- recorded as one `change` at this position instead.
     let r ← withDivertedEvents ref (Simp.simpHaveTelescope e)
     unless r.expr == e do
-      ref.modify (·.push (.defeq pos .change none e r.expr (← captureEvCtx ref)))
+      recordEvent ref (.defeq pos .change none e r.expr (← captureEvCtx ref))
       ref.modify (·.markUnresolved
         "`have` telescope simplified as a unit (`simpHaveTelescope` runs stock \
 simp, so its inner rewrites carry no position); recorded as one `change`")
@@ -1724,7 +1953,7 @@ partial def simpStepT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Resul
       let unfolded ← match e with
         | .fvar fvarId => do pure (some (← fvarId.getDecl).userName)
         | _ => pure none
-      ref.modify (·.push (.defeq pos .zeta unfolded e e' (← captureEvCtx ref)))
+      recordEvent ref (.defeq pos .zeta unfolded e e' (← captureEvCtx ref))
     return { expr := e' }
 
 /-- SOURCE: Main.lean:677-712 `Simp.simpLoop`, position-threaded.
