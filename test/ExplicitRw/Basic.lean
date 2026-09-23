@@ -71,8 +71,8 @@ theorem closing_form (a b : Nat) (h : a = b) : a + 0 = b := by
 /-! ## The closing forms, one fixture per spec `close` value
 
 The spec's close set is `rfl | true_intro | assumption:<name> | absurd:<hyp> |
-decide`. Every one of them renders through this closed enumeration; the three
-that name something route through `exact <term>`.
+decide`. Named side-proof closes render through the delimiter-bearing
+`close [<term>]` form; ordinary `exact <term>` remains compatible.
 -/
 
 /-- spec `{"by":"rfl"}`. -/
@@ -86,12 +86,19 @@ theorem close_decide : (2 + 3) + 1 = 6 := by
 
 /-- spec `{"by":"true_intro"}`. -/
 theorem close_true_intro (p : Prop) (hp : p = True) : p := by
-  explicit_rw [hp at []] then exact True.intro
+  explicit_rw [hp at []] then close [True.intro]
 
-/-- spec `{"by":"assumption:hb"}` — rendered as `exact <name>`, which names the
+/-- spec `{"by":"assumption:hb"}` — rendered as `close [<name>]`, which names the
 same hypothesis the trace recorded instead of searching for one. -/
 theorem close_assumption (a b : Nat) (h : a = b) (hb : b + 0 = b) : a + 0 = b := by
-  explicit_rw [h at [0, 1, 0, 1]] then exact hb
+  explicit_rw [h at [0, 1, 0, 1]] then close [hb]
+
+/-- Main-goal closes are self-delimiting before the next unbulleted generated
+tactic, so the parser cannot extend `True.intro` with that following call. -/
+theorem adjacent_unbulleted : True ∧ True := by
+  constructor
+  explicit_rw [] then close [True.intro]
+  explicit_rw [] then close [True.intro]
 
 /-- spec `{"by":"absurd:hp"}` — a dotted projection on a hypothesis. This form
 arises after rewriting a *hypothesis* to `False`, and `then` applies to the goal,
@@ -99,7 +106,7 @@ so the closer goes on the next line. -/
 theorem close_absurd (p : Prop) (q : Prop) (hq : p = False) (hp : p) : q := by
   explicit_rw [hq at []] at hp
   guard_hyp hp :ₛ False
-  exact hp.elim
+  explicit_rw [] then close [hp.elim]
 
 /-- spec `{"by":"nofun"}` — for `reduceCtorEq`-style side conditions, where the
 goal is an impossible equation between two distinct constructors. -/

@@ -431,11 +431,11 @@
   {"name": "close_omega", "close": {"by": "omega"}, "expect": "omega"},
   {"name": "close_nofun", "close": {"by": "nofun"}, "expect": "nofun"},
   {"name": "close_true_intro", "close": {"by": "true_intro"},
-   "expect": "exact True.intro"},
+   "expect": "close [True.intro]"},
   {"name": "close_assumption", "close": {"by": "assumption:hab"},
-   "expect": "exact hab"},
+   "expect": "close [hab]"},
   {"name": "close_absurd", "close": {"by": "absurd:hn"},
-   "expect": "exact hn.elim"}
+   "expect": "close [hn.elim]"}
  ],
 
  "close_errors": [
@@ -481,7 +481,7 @@
                             "steps": [{"kind": "rw", "pos": [], "name": "foo",
                                        "dir": "fwd"}],
                             "close": {"by": "absurd:h"}}]},
-   "expect": ["explicit_rw [foo at []] at h; exact h.elim"]
+   "expect": ["explicit_rw [foo at []] at h; explicit_rw [] then close [h.elim]"]
   },
   {
    "name": "hypothesis_close_assumption",
@@ -492,7 +492,7 @@
                             "steps": [{"kind": "rw", "pos": [], "name": "foo",
                                        "dir": "fwd"}],
                             "close": {"by": "assumption:h"}}]},
-   "expect": ["explicit_rw [foo at []] at h; exact h"]
+   "expect": ["explicit_rw [foo at []] at h; explicit_rw [] then close [h]"]
   },
   {
    "name": "hypothesis_close_true_intro",
@@ -503,7 +503,7 @@
                             "steps": [{"kind": "rw", "pos": [], "name": "foo",
                                        "dir": "fwd"}],
                             "close": {"by": "true_intro"}}]},
-   "expect": ["explicit_rw [foo at []] at h; exact True.intro"]
+   "expect": ["explicit_rw [foo at []] at h; explicit_rw [] then close [True.intro]"]
   },
   {
    "name": "hypothesis_close_rfl",
@@ -514,7 +514,7 @@
                             "steps": [{"kind": "rw", "pos": [], "name": "foo",
                                        "dir": "fwd"}],
                             "close": {"by": "rfl"}}]},
-   "expect": ["explicit_rw [foo at []] at h; rfl"]
+   "expect": ["explicit_rw [foo at []] at h; explicit_rw [] then rfl"]
   },
   {
    "name": "multi_location",
@@ -529,7 +529,7 @@
                                        "dir": "rev"}],
                             "close": {"by": "true_intro"}}]},
    "expect": ["explicit_rw [foo at []] at h",
-              "explicit_rw [← bar at [1]] then exact True.intro"]
+              "explicit_rw [← bar at [1]] then close [True.intro]"]
   },
   {
    "name": "multi_location_terminal_hypothesis_close",
@@ -544,7 +544,7 @@
                                        "dir": "fwd"}],
                             "close": {"by": "absurd:h2"}}]},
    "expect": ["explicit_rw [foo at []] at h1",
-              "explicit_rw [bar at []] at h2; exact h2.elim"]
+              "explicit_rw [bar at []] at h2; explicit_rw [] then close [h2.elim]"]
   },
   {
    "name": "no_close_leaves_goal_open",
@@ -556,6 +556,15 @@
                                        "dir": "fwd"}],
                             "close": null}]},
    "expect": ["explicit_rw [foo at []]"]
+  },
+  {
+   "name": "main_goal_close_delimiter",
+   "why": "the main goal closer is bracket-delimited in the rendered explicit_rw call",
+   "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
+             "call": "simp only [foo]",
+             "locations": [{"loc": "goal", "pre": "True", "post": null,
+                            "steps": [], "close": {"by": "true_intro"}}]},
+   "expect": ["explicit_rw [] then close [True.intro]"]
   }
  ],
 

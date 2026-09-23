@@ -52,8 +52,14 @@ list index, line number, generated position, or nearest call.
 `"nofun"` closes a goal of the form `c₁ ... = c₂ ... → False` (distinct constructors) or
 any goal refutable by empty pattern matching; replay is `exact nofun`. It is the close
 form for `reduceCtorEq`-style side conditions.
-```
-```
+
+The JSON `close.by` values above are unchanged. In generated `explicit_rw` source,
+named exact-term closes use the self-delimiting form `close [<term>]` (for example,
+`close [True.intro]` or `close [h.elim]`) so a following unbulleted tactic cannot
+be consumed as another term argument. The tactic continues to accept legacy
+`exact <term>` side-proof source. A goal close emitted after a hypothesis
+rewrite uses a second `explicit_rw [] then close [<term>]`, so the term remains
+self-delimiting.
 
 `STEP` is one of:
 

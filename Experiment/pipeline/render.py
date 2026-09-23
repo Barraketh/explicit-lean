@@ -27,8 +27,8 @@ Rendering rules, in one place:
                  with [<nested steps>] at <pos>`
 
 Closes map through one table: `rfl`/`decide`/`omega`/`nofun` render as
-themselves, `true_intro` as `exact True.intro`, `assumption:<n>` as
-`exact <n>`, `absurd:<h>` as `exact <h>.elim`. Anything else, including every
+themselves, `true_intro` as `close [True.intro]`, `assumption:<n>` as
+`close [<n>]`, `absurd:<h>` as `close [<h>.elim]`. Anything else, including every
 `unresolved:<reason>`, is not a close this renderer invents a spelling for.
 """
 
@@ -200,20 +200,23 @@ def render_close(close: Any, introduced: dict[str, int] | None = None) -> str:
     by = close["by"]
     if not isinstance(by, str):
         raise RenderError("bad_close", f"close.by is not a string: {by!r}")
+    def exact(term: str) -> str:
+        return f"close [{term}]"
+
     if by in ("rfl", "decide", "omega", "nofun"):
         return by
     if by == "true_intro":
-        return "exact True.intro"
+        return exact("True.intro")
     if by.startswith("assumption:"):
         name = by[len("assumption:") :]
         if introduced and name in introduced:
-            return f"exact introduced_ref {introduced[name]}"
-        return "exact " + check_name(name, "close.by assumption")
+            return exact(f"introduced_ref {introduced[name]}")
+        return exact(check_name(name, "close.by assumption"))
     if by.startswith("absurd:"):
         name = by[len("absurd:") :]
         if introduced and name in introduced:
-            return f"exact (introduced_ref {introduced[name]}).elim"
-        return "exact " + check_name(name, "close.by absurd") + ".elim"
+            return exact(f"(introduced_ref {introduced[name]}).elim")
+        return exact(check_name(name, "close.by absurd") + ".elim")
     if by.startswith("unresolved:"):
         raise RenderError("unresolved_close", f"close.by is {by!r}", side="t1")
     raise RenderError("unknown_close", f"close.by {by!r} is not a spec close form")
@@ -901,10 +904,10 @@ def render_location(loc: dict, depth: int = 0, *, source_text: Any = None,
     close = loc.get("close")
     if close is not None:
         if clause is not None:
-            # `then` belongs to explicit_rw's goal-closing syntax, not to an
-            # `at h` rewrite.  Sequence the exact recorded goal closer after
-            # the hypothesis rewrite as a separate ordinary tactic.
-            body += "; " + render_close(close)
+            # The close belongs to the goal, not the rewritten hypothesis.
+            # Route it through the closed side-proof grammar so exact terms are
+            # bracket-delimited even when another unbulleted goal follows.
+            body += "; explicit_rw [] then " + render_close(close)
         else:
             body += " then " + render_close(close)
     return body, clause

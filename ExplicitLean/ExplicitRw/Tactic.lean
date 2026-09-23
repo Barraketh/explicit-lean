@@ -73,9 +73,9 @@ Both take the same closed, **recursive** grammar:
 | `decide`                  | `"decide"`                                         |
 | `omega`                   | `"omega"` (a decision procedure, not simp family)  |
 | `nofun`                   | `"nofun"` (impossible constructor equation)        |
-| `exact t`                 | `"true_intro"` → `exact True.intro`;                |
-|                           | `"assumption:n"` → `exact n`;                       |
-|                           | `"absurd:h"` → `exact h.elim`                       |
+| `close [t]`               | self-delimiting exact proof term; generated for       |
+|                           | `true_intro`, `assumption:n` and `absurd:h`           |
+| `exact t`                 | retained for backwards compatibility                  |
 | `intro x y ; <side proof>` | a side trace with `intros` — needed whenever the   |
 |                           | hypothesis is implication-shaped, as `ite_congr`   |
 |                           | and `dite_congr` produce                            |
@@ -121,16 +121,22 @@ of `Expr.app`, so `f a b` has `b` at `[1]` and `a` at `[0, 1]`.
 ## Closing form
 
 `explicit_rw [...] then rfl` runs `rfl` on the remaining goal after the last
-step. The closer is a **closed enumeration** — `rfl`, `decide`, `exact <term>` —
+step. The closer is a **closed enumeration** — `rfl`, `decide`, and
+`close [<term>]` (`exact <term>` remains accepted for compatibility) —
 and `eq ... by` likewise accepts only `rfl` or `decide`. Omit the clause to leave
 the goal open. `trivial` and bare `assumption` are excluded because both search
 where the spec recorded an exact choice; the spec's `true_intro`,
-`assumption:<name>` and `absurd:<hyp>` all render as `exact <term>`. `rfl` is the
+`assumption:<name>` and `absurd:<hyp>` all render as `close [<term>]`. `rfl` is
 ordinary `rfl` tactic (`Eq`/`Iff`/`HEq` reflexivity and `@[refl]` lemmas), not a
 simp-backed one.
 
 The `then` clause applies to the goal. A trace that rewrites a hypothesis leaves
-the closer to the next line, which is where the spec's `absurd:<hyp>` form lands.
+the closer to the goal; the renderer emits an empty `explicit_rw [] then ...`
+after that hypothesis rewrite so the generated close stays in the closed
+grammar.
+Generated exact-term closes use `close [t]`: the brackets delimit the term so
+the following tactic in an unbulleted tactic sequence cannot be parsed as an
+additional term argument. `exact t` remains accepted for existing source.
 
 Neither slot is a `tacticSeq`, deliberately. A free `tacticSeq` would let a
 generated trace carry `simp` (or any forbidden tactic) *inside* the product
@@ -403,7 +409,8 @@ implication-shaped — `ite_congr` and `dite_congr` produce `c → x = u` — so
 proving it needs to introduce the antecedent and then replay a nested trace. That
 is `intro h; explicit_rw [...] then rfl`, which no flat enumeration can express.
 
-It stays closed: `rfl`, `decide`, `omega`, `nofun`, `exact <whitelisted term>`,
+It stays closed: `rfl`, `decide`, `omega`, `nofun`, `close [<whitelisted term>]`,
+`exact <whitelisted term>`,
 `intro <ident>+ ; <sideProof>`, and a nested `explicit_rw` with its own optional
 closer. `omega` is a decision procedure, not simp family. Nothing else is
 admitted, so a side proof can no more introduce a forbidden tactic than a closer
@@ -421,6 +428,8 @@ syntax (name := explicitRwSideOmega) &"omega" : explicitRwSideProof
 syntax (name := explicitRwSideNofun) &"nofun" : explicitRwSideProof
 /-- A closing term. -/
 syntax (name := explicitRwSideExact) &"exact " explicitRwTerm : explicitRwSideProof
+/-- A delimiter-bearing exact proof term for generated source. -/
+syntax (name := explicitRwSideClose) &"close " "[" explicitRwTerm "]" : explicitRwSideProof
 /-- Introduce the antecedents of an implication-shaped side condition. -/
 /- A recorder-issued handle introduces exactly one binder.  The continuation is
    recursive, so nested side proofs can introduce further handles in order. -/
@@ -463,9 +472,12 @@ syntax explicitRwChange := "change " explicitRwTerm explicitRwPos
 /--
 The closers a trace may use, as a **closed enumeration**. `explicit_rw` is
 product code, so it must not embed a free `tacticSeq`. The spec's `close` field
-maps onto `rfl` and `decide`, plus `exact <term>` for every form that names
-something: `true_intro` is `exact True.intro`, `assumption:<name>` is
-`exact <name>`, `absurd:<hyp>` is `exact <hyp>.elim`.
+maps onto `rfl` and `decide`, plus self-delimiting `close [<term>]` for forms
+that name something: `true_intro` is `close [True.intro]`,
+`assumption:<name>` is `close [<name>]`, and `absurd:<hyp>` is
+`close [<hyp>.elim]`. Existing `exact <term>` source remains accepted, but
+generated terms use brackets so a following unbulleted tactic cannot be
+swallowed as another application argument.
 
 Two tactics are deliberately **not** offered, both because they search where the
 spec recorded an exact choice: `trivial` is a macro that tries several tactics in
@@ -1826,6 +1838,15 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
       let val ← elabStrict (some idx) s!"the `exact` term of a side proof" t
         (expectedType? := some (← goal.getType))
       checkNoPendingTactic s!"the `exact` term of a side proof" (some idx) snapshot
+      goal.assign (← instantiateMVars val)
+  | ``explicitRwSideClose =>
+    goal.withContext do
+      let t ← toTerm stx[2] handles
+      checkNoTacticBlock s!"the `close` term of a side proof" (some idx) t
+      let snapshot ← syntheticMVarSnapshot
+      let val ← elabStrict (some idx) s!"the `close` term of a side proof" t
+        (expectedType? := some (← goal.getType))
+      checkNoPendingTactic s!"the `close` term of a side proof" (some idx) snapshot
       goal.assign (← instantiateMVars val)
   | ``explicitRwSideIntro =>
     let names : Array Name := stx[1].getArgs.map fun a => a.getId

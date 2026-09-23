@@ -146,7 +146,7 @@ def main() -> int:
     hyp_close = rendered(hyp_close_source, hyp_close_trace)
     assert hyp_close["status"] == "rendered", hyp_close
     assert hyp_close["lines"][-1] == (
-        "  explicit_rw [hFalse at [] ] at h; exact h.elim"
+        "  explicit_rw [hFalse at [] ] at h; explicit_rw [] then close [h.elim]"
     ), hyp_close["lines"]
 
     # Preserve fail-closed behavior when source after the call is outside the
