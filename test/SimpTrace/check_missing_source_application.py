@@ -18,6 +18,7 @@ TRACE_MARKERS = {
     "subtype-property.json": "T77_MISSING_SUBTYPE_PROPERTY",
     "show-from.json": "T77_MISSING_SHOW_FROM",
     "multiple-theorems.json": "T77_MISSING_MULTIPLE_THEOREMS",
+    "representation-invariants.json": "T77_REPRESENTATION_INVARIANTS",
 }
 
 
@@ -49,15 +50,17 @@ def main() -> None:
         raise AssertionError(f"positive source-application fixture emitted diagnostics: {positive}")
 
     outputs = {
-        "applied-local.json": (1, {"f g"}),
-        "forall-local.json": (1, {"f g"}),
-        "membership-local.json": (1, {"P 0 3"}),
-        "choose-spec.json": (1, {"⋯.choose"}),
-        "subtype-property.json": (1, {"p ↑x"}),
-        "show-from.json": (1, {"f n"}),
-        "multiple-theorems.json": (2, {"p", "q"}),
+        "applied-local.json": (1, {"f g"}, {0}),
+        "forall-local.json": (1, {"f g"}, {0}),
+        "membership-local.json": (1, {"P 0 3"}, {0}),
+        "choose-spec.json": (1, {"⋯.choose"}, {0}),
+        "subtype-property.json": (1, {"p ↑x"}, {0}),
+        "show-from.json": (1, {"f n"}, {0}),
+        "multiple-theorems.json": (2, {"p", "q"}, {0}),
+        "representation-invariants.json":
+            (2, {"(ρ g) a✝", "(ρ g) b✝"}, {0, 1}),
     }
-    for filename, (expected_count, expected_before) in outputs.items():
+    for filename, (expected_count, expected_before, expected_arg_ids) in outputs.items():
         value = json.loads((run_dir / filename).read_text(encoding="utf-8"))
         steps = [step for step in value["locations"][0]["steps"]
                  if step.get("derivation", {}).get("source") == "simp-argument"]
@@ -69,7 +72,7 @@ def main() -> None:
             raise AssertionError(f"{filename}: source argument remained unresolved: {steps!r}")
         if any("sourceValue" in step for step in steps):
             raise AssertionError("validator-only source values leaked into trace JSON")
-        if any(step["derivation"].get("argId") != 0 for step in steps):
+        if {step["derivation"].get("argId") for step in steps} != expected_arg_ids:
             raise AssertionError(f"{filename}: source range/argument identity was lost: {steps!r}")
 
     print("source-applied application validation: positive, range identity, and multi-theorem controls passed")

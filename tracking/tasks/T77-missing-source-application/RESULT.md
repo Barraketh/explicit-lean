@@ -36,8 +36,13 @@ Checks run from this isolated worktree:
 - `python3 -B test/SimpTrace/check_missing_source_application.py` — passed
   applied local hypotheses, membership-wrapped application, choice property,
   subtype property, `show ... from ...`, authenticated source range/argument
-  identity, and the case where one source argument yields multiple simp
-  theorems.
+  identity, the exact `Representation.Invariants.add_mem'` source shape (both
+  `hv g` and `hw g` resolve as source arguments 0 and 1), and the case where
+  one source argument yields multiple simp theorems. The direct adversarial
+  checks cover a semireducible Π alias, an explicit metavariable nested under
+  a definition, an allowed implicit metavariable, unresolved and opaque
+  function types that fail closed, and preservation of all tested
+  metavariable assignments.
 - `python3 -B test/SimpTrace/check_source_applied_arguments.py` — passed,
   including rejection of a bare source theorem when its required proof-side
   evidence is absent.
@@ -47,10 +52,19 @@ Checks run from this isolated worktree:
   and `git diff --check` — passed.
 
 No full campaign, simp-disabled certification, or simp-family output run was
-performed. Independent trust-boundary review remains pending. No database,
-live worker state, or campaign tracker was intentionally edited by this task.
+performed. No database, live worker state, or campaign tracker was edited by
+this task.
 
 ## Review note
+
+Independent trust-boundary review confirmed that `.default` WHNF only exposes
+the actual Π binder needed to classify each application argument. Explicit
+holes remain rejected through semireducible wrappers and nested applications;
+opaque or still-uninspectable function types fail closed. The review added a
+`withoutModifyingMCtx` boundary around the predicate so WHNF/type inference
+cannot persist metavariable or cache changes to the source elaboration or
+matcher. The direct tests assert that both allowed and rejected metavariables
+remain unassigned after validation. Focused suites pass.
 
 During initial diagnosis, one fresh compiler reproduction used a copied staged
 Lean file whose embedded trace output path pointed into the live pending-run

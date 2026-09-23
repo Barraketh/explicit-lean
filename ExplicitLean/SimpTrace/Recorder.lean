@@ -386,7 +386,11 @@ each binder's actual `BinderInfo`, rather than searching source text or names.
 
 This is a binder-level check, not a claim about how the hole was spelled: an
 explicitly written `@lemma _` still occupies an implicit binder. -/
-partial def hasExplicitSourceHole (e : Expr) : Simp.SimpM Bool := go e false
+partial def hasExplicitSourceHole (e : Expr) : Simp.SimpM Bool := do
+  -- Type inference and WHNF are observational checks here. In particular,
+  -- reducing a dependent application must not commit assignments to holes in
+  -- the elaborated source value or ambient simp matcher state.
+  withoutModifyingMCtx do go e false
 where
   go (e : Expr) (allowRootMVar : Bool) : Simp.SimpM Bool := do
     match e with
