@@ -182,6 +182,17 @@ def _candidate_rows(
         )
     for status in ("render_failed", "compile_failed"):
         if status in statuses:
+            authenticated_state = {
+                "render_failed": "render_failed",
+                "compile_failed": "rendered",
+            }[status]
+            branches.append(
+                "SELECT r.module_name,r.ordinal,r.status,r.error "
+                "FROM simp_replacements r JOIN isolated_trace_audit a "
+                "USING(module_name,ordinal) "
+                "WHERE r.status=? AND a.result_status=? AND a.trace_state=?"
+            )
+            args.extend((status, status, authenticated_state))
             branches.append(
                 "SELECT r.module_name,r.ordinal,r.status,r.error "
                 "FROM simp_replacements r JOIN isolated_trace_command_retry cr "

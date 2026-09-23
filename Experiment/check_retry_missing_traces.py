@@ -126,16 +126,26 @@ class MissingTraceRetryTests(unittest.TestCase):
             ('Mathlib.X',6,'render_failed','stale source audit'),
             ('Mathlib.X',7,'record_failed','exact trace failure'),
             ('Mathlib.X',8,'compile_failed','baseline inconclusive'),
-            ('Mathlib.X',9,'render_failed','baseline inconclusive');
+            ('Mathlib.X',9,'render_failed','baseline inconclusive'),
+            ('Mathlib.X',10,'render_failed','authenticated render failure'),
+            ('Mathlib.X',11,'render_failed','audit status mismatch'),
+            ('Mathlib.X',12,'render_failed','unsafe audit trace state'),
+            ('Mathlib.X',13,'compile_failed','authenticated compile failure'),
+            ('Mathlib.X',14,'render_failed','same simp status without audit');
           INSERT INTO isolated_trace_audit VALUES
             ('Mathlib.X',2,'record_failed','no_trace'),
-            ('Mathlib.X',3,'success','complete');
+            ('Mathlib.X',3,'success','complete'),
+            ('Mathlib.X',10,'render_failed','render_failed'),
+            ('Mathlib.X',11,'compile_failed','render_failed'),
+            ('Mathlib.X',12,'render_failed','trace_authentication_failed'),
+            ('Mathlib.X',13,'compile_failed','rendered');
           INSERT INTO isolated_trace_command_retry VALUES
             ('Mathlib.X',4,'hash','compile_failed'),
             ('Mathlib.X',6,'old-hash','render_failed'),
             ('Mathlib.X',7,'hash','trace_failed'),
             ('Mathlib.X',8,'hash','baseline_failed'),
-            ('Mathlib.X',9,'hash','baseline_failed');
+            ('Mathlib.X',9,'hash','baseline_failed'),
+            ('Mathlib.X',10,'hash','render_failed');
         """)
         self.assertEqual(retry._candidate_rows(db, None, ("record_failed",)),
                          [("Mathlib.X", 2, "record_failed", "missing trace"),
@@ -150,9 +160,12 @@ class MissingTraceRetryTests(unittest.TestCase):
         )
         self.assertEqual(retry._candidate_rows(db, None, ("compile_failed",)),
                          [("Mathlib.X", 4, "compile_failed", "gated compile failure"),
-                          ("Mathlib.X", 8, "compile_failed", "baseline inconclusive")])
+                          ("Mathlib.X", 8, "compile_failed", "baseline inconclusive"),
+                          ("Mathlib.X", 13, "compile_failed", "authenticated compile failure")])
         self.assertEqual(retry._candidate_rows(db, None, ("render_failed",)),
-                         [("Mathlib.X", 9, "render_failed", "baseline inconclusive")])
+                         [("Mathlib.X", 9, "render_failed", "baseline inconclusive"),
+                          ("Mathlib.X", 10, "render_failed",
+                           "authenticated render failure")])
         db.close()
 
     def test_manifest_is_authoritative_for_sharded_work(self) -> None:
