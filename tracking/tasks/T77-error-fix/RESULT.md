@@ -33,6 +33,14 @@ Subsequent reviewed mechanism commits:
 - `851dc5d`: two-premise nested-discharge queue-ownership regression.
 - `b25c513` / `e106938`: named zeta replay by exact indexed local identity,
   including malformed-evidence rejection.
+- `87adf90` / `014156a`: source-application binder inspection through
+  definitional wrappers, with validator metavariable state isolated.
+- `ad2ff5a` / `dcd2031` / `f183fdf`: self-delimiting ordinary Lean terms in
+  `explicit_rw`, preserving exact source spelling and rewrite direction.
+- `02125c2`: parsed-AST gates for generated-term elaboration extensions and
+  executable proof-hole syntax.
+- `306505e`: explicit regression for the historical module-to-command
+  `sourceArgs` coordinate mismatch.
 
 ## Implemented controls and principled fixes
 
@@ -159,12 +167,25 @@ Subsequent reviewed mechanism commits:
   the replacement by definitional equality. Large, proof-bearing, multiline,
   or elided pretty-printed let bodies are diagnostic only and no longer become
   generated source. Malformed or contextual local evidence fails closed.
+- Source-application binder inspection now WHNFs inferred function types at
+  ordinary transparency, so definitions and projections expose their real
+  telescope. Validation runs under `withoutModifyingMCtx`; explicit source
+  holes and opaque or unresolved function types still fail closed.
+- Generated complete terms are wrapped in the `lean_term(...)` parser so
+  notation, arrows, joins, complements, `let`, and other ordinary Lean syntax
+  cannot consume the surrounding `explicit_rw` grammar. Exact source terms
+  are not globally normalized, including inside strings and comments.
+- Modules used to elaborate generated `lean_term` syntax are inspected by
+  Lean's parsed command AST first. Term syntax, term macros/elaborators,
+  notation, extension-capable initializers, `run_cmd`, and parser recovery
+  fail closed. Retry and isolated compilation also audit executable `sorry`
+  and `admit` in the AST while ignoring documentation, comments, and strings.
 
 ## Verified checks
 
-- 19 isolated-compile focused tests.
+- 20 isolated-compile focused tests.
 - 25 per-site/batch retry focused tests.
-- 30 per-site/batch/audited-refresh focused tests after the refresh extensions.
+- 31 per-site/batch/audited-refresh focused tests after the refresh extensions.
 - 15 renderer regressions.
 - 122 renderer/layout checks and 16 focused renderer regressions after the
   close and ordinary-term changes.
@@ -246,6 +267,14 @@ Subsequent reviewed mechanism commits:
 - `py_compile` and `git diff --check` passed for the changed implementation.
 - Independent trust review passed the final database, manifest, transactional,
   source-provenance, and renderer boundaries.
+- The term-boundary review passed 12 syntax-AST checks, 31 retry checks, 20
+  isolated-compile checks, the grammar fixture, 17 explicit-rw fixtures, and
+  the 156-theorem axiom audit. Its later escape sweep was interrupted and is
+  explicitly not claimed.
+- The historical `bad_source_span` control reproduces the T76 renderer bug:
+  module-relative Unicode scalar offsets were applied to a sliced command.
+  Current code performs canonical whole-source validation and a checked
+  copy-only rebase; the focused controls and 30 retry checks passed.
 
 ## Real smoke evidence
 
@@ -309,6 +338,13 @@ propositions equal. No relaxation was integrated: this class needs fresh
 in-process typed dependent-congruence evidence and an independently reviewed
 replay design. The reproduction is documented at `d7bf031`.
 
+A second genuine blocker remains for a bare local `Function.LeftInverse`
+hypothesis. Ordinary `explicit_rw [h]` compiles, but the safe recorder checker
+rejects an unassigned explicit binder. Trusting only the typed local snapshot
+would be unsound: an unrelated quantified local can present the same shallow
+application shape. No bypass was integrated; the fix requires sharing the
+replayer's exact matching and metavariable-closing semantics.
+
 ## Active pending run
 
 Run root:
@@ -338,14 +374,39 @@ Whole-tree coverage and simp-disabled certification remain unclaimed.
 Run root:
 `.lake/private/T77-error-fix-20260923/named-zeta-retry-20260923`.
 
-Two additional local workers are active in `explicit-lean-zeta-000` and
-`explicit-lean-zeta-001`. Their manifests are pairwise disjoint and their
+The two historical workers are terminal. Their manifests are pairwise
+disjoint and their
 union is exactly the 303 modules containing the 388 T76 rows classified as
 `render_failed:reduction_has_name: zeta step`. Both writable databases are
 copies of the validated T76 merged output and passed `PRAGMA integrity_check`.
-The retry driver processes every `render_failed` row in each owned module so
-that command compilation remains module-consistent. It selected 269 modules
-with usable stopped artifacts; 34 manifest modules currently have no selected
-artifact and must remain explicitly unprocessed unless a valid source bundle
-is located. This brings the campaign to its hard maximum of six concurrent
-local workers; no further shard may start while these are active.
+The retry driver selected 269 modules with usable stopped artifacts; 34
+manifest modules had no selected artifact. It produced 652 new stock-compiling
+successes in 192 modules and 1,391 changed rows overall. Job 001 exited 1 only
+because the historical whole-module regex interpreted the English word
+`admit` in three documentation comments as a proof hole; this was not a Lean
+failure and is corrected by the reviewed AST audit.
+
+The validated merge is
+`.lake/private/T77-error-fix-20260923/named-zeta-retry-20260923/mathlib-db-named-zeta-merged.sqlite3`
+with SHA256
+`e2ee5cc13e5073e8f96c3c2a086e0f3c57aec556bd8e97d9c15ba623d2c54312`.
+It was made from a new copy; all input databases and the T76 source remain
+preserved.
+
+## Fresh all-failure retry run
+
+Two fresh workers run from the isolated checkout
+`.lake/private/T77-max-retry-20260923/worktree` at reviewed HEAD
+`02125c24dd29ba9a02169be62aa78a27c5347ad1`. Their disjoint manifests cover
+all 3,553 modules containing 20,123 `record_failed`, `render_failed`, or
+`compile_failed` rows in the validated named-zeta merge. Audit gating selected
+1,362 modules / 9,094 rows for worker 000 and 1,388 modules / 9,145 rows for
+worker 001.
+
+Both workers use `--refresh-recorded --retry-failed`: every selected source
+site is freshly recorded before rendering, rather than reclassifying stale T76
+JSON. This exercises the reviewed source-span rebase, ordinary-term printer,
+indexed-local zeta evidence, binder inspection, AST term-elaboration gate, and
+executable proof-hole audit. Together with the four pending workers, this is
+the hard ceiling of six concurrent campaign workers; no additional worker may
+start.

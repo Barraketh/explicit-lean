@@ -192,7 +192,14 @@
       "e106938",
       "3fa2568",
       "654e660",
-      "00b83af"
+      "00b83af",
+      "87adf90",
+      "014156a",
+      "ad2ff5a",
+      "dcd2031",
+      "f183fdf",
+      "02125c2",
+      "306505e"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -220,15 +227,19 @@
       "lean_syntax_authenticated_apply_all_expansion",
       "indexed_local_named_zeta_replay",
       "authenticated_source_proposition_telescope_replay",
-      "fail_closed_false_proposition_evidence"
+      "fail_closed_false_proposition_evidence",
+      "source_application_binder_whnf_with_isolated_metavariable_state",
+      "self_delimiting_ordinary_lean_rewrite_terms",
+      "authenticated_ast_term_elaboration_gate",
+      "ast_scoped_executable_proof_hole_audit"
     ],
     "checks": {
-      "isolatedCompile": 19,
-      "retry": 30,
+      "isolatedCompile": 20,
+      "retry": 31,
       "rendererFocused": 16,
       "rendererAndLayout": 122,
       "replacementWorker": 11,
-      "syntaxAncestry": 7,
+      "syntaxAncestry": 12,
       "quantifiedPropositionReplay": "passed_global_local_true_local_false_and_fail_closed_value_binder",
       "generatedCloseDelimiter": "passed_adjacent_unbulleted_and_real_Exponential_staged_module",
       "exactBinderSpine": "passed_nested_dependent_nondependent_and_real_map_div_shape",
@@ -244,6 +255,11 @@
       "namedZetaIndexedLocal": "passed_private_build_positive_negative_fresh_trace_126_renderer_nested_rendering_no_simp_family_and_independent_trust_review",
       "sourcePropositionTelescope": "passed_fresh_NeZero_and_Nat_zero_le_record_render_replay_simp_disabled_compile_fail_closed_explicit_binder_and_independent_review",
       "falsePropositionEvidence": "passed_declaration_and_authenticated_source_True_intro_rejection_after_independent_review_fix",
+      "sourceApplicationBinderInspection": "passed_default_transparency_whnf_exact_Representation_Invariants_add_mem_shape_explicit_hole_controls_and_withoutModifyingMCtx_review",
+      "ordinaryTermDelimiting": "passed_Grammar_17_fixtures_156_theorem_axiom_audit_and_independent_source_fidelity_reverse_direction_review_escape_sweep_interrupted_not_claimed",
+      "termElaborationAstGate": "passed_12_syntax_31_retry_20_isolated_trace_checks_and_fail_closed_direct_Meta_Simp_elaborator_controls",
+      "executableProofHoleAstAudit": "passed_sorry_admit_syntax_rejection_with_comment_docstring_string_controls_and_candidate_persistence_gate",
+      "sourceSpanRebaseHistoricalControl": "passed_unrebased_T76_failure_and_current_canonical_whole_source_copy_rebase_success",
       "currentEventMetavariableSnapshot": "passed_after_test_only_fix_00b83af_the_recorder_gate_was_correct_and_the_old_fixture_was_elided_as_an_identical_defeq_noop",
       "nestedDischargeOwnership": "passed_real_Finsupp_sum_sum_index_four_rewrites_two_ordered_sides_each",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
@@ -257,6 +273,13 @@
         "requiredFix": "fresh in-process typed dependent-congruence certificate with independent trust review",
         "unsafeShortcutRejected": "eqIgnoringProofs does not establish equality of the enclosing propositions",
         "resultCommit": "d7bf031"
+      },
+      "bareLocalExplicitBinderReplay": {
+        "representative": "Function.LeftInverse local hypothesis",
+        "classification": "safe recorder validator and ordinary explicit_rw replay disagree on a bare local quantified source",
+        "diagnosis": "the typed local snapshot alone cannot justify skipping explicit-binder validation because an unrelated binder can produce the same shallow application shape",
+        "requiredFix": "share exact rewrite matching and metavariable-closing semantics between recorder validation and explicit_rw replay",
+        "unsafeShortcutRejected": "blanket trust of a local evidence snapshot accepts unrelated explicit binders"
       }
     },
     "realSmoke": {
@@ -300,8 +323,37 @@
       "manifestsDisjoint": true,
       "driverSelectedModules": 269,
       "manifestModulesWithoutSelectedArtifact": 34,
-      "runningWorkers": ["000", "001"],
+      "runningWorkers": [],
+      "terminalWorkerExit": {"000": 0, "001": 1},
+      "worker001ModuleErrors": [
+        "Mathlib.Algebra.Lie.Solvable",
+        "Mathlib.Analysis.Analytic.Composition",
+        "Mathlib.MeasureTheory.Constructions.Polish.Basic"
+      ],
+      "worker001ErrorClassification": "historical whole-module proof-hole regex false positives on documentation text; no Lean failure",
+      "newCompiledSuccesses": 652,
+      "newCompiledSuccessModules": 192,
+      "changedRows": 1391,
+      "validatedMergedDatabase": ".lake/private/T77-error-fix-20260923/named-zeta-retry-20260923/mathlib-db-named-zeta-merged.sqlite3",
+      "validatedMergedDatabaseSha256": "e2ee5cc13e5073e8f96c3c2a086e0f3c57aec556bd8e97d9c15ba623d2c54312",
+      "status": "terminal_validated_and_merged_to_new_copy",
       "sourceStatus": "render_failed",
+      "cloudUsed": false
+    },
+    "maxFailureRetryRun": {
+      "checkout": ".lake/private/T77-max-retry-20260923/worktree",
+      "codeHead": "02125c24dd29ba9a02169be62aa78a27c5347ad1",
+      "root": ".lake/private/T77-max-retry-20260923/worktree/.lake/private/T77-error-fix-20260923/max-failure-retry-20260923",
+      "sourceDatabase": ".lake/private/T77-error-fix-20260923/named-zeta-retry-20260923/mathlib-db-named-zeta-merged.sqlite3",
+      "manifestUnionModules": 3553,
+      "baselineFailureRows": 20123,
+      "manifestsDisjoint": true,
+      "driverSelectedModules": {"000": 1362, "001": 1388},
+      "driverSelectedRows": {"000": 9094, "001": 9145},
+      "runningWorkers": ["000", "001"],
+      "statuses": ["record_failed", "render_failed", "compile_failed"],
+      "refreshRecorded": true,
+      "retryFailed": true,
       "cloudUsed": false
     },
     "simpDisabledCertification": "not_claimed",
