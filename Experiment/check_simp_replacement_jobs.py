@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import sqlite3
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -63,9 +65,13 @@ class SimpReplacementJobsTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def prepare(self, jobs_count: int = 2) -> tuple[Path, list[list[str]]]:
+    def prepare(
+        self,
+        jobs_count: int = 2,
+        statuses: tuple[str, ...] = ("pending",),
+    ) -> tuple[Path, list[list[str]]]:
         output = self.root / f"jobs-{jobs_count}"
-        assignment = jobs.prepare(self.primary, output, jobs_count)
+        assignment = jobs.prepare(self.primary, output, jobs_count, statuses)
         return output, assignment
 
     def test_partition_has_exact_coverage_and_balances_weight(self) -> None:
@@ -136,6 +142,68 @@ class SimpReplacementJobsTests(unittest.TestCase):
         with self.assertRaises(merger.MergeError):
             merger.merge(self.primary, [job0, job1])
         self.assertEqual(before, state(self.primary))
+
+    def test_authorized_record_failed_refinement_to_success_is_idempotent(self) -> None:
+        con = sqlite3.connect(self.primary)
+        con.execute(
+            "UPDATE simp_replacements SET status='record_failed', error='old trace failure' "
+            "WHERE module_name='M00' AND ordinal=0"
+        )
+        con.commit()
+        con.close()
+        output, _ = self.prepare(1, ("pending", "record_failed"))
+        job = output / "job-000"
+        dummy_update(job, "M00", 0, "success", "by exact True.intro")
+
+        with redirect_stdout(io.StringIO()):
+            exit_code = merger.main([
+                "--database", str(self.primary), "--replace-status", "record_failed", str(job)
+            ])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(state(self.primary)[0][2:], ("success", "by exact True.intro", None))
+        repeated = merger.merge(self.primary, [job], replace_status={"record_failed"})
+        self.assertEqual(repeated["identical_existing"], 1)
+        self.assertEqual(state(self.primary)[0][2:], ("success", "by exact True.intro", None))
+
+    def test_authorized_record_failed_refinement_to_failure(self) -> None:
+        con = sqlite3.connect(self.primary)
+        con.execute(
+            "UPDATE simp_replacements SET status='record_failed', error='old trace failure' "
+            "WHERE module_name='M00' AND ordinal=0"
+        )
+        con.commit()
+        con.close()
+        output, _ = self.prepare(1, ("pending", "record_failed"))
+        job = output / "job-000"
+        dummy_update(job, "M00", 0, "compile_failed", error="fresh compile failure")
+
+        merged = merger.merge(self.primary, [job], replace_status={"record_failed"})
+        self.assertEqual(merged["merged"], 1)
+        self.assertEqual(state(self.primary)[0][2:], ("compile_failed", None, "fresh compile failure"))
+
+    def test_record_failed_terminal_conflict_requires_explicit_authorization(self) -> None:
+        con = sqlite3.connect(self.primary)
+        con.execute(
+            "UPDATE simp_replacements SET status='record_failed', error='old trace failure' "
+            "WHERE module_name='M00' AND ordinal=0"
+        )
+        con.commit()
+        con.close()
+        output, _ = self.prepare(1, ("pending", "record_failed"))
+        job = output / "job-000"
+        dummy_update(job, "M00", 0, "success", "by exact True.intro")
+        before = state(self.primary)
+
+        with self.assertRaises(merger.MergeError):
+            merger.merge(self.primary, [job])
+        self.assertEqual(before, state(self.primary))
+
+    def test_replace_status_cannot_authorize_success_or_pending(self) -> None:
+        output, _ = self.prepare(1)
+        job = output / "job-000"
+        for status in ("pending", "success"):
+            with self.subTest(status=status), self.assertRaises(merger.MergeError):
+                merger.merge(self.primary, [job], replace_status={status})
 
     def test_overlapping_and_malformed_manifests_reject(self) -> None:
         output, _ = self.prepare(2)

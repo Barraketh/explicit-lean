@@ -9,7 +9,7 @@ import json
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 DB_NAME = "mathlib-db.sqlite3"
@@ -17,6 +17,10 @@ MANIFEST_NAME = "modules.txt"
 VALID_STATUSES = {
     "pending", "noop", "record_failed", "render_failed", "compile_failed",
     "success", "resource_failed", "worker_failed",
+}
+REPLACEABLE_STATUSES = {
+    "record_failed", "render_failed", "compile_failed", "resource_failed",
+    "worker_failed",
 }
 BASE_TABLES = ("modules", "imports", "commands")
 REQUIRED_TABLES = (*BASE_TABLES, "simp_replacements")
@@ -187,9 +191,19 @@ def prepare_job(primary: sqlite3.Connection, job_dir: Path, seen_modules: set[st
         worker.close()
 
 
-def merge(database: Path, job_dirs: list[Path]) -> dict[str, int]:
+def merge(
+    database: Path,
+    job_dirs: list[Path],
+    replace_status: Iterable[str] = (),
+) -> dict[str, int]:
     if not job_dirs:
         raise MergeError("at least one job directory is required")
+    authorized_replacements = frozenset(replace_status)
+    unsupported = authorized_replacements - REPLACEABLE_STATUSES
+    if unsupported:
+        raise MergeError(
+            f"replace_status may name only failure statuses: {sorted(unsupported)}"
+        )
     primary = open_rw(database)
     merged = idempotent = pending = 0
     try:
@@ -215,14 +229,14 @@ def merge(database: Path, job_dirs: list[Path]) -> dict[str, int]:
             if status == "pending":
                 pending += 1
                 continue
-            if current[0] == "pending":
+            if current == incoming:
+                idempotent += 1
+            elif current[0] == "pending" or current[0] in authorized_replacements:
                 primary.execute(
                     "UPDATE simp_replacements SET status=?, replacement_text=?, error=? WHERE module_name=? AND ordinal=?",
                     (status, replacement, error, *key),
                 )
                 merged += 1
-            elif current == incoming:
-                idempotent += 1
             else:
                 raise MergeError(f"conflicting terminal result for {key}: primary={current!r}, {label}={incoming!r}")
         primary.commit()
@@ -237,10 +251,20 @@ def merge(database: Path, job_dirs: list[Path]) -> dict[str, int]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", type=Path, required=True)
+    parser.add_argument(
+        "--replace-status",
+        action="append",
+        choices=sorted(REPLACEABLE_STATUSES),
+        default=[],
+        help=(
+            "allow an assigned primary row in this exact failure status to be "
+            "replaced by the incoming terminal result (repeatable; default: none)"
+        ),
+    )
     parser.add_argument("job_dirs", type=Path, nargs="+")
     args = parser.parse_args(argv)
     try:
-        result = merge(args.database, args.job_dirs)
+        result = merge(args.database, args.job_dirs, args.replace_status)
     except (OSError, sqlite3.Error, MergeError) as exc:
         print(f"merge failed: {exc}", file=sys.stderr)
         return 2
