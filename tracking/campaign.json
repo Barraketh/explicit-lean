@@ -170,7 +170,8 @@
       "4816f8a",
       "7537456",
       "251a659",
-      "16e32d5"
+      "16e32d5",
+      "ad3ed44"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -184,7 +185,8 @@
       "atomic_evidence_preserving_trace_refresh",
       "audit_gated_render_and_compile_failure_refresh",
       "authenticated_lean_tactic_syntax_ancestry_groundwork",
-      "quantified_proposition_selected_redex_validator_parity"
+      "quantified_proposition_selected_redex_validator_parity",
+      "self_delimiting_generated_exact_term_closes"
     ],
     "checks": {
       "isolatedCompile": 19,
@@ -194,6 +196,7 @@
       "replacementWorker": 11,
       "syntaxAncestry": 7,
       "quantifiedPropositionReplay": "passed_global_local_true_local_false_and_fail_closed_value_binder",
+      "generatedCloseDelimiter": "passed_adjacent_unbulleted_and_real_Exponential_staged_module",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
       "independentTrustReview": "passed"
     },

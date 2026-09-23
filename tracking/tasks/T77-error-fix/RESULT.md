@@ -13,6 +13,7 @@ Subsequent reviewed mechanism commits:
 - `251a659`: authenticated Lean tactic-syntax ancestry extraction groundwork.
 - `16e32d5`: quantified proposition validation aligned with existing
   selected-redex `explicit_rw` replay.
+- `ad3ed44`: self-delimiting generated exact-term closes.
 
 ## Implemented controls and principled fixes
 
@@ -74,6 +75,13 @@ Subsequent reviewed mechanism commits:
   The removed blanket rejection predated this `explicit_rw` capability. No
   inferred arguments or proof terms are serialized, and exact source-backed
   simp arguments retain their authenticated spelling.
+- Generated named closes now use the closed `close [term]` form. Brackets end
+  the term before a following unbulleted tactic, while the term still passes
+  the existing whitelist, tactic-block rejection, strict elaboration, and
+  pending-metavariable checks. Hypothesis closes use
+  `explicit_rw [] then close [term]` after the hypothesis rewrite, keeping the
+  same delimiter in every generated context. Legacy hand-written `exact term`
+  remains accepted.
 
 ## Verified checks
 
@@ -94,6 +102,10 @@ Subsequent reviewed mechanism commits:
   and a theorem with an undetermined explicit value binder that simp refused.
   `test/ExplicitRw/Provenance.lean` independently compiled the existing
   selected-redex proposition cases. Independent trust review passed.
+- The self-delimiting closer passed the ExplicitRw build, Basic and
+  LocalHandles Lean fixtures, 116 renderer assertions, 16 focused renderer
+  regressions, JSON validation, the no-simp-family audit, and independent
+  trust review including a tactic-block rejection probe.
 - T9 trace identity tests and T22 source-argument tests.
 - 316 pipeline checks excluding the unavailable historical T1/T2
   worktree-dependent site-count and end-to-end checks.
@@ -132,6 +144,13 @@ The disposable validator-parity rerun at
 classification. The module advanced to independent explicit-argument and
 position-validation blockers; it is not counted as a compiled success.
 Database integrity is `ok`.
+
+The previously failing staged
+`Mathlib.Probability.Distributions.Exponential.hasDerivAt_neg_exp_mul_exp`
+candidate was copied to the disposable `close-boundary-smoke` directory. With
+only its three generated `then exact True.intro` closers changed to
+`then close [True.intro]`, the full staged module compiled successfully. This
+is focused parser-boundary evidence, not a newly persisted database success.
 
 ## Active pending run
 
