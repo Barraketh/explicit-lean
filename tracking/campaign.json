@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-23T11:31:30Z",
+  "updatedAt": "2026-09-23T14:06:47Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -200,7 +200,12 @@
       "f183fdf",
       "02125c2",
       "306505e",
-      "3c77e1f"
+      "3c77e1f",
+      "a4c9f81",
+      "756e105",
+      "eb395b3",
+      "f008408",
+      "5cfdf9f"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -232,7 +237,11 @@
       "source_application_binder_whnf_with_isolated_metavariable_state",
       "self_delimiting_ordinary_lean_rewrite_terms",
       "authenticated_ast_term_elaboration_gate",
-      "ast_scoped_executable_proof_hole_audit"
+      "ast_scoped_executable_proof_hole_audit",
+      "authenticated_direct_simp_success_postcondition",
+      "exact_lean_command_range_and_candidate_reconstruction",
+      "shared_explicit_rw_recorder_matching_semantics",
+      "closed_exact_source_term_snapshot_with_typed_ordered_side_evidence"
     ],
     "checks": {
       "isolatedCompile": 20,
@@ -262,10 +271,12 @@
       "executableProofHoleAstAudit": "passed_sorry_admit_syntax_rejection_with_comment_docstring_string_controls_and_candidate_persistence_gate",
       "sourceSpanRebaseHistoricalControl": "passed_unrebased_T76_failure_and_current_canonical_whole_source_copy_rebase_success",
       "allGoalsSourceOwnership": "passed_current_tactic_semicolon_AST_and_fail_closed_no_tactic_less_than_semicolon_all_goals_ownership_with_29_invocation_12_AST_checks",
+      "directSimpSuccessPostcondition": "passed_6_parser_free_identity_checks_31_retry_checks_and_15_jobs_checks_with_synthetic_inventory; full_real_parser_jobs_sweep_stopped_after_two_tests_to_avoid_competing_with_live_workers",
+      "exactSourceApplicationReplay": "passed_private_SimpTrace_build_local_rewrite_parity_event_mvar_snapshot_class_explicit_arguments_and_end_to_end_source_argument_record_json_render_compile_checks",
       "currentEventMetavariableSnapshot": "passed_after_test_only_fix_00b83af_the_recorder_gate_was_correct_and_the_old_fixture_was_elided_as_an_identical_defeq_noop",
       "nestedDischargeOwnership": "passed_real_Finsupp_sum_sum_index_four_rewrites_two_ordered_sides_each",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
-      "independentTrustReview": "passed"
+      "independentTrustReview": "passed_qualified_with_real_parser_jobs_sweep_and_NeZero_fixture_deferred"
     },
     "genuineBlockers": {
       "typedDependentProofTransport": {
@@ -276,19 +287,20 @@
         "unsafeShortcutRejected": "eqIgnoringProofs does not establish equality of the enclosing propositions",
         "resultCommit": "d7bf031"
       },
-      "bareLocalExplicitBinderReplay": {
-        "representative": "Function.LeftInverse local hypothesis",
-        "classification": "safe recorder validator and ordinary explicit_rw replay disagree on a bare local quantified source",
-        "diagnosis": "the typed local snapshot alone cannot justify skipping explicit-binder validation because an unrelated binder can produce the same shallow application shape",
-        "requiredFix": "share exact rewrite matching and metavariable-closing semantics between recorder validation and explicit_rw replay",
-        "unsafeShortcutRejected": "blanket trust of a local evidence snapshot accepts unrelated explicit binders"
-      },
       "allGoalsWithoutApplyAllAncestry": {
         "representative": "ext; all_goals simp",
         "classification": "sequential all_goals source has no authenticated tactic_<;> owner",
         "diagnosis": "the invocation records do not identify which generated proof belongs to which goal",
         "requiredFix": "fresh source contract that authenticates all_goals child ownership and continuation semantics",
         "unsafeShortcutRejected": "inferring branch ownership from record count"
+      }
+    },
+    "resolvedFormerBlockers": {
+      "bareLocalExplicitBinderReplay": {
+        "representative": "Function.LeftInverse local hypothesis",
+        "status": "resolved_by_f008408_after_independent_review",
+        "mechanism": "abstract_and_close_the_exact_parser_term_then_reopen_only_during_shared_explicit_rw_validation; serialize_only_authenticated_source_text_and_ordered_typed_side_evidence",
+        "negativeControls": "bare_h_requires_serialized_hp_side; missing_reversed_reused_or_wrong_typed_side_fails_closed; caller_metavariables_do_not_leak"
       }
     },
     "realSmoke": {
@@ -329,7 +341,15 @@
       "preparedWorkers": [],
       "fastPathRestartedAt": "2026-09-23T06:27:03Z",
       "maximumConcurrentLocalCampaignWorkers": 6,
-      "cloudUsed": false
+      "cloudUsed": false,
+      "nonterminalSnapshotAt": "2026-09-23T14:06:47Z",
+      "nonterminalTransitions": {
+        "pending_to_success": 3180,
+        "pending_to_noop": 602,
+        "pending_to_record_failed": 2085,
+        "pending_to_render_failed": 357,
+        "pending_to_compile_failed": 608
+      }
     },
     "namedZetaRetryRun": {
       "root": ".lake/private/T77-error-fix-20260923/named-zeta-retry-20260923",
@@ -374,7 +394,34 @@
       "statuses": ["record_failed", "render_failed", "compile_failed"],
       "refreshRecorded": true,
       "retryFailed": true,
+      "knownModuleErrors": [
+        "Mathlib.Algebra.Group.UniqueProds.Basic"
+      ],
+      "knownModuleErrorClassification": "Lean full-module parser recovery; deliberately fail-closed pending an authenticated parser-context contract",
+      "nonterminalSnapshotAt": "2026-09-23T14:06:47Z",
+      "nonterminalTransitionsToSuccess": {
+        "compile_failed": 95,
+        "record_failed": 38,
+        "render_failed": 167,
+        "total": 300
+      },
       "cloudUsed": false
+    },
+    "residualSuccessAstAudit": {
+      "sourceDatabase": ".lake/private/T77-error-fix-20260923/named-zeta-retry-20260923/mathlib-db-named-zeta-merged.sqlite3",
+      "textualFindingRows": 37,
+      "textualFindings": 40,
+      "astConfirmedDirectRows": 26,
+      "astConfirmedDirectSites": 28,
+      "configurationOnlyRows": 9,
+      "configurationOnlyFindings": 10,
+      "parserRefusedRows": 2,
+      "status": "classified_not_retried",
+      "guardCommits": [
+        "a4c9f81",
+        "756e105",
+        "5cfdf9f"
+      ]
     },
     "simpDisabledCertification": "not_claimed",
     "wholeTreeAcceptance": "not_claimed"

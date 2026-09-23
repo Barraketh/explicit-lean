@@ -391,6 +391,52 @@ baseline, or frozen database.
 
 Whole-tree coverage and simp-disabled certification remain unclaimed.
 
+## Reviewed exact-source and success-postcondition extensions
+
+The exact-source replay path is now integrated through `f008408` after an
+independent review found that the first shared-matcher implementation could
+accept a bare local rule whose explicit proof argument had not been persisted.
+The reviewed mechanism snapshots the exact parser-term elaboration with its
+term and universe metavariables abstracted, reopens that closed snapshot only
+inside validation, and uses the same matcher and closer as ordinary
+`explicit_rw`. Source-backed trace JSON contains neither reconstructed
+arguments nor validator-only terms. A bare local rule requiring a proof now
+replays only with its ordered typed side evidence; missing, reversed, reused,
+or wrongly typed evidence fails closed, and validation cannot assign caller
+metavariables. The private SimpTrace build and focused local/global/method/
+implicit application record-to-render-to-compile fixtures passed. The NeZero
+fixture remains unrun because its pinned Cyclotomic dependency olean is absent;
+no broad dependency build was started.
+
+Successful replacement persistence is guarded through `756e105`. Lean's AST
+must show that every owned successful command has no executable direct
+`Lean.Parser.Tactic.simp` node. Original database command kinds and byte ranges
+must exactly match the parsed original module, the candidate source must be
+exactly reconstructed from the authenticated replacement map plus recorder
+import, and batched parser responses are bound to request IDs. Aesop `simp`
+configuration is not misclassified as a direct tactic. Parser recovery and
+unclassified extension contexts fail closed. Six parser-free identity attacks
+and all 31 retry tests pass; 15 job tests pass with a synthetic in-memory
+inventory. A real-parser jobs sweep was stopped after two tests because its
+large `lean --run` processes competed with the six live corpus workers; it is
+not claimed complete.
+
+The validated named-zeta database contains 37 success rows with 40 textual
+simp-family findings. Lean AST classification identifies 26 rows / 28 direct
+`simp` sites, 9 rows / 10 Aesop-configuration-only findings, and 2 rows whose
+module parser context refuses recovery. No row was mutated. A new-copy,
+opt-in retry mechanism for the 26 authenticated residual rows is under review.
+
+At `2026-09-23T14:06:47Z`, the still-running pending shards had moved 3,180
+owned rows to success, 602 to noop, 2,085 to record failure, 357 to render
+failure, and 608 to compile failure. The two broad failure-retry shards had
+added 300 successes: 95 from compile failure, 38 from record failure, and 167
+from render failure. These are nonterminal snapshots, not merged results. The
+only new max-retry module error is
+`Mathlib.Algebra.Group.UniqueProds.Basic`, whose full-module parser reports
+recovery; it remains deliberately unprocessed rather than weakening the AST
+gate.
+
 ## Named-zeta retry run
 
 Run root:
