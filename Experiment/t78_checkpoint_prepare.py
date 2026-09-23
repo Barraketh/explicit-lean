@@ -788,6 +788,7 @@ def _safe_apply_layer(
     state: dict[tuple[str, int], tuple[str, str | None, str | None]],
     source_db: sqlite3.Connection,
     repo_root: Path,
+    reparse_incoming_successes: bool,
 ) -> tuple[list[dict[str, Any]], Counter[str]]:
     by_module: dict[str, list[dict[str, Any]]] = {}
     for mutation in mutations:
@@ -801,13 +802,16 @@ def _safe_apply_layer(
             for item in module_changes
             if item["incoming"][0] == "success" and item["incoming"] != item["baseline"]
         }
-        accepted, quarantined = validate_incoming_successes(
-            module=module,
-            current_rows=state,
-            incoming_successes=incoming_successes,
-            source_db=source_db,
-            repo_root=repo_root,
-        )
+        if reparse_incoming_successes:
+            accepted, quarantined = validate_incoming_successes(
+                module=module,
+                current_rows=state,
+                incoming_successes=incoming_successes,
+                source_db=source_db,
+                repo_root=repo_root,
+            )
+        else:
+            accepted, quarantined = set(incoming_successes), {}
         for ordinal, reason in sorted(quarantined.items()):
             related = next(item for item in module_changes if int(item["ordinal"]) == ordinal)
             audit.append({
@@ -826,10 +830,13 @@ def _safe_apply_layer(
                 "job": related["job"],
                 "module": module,
                 "ordinal": ordinal,
-                "action": "validated_incoming_success",
-                "reason": "current TSA direct-simp postcondition passed",
+                "action": ("validated_incoming_success" if reparse_incoming_successes
+                           else "trusted_recorded_success"),
+                "reason": ("current TSA direct-simp postcondition passed" if reparse_incoming_successes
+                           else "success reparse explicitly skipped for fast checkpointing"),
             })
-            stats["validated_incoming_successes"] += 1
+            stats[("validated_incoming_successes" if reparse_incoming_successes
+                   else "trusted_recorded_successes")] += 1
 
         for mutation in module_changes:
             ordinal = int(mutation["ordinal"])
@@ -974,6 +981,7 @@ def create_checkpoint(
     maxretry_statuses: Sequence[str],
     output_root: Path,
     repo_root: Path = ROOT,
+    reparse_incoming_successes: bool = True,
 ) -> dict[str, Any]:
     verified_inputs = validate_input_receipt(
         input_receipt=input_receipt,
@@ -1020,6 +1028,7 @@ def create_checkpoint(
                 state=state,
                 source_db=baseline,
                 repo_root=repo_root,
+                reparse_incoming_successes=reparse_incoming_successes,
             )
         audit_entries.extend(layer_audit)
         transition_counts.update(stats)
@@ -1030,6 +1039,7 @@ def create_checkpoint(
     )
     report["summary"] = {
         "incomingChangedRows": sum(layer["changedRows"] for layer in report["layers"].values()),
+        "successReparse": "performed" if reparse_incoming_successes else "skipped",
         "quarantinedInvalidSuccesses": transition_counts["quarantined_invalid_successes"],
         "preservedCurrentSuccesses": transition_counts["preserved_current_successes"],
     }
@@ -1190,6 +1200,8 @@ def build_parser() -> argparse.ArgumentParser:
                              help="explicit comma-separated queue statuses defining the manifest union")
     checkpoint.add_argument("--repo-root", type=_canonical_cli_argument, default=ROOT,
                              help="Lean/Lake root used by current TSA parser validation")
+    checkpoint.add_argument("--skip-success-reparse", action="store_true",
+                             help="merge recorded successes without the Lean AST reparse audit")
     checkpoint.add_argument("--output-root", type=Path, required=True)
 
     partition = subparsers.add_parser("partition", help="make status-selected disjoint cloud job copies")
@@ -1220,6 +1232,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 maxretry_statuses=_csv_statuses(args.maxretry_statuses),
                 output_root=args.output_root,
                 repo_root=args.repo_root,
+                reparse_incoming_successes=not args.skip_success_reparse,
             )
         else:
             report = create_partitions(
