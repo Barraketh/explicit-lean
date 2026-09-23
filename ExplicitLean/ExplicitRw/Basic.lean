@@ -393,6 +393,50 @@ def closeLemmaMVars (idx : Nat) (lemmaStx : MessageData) (mvars : Array Expr) : 
           {indentExpr ty}\nafter matching at the given position. Supply it as an \
           explicit argument, or fix the position. `explicit_rw` never searches for it."
 
+/-- Match the equation side selected by `explicit_rw` against its positioned
+redex. The recorder validator uses this same operation when it checks that a
+bare local source can be replayed; keeping the primitive here prevents the two
+boundaries from drifting in their treatment of matcher-created assignments. -/
+def matchRewriteSource (source redex : Expr) : MetaM Bool :=
+  isDefEq source redex
+
+/-- Synthesize the instance-implicit arguments left open while a rewrite lemma
+is elaborated, once matching has fixed their types. If the redex already fixed
+an instance, require synthesis to agree with it. -/
+def synthesizeInstanceMVars (idx : Nat) (lemmaStx : MessageData)
+    (mvars : Array Expr) (sub : Expr) : MetaM Unit := do
+  for m in mvars do
+    let m ← instantiateMVars m
+    let .mvar mid := m | continue
+    if ← mid.isAssigned then continue
+    let ty ← instantiateMVars (← mid.getType)
+    if ty.hasExprMVar then continue
+    let some _ ← isClass? ty | continue
+    match ← trySynthInstance ty with
+    | .some val =>
+      unless ← isDefEq m val do
+        stepError idx m!"lemma {lemmaStx} needs an instance of{indentExpr ty}\n\
+          but the instance synthesized here is not the one the subterm uses:\
+          {indentExpr sub}"
+      pure ()
+    | .undef => pure ()
+    | .none =>
+      stepError idx m!"lemma {lemmaStx} needs an instance of{indentExpr ty}\n\
+        which cannot be synthesized at this position."
+
+/-- The unassigned proof arguments that `explicit_rw` offers to its ordered
+`with [...]` clause. The recorder uses the same classification when matching
+captured side evidence to remaining explicit proof binders. -/
+def unassignedRewritePropMVars (mvars : Array Expr) : MetaM (Array Expr) := do
+  mvars.filterMapM fun m => do
+    match ← instantiateMVars m with
+    | .mvar mid =>
+      if ← mid.isAssigned then return none
+      let ty ← instantiateMVars (← mid.getType)
+      if ← isProp ty then return some m
+      return none
+    | _ => return none
+
 /--
 Split an equation-or-iff proof into `(lhs, rhs, proofOfEq)`. An `Iff` is turned
 into an `Eq` with `propext`, exactly as a hand-written proof would.

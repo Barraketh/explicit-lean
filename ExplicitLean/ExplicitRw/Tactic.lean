@@ -1215,40 +1215,6 @@ def checkNoLevelMVars (idx : Nat) (lemmaStx : MessageData) (es : Array Expr) :
         name, or fix the position."
 
 
-/--
-Synthesize the instance-implicit arguments of a lemma once the position has
-fixed their types, and check the result against the subterm.
-
-Instance arguments are left open by `elabEquation` so that unification with the
-subterm can determine them; this is where they are closed. A synthesized
-instance that is not defeq to the one the subterm actually uses would silently
-rewrite along a different algebraic structure, so that is a step-indexed error
-rather than something to paper over.
--/
-def synthesizeInstanceMVars (idx : Nat) (lemmaStx : MessageData)
-    (mvars : Array Expr) (sub : Expr) : TacticM Unit := do
-  for m in mvars do
-    let m ← instantiateMVars m
-    let .mvar mid := m | continue
-    if ← mid.isAssigned then continue
-    let ty ← instantiateMVars (← mid.getType)
-    if ty.hasExprMVar then continue
-    let some _ ← isClass? ty | continue
-    match ← trySynthInstance ty with
-    | .some val =>
-      -- If the position already determined an instance, the synthesized one
-      -- must agree with it; otherwise the replay would rewrite along a
-      -- different structure than the recorder did.
-      unless ← isDefEq m val do
-        stepError idx m!"lemma {lemmaStx} needs an instance of{indentExpr ty}\n\
-          but the instance synthesized here is not the one the subterm uses:\
-          {indentExpr sub}"
-      pure ()
-    | .undef => pure ()
-    | .none =>
-      stepError idx m!"lemma {lemmaStx} needs an instance of{indentExpr ty}\n\
-        which cannot be synthesized at this position."
-
 /-- Run a definitional step at `pos` inside `e`, using `reduce` on the subterm. -/
 def runDefeqStep (idx : Nat) (e : Expr) (pos : Pos) (what : MessageData)
     (reduce : Expr → TacticM Expr) : TacticM Replacement := do
@@ -1364,7 +1330,7 @@ partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bo
       -- definition opened under `Classical`).  Matching only the types first
       -- leaves such an instance metavariable untouched, and synthesizing it
       -- before the term match then incorrectly reports a missing instance.
-      unless ← isDefEq source sub do
+      unless ← matchRewriteSource source sub do
         stepError idx m!"lemma `{stx}` does not match the subterm at \
           position {Pos.render pos}.\nExpected{indentExpr (← instantiateMVars source)}\n\
           but the subterm is{indentExpr sub}"
@@ -1372,11 +1338,7 @@ partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bo
       -- Discharge the lemma's hypotheses with the `with` clause, in order. A
       -- hypothesis is a Prop-valued argument metavariable the position did not
       -- determine; anything left over is still an error below.
-      let propMVars ← mvars.filterM fun m => do
-        match ← instantiateMVars m with
-        | .mvar mid => do
-          if ← mid.isAssigned then pure false else isProp (← instantiateMVars (← mid.getType))
-        | _ => pure false
+      let propMVars ← unassignedRewritePropMVars mvars
       if sideTacs.size > propMVars.size then
         stepError idx m!"the `with` clause supplies {sideTacs.size} proof(s) but lemma \
           `{stx}` has {propMVars.size} undetermined hypothesis(es) at this position."
@@ -1713,12 +1675,7 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax)
         -- A proposition rule can still have proof-valued binders.  They are
         -- discharged by the same closed, ordered side-proof language as an
         -- ordinary rewrite lemma; no hypothesis search is introduced here.
-        let propMVars ← mvars.filterM fun m => do
-          match ← instantiateMVars m with
-          | .mvar mid => do
-            if ← mid.isAssigned then pure false
-            else isProp (← instantiateMVars (← mid.getType))
-          | _ => pure false
+        let propMVars ← unassignedRewritePropMVars mvars
         if sideTacs.size > propMVars.size then
           stepError idx m!"the `with` clause supplies {sideTacs.size} proof(s) but proposition proof \
             `{term}` has {propMVars.size} undetermined hypothesis(es) at this position."

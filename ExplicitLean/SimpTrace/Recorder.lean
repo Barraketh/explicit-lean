@@ -622,13 +622,25 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     -- Resolve only assignments Lean made while matching/synthesizing the
     -- source theorem, without reconstructing or appending any argument. Do not
     -- let metavariable ids created at this local depth escape into the event.
-    let sourceValue? ← match sourceValue? with
-      | some value => do
-        let value ← instantiateMVars value
-        let value ← instantiateSourceValueLevels value
-        if ← hasAssignableTermOrLevelMVar value then pure none
-        else pure (some value)
-      | none => pure none
+    let sourceValue? ← match thm.origin with
+      | .stx .. => match sourceValue? with
+        | some value => do
+          let value ← instantiateMVars value
+          let value ← instantiateSourceValueLevels value
+          if ← hasAssignableTermOrLevelMVar value then pure none
+          else pure (some value)
+        | none => pure none
+      | .fvar fvarId => do
+        -- Keep the exact theorem application simp used for a local rewrite.
+        -- This validator-only evidence is never serialized; the source-facing
+        -- rewriter still names the local hypothesis. Requiring the originating
+        -- fvar prevents a local event from borrowing a theorem assembled from
+        -- unrelated context values.
+        let proof ← instantiateSourceValueLevels proof
+        if !proof.containsFVar fvarId then pure none
+        else if ← hasAssignableTermOrLevelMVar proof then pure none
+        else pure (some proof)
+      | _ => pure none
     Simp.recordSimpTheorem thm.origin
     let pending := (← ref.get).pendingSide
     let pending := pending.extract (min pendingSideStart pending.size) pending.size

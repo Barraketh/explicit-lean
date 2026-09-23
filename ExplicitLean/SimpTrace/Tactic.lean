@@ -24,6 +24,7 @@ Recorder machinery only.  This module is never imported by translated source.
 module
 
 public meta import Lean
+public meta import ExplicitLean.ExplicitRw.Basic
 public meta import ExplicitLean.SimpTrace.Types
 public meta import ExplicitLean.SimpTrace.Traversal
 public meta import ExplicitLean.SimpTrace.Recorder
@@ -575,7 +576,10 @@ a replayer cannot perform.
 -/
 
 /-- The statement `name args` proves, as an `Eq` or `Iff` pair, with remaining
-implicit and instance arguments left as metavariables to unify. -/
+implicit and instance arguments left as metavariables to unify. The third
+component retains the complete opened telescope, including any explicit
+arguments already assigned from `args`, so the validator can close it exactly
+as the replayer does. -/
 def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
     (proj : String := "") : MetaM (Option (Expr × Expr × Array Expr)) := do
   let head? : Option Expr ← match o with
@@ -599,7 +603,9 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
       -- instantiated *before* the projection -- `∀ x, P x ∧ Q x` is not a
       -- conjunction until it is applied.  Open them as metavariables, which
       -- the recorded `args` and unification then fix, exactly as for a lemma.
-      let (pmvars, pbis, _) ← forallMetaTelescope (← inferType head)
+      let (pmvars, pbis, _) ← match o with
+        | .fvar _ => forallMetaTelescopeReducing (← inferType head)
+        | _ => forallMetaTelescope (← inferType head)
       -- The recorded `args` belong to *this* application (`(h c).1` records
       -- `["c"]`), so assign them to its explicit binders here; the projected
       -- statement below has no binders left for them.
@@ -622,7 +628,9 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
   -- **Not** the `Reducing` variant: it whnfs the body, so a Prop-valued lemma's
   -- statement unfolds away from the form simp rewrote (`LeftTotal R` becomes
   -- `∃ b, R a b`, `¬(a ∈ [])` becomes `False`) and no longer matches `before`.
-  let (mvars, bis, concl) ← forallMetaTelescope (← inferType head)
+  let (mvars, bis, concl) ← match o with
+    | .fvar _ => forallMetaTelescopeReducing (← inferType head)
+    | _ => forallMetaTelescope (← inferType head)
   -- Then assign the recorded `args` to the **explicit** positions in order.
   -- `mkAppN head args` would feed them to whatever binder comes first, which is
   -- usually a universe or an implicit, silently producing a different statement
@@ -630,20 +638,19 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
   -- When a projection consumed the `args` above, the projected statement has
   -- none of its own left to fill.
   let mut i := if proj.isEmpty then 0 else args.size
-  -- The explicit binders the recorded `args` did *not* fill.  A lemma can take
+  -- Assign the recorded `args` to explicit binders, leaving all telescope
+  -- metavariables in `mvars` for matching, instance synthesis, side evidence,
+  -- and final closure. A lemma can take
   -- an explicit argument that does not occur in its left-hand side -- `dif_pos
   -- (hc : c)` proves the condition, and `dite c t e` mentions `c`, `t` and `e`
   -- but never `hc` -- so unifying the statement with the subterm leaves it
-  -- unassigned and a replayer has nothing to write.  Collect them so the
-  -- caller can require them assigned (REVIEW-9 2).
-  let mut unfilled : Array Expr := #[]
+  -- unassigned and a replayer has nothing to write. Retaining the full array
+  -- lets the caller apply the same closure check as the replayer (REVIEW-9 2).
   for mvar in mvars, bi in bis do
     if bi == .default then
       if h : i < args.size then
         unless ← isDefEq mvar args[i] do return none
         i := i + 1
-      else
-        unfilled := unfilled.push mvar
   -- More recorded arguments than the lemma has explicit binders: the `args` do
   -- not describe this lemma, so there is nothing to check them against.
   if i < args.size then return none
@@ -655,16 +662,16 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
   -- (`LeftTotal R` is a `∀`-statement about `∃`), which the `eq?` test below
   -- would then read as the rewrite — the wrong pair entirely.
   match prop? with
-  | some true => return some (concl, mkConst ``True, unfilled)
+  | some true => return some (concl, mkConst ``True, mvars)
   | some false =>
     -- `Ne a b` is a *definition* (`a = b → False`), so `not?` returns `none`
     -- on `0 ≠ 1` without unfolding it and the statement becomes `(0 ≠ 1) = False`,
     -- which cannot unify with the recorded `before: "0 = 1"`.  Unfold first, as
     -- the `none` arm below already does, so `a ≠ b` and `¬(a = b)` are treated
     -- the same (REVIEW-8 2).  `Ne` is one of Mathlib's commonest simp shapes.
-    if let some p := concl.not? then return some (p, mkConst ``False, unfilled)
+    if let some p := concl.not? then return some (p, mkConst ``False, mvars)
     let unfolded ← whnfR concl
-    if let some p := unfolded.not? then return some (p, mkConst ``False, unfilled)
+    if let some p := unfolded.not? then return some (p, mkConst ``False, mvars)
     -- `prop:false` records evidence for `¬ p` (or its `p = False`
     -- conversion), never an arbitrary proof of `p`. Treating an unrelated
     -- proposition proof as `(p, False)` would make e.g. `True.intro` appear to
@@ -675,30 +682,28 @@ def rwStatement? (o : Origin) (args : Array Expr) (prop? : Option Bool)
     -- conclusion hidden behind an abbreviation; applying it eagerly rewrites
     -- `p = True` into something that no longer matches the recorded subterm.
     if let some (_, lhs, rhs) := concl.eq? then
-      return some (lhs, rhs, unfilled)
+      return some (lhs, rhs, mvars)
     if let some (lhs, rhs) := concl.iff? then
-      return some (lhs, rhs, unfilled)
+      return some (lhs, rhs, mvars)
     let concl ← whnfR concl
     if let some (_, lhs, rhs) := concl.eq? then
-      return some (lhs, rhs, unfilled)
+      return some (lhs, rhs, mvars)
     if let some (lhs, rhs) := concl.iff? then
       -- `rw` rewrites with an iff through `propext`; both sides are `Prop`.
-      return some (lhs, rhs, unfilled)
+      return some (lhs, rhs, mvars)
     return none
 
 /-- Read the actual theorem application supplied by a directly authenticated
 source argument. Its explicit arguments are already part of `value`; opening
-its remaining telescope therefore leaves only the parameters that simp matched
-or discharged. This expression is validator-only and is never serialized. -/
+its remaining telescope yields the complete array of arguments that matching,
+instance synthesis, side evidence, and final closure must handle. This
+expression is validator-only and is never serialized. -/
 def rwStatementFromValue? (value : Expr) (prop? : Option Bool) :
     MetaM (Option (Expr × Expr × Array Expr)) := do
   -- Do not let ambient matching fill holes in an incompletely elaborated source
   -- argument. Only an exact elaborated term is suitable as source evidence.
   if ← hasAssignableMVar value then return none
-  let (mvars, bis, _) ← forallMetaTelescope (← inferType value)
-  let mut unfilled : Array Expr := #[]
-  for mvar in mvars, bi in bis do
-    if bi == .default then unfilled := unfilled.push mvar
+  let (mvars, _, _) ← forallMetaTelescope (← inferType value)
   -- A simp source argument such as `NeZero.ne _` is elaborated into a
   -- telescope-valued rewrite theorem. Its explicit placeholder is abstracted
   -- into the theorem's function type, while simp later matches that parameter
@@ -711,8 +716,8 @@ def rwStatementFromValue? (value : Expr) (prop? : Option Bool) :
   | some true =>
     if let some (_, lhs, rhs) := concl.eq? then
       if ← isDefEq rhs (mkConst ``True) then
-        return some (lhs, mkConst ``True, unfilled)
-    return some (concl, mkConst ``True, unfilled)
+        return some (lhs, mkConst ``True, mvars)
+    return some (concl, mkConst ``True, mvars)
   | some false =>
     -- Proposition rules may already have been converted by `eq_false` at the
     -- authenticated source application boundary. Preserve that exact
@@ -720,19 +725,19 @@ def rwStatementFromValue? (value : Expr) (prop? : Option Bool) :
     -- proposition to rewrite.
     if let some (_, lhs, rhs) := concl.eq? then
       if ← isDefEq rhs (mkConst ``False) then
-        return some (lhs, mkConst ``False, unfilled)
-    if let some p := concl.not? then return some (p, mkConst ``False, unfilled)
+        return some (lhs, mkConst ``False, mvars)
+    if let some p := concl.not? then return some (p, mkConst ``False, mvars)
     let unfolded ← whnfR concl
-    if let some p := unfolded.not? then return some (p, mkConst ``False, unfilled)
+    if let some p := unfolded.not? then return some (p, mkConst ``False, mvars)
     -- Match the proposition-proof contract in `elabProposition`: a proof of
     -- an arbitrary proposition cannot justify replacing it by `False`.
     return none
   | none =>
-    if let some (_, lhs, rhs) := concl.eq? then return some (lhs, rhs, unfilled)
-    if let some (lhs, rhs) := concl.iff? then return some (lhs, rhs, unfilled)
+    if let some (_, lhs, rhs) := concl.eq? then return some (lhs, rhs, mvars)
+    if let some (lhs, rhs) := concl.iff? then return some (lhs, rhs, mvars)
     let concl ← whnfR concl
-    if let some (_, lhs, rhs) := concl.eq? then return some (lhs, rhs, unfilled)
-    if let some (lhs, rhs) := concl.iff? then return some (lhs, rhs, unfilled)
+    if let some (_, lhs, rhs) := concl.eq? then return some (lhs, rhs, mvars)
+    if let some (lhs, rhs) := concl.iff? then return some (lhs, rhs, mvars)
     return none
 
 /-- The origin to *validate* against: a `.stx` names no declaration, so
@@ -754,7 +759,8 @@ Returns `none` on success, or a classified reason.
 -/
 def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
     (prop? : Option Bool) (before after : Expr) (c : EvCtx)
-    (hasSides : Bool) (proj : String) (sourceValue? : Option Expr) :
+    (sides : Array SideRec) (proj : String) (sourceValue? : Option Expr)
+    (localEvidence : Bool := false) :
     MetaM (Option String) :=
   withLCtx c.lctx c.insts do
 
@@ -767,10 +773,16 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
       | .other n => pure n.toString
     try
       withoutModifyingState do
+        if localEvidence then
+          match o, sourceValue? with
+          | .fvar fvarId, some proof =>
+            unless (← getLCtx).contains fvarId && proof.containsFVar fvarId do
+              return some s!"unreadable_local_evidence:{name}"
+          | _, _ => return some s!"unreadable_local_evidence:{name}"
         let statement? ← match sourceValue? with
           | some value => rwStatementFromValue? value prop?
           | none => rwStatement? o args prop? proj
-        let some (lhs, rhs, unfilled) := statement?
+        let some (lhs, rhs, _) := statement?
           -- No statement to read means the step cannot be verified at all.
           -- Round 7 made an unresolvable *origin* classified; this is the other
           -- half — a resolvable origin whose statement we cannot read — and
@@ -835,7 +847,7 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
             -- hypothesis, and a replayer supplies them in signature order.
             -- Rejecting here would be a false positive on every user
             -- congruence theorem (REVIEW-7 2).
-            if hasSides then return none
+            if !sides.isEmpty then return none
             return some s!"unreplayable_rw:{name}"
           return none
         -- A conditional or higher-order lemma can leave the other side with
@@ -859,9 +871,9 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
         -- Checking against `after` as well made this validator strictly more
         -- permissive than the tactic it is meant to protect, so the step
         -- shipped and failed at replay with "still has an unassigned
-        -- argument".  Re-check the explicit binders against the LHS alone; a
-        -- step carrying `side` traces is exempt, since discharging such an
-        -- argument is what a side trace is for (REVIEW-9 2).
+        -- argument". Re-check explicit binders against the LHS alone. Any
+        -- remaining proof binders must correspond, in order and by exact type,
+        -- to the captured side traces; side presence alone is not evidence.
         -- Proposition steps are replayed by `ExplicitRw.elabProposition`,
         -- which opens the proof's complete telescope and matches the resulting
         -- proposition against the selected redex.  Validate the same contract
@@ -870,34 +882,54 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
         -- binder before performing this check; that guard predated quantified
         -- proposition replay and incorrectly classified rules such as
         -- `Std.le_refl`, `exists_apply_eq_apply`, and quantified local evidence.
-        unless hasSides do
-          let lhsOnly ← withoutModifyingState do
-            withReducibleAndInstances do
-              let statement? ← match sourceValue? with
-                | some value => rwStatementFromValue? value prop?
-                | none => rwStatement? o args prop? proj
-              let some (l, r, unf) := statement? | pure false
-              -- The side `rw` matches against, in the recorded direction.
-              let matched := if inv then r else l
-              if ← isDefEq matched beforeCore then
-                -- Keep validator parity with `explicit_rw`: after matching the
-                -- selected side, its evaluator synthesizes any remaining
-                -- class-typed arguments (including explicit class-valued
-                -- binders), then checks the result.  Do not extend this to
-                -- arbitrary explicit arguments: a leftover non-class binder
-                -- still has no authenticated value for a replayer to write.
-                unf.allM fun m => do
-                  let m ← instantiateMVars m
-                  if !m.isMVar then return true
-                  let ty ← instantiateMVars (← inferType m)
-                  if !(← isClass? ty).isSome then
-                    return false
-                  match ← trySynthInstance ty with
-                  | .some value => isDefEq m value
-                  | .undef | .none => return false
-              else pure true
-          unless lhsOnly do
-            return some s!"unassigned_explicit_argument:{name}"
+        let lhsOnly ← withoutModifyingState do
+          let statement? ← if localEvidence then
+              -- Replay names the local, not the recorder's instantiated proof
+              -- snapshot. Validate that the local telescope itself can recover
+              -- every explicit binder from the selected rewrite side.
+              rwStatement? o args prop? proj
+            else match sourceValue? with
+              | some value => rwStatementFromValue? value prop?
+              | none => rwStatement? o args prop? proj
+          let some (l, r, unf) := statement? | pure false
+          -- The side `rw` matches against, in the recorded direction. Keep the
+          -- match assignments alive through the same instance, side-goal and
+          -- final-closure checks that `ExplicitRw.runRwStep` performs. The
+          -- enclosing snapshot restores every assignment before validation
+          -- returns, so this oracle cannot specialize the caller's mvars.
+          let matched := if inv then r else l
+          unless ← ExplicitLean.ExplicitRw.matchRewriteSource matched beforeCore do
+            return false
+          try
+            ExplicitLean.ExplicitRw.synthesizeInstanceMVars 0 m!"`{name}`" unf beforeCore
+            let proofMVars ← ExplicitLean.ExplicitRw.unassignedRewritePropMVars unf
+            if proofMVars.size != sides.size then return false
+            for i in [0 : sides.size] do
+              let .mvar mid := ← instantiateMVars proofMVars[i]! | return false
+              let ty ← instantiateMVars (← mid.getType)
+              let side := sides[i]!
+              let some close := side.by_ | return false
+              if close.startsWith "unresolved:" then return false
+              let goal ← instantiateMVars side.goal
+              if ← hasAssignableMVar ty then return false
+              if ← hasAssignableMVar goal then return false
+              let sameType ← withLCtx side.evCtx.lctx side.evCtx.insts do
+                isDefEq ty goal
+              unless sameType do return false
+            let mut sideIds : Array MVarId := #[]
+            for m in proofMVars do
+              if let .mvar mid := m then sideIds := sideIds.push mid
+            let remaining ← unf.filterM fun m => do
+              match ← instantiateMVars m with
+              | .mvar mid =>
+                if ← mid.isAssigned then pure false
+                else pure (!sideIds.contains mid)
+              | _ => pure false
+            ExplicitLean.ExplicitRw.closeLemmaMVars 0 m!"`{name}`" remaining
+            pure true
+          catch _ => pure false
+        unless lhsOnly do
+          return some s!"unassigned_explicit_argument:{name}"
         return none
     catch _ =>
       return some s!"unreplayable_rw:{name}"
@@ -912,17 +944,20 @@ partial def classifyEventTree (ur : IO.Ref Unresolved) (ev : Event) :
     let sourceKind? := derivation?.bind fun d => d.source?
     let sourceArgId? := derivation?.bind fun d => d.argId?
     let sourceMarked := sourceKind? == some "simp-argument"
+    let localEvidenceMarked := sourceKind? == some "local-evidence"
     let sourceError? :=
       if sourceMarked && sourceArgId?.isNone then some "unauthenticated_source_application"
       else if sourceMarked && sourceValue?.isNone then some "missing_source_application"
-      else if !sourceMarked && sourceValue?.isSome then some "untrusted_source_application"
+      else if localEvidenceMarked && sourceValue?.isNone then some "missing_local_evidence"
+      else if !sourceMarked && !localEvidenceMarked && sourceValue?.isSome then
+        some "untrusted_source_application"
       else none
     let reason? ← match sourceError? with
       | some reason => pure (some reason)
       | none => do
-        let hasSides := !sides.isEmpty
-        let value? := if sourceMarked then sourceValue? else none
-        checkRwStep (resolvedOrigin o lo) args inv prop? b a c hasSides pj value?
+        let value? := if sourceMarked || localEvidenceMarked then sourceValue? else none
+        checkRwStep (resolvedOrigin o lo) args inv prop? b a c sides pj value?
+          localEvidenceMarked
     if let some reason := reason? then ur.modify (·.add reason)
     let sideVerdicts ← sides.mapM fun sd => classifyEventArray ur sd.events
     return .mk reason? sideVerdicts #[]

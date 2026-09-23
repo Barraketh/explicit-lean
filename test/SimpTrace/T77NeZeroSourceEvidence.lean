@@ -23,7 +23,7 @@ run_cmd do
     let zero := mkNatLit 0
     let before ← mkEq zero zero
     let reason ← checkRwStep (.decl ``Nat.succ_ne_zero true false) #[] false
-      (some false) before (mkConst ``False) {} false ""
+      (some false) before (mkConst ``False) {} #[] ""
       (some (mkConst ``Nat.succ_ne_zero))
     unless reason.any (String.startsWith · "unreplayable_rw:") do
       throwError "a mismatched source proposition was accepted"
@@ -35,7 +35,7 @@ run_cmd do
     let zero := mkNatLit 0
     let before ← mkEq zero zero
     let reason ← checkRwStep (.decl ``neZeroWithUnusedArgument true false) #[]
-      false (some false) before (mkConst ``False) {} false ""
+      false (some false) before (mkConst ``False) {} #[] ""
       (some (mkConst ``neZeroWithUnusedArgument))
     unless reason.any (String.startsWith · "unassigned_explicit_argument:") do
       throwError "expected a missing explicit argument to fail closed, got {reason}"
@@ -44,12 +44,12 @@ run_cmd do
 run_cmd do
   Lean.Elab.Command.liftTermElabM do
     let reason ← checkRwStep (.decl ``True.intro true false) #[] false
-      (some false) (mkConst ``True) (mkConst ``False) {} false ""
+      (some false) (mkConst ``True) (mkConst ``False) {} #[] ""
       (some (mkConst ``True.intro))
     unless reason.any (String.startsWith · "unreadable_rw_statement:") do
       throwError "a proof of True was accepted as evidence that True is false: {reason}"
     let declarationReason ← checkRwStep (.decl ``True.intro true false) #[] false
-      (some false) (mkConst ``True) (mkConst ``False) {} false "" none
+      (some false) (mkConst ``True) (mkConst ``False) {} #[] "" none
     unless declarationReason.any (String.startsWith · "unreadable_rw_statement:") do
       throwError "a declaration proof of True was accepted as evidence that True is false: {declarationReason}"
 

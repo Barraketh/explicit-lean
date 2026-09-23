@@ -65,7 +65,7 @@ run_cmd do
     throwError "the local instance reference was not preserved"
   let reason ← Lean.Elab.Command.liftTermElabM do
     checkRwStep (.decl ``ne_eq true false) #[] false none before after ctx
-      false "" none
+      #[] "" none
   if let some reason := reason then
     throwError "snapshotted ne_eq step did not validate: {reason}"
 

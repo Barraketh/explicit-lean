@@ -32,7 +32,7 @@ run_cmd do
     let a := mkNatLit 2
     let before := mkAppN (mkConst ``Nat.add) #[a, mkNatLit 0]
     let reason ← checkRwStep (.decl ``extraNatBinder true false) #[a] false none
-      before a {} false "" none
+      before a {} #[] "" none
     unless reason.any (String.startsWith · "unassigned_explicit_argument:") do
       throwError "expected a missing non-class explicit argument, got {reason}"
 
