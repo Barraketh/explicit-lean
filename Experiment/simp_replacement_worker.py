@@ -11,6 +11,7 @@ single SQLite transaction.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -22,6 +23,7 @@ import sys
 import tempfile
 import time
 from dataclasses import replace
+from functools import lru_cache
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -257,12 +259,95 @@ def local_site(site: S.Site, source: str, command_start_char: int,
                    line_indent=line_indent)
 
 
+@lru_cache(maxsize=4)
+def _cached_canonical_source_site_envelopes(
+    source: str,
+) -> dict[int, dict[str, Any]]:
+    """Build and validate canonical T22 site envelopes from original source."""
+    try:
+        manifest = TI.manifest("", source, TI.find_sites(source))
+        TI.validate_source_args(manifest, source)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WorkerError(f"canonical T22 sourceArgs validation failed: {exc}") from exc
+    return {site["siteOrdinal"]: site for site in manifest["sites"]}
+
+
+def _canonical_source_site_envelopes(source: str) -> dict[int, dict[str, Any]]:
+    # Callers compare evidence against this mapping; do not expose the mutable
+    # cached manifest itself to later code.
+    return copy.deepcopy(_cached_canonical_source_site_envelopes(source))
+
+
+def _rebase_trace_source_args(trace: dict | list[dict], command_start_char: int,
+                              command_end_char: int, source: str,
+                              canonical_site: dict[str, Any]) -> dict | list[dict]:
+    """Copy invocation records and localize their authenticated source spans.
+
+    T22 records sourceArgs offsets in Unicode scalars from the module start,
+    while ``render_site`` receives this command's text. Preserve the trace
+    evidence and every sourceArgs field except the two coordinates, and refuse
+    malformed spans rather than allowing a slice outside this exact command.
+    """
+    if (not isinstance(command_start_char, int) or isinstance(command_start_char, bool)
+            or not isinstance(command_end_char, int) or isinstance(command_end_char, bool)
+            or command_start_char < 0 or command_end_char < command_start_char):
+        raise WorkerError("invalid command character range for trace source spans")
+    localized = copy.deepcopy(trace)
+    if isinstance(localized, list):
+        records = localized
+    elif isinstance(localized, dict):
+        executions = localized.get("_executions")
+        records = executions if isinstance(executions, list) else [localized]
+    else:
+        raise WorkerError("trace invocation records are not an object or list")
+    if not records:
+        raise WorkerError("trace has no invocation records to localize")
+
+    for invocation, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise WorkerError(f"trace invocation {invocation} is not an object")
+        site = record.get("site")
+        if not isinstance(site, dict):
+            raise WorkerError(f"trace invocation {invocation} has no source-site envelope")
+        if site != canonical_site:
+            raise WorkerError(
+                f"trace invocation {invocation} site envelope disagrees with canonical T22 source"
+            )
+        try:
+            TI.validate_source_args({"sites": [site]}, source)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WorkerError(
+                f"trace invocation {invocation} sourceArgs disagree with canonical T22 source: {exc}"
+            ) from exc
+        source_args = site.get("sourceArgs")
+        if not isinstance(source_args, list):
+            raise WorkerError(f"trace invocation {invocation} has malformed sourceArgs")
+        for arg_index, arg in enumerate(source_args):
+            if not isinstance(arg, dict):
+                raise WorkerError(
+                    f"trace invocation {invocation} sourceArgs[{arg_index}] is not an object"
+                )
+            start, end = arg.get("startChar"), arg.get("endChar")
+            if (not isinstance(start, int) or isinstance(start, bool)
+                    or not isinstance(end, int) or isinstance(end, bool)
+                    or not (command_start_char <= start < end <= command_end_char)):
+                raise WorkerError(
+                    f"trace invocation {invocation} sourceArgs[{arg_index}] has invalid or "
+                    f"out-of-command span {start!r}:{end!r} for "
+                    f"{command_start_char}:{command_end_char}"
+                )
+            arg["startChar"] = start - command_start_char
+            arg["endChar"] = end - command_start_char
+    return localized
+
+
 def render_command(source: str, command: dict[str, Any],
                    site_pairs: list[tuple[TI.Site, S.Site]],
                    traces: dict[int, list[dict]]) -> tuple[str | None, str | None]:
     command_start = byte_to_char(source, command["start"])
     command_end = byte_to_char(source, command["end"])
     command_text = source[command_start:command_end]
+    canonical_sites = _cached_canonical_source_site_envelopes(source)
     replacements: dict[int, list[str]] = {}
     local_sites: list[S.Site] = []
     for ti_site, s_site in site_pairs:
@@ -271,9 +356,22 @@ def render_command(source: str, command: dict[str, Any],
         trace = traces.get(ti_site.siteOrdinal)
         if not trace:
             return None, f"missing invocation trace for source site {ti_site.siteOrdinal}"
+        canonical_site = canonical_sites.get(ti_site.siteOrdinal)
+        if canonical_site is None:
+            return None, f"source site {ti_site.siteOrdinal} is absent from canonical T22 manifest"
         renderer_site = local_site(s_site, source, command_start, len(local_sites))
+        try:
+            local_trace = _rebase_trace_source_args(
+                trace, command_start, command_end, source, canonical_site
+            )
+        except WorkerError as exc:
+            return None, f"site {ti_site.siteOrdinal}: {exc}"
+        if isinstance(local_trace, list) and len(local_trace) == 1:
+            render_trace: dict | list[dict] = local_trace[0]
+        else:
+            render_trace = local_trace
         rendered = replay.render_site(renderer_site,
-                                      trace[0] if len(trace) == 1 else trace,
+                                      render_trace,
                                       command_text,
                                       include_original_comment=False,
                                       use_manual_overrides=False)
@@ -423,7 +521,7 @@ def process_module(db: sqlite3.Connection, module: str, artifacts: pathlib.Path)
                 if not sites or ordinal in results:
                     continue
                 rewritten, error = render_command(
-                    source, command_by_ordinal[ordinal], site_pairs, traces
+                    source, command_by_ordinal[ordinal], site_pairs, traces,
                 )
                 if error:
                     results[ordinal] = ("render_failed", None, error[:2000])

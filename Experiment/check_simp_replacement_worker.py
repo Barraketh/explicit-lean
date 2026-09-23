@@ -163,7 +163,10 @@ def test_full_command_rewrite_omits_comment() -> None:
     assert len(trace_sites) == len(renderer_sites) == 2
     # This trace is sufficient to exercise the renderer's source output path;
     # source-site/trace authentication is independently tested by T9.
-    traces = {site.siteOrdinal: [{"fixture": True}] for site in trace_sites}
+    canonical_sites = W._canonical_source_site_envelopes(source)
+    traces = {site.siteOrdinal: [{"fixture": True,
+                                  "site": canonical_sites[site.siteOrdinal] }]
+              for site in trace_sites}
     calls = iter(("explicit_rw [first at []]", "explicit_rw [second at []]"))
     original_renderer = W.replay.render_site
     W.replay.render_site = lambda *args, **kwargs: {
@@ -180,6 +183,165 @@ def test_full_command_rewrite_omits_comment() -> None:
     assert "explicit_rw [first at []]" in rewritten
     assert "explicit_rw [second at []]" in rewritten
     assert "simp" not in rewritten and "Original simp" not in rewritten
+
+
+def _unicode_source_argument_fixture():
+    source = "-- λ before command\nexample : True := by simp [← True.intro]\n"
+    renderer_sites, trace_sites = W.align_sites(source)
+    assert len(trace_sites) == len(renderer_sites) == 1
+    ti_site, renderer_site = trace_sites[0], renderer_sites[0]
+    command_start_char = source.index("example")
+    command = {
+        "ordinal": 4,
+        "start": len(source[:command_start_char].encode("utf-8")),
+        "end": len(source.encode("utf-8")),
+    }
+    canonical_site = W._canonical_source_site_envelopes(source)[ti_site.siteOrdinal]
+    source_arg = dict(canonical_site["sourceArgs"][0])
+
+    def invocation(ordinal: int = 0, total: int = 1) -> dict:
+        return {
+            "schema": "simp-trace-v2",
+            "modulePath": "Mathlib/Test/UnicodeSourceArgs.lean",
+            "site": {**canonical_site,
+                     "sourceArgs": [dict(source_arg)]},
+            "invocation": ordinal,
+            "invocations": total,
+            "locations": [{
+                "loc": "goal",
+                "steps": [{
+                    "kind": "rw", "pos": [], "name": "True.intro", "dir": "rev",
+                    "side": [], "args": [],
+                    "derivation": {
+                        "origin": "decl:lemma", "preprocess": ["direct_eq"],
+                        "redex": [], "extraArgs": 0, "binders": [],
+                        "discharge": [], "source": "simp-argument", "argId": 0,
+                    },
+                }],
+            }],
+        }
+
+    return source, command, ti_site, renderer_site, source_arg, invocation
+
+
+def test_render_command_rebases_unicode_source_arg_and_preserves_direction() -> None:
+    source, command, ti_site, renderer_site, source_arg, invocation = \
+        _unicode_source_argument_fixture()
+    original = invocation()
+    absolute_span = (source_arg["startChar"], source_arg["endChar"])
+    rewritten, error = W.render_command(
+        source, command, [(ti_site, renderer_site)],
+        {ti_site.siteOrdinal: [original]},
+    )
+    assert error is None and rewritten is not None, error
+    assert "← True.intro at []" in rewritten, rewritten
+    assert (source_arg["startChar"], source_arg["endChar"]) == absolute_span
+    assert (original["site"]["sourceArgs"][0]["startChar"],
+            original["site"]["sourceArgs"][0]["endChar"]) == absolute_span
+
+
+def test_render_command_rebases_every_invocation_without_mutating_evidence() -> None:
+    source, command, ti_site, renderer_site, source_arg, invocation = \
+        _unicode_source_argument_fixture()
+    original_records = [invocation(0, 2), invocation(1, 2)]
+    absolute_span = (source_arg["startChar"], source_arg["endChar"])
+    command_start_char = W.byte_to_char(source, command["start"])
+    seen = []
+    original_renderer = W.replay.render_site
+
+    def capture_renderer(_site, trace, *_args, **_kwargs):
+        seen.append(trace)
+        return {"status": "rendered", "lines": ["explicit_rw [True.intro at []]"]}
+
+    W.replay.render_site = capture_renderer
+    try:
+        rewritten, error = W.render_command(
+            source, command, [(ti_site, renderer_site)],
+            {ti_site.siteOrdinal: original_records},
+        )
+    finally:
+        W.replay.render_site = original_renderer
+    assert error is None and rewritten is not None, error
+    assert len(seen) == 1 and len(seen[0]) == 2
+    for ordinal, localized in enumerate(seen[0]):
+        arg = localized["site"]["sourceArgs"][0]
+        assert (arg["startChar"], arg["endChar"]) == (
+            absolute_span[0] - command_start_char,
+            absolute_span[1] - command_start_char,
+        )
+        assert (localized["invocation"], localized["invocations"]) == (ordinal, 2)
+        assert (arg["direction"], arg["head"], arg["kind"]) == (
+            "rev", "True.intro", "simp-lemma")
+    for original in original_records:
+        arg = original["site"]["sourceArgs"][0]
+        assert (arg["startChar"], arg["endChar"]) == absolute_span
+
+    wrong_second_invocation = invocation(1, 2)
+    wrong_second_invocation["site"]["sourceArgs"][0]["startChar"] += 1
+    rewritten, error = W.render_command(
+        source, command, [(ti_site, renderer_site)],
+        {ti_site.siteOrdinal: [invocation(0, 2), wrong_second_invocation]},
+    )
+    assert rewritten is None and error and "canonical T22" in error, (rewritten, error)
+
+
+def test_render_command_rejects_inbounds_wrong_argument_identity() -> None:
+    module_path = "Mathlib/Test/WrongSourceArg.lean"
+    source = "-- λ before command\nexample : True := by simp [foo, bar]\n"
+    renderer_sites, trace_sites = W.align_sites(source)
+    assert len(trace_sites) == len(renderer_sites) == 1
+    ti_site, renderer_site = trace_sites[0], renderer_sites[0]
+    canonical_site = W._canonical_source_site_envelopes(source)[ti_site.siteOrdinal]
+    assert len(canonical_site["sourceArgs"]) == 2
+    wrong_site = {**canonical_site,
+                  "sourceArgs": [dict(arg) for arg in canonical_site["sourceArgs"]]}
+    second_arg = wrong_site["sourceArgs"][1]
+    wrong_site["sourceArgs"][0]["startChar"] = second_arg["startChar"]
+    wrong_site["sourceArgs"][0]["endChar"] = second_arg["endChar"]
+    command_start_char = source.index("example")
+    command = {
+        "ordinal": 8,
+        "start": len(source[:command_start_char].encode("utf-8")),
+        "end": len(source.encode("utf-8")),
+    }
+    record = {
+        "schema": "simp-trace-v2", "modulePath": module_path,
+        "site": wrong_site, "occurrence": "fixture",
+        "invocation": 0, "invocations": 1, "locations": [],
+    }
+    # This is precisely the gap: identity validates the site shell but ignores
+    # sourceArgs, so the renderer's canonical T22 check must reject it.
+    identity, _ = W.replay.validate_identity(module_path, source, [ti_site], [record])
+    assert identity["identity"] == "accepted", identity
+    rewritten, error = W.render_command(
+        source, command, [(ti_site, renderer_site)], {ti_site.siteOrdinal: [record]}
+    )
+    assert rewritten is None and error and "canonical T22" in error, (rewritten, error)
+
+
+def test_render_command_rejects_malformed_and_out_of_command_source_spans() -> None:
+    source, command, ti_site, renderer_site, source_arg, invocation = \
+        _unicode_source_argument_fixture()
+    command_start_char = W.byte_to_char(source, command["start"])
+    command_end_char = W.byte_to_char(source, command["end"])
+    invalid_spans = [
+        (True, source_arg["endChar"]),
+        (source_arg["startChar"], "not-an-integer"),
+        (command_start_char - 1, source_arg["endChar"]),
+        (source_arg["startChar"], command_end_char + 1),
+        (source_arg["endChar"], source_arg["startChar"]),
+    ]
+    for start, end in invalid_spans:
+        record = invocation()
+        record["site"]["sourceArgs"][0]["startChar"] = start
+        record["site"]["sourceArgs"][0]["endChar"] = end
+        rewritten, error = W.render_command(
+            source, command, [(ti_site, renderer_site)],
+            {ti_site.siteOrdinal: [record]},
+        )
+        assert (rewritten is None and error and
+                ("sourceArgs[0]" in error or "canonical T22" in error)), (
+                    start, end, rewritten, error)
 
 
 def test_selected_site_record_render_compile() -> None:
@@ -281,9 +443,13 @@ def main() -> int:
     test_nested_tactic_contexts_and_non_targets()
     test_false_positive_is_atomic_noop()
     test_full_command_rewrite_omits_comment()
+    test_render_command_rebases_unicode_source_arg_and_preserves_direction()
+    test_render_command_rebases_every_invocation_without_mutating_evidence()
+    test_render_command_rejects_inbounds_wrong_argument_identity()
+    test_render_command_rejects_malformed_and_out_of_command_source_spans()
     test_selected_site_record_render_compile()
     test_leading_block_comment_candidate_is_not_noop()
-    print("check_simp_replacement_worker: PASS (7 focused checks)")
+    print("check_simp_replacement_worker: PASS (11 focused checks)")
     return 0
 
 

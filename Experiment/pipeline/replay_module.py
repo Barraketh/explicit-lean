@@ -565,6 +565,44 @@ def _branch_spine(source: str, site: S.Site) -> tuple[int, int, list[str], str, 
     return None
 
 
+def _space_before_explicit_rw_close(body: str) -> str:
+    """Separate the outer tactic-list close from a final empty rewrite path.
+
+    Without this gap, a final ``at []`` renders as ``at []]`` and Lean parses
+    the two adjacent closers as an unexpected token.  Find the close matching
+    the outer ``explicit_rw [`` while respecting nested square brackets and
+    quoted strings, then insert one space immediately before it.
+    """
+    marker = "explicit_rw ["
+    start = body.find(marker)
+    if start < 0:
+        return body
+    opening = start + len("explicit_rw ")
+    depth = 0
+    quoted = False
+    escaped = False
+    i = opening
+    while i < len(body):
+        ch = body[i]
+        if quoted:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                quoted = False
+        elif ch == '"':
+            quoted = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return body[:i].rstrip() + " " + body[i:]
+        i += 1
+    return body
+
+
 def _invocation_records(trace: dict | list[dict] | None) -> list[dict] | None:
     """Normalize one authenticated site to its complete ordinal list."""
     if isinstance(trace, list):
@@ -612,7 +650,8 @@ def _non_tail_continuation(suffix: str, branches: list[str], invocation: int) ->
 
 
 def _manual_function_basic(site: S.Site, source: str,
-                           base_indent: str, module_path: str | None) -> dict | None:
+                           base_indent: str, module_path: str | None,
+                           include_original_comment: bool = True) -> dict | None:
     """Small readable fallbacks for pinned Function.Basic recorder defects.
 
     These are ordinary Lean proofs for the eight assigned pilot failures that
@@ -639,7 +678,8 @@ def _manual_function_basic(site: S.Site, source: str,
     def standalone(body: list[str]) -> dict:
         return {
             "status": "rendered",
-            "lines": S.comment_original(site.text, base_indent)
+            "lines": (S.comment_original(site.text, base_indent)
+                      if include_original_comment else [])
             + [base_indent + line for line in body],
         }
 
@@ -671,7 +711,8 @@ def _manual_function_basic(site: S.Site, source: str,
     if parsed is None:
         return None
     start, end, branches, _suffix, _inline = parsed
-    lines = S.comment_original(site.text, base_indent)
+    lines = (S.comment_original(site.text, base_indent)
+             if include_original_comment else [])
     if site.index == 6:
         lines += [
             base_indent + branches[0],
@@ -714,19 +755,20 @@ def _manual_function_basic(site: S.Site, source: str,
 
 
 def _structural_replacement(source: str, site: S.Site,
-                            executions: list[dict], base_indent: str
+                            executions: list[dict], base_indent: str,
+                            include_original_comment: bool = True,
                             ) -> tuple[list[str], tuple[int, int], int, list[str]]:
-    """Render complete invocation ordinals as leaves of the source branch tree."""
+    """Render complete invocation ordinals over a parsed binary branch spine."""
     parsed = _branch_spine(source, site)
     if parsed is None:
         raise R.RenderError("structural_refused", "source has no supported binary <;> branch spine",
                             side="harness")
     start, end, branches, suffix, inline_prefix = parsed
     count = 2 ** len(branches)
-    if len(executions) != count:
+    if count < 1 or len(executions) != count:
         raise R.RenderError(
             "structural_refused",
-            f"branch spine has {count} leaves but metadata has {len(executions)} invocations",
+            f"source spine has {count} leaves but metadata has {len(executions)} invocations",
             side="harness",
         )
     ordinals = []
@@ -737,7 +779,8 @@ def _structural_replacement(source: str, site: S.Site,
                                 side="harness")
         ordinal = record.get("invocation")
         total = record.get("invocations")
-        if not isinstance(ordinal, int) or isinstance(ordinal, bool) or not isinstance(total, int):
+        if (not isinstance(ordinal, int) or isinstance(ordinal, bool)
+                or not isinstance(total, int) or isinstance(total, bool)):
             raise R.RenderError("structural_refused", "missing or malformed invocation metadata",
                                 side="harness")
         ordinals.append(ordinal)
@@ -759,6 +802,7 @@ def _structural_replacement(source: str, site: S.Site,
         if inaccessible:
             raise R.RenderError("structural_refused", "inaccessible locals need branch-specific names",
                                 side="harness")
+        bodies = [_space_before_explicit_rw_close(body) for body in bodies]
         leaf: list[str] = []
         for body in bodies:
             leaf.append(body)
@@ -772,8 +816,9 @@ def _structural_replacement(source: str, site: S.Site,
         lines = [inline_prefix]
         base_indent = (site.line_indent or "") + "  "
     else:
-        lines = S.comment_original(site.text, base_indent)
-    if inline_prefix:
+        lines = (S.comment_original(site.text, base_indent)
+                 if include_original_comment else [])
+    if inline_prefix and include_original_comment:
         lines.extend(S.comment_original(site.text, base_indent))
     lines.append(base_indent + branches[0])
     leaf_index = 0
@@ -852,8 +897,12 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
         module_path = trace[0].get("modulePath")
     else:
         module_path = None
-    manual = (_manual_function_basic(site, source or "", line_indent, module_path)
-              if use_manual_overrides else None)
+    manual = None
+    if use_manual_overrides:
+        manual = _manual_function_basic(
+            site, source or "", line_indent, module_path,
+            include_original_comment=include_original_comment,
+        )
     if manual is not None:
         record.update(manual)
         record["attribution"] = "manual_override"
@@ -887,7 +936,8 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
                                  "-- explicit_rw: unresolved: structurally refused: no source")
         try:
             expanded, span, count, generated = _structural_replacement(
-                source, site, executions, site.line_indent or indent)
+                source, site, executions, site.line_indent or indent,
+                include_original_comment=include_original_comment)
         except R.RenderError as exc:
             if exc.reason.startswith("unresolved:"):
                 reason = exc.reason[len("unresolved:"):]
@@ -922,6 +972,7 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
         return keep_original(
             f"render_failed:{exc.reason}", exc.detail, exc.side
         )
+    bodies = [_space_before_explicit_rw_close(body) for body in bodies]
 
     if not site.alone_on_line:
         # A mid-line site is spliced in place, so the render must be one line
@@ -973,8 +1024,9 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
         head, rest = body.split("[", 1)
         steps_text, tail = rest.rsplit("]", 1)
         steps = split_steps(steps_text)
+        list_close = " ]" if steps_text.endswith(" ") else "]"
         lines.extend(
-            S.wrap_step_list(head + "[", steps, "]" + tail, indent, continuation)
+            S.wrap_step_list(head + "[", steps, list_close + tail, indent, continuation)
         )
     long = S.overlong(lines)
     if long:

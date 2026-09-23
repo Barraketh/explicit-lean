@@ -2,9 +2,11 @@
 """Finalize stopped simp traces and stock-compile isolated module candidates.
 
 This recovery harness consumes extracted Scaleway worker artifacts. It changes
-only ``record_failed`` rows belonging to the supplied module manifest. Traces
-and compile diagnostics are preserved in an auxiliary audit table; ``sorry``
-is used only in ephemeral module copies to mask unrenderable theorem bodies.
+only rows belonging to the supplied module manifest. By default it processes
+unaudited ``record_failed`` rows; explicit ``--statuses`` retries selected
+audited failures and archives their previous audit result. Traces and compile
+diagnostics are preserved in auxiliary audit tables; ``sorry`` is used only in
+ephemeral module copies to mask a verified theorem or lemma proof body.
 """
 
 from __future__ import annotations
@@ -21,6 +23,10 @@ import tempfile
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+PRIVATE_ROOT = (ROOT / ".lake" / "private").resolve()
+T76_JOB_ROOT = (PRIVATE_ROOT / "T76-isolated-trace-20260923" / "jobs").resolve()
+T77_RUN_ROOT = (PRIVATE_ROOT / "T77-error-fix-20260923").resolve()
+T77_SNAPSHOT_ROOT = (T77_RUN_ROOT / "snapshot").resolve()
 sys.path.insert(0, str(ROOT / "Experiment"))
 sys.path.insert(0, str(ROOT / "Experiment" / "pipeline"))
 sys.path.insert(0, str(ROOT / "test" / "SimpTrace"))
@@ -34,6 +40,10 @@ from finalize_traces import finalize_paths  # noqa: E402
 RAW_PATH_RE = re.compile(r'=>trace\s+"([^"\n]+)"')
 RAW_NAME_RE = re.compile(r"^(?P<name>.+)_(?P<site>[0-9]+)(?:\.(?P<run>[0-9]+))?\.json$")
 UNSOUND_REPLACEMENT_RE = re.compile(r"\b(?:sorry|admit)\b")
+EMPTY_PATH_CLOSER_RE = re.compile(r"\bat\s+\[\s*\](?=\])")
+RETRYABLE_STATUSES = frozenset({
+    "record_failed", "render_failed", "compile_failed", "resource_failed",
+})
 AUDIT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS isolated_trace_audit (
   module_name TEXT NOT NULL,
@@ -43,6 +53,17 @@ CREATE TABLE IF NOT EXISTS isolated_trace_audit (
   compile_detail TEXT,
   updated_at TEXT NOT NULL,
   PRIMARY KEY(module_name, ordinal)
+)
+"""
+AUDIT_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS isolated_trace_audit_history (
+  attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  module_name TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  result_status TEXT NOT NULL,
+  trace_state TEXT NOT NULL,
+  compile_detail TEXT,
+  updated_at TEXT NOT NULL
 )
 """
 
@@ -55,6 +76,26 @@ def _read_manifest(path: pathlib.Path) -> list[str]:
     return worker.read_manifest(path)
 
 
+def _writable_database(path: pathlib.Path) -> pathlib.Path:
+    """Accept only a single-link worker copy in an explicit writable run root."""
+    resolved = path.resolve(strict=True)
+    if resolved.stat().st_nlink != 1:
+        raise IsolatedError(f"database path must have exactly one hard link: {resolved}")
+    try:
+        resolved.relative_to(T77_SNAPSHOT_ROOT)
+    except ValueError:
+        pass
+    else:
+        raise IsolatedError(f"refusing to write frozen snapshot database: {resolved}")
+    for allowed in (T76_JOB_ROOT, T77_RUN_ROOT):
+        try:
+            resolved.relative_to(allowed)
+            return resolved
+        except ValueError:
+            continue
+    raise IsolatedError(f"database is not an approved private writable copy: {resolved}")
+
+
 def _load_rows(db: sqlite3.Connection, module: str) -> list[dict[str, Any]]:
     rows = db.execute(
         "SELECT r.ordinal,c.start_byte,c.end_byte,c.source_sha256,c.kind,c.source,c.body,"
@@ -64,6 +105,33 @@ def _load_rows(db: sqlite3.Connection, module: str) -> list[dict[str, Any]]:
     ).fetchall()
     return [dict(zip(("ordinal", "start", "end", "sha", "kind", "command_source",
                       "body", "status", "replacement", "error"), row)) for row in rows]
+
+
+def _select_target_rows(commands: list[dict[str, Any]], audited: set[int],
+                        retry_statuses: set[str] | None = None) -> list[dict[str, Any]]:
+    if retry_statuses is None:
+        return [row for row in commands
+                if row["status"] == "record_failed" and row["ordinal"] not in audited]
+    # The manifest limits the module set. Non-record failures must also have
+    # an isolated-trace audit row so old compile_failed rows from other stages
+    # cannot be swept into an explicit retry by status alone.
+    return [row for row in commands if row["status"] in retry_statuses and
+            (row["status"] == "record_failed" or row["ordinal"] in audited)]
+
+
+def _archive_prior_audit(db: sqlite3.Connection, module: str, ordinal: int) -> None:
+    prior = db.execute(
+        "SELECT result_status,trace_state,compile_detail,updated_at "
+        "FROM isolated_trace_audit WHERE module_name=? AND ordinal=?",
+        (module, ordinal),
+    ).fetchone()
+    if prior is not None:
+        db.execute(
+            "INSERT INTO isolated_trace_audit_history "
+            "(module_name,ordinal,result_status,trace_state,compile_detail,updated_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (module, ordinal, *prior),
+        )
 
 
 def _trace_root(raw_dir: pathlib.Path, name: str) -> str:
@@ -216,6 +284,62 @@ def _is_theorem_or_lemma(command: dict[str, Any]) -> bool:
     return re.match(r"(?:theorem|lemma)\b", text) is not None
 
 
+def _declaration_assignment_before_body(source: str, theorem_head_end: int,
+                                        body_start: int) -> int | None:
+    """Find the declaration's top-level ``:=`` immediately before the body.
+
+    Command-parser body spans can start inside a named argument, for example
+    at the final ``R`` in ``(R := R)``.  Treating any preceding ``:=`` as the
+    theorem separator turns such a span into ``(R := by sorry`` and corrupts
+    every later compile probe in the module. Require a top-level separator
+    after the declaration head, with only whitespace/comments between it and
+    the exact parser-provided body suffix. Scan the whole command too: a bad
+    body span after a top-level ``let x := ...`` in the type could otherwise
+    mistake that let assignment for the theorem separator. Any later
+    top-level assignment makes the boundary ambiguous and is rejected.
+    """
+    if not (0 <= theorem_head_end <= body_start <= len(source)):
+        return None
+    masked = worker.S.mask_comments_and_strings(source)
+    if len(masked) != len(source):
+        return None
+    openers: list[str] = []
+    closing_to_opening = {")": "(", "]": "[", "}": "{", "⟩": "⟨"}
+    assignments: list[int] = []
+    index = theorem_head_end
+    while index < len(masked):
+        if masked[index] == "«":
+            quoted_end = masked.find("»", index + 1)
+            if quoted_end < 0:
+                return None
+            index = quoted_end + 1
+            continue
+        if not openers and masked.startswith(":=", index):
+            assignments.append(index)
+            index += 2
+            continue
+        char = masked[index]
+        if char in "([{⟨":
+            openers.append(char)
+        elif char in ")]}⟩":
+            if not openers or openers[-1] != closing_to_opening[char]:
+                return None
+            openers.pop()
+        index += 1
+    if openers or not assignments:
+        return None
+    preceding_assignments = [position for position in assignments
+                              if position < body_start]
+    if not preceding_assignments:
+        return None
+    assignment = preceding_assignments[-1]
+    if any(position > assignment for position in assignments):
+        return None
+    if masked[assignment + 2:body_start].strip():
+        return None
+    return assignment
+
+
 def _mask_body(source: str, command: dict[str, Any]) -> str | None:
     """Return a command with a theorem/lemma proof body replaced by sorry."""
     if not _is_theorem_or_lemma(command) or command["body"] is None:
@@ -227,16 +351,55 @@ def _mask_body(source: str, command: dict[str, Any]) -> str | None:
     if not body or not segment.endswith(body):
         return None
     at = len(segment) - len(body)
-    # Some parser rows around `@[to_additive (attr := simp)]` expose that
-    # attribute's `:=` as a body boundary. The suffix must begin after the
-    # theorem/lemma declaration's own assignment, not inside a preceding attr.
+    # Attribute arguments and named arguments can contain their own `:=`.
+    # Only mask when the exact body suffix follows a top-level declaration
+    # assignment; otherwise leave the source proof untouched in the scratch
+    # candidate rather than risk changing theorem syntax.
     prefix = segment[:at]
     masked_prefix = worker.S.mask_attributes(worker.S.mask_comments_and_strings(prefix))
     head = re.search(r"\b(?:theorem|lemma)\b", masked_prefix)
-    assignment = masked_prefix.rfind(":=")
-    if head is None or assignment < head.end():
+    if head is None or _declaration_assignment_before_body(segment, head.end(), at) is None:
         return None
     return segment[:at] + "by sorry" + segment[at + len(body):]
+
+
+def _space_explicit_rw_empty_path_closers(source: str) -> str:
+    """Separate adjacent empty-path and argument-list closing brackets.
+
+    The generated spelling ``at []]`` is tokenized by Lean as ``]]``.  A space
+    is syntax-neutral and makes the empty path's close and the surrounding
+    ``explicit_rw`` list close unambiguous.  Restrict edits to code inside an
+    ``explicit_rw [...]`` list, ignoring comments and strings.
+    """
+    masked = worker.S.mask_comments_and_strings(source)
+    edits: list[int] = []
+    for match in re.finditer(r"\bexplicit_rw\b", masked):
+        index = match.end()
+        while index < len(masked) and masked[index].isspace():
+            index += 1
+        if index >= len(masked) or masked[index] != "[":
+            continue
+        list_start = index
+        depth = 0
+        list_end: int | None = None
+        while index < len(masked):
+            if masked[index] == "[":
+                depth += 1
+            elif masked[index] == "]":
+                depth -= 1
+                if depth == 0:
+                    list_end = index
+                    break
+                if depth < 0:
+                    break
+            index += 1
+        if list_end is None:
+            continue
+        for empty_path in EMPTY_PATH_CLOSER_RE.finditer(masked, list_start, list_end + 1):
+            edits.append(empty_path.end())
+    for offset in sorted(set(edits), reverse=True):
+        source = source[:offset] + " " + source[offset:]
+    return source
 
 
 def _apply_edits(source: str, commands: list[dict[str, Any]],
@@ -259,6 +422,22 @@ def _check_persisted_replacement(replacement: str | None) -> None:
         raise IsolatedError("refusing to persist a replacement containing sorry/admit")
 
 
+def _existing_success_replacements(commands: list[dict[str, Any]]) -> dict[int, str]:
+    """Validate every stored success before it can enter a compile baseline."""
+    existing: dict[int, str] = {}
+    for row in commands:
+        if row["status"] != "success":
+            continue
+        replacement = row["replacement"]
+        if not isinstance(replacement, str) or not replacement.strip():
+            raise IsolatedError(
+                f"stored success has empty replacement text at ordinal {row['ordinal']}"
+            )
+        _check_persisted_replacement(replacement)
+        existing[row["ordinal"]] = replacement
+    return existing
+
+
 def _compile(module_path: str, text: str, scratch: pathlib.Path, serial: int) -> tuple[bool, str]:
     okay, detail, _ = worker.compile_candidate(module_path, text, scratch, serial)
     return okay, detail
@@ -266,20 +445,31 @@ def _compile(module_path: str, text: str, scratch: pathlib.Path, serial: int) ->
 
 def process_module(db: sqlite3.Connection, module: str, artifacts_root: pathlib.Path,
                   scratch_root: pathlib.Path,
-                  bundle_index: dict[str, list[pathlib.Path]] | None = None) -> dict[str, Any]:
+                  bundle_index: dict[str, list[pathlib.Path]] | None = None,
+                  retry_statuses: set[str] | None = None) -> dict[str, Any]:
     path, source_bytes, source, db_commands = worker.module_rows(db, module)
     commands = _load_rows(db, module)
     has_audit = db.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='isolated_trace_audit'"
     ).fetchone() is not None
-    audited: set[int] = set()
+    audited_statuses: dict[int, str] = {}
     if has_audit:
-        audited = {int(row[0]) for row in db.execute(
-            "SELECT ordinal FROM isolated_trace_audit WHERE module_name=?", (module,))}
-    target_rows = [row for row in commands
-                   if row["status"] == "record_failed" and row["ordinal"] not in audited]
+        audited_statuses = {int(ordinal): str(status) for ordinal, status in db.execute(
+            "SELECT ordinal,result_status FROM isolated_trace_audit WHERE module_name=?", (module,))}
+    audited = set(audited_statuses)
+    if retry_statuses is not None:
+        inconsistent = [row["ordinal"] for row in commands
+                        if row["status"] in retry_statuses and
+                        row["ordinal"] in audited and
+                        audited_statuses[row["ordinal"]] != row["status"]]
+        if inconsistent:
+            raise IsolatedError(
+                f"retry status disagrees with audit for {module}: {sorted(inconsistent)[:8]}"
+            )
+    target_rows = _select_target_rows(commands, audited, retry_statuses)
     if not target_rows:
         return {"module": module, "status": "skipped", "rows": 0}
+    existing = _existing_success_replacements(commands)
     mathlib_path = (ROOT / ".lake" / "packages" / "mathlib" / path).resolve()
     if not mathlib_path.is_file() or mathlib_path.read_bytes() != source_bytes:
         raise IsolatedError(f"pinned source does not match DB for {module}")
@@ -363,7 +553,7 @@ def process_module(db: sqlite3.Connection, module: str, artifacts_root: pathlib.
             failures[ordinal] = ("render_failed", (error or "renderer returned no command")[:2000])
             trace_state[ordinal] = "render_failed"
         else:
-            rendered[ordinal] = rewritten
+            rendered[ordinal] = _space_explicit_rw_empty_path_closers(rewritten)
             trace_state[ordinal] = "rendered"
 
     masks: dict[int, str] = {}
@@ -372,8 +562,6 @@ def process_module(db: sqlite3.Connection, module: str, artifacts_root: pathlib.
         if masked is not None:
             masks[ordinal] = masked
 
-    existing = {r["ordinal"]: r["replacement"] for r in commands
-                if r["status"] == "success" and r["replacement"]}
     candidate_text = _apply_edits(source, db_commands, {**existing, **rendered}, masks)
     scratch = module_scratch / "compile"
     okay, detail = _compile(path, candidate_text, scratch, 0)
@@ -424,14 +612,17 @@ def process_module(db: sqlite3.Connection, module: str, artifacts_root: pathlib.
 
     updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     db.execute(AUDIT_SCHEMA)
+    db.execute(AUDIT_HISTORY_SCHEMA)
     db.execute("BEGIN IMMEDIATE")
     try:
         for ordinal, (status, replacement, state, error) in outcomes.items():
             _check_persisted_replacement(replacement)
+            _archive_prior_audit(db, module, ordinal)
             cur = db.execute(
                 "UPDATE simp_replacements SET status=?,replacement_text=?,error=? "
-                "WHERE module_name=? AND ordinal=? AND status='record_failed'",
-                (status, replacement, error, module, ordinal),
+                "WHERE module_name=? AND ordinal=? AND status=?",
+                (status, replacement, error, module, ordinal,
+                 command_by_ordinal[ordinal]["status"]),
             )
             if cur.rowcount != 1:
                 raise IsolatedError(f"row changed while processing {module}:{ordinal}")
@@ -460,11 +651,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--artifacts-root", required=True, type=pathlib.Path)
     parser.add_argument("--scratch", required=True, type=pathlib.Path)
     parser.add_argument("--limit", type=int)
+    parser.add_argument(
+        "--statuses", nargs="+", choices=sorted(RETRYABLE_STATUSES),
+        help=("explicitly retry these manifest-owned statuses; non-record failures "
+              "must already have an isolated-trace audit row"),
+    )
     args = parser.parse_args(argv)
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
+    retry_statuses = set(args.statuses) if args.statuses is not None else None
     try:
         modules = _read_manifest(args.manifest)
+        if not modules:
+            raise IsolatedError("manifest contains no modules")
+        database = _writable_database(args.database)
         if args.limit is not None:
             modules = modules[:args.limit]
         args.scratch.mkdir(parents=True, exist_ok=True)
@@ -473,7 +673,7 @@ def main(argv: list[str] | None = None) -> int:
         bundle_index = _build_bundle_index(args.artifacts_root.resolve())
         print(f"indexed {sum(map(len, bundle_index.values()))} trace bundles across "
               f"{len(bundle_index)} modules", flush=True)
-        db = sqlite3.connect(args.database)
+        db = sqlite3.connect(database)
         module_errors = 0
         try:
             db.execute("PRAGMA foreign_keys=ON")
@@ -481,7 +681,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[{index}/{len(modules)}] {module}", flush=True)
                 try:
                     result = process_module(db, module, args.artifacts_root.resolve(),
-                                            args.scratch.resolve(), bundle_index)
+                                            args.scratch.resolve(), bundle_index,
+                                            retry_statuses)
                     print(json.dumps(result, ensure_ascii=False), flush=True)
                 except Exception as exc:
                     module_errors += 1
