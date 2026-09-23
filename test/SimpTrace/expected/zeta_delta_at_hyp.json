@@ -15,7 +15,12 @@
             1,
             0
           ],
-          "name": "g"
+          "name": "g",
+          "local": {
+            "userName": "g",
+            "inaccessible": false,
+            "ctxIndex": 4
+          }
         },
         {
           "kind": "beta",

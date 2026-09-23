@@ -314,6 +314,12 @@ partial def eventToStep (ur : IO.Ref Unresolved)
   | .defeq pos kind unfolded before after c =>
     let beforePP ← ppIn c before
     let afterPP ← ppIn c after
+    let zetaLocal? ←
+      if kind == .zeta && unfolded.isSome && before.isFVar then
+        let (_, _, local?) ← originName (.fvar before.fvarId!) c contextualFVars
+        pure local?
+      else
+        pure none
     let step : Step := match kind with
       | .unfold =>
         { kind := "unfold", pos := pos, name? := unfolded.map toString,
@@ -327,6 +333,7 @@ partial def eventToStep (ur : IO.Ref Unresolved)
         -- A `zetaDelta` unfold names the local it replaced, so a replayer knows
         -- *which* one (REVIEW-6 6); a plain `letE` zeta carries no name.
         { kind := "zeta", pos := pos, name? := unfolded.map toString,
+          local? := zetaLocal?,
           before? := some beforePP, after? := some afterPP }
       | k =>
         { kind := k.toString, pos := pos,

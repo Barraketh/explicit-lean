@@ -466,6 +466,14 @@ recursor application whose major premise is a constructor.
 syntax explicitRwRed :=
   (&"beta" <|> &"eta" <|> &"proj" <|> &"zeta" <|> &"iota") explicitRwPos
 
+/--
+`zeta_local local_ref n at [..]` unfolds exactly one authenticated local
+let-declaration. Unlike plain `zeta`, whose selected subterm must be a `letE`,
+this is the source form for simp's zeta-delta reduction of a local free
+variable. The context index is recorder evidence; no name lookup is performed.
+-/
+syntax explicitRwZetaLocal := &"zeta_local " &"local_ref " num explicitRwPos
+
 /-- `change t at [1]` — last-resort definitional replacement, checked by defeq. -/
 syntax explicitRwChange := "change " explicitRwTerm explicitRwPos
 
@@ -498,7 +506,8 @@ syntax explicitRwEq := &"eq " explicitRwType " by " (&"rfl" <|> &"decide") expli
 
 /-- The innermost nesting level: no further `congr`. -/
 syntax explicitRwInnerStep0 :=
-  explicitRwUnfold <|> explicitRwRed <|> explicitRwChange <|> explicitRwEq <|>
+  explicitRwUnfold <|> explicitRwRed <|> explicitRwZetaLocal <|>
+  explicitRwChange <|> explicitRwEq <|>
   explicitRwProp <|> explicitRwRw
 
 /- A closed contextual scope. The recorder supplies the stable introduced
@@ -522,7 +531,8 @@ syntax explicitRwCongr0 :=
 /-- One nesting level up, so a `congr` may nest a `congr` — which T1's
 `congr_nested_cast` trace does, transporting two levels of type equality. -/
 syntax explicitRwInnerStep :=
-  explicitRwUnfold <|> explicitRwRed <|> explicitRwChange <|> explicitRwEq <|>
+  explicitRwUnfold <|> explicitRwRed <|> explicitRwZetaLocal <|>
+  explicitRwChange <|> explicitRwEq <|>
   explicitRwCongr0 <|> explicitRwProp <|> explicitRwRw
 
 /--
@@ -551,7 +561,8 @@ syntax explicitRwTransport :=
 the bare-term rewrite, so `beta at [...]` is the reduction rather than a lemma
 named `beta`. -/
 syntax explicitRwStep :=
-  explicitRwUnfold <|> explicitRwRed <|> explicitRwIntroCtx <|> explicitRwChange <|>
+  explicitRwUnfold <|> explicitRwRed <|> explicitRwZetaLocal <|>
+  explicitRwIntroCtx <|> explicitRwChange <|>
   explicitRwEq <|> explicitRwCongr <|> explicitRwTransport <|> explicitRwProp <|> explicitRwRw
 
 /-- Optional closing tactic: `explicit_rw [...] then rfl`. -/
@@ -613,8 +624,7 @@ def checkedHandle (stx : Syntax) (what : String) : TacticM Nat := do
     throwError "explicit_rw: {what} requires a canonical decimal numeral"
   return values[0]!
 
-def resolveIndexedLocal (stx : Syntax) : TermElabM Expr := do
-  let index ← localRefIndex stx
+def indexedLocalDecl (index : Nat) : TermElabM LocalDecl := do
   let lctx ← getLCtx
   if index >= lctx.decls.size then
     throwError "explicit_rw: local_ref {index} is outside the current local context"
@@ -631,6 +641,11 @@ def resolveIndexedLocal (stx : Syntax) : TermElabM Expr := do
   -- inaccessible `h✝`/`a✝` binders) remain valid and are addressed by index.
   if decl.isAuxDecl then
     throwError "explicit_rw: local_ref {index} names an auxiliary declaration, not a local hypothesis"
+  return decl
+
+def resolveIndexedLocal (stx : Syntax) : TermElabM Expr := do
+  let index ← localRefIndex stx
+  let decl ← indexedLocalDecl index
   let mut value := mkFVar decl.fvarId
   for (surface, projection) in (← localRefProjectionIndices stx) do
     if surface == 0 then
@@ -1410,6 +1425,17 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax)
     | "" =>
       throwError "explicit_rw: antiquotations are not admitted in a trace step."
     | k => throwError "explicit_rw: internal error: unknown reduction keyword `{k}`"
+  | ``explicitRwZetaLocal =>
+    let index ← checkedHandle stx[2] "zeta_local local_ref index"
+    let pos := parsePos stx[3]
+    let decl ← indexedLocalDecl index
+    let some value := decl.value?
+      | stepError idx m!"`zeta_local local_ref {index}` names a local declaration without a let value."
+    let localExpr := mkFVar decl.fvarId
+    runDefeqStep idx e pos m!"`zeta_local local_ref {index}`" fun sub => do
+      unless sub == localExpr do
+        stepError idx m!"`zeta_local local_ref {index}` was applied where the selected subterm is not that exact local declaration."
+      return value
   | ``explicitRwCongr | ``explicitRwCongr0 =>
     -- `congr i [steps] at pos`: rebuild the application at `pos` through its
     -- auto-generated congruence theorem, proving argument `i`'s equation from

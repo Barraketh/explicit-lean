@@ -806,6 +806,19 @@ def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
         # malformed name while turning it into a different step kind.
         if kind == "zeta" and "name" in step:
             check_name(step.get("name"), "zeta.name")
+            if isinstance(step.get("local"), dict):
+                if step["local"].get("contextual") is True:
+                    raise RenderError(
+                        "bad_local_ref",
+                        "named zeta cannot target a contextual hypothesis",
+                        side="t1",
+                    )
+                return (
+                    "zeta_local "
+                    + _render_local(step, dict(introduced or {}))
+                    + " "
+                    + render_pos(step.get("pos"))
+                )
             after = check_term(step.get("after"), "zeta.after")
             return "change " + atomize(after) + " " + render_pos(step.get("pos"))
         if "name" in step:

@@ -165,8 +165,9 @@
    "name": "zeta_delta_local_definition",
    "why": "recorder-shaped zetaDelta event from the zeta_delta_at_hyp fixture: local fvar g unfolds to its value before the following beta step",
    "step": {"kind": "zeta", "pos": [1, 0], "name": "g",
+            "local": {"userName": "g", "inaccessible": false, "ctxIndex": 4},
             "before": "g", "after": "fun s => s + 0"},
-   "expect": "change (fun s => s + 0) at [1, 0]"
+   "expect": "zeta_local local_ref 4 at [1, 0]"
   },
   {
    "name": "iota_step",
@@ -477,10 +478,12 @@
              "locations": [{"loc": {"hyp": "hg"}, "pre": "P (g a)",
                             "post": "P (a + 0)",
                             "steps": [{"kind": "zeta", "pos": [1, 0], "name": "g",
+                                       "local": {"userName": "g", "inaccessible": false,
+                                                 "ctxIndex": 4},
                                        "before": "g", "after": "fun s => s + 0"},
                                       {"kind": "beta", "pos": [1]}],
                             "close": null}]},
-   "expect": ["explicit_rw [change (fun s => s + 0) at [1, 0], beta at [1]] at hg"]
+   "expect": ["explicit_rw [zeta_local local_ref 4 at [1, 0], beta at [1]] at hg"]
   },
   {
    "name": "goal_location",

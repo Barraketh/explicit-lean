@@ -22,8 +22,8 @@ Amended 2026-09-16 after review round 1 of T1/T2: `zeta` kind, `true_intro` and
 `absurd:<hyp>` close forms (replacing `trivial`/`eq_self`), local-hypothesis
 reference object. Schema id stays `simp-trace-v1` because nothing has shipped.
 Amended 2026-09-23: named `zeta` events represent zeta-delta unfolding of a
-local definition and require the recorded `after` expression for ordinary
-`change` replay.
+local definition and carry its exact indexed `local` identity. Replay uses
+`zeta_local local_ref <ctxIndex>`, avoiding serialization of the local body.
 
 One trace per executed simp call. JSON object (identity fields are mandatory):
 
@@ -88,12 +88,16 @@ self-delimiting.
   `iota` = matcher/recursor application to a constructor, reduced one step).
   A `zeta` step may additionally carry `"name": "<local user name>"` when
   simp's `zetaDelta` option unfolds a local definition at that position. In
-  this form `before` and `after` are the pretty-printed local reference and its
-  unfolded value, and `after` is required. Replay renders this recorded result
-  as ordinary `change <after> at [pos]`; `explicit_rw` checks definitional
-  equality at the selected position. A nameless `zeta` continues to denote
-  contraction of a `let` expression. Reduction kinds other than `zeta` do not
-  accept `name`.
+  this form it also carries the ordinary indexed `local` reference object for
+  that exact let-declaration. Replay renders
+  `zeta_local local_ref <ctxIndex> at [pos]`; `explicit_rw` directly checks
+  that the selected subterm is that exact local free variable, reads its
+  recorded local-declaration value, and checks the replacement by definitional
+  equality. `before` and `after` remain diagnostic only, so a large or
+  proof-bearing local body never becomes generated source. Legacy named-zeta
+  traces without `local` may still render their authenticated `after` as
+  `change`. A nameless `zeta` continues to denote contraction of a `let`
+  expression. Reduction kinds other than `zeta` do not accept `name`.
 - `{"kind":"change", "pos": POS, "to": "<ordinary Lean surface term>", "before": ..., "source": "<dsimproc name>" (optional)}`
   Definitional replacement when no named kind applies, including any
   dsimproc firing (`dreduceIte`, `Nat.reduceAdd` in dsimp mode, ...), which is

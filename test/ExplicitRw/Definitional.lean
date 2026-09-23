@@ -201,8 +201,23 @@ is beta-reduced as a separate trace step. This matches
 example (a : Nat) (P : Nat → Prop) (hP : ∀ n, P n) : True := by
   let g : Nat → Nat := fun s => s + 0
   have hg : P (g a) := hP _
-  explicit_rw [change (fun s => s + 0) at [1, 0], beta at [1]] at hg
+  explicit_rw [zeta_local local_ref 4 at [1, 0], beta at [1]] at hg
   guard_hyp hg :ₛ P (a + 0)
+  exact True.intro
+
+/- A named-zeta reference must point to an actual local let-declaration. -/
+/-- error: explicit_rw: step 1: `zeta_local local_ref 1` names a local declaration without a let value. -/
+#guard_msgs in
+example (a : Nat) : a = a := by
+  explicit_rw [zeta_local local_ref 1 at [0, 1]]
+
+/- The context index alone is not permission to unfold some other subterm. -/
+/-- error: explicit_rw: step 1: `zeta_local local_ref 4` was applied where the selected subterm is not that exact local declaration. -/
+#guard_msgs in
+example (a : Nat) (P : Nat → Prop) (hP : ∀ n, P n) : True := by
+  let g : Nat → Nat := fun s => s + 0
+  have hg : P (g a) := hP _
+  explicit_rw [zeta_local local_ref 4 at [1, 1]] at hg
   exact True.intro
 
 /-- A position taken *after* a `zeta` step, against the zeta-reduced term. -/
