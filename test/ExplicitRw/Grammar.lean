@@ -247,6 +247,10 @@ theorem delimited_named_arguments (a b : Nat) : a + b = b + a := by
   explicit_rw [lean_term(Nat.add_comm (n := a) (m := b)) at [0, 1]]
   rfl
 
+theorem delimited_reversed_term (a b : Nat) (h : a = b) : b + 0 = a := by
+  explicit_rw [← lean_term(h) at [0, 1, 0, 1]]
+  exact Nat.add_zero a
+
 structure DelimitedRecord where
   value : Nat
 
