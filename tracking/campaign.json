@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-23T04:05:33Z",
+  "updatedAt": "2026-09-23T06:14:01Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -158,6 +158,45 @@
     "translatedRootFirstMatches": "69/69",
     "nextCertificationFailure": "Mathlib.Logic.ExistsUnique_unresolved_broader_family_call",
     "wholeConeAcceptance": "not_claimed",
+    "wholeTreeAcceptance": "not_claimed"
+  },
+  "isolatedRecovery20260923": {
+    "task": "T77-error-fix",
+    "implementationCommit": "79b2f6aa7f854f2a4ef6b06b0ba8e436c6d06682",
+    "status": "active_local_disjoint_runs",
+    "principledFixes": [
+      "authenticated_theorem_lemma_body_boundary",
+      "single_site_trace_retry_with_isolated_command_compile",
+      "empty_explicit_rw_path_spacing",
+      "canonical_T22_sourceArgs_validation_and_command_local_rebase",
+      "fail_closed_database_manifest_and_status_boundaries"
+    ],
+    "checks": {
+      "isolatedCompile": 19,
+      "retry": 18,
+      "renderer": 15,
+      "replacementWorker": 11,
+      "pipelineWithoutUnavailableWorktreeChecks": 316,
+      "independentTrustReview": "passed"
+    },
+    "realSmoke": {
+      "module": "Mathlib.NumberTheory.NumberField.CanonicalEmbedding.NormLeOne",
+      "ordinals": [35, 36],
+      "compiledSuccesses": 2,
+      "databaseIntegrity": "ok",
+      "unsafeTokens": 0
+    },
+    "pendingRun": {
+      "root": ".lake/private/T77-error-fix-20260923/pending-run-20260923",
+      "modules": 1662,
+      "rows": 13102,
+      "manifestsDisjoint": true,
+      "runningWorkers": ["000", "001"],
+      "preparedWorkers": ["002", "003"],
+      "maximumConcurrentLocalCampaignWorkers": 6,
+      "cloudUsed": false
+    },
+    "simpDisabledCertification": "not_claimed",
     "wholeTreeAcceptance": "not_claimed"
   },
   "resumeStatus": {
