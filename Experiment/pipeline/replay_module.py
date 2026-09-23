@@ -692,7 +692,30 @@ def _syntax_branch_spine(
                 side="harness",
             )
         pivot = containing[0]
-        expected_role = "right" if pivot == 1 else "continuation"
+        if pivot == 0:
+            # Lean parses an unparenthesized chain like `a <;> b <;> c`
+            # with the outer sequence's left child containing the inner
+            # sequence. A target in that left child is valid only when a
+            # nested authenticated `<;>` node owns the target and supplies
+            # the actual prefix.
+            child_start, child_end = ordered[0][:2]
+            has_nested_sequence = any(
+                other is not node
+                and isinstance(other.get("startChar"), int)
+                and isinstance(other.get("endChar"), int)
+                and child_start <= other["startChar"]
+                and other["endChar"] <= child_end
+                for other in sequence_nodes
+            )
+            if child_roles[pivot] != "left" or not has_nested_sequence:
+                raise R.RenderError(
+                    "structural_refused",
+                    "the simp site is not in an authenticated `<;>` right operand",
+                    side="harness",
+                )
+        expected_role = "left" if pivot == 0 else (
+            "right" if pivot == 1 else "continuation"
+        )
         if child_roles[pivot] != expected_role:
             raise R.RenderError(
                 "structural_refused",
@@ -1002,17 +1025,20 @@ def _structural_replacement(source: str, site: S.Site,
             else:
                 lines.append(base_indent + "  " + body)
         if suffix:
-            # Bullets close their own goal scopes.  Copying a source
-            # continuation into each bullet preserves the `<;>` all-goals
-            # behavior while keeping the suffix in its original order.
+            # The original `<;>` applies each continuation to every goal
+            # remaining after the translated simp call, and is a no-op when
+            # that call already closed its goal.  `all_goals` preserves both
+            # properties inside the per-invocation bullet.
             suffix_lines = textwrap.dedent(suffix).splitlines()
-            lines.extend(base_indent + "  " + line for line in suffix_lines)
+            lines.append(base_indent + "  all_goals")
+            lines.extend(base_indent + "    " + line for line in suffix_lines)
     generated = [base_indent + "· " + body
                  for leaf in rendered for body in leaf]
     if suffix:
         suffix_lines = textwrap.dedent(suffix).splitlines()
-        generated.extend(base_indent + "  " + line
-                         for _leaf in rendered for line in suffix_lines)
+        for _leaf in rendered:
+            generated.append(base_indent + "  all_goals")
+            generated.extend(base_indent + "    " + line for line in suffix_lines)
     return lines, (start, end), count, generated
 
 

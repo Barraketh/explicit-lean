@@ -1,6 +1,7 @@
 import Mathlib
 
 set_option linter.unusedTactic false
+set_option linter.unreachableTactic false
 
 theorem originalApplyAll : (True ∧ True) ∧ (True ∧ True) := by
   constructor <;> constructor <;> skip <;> simp
@@ -30,3 +31,14 @@ theorem nestedMultilineExpanded (b : Bool) : True := by
       · exact True.intro
       · exact True.intro
   exact h
+
+theorem expandedContinuationAfterClosedGoals : True := by
+  by_cases h : True
+  · exact True.intro
+    all_goals trivial
+  · exact True.intro
+    all_goals trivial
+
+theorem expandedContinuationAfterGoalSplit : True ∧ True := by
+  constructor
+  all_goals trivial

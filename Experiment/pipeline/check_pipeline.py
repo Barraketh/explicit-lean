@@ -531,8 +531,9 @@ def invocation_tests(f: Failures) -> None:
     non_tail = expanded("non_tail", 2)
     f.equal("invocations/non_tail_continuation_rewritten", non_tail["status"], "rendered")
     f.check("invocations/non_tail_continuation_per_goal",
-            sum(line.strip() == "trivial" for line in non_tail["lines"]) == 2,
-            "the source continuation was not applied to each generated goal")
+            sum(line.strip() == "all_goals" for line in non_tail["lines"]) == 2
+            and sum(line.strip() == "trivial" for line in non_tail["lines"]) == 2,
+            "the source continuation was not applied to each generated goal safely")
     f.check("invocations/non_tail_no_generated_simp_family",
             not P.lint_replacement(non_tail),
             "non-tail continuation still contains a generated simp-family call")
