@@ -410,3 +410,12 @@ indexed-local zeta evidence, binder inspection, AST term-elaboration gate, and
 executable proof-hole audit. Together with the four pending workers, this is
 the hard ceiling of six concurrent campaign workers; no additional worker may
 start.
+
+The first launch was stopped before useful progress when staged recorder files
+reported that the isolated build lacked the `ExplicitLean.SimpTrace` umbrella
+olean. It persisted no replacement successes and both databases retained
+integrity `ok`; the exact failed-attempt logs are preserved as
+`prebuild-missing-simptrace.log`. After building the missing umbrella module,
+one preserved staged recorder file compiled successfully. Both workers then
+restarted on the same databases with `--retry-failed`; a live module has since
+freshly recorded seven sites and stock-compiled one command successfully.
