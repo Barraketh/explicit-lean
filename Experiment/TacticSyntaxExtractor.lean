@@ -153,33 +153,43 @@ private def sourceAttributeName? (stx : Syntax) : Option Name := Id.run do
 
 private def sourceExtensionAttributeReason? (env : Environment) (name : Name) :
     Option String := Id.run do
-  let leaf := (name.toString.splitOn ".").getLast!
   match Lean.getAttributeImpl env name with
   | .error _ => return none
   | .ok attributeImpl =>
     let descr := attributeImpl.descr
     -- Some built-in elaboration attributes are registered by specialized
     -- tables rather than through `mkElabAttribute`, so classify their parsed
-    -- names only after confirming this exact attribute is registered. This
-    -- avoids treating an unrelated user attribute with a matching leaf name
-    -- as an elaborator hook.
-    match leaf with
-    | "term_elab" | "builtin_term_elab" => return some "source_term_elab_attribute"
-    | "command_elab" | "builtin_command_elab" => return some "source_command_elab_attribute"
-    | "tactic" | "builtin_tactic" => return some "source_tactic_elab_attribute"
-    | "macro" | "builtin_macro" => return some "source_macro_attribute"
-    | "doElem_elab" | "builtin_doElem_elab" => return some "source_do_elab_attribute"
-    | "inductive_elab" | "builtin_inductive_elab" => return some "source_inductive_elab_attribute"
-    | "grind_tactic" | "builtin_grind_tactic" => return some "source_grind_tactic_attribute"
-    | "try_tactic" | "builtin_try_tactic" => return some "source_try_tactic_attribute"
-    | "sym_simproc" | "builtin_sym_simproc" => return some "source_sym_simproc_attribute"
-    | "sym_discharger" | "builtin_sym_discharger" => return some "source_sym_discharger_attribute"
-    | "sym_dsimproc" | "builtin_sym_dsimproc" => return some "source_sym_dsimproc_attribute"
-    | "doElem_control_info" | "builtin_doElem_control_info" =>
-      return some "source_do_control_info_attribute"
-    | "quot_precheck" | "builtin_quot_precheck" =>
-      return some "source_quotation_precheck_attribute"
-    | "try_suggestion" => return some "source_try_suggestion_attribute"
+    -- names only after confirming this exact root attribute is registered.
+    -- Aliases are recognized by the implementation description below; do
+    -- not confuse a namespaced user attribute with the same leaf name.
+    match name with
+    | `term_elab => return some "source_term_elab_attribute"
+    | `builtin_term_elab => return some "source_term_elab_attribute"
+    | `command_elab => return some "source_command_elab_attribute"
+    | `builtin_command_elab => return some "source_command_elab_attribute"
+    | `tactic => return some "source_tactic_elab_attribute"
+    | `builtin_tactic => return some "source_tactic_elab_attribute"
+    | `macro => return some "source_macro_attribute"
+    | `builtin_macro => return some "source_macro_attribute"
+    | `doElem_elab => return some "source_do_elab_attribute"
+    | `builtin_doElem_elab => return some "source_do_elab_attribute"
+    | `inductive_elab => return some "source_inductive_elab_attribute"
+    | `builtin_inductive_elab => return some "source_inductive_elab_attribute"
+    | `grind_tactic => return some "source_grind_tactic_attribute"
+    | `builtin_grind_tactic => return some "source_grind_tactic_attribute"
+    | `try_tactic => return some "source_try_tactic_attribute"
+    | `builtin_try_tactic => return some "source_try_tactic_attribute"
+    | `sym_simproc => return some "source_sym_simproc_attribute"
+    | `builtin_sym_simproc => return some "source_sym_simproc_attribute"
+    | `sym_discharger => return some "source_sym_discharger_attribute"
+    | `builtin_sym_discharger => return some "source_sym_discharger_attribute"
+    | `sym_dsimproc => return some "source_sym_dsimproc_attribute"
+    | `builtin_sym_dsimproc => return some "source_sym_dsimproc_attribute"
+    | `doElem_control_info => return some "source_do_control_info_attribute"
+    | `builtin_doElem_control_info => return some "source_do_control_info_attribute"
+    | `quot_precheck => return some "source_quotation_precheck_attribute"
+    | `builtin_quot_precheck => return some "source_quotation_precheck_attribute"
+    | `try_suggestion => return some "source_try_suggestion_attribute"
     | _ => pure ()
     -- Attribute descriptions are supplied by Lean's registered extension
     -- implementation. They catch fully-qualified spellings and aliases of
