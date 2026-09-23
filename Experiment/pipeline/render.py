@@ -976,14 +976,18 @@ def render_trace(trace: dict, *, source_text: Any = None,
 def unresolved_reason(trace: dict) -> str | None:
     """Return the classified `unresolved:` reason of a trace, if it has one.
 
-    The spec classifies an unreplayable call by writing `unresolved:<reason>`
-    into a `close.by`. Such a site renders as the original call plus a marker
-    comment, so the module still compiles and the site is counted, never hidden.
+    Older close-level classifications are encoded as `unresolved:<reason>` in
+    `close.by`; current operational traces classify the individual event in
+    its `unresolved` field. Either means that the call must stay visibly
+    unresolved instead of sending a classified step through the renderer.
     """
     found: list[str] = []
 
     def scan(obj: Any) -> None:
         if isinstance(obj, dict):
+            reason = obj.get("unresolved")
+            if isinstance(reason, str) and reason:
+                found.append(reason)
             close = obj.get("close")
             if isinstance(close, dict):
                 by = close.get("by")

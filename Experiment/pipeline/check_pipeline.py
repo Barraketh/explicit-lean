@@ -130,6 +130,26 @@ def render_tests(f: Failures) -> None:
         f.equal("unresolved/" + case["name"],
                 R.unresolved_reason(case["trace"]), case["expect"])
 
+    # Operational recorder classifications live on individual steps. They
+    # must be surfaced as unresolved before the renderer rejects missing
+    # derivation metadata, and the original call must stay in the source.
+    operational_unresolved = next(
+        case["trace"] for case in cases["unresolved"]
+        if case["name"] == "unresolved_operational_step"
+    )
+    source = "theorem t : True := by simp\n"
+    site = S.find_sites(source)[0]
+    record = P.render_site(site, operational_unresolved, source=source)
+    f.equal("unresolved/operational_status", record["status"],
+            "unresolved:unreplayable_rw:localEq")
+    f.check("unresolved/operational_keeps_original",
+            any("simp" in line for line in record["lines"]),
+            f"original call missing from {record['lines']!r}")
+    f.check("unresolved/operational_marker",
+            any("unresolved: unreplayable_rw:localEq" in line
+                for line in record["lines"]),
+            f"unresolved marker missing from {record['lines']!r}")
+
     for case in cases["inaccessible"]:
         indices: list[int] = []
         for loc in case["trace"]["locations"]:

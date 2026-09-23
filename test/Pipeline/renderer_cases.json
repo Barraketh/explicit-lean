@@ -653,6 +653,17 @@
    "expect": "simproc:Finset.decide"
   },
   {
+   "name": "unresolved_operational_step",
+   "why": "a recorder-classified operational step must be retained as unresolved before rendering",
+   "trace": {"schema": "simp-trace-v2", "module": "M", "occurrence": "1",
+             "call": "simp",
+             "locations": [{"loc": "goal", "pre": "a", "post": null,
+                            "steps": [{"kind": "rw", "pos": [], "name": "localEq",
+                                       "dir": "fwd", "unresolved": "unreplayable_rw:localEq"}],
+                            "close": {"by": "rfl"}}]},
+   "expect": "unreplayable_rw:localEq"
+  },
+  {
    "name": "resolved_trace_has_no_reason",
    "why": "a clean trace must not be reported unresolved",
    "trace": {"schema": "simp-trace-v1", "module": "M", "occurrence": "1",
