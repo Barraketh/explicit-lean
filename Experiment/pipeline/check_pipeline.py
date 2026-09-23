@@ -150,6 +150,59 @@ def render_tests(f: Failures) -> None:
                 for line in record["lines"]),
             f"unresolved marker missing from {record['lines']!r}")
 
+    # Only an actual step field in a current v2 trace is an operational
+    # unresolved marker. Lookalike fields on the envelope/location are
+    # ordinary metadata and must not suppress otherwise renderable steps.
+    decoy = {
+        "schema": "simp-trace-v2", "unresolved": "envelope-decoy",
+        "site": {"unresolved": "site-decoy"},
+        "locations": [{"loc": "goal", "unresolved": "location-decoy",
+                       "steps": [{"kind": "beta", "pos": []}], "close": None}],
+    }
+    f.equal("unresolved/decoy_fields_ignored", R.unresolved_reason(decoy), None)
+    decoy_record = P.render_site(site, decoy, source=source)
+    f.equal("unresolved/decoy_preserves_rendering", decoy_record["status"], "rendered")
+    f.check("unresolved/decoy_step_rendered",
+            any("beta at []" in line for line in decoy_record["lines"]),
+            f"renderable step was hidden by a decoy marker: {decoy_record['lines']!r}")
+
+    # Current markers and legacy close markers remain discoverable in the
+    # nested side-proof grammar, without traversing arbitrary JSON objects.
+    nested_operational = {
+        "schema": "simp-trace-v2",
+        "locations": [{"loc": "goal", "steps": [{
+            "kind": "rw", "pos": [], "name": "outer", "dir": "fwd",
+            "side": [{"steps": [{"kind": "rw", "pos": [], "name": "localEq",
+                                   "dir": "fwd",
+                                   "unresolved": "unreplayable_rw:side"}],
+                       "close": {"by": "rfl"}}],
+        }], "close": None}],
+    }
+    f.equal("unresolved/nested_side_step",
+            R.unresolved_reason(nested_operational), "unreplayable_rw:side")
+    nested_record = P.render_site(site, nested_operational, source=source)
+    f.equal("unresolved/nested_side_retains_original",
+            nested_record["status"], "unresolved:unreplayable_rw:side")
+    f.check("unresolved/nested_side_marker_visible",
+            any("unresolved: unreplayable_rw:side" in line
+                for line in nested_record["lines"]),
+            f"nested side marker missing from {nested_record['lines']!r}")
+    legacy_nested = next(
+        case["trace"] for case in cases["unresolved"]
+        if case["name"] == "unresolved_discharger"
+    )
+    f.equal("unresolved/legacy_nested_close",
+            R.unresolved_reason(legacy_nested), "positivity")
+    v1_step_decoy = {
+        "schema": "simp-trace-v1",
+        "locations": [{"steps": [{"kind": "rw", "pos": [], "name": "foo",
+                                   "dir": "fwd",
+                                   "unresolved": "not-a-current-marker"}],
+                       "close": None}],
+    }
+    f.equal("unresolved/v1_step_field_ignored",
+            R.unresolved_reason(v1_step_decoy), None)
+
     for case in cases["inaccessible"]:
         indices: list[int] = []
         for loc in case["trace"]["locations"]:
@@ -1043,6 +1096,34 @@ def identity_tests(f: Failures) -> None:
     accepted, _ = P.validate_identity(module, source, sites, records)
     f.equal("identity/valid_fixture", accepted["identity"], "accepted")
     f.equal("identity/fixture_site_count", accepted["expectedSites"], 6)
+
+    # A classified step remains part of the same authenticated one-to-one
+    # source-site accounting. It changes that site's replay status only; it
+    # cannot remove the site from the manifest or silently render a partial
+    # subset of the trace.
+    unresolved_records = list(records)
+    unresolved_records[0] = dict(unresolved_records[0], locations=[{
+        "loc": "goal", "steps": [{"kind": "rw", "pos": [], "name": "localEq",
+                                   "dir": "fwd",
+                                   "unresolved": "unreplayable_rw:localEq"}],
+        "close": None,
+    }])
+    unresolved_identity, unresolved_grouped = P.validate_identity(
+        module, source, sites, unresolved_records
+    )
+    f.equal("identity/unresolved_still_accounted", unresolved_identity["identity"],
+            "accepted")
+    f.equal("identity/unresolved_site_count", unresolved_identity["expectedSites"], 6)
+    f.equal("identity/unresolved_group_count", len(unresolved_grouped), 6)
+    unresolved_site = S.find_sites(source)[0]
+    unresolved_render = P.render_site(
+        unresolved_site, unresolved_grouped[unresolved_site.index][0], source=source
+    )
+    f.equal("identity/unresolved_site_retained",
+            unresolved_render["status"], "unresolved:unreplayable_rw:localEq")
+    f.check("identity/unresolved_original_kept",
+            any(unresolved_site.text in line for line in unresolved_render["lines"]),
+            "authenticated unresolved site did not retain its original call")
 
     def rejected(name: str, forged: list[dict], category: str | None = None) -> None:
         result, _ = P.validate_identity(module, source, sites, forged)

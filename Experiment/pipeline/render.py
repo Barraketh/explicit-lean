@@ -982,24 +982,52 @@ def unresolved_reason(trace: dict) -> str | None:
     unresolved instead of sending a classified step through the renderer.
     """
     found: list[str] = []
+    current_operational = trace.get("schema") == "simp-trace-v2"
 
-    def scan(obj: Any) -> None:
-        if isinstance(obj, dict):
-            reason = obj.get("unresolved")
-            if isinstance(reason, str) and reason:
+    def scan_close(close: Any) -> None:
+        if isinstance(close, dict):
+            by = close.get("by")
+            if isinstance(by, str) and by.startswith("unresolved:"):
+                found.append(by[len("unresolved:") :])
+
+    def scan_steps(steps: Any) -> None:
+        if not isinstance(steps, list):
+            return
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            # The v2 recorder classifies a failed operation on the event
+            # itself. Do not treat a same-named extension field on the trace,
+            # site envelope, location, or arbitrary nested metadata as an
+            # unresolved classification.
+            reason = step.get("unresolved")
+            if (current_operational and isinstance(reason, str) and reason
+                    and step.get("kind") in KNOWN_KINDS):
                 found.append(reason)
-            close = obj.get("close")
-            if isinstance(close, dict):
-                by = close.get("by")
-                if isinstance(by, str) and by.startswith("unresolved:"):
-                    found.append(by[len("unresolved:") :])
-            for value in obj.values():
-                scan(value)
-        elif isinstance(obj, list):
-            for item in obj:
-                scan(item)
 
-    scan(trace)
+            # Visit only recursive step-bearing fields from the trace grammar;
+            # this includes rewrite side proofs, congruence/introduction
+            # substeps, and dependent-transport domain/body events.
+            if step.get("kind") in {"rw"}:
+                sides = step.get("side")
+                if isinstance(sides, list):
+                    for side in sides:
+                        if isinstance(side, dict):
+                            scan_steps(side.get("steps"))
+                            scan_close(side.get("close"))
+            if step.get("kind") in {"congr", "intro_ctx"}:
+                scan_steps(step.get("steps"))
+            if step.get("kind") == "transport":
+                scan_steps(step.get("domain"))
+                scan_steps(step.get("body"))
+
+    locations = trace.get("locations")
+    if isinstance(locations, list):
+        for location in locations:
+            if not isinstance(location, dict):
+                continue
+            scan_steps(location.get("steps"))
+            scan_close(location.get("close"))
     if not found:
         return None
     return found[0]
