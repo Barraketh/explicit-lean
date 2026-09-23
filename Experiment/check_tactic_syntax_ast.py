@@ -196,6 +196,112 @@ class TacticSyntaxAstChecks(unittest.TestCase):
                     require_pinned_path=False,
                 )
 
+    def test_term_elaboration_gate_uses_authenticated_command_ast(self) -> None:
+        path = ast.ROOT / ".lake" / "packages" / "mathlib" / "Mathlib" / "Logic" / "Basic.lean"
+        ordinary = path.read_bytes()
+        result = ast.inspect_term_elaboration_boundary(
+            module="Mathlib.Logic.Basic", source_path=path,
+            expected_source_sha256=hashlib.sha256(ordinary).hexdigest(),
+        )
+        self.assertEqual(result["status"], "ok", result)
+        self.assertEqual(result["risks"], [])
+        self.assertEqual(result["moduleSourceSha256"],
+                         hashlib.sha256(ordinary).hexdigest())
+        tactic_only = 'import Lean\nsyntax "gateTacticOnly" : tactic\n'
+        with tempfile.TemporaryDirectory(prefix="term-gate-tactic-only-") as temp:
+            tactic_path = Path(temp) / "TacticOnly.lean"
+            tactic_path.write_text(tactic_only, encoding="utf-8")
+            tactic_result = ast.inspect_term_elaboration_boundary(
+                module="Mathlib.TermGateTacticOnly", source_path=tactic_path,
+                expected_source_sha256=hashlib.sha256(tactic_only.encode()).hexdigest(),
+                require_pinned_path=False,
+            )
+        self.assertEqual(tactic_result["status"], "ok", tactic_result)
+        self.assertEqual(tactic_result["risks"], [])
+
+    def test_term_elaboration_gate_refuses_source_local_term_hooks(self) -> None:
+        dangerous = '''import Lean
+syntax "hiddenSyntax" : term
+macro "hiddenMacro" : term => `(0)
+macro_rules | `(term| (1 + 0)) => `(1)
+elab "hiddenElab" : term => `(0)
+elab_rules : term | `(hiddenSyntax) => `(0)
+@[term_elab Lean.Parser.Term.ident]
+def hiddenIdentElab : Lean.Elab.Term.TermElab := fun _ _ => do
+  Lean.Meta.Simp.simpGoal (← Lean.Elab.Term.getMainGoal)
+initialize hiddenExtensionRegistrationProbe : IO Unit := pure ()
+run_cmd pure ()
+attribute [term_elab] hiddenIdentElab
+'''
+        with tempfile.TemporaryDirectory(prefix="term-gate-negative-") as temp:
+            path = Path(temp) / "Dangerous.lean"
+            path.write_text(dangerous, encoding="utf-8")
+            result = ast.inspect_term_elaboration_boundary(
+                module="Mathlib.TermGateDangerous", source_path=path,
+                expected_source_sha256=hashlib.sha256(dangerous.encode()).hexdigest(),
+                require_pinned_path=False,
+            )
+        self.assertEqual(result["status"], "refused", result)
+        self.assertEqual(
+            [risk["reason"] for risk in result["risks"]],
+            ["source_term_syntax", "source_term_macro_or_elaborator",
+             "source_term_macro_rules", "source_term_macro_or_elaborator",
+             "source_term_macro_or_elaborator", "source_term_elab_attribute",
+             "source_command_can_register_term_extension",
+             "source_command_can_register_term_extension",
+             "source_term_elab_attribute"],
+        )
+        self.assertIn("Lean.Meta.Simp.simpGoal", dangerous)
+        for risk in result["risks"]:
+            self.assertEqual(
+                dangerous[risk["startChar"]:risk["endChar"]].splitlines()[0].split()[0],
+                {"Lean.Parser.Command.syntax": "syntax",
+                 "Lean.Parser.Command.macro": "macro",
+                 "Lean.Parser.Command.macro_rules": "macro_rules",
+                 "Lean.Parser.Command.elab": "elab",
+                 "Lean.Parser.Command.elab_rules": "elab_rules",
+                 "Lean.Parser.Command.declaration": "@[term_elab",
+                 "Lean.Parser.Command.initialize": "initialize",
+                 "Lean.runCmd": "run_cmd",
+                 "Lean.Parser.Command.attribute": "attribute"}[risk["kind"]],
+            )
+
+    def test_term_elaboration_gate_authenticates_bytes_and_pinned_identity(self) -> None:
+        ordinary = "import Lean\ndef x : Nat := 1\n"
+        with tempfile.TemporaryDirectory(prefix="term-gate-identity-") as temp:
+            path = Path(temp) / "Identity.lean"
+            path.write_text(ordinary, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                ast.inspect_term_elaboration_boundary(
+                    module="Mathlib.TermGateIdentity", source_path=path,
+                    expected_source_sha256="0" * 64, require_pinned_path=False,
+                )
+
+    def test_executable_proof_hole_ast_audit_ignores_comments_and_strings(self) -> None:
+        clean = '''import Lean
+/-- The words sorry and admit here are documentation. -/
+def tokenAuditText : String := "sorry admit"
+-- sorry admit
+theorem tokenAuditClean : True := by exact True.intro
+'''
+        clean_result = ast.audit_executable_proof_holes(
+            module="Mathlib.ProofHoleCleanFixture", source=clean,
+            expected_source_sha256=hashlib.sha256(clean.encode()).hexdigest(),
+        )
+        self.assertEqual(clean_result["status"], "ok", clean_result)
+        self.assertEqual(clean_result["proofHoles"], [])
+        dirty = '''import Lean
+theorem tokenAuditSorry : True := by exact sorry
+def tokenAuditAdmit : Nat := admit
+'''
+        dirty_result = ast.audit_executable_proof_holes(
+            module="Mathlib.ProofHoleDirtyFixture", source=dirty,
+            expected_source_sha256=hashlib.sha256(dirty.encode()).hexdigest(),
+        )
+        self.assertEqual(dirty_result["status"], "refused", dirty_result)
+        self.assertEqual([item["token"] for item in dirty_result["proofHoles"]],
+                         ["sorry", "admit"])
+
 
 if __name__ == "__main__":
     unittest.main()

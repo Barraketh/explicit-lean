@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 import pathlib
 import re
@@ -34,6 +35,7 @@ sys.path.insert(0, str(ROOT / "test" / "SimpTrace"))
 import replay_module as replay  # noqa: E402
 import simp_replacement_worker as worker  # noqa: E402
 import trace_identity as TI  # noqa: E402
+import tactic_syntax_ast as TSA  # noqa: E402
 from finalize_traces import finalize_paths  # noqa: E402
 
 
@@ -443,6 +445,43 @@ def _compile(module_path: str, text: str, scratch: pathlib.Path, serial: int) ->
     return okay, detail
 
 
+def _persist_term_elaboration_gate_refusal(
+    db: sqlite3.Connection, module: str, commands: list[dict[str, Any]],
+    target_rows: list[dict[str, Any]], detail: str,
+) -> dict[str, Any]:
+    """Record a source-identity-bound, fail-closed module-level refusal."""
+    command_by_ordinal = {row["ordinal"]: row for row in commands}
+    updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    db.execute(AUDIT_SCHEMA)
+    db.execute(AUDIT_HISTORY_SCHEMA)
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        for row in target_rows:
+            ordinal = row["ordinal"]
+            _archive_prior_audit(db, module, ordinal)
+            cur = db.execute(
+                "UPDATE simp_replacements SET status='render_failed',replacement_text=NULL,error=? "
+                "WHERE module_name=? AND ordinal=? AND status=?",
+                (detail[:2000], module, ordinal, command_by_ordinal[ordinal]["status"]),
+            )
+            if cur.rowcount != 1:
+                raise IsolatedError(f"row changed while gating {module}:{ordinal}")
+            db.execute(
+                "INSERT INTO isolated_trace_audit(module_name,ordinal,result_status,trace_state,compile_detail,updated_at) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(module_name,ordinal) DO UPDATE SET "
+                "result_status=excluded.result_status,trace_state=excluded.trace_state,"
+                "compile_detail=excluded.compile_detail,updated_at=excluded.updated_at",
+                (module, ordinal, "render_failed", "term_elab_gate_refused", detail[:2000], updated_at),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"module": module, "status": "committed", "rows": len(target_rows),
+            "counts": {"render_failed": len(target_rows)},
+            "termElaborationGate": "refused"}
+
+
 def process_module(db: sqlite3.Connection, module: str, artifacts_root: pathlib.Path,
                   scratch_root: pathlib.Path,
                   bundle_index: dict[str, list[pathlib.Path]] | None = None,
@@ -473,6 +512,30 @@ def process_module(db: sqlite3.Connection, module: str, artifacts_root: pathlib.
     mathlib_path = (ROOT / ".lake" / "packages" / "mathlib" / path).resolve()
     if not mathlib_path.is_file() or mathlib_path.read_bytes() != source_bytes:
         raise IsolatedError(f"pinned source does not match DB for {module}")
+    # Authenticate and parse the source before any recorder trace is turned
+    # into a generated term, candidate compilation is attempted, or result is
+    # persisted as success.  Term syntax/elaboration extensions can dispatch
+    # to arbitrary MetaM (including Meta.Simp) even without tactic syntax.
+    module_name = "Mathlib." + pathlib.PurePosixPath(path).with_suffix("") \
+        .as_posix().removeprefix("Mathlib/").replace("/", ".")
+    source_hash = hashlib.sha256(source_bytes).hexdigest()
+    try:
+        extension_inventory = TSA.inspect_term_elaboration_boundary(
+            module=module_name, source_path=mathlib_path,
+            expected_source_sha256=source_hash,
+            mathlib_root=ROOT / ".lake" / "packages" / "mathlib" / "Mathlib",
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        return _persist_term_elaboration_gate_refusal(
+            db, module, commands, target_rows,
+            f"term-elaboration AST gate failed closed: {error}",
+        )
+    if extension_inventory["status"] != "ok":
+        detail = "term-elaboration AST gate refused: " + json.dumps(
+            extension_inventory["risks"], sort_keys=True)
+        return _persist_term_elaboration_gate_refusal(
+            db, module, commands, target_rows, detail,
+        )
     _, trace_sites = worker.align_sites(source)
     command_by_ordinal = {row["ordinal"]: row for row in commands}
     candidate_ordinals = {row["ordinal"] for row in target_rows}

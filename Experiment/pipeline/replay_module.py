@@ -1463,10 +1463,46 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
     source_rel = mathlib_rel[len("Mathlib/") :]
     source_path = mathlib / source_rel
     # Decode the source bytes without changing character coordinates.
-    source = source_path.read_bytes().decode("utf-8")
+    source_bytes = source_path.read_bytes()
+    source = source_bytes.decode("utf-8")
 
     log: list[str] = []
     site_list = S.find_sites(source)
+    module_name = "Mathlib." + source_rel[:-len(".lean")].replace("/", ".")
+    try:
+        term_extension_inventory = TSA.inspect_term_elaboration_boundary(
+            module=module_name,
+            source_path=source_path,
+            expected_source_sha256=hashlib.sha256(source_bytes).hexdigest(),
+            mathlib_root=mathlib,
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        gate_detail = f"term-elaboration AST gate failed closed: {error}"
+        term_extension_inventory = {"status": "refused", "risks": [],
+                                    "reason": gate_detail}
+    if term_extension_inventory["status"] != "ok":
+        gate_detail = term_extension_inventory.get("reason", "source-local term extension")
+        records = [
+            {
+                "site": site.index, "line": site.line, "column": site.column,
+                "original": site.text, "alone_on_line": site.alone_on_line,
+                "status": "render_failed:term_elaboration_gate",
+                "attribution": "harness", "detail": gate_detail,
+            }
+            for site in site_list
+        ]
+        return {
+            "module": mathlib_rel, "traced_module": traced_name,
+            "sites": len(site_list), "compile_mode": "term_elab_gate_refused",
+            "whole_module_exit": None, "whole_module_errors": [],
+            "whole_module_seconds": 0, "transcription": {"status": "not_run"},
+            "trace_count": 0,
+            "identity": {"identity": "rejected", "reason": "term_elaboration_gate",
+                         "moduleSourceSha256": hashlib.sha256(source_bytes).hexdigest(),
+                         "termElaborationGate": term_extension_inventory},
+            "published": False, "records": records, "log": log,
+            "seconds": round(time.monotonic() - started, 2),
+        }
     _, transcription = transcribe(t1, mathlib, mathlib_rel, traced_name,
                                   out_dir, False, log)
     identity, authenticated = validate_identity(

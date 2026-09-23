@@ -172,6 +172,29 @@ class IsolatedTraceCompileTests(unittest.TestCase):
         ).fetchone(), ("Mathlib.Test", 7, "compile_failed", "rendered", "old diagnostic", "old time"))
         db.close()
 
+    def test_term_extension_gate_refusal_is_persisted_without_success(self) -> None:
+        import sqlite3
+
+        db = sqlite3.connect(":memory:")
+        db.execute("CREATE TABLE simp_replacements(module_name TEXT,ordinal INTEGER,status TEXT,"
+                   "replacement_text TEXT,error TEXT,PRIMARY KEY(module_name,ordinal))")
+        db.execute("INSERT INTO simp_replacements VALUES('Mathlib.X',7,'record_failed',NULL,'old')")
+        db.commit()
+        command = {"ordinal": 7, "status": "record_failed"}
+        result = isolated._persist_term_elaboration_gate_refusal(
+            db, "Mathlib.X", [command], [command],
+            'term-elaboration AST gate refused: [{"reason":"source_term_elab_attribute"}]',
+        )
+        self.assertEqual(result["termElaborationGate"], "refused")
+        self.assertEqual(db.execute(
+            "SELECT status,replacement_text,error FROM simp_replacements"
+        ).fetchone(), ("render_failed", None,
+                       'term-elaboration AST gate refused: [{"reason":"source_term_elab_attribute"}]'))
+        self.assertEqual(db.execute(
+            "SELECT result_status,trace_state FROM isolated_trace_audit"
+        ).fetchone(), ("render_failed", "term_elab_gate_refused"))
+        db.close()
+
     def test_non_suffix_body_is_not_masked(self) -> None:
         source = "lemma foo : True := by trivial -- note\n"
         command = {"kind": "lemma", "body": "by trivial", "start": 0,

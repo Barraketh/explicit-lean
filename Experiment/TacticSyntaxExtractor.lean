@@ -100,6 +100,121 @@ private def rangeOf (stx : Syntax) : Option (Nat × Nat) := do
 
 private def kindString (stx : Syntax) : String := stx.getKind.toString
 
+private partial def hasIdentifier (stx : Syntax) (name : String) : Bool :=
+  match stx with
+  | .ident _ value _ _ => value.toString == name
+  | _ => stx.getArgs.any (fun child => hasIdentifier child name)
+
+private def directCategoryAfterColon (stx : Syntax) : Option String := Id.run do
+  let args := stx.getArgs
+  for index in [:args.size] do
+    let isColon := match args[index]! with
+      | .atom _ value => value == ":"
+      | _ => false
+    if isColon then
+      if let some next := args[index + 1]? then
+        if let .ident _ value _ _ := next then return some value.toString
+  return none
+
+private partial def hasTermCategoryAfterColon (stx : Syntax) : Bool := Id.run do
+  if directCategoryAfterColon stx == some "term" then return true
+  for child in stx.getArgs do
+    if hasTermCategoryAfterColon child then return true
+  return false
+
+private def termElaborationRisk (command : Syntax) : Option String := Id.run do
+  let kind := kindString command
+  -- These are command AST nodes, not source-text matches.  The category
+  -- identifier is part of the parsed declaration (or, for macro_rules, the
+  -- quoted term pattern).  Refuse rather than trying to execute/elaborate a
+  -- source-local extension while recording another term.
+  if kind == "Lean.Parser.Command.syntax" then
+    if hasTermCategoryAfterColon command then return some "source_term_syntax"
+  -- Notation/mixfix declarations introduce ordinary term syntax through
+  -- elaborator extensions; their AST category is not always explicit in the
+  -- declaration (e.g. inferred term notation), so fail closed on the parsed
+  -- command kind rather than infer it from source spelling.
+  if command.isOfKind ``Lean.Parser.Command.«notation» ||
+      command.isOfKind ``Lean.Parser.Command.«mixfix» ||
+      command.isOfKind `Lean.Parser.Command.mixfix then
+    return some "source_term_notation"
+  if kind == "Lean.Parser.Command.macro" || kind == "Lean.Parser.Command.elab" ||
+      kind == "Lean.Parser.Command.elab_rules" then
+    if hasTermCategoryAfterColon command then
+      return some "source_term_macro_or_elaborator"
+  if kind == "Lean.Parser.Command.macro_rules" && hasIdentifier command "term" then
+    return some "source_term_macro_rules"
+  -- A declaration tagged [term_elab ...] can run arbitrary MetaM during
+  -- ordinary term elaboration, including Lean.Meta.Simp.  This structural
+  -- attribute check intentionally fails closed even if the declaration body
+  -- is opaque to this inventory.
+  if (kind == "Lean.Parser.Command.declaration" ||
+      kind == "Lean.Parser.Command.attribute") && hasIdentifier command "term_elab" then
+    return some "source_term_elab_attribute"
+  -- Initializers and run_cmd can register term elaborators through APIs
+  -- instead of the surface `elab`/attribute commands.  Their bodies are code,
+  -- not a declarative syntax tree that this parser-only gate can safely
+  -- evaluate, so neither is executed; both fail closed as extension-capable.
+  if kind == "Lean.Parser.Command.initialize" ||
+      kind == "Lean.Parser.Command.builtin_initialize" ||
+      kind == "Lean.Parser.Command.runCmd" || kind == "Lean.runCmd" then
+    return some "source_command_can_register_term_extension"
+  return none
+
+private partial def inventoryTermElaborationRisks (stx : Syntax) : Array Json := Id.run do
+  let mut risks := #[]
+  if let some reason := termElaborationRisk stx then
+    let rangeFields := match rangeOf stx with
+      | some (start, stop) => [
+          ("startByte", toJson start), ("endByte", toJson stop)]
+      | none => []
+    risks := risks.push <| Json.mkObj <| [
+      ("kind", toJson (kindString stx)), ("reason", toJson reason)] ++ rangeFields
+  for child in stx.getArgs do
+    risks := risks ++ inventoryTermElaborationRisks child
+  return risks
+
+private def termElaborationInventoryJson (moduleName : String)
+    (commands : Array Syntax) : Json := Id.run do
+  let mut risks := #[]
+  for command in commands do
+    risks := risks ++ inventoryTermElaborationRisks command
+  return Json.mkObj [
+    ("module", toJson moduleName),
+    ("status", toJson (if risks.isEmpty then "ok" else "refused")),
+    ("reason", toJson (if risks.isEmpty then "no_source_term_extensions" else "source_local_term_extension")),
+    ("risks", Json.arr risks)]
+
+private partial def executableProofHoleTokens (stx : Syntax) : Array Json := Id.run do
+  let proofHole := stx.isOfKind ``Lean.Parser.Term.sorry ||
+    (match stx with
+     | .ident _ value _ _ => value.toString == "admit"
+     | _ => false)
+  let mut found := #[]
+  if proofHole then
+    let token := match stx with
+      | .ident _ value _ _ => value.toString
+      | _ => "sorry"
+    let rangeFields := match rangeOf stx with
+      | some (start, stop) => [
+          ("startByte", toJson start), ("endByte", toJson stop)]
+      | none => []
+    found := found.push <| Json.mkObj <| [
+      ("token", toJson token), ("kind", toJson (kindString stx))] ++ rangeFields
+  for child in stx.getArgs do
+    found := found ++ executableProofHoleTokens child
+  return found
+
+private def proofHoleAuditJson (moduleName : String) (commands : Array Syntax) : Json := Id.run do
+  let mut holes := #[]
+  for command in commands do
+    holes := holes ++ executableProofHoleTokens command
+  return Json.mkObj [
+    ("module", toJson moduleName),
+    ("status", toJson (if holes.isEmpty then "ok" else "refused")),
+    ("reason", toJson (if holes.isEmpty then "no_executable_proof_holes" else "executable_proof_hole_token")),
+    ("proofHoles", Json.arr holes)]
+
 private def jsonRange (stx : Syntax) : Json := Id.run do
   match rangeOf stx with
   | some (start, stop) => return Json.mkObj [
@@ -115,6 +230,16 @@ private def isSimpSiteNode (stx : Syntax) : Bool :=
 
 private def isSeqNode (stx : Syntax) : Bool :=
   kindString stx == "Lean.Parser.Tactic.«tactic_<;>_»"
+
+private partial def debugSyntax (stx : Syntax) : Json := Id.run do
+  let mut fields := [("kind", toJson (kindString stx))]
+  match stx with
+  | .atom _ value => fields := fields ++ [("token", toJson value)]
+  | .ident _ value _ _ => fields := fields ++ [("token", toJson value.toString)]
+  | _ => pure ()
+  if !stx.getArgs.isEmpty then
+    fields := fields ++ [("args", Json.arr (stx.getArgs.map debugSyntax))]
+  return Json.mkObj fields
 
 private partial def findEnclosing (stx : Syntax) (targetStart targetEnd : Nat)
     (ancestors : Array Syntax := #[]) : Array (Array Syntax) := Id.run do
@@ -195,7 +320,43 @@ private def extractRange (moduleName : String) (commands : Array Syntax)
 
 unsafe def runArgs (args : List String) : IO UInt32 := do
   match args with
-  | moduleName :: path :: rangeArgs =>
+  | moduleName :: path :: "--dump" :: [] => do
+    Lean.initSearchPath (← Lean.findSysroot)
+    Lean.enableInitializersExecution
+    let path := System.FilePath.mk path
+    let source ← IO.FS.readFile path
+    try
+      let (commands, _) ← parseModule path source
+      IO.println (Json.arr (commands.map debugSyntax) |>.compress)
+      return 0
+    catch error =>
+      IO.eprintln s!"Lean syntax dump failed for {moduleName}: {error}"
+      return 1
+  | moduleName :: path :: "--term-elab-gate" :: [] => do
+    Lean.initSearchPath (← Lean.findSysroot)
+    Lean.enableInitializersExecution
+    let path := System.FilePath.mk path
+    let source ← IO.FS.readFile path
+    try
+      let (commands, _) ← parseModule path source
+      IO.println (termElaborationInventoryJson moduleName commands |>.compress)
+      return 0
+    catch error =>
+      IO.eprintln s!"Lean term-elaboration gate failed closed for {moduleName}: {error}"
+      return 1
+  | moduleName :: path :: "--proof-hole-audit" :: [] => do
+    Lean.initSearchPath (← Lean.findSysroot)
+    Lean.enableInitializersExecution
+    let path := System.FilePath.mk path
+    let source ← IO.FS.readFile path
+    try
+      let (commands, _) ← parseModule path source
+      IO.println (proofHoleAuditJson moduleName commands |>.compress)
+      return 0
+    catch error =>
+      IO.eprintln s!"Lean proof-hole audit failed closed for {moduleName}: {error}"
+      return 1
+  | moduleName :: path :: rangeArgs => do
     if rangeArgs.isEmpty || rangeArgs.length % 2 != 0 then return 2
     Lean.initSearchPath (← Lean.findSysroot)
     Lean.enableInitializersExecution

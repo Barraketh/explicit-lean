@@ -64,6 +64,13 @@ class MissingTraceRetryTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(
                 retry.worker, "align_sites", return_value=([], sites)))
             stack.enter_context(mock.patch.object(
+                retry.TSA, "inspect_term_elaboration_boundary",
+                return_value={"status": "ok", "risks": [],
+                              "reason": "no_source_term_extensions"}))
+            stack.enter_context(mock.patch.object(
+                retry.TSA, "audit_executable_proof_holes",
+                return_value={"status": "ok", "proofHoles": []}))
+            stack.enter_context(mock.patch.object(
                 retry, "_authenticated_old_traces",
                 return_value=(traces, set(traces), None if old_traces else "no bundle")))
             stack.enter_context(mock.patch.object(
@@ -459,6 +466,28 @@ class MissingTraceRetryTests(unittest.TestCase):
             ))
             self.assertEqual(identity.call_count, 1)  # exact bulk batch
 
+    def test_term_extension_gate_refuses_before_record_render_or_compile(self) -> None:
+        with self.process_fixture() as case:
+            recorder = mock.Mock()
+            compiler = mock.Mock()
+            with mock.patch.object(retry.TSA, "inspect_term_elaboration_boundary",
+                                   return_value={"status": "refused", "reason": "source_local_term_extension",
+                                                 "risks": [{"reason": "source_term_elab_attribute"}]}), \
+                    mock.patch.object(retry.worker, "record_sites", recorder), \
+                    mock.patch.object(retry.worker, "compile_candidate", compiler):
+                result = retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=None)
+            self.assertEqual(result["termElaborationGate"], "refused")
+            self.assertEqual(recorder.call_count, 0)
+            self.assertEqual(compiler.call_count, 0)
+            self.assertEqual(case["db"].execute(
+                "SELECT status,replacement_text,error FROM simp_replacements ORDER BY ordinal"
+            ).fetchall(), [
+                ("render_failed", None, mock.ANY),
+                ("render_failed", None, mock.ANY),
+            ])
+
     def test_refresh_failure_archives_old_trace_and_keeps_command_status(self) -> None:
         with self.process_fixture(old_traces=False) as case:
             site = case["sites"][0]
@@ -637,10 +666,16 @@ class MissingTraceRetryTests(unittest.TestCase):
     def test_blank_or_unsafe_render_is_rejected_before_batch_compile(self) -> None:
         with self.process_fixture(old_traces=True) as case:
             compiler = mock.Mock(return_value=(True, "", None))
+            def audit_candidate(*, source, **_kwargs):
+                if '"by sorry"' in source:
+                    return {"status": "refused", "proofHoles": [{"token": "sorry"}]}
+                return {"status": "ok", "proofHoles": []}
             def rendered(_source, row, _pairs, _traces):
                 return ("   " if row["ordinal"] == 1 else "by sorry"), None
 
             with mock.patch.object(retry.worker, "render_command", side_effect=rendered), \
+                    mock.patch.object(retry.TSA, "audit_executable_proof_holes",
+                                      side_effect=audit_candidate), \
                     mock.patch.object(retry.worker, "compile_candidate", compiler):
                 retry.process_module(
                     case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
@@ -757,7 +792,8 @@ class MissingTraceRetryTests(unittest.TestCase):
         db.execute(retry.COMMAND_SCHEMA)
         db.commit()
         retry._persist_command_result(db, "Mathlib.X", 1, "a" * 64, "pending",
-                                      "compiled_success", "by exact h", None, None)
+                                      "compiled_success", "by exact h", None, None,
+                                      proof_hole_audited=True)
         self.assertEqual(db.execute(
             "SELECT status,replacement_text,error FROM simp_replacements "
             "WHERE module_name='Mathlib.X' AND ordinal=1").fetchone(),

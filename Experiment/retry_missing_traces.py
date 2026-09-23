@@ -36,6 +36,7 @@ sys.path.insert(0, str(ROOT / "test" / "SimpTrace"))
 
 import isolated_trace_compile as isolated  # noqa: E402
 import simp_replacement_worker as worker  # noqa: E402
+import tactic_syntax_ast as TSA  # noqa: E402
 
 
 PLACEHOLDER_RE = re.compile(r"\b(?:sorry|admit)\b")
@@ -414,8 +415,6 @@ def _existing_success_replacements(
     ):
         if not isinstance(text, str) or not text.strip():
             raise RetryError(f"success row has blank replacement: {module}:{ordinal}")
-        if placeholder_token(text):
-            raise RetryError(f"success row contains a proof-hole token: {module}:{ordinal}")
         replacements[int(ordinal)] = text
     return replacements
 
@@ -430,11 +429,13 @@ def _persist_command_result(
     replacement: str | None,
     render_error: str | None,
     compile_error: str | None,
+    *,
+    proof_hole_audited: bool = False,
 ) -> None:
     if result_status == "compiled_success" and (replacement is None or not replacement.strip()):
         raise RetryError("compiled_success requires a nonblank replacement")
-    if replacement is not None and placeholder_token(replacement):
-        raise RetryError("refusing to persist a rendered command with proof-hole token")
+    if result_status == "compiled_success" and not proof_hole_audited:
+        raise RetryError("compiled_success requires an authenticated executable proof-hole AST audit")
     db.execute("BEGIN IMMEDIATE")
     try:
         if result_status == "compiled_success":
@@ -516,11 +517,22 @@ def _render_command(
     rendered, render_error = worker.render_command(source, row, site_pairs, traces)
     if rendered is None or render_error:
         return None, _safe_detail(render_error or "renderer returned no command")
-    if placeholder_token(rendered):
-        return None, "rendered command contains a forbidden proof-hole token"
     if not rendered.strip():
         return None, "renderer returned a blank command"
     return rendered, None
+
+
+def _audit_executable_proof_holes(module: str, candidate: str) -> dict[str, Any]:
+    """Parse candidate code for executable sorry/admit, ignoring comments/strings."""
+    digest = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+    try:
+        inventory = TSA.audit_executable_proof_holes(
+            module=module, source=candidate,
+            expected_source_sha256=digest, repo_root=ROOT,
+        )
+    except (RuntimeError, ValueError) as error:
+        raise RetryError(f"Lean executable proof-hole AST audit failed closed: {error}") from error
+    return inventory
 
 
 def process_module(
@@ -587,6 +599,46 @@ def process_module(
                 "attempted": 0, "recorded": 0, "failed": 0, "skipped": 0,
                 "deferred": 0, "noop": len(no_site_rows),
                 "commandResults": {"noop": len(no_site_rows)}}
+    # A source-local term syntax/elaboration hook can cause an apparently
+    # ordinary generated term to run hidden Meta.Simp.  Refuse the entire
+    # candidate module before recording, compiling, or persisting any
+    # replacement; the authenticated Lean AST gate does not execute or strip
+    # those declarations.
+    try:
+        extension_inventory = TSA.inspect_term_elaboration_boundary(
+            module="Mathlib." + pathlib.PurePosixPath(module_path)
+                .with_suffix("").as_posix().replace("/", ".").removeprefix("Mathlib."),
+            source_path=pinned_path,
+            expected_source_sha256=source_hash,
+            mathlib_root=ROOT / ".lake" / "packages" / "mathlib" / "Mathlib",
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        gate_error = "term-elaboration AST gate failed closed: " + str(error)
+        for _, ordinal, state, _ in effective_target_rows:
+            _persist_command_result(db, module, ordinal, source_hash, state,
+                                    "render_failed", None, gate_error, None)
+        return {"module": module, "status": "committed", "auditRows": len(target_rows),
+                "targetSites": sum(len(by_command.get(ordinal, []))
+                                   for _, ordinal, _, _ in effective_target_rows),
+                "attempted": 0, "recorded": 0, "failed": 0, "skipped": 0,
+                "deferred": 0, "noop": len(no_site_rows),
+                "commandResults": {"noop": len(no_site_rows),
+                                   "render_failed": len(effective_target_rows)},
+                "termElaborationGate": "parse_failed_closed", "error": gate_error}
+    if extension_inventory["status"] != "ok":
+        gate_error = "term-elaboration AST gate refused source-local term extension: " + \
+            json.dumps(extension_inventory["risks"], sort_keys=True)
+        for _, ordinal, state, _ in effective_target_rows:
+            _persist_command_result(db, module, ordinal, source_hash, state,
+                                    "render_failed", None, gate_error, None)
+        return {"module": module, "status": "committed", "auditRows": len(target_rows),
+                "targetSites": sum(len(by_command.get(ordinal, []))
+                                   for _, ordinal, _, _ in effective_target_rows),
+                "attempted": 0, "recorded": 0, "failed": 0, "skipped": 0,
+                "deferred": 0, "noop": len(no_site_rows),
+                "commandResults": {"noop": len(no_site_rows),
+                                   "render_failed": len(effective_target_rows)},
+                "termElaborationGate": "refused", "risks": extension_inventory["risks"]}
     attempted = recorded = failed = skipped = 0
     pending_sites: list[tuple[int, int]] = []
     missing_before_limit = 0
@@ -765,8 +817,14 @@ def process_module(
     # the fast path can validate the exact module containing all of them.
     existing = _existing_success_replacements(db, module)
     baseline = worker.module_with_replacements(source, commands, existing)
-    baseline_ok, baseline_error, _ = worker.compile_candidate(
-        module_path, baseline, module_scratch, 0)
+    baseline_holes = _audit_executable_proof_holes(module, baseline)
+    if baseline_holes["status"] == "ok":
+        baseline_ok, baseline_error, _ = worker.compile_candidate(
+            module_path, baseline, module_scratch, 0)
+    else:
+        baseline_ok = False
+        baseline_error = "unchanged baseline contains executable sorry/admit syntax: " + \
+            json.dumps(baseline_holes["proofHoles"], sort_keys=True)
     diagnostic_counts: dict[str, int] = {}
     rendered_candidates: list[tuple[int, str, str]] = []
     for _, ordinal, original_status, _old_error in effective_target_rows:
@@ -812,14 +870,64 @@ def process_module(
                               **{ordinal: rendered
                                  for ordinal, _, rendered in rendered_candidates}}
         batch_candidate = worker.module_with_replacements(source, commands, batch_replacements)
-        if placeholder_token(batch_candidate):
-            raise RetryError("candidate module contains a forbidden proof-hole token")
+        batch_holes = _audit_executable_proof_holes(module, batch_candidate)
+        if batch_holes["status"] != "ok":
+            # Attribute executable proof-hole syntax only after parser-based
+            # isolation. Comments and strings never enter the AST inventory.
+            # Affected commands become render_failed; clean siblings remain
+            # eligible for the batch compile.
+            clean_candidates: list[tuple[int, str, str]] = []
+            for ordinal, original_status, rendered in rendered_candidates:
+                isolated_candidate = worker.module_with_replacements(
+                    source, commands, {**existing, ordinal: rendered})
+                try:
+                    isolated_holes = _audit_executable_proof_holes(module, isolated_candidate)
+                except RetryError as error:
+                    isolated_holes = {"status": "refused", "proofHoles": [],
+                                      "auditError": str(error)}
+                if isolated_holes["status"] == "ok":
+                    clean_candidates.append((ordinal, original_status, rendered))
+                else:
+                    detail = "rendered command contains executable sorry/admit syntax: " + \
+                        json.dumps(isolated_holes.get("proofHoles", []), sort_keys=True)
+                    if isolated_holes.get("auditError"):
+                        detail += "; " + isolated_holes["auditError"]
+                    _persist_command_result(
+                        db, module, ordinal, source_hash, original_status,
+                        "render_failed", None, _safe_detail(detail), None)
+                    diagnostic_counts["render_failed"] = diagnostic_counts.get("render_failed", 0) + 1
+            rendered_candidates = clean_candidates
+            if rendered_candidates:
+                batch_replacements = {**existing,
+                                      **{ordinal: rendered
+                                         for ordinal, _, rendered in rendered_candidates}}
+                batch_candidate = worker.module_with_replacements(
+                    source, commands, batch_replacements)
+                batch_holes = _audit_executable_proof_holes(module, batch_candidate)
+                if batch_holes["status"] != "ok":
+                    detail = "candidate module proof-hole audit remains ambiguous after isolation: " + \
+                        json.dumps(batch_holes["proofHoles"], sort_keys=True)
+                    for ordinal, original_status, _rendered in rendered_candidates:
+                        _persist_command_result(
+                            db, module, ordinal, source_hash, original_status,
+                            "render_failed", None, _safe_detail(detail), None)
+                        diagnostic_counts["render_failed"] = diagnostic_counts.get("render_failed", 0) + 1
+                    rendered_candidates = []
+        if rendered_candidates:
+            # This exact AST audit covers every persisted candidate; the
+            # compile result alone is not the proof-hole check.
+            if batch_holes["status"] != "ok":
+                raise RetryError("candidate reached compile without a clean executable proof-hole AST audit")
+        else:
+            batch_candidate = ""
+    if rendered_candidates:
         batch_ok, batch_error, _ = worker.compile_candidate(
             module_path, batch_candidate, module_scratch, 1)
         if batch_ok:
             for ordinal, original_status, rendered in rendered_candidates:
                 _persist_command_result(db, module, ordinal, source_hash, original_status,
-                                        "compiled_success", rendered, None, None)
+                                        "compiled_success", rendered, None, None,
+                                        proof_hole_audited=True)
                 diagnostic_counts["compiled_success"] = diagnostic_counts.get(
                     "compiled_success", 0) + 1
         else:
@@ -832,13 +940,13 @@ def process_module(
                 candidate_replacements = {**accepted, ordinal: rendered}
                 candidate = worker.module_with_replacements(
                     source, commands, candidate_replacements)
-                if placeholder_token(candidate):
-                    raise RetryError("candidate module contains a forbidden proof-hole token")
+                _audit_executable_proof_holes(module, candidate)
                 okay, detail, _ = worker.compile_candidate(
                     module_path, candidate, module_scratch, serial)
                 if okay:
                     _persist_command_result(db, module, ordinal, source_hash, original_status,
-                                            "compiled_success", rendered, None, None)
+                                            "compiled_success", rendered, None, None,
+                                            proof_hole_audited=True)
                     accepted[ordinal] = rendered
                     result_status = "compiled_success"
                 else:

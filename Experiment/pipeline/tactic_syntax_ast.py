@@ -187,3 +187,111 @@ def extract_tactic_ancestries(
         result["targetText"] = actual_text
         _annotate_scalar_ranges(result, source_bytes)
     return results
+
+
+def inspect_term_elaboration_boundary(
+    *,
+    module: str,
+    source_path: str | Path,
+    expected_source_sha256: str,
+    mathlib_root: str | Path | None = None,
+    repo_root: str | Path = ROOT,
+    require_pinned_path: bool = True,
+) -> dict[str, Any]:
+    """Fail closed if parsed source defines a term syntax/elaboration hook.
+
+    This inventories Lean's authenticated command AST; it never searches the
+    source text with regular expressions and never executes source commands.
+    Syntax/notation declarations needed by the incremental parser are parsed
+    by the existing extractor.  The source bytes and pinned Mathlib path are
+    checked before the exact bytes are passed to Lean.
+    """
+    path = Path(source_path).resolve()
+    source_bytes = path.read_bytes()
+    try:
+        source_bytes.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise ValueError("module source is not valid UTF-8") from error
+    digest = hashlib.sha256(source_bytes).hexdigest()
+    if digest != expected_source_sha256:
+        raise ValueError("module source SHA-256 does not match authenticated digest")
+    if require_pinned_path:
+        resolved_root = Path(mathlib_root).resolve() if mathlib_root else None
+        _validate_pinned_module(module, path, resolved_root)
+
+    with tempfile.TemporaryDirectory(prefix="lean-term-elab-gate-") as temp_dir:
+        source_snapshot = Path(temp_dir) / path.name
+        source_snapshot.write_bytes(source_bytes)
+        command = [
+            "lake", "env", "lean", "--run", str(EXTRACTOR), module,
+            str(source_snapshot), "--term-elab-gate",
+        ]
+        completed = subprocess.run(
+            command, cwd=Path(repo_root), text=True,
+            capture_output=True, check=False,
+        )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Lean term-elaboration gate refused or failed to parse module: " +
+            (completed.stderr.strip() or completed.stdout.strip())
+        )
+    try:
+        result = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Lean term-elaboration gate returned invalid JSON") from error
+    if not isinstance(result, dict) or result.get("module") != module or \
+            not isinstance(result.get("risks"), list):
+        raise RuntimeError("Lean term-elaboration gate returned malformed inventory")
+    result["moduleSourceSha256"] = digest
+    _annotate_scalar_ranges(result, source_bytes)
+    return result
+
+
+def audit_executable_proof_holes(
+    *,
+    module: str,
+    source: str,
+    expected_source_sha256: str,
+    repo_root: str | Path = ROOT,
+) -> dict[str, Any]:
+    """Find executable sorry/admit syntax in a complete candidate module.
+
+    Lean's authenticated command AST excludes comments and string contents.
+    ``sorry`` is recognized by its parser node; ``admit`` is conservatively
+    recognized as an identifier token. Parser errors are refusals, never a
+    clean audit. This is for generated candidate text, not a replacement for
+    authenticating the original pinned module separately.
+    """
+    try:
+        source_bytes = source.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise ValueError("candidate source is not valid UTF-8") from error
+    digest = hashlib.sha256(source_bytes).hexdigest()
+    if digest != expected_source_sha256:
+        raise ValueError("candidate source SHA-256 does not match authenticated digest")
+    with tempfile.TemporaryDirectory(prefix="lean-proof-hole-audit-") as temp_dir:
+        source_snapshot = Path(temp_dir) / "Candidate.lean"
+        source_snapshot.write_bytes(source_bytes)
+        command = [
+            "lake", "env", "lean", "--run", str(EXTRACTOR), module,
+            str(source_snapshot), "--proof-hole-audit",
+        ]
+        completed = subprocess.run(
+            command, cwd=Path(repo_root), text=True,
+            capture_output=True, check=False,
+        )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Lean proof-hole audit failed closed: " +
+            (completed.stderr.strip() or completed.stdout.strip())
+        )
+    try:
+        result = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Lean proof-hole audit returned invalid JSON") from error
+    if not isinstance(result, dict) or result.get("module") != module or \
+            not isinstance(result.get("proofHoles"), list):
+        raise RuntimeError("Lean proof-hole audit returned malformed inventory")
+    result["moduleSourceSha256"] = digest
+    _annotate_scalar_ranges(result, source_bytes)
+    return result
