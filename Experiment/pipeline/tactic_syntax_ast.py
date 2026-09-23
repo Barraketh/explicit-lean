@@ -658,7 +658,7 @@ def inspect_term_elaboration_boundary(
     repo_root: str | Path = ROOT,
     require_pinned_path: bool = True,
 ) -> dict[str, Any]:
-    """Fail closed if parsed source defines a term syntax/elaboration hook.
+    """Fail closed if parsed source defines an executable syntax/elaboration hook.
 
     This inventories Lean's authenticated command AST; it never searches the
     source text with regular expressions and never executes source commands.

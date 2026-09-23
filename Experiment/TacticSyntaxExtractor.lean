@@ -109,7 +109,9 @@ private def kindString (stx : Syntax) : String := stx.getKind.toString
 
 private partial def hasIdentifier (stx : Syntax) (name : String) : Bool :=
   match stx with
-  | .ident _ value _ _ => value.toString == name
+  | .ident _ value _ _ =>
+    let value := value.toString
+    value == name || value.endsWith ("." ++ name)
   | _ => stx.getArgs.any (fun child => hasIdentifier child name)
 
 private def directCategoryAfterColon (stx : Syntax) : Option String := Id.run do
@@ -123,18 +125,55 @@ private def directCategoryAfterColon (stx : Syntax) : Option String := Id.run do
         if let .ident _ value _ _ := next then return some value.toString
   return none
 
+private partial def categoryAfterColon? (stx : Syntax) : Option String := Id.run do
+  if let some category := directCategoryAfterColon stx then return some category
+  for child in stx.getArgs do
+    if let some category := categoryAfterColon? child then return some category
+  return none
+
 private partial def hasTermCategoryAfterColon (stx : Syntax) : Bool := Id.run do
   if directCategoryAfterColon stx == some "term" then return true
   for child in stx.getArgs do
     if hasTermCategoryAfterColon child then return true
   return false
 
+private partial def hasMacroAttributeSyntax (stx : Syntax) : Bool :=
+  kindString stx == "Lean.Parser.Attr.macro" ||
+    stx.getArgs.any hasMacroAttributeSyntax
+
+private def sourceExtensionAttribute? (command : Syntax) : Option (String × String) := Id.run do
+  let kind := kindString command
+  if kind != "Lean.Parser.Command.declaration" &&
+      kind != "Lean.Parser.Command.attribute" then
+    return none
+  -- These attributes register code that can run while terms, tactics,
+  -- commands, or `do` elements are elaborated.  In particular, a command
+  -- elaborator can invoke Meta.Simp even though no term-level extension is
+  -- declared.  Include the builtin spellings because they register the same
+  -- executable extension points with builtin priority.
+  let attributes : Array (String × String) := #[
+    ("term_elab", "source_term_elab_attribute"),
+    ("builtin_term_elab", "source_term_elab_attribute"),
+    ("command_elab", "source_command_elab_attribute"),
+    ("builtin_command_elab", "source_command_elab_attribute"),
+    ("tactic", "source_tactic_elab_attribute"),
+    ("builtin_tactic", "source_tactic_elab_attribute"),
+    ("macro", "source_macro_attribute"),
+    ("builtin_macro", "source_macro_attribute"),
+    ("doElem_elab", "source_do_elab_attribute"),
+    ("builtin_doElem_elab", "source_do_elab_attribute")]
+  for (attributeName, reason) in attributes do
+    if hasIdentifier command attributeName ||
+        (attributeName == "macro" && hasMacroAttributeSyntax command) then
+      return some (attributeName, reason)
+  return none
+
 private def termElaborationRisk (command : Syntax) : Option String := Id.run do
   let kind := kindString command
-  -- These are command AST nodes, not source-text matches.  The category
-  -- identifier is part of the parsed declaration (or, for macro_rules, the
-  -- quoted term pattern).  Refuse rather than trying to execute/elaborate a
-  -- source-local extension while recording another term.
+  -- These are command AST nodes, not source-text matches.  Refuse rather than
+  -- executing or recompiling source-local extension code while recording a
+  -- replacement.  A command macro/elaborator may run Meta.Simp even though the
+  -- target proof itself contains no term-level extension.
   if kind == "Lean.Parser.Command.syntax" then
     if hasTermCategoryAfterColon command then return some "source_term_syntax"
   -- Notation/mixfix declarations introduce ordinary term syntax through
@@ -147,21 +186,24 @@ private def termElaborationRisk (command : Syntax) : Option String := Id.run do
     return some "source_term_notation"
   if kind == "Lean.Parser.Command.macro" || kind == "Lean.Parser.Command.elab" ||
       kind == "Lean.Parser.Command.elab_rules" then
-    if hasTermCategoryAfterColon command then
-      return some "source_term_macro_or_elaborator"
-  if kind == "Lean.Parser.Command.macro_rules" && hasIdentifier command "term" then
-    return some "source_term_macro_rules"
-  -- A declaration tagged [term_elab ...] can run arbitrary MetaM during
-  -- ordinary term elaboration, including Lean.Meta.Simp.  This structural
-  -- attribute check intentionally fails closed even if the declaration body
-  -- is opaque to this inventory.
-  if (kind == "Lean.Parser.Command.declaration" ||
-      kind == "Lean.Parser.Command.attribute") && hasIdentifier command "term_elab" then
-    return some "source_term_elab_attribute"
-  -- Initializers and run_cmd can register term elaborators through APIs
-  -- instead of the surface `elab`/attribute commands.  Their bodies are code,
-  -- not a declarative syntax tree that this parser-only gate can safely
-  -- evaluate, so neither is executed; both fail closed as extension-capable.
+    -- `command`, `tactic`, and other categories are executable extension
+    -- points too.  Their callbacks run when a candidate module is fully
+    -- recompiled, so category-independent refusal is required here.
+    match categoryAfterColon? command with
+    | some category => return some s!"source_{category}_macro_or_elaborator"
+    | none => return some "source_macro_or_elaborator_unknown_category"
+  if kind == "Lean.Parser.Command.macro_rules" then
+    -- A macro rule's category is encoded in quoted syntax patterns and can
+    -- be any imported or user-defined category.  Keep the old term-specific
+    -- diagnostic label where applicable; every category is refused.
+    if hasIdentifier command "term" then return some "source_term_macro_rules"
+    return some "source_macro_rules_any_category"
+  if let some (_, reason) := sourceExtensionAttribute? command then
+    return some reason
+  -- Initializers and run_cmd can register executable parser/elaboration
+  -- callbacks through APIs instead of the surface `elab`/attribute commands.
+  -- Their bodies are code, not a declarative syntax tree that this parser-only
+  -- gate can safely evaluate, so neither is executed; both fail closed.
   if kind == "Lean.Parser.Command.initialize" ||
       kind == "Lean.Parser.Command.builtin_initialize" ||
       kind == "Lean.Parser.Command.runCmd" || kind == "Lean.runCmd" then
@@ -175,8 +217,21 @@ private partial def inventoryTermElaborationRisks (stx : Syntax) : Array Json :=
       | some (start, stop) => [
           ("startByte", toJson start), ("endByte", toJson stop)]
       | none => []
+    let categoryBearingKind := kindString stx == "Lean.Parser.Command.syntax" ||
+      kindString stx == "Lean.Parser.Command.macro" ||
+      kindString stx == "Lean.Parser.Command.elab" ||
+      kindString stx == "Lean.Parser.Command.elab_rules"
+    let categoryFields := if categoryBearingKind then
+      match categoryAfterColon? stx with
+      | some category => [("category", toJson category)]
+      | none => []
+    else []
+    let attributeFields := match sourceExtensionAttribute? stx with
+      | some (attributeName, _) => [("attribute", toJson attributeName)]
+      | none => []
     risks := risks.push <| Json.mkObj <| [
-      ("kind", toJson (kindString stx)), ("reason", toJson reason)] ++ rangeFields
+      ("kind", toJson (kindString stx)), ("reason", toJson reason)] ++
+      categoryFields ++ attributeFields ++ rangeFields
   for child in stx.getArgs do
     risks := risks ++ inventoryTermElaborationRisks child
   return risks

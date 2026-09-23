@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -442,6 +443,160 @@ def tokenAuditAdmit : Nat := admit
                         command_rows[config_ordinal]["end"]
                     ].decode("utf-8")},
                 )
+
+
+class TermElaborationExtensionGateChecks(unittest.TestCase):
+    def _inspect(self, module: str, source: str) -> dict:
+        temp = tempfile.TemporaryDirectory(prefix="term-extension-category-")
+        self.addCleanup(temp.cleanup)
+        path = Path(temp.name) / "ExtensionFixture.lean"
+        path.write_text(source, encoding="utf-8")
+        return ast.inspect_term_elaboration_boundary(
+            module=module, source_path=path,
+            expected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),
+            repo_root=ast.ROOT, require_pinned_path=False,
+        )
+
+    def test_existing_term_extension_refusals_keep_their_classification(self) -> None:
+        source = '''import Lean
+syntax "hiddenSyntax" : term
+macro "hiddenMacro" : term => `(0)
+macro_rules | `(term| (1 + 0)) => `(1)
+elab "hiddenElab" : term => `(0)
+elab_rules : term | `(hiddenSyntax) => `(0)
+@[term_elab Lean.Parser.Term.ident]
+def hiddenIdentElab : Lean.Elab.Term.TermElab := fun _ _ => do
+  Lean.Meta.Simp.simpGoal (← Lean.Elab.Term.getMainGoal)
+initialize hiddenExtensionRegistrationProbe : IO Unit := pure ()
+run_cmd pure ()
+attribute [term_elab] hiddenIdentElab
+'''
+        result = self._inspect("Mathlib.T77ExistingTermExtensions", source)
+        self.assertEqual(result["status"], "refused", result)
+        self.assertEqual(
+            [risk["reason"] for risk in result["risks"]],
+            [
+                "source_term_syntax",
+                "source_term_macro_or_elaborator",
+                "source_term_macro_rules",
+                "source_term_macro_or_elaborator",
+                "source_term_macro_or_elaborator",
+                "source_term_elab_attribute",
+                "source_command_can_register_term_extension",
+                "source_command_can_register_term_extension",
+                "source_term_elab_attribute",
+            ],
+        )
+
+    def test_command_elaborator_meta_simp_is_refused_before_full_compile(self) -> None:
+        source = '''import Lean
+import Lean.Meta.Tactic.Simp
+open Lean Elab Command
+syntax "t77HiddenCommand" : command
+elab_rules : command
+  | `(t77HiddenCommand) => do
+      liftTermElabM do
+        let termStx ← `(term| 1 + 0)
+        let e ← Lean.Elab.Term.elabTerm termStx none
+        let ctx ← Lean.Meta.Simp.Context.mkDefault
+        let _ ← Lean.Meta.simp e ctx
+      liftIO <| IO.println "T77_COMMAND_ELAB_EXECUTED"
+t77HiddenCommand
+'''
+        with tempfile.TemporaryDirectory(prefix="term-command-elab-compile-") as temp:
+            path = Path(temp) / "CommandElab.lean"
+            path.write_text(source, encoding="utf-8")
+            result = ast.inspect_term_elaboration_boundary(
+                module="Mathlib.T77CommandElabProbe", source_path=path,
+                expected_source_sha256=hashlib.sha256(source.encode()).hexdigest(),
+                repo_root=ast.ROOT, require_pinned_path=False,
+            )
+            self.assertEqual(result["status"], "refused", result)
+            self.assertEqual(
+                [(risk["reason"], risk.get("category")) for risk in result["risks"]],
+                [("source_command_macro_or_elaborator", "command")],
+            )
+
+            # Recompiling the same full source really runs the extension.  The
+            # gate must refuse before the campaign's isolated candidate
+            # compiler reaches this command.
+            compiled = subprocess.run(
+                ["lake", "env", "lean", str(path)], cwd=ast.ROOT,
+                text=True, capture_output=True, check=False, timeout=30,
+            )
+            self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+            self.assertIn("T77_COMMAND_ELAB_EXECUTED", compiled.stdout)
+
+    def test_macro_and_elaborator_commands_are_refused_across_categories(self) -> None:
+        source = '''import Lean
+syntax "t77CommandMacro" : command
+macro "t77CommandMacro" : command => `(command| #check Nat)
+syntax "t77TacticMacro" : tactic
+macro "t77TacticMacro" : tactic => `(tactic| skip)
+syntax "t77CommandMacroRules" : command
+macro_rules
+  | `(t77CommandMacroRules) => `(command| #check Nat)
+syntax "t77TacticMacroRules" : tactic
+macro_rules
+  | `(tactic| t77TacticMacroRules) => `(tactic| skip)
+elab "t77TermElab" : term => `(0)
+elab "t77CommandElab" : command => pure ()
+elab "t77TacticElab" : tactic => throwUnsupportedSyntax
+syntax "t77CommandElabRules" : command
+syntax "t77TacticElabRules" : tactic
+elab_rules : command
+  | `(t77CommandElabRules) => pure ()
+elab_rules : tactic
+  | `(tactic| t77TacticElabRules) => throwUnsupportedSyntax
+'''
+        result = self._inspect("Mathlib.T77ExtensionCategories", source)
+        self.assertEqual(result["status"], "refused", result)
+        self.assertEqual(
+            [(risk["reason"], risk.get("category")) for risk in result["risks"]],
+            [
+                ("source_command_macro_or_elaborator", "command"),
+                ("source_tactic_macro_or_elaborator", "tactic"),
+                ("source_macro_rules_any_category", None),
+                ("source_macro_rules_any_category", None),
+                ("source_term_macro_or_elaborator", "term"),
+                ("source_command_macro_or_elaborator", "command"),
+                ("source_tactic_macro_or_elaborator", "tactic"),
+                ("source_command_macro_or_elaborator", "command"),
+                ("source_tactic_macro_or_elaborator", "tactic"),
+            ],
+        )
+
+    def test_extension_registration_attributes_cover_command_tactic_and_macro(self) -> None:
+        source = '''import Lean
+syntax (name := t77AttributeCommandKind) "t77AttributeCommand" : command
+syntax (name := t77AttributeTacticKind) "t77AttributeTactic" : tactic
+@[command_elab t77AttributeCommandKind]
+def t77CommandExtension : Lean.Elab.Command.CommandElab := fun _ => pure ()
+@[tactic t77AttributeTacticKind]
+def t77TacticExtension : Lean.Elab.Tactic.Tactic := fun _ => pure ()
+attribute [builtin_command_elab t77AttributeCommandKind] t77CommandExtension
+attribute [macro t77AttributeCommandKind] t77CommandExtension
+'''
+        result = self._inspect("Mathlib.T77ExtensionAttributes", source)
+        self.assertEqual(result["status"], "refused", result)
+        self.assertEqual(
+            [(risk["reason"], risk.get("attribute")) for risk in result["risks"]],
+            [
+                ("source_command_elab_attribute", "command_elab"),
+                ("source_tactic_elab_attribute", "tactic"),
+                ("source_command_elab_attribute", "builtin_command_elab"),
+                ("source_macro_attribute", "macro"),
+            ],
+        )
+
+    def test_passive_command_and_tactic_syntax_remain_allowed(self) -> None:
+        source = '''import Lean
+syntax "t77ParserOnlyCommand" : command
+syntax "t77ParserOnlyTactic" : tactic
+'''
+        result = self._inspect("Mathlib.T77ParserOnly", source)
+        self.assertEqual(result["status"], "ok", result)
+        self.assertEqual(result["risks"], [])
 
 
 if __name__ == "__main__":
