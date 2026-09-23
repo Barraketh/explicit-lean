@@ -129,6 +129,7 @@ inductive Event where
        (localOrigin : Origin) (proj : String)
        (derivation? : Option RuleDerivation := none)
        (sourceValue? : Option Expr := none)
+       (sourceTerm? : Option SourceTermValue := none)
   /-- A simproc firing (or any procedure-computed equation). -/
   | eq (pos : Pos) (source? : Option Name) (before after : Expr)
        (ctx : EvCtx) (side : Array SideRec)
@@ -284,12 +285,12 @@ mutual
 partial def Event.instantiateAssignments (ev : Event) : MetaM Event := do
   match ev with
   | .rw pos origin inv prop? before after ctx args side source localOrigin proj derivation?
-      sourceValue? =>
+      sourceValue? sourceTerm? =>
     return .rw pos origin inv prop?
       (← instantiateEventAssignments before) (← instantiateEventAssignments after)
       (← ctx.instantiateAssignments) (← args.mapM instantiateEventAssignments)
       (← side.mapM SideRec.instantiateAssignments) source localOrigin proj derivation?
-      (← sourceValue?.mapM instantiateEventAssignments)
+      (← sourceValue?.mapM instantiateEventAssignments) sourceTerm?
   | .eq pos source before after ctx side =>
     return .eq pos source (← instantiateEventAssignments before)
       (← instantiateEventAssignments after) (← ctx.instantiateAssignments)
@@ -325,7 +326,7 @@ partial def SideRec.instantiateAssignments (side : SideRec) : MetaM SideRec := d
 
 partial def Event.hasAssignablePayload (ev : Event) : MetaM Bool := do
   match ev with
-  | .rw _ _ _ _ before after ctx args side _ _ _ _ sourceValue? => do
+  | .rw _ _ _ _ before after ctx args side _ _ _ _ sourceValue? sourceTerm? => do
     if ← hasAssignableTermOrLevelMVar before then return true
     if ← hasAssignableTermOrLevelMVar after then return true
     if ← ctx.hasAssignablePayload then return true
@@ -333,7 +334,9 @@ partial def Event.hasAssignablePayload (ev : Event) : MetaM Bool := do
     for sideRec in side do
       if ← SideRec.hasAssignablePayload sideRec then return true
     if let some value := sourceValue? then
-      hasAssignableTermOrLevelMVar value
+      if ← hasAssignableTermOrLevelMVar value then return true
+    if let some value := sourceTerm? then
+      hasAssignableTermOrLevelMVar value.expr
     else pure false
   | .eq _ _ before after ctx side => do
     if ← hasAssignableTermOrLevelMVar before then return true
@@ -427,9 +430,9 @@ def RuleDerivation.strip (base : Pos) (d : RuleDerivation) : RuleDerivation :=
     simproc? := d.simproc?.map (SimprocDerivation.strip base) }
 
 partial def Event.rebase (base : Pos) (ancestors : Array BinderSlot := #[]) : Event → Event
-  | .rw p o inv pr b a c args side src lo pj d sourceValue? =>
+  | .rw p o inv pr b a c args side src lo pj d sourceValue? sourceTerm? =>
     .rw (base ++ p) o inv pr b a (c.rebase base ancestors) args side src lo pj
-      (d.map (RuleDerivation.rebase base)) sourceValue?
+      (d.map (RuleDerivation.rebase base)) sourceValue? sourceTerm?
   | .eq p s b a c side => .eq (base ++ p) s b a (c.rebase base ancestors) side
   | .defeq p k n b a c => .defeq (base ++ p) k n b a (c.rebase base ancestors)
   | .introCtx p f c i =>
@@ -454,8 +457,8 @@ def Event.pos : Event → Pos
 
 /-- Replace an event's position. -/
 def Event.reposition (q : Pos) : Event → Event
-  | .rw _ o inv pr b a c args side src lo pj d sourceValue? =>
-    .rw q o inv pr b a c args side src lo pj d sourceValue?
+  | .rw _ o inv pr b a c args side src lo pj d sourceValue? sourceTerm? =>
+    .rw q o inv pr b a c args side src lo pj d sourceValue? sourceTerm?
   | .eq _ s b a c side => .eq q s b a c side
   | .defeq _ k n b a c => .defeq q k n b a c
   | .introCtx _ f c i => .introCtx q f c i
@@ -474,9 +477,9 @@ def Event.strip (base : Pos) : Event → Event
     else
       let q := p.extract base.size p.size
       match ev with
-      | .rw _ o inv pr b a c args side src lo pj d sourceValue? =>
+      | .rw _ o inv pr b a c args side src lo pj d sourceValue? sourceTerm? =>
         .rw q o inv pr b a (c.strip base) args side src lo pj
-          (d.map (RuleDerivation.strip base)) sourceValue?
+          (d.map (RuleDerivation.strip base)) sourceValue? sourceTerm?
       | .eq _ s b a c side => .eq q s b a (c.strip base) side
       | .defeq _ k n b a c => .defeq q k n b a (c.strip base)
       | .introCtx _ f c i =>

@@ -538,21 +538,22 @@ def derivationFor (_ref : TraceRef) (o : Origin) (constructionOrigin : Origin)
 def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     (thm : SimpTheorem) (numExtraArgs : Nat) (rflOnly : Bool) :
     Simp.SimpM (Option (Simp.Result ×
-      Option (RuleDerivation × Pos × Expr × Expr × Option Expr))) := do
+      Option (RuleDerivation × Pos × Expr × Expr × Option Expr × Option SourceTermValue))) := do
   withNewMCtxDepth do
     -- A discharger can run nested simp while an enclosing rewrite already has
     -- pending side records. Only this candidate's appended suffix is checked.
     let pendingSideStart := (← ref.get).pendingSide.size
     let val ← thm.getValue
     let sourceInfo? ← sourceArgInfo? ref thm.origin
-    -- Snapshot the source elaboration *before* matcher unification can fill
-    -- any metavariables from the redex. The expression may still contain
-    -- implicit/typeclass metavariables that ordinary elaboration resolves from
-    -- the matched proposition; these remain internal and are never printed.
+    -- Reopen only the exact parser-term snapshot captured before stock simp.
+    -- Implicit source metavariables are permitted here: matching may solve
+    -- them, but explicit-binder holes are rejected by `hasExplicitSourceHole`.
     let sourceValue? ← match thm.origin with
-      | .stx .. => do
-        let value ← instantiateMVars val
-        if ← hasExplicitSourceHole value then pure none else pure (some value)
+      | .stx .. => match sourceInfo?.bind (·.termValue?) with
+        | some value => do
+          let value ← value.instantiate
+          if ← hasExplicitSourceHole value then pure none else pure (some value)
+        | none => pure none
       | _ => pure none
     let type ← inferType val
     let (xs, bis, type) ← forallMetaTelescopeReducing type
@@ -622,14 +623,15 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
     -- Resolve only assignments Lean made while matching/synthesizing the
     -- source theorem, without reconstructing or appending any argument. Do not
     -- let metavariable ids created at this local depth escape into the event.
-    let sourceValue? ← match thm.origin with
+    let sourceTerm? ← match thm.origin with
       | .stx .. => match sourceValue? with
         | some value => do
-          let value ← instantiateMVars value
           let value ← instantiateSourceValueLevels value
-          if ← hasAssignableTermOrLevelMVar value then pure none
-          else pure (some value)
+          if ← hasExplicitSourceHole value then pure none
+          else SourceTermValue.capture? value
         | none => pure none
+      | _ => pure none
+    let sourceValue? ← match thm.origin with
       | .fvar fvarId => do
         -- Keep the exact theorem application simp used for a local rewrite.
         -- This validator-only evidence is never serialized; the source-facing
@@ -662,7 +664,7 @@ def tryTheoremOperational? (ref : TraceRef) (_tag : String) (e : Expr)
       -- temporary-depth payload escape into a trace event.
       return some (result, none)
     return some (result, some (derivation, redexPos, coreSnapshot, rhsSnapshot,
-      sourceValue?))
+      sourceValue?, sourceTerm?))
 
 def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
     (tree : SimpTheoremTree) (erased : PHashSet Origin) (rflOnly : Bool) :
@@ -678,7 +680,7 @@ def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
     let pendingSideStart := (← ref.get).pendingSide.size
     if let some (result, traceData?) ←
         tryTheoremOperational? ref tag e thm extra rflOnly then
-      if let some (derivation, pos, before, after, sourceValue?) := traceData? then
+      if let some (derivation, pos, before, after, sourceValue?, sourceTerm?) := traceData? then
         let evCtx ← captureEvCtx ref
         let pending := (← ref.get).pendingSide
         let sides := pending.extract (min pendingSideStart pending.size) pending.size
@@ -690,7 +692,7 @@ def rewriteOperational? (ref : TraceRef) (tag : String) (e : Expr)
           resolveStxOrigin thm.origin ((sourceInfo?.map (·.headLocal)).getD false)
         let prop? ← propFlag? resolved result.expr evCtx.lctx evCtx.insts
         recordEvent ref (.rw pos thm.origin (inv != rinv) prop? before after evCtx
-          rargs sides none resolved rproj (some derivation) sourceValue?)
+          rargs sides none resolved rproj (some derivation) sourceValue? sourceTerm?)
       else
         -- The theorem fired, but the temporary-depth trace payload did not
         -- pass its liveness gate. Preserve simp's result and omit that event.

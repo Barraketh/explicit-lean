@@ -238,7 +238,7 @@ partial def eventToStep (ur : IO.Ref Unresolved)
     (contextualFVars : Array (FVarId × Nat))
     (ev : Event) : MetaM (Option Step) := do
   match ev with
-  | .rw pos o inv prop? before after c args side src? localO proj derivation? _sourceValue? =>
+  | .rw pos o inv prop? before after c args side src? localO proj derivation? _sourceValue? _sourceTerm? =>
     let beforePP ← ppIn c before
     let afterPP ← ppIn c after
     -- `dir` still comes from the written syntax, which is what carries a
@@ -401,8 +401,8 @@ Stock `mkSimpContext` keeps the original `Syntax` in every `Origin.stx`, but
 its private `elabSimpArgs` result is not exposed.  Register the source facts
 from the parser nodes before invoking stock elaboration.  IDs are assigned in
 the source argument list (site-local), and origins are joined later by their
-exact source range.  This is intentionally not theorem-table enumeration and
-does not retain an elaborated term. -/
+exact source range.  For lemma arguments, an exact elaboration snapshot is also
+retained in memory for validation only; it is omitted from trace JSON. -/
 
 def scalarOffsetOfByte (source : String) (byteIdx : Nat) : Nat :=
   Id.run do
@@ -425,14 +425,28 @@ def sourceIdentText (stx : Syntax) : String :=
   | .ident _ rawVal _ _ => rawVal.toString
   | _ => stx.getId.toString
 
-def sourceHeadIdentity? (term : Syntax) : TacticM (Option (String × Option Name × Bool)) := do
+/- Re-elaborate this one parser term only as validator evidence. The tactic
+state is restored immediately, and expressions containing unresolved term or
+universe metavariables are not retained. This keeps exact source applications
+distinct from applications simp may add while building a rewrite theorem. -/
+def exactSourceTermValue? (term : Syntax) : TacticM (Option SourceTermValue) := do
+  let saved ← saveState
+  let result? ← try
+    let value ← runTermElab do
+      let value ← Term.elabTermAndSynthesize term none
+      SourceTermValue.capture? value
+    pure value
+  catch _ => pure none
+  saved.restore (restoreInfo := true)
+  return result?
+
+def sourceHeadIdentity? (term : Syntax) :
+    TacticM (Option (String × Option Name × Bool)) := do
   let some head := firstIdent? term | return none
   -- Resolve only this source head, never the complete argument.  The local
   -- probe is diagnostic-free and gives us the local-vs-declaration bit before
-  -- stock simp elaborates the argument.  Full-term re-elaboration is
-  -- intentionally forbidden here: projections such as `(h c).1` contain
-  -- synthetic field identifiers that emit diagnostics despite being accepted
-  -- by stock simp.
+  -- stock simp elaborates the argument. Exact term capture is performed
+  -- separately by `exactSourceTermValue?` in a restored tactic state.
   let localExpr? ← runTermElab (Lean.Elab.Term.isLocalIdent? head)
   if localExpr?.isSome then
     -- A hygienic local identifier can carry a generated Name in Syntax.  The
@@ -459,13 +473,14 @@ def registerSourceArgs (stx : Syntax) : TacticM (Array SourceArg) := do
     let head? := headInfo?.map (·.1)
     let headName? := headInfo?.map (fun h => h.2.1) |>.join
     let headLocal := headInfo?.map (fun h => h.2.2) |>.getD false
+    let termValue? ← if isLemma then exactSourceTermValue? term else pure none
     let direction := if isLemma && !arg[1].isNone then "rev" else "fwd"
     let kind := if isLemma then "simp-lemma" else arg.getKind.toString
     result := result.push {
       argId := i, startChar := scalarOffsetOfByte source startByte,
       endChar := scalarOffsetOfByte source endByte,
       startByte, endByte,
-      direction, kind, head?, headName?, headLocal }
+      direction, kind, head?, headName?, headLocal, termValue? }
   return result
 
 /-! ### Locations -/
@@ -700,9 +715,6 @@ instance synthesis, side evidence, and final closure must handle. This
 expression is validator-only and is never serialized. -/
 def rwStatementFromValue? (value : Expr) (prop? : Option Bool) :
     MetaM (Option (Expr × Expr × Array Expr)) := do
-  -- Do not let ambient matching fill holes in an incompletely elaborated source
-  -- argument. Only an exact elaborated term is suitable as source evidence.
-  if ← hasAssignableMVar value then return none
   let (mvars, _, _) ← forallMetaTelescope (← inferType value)
   -- A simp source argument such as `NeZero.ne _` is elaborated into a
   -- telescope-valued rewrite theorem. Its explicit placeholder is abstracted
@@ -760,6 +772,7 @@ Returns `none` on success, or a classified reason.
 def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
     (prop? : Option Bool) (before after : Expr) (c : EvCtx)
     (sides : Array SideRec) (proj : String) (sourceValue? : Option Expr)
+    (sourceTerm? : Option SourceTermValue := none)
     (localEvidence : Bool := false) :
     MetaM (Option String) :=
   withLCtx c.lctx c.insts do
@@ -779,8 +792,12 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
             unless (← getLCtx).contains fvarId && proof.containsFVar fvarId do
               return some s!"unreadable_local_evidence:{name}"
           | _, _ => return some s!"unreadable_local_evidence:{name}"
-        let statement? ← match sourceValue? with
-          | some value => rwStatementFromValue? value prop?
+        let statement? ← if localEvidence then
+          rwStatement? o args prop? proj
+        else match sourceTerm? with
+          | some sourceTerm => do
+            let value ← sourceTerm.instantiate
+            rwStatementFromValue? value prop?
           | none => rwStatement? o args prop? proj
         let some (lhs, rhs, _) := statement?
           -- No statement to read means the step cannot be verified at all.
@@ -883,14 +900,18 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
         -- proposition replay and incorrectly classified rules such as
         -- `Std.le_refl`, `exists_apply_eq_apply`, and quantified local evidence.
         let lhsOnly ← withoutModifyingState do
-          let statement? ← if localEvidence then
-              -- Replay names the local, not the recorder's instantiated proof
-              -- snapshot. Validate that the local telescope itself can recover
-              -- every explicit binder from the selected rewrite side.
-              rwStatement? o args prop? proj
-            else match sourceValue? with
-              | some value => rwStatementFromValue? value prop?
-              | none => rwStatement? o args prop? proj
+          -- For simp arguments, sourceValue is an exact elaboration of the
+          -- parser term whose source span is persisted in sourceArgs; it is
+          -- not the theorem application stock simp may construct from it.
+          -- For local evidence there is no source term, so replay must close
+          -- from the named local and its recorded args alone.
+          let (statement?, sourceValueForClosure?) ← if localEvidence then
+              pure (← rwStatement? o args prop? proj, none)
+            else match sourceTerm? with
+              | some sourceTerm => do
+                let value ← sourceTerm.instantiate
+                pure (← rwStatementFromValue? value prop?, some value)
+              | none => pure (← rwStatement? o args prop? proj, none)
           let some (l, r, unf) := statement? | pure false
           -- The side `rw` matches against, in the recorded direction. Keep the
           -- match assignments alive through the same instance, side-goal and
@@ -926,6 +947,8 @@ def checkRwStep (o : Origin) (args : Array Expr) (inv : Bool)
                 else pure (!sideIds.contains mid)
               | _ => pure false
             ExplicitLean.ExplicitRw.closeLemmaMVars 0 m!"`{name}`" remaining
+            if let some value := sourceValueForClosure? then
+              if ← hasAssignableTermOrLevelMVar value then return false
             pure true
           catch _ => pure false
         unless lhsOnly do
@@ -940,23 +963,25 @@ mutual
 partial def classifyEventTree (ur : IO.Ref Unresolved) (ev : Event) :
     MetaM ValidationVerdict := do
   match ev with
-  | .rw _ o inv prop? b a c args sides _ lo pj derivation? sourceValue? =>
+  | .rw _ o inv prop? b a c args sides _ lo pj derivation? sourceValue? sourceTerm? =>
     let sourceKind? := derivation?.bind fun d => d.source?
     let sourceArgId? := derivation?.bind fun d => d.argId?
     let sourceMarked := sourceKind? == some "simp-argument"
     let localEvidenceMarked := sourceKind? == some "local-evidence"
     let sourceError? :=
       if sourceMarked && sourceArgId?.isNone then some "unauthenticated_source_application"
-      else if sourceMarked && sourceValue?.isNone then some "missing_source_application"
+      else if sourceMarked && sourceTerm?.isNone then some "missing_source_application"
       else if localEvidenceMarked && sourceValue?.isNone then some "missing_local_evidence"
-      else if !sourceMarked && !localEvidenceMarked && sourceValue?.isSome then
+      else if !sourceMarked && !localEvidenceMarked
+          && (sourceValue?.isSome || sourceTerm?.isSome) then
         some "untrusted_source_application"
       else none
     let reason? ← match sourceError? with
       | some reason => pure (some reason)
       | none => do
-        let value? := if sourceMarked || localEvidenceMarked then sourceValue? else none
-        checkRwStep (resolvedOrigin o lo) args inv prop? b a c sides pj value?
+        checkRwStep (resolvedOrigin o lo) args inv prop? b a c sides pj
+          (if localEvidenceMarked then sourceValue? else none)
+          (if sourceMarked then sourceTerm? else none)
           localEvidenceMarked
     if let some reason := reason? then ur.modify (·.add reason)
     let sideVerdicts ← sides.mapM fun sd => classifyEventArray ur sd.events

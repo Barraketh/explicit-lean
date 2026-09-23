@@ -25,6 +25,10 @@ example (x : ℝ) (hx : x < 0) :
     (if 0 ≤ x then (1 : ℝ) else 0) = 0 := by
   simp_trace only [if_neg (not_le.mpr hx)] =>trace "SOURCE_APPLIED_IF_NEG_TRACE_PATH"
 
+example (P : Prop) (hp : P) (f g : Nat → Nat)
+    (h : P → ∀ n, f n = g n) (n : Nat) : f n = g n := by
+  simp_trace only [(h hp)] =>trace "SOURCE_APPLIED_LOCAL_TRACE_PATH"
+
 example (P : Prop) [Decidable P] (h : ¬ P) (a b : Nat)
     (hEq : (if P then a else b) = a) : b = a := by
   simp_trace (discharger := assumption) only [if_neg] at hEq =>trace "SOURCE_APPLIED_BARE_IF_NEG_TRACE_PATH"

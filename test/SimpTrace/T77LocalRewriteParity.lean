@@ -93,6 +93,55 @@ run_cmd do
 
 run_cmd do
   Lean.Elab.Command.liftTermElabM do
+    withLocalDeclD `f (← mkArrow (mkConst ``Nat) (mkConst ``Nat)) fun f => do
+      withLocalDeclD `g (← mkArrow (mkConst ``Nat) (mkConst ``Nat)) fun g => do
+        withLocalDeclD `n (mkConst ``Nat) fun n => do
+          let p ← mkEq n (mkNatLit 0)
+          let q ← mkEq n (mkNatLit 1)
+          withLocalDeclD `hp p fun hp => do
+            withLocalDeclD `hq q fun hq => do
+              let lhs := mkApp f n
+              let rhs := mkApp g n
+              let hType ← mkForallFVars #[n, hp, hq] (← mkEq lhs rhs)
+              withLocalDeclD `h hType fun h => do
+                let sourceProof := mkAppN h #[n, hp, hq]
+                let lctx ← getLCtx
+                let ctx : EvCtx := { lctx := lctx, insts := (← getLocalInstances) }
+                let side (goal : Expr) (close : String) : SideRec :=
+                  .mk goal #[] (some close) ctx #[] goal (some goal)
+                let sideP := side p "assumption:hp"
+                let sideQ := side q "assumption:hq"
+                let before := mkApp f n
+                let after := mkApp g n
+                let correct ← checkRwStep (.fvar h.fvarId!) #[] false none
+                  before after ctx #[sideP, sideQ] "" (some sourceProof)
+                  (localEvidence := true)
+                unless correct.isNone do
+                  throwError "ordered typed side evidence was rejected: {correct}"
+                let reversed ← checkRwStep (.fvar h.fvarId!) #[] false none
+                  before after ctx #[sideQ, sideP] "" (some sourceProof)
+                  (localEvidence := true)
+                unless reversed.any (String.startsWith · "unassigned_explicit_argument:") do
+                  throwError "reversed proof side evidence was accepted: {reversed}"
+                let reused ← checkRwStep (.fvar h.fvarId!) #[] false none
+                  before after ctx #[sideP, sideP] "" (some sourceProof)
+                  (localEvidence := true)
+                unless reused.any (String.startsWith · "unassigned_explicit_argument:") do
+                  throwError "reused proof side evidence was accepted: {reused}"
+                let targetArg ← mkFreshExprMVar (mkConst ``Nat)
+                let varBefore := mkApp f targetArg
+                let varAfter := mkApp g targetArg
+                let failedWithMVar ← checkRwStep (.fvar h.fvarId!) #[] false none
+                  varBefore varAfter ctx #[sideQ, sideP] "" (some sourceProof)
+                  (localEvidence := true)
+                unless failedWithMVar.isSome do
+                  throwError "validation with an unresolved caller metavariable unexpectedly passed"
+                let targetAfter ← instantiateMVars targetArg
+                unless targetAfter == targetArg do
+                  throwError "failed side validation leaked a caller metavariable assignment"
+
+run_cmd do
+  Lean.Elab.Command.liftTermElabM do
     withLocalDeclD `α (mkSort (Level.succ Level.zero)) fun α => do
       let fnTy ← mkArrow α α
       withLocalDeclD `i fnTy fun i => do

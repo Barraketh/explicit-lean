@@ -9,12 +9,14 @@ types on purpose.  Nothing here is imported by translated Mathlib source.
 module
 
 public meta import Lean
+public meta import Lean.Meta.AbstractMVars
 
 public meta section
 
 namespace ExplicitLean.SimpTrace
 
 open Lean
+open Lean.Meta
 
 /-- A position is a list of child indices from the root of the location, using
 the `SubExpr.Pos` child convention described in the spec.  We keep the explicit
@@ -112,6 +114,40 @@ declaration/local identity observed at registration time.  `startChar` and
 `endChar` are Unicode-scalar source positions (end exclusive); the internal
 byte range is retained only for joining `Origin.stx`, so repeated argument text
 remains distinguishable. -/
+structure SourceTermValue where
+  /-- Universe parameters replacing elaborator metavariables at capture time. -/
+  levelParams : Array Name
+  /-- Number of elaborator metavariables abstracted into `expr`'s lambda. -/
+  numMVars : Nat
+  /-- A lambda-abstracted elaboration of the exact parser term. -/
+  expr : Expr
+  deriving Inhabited, Repr
+
+namespace SourceTermValue
+
+/-- Abstract the term-local expression and universe metavariables, rejecting
+anything owned by an enclosing elaboration context. -/
+def capture? (value : Expr) : MetaM (Option SourceTermValue) := do
+  let abstracted ← abstractMVars value
+  if abstracted.expr.hasExprMVar || abstracted.expr.hasLevelMVar then
+    return none
+  return some {
+    levelParams := abstracted.paramNames
+    numMVars := abstracted.mvars.size
+    expr := abstracted.expr
+  }
+
+/-- Reopen an exact source-term snapshot with fresh metavariables in the
+current validation context. The captured expression itself contains no
+metavariable IDs, so it is safe to retain across temporary MetaM contexts. -/
+def instantiate (snapshot : SourceTermValue) : MetaM Expr := do
+  let levels ← snapshot.levelParams.mapM fun _ => mkFreshLevelMVar
+  let expr := snapshot.expr.instantiateLevelParamsArray snapshot.levelParams levels
+  let (_, _, value) ← lambdaMetaTelescope expr (some snapshot.numMVars)
+  return value
+
+end SourceTermValue
+
 structure SourceArg where
   argId      : Nat
   startChar  : Nat
@@ -122,6 +158,9 @@ structure SourceArg where
   /-- Internal elaborated identity; omitted by the wire representation. -/
   headName?  : Option Name := none
   headLocal  : Bool := false
+  /-- Exact parser-term elaboration, with its temporary metavariables
+  abstracted; validation-only and omitted by the wire representation. -/
+  termValue? : Option SourceTermValue := none
   /-- Parser byte range used only for the in-memory `Origin.stx` join. -/
   startByte  : Nat := 0
   endByte    : Nat := 0
@@ -342,6 +381,9 @@ def RuleDerivation.toJson (d : RuleDerivation) : String :=
 mutual
 
 partial def Step.toJson (s : Step) : String :=
+  let sourceBacked := match s.derivation? with
+    | some derivation => derivation.source? == some "simp-argument"
+    | none => false
   obj #[
     ("kind", some (str s.kind)),
     ("pos", some (posJson s.pos)),
@@ -349,7 +391,11 @@ partial def Step.toJson (s : Step) : String :=
     ("dir", s.dir?.map str),
     ("prop", s.prop?.map str),
     ("local", s.local?.map LocalRef.toJson),
-    ("args", if s.args.isEmpty then none else some (strArray s.args)),
+    -- A source-backed step is replayed from its exact `sourceArgs` span, not
+    -- from printer-reconstructed expressions. Keep recorder-side validation
+    -- arguments internal so a hidden/discharger-supplied proof cannot look
+    -- like part of the user's source spelling.
+    ("args", if sourceBacked || s.args.isEmpty then none else some (strArray s.args)),
     ("lhs", s.lhs?.map str),
     ("rhs", s.rhs?.map str),
     ("by", s.by_?.map str),

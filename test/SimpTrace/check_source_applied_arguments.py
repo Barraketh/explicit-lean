@@ -19,12 +19,14 @@ MARKERS = {
     "GLOBAL": "SOURCE_APPLIED_GLOBAL_TRACE_PATH",
     "METHOD": "SOURCE_APPLIED_METHOD_TRACE_PATH",
     "IF_NEG": "SOURCE_APPLIED_IF_NEG_TRACE_PATH",
+    "LOCAL": "SOURCE_APPLIED_LOCAL_TRACE_PATH",
     "BARE_IF_NEG": "SOURCE_APPLIED_BARE_IF_NEG_TRACE_PATH",
 }
 CALLS = {
     "GLOBAL": 'simp_trace only [mul_inv_cancel_left₀ ha] =>trace "SOURCE_APPLIED_GLOBAL_TRACE_PATH"',
     "METHOD": 'simp_trace only [hf.eq_iff] =>trace "SOURCE_APPLIED_METHOD_TRACE_PATH"',
     "IF_NEG": 'simp_trace only [if_neg (not_le.mpr hx)] =>trace "SOURCE_APPLIED_IF_NEG_TRACE_PATH"',
+    "LOCAL": 'simp_trace only [(h hp)] =>trace "SOURCE_APPLIED_LOCAL_TRACE_PATH"',
     "BARE_IF_NEG": 'simp_trace (discharger := assumption) only [if_neg] at hEq =>trace "SOURCE_APPLIED_BARE_IF_NEG_TRACE_PATH"',
 }
 
@@ -56,6 +58,8 @@ def render_trace(
         derivation.get("source") != "simp-argument" or derivation.get("argId") is None
     ):
         raise AssertionError(f"rewrite lacks direct source-argument identity: {step!r}")
+    if derivation.get("source") == "simp-argument" and "args" in step:
+        raise AssertionError(f"source-backed replay duplicated validator args: {step!r}")
     # Recovered source applications are validation evidence only. The exact
     # source term remains the renderer's spelling and args are not duplicated.
     rendered, _ = R.render_trace(
@@ -93,6 +97,7 @@ def main() -> None:
         "GLOBAL": "mul_inv_cancel_left₀ ha",
         "METHOD": "hf.eq_iff",
         "IF_NEG": "if_neg (not_le.mpr hx)",
+        "LOCAL": "(h hp)",
         "BARE_IF_NEG": "if_neg",
     }
     for name, term in expected_terms.items():
@@ -109,6 +114,89 @@ def main() -> None:
     replayed = run_dir / "SourceAppliedArgumentsReplayed.lean"
     replayed.write_text(replay_source, encoding="utf-8")
     run_lean(replayed)
+
+    # A source entry `[h]` is not the application `(h hp)`. If simp discharges
+    # h's explicit proof binder, that evidence must be the serialized ordered
+    # side trace—not an inferred application hidden in validator-only state.
+    split_trace = run_dir / "split-local.json"
+    split_source = run_dir / "SplitLocalRecorded.lean"
+    split_source.write_text(
+        f"""import ExplicitLean.SimpTrace
+import ExplicitLean.ExplicitRw
+
+namespace ExplicitLean.SimpTrace.SourceAppliedArguments
+
+example (P : Prop) (hp : P) (f g : Nat → Nat)
+    (h : P → ∀ n, f n = g n) (n : Nat) : f n = g n := by
+  simp_trace (discharger := assumption) only [h] =>trace \"{split_trace.as_posix()}\"
+
+end ExplicitLean.SimpTrace.SourceAppliedArguments
+""",
+        encoding="utf-8",
+    )
+    run_lean(split_source)
+    split_raw = json.loads(split_trace.read_text(encoding="utf-8"))
+    split_step = split_raw["locations"][0]["steps"][0]
+    if "sourceValue" in split_step or "sourceValue?" in split_step or "args" in split_step:
+        raise AssertionError(f"split source leaked validator-only application data: {split_step!r}")
+    split_derivation = split_step.get("derivation", {})
+    if split_derivation.get("source") != "simp-argument" or split_derivation.get("argId") != 0:
+        raise AssertionError(f"split term was not bound to exact source argument h: {split_step!r}")
+    if not split_step.get("side"):
+        raise AssertionError(f"bare h should carry its explicit proof as side evidence: {split_step!r}")
+    split_call = (
+        f'simp_trace (discharger := assumption) only [h] =>trace "{split_trace.as_posix()}"'
+    )
+    split_text = split_source.read_text(encoding="utf-8")
+    split_replay_source, _ = R.render_trace(
+        {"schema": "simp-trace-v2", "site": {"sourceArgs": split_raw["sourceArgs"]},
+         "locations": split_raw["locations"]},
+        source_text=split_text,
+    )
+    if len(split_replay_source) != 1:
+        raise AssertionError(f"expected one split-argument replay, got {split_replay_source!r}")
+    split_replay_text = split_text.replace(split_call, split_replay_source[0])
+    if split_replay_text == split_text:
+        raise AssertionError("split-argument source call was not replaced for replay")
+    split_replay = run_dir / "SplitLocalReplayed.lean"
+    split_replay.write_text(split_replay_text, encoding="utf-8")
+    run_lean(split_replay)
+
+    # Dropping the persisted side proof must not leave an apparently valid
+    # source application `h` that silently relies on the validator snapshot.
+    split_without_side = copy.deepcopy(split_raw)
+    split_without_side["locations"][0]["steps"][0].pop("side", None)
+    try:
+        R.render_trace(
+            {"schema": "simp-trace-v2", "site": {"sourceArgs": split_without_side["sourceArgs"]},
+             "locations": split_without_side["locations"]},
+            source_text=split_text,
+        )
+    except R.RenderError:
+        print("  bare h without persisted proof side: renderer rejected")
+    else:
+        raise AssertionError("renderer accepted bare h without its persisted proof side")
+
+    # Even outside the trace renderer, ordinary Lean replay `[h]` cannot
+    # discharge the explicit `P` proof binder.
+    split_missing_proof = run_dir / "SplitLocalMissingProof.lean"
+    split_missing_proof.write_text(
+        """import ExplicitLean.ExplicitRw
+
+namespace ExplicitLean.SimpTrace.SourceAppliedArguments
+
+example (P : Prop) (hp : P) (f g : Nat → Nat)
+    (h : P → ∀ n, f n = g n) (n : Nat) : f n = g n := by
+  explicit_rw [h at [0, 1]]
+
+end ExplicitLean.SimpTrace.SourceAppliedArguments
+""",
+        encoding="utf-8",
+    )
+    replay_failure = run_lean(split_missing_proof, success=False)
+    if "unassigned argument" not in (replay_failure.stdout + replay_failure.stderr):
+        raise AssertionError("ordinary explicit_rw [h] did not expose its missing proof binder")
+    print("  explicit_rw [h] without recorded proof side: compile rejected")
 
     # The source-backed bare `if_neg` has no proof application in the source;
     # its only proof is the ordered side trace. Removing it must not result in
