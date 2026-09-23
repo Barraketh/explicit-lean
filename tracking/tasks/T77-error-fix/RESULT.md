@@ -374,13 +374,16 @@ logs/completion/exit markers are preserved under `prebatch-79b2f6a` names.
 Both resumed from their existing databases at the fast-path commit, reusing
 already authenticated site traces and completed command results.
 
-The old whole-file proof-hole regex has produced four known module-level
+The old whole-file proof-hole regex has produced six known module-level
 false positives in this run: `Mathlib.Order.Grade` and
 `Mathlib.RingTheory.Extension.Presentation.Submersive` use the English word
 `admit` in documentation, while
 `Mathlib.Probability.Independence.Integration` has explanatory `sorry` tokens
 inside a fenced documentation example. `Mathlib.Tactic.ComputeDegree` says
-that its tactics "admit a `!` modifier" in module documentation. Their owned pending rows remain
+that its tactics "admit a `!` modifier" in module documentation;
+`Mathlib.Topology.Algebra.Module.Complement` describes submodules that "admit"
+complements; and `Mathlib.Tactic.Qify` contains `sorry` only in fenced
+documentation examples. Their owned pending rows remain
 unprocessed and will be retried after merge under the reviewed executable-AST
 audit; they are not Lean failures.
 

@@ -345,7 +345,9 @@
         "Mathlib.Order.Grade",
         "Mathlib.Probability.Independence.Integration",
         "Mathlib.RingTheory.Extension.Presentation.Submersive",
-        "Mathlib.Tactic.ComputeDegree"
+        "Mathlib.Tactic.ComputeDegree",
+        "Mathlib.Tactic.Qify",
+        "Mathlib.Topology.Algebra.Module.Complement"
       ],
       "knownModuleErrorClassification": "historical whole-module proof-hole regex false positives in documentation comments or fenced documentation code",
       "postMergeRetry": "retry owned pending rows for known module errors under reviewed AST executable-hole audit",
