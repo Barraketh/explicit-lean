@@ -82,6 +82,27 @@ CREATE TABLE IF NOT EXISTS isolated_trace_command_retry (
   PRIMARY KEY(module_name, ordinal, source_sha256)
 )
 """
+RESIDUAL_SUCCESS_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS residual_simp_success_history (
+  attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  module_name TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  command_sha256 TEXT NOT NULL,
+  prior_replacement_text TEXT NOT NULL,
+  prior_replacement_sha256 TEXT NOT NULL,
+  prior_error TEXT,
+  prior_audit_json TEXT,
+  prior_command_retry_json TEXT,
+  candidate_source_sha256 TEXT NOT NULL,
+  candidate_command_start_byte INTEGER NOT NULL,
+  candidate_command_end_byte INTEGER NOT NULL,
+  candidate_command_start_char INTEGER NOT NULL,
+  candidate_command_end_char INTEGER NOT NULL,
+  residual_simp_sites_json TEXT NOT NULL,
+  archived_at TEXT NOT NULL
+)
+"""
 
 
 class RetryError(RuntimeError):
@@ -404,6 +425,34 @@ def _exact_site_keys(value: object, expected: set[int]) -> bool:
             and set(value) == expected)
 
 
+def _validate_residual_success_targets(
+    target_rows: list[tuple[str, int, str, str | None]],
+    evidence: dict[int, dict[str, Any]],
+) -> None:
+    success_ordinals = [ordinal for _, ordinal, status, _ in target_rows
+                        if status == "success"]
+    if (len(success_ordinals) != len(set(success_ordinals))
+            or set(success_ordinals) != set(evidence)):
+        raise RetryError(
+            "success retry targets differ from authenticated residual simp evidence"
+        )
+    if evidence and any(status != "success" for _, _, status, _ in target_rows):
+        raise RetryError("residual direct-simp retry accepts only historical success rows")
+
+
+def _require_residual_success_site_alignment(
+    module: str,
+    evidence: dict[int, dict[str, Any]],
+    by_command: dict[int, list[int]],
+) -> None:
+    unaligned = set(evidence) - {ordinal for ordinal, sites in by_command.items() if sites}
+    if unaligned:
+        raise RetryError(
+            "AST-confirmed residual simp lacks an authenticated source-site owner: "
+            + ",".join(f"{module}:{ordinal}" for ordinal in sorted(unaligned))
+        )
+
+
 def _existing_success_replacements(
     db: sqlite3.Connection,
     module: str,
@@ -435,8 +484,11 @@ def _persist_command_result(
     candidate_source: str | None = None,
     command_rows: list[dict[str, Any]] | None = None,
     candidate_replacements: dict[int, str] | None = None,
+    residual_success_evidence: dict[str, Any] | None = None,
+    live_success_replacements: dict[int, str] | None = None,
 ) -> None:
-    if result_status == "compiled_success" and (replacement is None or not replacement.strip()):
+    if result_status == "compiled_success" and (
+            not isinstance(replacement, str) or not replacement.strip()):
         raise RetryError("compiled_success requires a nonblank replacement")
     if result_status == "compiled_success" and not proof_hole_audited:
         raise RetryError("compiled_success requires an authenticated executable proof-hole AST audit")
@@ -460,13 +512,33 @@ def _persist_command_result(
                 "direct simp command postcondition failed closed: "
                 f"{type(error).__name__}: {error}"
             ) from error
+    if original_status == "success" and residual_success_evidence is None:
+        raise RetryError(
+            "retrying a successful row requires authenticated residual direct-simp evidence"
+        )
+    if residual_success_evidence is not None:
+        _validate_residual_success_evidence(
+            module, ordinal, source_hash, original_status,
+            residual_success_evidence,
+        )
     db.execute("BEGIN IMMEDIATE")
     try:
+        if residual_success_evidence is not None:
+            _check_residual_success_row(
+                db, module, ordinal, source_hash, residual_success_evidence,
+            )
+            _archive_residual_success(
+                db, module, ordinal, source_hash,
+                residual_success_evidence,
+            )
         if result_status == "compiled_success":
             cursor = db.execute(
                 "UPDATE simp_replacements SET status='success',replacement_text=?,error=NULL "
-                "WHERE module_name=? AND ordinal=? AND status=?",
-                (replacement, module, ordinal, original_status),
+                "WHERE module_name=? AND ordinal=? AND status=? "
+                "AND replacement_text IS ?",
+                (replacement, module, ordinal, original_status,
+                 residual_success_evidence["prior_replacement"]
+                 if residual_success_evidence is not None else None),
             )
             if cursor.rowcount != 1:
                 raise RetryError(
@@ -481,7 +553,7 @@ def _persist_command_result(
             if cursor.rowcount != 1:
                 raise RetryError(f"pending command changed before noop commit: {module}:{ordinal}")
         elif result_status in {"compile_failed", "render_failed", "trace_failed"} and original_status in {
-            "pending", "record_failed", "render_failed", "compile_failed"
+            "pending", "record_failed", "render_failed", "compile_failed", "success"
         }:
             if result_status == "compile_failed":
                 primary_status, details = "compile_failed", compile_error
@@ -491,8 +563,12 @@ def _persist_command_result(
                 primary_status, details = "record_failed", render_error
             cursor = db.execute(
                 "UPDATE simp_replacements SET status=?,replacement_text=NULL,error=? "
-                "WHERE module_name=? AND ordinal=? AND status=?",
-                (primary_status, _safe_detail(details or result_status), module, ordinal, original_status),
+                "WHERE module_name=? AND ordinal=? AND status=? "
+                "AND replacement_text IS ?",
+                (primary_status, _safe_detail(details or result_status), module, ordinal,
+                 original_status,
+                 residual_success_evidence["prior_replacement"]
+                 if residual_success_evidence is not None else None),
             )
             if cursor.rowcount != 1:
                 raise RetryError(
@@ -527,9 +603,165 @@ def _persist_command_result(
              datetime.now(timezone.utc).isoformat(timespec="seconds")),
         )
         db.commit()
+        if residual_success_evidence is not None and live_success_replacements is not None:
+            if result_status == "compiled_success":
+                # The compiled-success precondition above guarantees a string.
+                live_success_replacements[ordinal] = replacement
+            elif result_status in {"compile_failed", "render_failed", "trace_failed"}:
+                live_success_replacements.pop(ordinal, None)
     except Exception:
         db.rollback()
         raise
+
+
+def _validate_residual_success_evidence(
+    module: str,
+    ordinal: int,
+    source_hash: str,
+    original_status: str,
+    evidence: dict[str, Any],
+) -> None:
+    """Validate the immutable AST witness threaded from residual selection."""
+    if original_status != "success":
+        raise RetryError("residual direct-simp evidence only applies to a success row")
+    if not isinstance(evidence, dict):
+        raise RetryError("residual direct-simp evidence is malformed")
+    expected_keys = {
+        "ordinal", "source_sha256", "command_sha256", "prior_replacement",
+        "prior_replacement_sha256", "candidate_source_sha256", "command_range",
+        "simp_sites",
+    }
+    if set(evidence) != expected_keys:
+        raise RetryError("residual direct-simp evidence has unexpected or missing fields")
+    if (type(evidence["ordinal"]) is not int or evidence["ordinal"] != ordinal
+            or evidence["source_sha256"] != source_hash):
+        raise RetryError(f"residual direct-simp evidence source identity mismatch: {module}:{ordinal}")
+    replacement = evidence["prior_replacement"]
+    if not isinstance(replacement, str) or not replacement.strip():
+        raise RetryError(f"residual direct-simp evidence has a blank prior replacement: {module}:{ordinal}")
+    if (evidence["prior_replacement_sha256"]
+            != hashlib.sha256(replacement.encode("utf-8", errors="strict")).hexdigest()):
+        raise RetryError(f"residual direct-simp evidence replacement hash mismatch: {module}:{ordinal}")
+    for key in ("command_sha256", "candidate_source_sha256"):
+        value = evidence[key]
+        if (not isinstance(value, str) or len(value) != 64
+                or any(char not in "0123456789abcdef" for char in value)):
+            raise RetryError(f"residual direct-simp evidence has invalid {key}: {module}:{ordinal}")
+    sites = evidence["simp_sites"]
+    if not isinstance(sites, list) or not sites:
+        raise RetryError(f"residual direct-simp evidence has no AST sites: {module}:{ordinal}")
+    command_range = evidence["command_range"]
+    if not isinstance(command_range, dict) or set(command_range) != {
+            "startByte", "endByte", "startChar", "endChar"}:
+        raise RetryError(f"residual direct-simp command range is malformed: {module}:{ordinal}")
+    if (any(type(command_range[key]) is not int for key in command_range)
+            or not (0 <= command_range["startByte"] < command_range["endByte"])
+            or not (0 <= command_range["startChar"] < command_range["endChar"])):
+        raise RetryError(f"residual direct-simp command range is invalid: {module}:{ordinal}")
+    previous_end: int | None = None
+    for site in sites:
+        if not isinstance(site, dict) or set(site) != {
+                "kind", "startByte", "endByte", "startChar", "endChar"}:
+            raise RetryError(f"residual direct-simp AST site is malformed: {module}:{ordinal}")
+        if (site["kind"] != "Lean.Parser.Tactic.simp"
+                or any(type(site[key]) is not int for key in
+                       ("startByte", "endByte", "startChar", "endChar"))
+                or not (0 <= site["startByte"] < site["endByte"])
+                or not (0 <= site["startChar"] < site["endChar"])
+                or not (command_range["startByte"] <= site["startByte"]
+                        < site["endByte"] <= command_range["endByte"])
+                or not (command_range["startChar"] <= site["startChar"]
+                        < site["endChar"] <= command_range["endChar"])):
+            raise RetryError(f"residual direct-simp AST site is invalid: {module}:{ordinal}")
+        if previous_end is not None and site["startByte"] < previous_end:
+            raise RetryError(f"residual direct-simp AST sites are not source ordered: {module}:{ordinal}")
+        previous_end = site["endByte"]
+
+
+def _check_residual_success_row(
+    db: sqlite3.Connection,
+    module: str,
+    ordinal: int,
+    source_hash: str,
+    evidence: dict[str, Any],
+) -> None:
+    row = db.execute(
+        "SELECT r.status,r.replacement_text,m.source_sha256,c.source_sha256 "
+        "FROM simp_replacements r JOIN modules m ON m.name=r.module_name "
+        "JOIN commands c USING(module_name,ordinal) "
+        "WHERE r.module_name=? AND r.ordinal=?",
+        (module, ordinal),
+    ).fetchone()
+    if (row is None or row[0] != "success"
+            or row[1] != evidence["prior_replacement"]
+            or row[2] != source_hash
+            or row[3] != evidence["command_sha256"]):
+        raise RetryError(f"success row changed after AST selection: {module}:{ordinal}")
+
+
+def _existing_row_json(db: sqlite3.Connection, table: str,
+                       module: str, ordinal: int) -> str | None:
+    columns = {
+        "isolated_trace_audit": (
+            "module_name", "ordinal", "result_status", "trace_state",
+            "compile_detail", "updated_at",
+        ),
+        "isolated_trace_command_retry": (
+            "module_name", "ordinal", "source_sha256", "original_status",
+            "result_status", "replacement_sha256", "render_error",
+            "compile_error", "updated_at",
+        ),
+    }
+    if table not in columns:
+        raise RetryError(f"unexpected evidence table: {table}")
+    present = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()
+    if present is None:
+        return None
+    names = columns[table]
+    present_columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    if not set(names) <= present_columns:
+        raise RetryError(f"existing evidence table has an unexpected schema: {table}")
+    query = f"SELECT {','.join(names)} FROM {table} WHERE module_name=? AND ordinal=?"
+    row = db.execute(query, (module, ordinal)).fetchone()
+    if row is None:
+        return None
+    return json.dumps(dict(zip(names, row)), ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"))
+
+
+def _archive_residual_success(
+    db: sqlite3.Connection,
+    module: str,
+    ordinal: int,
+    source_hash: str,
+    evidence: dict[str, Any],
+) -> None:
+    prior_error = db.execute(
+        "SELECT error FROM simp_replacements WHERE module_name=? AND ordinal=?",
+        (module, ordinal),
+    ).fetchone()
+    if prior_error is None:
+        raise RetryError(f"success row disappeared before archival: {module}:{ordinal}")
+    archived_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    db.execute(
+        "INSERT INTO residual_simp_success_history "
+        "(module_name,ordinal,source_sha256,command_sha256,prior_replacement_text,"
+        "prior_replacement_sha256,prior_error,prior_audit_json,prior_command_retry_json,"
+        "candidate_source_sha256,candidate_command_start_byte,candidate_command_end_byte,"
+        "candidate_command_start_char,candidate_command_end_char,residual_simp_sites_json,archived_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (module, ordinal, source_hash, evidence["command_sha256"],
+         evidence["prior_replacement"], evidence["prior_replacement_sha256"],
+         prior_error[0], _existing_row_json(db, "isolated_trace_audit", module, ordinal),
+         _existing_row_json(db, "isolated_trace_command_retry", module, ordinal),
+         evidence["candidate_source_sha256"],
+         evidence["command_range"]["startByte"], evidence["command_range"]["endByte"],
+         evidence["command_range"]["startChar"], evidence["command_range"]["endChar"],
+         json.dumps(evidence["simp_sites"], sort_keys=True, separators=(",", ":")),
+         archived_at),
+    )
 
 
 def _render_command(
@@ -569,6 +801,7 @@ def process_module(
     retry_failed: bool,
     site_limit: int | None = None,
     refresh_recorded: bool = False,
+    residual_success_evidence: dict[int, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     module_path, source_bytes, source, commands = worker.module_rows(db, module)
     pinned_path = (ROOT / ".lake" / "packages" / "mathlib" / module_path).resolve()
@@ -581,6 +814,31 @@ def process_module(
         raise RetryError(f"missing module row for {module}")
     source_hash = str(module_row[0])
     cmd_by_ord = {row["ordinal"]: row for row in commands}
+    existing = _existing_success_replacements(db, module)
+    residual_success_evidence = residual_success_evidence or {}
+    _validate_residual_success_targets(target_rows, residual_success_evidence)
+    if residual_success_evidence:
+        candidate_baseline = worker.module_with_replacements(source, commands, existing)
+        candidate_hash = hashlib.sha256(candidate_baseline.encode("utf-8")).hexdigest()
+        for ordinal, evidence in residual_success_evidence.items():
+            _validate_residual_success_evidence(
+                module, ordinal, source_hash, "success", evidence,
+            )
+            command = cmd_by_ord.get(ordinal)
+            if (command is None or command["sha256"] != evidence["command_sha256"]
+                    or existing.get(ordinal) != evidence["prior_replacement"]
+                    or candidate_hash != evidence["candidate_source_sha256"]):
+                raise RetryError(f"success retry identity changed after AST selection: {module}:{ordinal}")
+
+    def success_persistence_kwargs(ordinal: int) -> dict[str, Any]:
+        evidence = residual_success_evidence.get(ordinal)
+        if evidence is None:
+            return {}
+        return {
+            "residual_success_evidence": evidence,
+            "live_success_replacements": existing,
+        }
+
     pairs, owner_by_site = _renderer_pairs(source, commands)
     pairs_by_site = {int(site.siteOrdinal): (site, render_site) for site, render_site in pairs}
     module_scratch = pathlib.Path(tempfile.mkdtemp(prefix=module.replace(".", "_") + "-", dir=scratch_root))
@@ -603,6 +861,7 @@ def process_module(
         if command_ordinal in selected_command_ordinals:
             by_command.setdefault(command_ordinal, []).append(site_ordinal)
     effective_target_rows, no_site_rows = partition_source_site_rows(target_rows, by_command)
+    _require_residual_success_site_alignment(module, residual_success_evidence, by_command)
     refresh_site_ids = ({site for _, ordinal, _, _ in effective_target_rows
                          for site in by_command.get(ordinal, [])}
                         if refresh_recorded else set())
@@ -616,7 +875,8 @@ def process_module(
     }
     for _, ordinal, state, _ in no_site_rows:
         _persist_command_result(db, module, ordinal, source_hash, state,
-                                "noop", None, None, None)
+                                "noop", None, None, None,
+                                **success_persistence_kwargs(ordinal))
     if not effective_target_rows:
         return {"module": module, "status": "committed", "auditRows": len(target_rows),
                 "targetSites": 0, "oldTraceSites": 0, "oldTraceError": None,
@@ -640,7 +900,8 @@ def process_module(
         gate_error = "term-elaboration AST gate failed closed: " + str(error)
         for _, ordinal, state, _ in effective_target_rows:
             _persist_command_result(db, module, ordinal, source_hash, state,
-                                    "render_failed", None, gate_error, None)
+                                    "render_failed", None, gate_error, None,
+                                    **success_persistence_kwargs(ordinal))
         return {"module": module, "status": "committed", "auditRows": len(target_rows),
                 "targetSites": sum(len(by_command.get(ordinal, []))
                                    for _, ordinal, _, _ in effective_target_rows),
@@ -654,7 +915,8 @@ def process_module(
             json.dumps(extension_inventory["risks"], sort_keys=True)
         for _, ordinal, state, _ in effective_target_rows:
             _persist_command_result(db, module, ordinal, source_hash, state,
-                                    "render_failed", None, gate_error, None)
+                                    "render_failed", None, gate_error, None,
+                                    **success_persistence_kwargs(ordinal))
         return {"module": module, "status": "committed", "auditRows": len(target_rows),
                 "targetSites": sum(len(by_command.get(ordinal, []))
                                    for _, ordinal, _, _ in effective_target_rows),
@@ -839,7 +1101,6 @@ def process_module(
     # First certify the unchanged module plus already-committed replacements.
     # Fully traced commands are all rendered before candidate compilation, so
     # the fast path can validate the exact module containing all of them.
-    existing = _existing_success_replacements(db, module)
     baseline = worker.module_with_replacements(source, commands, existing)
     baseline_holes = _audit_executable_proof_holes(module, baseline)
     if baseline_holes["status"] == "ok":
@@ -869,12 +1130,14 @@ def process_module(
                       else "authenticated invocation trace unavailable for source site "
                            f"{missing[0]}")
             _persist_command_result(db, module, ordinal, source_hash, original_status,
-                                    result_status, None, _safe_detail(detail), None)
+                                    result_status, None, _safe_detail(detail), None,
+                                    **success_persistence_kwargs(ordinal))
             diagnostic_counts[result_status] = diagnostic_counts.get(result_status, 0) + 1
         elif not baseline_ok:
             result_status = "baseline_failed"
             _persist_command_result(db, module, ordinal, source_hash, original_status,
-                                    result_status, None, None, baseline_error)
+                                    result_status, None, None, baseline_error,
+                                    **success_persistence_kwargs(ordinal))
             diagnostic_counts[result_status] = diagnostic_counts.get(result_status, 0) + 1
         else:
             row = cmd_by_ord[ordinal]
@@ -884,7 +1147,8 @@ def process_module(
             if rendered is None:
                 result_status = "render_failed"
                 _persist_command_result(db, module, ordinal, source_hash, original_status,
-                                        result_status, None, render_error, None)
+                                        result_status, None, render_error, None,
+                                        **success_persistence_kwargs(ordinal))
                 diagnostic_counts[result_status] = diagnostic_counts.get(result_status, 0) + 1
             else:
                 rendered_candidates.append((ordinal, original_status, rendered))
@@ -918,7 +1182,8 @@ def process_module(
                         detail += "; " + isolated_holes["auditError"]
                     _persist_command_result(
                         db, module, ordinal, source_hash, original_status,
-                        "render_failed", None, _safe_detail(detail), None)
+                        "render_failed", None, _safe_detail(detail), None,
+                        **success_persistence_kwargs(ordinal))
                     diagnostic_counts["render_failed"] = diagnostic_counts.get("render_failed", 0) + 1
             rendered_candidates = clean_candidates
             if rendered_candidates:
@@ -934,7 +1199,8 @@ def process_module(
                     for ordinal, original_status, _rendered in rendered_candidates:
                         _persist_command_result(
                             db, module, ordinal, source_hash, original_status,
-                            "render_failed", None, _safe_detail(detail), None)
+                            "render_failed", None, _safe_detail(detail), None,
+                            **success_persistence_kwargs(ordinal))
                         diagnostic_counts["render_failed"] = diagnostic_counts.get("render_failed", 0) + 1
                     rendered_candidates = []
         if rendered_candidates:
@@ -955,7 +1221,8 @@ def process_module(
                                         original_source=source,
                                         candidate_source=batch_candidate,
                                         command_rows=commands,
-                                        candidate_replacements=batch_replacements)
+                                        candidate_replacements=batch_replacements,
+                                        **success_persistence_kwargs(ordinal))
                 diagnostic_counts["compiled_success"] = diagnostic_counts.get(
                     "compiled_success", 0) + 1
         else:
@@ -978,13 +1245,17 @@ def process_module(
                                             original_source=source,
                                             candidate_source=candidate,
                                             command_rows=commands,
-                                            candidate_replacements=candidate_replacements)
+                                            candidate_replacements=candidate_replacements,
+                                            **success_persistence_kwargs(ordinal))
                     accepted[ordinal] = rendered
                     result_status = "compiled_success"
                 else:
                     compile_error = _safe_detail(detail or batch_error)
                     _persist_command_result(db, module, ordinal, source_hash, original_status,
-                                            "compile_failed", None, None, compile_error)
+                                            "compile_failed", None, None, compile_error,
+                                            **success_persistence_kwargs(ordinal))
+                    if ordinal in residual_success_evidence:
+                        accepted.pop(ordinal, None)
                     result_status = "compile_failed"
                 diagnostic_counts[result_status] = diagnostic_counts.get(result_status, 0) + 1
 
