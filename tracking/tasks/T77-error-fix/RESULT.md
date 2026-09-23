@@ -286,6 +286,29 @@ only its three generated `then exact True.intro` closers changed to
 `then close [True.intro]`, the full staged module compiled successfully. This
 is focused parser-boundary evidence, not a newly persisted database success.
 
+The authenticated proposition-source correction is integrated as `3fa2568`
+with independent-review fix `654e660`. Fresh record/render/replay covers
+`NeZero.ne _` and `Nat.zero_le _`; ordinary undetermined explicit binders,
+mismatched propositions, and both declaration/source-value attempts to use
+`True.intro` as false-proposition evidence fail closed. A fresh isolated build
+of the integrated main passed both target builds and the focused source and
+quantified-proposition checks.
+
+The apparent `EventMVarSnapshot` regression was a stale fixture rather than a
+recorder defect: identical definitional before/after expressions are
+intentionally elided before the depth gate. Commit `00b83af` uses
+definitionally equal but structurally distinct controls and directly verifies
+MetaM term/universe assignability at enclosing and child depths. The private
+SimpTrace build, direct fixture, and checker pass.
+
+`Mathlib.Order.Copy` ordinal 11 establishes one genuine blocker. Its dependent
+proof argument changes from `eq_le : le = LE.le` to the transported
+`eq_le ▸ eq_le : LE.le = LE.le`; the old JSON pretty-printer elides that
+`Eq.ndrec` cast. Ignoring proof terms would not prove the enclosing
+propositions equal. No relaxation was integrated: this class needs fresh
+in-process typed dependent-congruence evidence and an independently reviewed
+replay design. The reproduction is documented at `d7bf031`.
+
 ## Active pending run
 
 Run root:

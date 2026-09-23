@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-23T11:19:36Z",
+  "updatedAt": "2026-09-23T11:31:30Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -191,7 +191,8 @@
       "b25c513",
       "e106938",
       "3fa2568",
-      "654e660"
+      "654e660",
+      "00b83af"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -232,7 +233,7 @@
       "generatedCloseDelimiter": "passed_adjacent_unbulleted_and_real_Exponential_staged_module",
       "exactBinderSpine": "passed_nested_dependent_nondependent_and_real_map_div_shape",
       "sourceAppliedArguments": "passed_global_method_projection_applied_if_neg_and_bare_if_neg_missing_side_rejection",
-      "eventMetavariableSnapshot": "passed_assigned_term_and_universe_child_rejection_outer_retention_local_context_instances_and_real_nested_ne_eq_validation",
+      "eventMetavariableSnapshot": "passed_assigned_term_and_universe_child_rejection_outer_retention_local_context_instances_and_real_nested_ne_eq_validation_with_non_noop_depth_controls",
       "classExplicitArguments": "passed_iInf_pos_and_fail_closed_nonclass_value_binder",
       "opaqueSimprocAttribution": "passed_real_cmpLE_swap_nested_local_evidence_false_outer_attribution_rejection_and_probe_state_isolation",
       "namedZetaDelta": "passed_122_renderer_assertions_16_focused_regressions_and_independent_static_review_lean_fixture_not_yet_compiled",
@@ -243,10 +244,20 @@
       "namedZetaIndexedLocal": "passed_private_build_positive_negative_fresh_trace_126_renderer_nested_rendering_no_simp_family_and_independent_trust_review",
       "sourcePropositionTelescope": "passed_fresh_NeZero_and_Nat_zero_le_record_render_replay_simp_disabled_compile_fail_closed_explicit_binder_and_independent_review",
       "falsePropositionEvidence": "passed_declaration_and_authenticated_source_True_intro_rejection_after_independent_review_fix",
-      "currentEventMetavariableSnapshot": "fresh_c6c5bd2_baseline_and_654e660_both_fail_outer_metavariable_assertion_separate_regression_queued",
+      "currentEventMetavariableSnapshot": "passed_after_test_only_fix_00b83af_the_recorder_gate_was_correct_and_the_old_fixture_was_elided_as_an_identical_defeq_noop",
       "nestedDischargeOwnership": "passed_real_Finsupp_sum_sum_index_four_rewrites_two_ordered_sides_each",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
       "independentTrustReview": "passed"
+    },
+    "genuineBlockers": {
+      "typedDependentProofTransport": {
+        "representative": "Mathlib.Order.Copy ordinal 11",
+        "classification": "transported proof term at a rewritten proposition",
+        "diagnosis": "dependent Eq.ndrec cast changes the proof argument type and is elided by persisted v1 pretty-printed JSON",
+        "requiredFix": "fresh in-process typed dependent-congruence certificate with independent trust review",
+        "unsafeShortcutRejected": "eqIgnoringProofs does not establish equality of the enclosing propositions",
+        "resultCommit": "d7bf031"
+      }
     },
     "realSmoke": {
       "module": "Mathlib.NumberTheory.NumberField.CanonicalEmbedding.NormLeOne",
