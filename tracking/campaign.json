@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-22T22:44:16Z",
+  "updatedAt": "2026-09-23T03:41:06Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -483,7 +483,7 @@
     "Run dependency-ordered translated builds for the expanded cone, then compile the full pinned Mathlib tree from the translated root with fresh outputs and import-resolution audits.",
     "Complete the remaining executable simp-family call audit, reusable-call provenance checks, declaration/computational semantic checks and final trust validation; do not convert the bounded cone result into whole-tree credit.",
     "Use the declaration oracle only as an optional focused diagnostic; do not make per-site hashes, a neutral forgery suite or other retired machinery acceptance prerequisites.",
-    "Monitor the user-authorized one-host Scaleway replacement run, collect both validated job archives, and confirm exact server, SBS volume, flexible IPv4, and security-group deletion by the immutable 2026-09-23T09:50:00Z cutoff. Do not add another host or extend the cutoff; whole-tree acceptance remains unclaimed."
+    "Analyze and repair module-wide recorder failure fanout before any further corpus run: salvage clean partial raw traces, finalize/render per site or command, bisect missing sites, and fix the dominant quantified-proposition, rewrite-replay, explicit-argument, validation, and metavariable mechanisms. The stopped Scaleway run is fully collected and cleaned up; 13,102 rows remain pending and whole-tree acceptance remains unclaimed."
   ],
   "work": [
     {
@@ -1174,7 +1174,7 @@
     "candidateRowsPerDatabase": 51322,
     "sourceCommit": "1953b0721faf53b6a40adf8fadbd13bec20cfc7f",
     "databaseBaselineSha256": "411d08771291e901988e5b9afd41a0fcc70d5d8d864e0843ce2b4a24808589f9",
-    "status": "workers_running",
+    "status": "stopped_collected_merged_analyzed_resources_deleted",
     "hostLifetimeSeconds": 43200,
     "workerRuntimeSeconds": 36000,
     "notAfter": "2026-09-23T09:50:00Z",
@@ -1184,9 +1184,49 @@
     "maxCostUsd": "20.00",
     "eurUsdRate": "1.1490",
     "monitoring": {
-      "localSupervisor": "explicit-lean-scaleway-supervisor",
-      "deletionWatchdog": "explicit-lean-scaleway-watchdog",
-      "heartbeat": "monitor-scaleway-simp-replacement-run"
+      "localSupervisor": "stopped",
+      "deletionWatchdog": "stopped",
+      "heartbeat": "deleted"
+    },
+    "stoppedAt": "2026-09-23T03:28:06.781337Z",
+    "collectedAt": "2026-09-23T03:32:38.012389Z",
+    "mergedDatabase": {
+      "path": ".lake/private/T65-scaleway-full-20260922/mathlib-db-stopped-merged.sqlite3",
+      "sha256": "6956d43570b0d16ce8a4c4a0dedcc8595a741c2d79c2cd862b6e8256c545b01d",
+      "integrityCheck": "ok",
+      "originalPreservedSha256": "e573cd5b99fd901863bf4b31e4d6e52c4618ca40c48a5acab1d2aa55d9dc03ad",
+      "mergedRows": 38220,
+      "statusCounts": {
+        "success": 2661,
+        "noop": 3956,
+        "render_failed": 1116,
+        "compile_failed": 430,
+        "record_failed": 30057,
+        "pending": 13102
+      }
+    },
+    "recordFailureAnalysis": {
+      "modules": 2867,
+      "distinctStoredErrors": 2866,
+      "commandRows": 30057,
+      "sourceSimpSites": 44865,
+      "moduleWideFanout": true,
+      "locatedFailedManifests": 2858,
+      "locatedSelectedSites": 44809,
+      "rawSitesEmitted": 40679,
+      "rawSitesWithoutUnresolvedMarker": 30520,
+      "mappedFailedCommands": 30013,
+      "commandsWithCompleteCleanRawSites": 19061,
+      "note": "Clean partial raw traces are salvage candidates only; subset finalization, rendering, and stock compilation remain required. Stored diagnostics are truncated and overlapping category counts are lower bounds."
+    },
+    "cleanup": {
+      "verifiedAt": "2026-09-23T03:41:06Z",
+      "method": "exact manual deletion through dedicated newprofile after the controller failed closed because its SBS helper dropped cli_profile",
+      "controllerFixRequiredBeforeReuse": true,
+      "server": "absent",
+      "sbsVolume": "absent",
+      "flexibleIp": "absent",
+      "securityGroup": "absent"
     },
     "result": "tracking/tasks/T72-scaleway-live-run/RESULT.md",
     "wholeTreeAcceptance": "not_claimed"
@@ -1202,6 +1242,6 @@
       "vast": "cheapest but old hardware and reclaimable; user preferred Scaleway"
     },
     "pricingReport": "tracking/tasks/research-cloud-pricing.md",
-    "status": "running_authorized_full_replacement_run"
+    "status": "stopped_terminal_results_collected_resources_deleted"
   }
 }
