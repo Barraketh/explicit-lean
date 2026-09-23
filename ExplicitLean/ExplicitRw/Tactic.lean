@@ -1042,24 +1042,25 @@ nothing, and — because the surrounding `by` block is abandoned without an erro
 the theorem is admitted at exit code 0. Fixing that per call site is how the hole
 survived two rounds, so every site now goes through here.
 
-The checks, in order: elaborate with error recovery **off**, force synthetic
-metavariables without postponing, instantiate, then reject the result if it
-contains `sorry` (synthetic or not), any expression or level metavariable, or if
-any error was logged while elaborating. Every rejection is a step-indexed error.
+The checks, in order: elaborate with error recovery **off**, optionally force
+synthetic metavariables without postponing, instantiate, then reject the result
+if it contains `sorry` (synthetic or not), any disallowed expression or level
+metavariable, or if any error was logged while elaborating. Every rejection is
+a step-indexed error.
 
-`allowMVars` is for the one caller that legitimately needs open metavariables: a
-lemma term whose implicit and instance arguments are fixed later, by unifying
-with the subterm at the recorded position. That caller closes them itself
-(`closeLemmaMVars`, `checkNoLevelMVars`, `synthesizeInstanceMVars`).
+`allowMVars` is for callers that legitimately need open metavariables. Lemma
+and proposition replay close those themselves after matching at the recorded
+position (`closeLemmaMVars`, `checkNoLevelMVars`, `synthesizeInstanceMVars`).
 -/
 def elabStrict (idx? : Option Nat) (what : String) (stx : Term)
-    (expectedType? : Option Expr := none) (allowMVars := false) : TacticM Expr := do
+    (expectedType? : Option Expr := none) (allowMVars := false)
+    (synthesize := true) : TacticM Expr := do
   let errsBefore := (← Core.getMessageLog).hasErrors
   let e ← Term.withoutErrToSorry do
     let e ← match expectedType? with
       | some ty => Term.elabTermEnsuringType stx ty
       | none => Term.elabTerm stx none
-    Term.synthesizeSyntheticMVarsNoPostponing
+    if synthesize then Term.synthesizeSyntheticMVarsNoPostponing
     instantiateMVars e
   let e ← instantiateMVars e
   let fail (why : MessageData) : TacticM Expr :=
@@ -1147,8 +1148,12 @@ def elabProposition (idx : Nat) (stx : Term) (sub : Expr) (truth : Bool) :
       let lvls ← info.levelParams.mapM fun _ => mkFreshLevelMVar
       pure (mkConst name lvls)
     else
+      -- Keep placeholders and dependent instances open until the proposition
+      -- is matched at `sub`: e.g. `NeZero.ne _` cannot synthesize
+      -- `[NeZero ?n]` until that match fixes `?n`. `closeLemmaMVars` below
+      -- still rejects anything matching and instance synthesis cannot close.
       elabStrict (some idx) s!"the proposition proof of this step" stx
-        (allowMVars := true)
+        (allowMVars := true) (synthesize := false)
   checkNoPendingTactic s!"the proposition proof of this step" (some idx) snapshot
   let proof ← instantiateMVars proof
   let type ← instantiateMVars (← inferType proof)

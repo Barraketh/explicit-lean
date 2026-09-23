@@ -691,14 +691,32 @@ def rwStatementFromValue? (value : Expr) (prop? : Option Bool) :
   -- Do not let ambient matching fill holes in an incompletely elaborated source
   -- argument. Only an exact elaborated term is suitable as source evidence.
   if ← hasAssignableMVar value then return none
-  let (mvars, bis, concl) ← forallMetaTelescope (← inferType value)
+  let (mvars, bis, _) ← forallMetaTelescope (← inferType value)
   let mut unfilled : Array Expr := #[]
   for mvar in mvars, bi in bis do
     if bi == .default then unfilled := unfilled.push mvar
-  let concl ← instantiateMVars concl
+  -- A simp source argument such as `NeZero.ne _` is elaborated into a
+  -- telescope-valued rewrite theorem. Its explicit placeholder is abstracted
+  -- into the theorem's function type, while simp later matches that parameter
+  -- against the selected redex. Inspect the exact source value after applying
+  -- those telescope variables; reading its unapplied result type leaves the
+  -- source-supplied rewrite as a goal-level metavariable.
+  let appliedValue := mkAppN value mvars
+  let concl ← instantiateMVars (← inferType appliedValue)
   match prop? with
-  | some true => return some (concl, mkConst ``True, unfilled)
+  | some true =>
+    if let some (_, lhs, rhs) := concl.eq? then
+      if ← isDefEq rhs (mkConst ``True) then
+        return some (lhs, mkConst ``True, unfilled)
+    return some (concl, mkConst ``True, unfilled)
   | some false =>
+    -- Proposition rules may already have been converted by `eq_false` at the
+    -- authenticated source application boundary. Preserve that exact
+    -- equality instead of treating the whole equality proposition as the
+    -- proposition to rewrite.
+    if let some (_, lhs, rhs) := concl.eq? then
+      if ← isDefEq rhs (mkConst ``False) then
+        return some (lhs, mkConst ``False, unfilled)
     if let some p := concl.not? then return some (p, mkConst ``False, unfilled)
     let unfolded ← whnfR concl
     if let some p := unfolded.not? then return some (p, mkConst ``False, unfilled)
