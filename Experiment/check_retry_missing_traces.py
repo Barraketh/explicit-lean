@@ -9,12 +9,82 @@ import pathlib
 import os
 import sqlite3
 import tempfile
+from types import SimpleNamespace
+from unittest import mock
 import unittest
 
 import retry_missing_traces as retry
 
 
 class MissingTraceRetryTests(unittest.TestCase):
+    @contextlib.contextmanager
+    def process_fixture(self, *, old_traces: bool = False,
+                        statuses: tuple[str, ...] = ("record_failed", "record_failed")):
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            root = base / "repo"
+            module_path = "Mathlib/X.lean"
+            source = "theorem fixture : True := by exact True.intro\n"
+            source_bytes = source.encode("utf-8")
+            pinned = root / ".lake" / "packages" / "mathlib" / module_path
+            pinned.parent.mkdir(parents=True)
+            pinned.write_bytes(source_bytes)
+            scratch = base / "scratch"
+            scratch.mkdir()
+            sites = [
+                SimpleNamespace(siteOrdinal=index, startChar=index, endChar=index + 1,
+                                callText=f"simp only [fixture_{index}]")
+                for index in (1, 2)
+            ]
+            pairs = [(site, object()) for site in sites]
+            owners = {site.siteOrdinal: site.siteOrdinal for site in sites}
+            commands = [{"ordinal": index} for index in (1, 2)]
+            traces = ({site.siteOrdinal: [self.trace_record(module_path, site)]
+                       for site in sites} if old_traces else {})
+            db = sqlite3.connect(":memory:")
+            db.execute("CREATE TABLE modules(name TEXT,source_sha256 TEXT)")
+            db.execute("INSERT INTO modules VALUES('Mathlib.X',?)", ("a" * 64,))
+            db.execute("CREATE TABLE simp_replacements(module_name TEXT,ordinal INTEGER,"
+                       "status TEXT,replacement_text TEXT,error TEXT,"
+                       "PRIMARY KEY(module_name,ordinal))")
+            for ordinal, status in zip((1, 2), statuses):
+                db.execute("INSERT INTO simp_replacements VALUES(?,?,?,NULL,'old failure')",
+                           ("Mathlib.X", ordinal, status))
+            db.execute(retry.RETRY_SCHEMA)
+            db.execute(retry.COMMAND_SCHEMA)
+            db.commit()
+            stack = contextlib.ExitStack()
+            stack.enter_context(mock.patch.object(retry, "ROOT", root))
+            stack.enter_context(mock.patch.object(
+                retry.worker, "module_rows",
+                return_value=(module_path, source_bytes, source, commands)))
+            stack.enter_context(mock.patch.object(
+                retry, "_renderer_pairs", return_value=(pairs, owners)))
+            stack.enter_context(mock.patch.object(
+                retry.worker, "align_sites", return_value=([], sites)))
+            stack.enter_context(mock.patch.object(
+                retry, "_authenticated_old_traces",
+                return_value=(traces, set(traces), None if old_traces else "no bundle")))
+            stack.enter_context(mock.patch.object(
+                retry, "_load_retried_traces", return_value={}))
+            stack.enter_context(mock.patch.object(
+                retry.worker, "module_with_replacements",
+                side_effect=lambda _source, _commands, replacements:
+                _source + "\n" + retry.json.dumps(sorted(replacements.items()))))
+            try:
+                yield {
+                    "base": base, "root": root, "pinned": pinned,
+                    "source": source, "source_bytes": source_bytes,
+                    "module_path": module_path, "sites": sites,
+                    "commands": commands, "traces": traces,
+                    "scratch": scratch, "db": db, "stack": stack,
+                    "targets": [("Mathlib.X", index, statuses[index - 1], "old failure")
+                                for index in (1, 2)],
+                }
+            finally:
+                stack.close()
+                db.close()
+
     def test_missing_sites_are_source_ordered_and_command_scoped(self) -> None:
         self.assertEqual(
             retry.missing_site_ordinals([2, 5, 8], {2}, {8}), [5]
@@ -204,6 +274,215 @@ class MissingTraceRetryTests(unittest.TestCase):
             "invocations": 1,
             "locations": [],
         }
+
+    def test_bulk_site_recording_authenticates_and_persists_exact_batch(self) -> None:
+        with self.process_fixture() as case:
+            records = {site.siteOrdinal: [self.trace_record(case["module_path"], site)]
+                       for site in case["sites"]}
+            recorder = mock.Mock(return_value=(records, ""))
+            identity = mock.Mock(return_value=({"identity": "accepted"}, records))
+            compiler = mock.Mock(return_value=(True, "", None))
+            with mock.patch.object(retry.worker, "record_sites", recorder), \
+                    mock.patch.object(retry.worker.replay, "validate_identity", identity), \
+                    mock.patch.object(retry.worker, "compile_candidate", compiler), \
+                    mock.patch.object(retry, "_render_command",
+                                      side_effect=lambda _src, row, _pairs, _traces:
+                                      (f"by exact h{row['ordinal']}", None)):
+                result = retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=None)
+
+            self.assertEqual(recorder.call_count, 1)
+            self.assertEqual(recorder.call_args.args[3], case["sites"])
+            identity.assert_called_once()
+            self.assertEqual(result["attempted"], 2)
+            self.assertEqual(result["recorded"], 2)
+            self.assertEqual(case["db"].execute(
+                "SELECT site_ordinal,status FROM isolated_trace_site_retry "
+                "ORDER BY site_ordinal").fetchall(), [(1, "recorded"), (2, "recorded")])
+            self.assertEqual(case["db"].execute(
+                "SELECT status,replacement_text FROM simp_replacements ORDER BY ordinal"
+            ).fetchall(), [("success", "by exact h1"), ("success", "by exact h2")])
+            self.assertEqual([call.args[3] for call in compiler.call_args_list], [0, 1])
+            batch_module = compiler.call_args_list[1].args[1]
+            self.assertIn("by exact h1", batch_module)
+            self.assertIn("by exact h2", batch_module)
+
+    def test_every_bulk_defect_falls_back_for_all_sites(self) -> None:
+        for defect in ("missing", "extra", "identity", "exception"):
+            with self.subTest(defect=defect), self.process_fixture() as case:
+                valid = {site.siteOrdinal: [self.trace_record(case["module_path"], site)]
+                         for site in case["sites"]}
+                extra_site = SimpleNamespace(
+                    siteOrdinal=9, startChar=9, endChar=10, callText="simp [extra]")
+                calls: list[list[int]] = []
+
+                def record_sites(_source, _module_path, _pinned, selected, _work_dir):
+                    ordinals = [site.siteOrdinal for site in selected]
+                    calls.append(ordinals)
+                    if len(selected) > 1:
+                        if defect == "exception":
+                            raise RuntimeError("bulk invocation failed")
+                        if defect == "missing":
+                            return {1: valid[1]}, ""
+                        if defect == "identity":
+                            return valid, ""
+                        return {**valid, 9: [self.trace_record(case["module_path"], extra_site)]}, ""
+                    site = selected[0]
+                    return {site.siteOrdinal: valid[site.siteOrdinal]}, ""
+
+                compiler = mock.Mock(return_value=(True, "", None))
+                identity_result = (({"identity": "rejected"}, {}) if defect == "identity"
+                                   else ({"identity": "accepted"}, valid))
+                with mock.patch.object(retry.worker, "record_sites", side_effect=record_sites), \
+                        mock.patch.object(retry.worker.replay, "validate_identity",
+                                          return_value=identity_result) as identity, \
+                        mock.patch.object(retry.worker, "compile_candidate", compiler), \
+                        mock.patch.object(retry, "_render_command",
+                                          side_effect=lambda _src, row, _pairs, _traces:
+                                          (f"by exact h{row['ordinal']}", None)):
+                    result = retry.process_module(
+                        case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                        retry_failed=False, site_limit=None)
+
+                self.assertEqual(calls, [[1, 2], [1], [2]])
+                if defect == "identity":
+                    identity.assert_called_once()
+                else:
+                    identity.assert_not_called()
+                self.assertEqual(result["attempted"], 2)
+                self.assertEqual(result["recorded"], 2)
+                self.assertEqual(result["failed"], 0)
+                self.assertEqual(case["db"].execute(
+                    "SELECT site_ordinal,status FROM isolated_trace_site_retry "
+                    "ORDER BY site_ordinal").fetchall(), [(1, "recorded"), (2, "recorded")])
+
+    def test_explicit_site_limit_keeps_per_site_recording(self) -> None:
+        with self.process_fixture() as case:
+            records = {site.siteOrdinal: [self.trace_record(case["module_path"], site)]
+                       for site in case["sites"]}
+            calls: list[list[int]] = []
+
+            def record_sites(_source, _module_path, _pinned, selected, _work_dir):
+                calls.append([site.siteOrdinal for site in selected])
+                site = selected[0]
+                return {site.siteOrdinal: records[site.siteOrdinal]}, ""
+
+            with mock.patch.object(retry.worker, "record_sites", side_effect=record_sites), \
+                    mock.patch.object(retry.worker, "compile_candidate",
+                                      return_value=(True, "", None)), \
+                    mock.patch.object(retry, "_render_command",
+                                      side_effect=lambda _src, row, _pairs, _traces:
+                                      (f"by exact h{row['ordinal']}", None)):
+                result = retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=2)
+
+            self.assertEqual(calls, [[1], [2]])
+            self.assertEqual(result["attempted"], 2)
+
+    def test_batch_compile_success_credits_every_rendered_candidate(self) -> None:
+        with self.process_fixture(old_traces=True) as case:
+            recorder = mock.Mock(side_effect=AssertionError("all sites already traced"))
+            compiler = mock.Mock(return_value=(True, "", None))
+            with mock.patch.object(retry.worker, "record_sites", recorder), \
+                    mock.patch.object(retry.worker, "compile_candidate", compiler), \
+                    mock.patch.object(retry, "_render_command",
+                                      side_effect=lambda _src, row, _pairs, _traces:
+                                      (f"by exact h{row['ordinal']}", None)):
+                result = retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=None)
+
+            recorder.assert_not_called()
+            self.assertEqual(result["attempted"], 0)
+            self.assertEqual([call.args[3] for call in compiler.call_args_list], [0, 1])
+            batch_module = compiler.call_args_list[1].args[1]
+            self.assertIn("by exact h1", batch_module)
+            self.assertIn("by exact h2", batch_module)
+            self.assertEqual(case["db"].execute(
+                "SELECT status,replacement_text FROM simp_replacements ORDER BY ordinal"
+            ).fetchall(), [("success", "by exact h1"), ("success", "by exact h2")])
+            self.assertEqual(result["commandResults"], {"compiled_success": 2})
+
+    def test_batch_compile_failure_credits_only_isolated_successes(self) -> None:
+        with self.process_fixture(old_traces=True) as case:
+            def compile_candidate(_module_path, candidate, _scratch, serial):
+                if serial == 0:
+                    return True, "", None
+                if serial == 1:
+                    return False, "combined candidates conflict", None
+                return "by exact h2" not in candidate, "individual diagnostic", None
+
+            compiler = mock.Mock(side_effect=compile_candidate)
+            with mock.patch.object(retry.worker, "compile_candidate", compiler), \
+                    mock.patch.object(retry, "_render_command",
+                                      side_effect=lambda _src, row, _pairs, _traces:
+                                      (f"by exact h{row['ordinal']}", None)):
+                result = retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=None)
+
+            self.assertEqual([call.args[3] for call in compiler.call_args_list], [0, 1, 2, 3])
+            self.assertEqual(case["db"].execute(
+                "SELECT status,replacement_text FROM simp_replacements ORDER BY ordinal"
+            ).fetchall(), [("success", "by exact h1"), ("compile_failed", None)])
+            self.assertEqual(result["commandResults"],
+                             {"compiled_success": 1, "compile_failed": 1})
+
+    def test_blank_or_unsafe_render_is_rejected_before_batch_compile(self) -> None:
+        with self.process_fixture(old_traces=True) as case:
+            compiler = mock.Mock(return_value=(True, "", None))
+            def rendered(_source, row, _pairs, _traces):
+                return ("   " if row["ordinal"] == 1 else "by sorry"), None
+
+            with mock.patch.object(retry.worker, "render_command", side_effect=rendered), \
+                    mock.patch.object(retry.worker, "compile_candidate", compiler):
+                retry.process_module(
+                    case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                    retry_failed=False, site_limit=None)
+
+            self.assertEqual(compiler.call_count, 1)  # unchanged baseline only
+            self.assertEqual(case["db"].execute(
+                "SELECT status,replacement_text FROM simp_replacements ORDER BY ordinal"
+            ).fetchall(), [("render_failed", None), ("render_failed", None)])
+            self.assertEqual(case["db"].execute(
+                "SELECT result_status FROM isolated_trace_command_retry ORDER BY ordinal"
+            ).fetchall(), [("render_failed",), ("render_failed",)])
+
+    def test_process_preserves_pinned_source_and_status_transaction_guards(self) -> None:
+        with self.process_fixture(old_traces=True) as case:
+            case["pinned"].write_text("different source\n", encoding="utf-8")
+            with mock.patch.object(retry.worker, "compile_candidate") as compiler:
+                with self.assertRaisesRegex(retry.RetryError, "pinned source mismatch"):
+                    retry.process_module(
+                        case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                        retry_failed=False, site_limit=None)
+                compiler.assert_not_called()
+
+        with self.process_fixture(old_traces=True) as case:
+            def concurrent_status_change(_module_path, _candidate, _scratch, serial):
+                if serial == 1:
+                    case["db"].execute(
+                        "UPDATE simp_replacements SET status='compile_failed' "
+                        "WHERE module_name='Mathlib.X' AND ordinal=1")
+                    case["db"].commit()
+                return True, "", None
+
+            with mock.patch.object(retry.worker, "compile_candidate",
+                                   side_effect=concurrent_status_change), \
+                    mock.patch.object(retry, "_render_command",
+                                      side_effect=lambda _src, row, _pairs, _traces:
+                                      (f"by exact h{row['ordinal']}", None)):
+                with self.assertRaisesRegex(retry.RetryError, "status changed before commit"):
+                    retry.process_module(
+                        case["db"], "Mathlib.X", case["targets"], {}, case["scratch"],
+                        retry_failed=False, site_limit=None)
+            self.assertEqual(case["db"].execute(
+                "SELECT status,replacement_text FROM simp_replacements "
+                "WHERE ordinal=1").fetchone(), ("compile_failed", None))
+            self.assertEqual(case["db"].execute(
+                "SELECT COUNT(*) FROM isolated_trace_command_retry").fetchone()[0], 0)
 
     def test_stored_retry_trace_rejects_duplicate_or_wrong_identity(self) -> None:
         source = "theorem t : True := by simp\n"

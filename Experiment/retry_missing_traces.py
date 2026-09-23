@@ -3,11 +3,14 @@
 
 The input database must be a writable copy of a T76 job snapshot. Frozen
 snapshots and the original T65 databases are rejected. By default this retries
-only audited record_failed rows; pending rows require explicit opt-in. Each
-missing source site is recorded in its own Lean invocation and committed as one
-auxiliary SQLite row, so a failure at one site cannot erase another site's
-trace. Fully traced commands are rendered and stock-compiled against a passing
-unchanged baseline; only a passing command is persisted as a replacement.
+only audited record_failed rows; pending rows require explicit opt-in. An
+unbounded module retry first records multiple missing source sites together
+through the authenticated recorder, falling back to independent per-site runs
+if the batch is incomplete or rejected. Each source-site result is committed as
+one auxiliary SQLite row, so a failure at one site cannot erase another site's
+trace. Fully traced commands are rendered together and stock-compiled against
+a passing unchanged baseline; a failed batch is isolated command by command,
+and only passing commands are persisted as replacements.
 """
 
 from __future__ import annotations
@@ -508,48 +511,115 @@ def process_module(
     deferred_site_ids = {site for _, site in all_candidate_pairs - selected_pairs}
 
     selected_lookup = {site.siteOrdinal: site for site in worker.align_sites(source)[1]}
+    selected_sites: list[Any] = []
     for ordinal, site_ordinal in pending_sites:
         site = selected_lookup.get(site_ordinal)
         if site is None or owner_by_site.get(site_ordinal) != ordinal:
             raise RetryError(f"site/command identity mismatch: {module}:{ordinal}:{site_ordinal}")
         if placeholder_token(site.callText):
             raise RetryError(f"refusing to persist placeholder token in source site {site_ordinal}")
-        work_dir = pathlib.Path(tempfile.mkdtemp(
-            prefix=f"{module.replace('.', '_')}-site-{site_ordinal:06}-", dir=scratch_root))
-        status = "record_failed"
-        trace_json = None
-        error = None
+        selected_sites.append(site)
+
+    # record_sites authenticates invocation identity against its exact selected
+    # source-site list. For an unbounded module retry, try that authenticated
+    # batch once when multiple sites are missing. Any incomplete or malformed
+    # batch is discarded wholesale and retried through the original one-site
+    # path; partial recorder output is never persisted or salvaged.
+    bulk_records: dict[int, list[dict]] | None = None
+    if site_limit is None and len(pending_sites) > 1:
+        requested_ordinals = [site_ordinal for _, site_ordinal in pending_sites]
+        if len(requested_ordinals) != len(set(requested_ordinals)):
+            raise RetryError("bulk recorder request contains duplicate source-site ordinals")
         try:
-            traces, _ = worker.record_sites(source, module_path, pinned_path, [site], work_dir)
-            records = traces.get(site_ordinal)
-            if not records:
-                raise RetryError("single-site recorder returned no invocation records")
-            if set(traces) != {site_ordinal}:
-                raise RetryError(f"single-site recorder returned unexpected sites: {sorted(traces)}")
-            trace_json = json.dumps(records, ensure_ascii=False, sort_keys=True,
-                                    separators=(",", ":"))
-            if placeholder_token(trace_json):
-                raise RetryError("trace record contains a sorry/admit token")
-            status = "recorded"
-            recorded += 1
-            combined_traces[site_ordinal] = records
-        except Exception as exc:
-            trace_json = None
-            error = _safe_detail(f"{type(exc).__name__}: {exc}")
-            failed += 1
-        attempted += 1
+            bulk_dir = pathlib.Path(tempfile.mkdtemp(
+                prefix=f"{module.replace('.', '_')}-sites-bulk-", dir=scratch_root))
+            returned, _ = worker.record_sites(
+                source, module_path, pinned_path, selected_sites, bulk_dir)
+            if not isinstance(returned, dict) or set(returned) != set(requested_ordinals):
+                raise RetryError("bulk recorder returned missing or unexpected source sites")
+            flattened: list[dict] = []
+            for site_ordinal in requested_ordinals:
+                records = returned[site_ordinal]
+                if (not isinstance(records, list) or not records
+                        or any(not isinstance(record, dict) for record in records)):
+                    raise RetryError(
+                        f"bulk recorder returned no valid invocation records for site {site_ordinal}")
+                if placeholder_token(json.dumps(records, ensure_ascii=False)):
+                    raise RetryError(
+                        f"bulk recorder returned a sorry/admit token for site {site_ordinal}")
+                flattened.extend(records)
+            identity, authenticated = worker.replay.validate_identity(
+                module_path, source, selected_sites, flattened)
+            if (identity.get("identity") != "accepted"
+                    or set(authenticated) != set(requested_ordinals)
+                    or any(not authenticated[site] for site in requested_ordinals)):
+                raise RetryError(
+                    "bulk recorder trace identity rejected: "
+                    + json.dumps(identity, ensure_ascii=False)[:1200])
+            bulk_records = authenticated
+        except Exception:
+            # Fall back for every requested site. Never retain a valid-looking
+            # subset from an unauthenticated or incomplete module batch.
+            bulk_records = None
+
+    def persist_recorded_site(ordinal: int, site: Any,
+                              records: list[dict]) -> None:
+        nonlocal attempted, recorded
+        trace_json = json.dumps(records, ensure_ascii=False, sort_keys=True,
+                                separators=(",", ":"))
+        if placeholder_token(trace_json):
+            raise RetryError("trace record contains a sorry/admit token")
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _persist_site(db, (module, ordinal, site_ordinal, source_hash,
-                           site.callText, status, trace_json, error, now))
+        _persist_site(db, (module, ordinal, site.siteOrdinal, source_hash,
+                           site.callText, "recorded", trace_json, None, now))
+        attempted += 1
+        recorded += 1
+        combined_traces[site.siteOrdinal] = records
+
+    if bulk_records is not None:
+        for (ordinal, _site_ordinal), site in zip(pending_sites, selected_sites):
+            persist_recorded_site(ordinal, site, bulk_records[site.siteOrdinal])
+    else:
+        for ordinal, site_ordinal in pending_sites:
+            site = selected_lookup[site_ordinal]
+            work_dir = pathlib.Path(tempfile.mkdtemp(
+                prefix=f"{module.replace('.', '_')}-site-{site_ordinal:06}-", dir=scratch_root))
+            status = "record_failed"
+            trace_json = None
+            error = None
+            try:
+                traces, _ = worker.record_sites(source, module_path, pinned_path, [site], work_dir)
+                records = traces.get(site_ordinal)
+                if not records:
+                    raise RetryError("single-site recorder returned no invocation records")
+                if set(traces) != {site_ordinal}:
+                    raise RetryError(f"single-site recorder returned unexpected sites: {sorted(traces)}")
+                trace_json = json.dumps(records, ensure_ascii=False, sort_keys=True,
+                                        separators=(",", ":"))
+                if placeholder_token(trace_json):
+                    raise RetryError("trace record contains a sorry/admit token")
+                status = "recorded"
+                recorded += 1
+                combined_traces[site_ordinal] = records
+            except Exception as exc:
+                trace_json = None
+                error = _safe_detail(f"{type(exc).__name__}: {exc}")
+                failed += 1
+            attempted += 1
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            _persist_site(db, (module, ordinal, site_ordinal, source_hash,
+                               site.callText, status, trace_json, error, now))
 
     # First certify the unchanged module plus already-committed replacements.
-    # Subsequent candidates differ from a compiled baseline by one command only.
+    # Fully traced commands are all rendered before candidate compilation, so
+    # the fast path can validate the exact module containing all of them.
     existing = _existing_success_replacements(db, module)
     baseline = worker.module_with_replacements(source, commands, existing)
     baseline_ok, baseline_error, _ = worker.compile_candidate(
         module_path, baseline, module_scratch, 0)
     diagnostic_counts: dict[str, int] = {}
-    for serial, (_, ordinal, original_status, _old_error) in enumerate(effective_target_rows, 1):
+    rendered_candidates: list[tuple[int, str, str]] = []
+    for _, ordinal, original_status, _old_error in effective_target_rows:
         expected = sorted(by_command.get(ordinal, []))
         if not expected:
             continue
@@ -568,10 +638,12 @@ def process_module(
                            f"{missing[0]}")
             _persist_command_result(db, module, ordinal, source_hash, original_status,
                                     result_status, None, _safe_detail(detail), None)
+            diagnostic_counts[result_status] = diagnostic_counts.get(result_status, 0) + 1
         elif not baseline_ok:
             result_status = "baseline_failed"
             _persist_command_result(db, module, ordinal, source_hash, original_status,
                                     result_status, None, None, baseline_error)
+            diagnostic_counts[result_status] = diagnostic_counts.get(result_status, 0) + 1
         else:
             row = cmd_by_ord[ordinal]
             owned_pairs = [pairs_by_site[site] for site in expected]
@@ -581,24 +653,50 @@ def process_module(
                 result_status = "render_failed"
                 _persist_command_result(db, module, ordinal, source_hash, original_status,
                                         result_status, None, render_error, None)
+                diagnostic_counts[result_status] = diagnostic_counts.get(result_status, 0) + 1
             else:
-                candidate_replacements = {**existing, ordinal: rendered}
-                candidate = worker.module_with_replacements(source, commands, candidate_replacements)
+                rendered_candidates.append((ordinal, original_status, rendered))
+
+    if rendered_candidates:
+        batch_replacements = {**existing,
+                              **{ordinal: rendered
+                                 for ordinal, _, rendered in rendered_candidates}}
+        batch_candidate = worker.module_with_replacements(source, commands, batch_replacements)
+        if placeholder_token(batch_candidate):
+            raise RetryError("candidate module contains a forbidden proof-hole token")
+        batch_ok, batch_error, _ = worker.compile_candidate(
+            module_path, batch_candidate, module_scratch, 1)
+        if batch_ok:
+            for ordinal, original_status, rendered in rendered_candidates:
+                _persist_command_result(db, module, ordinal, source_hash, original_status,
+                                        "compiled_success", rendered, None, None)
+                diagnostic_counts["compiled_success"] = diagnostic_counts.get(
+                    "compiled_success", 0) + 1
+        else:
+            # The batch failure says nothing about any one command. Isolate
+            # candidates sequentially from the passing unchanged baseline,
+            # retaining only commands that compile with prior accepted ones.
+            accepted = dict(existing)
+            for serial, (ordinal, original_status, rendered) in enumerate(
+                    rendered_candidates, 2):
+                candidate_replacements = {**accepted, ordinal: rendered}
+                candidate = worker.module_with_replacements(
+                    source, commands, candidate_replacements)
                 if placeholder_token(candidate):
                     raise RetryError("candidate module contains a forbidden proof-hole token")
                 okay, detail, _ = worker.compile_candidate(
                     module_path, candidate, module_scratch, serial)
                 if okay:
+                    _persist_command_result(db, module, ordinal, source_hash, original_status,
+                                            "compiled_success", rendered, None, None)
+                    accepted[ordinal] = rendered
                     result_status = "compiled_success"
-                    existing[ordinal] = rendered
-                    _persist_command_result(db, module, ordinal, source_hash, original_status,
-                                            result_status, rendered, None, None)
                 else:
-                    result_status = "compile_failed"
-                    compile_error = _safe_detail(detail)
+                    compile_error = _safe_detail(detail or batch_error)
                     _persist_command_result(db, module, ordinal, source_hash, original_status,
-                                            result_status, None, None, compile_error)
-        diagnostic_counts[result_status] = diagnostic_counts.get(result_status, 0) + 1
+                                            "compile_failed", None, None, compile_error)
+                    result_status = "compile_failed"
+                diagnostic_counts[result_status] = diagnostic_counts.get(result_status, 0) + 1
 
     return {"module": module, "status": "committed", "auditRows": len(target_rows),
             "targetSites": sum(len(by_command.get(ordinal, []))
