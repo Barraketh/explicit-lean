@@ -16,7 +16,9 @@ Rendering rules, in one place:
               `name` (wrapped by `eq_true`/`eq_false` when `prop` is set)
               followed by its parenthesised `args`.
 * `unfold` -> `unfold <name> at [pos]`
-* `beta`/`eta`/`proj`/`zeta`/`iota` -> `<kind> at [pos]`
+* `beta`/`eta`/`proj`/`iota` -> `<kind> at [pos]`; unnamed `zeta` uses the
+  same form, while named `zeta` (a local-definition unfold) uses
+  `change <after> at [pos]`
 * `change` -> `change <to> at [pos]`
 * `eq`     -> `eq (<lhs> = <rhs>) by <by> at [pos]`
 * `congr`  -> `congr <arg> [<nested steps>] at [pos]`
@@ -795,14 +797,17 @@ def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
             step.get("pos")
         )
     if kind in REDUCTION_KINDS:
-        # The spec defines no `name` on a reduction step and T2 has no syntax
-        # for one, so a step that carries one is reported rather than dropped.
-        if "name" in step:
-            raise RenderError(
-                "reduction_has_name",
-                f"{kind} step carries a `name` field the spec does not define: "
-                f"{step['name']!r}",
-            )
+        # A named zeta event is zeta-delta: the recorder unfolded a local
+        # definition and stores its user name.  The ordinary `zeta` replay
+        # syntax contracts `letE`s only, and `unfold` accepts global constants,
+        # so express this exact recorded result as a definitional `change`.
+        # ExplicitRw checks that target against the selected subterm by defeq.
+        # Keep the name validated as provenance; do not silently discard a
+        # malformed name while turning it into a different step kind.
+        if kind == "zeta" and "name" in step:
+            check_name(step.get("name"), "zeta.name")
+            after = check_term(step.get("after"), "zeta.after")
+            return "change " + after + " " + render_pos(step.get("pos"))
         return kind + " " + render_pos(step.get("pos"))
     if kind == "change":
         return (

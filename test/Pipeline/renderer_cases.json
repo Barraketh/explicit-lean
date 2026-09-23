@@ -162,6 +162,13 @@
    "expect": "zeta at [1, 0]"
   },
   {
+   "name": "zeta_delta_local_definition",
+   "why": "a named zeta event is the recorder's local-definition unfold; replay its exact recorded result with definitional `change`",
+   "step": {"kind": "zeta", "pos": [1, 0], "name": "O₂",
+            "before": "O₂ x", "after": "(fun y => y) x"},
+   "expect": "change (fun y => y) x at [1, 0]"
+  },
+  {
    "name": "iota_step",
    "why": "spec STEP `iota`: matcher/recursor on a constructor, one step",
    "step": {"kind": "iota", "pos": [1]},
@@ -380,10 +387,16 @@
    "error": "pp_all_term", "side": "t1"
   },
   {
-   "name": "reduction_with_name",
-   "why": "T1/T2 gap: `zeta` with a `name` is in neither the spec nor the grammar",
+   "name": "zeta_delta_missing_target",
+   "why": "a named zeta event must carry its recorded post-reduction expression",
    "step": {"kind": "zeta", "pos": [1, 0], "name": "g"},
-   "error": "reduction_has_name", "side": "t1"
+   "error": "bad_term", "side": "t1"
+  },
+  {
+   "name": "zeta_delta_invalid_name",
+   "why": "a named zeta event must retain a valid local-name provenance field",
+   "step": {"kind": "zeta", "pos": [1, 0], "name": "fun h => h", "after": "x"},
+   "error": "name_is_syntax", "side": "t1"
   },
   {
    "name": "bad_direction",
