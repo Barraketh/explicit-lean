@@ -5,7 +5,7 @@
   "branch": "codex/search-free-mathlib-2026-08-31",
   "baseCommit": "ad107b0d2481802449ca617c31756236a84dcba2",
   "reviewedCodeCommit": "ee30955a34331c6508cd510b02a2e66ae559bb9a",
-  "updatedAt": "2026-09-23T09:22:48Z",
+  "updatedAt": "2026-09-23T11:19:36Z",
   "latestMilestone": {
     "id": "T47-strict-translated-cone",
     "integrationCommit": "59262d72a82255d1d4c33349617554076cc998cc",
@@ -189,7 +189,9 @@
       "03190f9",
       "851dc5d",
       "b25c513",
-      "e106938"
+      "e106938",
+      "3fa2568",
+      "654e660"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -215,7 +217,9 @@
       "whnf_exposed_constructor_projection_reduction",
       "schema_scoped_step_level_unresolved_classification",
       "lean_syntax_authenticated_apply_all_expansion",
-      "indexed_local_named_zeta_replay"
+      "indexed_local_named_zeta_replay",
+      "authenticated_source_proposition_telescope_replay",
+      "fail_closed_false_proposition_evidence"
     ],
     "checks": {
       "isolatedCompile": 19,
@@ -237,6 +241,9 @@
       "stepLevelUnresolved": "passed_167_render_identity_assertions_and_independent_review_with_decoy_metadata_fix",
       "applyAllExpansion": "passed_8_syntax_25_invocation_14_renderer_private_Lean_fixture_and_independent_semantics_review",
       "namedZetaIndexedLocal": "passed_private_build_positive_negative_fresh_trace_126_renderer_nested_rendering_no_simp_family_and_independent_trust_review",
+      "sourcePropositionTelescope": "passed_fresh_NeZero_and_Nat_zero_le_record_render_replay_simp_disabled_compile_fail_closed_explicit_binder_and_independent_review",
+      "falsePropositionEvidence": "passed_declaration_and_authenticated_source_True_intro_rejection_after_independent_review_fix",
+      "currentEventMetavariableSnapshot": "fresh_c6c5bd2_baseline_and_654e660_both_fail_outer_metavariable_assertion_separate_regression_queued",
       "nestedDischargeOwnership": "passed_real_Finsupp_sum_sum_index_four_rewrites_two_ordered_sides_each",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
       "independentTrustReview": "passed"

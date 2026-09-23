@@ -1,8 +1,9 @@
 # T77 NeZero source-proposition replay
 
-Status: implemented in private worktree `task/T77-nezero-source`, based on
-`03190f9045d8459c4657c2eab045460a903a0e9f`. This is a recorder and replay
-semantics fix; it has not been integrated.
+Status: integrated as `3fa2568` with the independent review correction
+`654e660`. The implementation was prepared in private worktree
+`task/T77-nezero-source`, based on
+`03190f9045d8459c4657c2eab045460a903a0e9f`.
 
 ## Diagnosis and change
 
@@ -20,6 +21,12 @@ proof type and preserves an already converted `= False` or `= True` relation.
 `elabProposition` now keeps synthetic arguments open through position matching,
 then uses the existing instance synthesis and `closeLemmaMVars` checks. Explicit
 arguments that remain undetermined still fail closed.
+
+Independent review reproduced and fixed a pre-existing fail-open edge in the
+false-proposition readers: an arbitrary proposition proof could be interpreted
+as evidence for rewriting that proposition to `False`. Both declaration and
+authenticated source-value paths now require an explicit `p = False` result or
+a type reducing to `¬ p`; `True.intro` is rejected in both paths.
 
 ## Focused evidence
 
@@ -43,5 +50,13 @@ with `temporary-depth event gate rejected a valid outer metavariable`. The
 changed functions do not touch event snapshot logic; this failure is recorded
 as untriaged and no pass is claimed for that regression.
 
-Independent focused review is required before integration because the change
-updates recorder validation semantics.
+Because the change updates recorder validation semantics, it underwent an
+independent focused review. Review passed with the correction above.
+A fresh isolated post-integration build at exact main `654e660` passed both
+target builds, the NeZero checker, source-applied and quantified proposition
+checks, and `git diff --check`.
+
+`EventMVarSnapshot.lean` also failed at its outer-metavariable assertion in a
+fresh build of pre-change baseline `c6c5bd2`; it is a separate current-source
+regression, not introduced by these commits, and remains queued for a
+principled fix.
