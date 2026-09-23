@@ -163,10 +163,10 @@
   },
   {
    "name": "zeta_delta_local_definition",
-   "why": "a named zeta event is the recorder's local-definition unfold; replay its exact recorded result with definitional `change`",
-   "step": {"kind": "zeta", "pos": [1, 0], "name": "O₂",
-            "before": "O₂ x", "after": "(fun y => y) x"},
-   "expect": "change (fun y => y) x at [1, 0]"
+   "why": "recorder-shaped zetaDelta event from the zeta_delta_at_hyp fixture: local fvar g unfolds to its value before the following beta step",
+   "step": {"kind": "zeta", "pos": [1, 0], "name": "g",
+            "before": "g", "after": "fun s => s + 0"},
+   "expect": "change (fun s => s + 0) at [1, 0]"
   },
   {
    "name": "iota_step",
@@ -399,6 +399,12 @@
    "error": "name_is_syntax", "side": "t1"
   },
   {
+   "name": "beta_with_name",
+   "why": "only the recorder's zetaDelta event defines a reduction name",
+   "step": {"kind": "beta", "pos": [1], "name": "g"},
+   "error": "reduction_has_name", "side": "t1"
+  },
+  {
    "name": "bad_direction",
    "why": "`dir` is exactly fwd or rev",
    "step": {"kind": "rw", "pos": [], "name": "foo", "dir": "backwards"},
@@ -463,6 +469,19 @@
  ],
 
  "traces": [
+  {
+   "name": "zeta_delta_at_hyp_trace",
+   "why": "the exact named-zeta then beta sequence from test/SimpTrace/zeta_delta_at_hyp renders as the corresponding explicit_rw steps",
+   "trace": {"schema": "simp-trace-v1", "module": "Fixture", "occurrence": "1",
+             "call": "simp only [g] at hg",
+             "locations": [{"loc": {"hyp": "hg"}, "pre": "P (g a)",
+                            "post": "P (a + 0)",
+                            "steps": [{"kind": "zeta", "pos": [1, 0], "name": "g",
+                                       "before": "g", "after": "fun s => s + 0"},
+                                      {"kind": "beta", "pos": [1]}],
+                            "close": null}]},
+   "expect": ["explicit_rw [change (fun s => s + 0) at [1, 0], beta at [1]] at hg"]
+  },
   {
    "name": "goal_location",
    "why": "a goal location renders as one explicit_rw with a `then` closer",

@@ -180,6 +180,17 @@ theorem zeta_step (a : Nat) : (let y : Nat := 7; a + y) = a + 7 := by
 theorem zeta_step_conv (a : Nat) : (let y : Nat := 7; a + y) = a + 7 := by
   conv => lhs; zeta
 
+/-- A named trace `zeta` is zeta-delta on the local definition `g`; the
+recorded lambda body is replayed with an ordinary `change`, then its application
+is beta-reduced as a separate trace step. This matches
+`test/SimpTrace/zeta_delta_at_hyp`. -/
+example (a : Nat) (P : Nat → Prop) (hP : ∀ n, P n) : True := by
+  let g : Nat → Nat := fun s => s + 0
+  have hg : P (g a) := hP _
+  explicit_rw [change (fun s => s + 0) at [1, 0], beta at [1]] at hg
+  guard_hyp hg :ₛ P (a + 0)
+  exact True.intro
+
 /-- A position taken *after* a `zeta` step, against the zeta-reduced term. -/
 theorem zeta_then_rewrite (a b : Nat) (h : a = b) :
     (let y : Nat := 7; a + y) = b + 7 := by

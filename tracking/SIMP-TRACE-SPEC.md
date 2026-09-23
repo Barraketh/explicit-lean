@@ -21,6 +21,9 @@ Amended 2026-09-16 after review round 3 of T1: `iota` kind, `prop` flag on
 Amended 2026-09-16 after review round 1 of T1/T2: `zeta` kind, `true_intro` and
 `absurd:<hyp>` close forms (replacing `trivial`/`eq_self`), local-hypothesis
 reference object. Schema id stays `simp-trace-v1` because nothing has shipped.
+Amended 2026-09-23: named `zeta` events represent zeta-delta unfolding of a
+local definition and require the recorded `after` expression for ordinary
+`change` replay.
 
 One trace per executed simp call. JSON object (identity fields are mandatory):
 
@@ -83,6 +86,14 @@ self-delimiting.
 - `{"kind":"beta"|"eta"|"proj"|"zeta"|"iota", "pos": POS, "before": ..., "after": ...}` Definitional
   reductions simp performs silently (`zeta` = `let x := v; b` to `b[v/x]`;
   `iota` = matcher/recursor application to a constructor, reduced one step).
+  A `zeta` step may additionally carry `"name": "<local user name>"` when
+  simp's `zetaDelta` option unfolds a local definition at that position. In
+  this form `before` and `after` are the pretty-printed local reference and its
+  unfolded value, and `after` is required. Replay renders this recorded result
+  as ordinary `change <after> at [pos]`; `explicit_rw` checks definitional
+  equality at the selected position. A nameless `zeta` continues to denote
+  contraction of a `let` expression. Reduction kinds other than `zeta` do not
+  accept `name`.
 - `{"kind":"change", "pos": POS, "to": "<ordinary Lean surface term>", "before": ..., "source": "<dsimproc name>" (optional)}`
   Definitional replacement when no named kind applies, including any
   dsimproc firing (`dreduceIte`, `Nat.reduceAdd` in dsimp mode, ...), which is

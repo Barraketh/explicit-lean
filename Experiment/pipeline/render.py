@@ -807,7 +807,13 @@ def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
         if kind == "zeta" and "name" in step:
             check_name(step.get("name"), "zeta.name")
             after = check_term(step.get("after"), "zeta.after")
-            return "change " + after + " " + render_pos(step.get("pos"))
+            return "change " + atomize(after) + " " + render_pos(step.get("pos"))
+        if "name" in step:
+            raise RenderError(
+                "reduction_has_name",
+                f"{kind} step carries a `name` field the spec does not define: "
+                f"{step['name']!r}",
+            )
         return kind + " " + render_pos(step.get("pos"))
     if kind == "change":
         return (
