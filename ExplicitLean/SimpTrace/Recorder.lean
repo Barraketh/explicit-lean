@@ -27,10 +27,13 @@ open Lean Meta Elab
 
 /-! ### Attribution
 
-A firing's origin is read from `usedTheorems`, which grows by exactly the
-origins the procedure registered.  When it does not grow — simp had already
-recorded that origin earlier in the run — we probe the candidate theorems
-individually with stock `Simp.tryTheoremWithExtraArgs?` to name the exact one.
+A firing's candidate origins are read from the `usedTheorems` delta, but the
+delta is not causal proof: an opaque procedure can run nested simp and register
+theorems while changing a different enclosing expression.  We validate each
+candidate against the exact before/after pair with stock theorem matching.
+When no registered candidate matches — including when `usedTheorems` did not
+grow because simp cached the origin — we probe candidate theorems individually
+with stock `Simp.tryTheoremWithExtraArgs?`.
 
 When neither succeeds the firing is a computed equation: the spec's `eq` kind,
 whose `by` is decided by a scratch check.  It is **never** an abort.  That is
@@ -97,12 +100,51 @@ def descendToRewritten (lhsArity : Nat) (pos : Pos) (before after : Expr) :
 def newOrigins (usedBefore usedAfter : Simp.UsedSimps) : Array Origin :=
   usedAfter.toArray.filter fun o => !usedBefore.contains o
 
+/-- Run a diagnostic theorem probe without retaining any of its effects. The
+stock theorem matcher can invoke the recorder's instrumented discharger and
+assign metavariables, so Meta state, simp state (notably `usedTheorems`), and
+the recorder buffer must all be restored even when the probe throws. Callers
+must return only state-independent evidence such as a Boolean or an origin,
+never an expression whose metavariable assignments were rolled back. -/
+def isolatedAttributionProbe (ref : TraceRef) (probe : Simp.SimpM α) :
+    Simp.SimpM α := do
+  let simpState ← get
+  let metaState ← liftMetaM (getThe Meta.State)
+  let traceState ← ref.get
+  try probe finally
+    liftMetaM <| modifyThe Meta.State fun _ => metaState
+    modify fun _ => simpState
+    ref.set traceState
+
+/-- Check whether this exact theorem origin, from the selected pre/post tree,
+operationally rewrites `before` to `after`.  A `usedTheorems` delta alone is
+not enough: an opaque simproc may have registered a theorem in a nested simp
+while returning a change to its enclosing expression. -/
+def validateOrigin? (ref : TraceRef) (origin : Origin) (before after : Expr) (post : Bool) :
+    Simp.SimpM (Option Bool) := do
+  for thms in (← readThe Simp.Context).simpTheorems do
+    let tree := if post then thms.post else thms.pre
+    let candidates ← Simp.withSimpIndexConfig <| tree.getMatchWithExtra before
+    for (thm, numExtraArgs) in candidates do
+      if thm.origin != origin || thms.erased.contains thm.origin then continue
+      let matched ← isolatedAttributionProbe ref do
+        try
+          match ← Simp.tryTheoremWithExtraArgs? before thm numExtraArgs with
+          | some result => pure (result.expr == after)
+          | none => pure false
+        catch _ => pure false
+      if matched then
+        match thm.origin with
+        | .decl _ _ inv => return some inv
+        | _ => return some false
+  return none
+
 /--
 Identify which simp theorem rewrote `before` to `after`, by probing the
-candidate theorems individually with stock `Simp.tryTheorem*?`.  Used only when
-`usedTheorems` did not grow, so no attribution is lost to simp's caching.
+candidate theorems individually with stock `Simp.tryTheorem*?`. Used when no
+controlled or delta-derived origin passed exact operational validation.
 -/
-def reattribute? (before after : Expr) (post : Bool) :
+def reattribute? (ref : TraceRef) (before after : Expr) (post : Bool) :
     Simp.SimpM (Option (Origin × Bool)) := do
   for thms in (← readThe Simp.Context).simpTheorems do
     let tree := if post then thms.post else thms.pre
@@ -110,14 +152,16 @@ def reattribute? (before after : Expr) (post : Bool) :
     let candidates := candidates.insertionSort fun a b => a.1.priority > b.1.priority
     for (thm, numExtraArgs) in candidates do
       if thms.erased.contains thm.origin then continue
-      let r? ← try
-          Simp.tryTheoremWithExtraArgs? before thm numExtraArgs
-        catch _ => pure none
-      if let some r := r? then
-        if r.expr == after then
-          match thm.origin with
-          | .decl n p inv => return some (.decl n p inv, inv)
-          | o => return some (o, false)
+      let matched ← isolatedAttributionProbe ref do
+        try
+          match ← Simp.tryTheoremWithExtraArgs? before thm numExtraArgs with
+          | some result => pure (result.expr == after)
+          | none => pure false
+        catch _ => pure false
+      if matched then
+        match thm.origin with
+        | .decl n p inv => return some (.decl n p inv, inv)
+        | o => return some (o, false)
   return none
 
 /-! ### The `prop` flag (spec amendment; REVIEW-3 M5)
@@ -875,6 +919,19 @@ def replayProcCondition (goal : Expr) (nested : Array Event) :
     current := next
   return some (current, located)
 
+/-- Preserve a generic simproc's nested simp trace as a side condition when the
+observed nested goal and steps give an ordinary replayable close form. This is
+used only when the enclosing procedure result has no theorem attribution. -/
+def procEvidenceSide? (goal : Expr) (nested : Array Event) (ctx : EvCtx) :
+    Simp.SimpM (Option SideRec) := do
+  if nested.isEmpty then return none
+  match replayProcCondition goal nested with
+  | none => return none
+  | some (after, events) =>
+    if after == goal then return none
+    let some by_ ← goalCloseForm? after | return none
+    return some (.mk goal events (some by_) ctx #[] goal (some after))
+
 def mkIteConditionSide (goal : Expr) (truth : Expr) (nested : Array Event)
     (ctx : EvCtx) : Simp.SimpM (Option (SideRec × Bool)) := do
   let sideGoal ← mkEq goal truth
@@ -1380,20 +1437,20 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
         -- (REVIEW-9 1).
         let rebased := diverted.map (Event.strip pos)
         let news := newOrigins usedBefore usedAfter
-        -- `+contextual` registers the antecedent hypothesis alongside the
-        -- lemma that fired, so a single firing can add more than one origin;
-        -- the rewrite we are recording is the last one registered.
-        let origin? : Option (Origin × Bool) :=
-          match controlledOrigin? with
+        -- Keep the registration order for `+contextual`, but treat each delta
+        -- origin only as a candidate: nested simp may register a local theorem
+        -- while this procedure changes an enclosing wrapper.
+        let mut validatedDelta? : Option (Origin × Bool) := none
+        for candidate in news.reverse do
+          if let some inv ← validateOrigin? ref candidate e r.expr (tag == "post") then
+            validatedDelta? := some (candidate, inv)
+            break
+        let origin? : Option (Origin × Bool) := match controlledOrigin? with
           | some n => some (.decl n false false, false)
-          | none =>
-            if news.isEmpty then none
-            else match news[news.size - 1]! with
-              | .decl n p inv => some (.decl n p inv, inv)
-              | o => some (o, false)
+          | none => validatedDelta?
         let origin? ← match origin? with
           | some oi => pure (some oi)
-          | none => reattribute? e r.expr (tag == "post")
+          | none => reattribute? ref e r.expr (tag == "post")
         match origin? with
         | some (o, inv) =>
           -- A simproc registers its declaration name in `usedTheorems` just as
@@ -1439,10 +1496,36 @@ def instrument (ref : TraceRef) (tag : String) (p : Simp.Simproc) : Simp.Simproc
               (.rw pos o (inv != rinv) prop? e rExpr evCtx rargs side none
                 resolved rproj)
         | none =>
-          -- No origin at all: a simproc that registered nothing (`simpUsingDecide`
-          -- and the ground arithmetic/matcher simprocs).  Same classification.
+          -- Neither a controlled origin nor an exact theorem application
+          -- explains this enclosing change. Keep bounded conditional reduction
+          -- on its dedicated path; otherwise record an unattributed equation
+          -- and let scratchCheckEq independently validate it. In particular,
+          -- never reuse a local theorem that merely appeared in the nested
+          -- `usedTheorems` delta.
           let bounded? := inferBoundedIteSource? e r divertedGoal?
-          emitProcStep ref pos e r evCtx side bounded? rebased divertedGoal?
+          let boundedCondition? := boundedIteCondition? e r.expr
+          let isBounded := match bounded?, boundedCondition?, divertedGoal? with
+            | some _, some condition, some goal => goal == condition
+            | _, _, _ => false
+          if isBounded then
+            emitProcStep ref pos e r evCtx side bounded? rebased divertedGoal?
+          else
+            let mut fallbackSide := side
+            if !rebased.isEmpty then
+              match divertedGoal? with
+              | some goal =>
+                match ← procEvidenceSide? goal rebased evCtx with
+                | some nestedSide => fallbackSide := fallbackSide.push nestedSide
+                | none =>
+                  ref.modify (·.markUnresolved
+                    "proc_fallback_nested_simp_evidence_unreplayable")
+                  fallbackSide := fallbackSide.push
+                    (.mk goal #[] (some "unresolved:nested simp steps could not be \
+                      replayed as a side condition") evCtx #[] goal none)
+              | none =>
+                ref.modify (·.markUnresolved
+                  "proc_fallback_nested_simp_goal_missing")
+            recordEvent ref (.eq pos none e r.expr evCtx fallbackSide)
     match stepResult with
     | .done r => record r
     | .visit r => record r
