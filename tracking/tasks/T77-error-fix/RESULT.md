@@ -11,6 +11,8 @@ Subsequent reviewed mechanism commits:
 - `4816f8a`: ordinary-Lean `change.to` printing;
 - `7537456`: audit-gated T76 failure refresh;
 - `251a659`: authenticated Lean tactic-syntax ancestry extraction groundwork.
+- `16e32d5`: quantified proposition validation aligned with existing
+  selected-redex `explicit_rw` replay.
 
 ## Implemented controls and principled fixes
 
@@ -66,6 +68,12 @@ Subsequent reviewed mechanism commits:
   then reports the unique parsed `simp` ancestry and `<;>` child ranges. This is
   groundwork only: it performs no replacement and local macro syntax currently
   refuses the module rather than falling back to full elaboration.
+- Quantified proposition rules now use the same contract in recording and
+  replay: open the complete proof telescope, match the resulting proposition
+  against the selected redex, and reject any binder that remains unassigned.
+  The removed blanket rejection predated this `explicit_rw` capability. No
+  inferred arguments or proof terms are serialized, and exact source-backed
+  simp arguments retain their authenticated spelling.
 
 ## Verified checks
 
@@ -81,6 +89,11 @@ Subsequent reviewed mechanism commits:
   T9 identity, and T22 source-argument checks passed.
 - The syntax ancestry extractor passed seven focused checks, including a
   pinned `Mathlib.Logic.Basic` smoke and Unicode byte/scalar ranges.
+- The quantified proposition recorder/render/replay fixture passed for a
+  global theorem, quantified local `prop_true`, quantified local `prop_false`,
+  and a theorem with an undetermined explicit value binder that simp refused.
+  `test/ExplicitRw/Provenance.lean` independently compiled the existing
+  selected-redex proposition cases. Independent trust review passed.
 - T9 trace identity tests and T22 source-argument tests.
 - 316 pipeline checks excluding the unavailable historical T1/T2
   worktree-dependent site-count and end-to-end checks.
@@ -112,6 +125,13 @@ success with no executable simp-family or proof-hole token. Five separate
 fresh-recording pp-all/change smokes reached independent recorder blockers
 (`not_isEmpty_of_nonempty`, `Fin.succAbove_ne`, or `Std.le_refl`) and therefore
 correctly persisted no replacement. They are not counted as successes.
+
+The disposable validator-parity rerun at
+`.lake/private/T77-error-fix-20260923/quantified-prop-smoke` freshly recorded
+`exists_apply_eq_apply` without the former `unapplied_quantified_prop`
+classification. The module advanced to independent explicit-argument and
+position-validation blockers; it is not counted as a compiled success.
+Database integrity is `ok`.
 
 ## Active pending run
 

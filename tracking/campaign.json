@@ -169,7 +169,8 @@
       "bf32f05",
       "4816f8a",
       "7537456",
-      "251a659"
+      "251a659",
+      "16e32d5"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -182,7 +183,8 @@
       "ordinary_lean_change_target_printing",
       "atomic_evidence_preserving_trace_refresh",
       "audit_gated_render_and_compile_failure_refresh",
-      "authenticated_lean_tactic_syntax_ancestry_groundwork"
+      "authenticated_lean_tactic_syntax_ancestry_groundwork",
+      "quantified_proposition_selected_redex_validator_parity"
     ],
     "checks": {
       "isolatedCompile": 19,
@@ -191,6 +193,7 @@
       "rendererAndLayout": 122,
       "replacementWorker": 11,
       "syntaxAncestry": 7,
+      "quantifiedPropositionReplay": "passed_global_local_true_local_false_and_fail_closed_value_binder",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
       "independentTrustReview": "passed"
     },
