@@ -26,6 +26,13 @@ Subsequent reviewed mechanism commits:
 - `42d422d`: explicit failure-status-only merge refinement for audited retry
   databases.
 - `70ed7b6`: projection reduction through WHNF-exposed constructor majors.
+- `5439b11` / `3438e2a`: schema-scoped current step-level unresolved
+  classifications.
+- `43b953d` / `03190f9`: Lean-syntax-authenticated apply-all expansion with
+  exact continuation semantics.
+- `851dc5d`: two-premise nested-discharge queue-ownership regression.
+- `b25c513` / `e106938`: named zeta replay by exact indexed local identity,
+  including malformed-evidence rejection.
 
 ## Implemented controls and principled fixes
 
@@ -135,6 +142,23 @@ Subsequent reviewed mechanism commits:
   proceed only when it is a complete constructor application and the existing
   exact definitional-equality validation succeeds. Stuck structure variables
   continue to fail closed.
+- Current step-level `unresolved` classifications are honored only while
+  traversing the defined trace grammar. They keep the original call visibly
+  unresolved instead of attempting an operational rewrite with no derivation;
+  unrelated envelope/site metadata cannot suppress renderable work.
+- Multi-invocation `<;>` sites are expanded from authenticated Lean syntax
+  ancestry rather than line/text patterns. The site must have a unique
+  right-operand owner, nested ranges and child roles must agree, overlapping
+  simp sites are refused, and suffix tactics run under ordinary `all_goals`
+  to preserve apply-all behavior even when a translated branch closes or
+  creates goals.
+- Named zeta-delta steps now carry the exact `LocalDecl.index` of the
+  let-bound free variable and render as
+  `zeta_local local_ref <index> at <position>`. Replay requires that exact
+  free variable at the selected position, requires a let value, and verifies
+  the replacement by definitional equality. Large, proof-bearing, multiline,
+  or elided pretty-printed let bodies are diagnostic only and no longer become
+  generated source. Malformed or contextual local evidence fails closed.
 
 ## Verified checks
 
@@ -199,6 +223,23 @@ Subsequent reviewed mechanism commits:
   negative fixtures, and compiled the exact historical
   `Mathlib.Algebra.Category.ModuleCat.Subobject` staged candidate. Independent
   static review passed.
+- The apply-all implementation passed 8 syntax-extractor checks, 25 invocation
+  checks, 14 focused renderer regressions, and the private Lean
+  `ApplyAllExpansion` fixture. Independent review found and fixed both
+  continuation-on-closed-goal behavior and the left-associated nested-`<;>`
+  ancestry case.
+- The unresolved-marker change passed 167 render/identity assertions and
+  independent review. The review rejected and fixed an earlier overbroad
+  recursive JSON search that could have treated decoy metadata as a step.
+- Indexed-local zeta replay passed the private ExplicitRw build, positive and
+  negative definitional fixtures, a fresh trace showing exact local index 4
+  followed by beta, 126 renderer assertions, nested side/congruence rendering,
+  and the no-simp-family audit. Independent trust review found and fixed a
+  malformed-`local` legacy-fallback gap.
+- A real `Finsupp.sum_sum_index` regression now records four rewrites with
+  both ordered premise traces. This confirms current `82c33bf` suffix-owned
+  side queues; historical T65/T76 side-mismatch JSON genuinely omitted the
+  first premise and must be re-recorded rather than relaxed in the renderer.
 - T9 trace identity tests and T22 source-argument tests.
 - 316 pipeline checks excluding the unavailable historical T1/T2
   worktree-dependent site-count and end-to-end checks.

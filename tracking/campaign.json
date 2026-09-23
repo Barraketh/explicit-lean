@@ -182,7 +182,14 @@
       "02ba91e",
       "f904265",
       "42d422d",
-      "70ed7b6"
+      "70ed7b6",
+      "5439b11",
+      "3438e2a",
+      "43b953d",
+      "03190f9",
+      "851dc5d",
+      "b25c513",
+      "e106938"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -205,7 +212,10 @@
       "exact_opaque_simproc_attribution_with_isolated_probes",
       "named_zeta_delta_replay_as_typed_change",
       "authenticated_congruence_event_roots_and_recursive_transport_validation",
-      "whnf_exposed_constructor_projection_reduction"
+      "whnf_exposed_constructor_projection_reduction",
+      "schema_scoped_step_level_unresolved_classification",
+      "lean_syntax_authenticated_apply_all_expansion",
+      "indexed_local_named_zeta_replay"
     ],
     "checks": {
       "isolatedCompile": 19,
@@ -224,6 +234,10 @@
       "namedZetaDelta": "passed_122_renderer_assertions_16_focused_regressions_and_independent_static_review_lean_fixture_not_yet_compiled",
       "congruenceEventRoots": "passed_private_isolated_build_real_CondDistrib_and_memoized_nonmemoized_duplicate_controls_independent_trust_review",
       "projectionWhnf": "passed_ExplicitRw_build_definitional_negative_and_historical_ModuleCat_Subobject_candidate_independent_static_review",
+      "stepLevelUnresolved": "passed_167_render_identity_assertions_and_independent_review_with_decoy_metadata_fix",
+      "applyAllExpansion": "passed_8_syntax_25_invocation_14_renderer_private_Lean_fixture_and_independent_semantics_review",
+      "namedZetaIndexedLocal": "passed_private_build_positive_negative_fresh_trace_126_renderer_nested_rendering_no_simp_family_and_independent_trust_review",
+      "nestedDischargeOwnership": "passed_real_Finsupp_sum_sum_index_four_rewrites_two_ordered_sides_each",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
       "independentTrustReview": "passed"
     },
