@@ -113,6 +113,10 @@ Subsequent reviewed mechanism commits:
   observed before/after pair in an isolated diagnostic probe whose Meta, Simp,
   and recorder state is restored. Unverifiable enclosing changes remain visible
   genuine blockers instead of being falsely attributed to nested local rewrites.
+- Named zeta-delta reductions now render as ordinary `change` steps at the
+  recorded position. This covers local-definition unfolding such as `O₂` while
+  retaining fail-closed rejection of a `name` field on beta, eta, projection,
+  or iota reductions.
 
 ## Verified checks
 
@@ -164,6 +168,12 @@ Subsequent reviewed mechanism commits:
   `usedTheorems`, or side evidence into the next recorded event. The opaque
   wrapper remains an explicitly classified blocker pending a sound operational
   replay model.
+- Named zeta-delta replay passed 122 renderer assertions and 16 focused
+  renderer regressions. The trace contract and a recorder-shaped
+  zeta-then-beta fixture now require the recorded `after` expression and render
+  it as `change`; independent trust review passed. The added Lean fixture was
+  statically reviewed but has not yet been compiled in the live checkout while
+  the shared worker artifacts are in use.
 - T9 trace identity tests and T22 source-argument tests.
 - 316 pipeline checks excluding the unavailable historical T1/T2
   worktree-dependent site-count and end-to-end checks.

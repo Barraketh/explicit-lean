@@ -176,7 +176,9 @@
       "ac6a8a4",
       "82c33bf",
       "273c4fb",
-      "b676829"
+      "b676829",
+      "aeec19c",
+      "a3128cb"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -196,7 +198,8 @@
       "authenticated_source_application_validation_witness",
       "temporary_metavariable_event_snapshot_boundary",
       "class_valued_explicit_argument_validator_parity",
-      "exact_opaque_simproc_attribution_with_isolated_probes"
+      "exact_opaque_simproc_attribution_with_isolated_probes",
+      "named_zeta_delta_replay_as_typed_change"
     ],
     "checks": {
       "isolatedCompile": 19,
@@ -212,6 +215,7 @@
       "eventMetavariableSnapshot": "passed_assigned_term_and_universe_child_rejection_outer_retention_local_context_instances_and_real_nested_ne_eq_validation",
       "classExplicitArguments": "passed_iInf_pos_and_fail_closed_nonclass_value_binder",
       "opaqueSimprocAttribution": "passed_real_cmpLE_swap_nested_local_evidence_false_outer_attribution_rejection_and_probe_state_isolation",
+      "namedZetaDelta": "passed_122_renderer_assertions_16_focused_regressions_and_independent_static_review_lean_fixture_not_yet_compiled",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
       "independentTrustReview": "passed"
     },
