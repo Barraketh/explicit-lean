@@ -22,6 +22,18 @@ array rather than a packed `SubExpr.Pos` because the spec's wire form is the
 array and because packed positions cap the coordinate at `maxChildren`. -/
 abbrev Pos := Array Nat
 
+/-- One crossed binder node in the traversal's exact positional spine.
+
+`dummy` denotes a non-dependent binder (an arrow) which shifts de Bruijn
+indices but introduces no term variable. `fvar` records the free variable used
+when a dependent binder was opened. `bodyPos` is the path to that binder's
+body, allowing events emitted at a rebuilt ancestor to select only the binders
+actually crossed by their position. -/
+inductive BinderSlot where
+  | fvar (bodyPos : Pos) (id : FVarId)
+  | dummy (bodyPos : Pos)
+  deriving Inhabited, Repr, BEq
+
 /-- A reference to a local hypothesis, per the amended spec. -/
 inductive LocalRef where
   /-- An ordinary local: its user name, whether that name is inaccessible, and

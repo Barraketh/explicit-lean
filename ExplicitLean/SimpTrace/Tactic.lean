@@ -876,12 +876,12 @@ partial def validateNested (ur : IO.Ref Unresolved) (c : EvCtx)
     let some (sub, binderNodes) := navigate? running pos
       | throwError "simp_trace: validation failed: `congr` nested step has no \
           subterm at relative position {pos}\n  in: {running}"
-    let expected := abstractSimpFVars before ec.binders binderNodes
+    let expected ← abstractSimpFVars before ec.binderSpine pos binderNodes
     unless (← withLCtx ec.lctx ec.insts (eqUpToProofs sub expected)) do
       throwError "simp_trace: validation failed: `congr` nested subterm at \
         relative {pos} is\n{sub}\nbut the step's `before` is\n{expected}"
-    let some next := replaceAt? running pos
-      (abstractSimpFVars after ec.binders binderNodes)
+    let replacement ← abstractSimpFVars after ec.binderSpine pos binderNodes
+    let some next := replaceAt? running pos replacement
       | throwError "simp_trace: validation failed: `congr` nested step cannot \
           replace at relative {pos}"
     running ← instantiateMVars next
@@ -930,22 +930,16 @@ partial def validate (ur : IO.Ref Unresolved) (pre : Expr) (result : Expr)
       let _ ← validate ur domainBefore domainAfter domain
       let _ ← validate ur bodyBefore bodyAfter body
     | _ => pure ()
-    -- The traversal observed the subterm with its enclosing binders as free
-    -- variables; the running term still has loose bvars there.  The event
-    -- carries exactly the variables the traversal substituted, outermost first,
-    -- so nothing has to be inferred from the local context.
-    -- Two depths matter (see `abstractSimpFVars`): the traversal's own binder
-    -- stack says which *term variables* it substituted, and `navigate?` says
-    -- how many binder *nodes* the path crossed — larger when a non-dependent
-    -- arrow sits between them, since an arrow binds nothing but still shifts
-    -- de Bruijn indices.
-    let introduced := c.binders
+    -- The traversal observed the subterm with enclosing term binders as free
+    -- variables; the running term still has loose bvars there. Each crossed
+    -- binder has a path-tagged slot, including non-dependent arrows, so their
+    -- ordering is not reconstructed from separate counts.
     let before ← instantiateMVars before
     let after ← instantiateMVars after
     let some (sub, binderNodes) := navigate? running pos
       | throwError "simp_trace: validation failed: no subterm at position {pos}\n\
           in: {running}"
-    let expected := abstractSimpFVars before introduced binderNodes
+    let expected ← abstractSimpFVars before c.binderSpine pos binderNodes
     unless (← withLCtx c.lctx c.insts (eqUpToProofs sub expected)) do
       -- When the two differ *only* in proof subterms, the step is real and the
       -- positions are right; what the validator cannot confirm is the identity
@@ -961,7 +955,7 @@ positions checked, proof identity not")
       else
         throwError "simp_trace: validation failed: subterm at {pos} is\n\
           {sub}\nbut the recorded step's `before` is\n{expected}"
-    let replacement := abstractSimpFVars after introduced binderNodes
+    let replacement ← abstractSimpFVars after c.binderSpine pos binderNodes
     let some next := replaceAt? running pos replacement
       | throwError "simp_trace: validation failed: cannot replace at {pos}"
     running ← instantiateMVars next

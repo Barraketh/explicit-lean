@@ -64,19 +64,43 @@ def DefKind.toString : DefKind → String
 /-- The ambient context an event was observed in, so recorded subterms
 pretty-print with their binders in scope.
 
-`binders` is the decisive field for validation: the free variables the traversal
-substituted for the term binders it descended under, **outermost first**.  The
-traversal knows them exactly (it introduces them), so the validator never has to
-guess which locals came from binder descent — which is what left a raw `_fvar`
-in a recorded subterm in REVIEW-3 M4(b). -/
+`binderSpine` records each crossed expression binder in traversal order,
+including dummy slots for non-dependent arrows. Slots carry the body path so
+validation can exclude binders opened only inside a rebuilt descendant. -/
 structure EvCtx where
   lctx    : LocalContext := {}
   insts   : LocalInstances := {}
-  binders : Array FVarId := #[]
+  binderSpine : Array BinderSlot := #[]
   /-- Stable recorder handles for binders introduced by a dependent-forall
   transport currently being simplified. -/
   introduced : Array (FVarId × Nat) := #[]
   deriving Inhabited
+
+def BinderSlot.bodyPos : BinderSlot → Pos
+  | .fvar p _ | .dummy p => p
+
+def BinderSlot.rebase (base : Pos) : BinderSlot → BinderSlot
+  | .fvar p id => .fvar (base ++ p) id
+  | .dummy p => .dummy (base ++ p)
+
+/-- Retain only binder bodies strictly below a newly rooted subterm. A binder
+at the root is part of the surrounding local context, not a binder crossed
+inside that subterm. -/
+def BinderSlot.strip (base : Pos) : BinderSlot → Option BinderSlot
+  | .fvar p id =>
+    if base.size < p.size && p.extract 0 base.size == base then
+      some (.fvar (p.extract base.size p.size) id)
+    else none
+  | .dummy p =>
+    if base.size < p.size && p.extract 0 base.size == base then
+      some (.dummy (p.extract base.size p.size))
+    else none
+
+def EvCtx.rebase (base : Pos) (ancestors : Array BinderSlot) (c : EvCtx) : EvCtx :=
+  { c with binderSpine := ancestors ++ c.binderSpine.map (BinderSlot.rebase base) }
+
+def EvCtx.strip (base : Pos) (c : EvCtx) : EvCtx :=
+  { c with binderSpine := c.binderSpine.filterMap (BinderSlot.strip base) }
 
 mutual
 
@@ -185,13 +209,14 @@ def RuleDerivation.strip (base : Pos) (d : RuleDerivation) : RuleDerivation :=
     extraArgs := d.extraArgs, binders := d.binders, discharge := d.discharge,
     simproc? := d.simproc?.map (SimprocDerivation.strip base) }
 
-partial def Event.rebase (base : Pos) : Event → Event
+partial def Event.rebase (base : Pos) (ancestors : Array BinderSlot := #[]) : Event → Event
   | .rw p o inv pr b a c args side src lo pj d =>
-    .rw (base ++ p) o inv pr b a c args side src lo pj (d.map (RuleDerivation.rebase base))
-  | .eq p s b a c side => .eq (base ++ p) s b a c side
-  | .defeq p k n b a c => .defeq (base ++ p) k n b a c
+    .rw (base ++ p) o inv pr b a (c.rebase base ancestors) args side src lo pj
+      (d.map (RuleDerivation.rebase base))
+  | .eq p s b a c side => .eq (base ++ p) s b a (c.rebase base ancestors) side
+  | .defeq p k n b a c => .defeq (base ++ p) k n b a (c.rebase base ancestors)
   | .introCtx p f c i =>
-    .introCtx (base ++ p) f c
+    .introCtx (base ++ p) f (c.rebase base ancestors)
       { i with domain.position := base ++ i.domain.position,
                scope.enter := base ++ i.scope.enter,
                scope.exit := base ++ i.scope.exit }
@@ -200,9 +225,10 @@ partial def Event.rebase (base : Pos) : Event → Event
       { i with domain.position := base ++ i.domain.position,
                scope.enter := base ++ i.scope.enter,
                scope.exit := base ++ i.scope.exit }
-  | .congr p i steps b a ab aa c => .congr (base ++ p) i steps b a ab aa c
+  | .congr p i steps b a ab aa c =>
+    .congr (base ++ p) i steps b a ab aa (c.rebase base ancestors)
   | .transport p h domain body b a db da bb ba c =>
-    .transport (base ++ p) h domain body b a db da bb ba c
+    .transport (base ++ p) h domain body b a db da bb ba (c.rebase base ancestors)
 
 /-- The position an event was logged at. -/
 def Event.pos : Event → Pos
@@ -231,9 +257,12 @@ def Event.strip (base : Pos) : Event → Event
       let q := p.extract base.size p.size
       match ev with
       | .rw _ o inv pr b a c args side src lo pj d =>
-        .rw q o inv pr b a c args side src lo pj (d.map (RuleDerivation.strip base))
+        .rw q o inv pr b a (c.strip base) args side src lo pj
+          (d.map (RuleDerivation.strip base))
+      | .eq _ s b a c side => .eq q s b a (c.strip base) side
+      | .defeq _ k n b a c => .defeq q k n b a (c.strip base)
       | .introCtx _ f c i =>
-        .introCtx q f c
+        .introCtx q f (c.strip base)
           { i with domain.position := stripPosition base i.domain.position,
                    scope.enter := stripPosition base i.scope.enter,
                    scope.exit := stripPosition base i.scope.exit }
@@ -242,7 +271,10 @@ def Event.strip (base : Pos) : Event → Event
           { i with domain.position := stripPosition base i.domain.position,
                    scope.enter := stripPosition base i.scope.enter,
                    scope.exit := stripPosition base i.scope.exit }
-      | _ => ev.reposition q
+      | .congr _ i steps b a ab aa c =>
+        .congr q i steps b a ab aa (c.strip base)
+      | .transport _ h domain body b a db da bb ba c =>
+        .transport q h domain body b a db da bb ba (c.strip base)
 
 structure CacheEntry where
   result : Simp.Result
@@ -277,10 +309,9 @@ structure TraceState where
   /-- The position the traversal is currently visiting.  Set by the copied
   traversal immediately before it calls into the stock `Methods`. -/
   pos : Pos := #[]
-  /-- Free variables substituted for the term binders the traversal has
-  descended under, outermost first.  Only *term* binders are pushed here:
-  `+contextual`'s antecedent hypotheses bind no position in the running term. -/
-  binders : Array FVarId := #[]
+  /-- Exact ordered spine of crossed expression binders. Non-dependent arrows
+  push dummy slots because they still shift de Bruijn indices. -/
+  binderSpine : Array BinderSlot := #[]
   /-- Active stable handles for dependent-forall transport binders. -/
   introduced : Array (FVarId × Nat) := #[]
   /-- Next per-call stable handle. -/
@@ -371,7 +402,8 @@ def replayCachedEvents (ref : TraceRef) (root : Pos) (events : Array Event) : Si
   let mut handles : Array (Nat × Nat) := #[]
   let mut scopes : Array (Nat × Nat) := #[]
   let mut out : Array Event := #[]
-  for ev in events.map (Event.rebase root) do
+  let parentSpine := (← ref.get).binderSpine
+  for ev in events.map (Event.rebase root parentSpine) do
     match ev with
     | .introCtx p f c i =>
       let st ← ref.get
@@ -430,7 +462,7 @@ just before handing control to stock code (so the recorder wrapper installed on
 /-- Capture the ambient local context and the traversal's binder stack. -/
 def captureEvCtx (ref : TraceRef) : MetaM EvCtx := do
   return { lctx := ← getLCtx, insts := ← getLocalInstances,
-           binders := (← ref.get).binders,
+           binderSpine := (← ref.get).binderSpine,
            introduced := (← ref.get).introduced }
 
 /-! ### Contextual binder ownership -/
@@ -474,10 +506,16 @@ def withIntroCtxScope (ref : TraceRef) (pos : Pos) (domain : Expr) (h : Expr)
 
 /-- Descend under a term binder whose bound variable the traversal replaced by
 the free variable `x`, for the duration of `k`. -/
-@[inline] def withBinder (ref : TraceRef) (x : Expr) (k : SimpM α) : SimpM α := do
-  let saved := (← ref.get).binders
-  ref.modify fun s => { s with binders := s.binders.push x.fvarId! }
-  try k finally ref.modify fun s => { s with binders := saved }
+@[inline] def withBinder (ref : TraceRef) (bodyPos : Pos) (x : Expr)
+    (k : SimpM α) : SimpM α := do
+  let saved := (← ref.get).binderSpine
+  ref.modify fun s => { s with binderSpine := s.binderSpine.push (.fvar bodyPos x.fvarId!) }
+  try k finally ref.modify fun s => { s with binderSpine := saved }
+
+@[inline] def withDummyBinder (ref : TraceRef) (bodyPos : Pos) (k : SimpM α) : SimpM α := do
+  let saved := (← ref.get).binderSpine
+  ref.modify fun s => { s with binderSpine := s.binderSpine.push (.dummy bodyPos) }
+  try k finally ref.modify fun s => { s with binderSpine := saved }
 
 /-! Stable handles are allocated at the dependent-forall construction point,
 not inferred later from names or proof terms. -/
@@ -516,21 +554,23 @@ belong.  `tryAutoCongrTheoremT?` uses this because whether an argument's
 rewrites keep their own absolute positions or become a `congr` step's nested
 steps is only known after every argument has been visited (a `cast` dependent
 may appear later in the argument list). -/
-def captureEvents (ref : TraceRef) (k : SimpM α) : SimpM (α × Array Event) := do
-  ref.modify fun s => { s with procEvents := s.procEvents.push #[] }
+def captureEvents (ref : TraceRef) (k : SimpM α) :
+    SimpM (α × Array Event × Array BinderSlot) := do
+  let parentSpine := (← ref.get).binderSpine
+  ref.modify fun s => { s with procEvents := s.procEvents.push #[], binderSpine := #[] }
   let depth := (← ref.get).procEvents.size
   let a ←
     try k
     catch ex =>
-      ref.modify fun s => { s with procEvents := s.procEvents.take (depth - 1) }
+      ref.modify fun s => { s with procEvents := s.procEvents.take (depth - 1), binderSpine := parentSpine }
       throw ex
   let st ← ref.get
   let evs :=
     if depth > 0 && depth <= st.procEvents.size then
       st.procEvents.getD (depth - 1) #[]
     else #[]
-  ref.set { st with procEvents := st.procEvents.take (depth - 1) }
-  return (a, evs)
+  ref.set { st with procEvents := st.procEvents.take (depth - 1), binderSpine := parentSpine }
+  return (a, evs, parentSpine)
 
 /-- How many events the innermost active frame currently holds.  Comparing this
 across a stock-method call says whether that call logged anything. -/
@@ -557,9 +597,9 @@ The discharger runs *inside* the `withPos` of the node whose condition it is
 discharging, so without this reset every event it logs inherits a position that
 cannot exist in the side goal — T2 rejects such a step by name (REVIEW-8 3). -/
 @[inline] def atSideRoot (ref : TraceRef) (k : SimpM α) : SimpM α := do
-  let saved := (← ref.get).pos
-  ref.modify fun s => { s with pos := #[] }
-  try k finally ref.modify fun s => { s with pos := saved }
+  let st ← ref.get
+  ref.modify fun s => { s with pos := #[], binderSpine := #[] }
+  try k finally ref.modify fun s => { s with pos := st.pos, binderSpine := st.binderSpine }
 
 /-! ## Copied helpers from `Lean/Meta/Tactic/Simp/Main.lean`
 
@@ -971,7 +1011,7 @@ where
     match e with
     | .lam n d b c =>
       withLocalDecl n c (← visit (pos.push 0) (d.instantiateRev fvars)) fun x =>
-        withBinder ref x do visitLambda (pos.push 1) (fvars.push x) b
+        withBinder ref (pos.push 1) x do visitLambda (pos.push 1) (fvars.push x) b
     | e =>
       let body ← visit pos (e.instantiateRev fvars)
       visitPost (rootOf pos fvars.size)
@@ -981,7 +1021,7 @@ where
     match e with
     | .forallE n d b c =>
       withLocalDecl n c (← visit (pos.push 0) (d.instantiateRev fvars)) fun x =>
-        withBinder ref x do visitForall (pos.push 1) (fvars.push x) b
+        withBinder ref (pos.push 1) x do visitForall (pos.push 1) (fvars.push x) b
     | e =>
       let body ← visit pos (e.instantiateRev fvars)
       visitPost (rootOf pos fvars.size)
@@ -996,7 +1036,7 @@ where
     | .letE n t v b nondep =>
       withLetDecl n (← visit (pos.push 0) (t.instantiateRev fvars))
           (← visit (pos.push 1) (v.instantiateRev fvars)) (nondep := nondep) fun x =>
-        withBinder ref x do visitLet (pos.push 2) (fvars.push x) b
+        withBinder ref (pos.push 2) x do visitLet (pos.push 2) (fvars.push x) b
     | e =>
       let body ← visit pos (e.instantiateRev fvars)
       visitPost (rootOf pos fvars.size)
@@ -1168,7 +1208,7 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
   let mut hasCast    := false
   let mut argsNew    := #[]
   let mut argResults := #[]
-  let mut eqArgEvents : Array (Nat × Expr × Expr × Array Event) := #[]
+  let mut eqArgEvents : Array (Nat × Expr × Expr × Array Event × Array BinderSlot) := #[]
   let mut i          := 0
   for arg in args, kind in cgrThm.argKinds do
     let apos := argPos pos numArgs i
@@ -1190,8 +1230,8 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
       -- transport a `cast` dependent, they become a `congr` step's nested
       -- `steps` (rooted at the argument) instead of steps at their own absolute
       -- positions, which plain positional rewriting could not replay.
-      let (argResult, evs) ← captureEvents ref (simpT ref #[] arg)
-      eqArgEvents := eqArgEvents.push (i, arg, argResult.expr, evs)
+      let (argResult, evs, parentSpine) ← captureEvents ref (simpT ref #[] arg)
+      eqArgEvents := eqArgEvents.push (i, arg, argResult.expr, evs, parentSpine)
       argResults := argResults.push argResult
       argsNew    := argsNew.push argResult.expr
       if argResult.proof?.isSome then hasProof := true
@@ -1210,7 +1250,7 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
     -- as it stands when that step runs, so the steps compose in array order.
     let evCtx ← captureEvCtx ref
     let mut nodeArgs := args
-    for (ai, aBefore, aAfter, evs) in eqArgEvents do
+    for (ai, aBefore, aAfter, evs, _) in eqArgEvents do
       if h : ai < nodeArgs.size then
         unless aBefore == aAfter do
           let nodeBefore := mkAppN f nodeArgs
@@ -1221,9 +1261,9 @@ partial def tryAutoCongrTheoremT? (ref : TraceRef) (pos : Pos) (e : Expr) :
   else
     -- No cast: the arguments are ordinary, so their rewrites keep their own
     -- absolute positions and stay plain steps, exactly as before.
-    for (ai, _, _, evs) in eqArgEvents do
+    for (ai, _, _, evs, parentSpine) in eqArgEvents do
       for ev in evs do
-        ref.modify (·.push (ev.rebase (argPos pos numArgs ai)))
+        ref.modify (·.push (ev.rebase (argPos pos numArgs ai) parentSpine))
   if !hasProof && !hasCast then
     return some { expr := mkAppN f argsNew }
   let mut proof := cgrThm.proof
@@ -1307,7 +1347,7 @@ partial def processCongrHypothesisT (ref : TraceRef) (thmName : Name)
     let lhs ← instantiateMVars hType.appFn!.appArg!
     -- The hypothesis's steps are relative to its own left-hand side, which is
     -- what the side trace's goal names, so the sub-run starts at the root.
-    let (r, evs) ← captureEvents ref (simpT ref #[] lhs)
+    let (r, evs, _) ← captureEvents ref (simpT ref #[] lhs)
     let rhs := hType.appArg!
     rhs.withApp fun m zs => do
       let val ← mkLambdaFVars zs r.expr
@@ -1514,7 +1554,7 @@ where
     match e with
     | .lam n d b c =>
       withLocalDecl n c (← dsimpT ref (pos.push 0) d) fun x =>
-        withBinder ref x do go (pos.push 1) (xs.push x) (b.instantiate1 x)
+        withBinder ref (pos.push 1) x do go (pos.push 1) (xs.push x) (b.instantiate1 x)
     | e => k pos xs e
 
 /-- SOURCE: Main.lean:328-331 `Simp.simpLambda`, position-threaded. -/
@@ -1534,21 +1574,23 @@ partial def simpArrowT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Resu
   let rp ← simpT ref (pos.push 0) p
   if (← pure (← Simp.getConfig).contextual <&&> isProp p <&&> isProp q) then
     withLocalDeclD e.bindingName! rp.expr fun h =>
-      withIntroCtxScope ref pos rp.expr h do
-        withNewLemmasT ref #[h] do
-      let rq ← simpT ref (pos.push 1) q
-      match rq.proof? with
-      | none    => Simp.mkImpCongr e rp rq
-      | some hq =>
-        let hq ← mkLambdaFVars #[h] hq
-        if rq.expr.containsFVar h.fvarId! then
-          return { expr := (← mkForallFVars #[h] rq.expr),
-                   proof? := (← withDefault <| mkImpDepCongrCtx (← rp.getProof) hq) }
-        else
-          return { expr := e.updateForallE! rp.expr rq.expr,
-                   proof? := (← withDefault <| mkImpCongrCtx (← rp.getProof) hq) }
+      withDummyBinder ref (pos.push 1) do
+        withIntroCtxScope ref pos rp.expr h do
+          withNewLemmasT ref #[h] do
+            let rq ← simpT ref (pos.push 1) q
+            match rq.proof? with
+            | none    => Simp.mkImpCongr e rp rq
+            | some hq =>
+              let hq ← mkLambdaFVars #[h] hq
+              if rq.expr.containsFVar h.fvarId! then
+                return { expr := (← mkForallFVars #[h] rq.expr),
+                         proof? := (← withDefault <| mkImpDepCongrCtx (← rp.getProof) hq) }
+              else
+                return { expr := e.updateForallE! rp.expr rq.expr,
+                         proof? := (← withDefault <| mkImpCongrCtx (← rp.getProof) hq) }
   else
-    Simp.mkImpCongr e rp (← simpT ref (pos.push 1) q)
+    withDummyBinder ref (pos.push 1) do
+      Simp.mkImpCongr e rp (← simpT ref (pos.push 1) q)
 
 /-- SOURCE: Main.lean:365-412 `Simp.simpForall`, position-threaded. -/
 partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Result :=
@@ -1562,7 +1604,7 @@ partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Res
         -- both children at fresh roots so their exact event positions can be
         -- exported as T32's nested domain/body lists; keeping them in the
         -- outer stream would replay the substituted proof at the wrong term.
-        let (rd, domainEvents) ← captureEvents ref (simpT ref #[] domain)
+        let (rd, domainEvents, domainParentSpine) ← captureEvents ref (simpT ref #[] domain)
         if let some h₁ := rd.proof? then
           -- `forall_prop_domain_congr` rewrites the body under a *substituted*
           -- binder (`h₁.substr a`), so the body simp sees is not the body at
@@ -1574,13 +1616,13 @@ partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Res
           let handle ← freshIntroduced ref
           let outerCtx ← captureEvCtx ref
           let result ← withLocalDecl e.bindingName! e.bindingInfo! p₂ fun a =>
-            withBinder ref a <| withIntroduced ref handle a <| withNewLemmasT ref #[a] do
+            withIntroduced ref handle a <| withNewLemmasT ref #[a] do
               let prop := mkSort Level.zero
               let h₁_substr_a := mkApp6 (mkConst ``Eq.substr [Level.one]) prop
                 (mkLambda `x .default prop (mkBVar 0)) p₂ p₁ h₁ a
               let q_h₁_substr_a := e.bindingBody!.instantiate1 h₁_substr_a
               let before := q_h₁_substr_a
-              let (rb, bodyEvents) ← captureEvents ref (simpT ref #[] q_h₁_substr_a)
+              let (rb, bodyEvents, _) ← captureEvents ref (simpT ref #[] q_h₁_substr_a)
               let h₂ ← mkLambdaFVars #[a] (← rb.getProof)
               let q₂ ← mkLambdaFVars #[a] rb.expr
               let result ← mkForallFVars #[a] rb.expr
@@ -1596,10 +1638,10 @@ partial def simpForallT (ref : TraceRef) (pos : Pos) (e : Expr) : SimpM Simp.Res
           -- The domain may have only definitional progress.  It was captured
           -- at a fresh root above, so restore those ordinary events at the
           -- actual domain child when no dependent transport is constructed.
-          appendEvents ref (domainEvents.map (Event.rebase (pos.push 0)))
+          appendEvents ref (domainEvents.map (Event.rebase (pos.push 0) domainParentSpine))
       let domain ← dsimpT ref (pos.push 0) domain
       withLocalDecl e.bindingName! e.bindingInfo! domain fun x =>
-        withBinder ref x <| withNewLemmasT ref #[x] do
+        withBinder ref (pos.push 1) x <| withNewLemmasT ref #[x] do
           let b := e.bindingBody!.instantiate1 x
           let rb ← simpT ref (pos.push 1) b
           let eNew ← mkForallFVars #[x] rb.expr

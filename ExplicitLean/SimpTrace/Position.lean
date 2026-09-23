@@ -1,13 +1,13 @@
 /-
 Structural navigation and the replay **validator**.
 
-The position-reconstruction machinery this module used to hold — `findBridge?`,
-`findBridgeChain?`, `reducibleSites`, the stale-term `refresh`, `abstractSimpFVars`
-and `findOccurrences` — is **deleted**.  Positions now come out of the forked
-traversal exactly (`ExplicitLean/SimpTrace/Traversal.lean`), so nothing here
-searches: three review rounds showed the search was the source of the critical
-defects (REVIEW-3 C2's exponential chain search, C1's unattributed firings and
-M4's leaked `_fvar` in a bridge target).
+Position reconstruction now comes from the forked traversal
+(`ExplicitLean/SimpTrace/Traversal.lean`), so this module does not search for
+candidate rewrites: three review rounds showed that search was the source of
+critical defects (REVIEW-3 C2's exponential chain search, C1's unattributed
+firings and M4's leaked `_fvar` in a bridge target). The validator retains the
+exact binder-spine abstraction needed to compare open observations against the
+closed expression at a recorded position.
 
 What survives is the safety net the task asks for: after the traversal, replay
 the recorded steps structurally from the pre-state term — navigate `pos`, check
@@ -139,10 +139,10 @@ partial def navigate? (e : Expr) (pos : Pos) (depth : Nat := 0) :
 /-! ### Open and closed subterms
 
 The traversal observes a subterm with its enclosing binders instantiated as
-*free* variables (simp introduces one local per binder it descends under),
-while the running term still has loose `bvar`s there.  The events carry the
-local context they were observed in, so the validator abstracts exactly the
-free variables that are not in the location's own context, innermost last.
+*free* variables, while the running term still has loose `bvar`s there. The
+events carry path-tagged binder slots, including dummy slots for non-dependent
+arrows, so the validator abstracts exactly the binder nodes crossed by that
+event position.
 
 `Expr.abstract` is used rather than `Expr.replace`: it accounts for binders
 *inside* the subterm, so a variable occurring under a nested binder gets the
@@ -253,42 +253,28 @@ partial def eqIgnoringProofs (a b : Expr) : MetaM Bool := do
 Abstract the traversal-introduced free variables of `target` so it matches the
 open subterm sitting at a position under `binderNodes` binder nodes.
 
-`simpFVars` are the free variables the traversal substituted for the *term*
-binders it descended under, outermost first.  `binderNodes` is how many binder
-`Expr` nodes the position path crossed, which can be larger: a non-dependent
-arrow is a binder node that binds no term variable.
-
-`Expr.abstract xs` assigns `bvar (xs.size - 1 - i)` to `xs[i]`, i.e. it assumes
-the variables are the innermost `xs.size` binders.  When binder nodes that bind
-nothing sit *below* the term binders (exactly the arrow case), the real indices
-are shifted up by the number of such nodes, so we pad the scope with that many
-dummy slots at the inner end.
+`binderSpine` records every binder body crossed in traversal order, including
+non-dependent arrows as dummy slots. `bodyPos` ties each slot to the path that
+crossed it, so events at a rebuilt ancestor do not accidentally use variables
+opened only in one of its descendants.
 
 `Expr.abstract` is used rather than `Expr.replace`: it accounts for binders
 *inside* `target`, so a variable occurring under a nested binder gets the right
 de Bruijn index.  (`Expr.replace` does not, and getting that wrong was review
 round 1's shadowed-binder defect.)
 -/
-def abstractSimpFVars (target : Expr) (simpFVars : Array FVarId)
-    (binderNodes : Nat) : Expr :=
-  if simpFVars.isEmpty then target
-  else
-    let n := simpFVars.size
-    -- Term binders in scope, outermost first, capped at the nodes crossed.
-    let depth := min n binderNodes
-    if depth == 0 then target
-    else
-      let scope := (simpFVars.extract (n - depth) n).map Expr.fvar
-      -- Binder nodes that bind no term variable, sitting inside the term
-      -- binders: they shift every index up by one each.
-      let padding := binderNodes - depth
-      if padding == 0 then
-        target.abstract scope
-      else
-        -- `mkFVar` on fresh, unused ids: they occur nowhere in `target`, so they
-        -- only consume de Bruijn slots, which is exactly the shift we need.
-        let pad := (Array.range padding).map fun i =>
-          Expr.fvar ⟨Name.mkSimple s!"_simpTracePad{i}"⟩
-        target.abstract (scope ++ pad)
+def abstractSimpFVars (target : Expr) (binderSpine : Array BinderSlot)
+    (eventPos : Pos) (binderNodes : Nat) : MetaM Expr := do
+  let slots := binderSpine.filter fun slot =>
+    let bodyPos := match slot with
+      | .fvar p _ | .dummy p => p
+    bodyPos.size <= eventPos.size && eventPos.extract 0 bodyPos.size == bodyPos
+  unless slots.size == binderNodes do
+    throwError "simp_trace: binder-spine mismatch at {eventPos}: position crosses {binderNodes} binder node(s), recorder captured {slots.size}"
+  let scope ← slots.mapM fun slot => do
+    match slot with
+    | .fvar _ id => pure (.fvar id)
+    | .dummy _ => return .fvar (← mkFreshFVarId)
+  return target.abstract scope
 
 end ExplicitLean.SimpTrace
