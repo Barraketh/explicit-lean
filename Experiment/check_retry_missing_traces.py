@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import pathlib
 import os
@@ -26,6 +27,7 @@ class MissingTraceRetryTests(unittest.TestCase):
             module_path = "Mathlib/X.lean"
             source = "theorem fixture : True := by exact True.intro\n"
             source_bytes = source.encode("utf-8")
+            source_hash = hashlib.sha256(source_bytes).hexdigest()
             pinned = root / ".lake" / "packages" / "mathlib" / module_path
             pinned.parent.mkdir(parents=True)
             pinned.write_bytes(source_bytes)
@@ -43,7 +45,7 @@ class MissingTraceRetryTests(unittest.TestCase):
                        for site in sites} if old_traces else {})
             db = sqlite3.connect(":memory:")
             db.execute("CREATE TABLE modules(name TEXT,source_sha256 TEXT)")
-            db.execute("INSERT INTO modules VALUES('Mathlib.X',?)", ("a" * 64,))
+            db.execute("INSERT INTO modules VALUES('Mathlib.X',?)", (source_hash,))
             db.execute("CREATE TABLE simp_replacements(module_name TEXT,ordinal INTEGER,"
                        "status TEXT,replacement_text TEXT,error TEXT,"
                        "PRIMARY KEY(module_name,ordinal))")
@@ -70,6 +72,25 @@ class MissingTraceRetryTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(
                 retry.TSA, "audit_executable_proof_holes",
                 return_value={"status": "ok", "proofHoles": []}))
+            def authenticate_fixture_postcondition(**kwargs):
+                # These process fixtures intentionally use synthetic command
+                # rows and candidate text; keep this mock focused on retry
+                # call plumbing while the parser-free AST identity checks
+                # exercise the strict validator against synthetic inventories.
+                self.assertEqual(kwargs["expected_source_sha256"], source_hash)
+                self.assertEqual(kwargs["original_source"], source)
+                self.assertEqual(kwargs["command_rows"], commands)
+                self.assertTrue(
+                    kwargs["success_ordinals"].issubset(kwargs["candidate_replacements"])
+                )
+                expected_candidate = source + "\n" + retry.json.dumps(
+                    sorted(kwargs["candidate_replacements"].items())
+                )
+                self.assertEqual(kwargs["candidate_source"], expected_candidate)
+
+            stack.enter_context(mock.patch.object(
+                retry.TSA, "assert_success_commands_have_no_simp",
+                side_effect=authenticate_fixture_postcondition))
             stack.enter_context(mock.patch.object(
                 retry, "_authenticated_old_traces",
                 return_value=(traces, set(traces), None if old_traces else "no bundle")))
@@ -83,6 +104,7 @@ class MissingTraceRetryTests(unittest.TestCase):
                 yield {
                     "base": base, "root": root, "pinned": pinned,
                     "source": source, "source_bytes": source_bytes,
+                    "source_hash": source_hash,
                     "module_path": module_path, "sites": sites,
                     "commands": commands, "traces": traces,
                     "scratch": scratch, "db": db, "stack": stack,
@@ -208,18 +230,20 @@ class MissingTraceRetryTests(unittest.TestCase):
                 retry.main(["--database", "missing.sqlite3",
                             "--artifacts-root", "missing-artifacts",
                             "--scratch", "missing-scratch"])
-        with tempfile.TemporaryDirectory(dir=retry.RUN_ROOT) as directory:
-            manifest = pathlib.Path(directory) / "empty.txt"
-            manifest.write_text("", encoding="utf-8")
-            database = pathlib.Path(directory) / "must-not-be-created.sqlite3"
-            with contextlib.redirect_stderr(io.StringIO()):
-                result = retry.main([
-                    "--database", str(database), "--artifacts-root", "missing-artifacts",
-                    "--scratch", str(pathlib.Path(directory) / "scratch"),
-                    "--manifest", str(manifest),
-                ])
-            self.assertEqual(result, 1)
-            self.assertFalse(database.exists())
+        with tempfile.TemporaryDirectory(dir=pathlib.Path.cwd()) as run_root:
+            with mock.patch.object(retry, "RUN_ROOT", pathlib.Path(run_root).resolve()):
+                with tempfile.TemporaryDirectory(dir=retry.RUN_ROOT) as directory:
+                    manifest = pathlib.Path(directory) / "empty.txt"
+                    manifest.write_text("", encoding="utf-8")
+                    database = pathlib.Path(directory) / "must-not-be-created.sqlite3"
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        result = retry.main([
+                            "--database", str(database), "--artifacts-root", "missing-artifacts",
+                            "--scratch", str(pathlib.Path(directory) / "scratch"),
+                            "--manifest", str(manifest),
+                        ])
+                    self.assertEqual(result, 1)
+                    self.assertFalse(database.exists())
 
     def test_placeholder_guard_uses_lean_tokens(self) -> None:
         self.assertTrue(retry.placeholder_token("by sorry"))
@@ -228,26 +252,32 @@ class MissingTraceRetryTests(unittest.TestCase):
         self.assertFalse(retry.placeholder_token("admitted"))
 
     def test_database_guard_rejects_snapshot_and_out_of_scope_paths(self) -> None:
-        with tempfile.TemporaryDirectory(dir=retry.RUN_ROOT) as directory:
-            writable = pathlib.Path(directory) / "copy.sqlite3"
-            writable.touch()
-            self.assertEqual(retry.read_only_snapshot_guard(writable), writable.resolve())
-        frozen = retry.SNAPSHOT_ROOT / "job-000.sqlite3"
-        with self.assertRaises(retry.RetryError):
-            retry.read_only_snapshot_guard(frozen)
-        with tempfile.NamedTemporaryFile() as outside:
-            with self.assertRaises(retry.RetryError):
-                retry.read_only_snapshot_guard(pathlib.Path(outside.name))
-        with tempfile.TemporaryDirectory(dir=retry.RUN_ROOT) as directory:
-            original = pathlib.Path(directory) / "db.sqlite3"
-            linked = pathlib.Path(directory) / "linked.sqlite3"
-            original.touch()
-            try:
-                os.link(original, linked)
-            except OSError as exc:
-                self.skipTest(f"hard links unavailable: {exc}")
-            with self.assertRaisesRegex(retry.RetryError, "hard link"):
-                retry.read_only_snapshot_guard(linked)
+        with tempfile.TemporaryDirectory(dir=pathlib.Path.cwd()) as run_root:
+            with mock.patch.object(retry, "RUN_ROOT", pathlib.Path(run_root).resolve()):
+                with tempfile.TemporaryDirectory(dir=retry.RUN_ROOT) as directory:
+                    writable = pathlib.Path(directory) / "copy.sqlite3"
+                    writable.touch()
+                    self.assertEqual(retry.read_only_snapshot_guard(writable), writable.resolve())
+                snapshot_root = pathlib.Path(retry.RUN_ROOT) / "snapshot"
+                snapshot_root.mkdir()
+                frozen = snapshot_root / "job-000.sqlite3"
+                frozen.touch()
+                with mock.patch.object(retry, "SNAPSHOT_ROOT", snapshot_root.resolve()):
+                    with self.assertRaises(retry.RetryError):
+                        retry.read_only_snapshot_guard(frozen)
+                with tempfile.NamedTemporaryFile() as outside:
+                    with self.assertRaises(retry.RetryError):
+                        retry.read_only_snapshot_guard(pathlib.Path(outside.name))
+                with tempfile.TemporaryDirectory(dir=retry.RUN_ROOT) as directory:
+                    original = pathlib.Path(directory) / "db.sqlite3"
+                    linked = pathlib.Path(directory) / "linked.sqlite3"
+                    original.touch()
+                    try:
+                        os.link(original, linked)
+                    except OSError as exc:
+                        self.skipTest(f"hard links unavailable: {exc}")
+                    with self.assertRaisesRegex(retry.RetryError, "hard link"):
+                        retry.read_only_snapshot_guard(linked)
 
     def test_per_site_results_commit_and_resume(self) -> None:
         db = sqlite3.connect(":memory:")
@@ -494,7 +524,7 @@ class MissingTraceRetryTests(unittest.TestCase):
             old_record = self.trace_record(case["module_path"], site)
             old_json = retry.json.dumps([old_record], sort_keys=True)
             retry._persist_site(case["db"], (
-                "Mathlib.X", 1, site.siteOrdinal, "a" * 64, site.callText,
+                "Mathlib.X", 1, site.siteOrdinal, case["source_hash"], site.callText,
                 "recorded", old_json, None, "old-time"))
             calls: list[list[int]] = []
 
@@ -608,7 +638,7 @@ class MissingTraceRetryTests(unittest.TestCase):
             for ordinal, site in enumerate(case["sites"], 1):
                 record = self.trace_record(case["module_path"], site)
                 retry._persist_site(case["db"], (
-                    "Mathlib.X", ordinal, site.siteOrdinal, "a" * 64,
+                    "Mathlib.X", ordinal, site.siteOrdinal, case["source_hash"],
                     site.callText, "recorded",
                     retry.json.dumps([record], sort_keys=True), None, "old-time"))
             case["db"].execute(

@@ -154,7 +154,11 @@ class SimpReplacementJobsTests(unittest.TestCase):
         dummy_update(job, module, 0, "pending")
         result = merger.merge(self.primary, [job])
         self.assertGreaterEqual(result["returned_pending"], 1)
-        self.assertEqual(state(self.primary)[0][2], "success")
+        primary_row = next(
+            row for row in state(self.primary)
+            if row[:2] == (module, 0)
+        )
+        self.assertEqual(primary_row[2], "success")
 
     def test_conflict_rolls_back_all_jobs(self) -> None:
         output, _ = self.prepare(2)
