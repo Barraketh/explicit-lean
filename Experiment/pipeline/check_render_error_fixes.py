@@ -3,14 +3,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import sys
+import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import replay_module as P  # noqa: E402
 import sites as S  # noqa: E402
+import tactic_syntax_ast as TSA  # noqa: E402
 
 
 def trace(name: str, invocation: int = 0, invocations: int = 1,
@@ -35,13 +38,31 @@ def rendered(source: str, records: list[dict] | dict,
              include_original_comment: bool = True) -> dict:
     sites = S.find_sites(source)
     assert len(sites) == 1, f"expected one source site, got {len(sites)}"
+    syntax = None
+    if isinstance(records, list) and len(records) > 1:
+        with tempfile.TemporaryDirectory(prefix="render-error-syntax-") as temp:
+            path = pathlib.Path(temp) / "Fixture.lean"
+            source_bytes = source.encode("utf-8")
+            path.write_bytes(source_bytes)
+            syntax = TSA.extract_tactic_ancestries(
+                module="Mathlib.RenderErrorFixture",
+                source_path=path,
+                sites=[{
+                    "start_char": sites[0].start,
+                    "end_char": sites[0].end,
+                    "expected_text": sites[0].text,
+                }],
+                expected_source_sha256=hashlib.sha256(source_bytes).hexdigest(),
+                require_pinned_path=False,
+            )[0]
     return P.render_site(sites[0], records, source,
-                         include_original_comment=include_original_comment)
+                         include_original_comment=include_original_comment,
+                         syntax_ancestry=syntax, module_sites=sites)
 
 
 def main() -> int:
-    # Only the pre-existing exact binary branch-spine parser may expand an
-    # invocation list. It establishes both branch count and source order.
+    # Only a Lean parser-authenticated `<;>` ancestry may expand an invocation
+    # list. It establishes the source order of generated goals.
     branch_source = "example : True := by\n  by_cases h : True <;> simp\n"
     branch_records = [trace("first", 0, 2), trace("second", 1, 2)]
     branch = rendered(branch_source, branch_records)
@@ -65,28 +86,31 @@ def main() -> int:
         include_original_comment=False,
     )
     assert inline_branch["status"] == "rendered", inline_branch
-    assert inline_branch["lines"][0] == "example : True := by", inline_branch["lines"]
+    assert "by_cases h : True" in "\n".join(inline_branch["lines"]), inline_branch["lines"]
     assert not any("Original simp" in line for line in inline_branch["lines"]), (
         inline_branch["lines"]
     )
 
-    # Generic producer inference was removed: nested declarations, multiline
-    # tactic blocks, and text-only operator lookalikes are all refused.
+    # Nested declarations and multi-line tactic blocks are parsed structurally;
+    # text-only operator lookalikes still have no authenticated ancestry.
+    nested_proof = rendered(
+        "example (b : Bool) : True := by\n"
+        "  have h : True := by cases b <;> simp\n  exact h\n",
+        branch_records,
+    )
+    assert nested_proof["status"] == "rendered", nested_proof
+    assert all(line.startswith("    ") for line in nested_proof["lines"]), nested_proof["lines"]
+    multiline_proof = rendered(
+        "example (b : Bool) : True := by\n"
+        "  have h : True :=\n"
+        "    by\n"
+        "      cases b <;>\n"
+        "        simp\n"
+        "  exact h\n",
+        branch_records,
+    )
+    assert multiline_proof["status"] == "rendered", multiline_proof
     fail_closed = [
-        (
-            "nested have inline proof",
-            "example (b : Bool) : True := by\n"
-            "  have h : True := by cases b <;> simp\n  exact h\n",
-        ),
-        (
-            "multiline declaration and tactic",
-            "example (b : Bool) : True := by\n"
-            "  have h : True :=\n"
-            "    by\n"
-            "      cases b <;>\n"
-            "        simp\n"
-            "  exact h\n",
-        ),
         (
             "string lookalike",
             'example : True := by\n  have s : String := "<;> by_cases h : P"\n  simp\n',
@@ -149,8 +173,7 @@ def main() -> int:
         "  explicit_rw [hFalse at [] ] at h; explicit_rw [] then close [h.elim]"
     ), hyp_close["lines"]
 
-    # Preserve fail-closed behavior when source after the call is outside the
-    # exact branch-spine grammar.
+    # A semicolon continuation is outside the extracted `<;>` branch range.
     unsupported = rendered(
         "example : True := by\n  cases x <;> simp; rfl\n",
         branch_records,

@@ -137,6 +137,41 @@ class TacticSyntaxAstChecks(unittest.TestCase):
                 self.assertLess(child["startChar"], child["endChar"])
                 self.assertTrue(FIXTURE[child["startChar"]:child["endChar"]])
 
+    def test_apply_all_child_ranges_are_exact_source_slices(self) -> None:
+        multiline = self.extract("simp", occurrence=1)
+        sequence = next(node for node in multiline["ancestry"]
+                        if "tactic_<;>_" in node["kind"])
+        children = sorted(sequence["branchChildren"], key=lambda child: child["startChar"])
+        self.assertEqual(len(children), 2)
+        self.assertEqual(
+            [FIXTURE[child["startChar"] : child["endChar"]] for child in children],
+            ["apply And.intro", "simp"],
+        )
+        self.assertEqual([child["role"] for child in children], ["left", "right"])
+
+        nested = self.extract("simp", occurrence=2)
+        nested_sequences = [node for node in nested["ancestry"]
+                            if "tactic_<;>_" in node["kind"]]
+        self.assertEqual(len(nested_sequences), 2)
+        outer, inner = nested_sequences
+        outer_children = sorted(outer["branchChildren"], key=lambda child: child["startChar"])
+        inner_children = sorted(inner["branchChildren"], key=lambda child: child["startChar"])
+        self.assertEqual(FIXTURE[outer_children[0]["startChar"] : outer_children[0]["endChar"]],
+                         "by_cases h : True")
+        self.assertEqual(FIXTURE[inner_children[0]["startChar"] : inner_children[0]["endChar"]],
+                         "by_cases h₂ : True")
+        self.assertEqual(FIXTURE[inner_children[1]["startChar"] : inner_children[1]["endChar"]],
+                         "simp")
+
+        continued = self.extract("simp", occurrence=5)
+        self.assertTrue(any(
+            child["role"] == "continuation"
+            and FIXTURE[child["startChar"] : child["endChar"]] == "tauto"
+            for node in continued["ancestry"]
+            if "tactic_<;>_" in node["kind"]
+            for child in node["branchChildren"]
+        ))
+
     def test_authentication_rejects_changed_source_and_range(self) -> None:
         with self.assertRaisesRegex(ValueError, "SHA-256"):
             ast.extract_tactic_ancestry(

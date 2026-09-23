@@ -24,6 +24,7 @@ Exit 0 when everything passes, 1 otherwise.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -41,6 +42,7 @@ import replay_module as P  # noqa: E402
 import sites as S  # noqa: E402
 import simp_engine_inventory as I  # noqa: E402
 import broader_overlay as B  # noqa: E402
+import tactic_syntax_ast as TSA  # noqa: E402
 
 CASES = ROOT / "test" / "Pipeline" / "renderer_cases.json"
 
@@ -422,9 +424,60 @@ def diagnostic_tests(f: Failures) -> None:
 
 
 def invocation_tests(f: Failures) -> None:
-    """Structural expansion fixtures for the four observed branch families."""
-    def source(prefix: str, call: str = "simp [h]", suffix: str = "") -> str:
-        return "import A\nexample : True := by\n  " + prefix + " <;> " + call + suffix + "\n"
+    """Structural expansion fixtures authenticated by Lean syntax ranges."""
+    specifications = {
+        "A": ("by_cases h : True", ""),
+        "B": ("rcases h with rfl | hne", ""),
+        "C": ("obtain rfl | ha := eq_or_ne x y <;> obtain rfl | ha' := eq_or_ne a b",
+              ""),
+        "D": ("by_cases hp : P <;> by_cases hq : Q", ""),
+        "parenthesized": ("by_cases hp : P <;> (by_cases hq : Q", ")"),
+        "non_tail": ("by_cases h : True", " <;> trivial"),
+        "unsupported_suffix": ("by_cases h : True", " <;> simpa using h"),
+        "identical": ("by_cases h : True", ""),
+        "base": ("by_cases h : True", ""),
+    }
+    chunks = ["import Mathlib\n"]
+    case_ranges: dict[str, tuple[int, int]] = {}
+    for name, (prefix, suffix) in specifications.items():
+        declaration = (
+            f"theorem branch_{name} : True := by\n"
+            f"  {prefix} <;> simp [h]{suffix}\n"
+        )
+        start = sum(len(chunk) for chunk in chunks)
+        chunks.append(declaration)
+        case_ranges[name] = (start, start + len(declaration))
+    fixture_source = "".join(chunks)
+    fixture_sites = S.find_sites(fixture_source)
+    fixture_path: pathlib.Path | None = None
+    temp_fixture = tempfile.TemporaryDirectory(prefix="pipeline-branch-syntax-")
+    try:
+        fixture_path = pathlib.Path(temp_fixture.name) / "Fixture.lean"
+        fixture_path.write_text(fixture_source, encoding="utf-8")
+        fixture_bytes = fixture_source.encode("utf-8")
+        syntax_records = TSA.extract_tactic_ancestries(
+            module="Mathlib.PipelineBranchSyntaxFixture",
+            source_path=fixture_path,
+            sites=[{
+                "start_char": site.start,
+                "end_char": site.end,
+                "expected_text": site.text,
+            } for site in fixture_sites],
+            expected_source_sha256=hashlib.sha256(fixture_bytes).hexdigest(),
+            require_pinned_path=False,
+        )
+    finally:
+        temp_fixture.cleanup()
+    syntax_by_name = {}
+    site_by_name = {}
+    for site, syntax in zip(fixture_sites, syntax_records):
+        owner = next(name for name, (start, end) in case_ranges.items()
+                     if start <= site.start < end)
+        syntax_by_name[owner] = syntax
+        site_by_name[owner] = site
+
+    def fixture(name: str) -> tuple[S.Site, dict]:
+        return site_by_name[name], syntax_by_name[name]
 
     def traces(count: int, names: list[str] | None = None) -> list[dict]:
         names = names or ["foo"] * count
@@ -436,13 +489,12 @@ def invocation_tests(f: Failures) -> None:
                            "close": {"by": "rfl"}}],
         } for i in range(count)]
 
-    def expanded(name: str, prefix: str, count: int, suffix: str = "",
-                 names: list[str] | None = None) -> dict:
-        text = source(prefix, suffix=suffix)
-        site = S.find_sites(text)[0]
-        return P.render_site(site, traces(count, names), text)
+    def expanded(name: str, count: int, names: list[str] | None = None) -> dict:
+        site, syntax = fixture(name)
+        return P.render_site(site, traces(count, names), fixture_source,
+                             syntax_ancestry=syntax, module_sites=fixture_sites)
 
-    one = expanded("A", "by_cases h : True", 2, names=["true_step", "false_step"])
+    one = expanded("A", 2, names=["true_step", "false_step"])
     f.equal("invocations/group_A_replayed", one["status"], "rendered")
     f.equal("invocations/group_A_leaf_count", one["structural_leaf_count"], 2)
     f.check("invocations/group_A_order", "true_step" in one["lines"][3]
@@ -450,60 +502,64 @@ def invocation_tests(f: Failures) -> None:
     f.check("invocations/comment_adjacent", one["lines"][2].startswith("  by_cases")
             and one["lines"][1] == "  -- simp [h]", "original comment is not adjacent")
 
-    b = expanded("B", "rcases h with rfl | hne", 2)
+    b = expanded("B", 2)
     f.equal("invocations/group_B_leaf_count", b["structural_leaf_count"], 2)
     f.check("invocations/group_B_bullets", sum(line.lstrip().startswith("·")
             for line in b["lines"]) == 2, "rcases did not produce two leaves")
 
-    c = expanded("C", "obtain rfl | ha := eq_or_ne x y <;> obtain rfl | ha' := eq_or_ne a b", 4)
+    c = expanded("C", 4)
     f.equal("invocations/group_C_leaf_count", c["structural_leaf_count"], 4)
-    f.check("invocations/group_C_nested", sum("obtain rfl | ha'" in line for line in c["lines"]) == 2,
-            "nested obtain spine was not expanded")
+    f.check("invocations/group_C_apply_all_prefix",
+            "obtain rfl | ha := eq_or_ne x y <;> obtain rfl | ha' := eq_or_ne a b"
+            in "\n".join(c["lines"]),
+            "nested apply-all prefix was not preserved")
 
-    d = expanded("D", "by_cases hp : P <;> by_cases hq : Q", 4,
+    parenthesized = expanded("parenthesized", 4,
+                             names=["nested_0", "nested_1", "nested_2", "nested_3"])
+    f.equal("invocations/parenthesized_leaf_count",
+            parenthesized["structural_leaf_count"], 4)
+    f.check("invocations/parenthesized_prefix_flattened",
+            "by_cases hp : P <;> by_cases hq : Q" in "\n".join(parenthesized["lines"]),
+            "parser-authenticated parenthesized apply-all sequence was not flattened")
+
+    d = expanded("D", 4,
                  names=["p_q", "p_nq", "np_q", "np_nq"])
     f.equal("invocations/group_D_leaf_count", d["structural_leaf_count"], 4)
     f.check("invocations/group_D_order", all(name in "\n".join(d["lines"])
             for name in ("p_q", "p_nq", "np_q", "np_nq")), "nested by_cases traces missing")
 
-    non_tail = expanded("non_tail", "by_cases h : a == b", 2,
-                        suffix=" <;> simpa [I.eq_iff] using h")
+    non_tail = expanded("non_tail", 2)
     f.equal("invocations/non_tail_continuation_rewritten", non_tail["status"], "rendered")
-    f.equal("invocations/non_tail_original_comments",
-            sum("-- Original continuation: simpa [I.eq_iff] using h" in line
-                for line in non_tail["lines"]), 2)
-    f.check("invocations/non_tail_has_ordinary_closes",
-            any("exact congrArg f (beq_iff_eq.mp h)" in line for line in non_tail["lines"])
-            and any("exact fun hab => h (beq_iff_eq.mpr ((I.eq_iff).mp hab))" in line
-                     for line in non_tail["lines"]),
-            "branch-specific ordinary continuation was not emitted")
+    f.check("invocations/non_tail_continuation_per_goal",
+            sum(line.strip() == "trivial" for line in non_tail["lines"]) == 2,
+            "the source continuation was not applied to each generated goal")
     f.check("invocations/non_tail_no_generated_simp_family",
             not P.lint_replacement(non_tail),
             "non-tail continuation still contains a generated simp-family call")
 
-    refused_suffix = expanded("unsupported_suffix", "by_cases h : True", 2,
-                              suffix=" <;> simpa using h")
+    refused_suffix = expanded("unsupported_suffix", 2)
     f.equal("invocations/unsupported_simp_suffix_refused",
             refused_suffix["status"], "structurally_refused")
 
-    identical = expanded("identical", "by_cases h : True", 2, names=["same", "same"])
+    identical = expanded("identical", 2, names=["same", "same"])
     f.equal("invocations/identical_step_lists_keep_leaves", identical["structural_leaf_count"], 2)
     f.equal("invocations/identical_step_lists_occurrences", "\n".join(identical["lines"]).count("same at []"), 2)
 
-    base = source("by_cases h : True")
-    site = S.find_sites(base)[0]
+    site, syntax = fixture("base")
     for name, records in (("missing", traces(2)[:1]),
                           ("duplicate", traces(2)[:1] + [dict(traces(2)[0])]),
                           ("gapped", [dict(traces(2)[0], invocation=0),
                                       dict(traces(2)[1], invocation=2)])):
-        refused = P.render_site(site, records, base)
+        refused = P.render_site(site, records, fixture_source,
+                                syntax_ancestry=syntax, module_sites=fixture_sites)
         f.equal("invocations/malformed_" + name, refused["status"], "structurally_refused")
         f.check("invocations/malformed_" + name + "/original",
                 any(site.text in line for line in refused["lines"]), "original call was not retained")
 
     # A legacy aggregate does not carry the complete records and is refused.
     legacy = P.render_site(site, {"schema": "simp-trace-v1", "invocations": 2,
-                                  "locations": []}, base)
+                                  "locations": []}, fixture_source,
+                           syntax_ancestry=syntax, module_sites=fixture_sites)
     f.equal("invocations/legacy_aggregate_refused", legacy["status"], "structurally_refused")
 
 

@@ -13,8 +13,8 @@ Per module, in five stages:
 2. **Render.** Translate each trace into replacement source text for its site:
    the original call preserved as a comment, deterministic indexed local and
    introduced handles where provenance requires them, then one `explicit_rw`
-   per location. Complete multi-invocation sites are expanded into the source
-   branch spine's leaves.
+   per location. Complete multi-invocation sites are expanded by their
+   authenticated `<;>` ancestry, with one bullet per recorded invocation.
 3. **Splice.** Write the translated module with every site replaced and
    `import ExplicitLean.ExplicitRw` added after the existing imports.
 4. **Compile.** `lake env lean` the translated file in the T2 worktree, whose
@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -48,6 +49,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -58,6 +60,7 @@ import sites as S  # noqa: E402
 import simp_family_lint as L  # noqa: E402
 import simp_manual_overrides as M  # noqa: E402
 import broader_overlay as B  # noqa: E402
+import tactic_syntax_ast as TSA  # noqa: E402
 
 # The six modules T1 has traced copies for: (Mathlib path, traced module name).
 MODULES = {
@@ -565,6 +568,214 @@ def _branch_spine(source: str, site: S.Site) -> tuple[int, int, list[str], str, 
     return None
 
 
+def _syntax_branch_spine(
+    source: str,
+    site: S.Site,
+    syntax: dict | None,
+    module_sites: list[S.Site],
+) -> tuple[int, int, str, str]:
+    """Return a source-authenticated `<;>` prefix and continuation.
+
+    The extractor's ancestry is the authority for tactic ownership and child
+    ranges.  Flattening nested right-hand `<;>` nodes is valid because each
+    node applies its right operand to every goal produced by its left operand;
+    the flattened prefix therefore produces the exact goals whose ordered
+    invocation records are emitted as bullets below.
+    """
+    if not isinstance(syntax, dict) or syntax.get("status") != "ok":
+        reason = (syntax.get("detail", syntax.get("reason", "missing_syntax_ancestry"))
+                  if isinstance(syntax, dict) else "missing_syntax_ancestry")
+        raise R.RenderError(
+            "structural_refused",
+            f"Lean syntax ancestry is unavailable: {reason}",
+            side="harness",
+        )
+
+    target = syntax.get("target")
+    if (not isinstance(target, dict)
+            or target.get("startChar") != site.start
+            or target.get("endChar") != site.end
+            or syntax.get("targetText") != site.text
+            or source[site.start:site.end] != site.text
+            or syntax.get("moduleSourceSha256")
+            != hashlib.sha256(source.encode("utf-8")).hexdigest()):
+        raise R.RenderError(
+            "structural_refused",
+            "Lean syntax target does not authenticate the complete source site",
+            side="harness",
+        )
+
+    ancestry = syntax.get("ancestry")
+    if not isinstance(ancestry, list):
+        raise R.RenderError("structural_refused", "Lean syntax ancestry is malformed",
+                            side="harness")
+    allowed_tactic_nodes = {
+        "Lean.Parser.Tactic.tacticSeq",
+        "Lean.Parser.Tactic.tacticSeq1Indented",
+        "Lean.Parser.Tactic.paren",
+        "Lean.Parser.Tactic.simp",
+        "Lean.Parser.Tactic.tacticHave__",
+        "Lean.Parser.Tactic.«tactic_<;>_»",
+    }
+    if any(isinstance(node, dict)
+           and str(node.get("kind", "")).startswith("Lean.Parser.Tactic.")
+           and node.get("kind") not in allowed_tactic_nodes
+           for node in ancestry):
+        raise R.RenderError(
+            "structural_refused",
+            "the simp site is nested in a tactic form outside the authenticated `<;>` sequence",
+            side="harness",
+        )
+
+    sequence_nodes = [
+        node for node in ancestry
+        if isinstance(node, dict)
+        and node.get("kind") == "Lean.Parser.Tactic.«tactic_<;>_»"
+    ]
+    if not sequence_nodes:
+        raise R.RenderError("structural_refused", "source has no authenticated `<;>` ancestry",
+                            side="harness")
+
+    prefix_parts: list[str] = []
+    suffix_levels: list[list[str]] = []
+    enclosing_range: tuple[int, int] | None = None
+    for node in sequence_nodes:
+        node_start, node_end = node.get("startChar"), node.get("endChar")
+        children = node.get("branchChildren")
+        if (not isinstance(node_start, int) or isinstance(node_start, bool)
+                or not isinstance(node_end, int) or isinstance(node_end, bool)
+                or not node_start <= site.start < site.end <= node_end
+                or not isinstance(children, list) or len(children) < 2):
+            raise R.RenderError("structural_refused", "malformed `<;>` child ranges",
+                                side="harness")
+        if (enclosing_range is not None
+                and not (enclosing_range[0] <= node_start
+                         and node_end <= enclosing_range[1])):
+            raise R.RenderError("structural_refused", "`<;>` ancestry ranges are not nested",
+                                side="harness")
+        enclosing_range = (node_start, node_end)
+        ordered: list[tuple[int, int, str, str]] = []
+        for child in children:
+            if not isinstance(child, dict):
+                raise R.RenderError("structural_refused", "malformed `<;>` child record",
+                                    side="harness")
+            child_start, child_end = child.get("startChar"), child.get("endChar")
+            child_kind = child.get("kind")
+            child_role = child.get("role")
+            if (not isinstance(child_start, int) or isinstance(child_start, bool)
+                    or not isinstance(child_end, int) or isinstance(child_end, bool)
+                    or child_start < node_start or child_end > node_end
+                    or child_end <= child_start
+                    or not isinstance(child_kind, str) or not child_kind
+                    or not isinstance(child_role, str)
+                    or child_role not in {"left", "right", "continuation"}):
+                raise R.RenderError("structural_refused", "invalid `<;>` child source range",
+                                    side="harness")
+            ordered.append((child_start, child_end, child_kind, child_role))
+        if not ordered:
+            raise R.RenderError("structural_refused", "`<;>` has no tactic children",
+                                side="harness")
+        ordered.sort(key=lambda item: item[0])
+        child_roles = [role for _start, _end, _kind, role in ordered]
+        if child_roles[0] != "left":
+            raise R.RenderError("structural_refused", "`<;>` left operand is unauthenticated",
+                                side="harness")
+        if any(left[1] > right[0] for left, right in zip(ordered, ordered[1:])):
+            raise R.RenderError("structural_refused", "`<;>` child ranges overlap",
+                                side="harness")
+        containing = [i for i, (start, end, _kind, _role) in enumerate(ordered)
+                      if start <= site.start and site.end <= end]
+        if len(containing) != 1:
+            raise R.RenderError(
+                "structural_refused",
+                "the simp site is not owned by exactly one `<;>` child",
+                side="harness",
+            )
+        pivot = containing[0]
+        expected_role = "right" if pivot == 1 else "continuation"
+        if child_roles[pivot] != expected_role:
+            raise R.RenderError(
+                "structural_refused",
+                "the simp site is not in an authenticated `<;>` right operand",
+                side="harness",
+            )
+        if any(role != "continuation" for role in child_roles[2:]):
+            raise R.RenderError("structural_refused", "invalid `<;>` continuation roles",
+                                side="harness")
+        before = [source[start:end].strip() for start, end, _kind, _role in ordered[:pivot]]
+        after = [source[start:end].strip() for start, end, _kind, _role in ordered[pivot + 1:]]
+        if any(not part for part in before + after):
+            raise R.RenderError("structural_refused", "empty tactic in `<;>` ancestry",
+                                side="harness")
+        prefix_parts.extend(before)
+        suffix_levels.append(after)
+
+    prefix = " <;> ".join(prefix_parts)
+    suffix_parts = [part for level in reversed(suffix_levels) for part in level]
+    suffix = " <;> ".join(suffix_parts)
+    if L.findings(prefix):
+        raise R.RenderError(
+            "structural_refused",
+            "the source prefix contains a forbidden simp-family tactic",
+            side="harness",
+        )
+    if suffix and L.findings(suffix):
+        raise R.RenderError(
+            "structural_refused",
+            "the source continuation contains a forbidden simp-family tactic",
+            side="harness",
+        )
+    if not prefix:
+        raise R.RenderError("structural_refused", "authenticated `<;>` spine has no prefix",
+                            side="harness")
+
+    root = sequence_nodes[0]
+    start, end = root.get("startChar"), root.get("endChar")
+    if (not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(end, int) or isinstance(end, bool)
+            or start < 0 or end <= start or end > len(source)):
+        raise R.RenderError("structural_refused", "invalid authenticated `<;>` root range",
+                            side="harness")
+    nested_scopes = [
+        node for node in ancestry
+        if isinstance(node, dict)
+        and node.get("kind") == "Lean.Parser.Tactic.tacticHave__"
+        and isinstance(node.get("startChar"), int)
+        and isinstance(node.get("endChar"), int)
+        and node["startChar"] <= start and end <= node["endChar"]
+    ]
+    nested_scope = nested_scopes[-1] if nested_scopes else None
+    for node in ancestry:
+        if (isinstance(node, dict)
+                and node.get("kind") in {
+                    "Lean.Parser.Tactic.tacticSeq",
+                    "Lean.Parser.Tactic.tacticSeq1Indented",
+                }
+                and isinstance(node.get("startChar"), int)
+                and isinstance(node.get("endChar"), int)
+                and node["startChar"] <= start
+                and end <= node["endChar"]
+                and node["endChar"] > end):
+            if (nested_scope is not None
+                    and node["startChar"] == nested_scope["startChar"]
+                    and node["endChar"] > nested_scope["endChar"]):
+                continue
+            raise R.RenderError(
+                "structural_refused",
+                "a surrounding tactic sequence has source after the `<;>` spine",
+                side="harness",
+            )
+    overlapping_sites = [other for other in module_sites
+                         if start <= other.start and other.end <= end]
+    if len(overlapping_sites) != 1 or overlapping_sites[0].index != site.index:
+        raise R.RenderError(
+            "structural_refused",
+            "the authenticated `<;>` range contains another simp source site",
+            side="harness",
+        )
+    return start, end, prefix, suffix
+
+
 def _space_before_explicit_rw_close(body: str) -> str:
     """Separate the outer tactic-list close from a final empty rewrite path.
 
@@ -616,37 +827,6 @@ def _invocation_records(trace: dict | list[dict] | None) -> list[dict] | None:
     if isinstance(total, int) and total == 1:
         return [trace]
     return None
-
-
-def _non_tail_continuation(suffix: str, branches: list[str], invocation: int) -> list[str]:
-    """Render a supported non-tail continuation as ordinary Lean.
-
-    The source ``Function.Defs`` site has a branch-specific continuation:
-    after the recorded ``explicit_rw`` steps, the true branch is an equality
-    of ``f`` applications and the false branch is its negation.  The original
-    source closes both with ``simpa [I.eq_iff] using h``.  Copying that suffix
-    once per structural leaf both violates the no-simp-family product rule and
-    changes the source's one occurrence into two.  Keep the source spelling as
-    a comment, then close each leaf with the direct proof that the preceding
-    explicit rewrites expose.
-
-    Other simp-family continuations are refused rather than copied into a
-    generated module.  Non-simp continuations remain source-preserving.
-    """
-    if suffix == "simpa [I.eq_iff] using h" and branches == ["by_cases h : a == b"]:
-        proof = (
-            "exact congrArg f (beq_iff_eq.mp h)"
-            if invocation == 0
-            else "exact fun hab => h (beq_iff_eq.mpr ((I.eq_iff).mp hab))"
-        )
-        return ["-- Original continuation: " + suffix, proof]
-    if L.findings(suffix):
-        raise R.RenderError(
-            "structural_refused",
-            "non-tail continuation contains an unsupported simp-family call",
-            side="harness",
-        )
-    return [suffix]
 
 
 def _manual_function_basic(site: S.Site, source: str,
@@ -756,19 +936,26 @@ def _manual_function_basic(site: S.Site, source: str,
 
 def _structural_replacement(source: str, site: S.Site,
                             executions: list[dict], base_indent: str,
+                            syntax_ancestry: dict | None,
+                            module_sites: list[S.Site],
                             include_original_comment: bool = True,
                             ) -> tuple[list[str], tuple[int, int], int, list[str]]:
-    """Render complete invocation ordinals over a parsed binary branch spine."""
-    parsed = _branch_spine(source, site)
-    if parsed is None:
-        raise R.RenderError("structural_refused", "source has no supported binary <;> branch spine",
-                            side="harness")
-    start, end, branches, suffix, inline_prefix = parsed
-    count = 2 ** len(branches)
-    if count < 1 or len(executions) != count:
+    """Render complete invocation ordinals over an authenticated apply-all spine."""
+    start, end, prefix, suffix = _syntax_branch_spine(
+        source, site, syntax_ancestry, module_sites
+    )
+    root_line_start = source.rfind("\n", 0, start) + 1
+    root_line_prefix = source[root_line_start:start]
+    root_leading = len(root_line_prefix) - len(root_line_prefix.lstrip(" \t"))
+    if root_line_prefix.strip():
+        base_indent = " " * (root_leading + 2)
+    else:
+        base_indent = root_line_prefix
+    count = len(executions)
+    if count < 1:
         raise R.RenderError(
             "structural_refused",
-            f"source spine has {count} leaves but metadata has {len(executions)} invocations",
+            "the source must have at least one recorded invocation",
             side="harness",
         )
     ordinals = []
@@ -803,58 +990,38 @@ def _structural_replacement(source: str, site: S.Site,
             raise R.RenderError("structural_refused", "inaccessible locals need branch-specific names",
                                 side="harness")
         bodies = [_space_before_explicit_rw_close(body) for body in bodies]
-        leaf: list[str] = []
-        for body in bodies:
-            leaf.append(body)
-        if suffix:
-            leaf.extend(_non_tail_continuation(
-                suffix, branches, record["invocation"]
-            ))
-        rendered.append(leaf)
+        rendered.append(bodies)
 
-    if inline_prefix:
-        lines = [inline_prefix]
-        base_indent = (site.line_indent or "") + "  "
-    else:
-        lines = (S.comment_original(site.text, base_indent)
-                 if include_original_comment else [])
-    if inline_prefix and include_original_comment:
-        lines.extend(S.comment_original(site.text, base_indent))
-    lines.append(base_indent + branches[0])
-    leaf_index = 0
-
-    def emit_children(tactic_index: int) -> None:
-        """Emit two children of the tactic at ``tactic_index``."""
-        nonlocal leaf_index
-        bullet_indent = base_indent + "  " * tactic_index
-        next_index = tactic_index + 1
-        for _child in (0, 1):
-            if next_index < len(branches):
-                lines.append(bullet_indent + "· " + branches[next_index])
-                emit_children(next_index)
+    lines = (S.comment_original(site.text, base_indent)
+             if include_original_comment else [])
+    lines.append(base_indent + prefix)
+    for leaf in rendered:
+        for line_no, body in enumerate(leaf):
+            if line_no == 0:
+                lines.append(base_indent + "· " + body)
             else:
-                for line_no, body in enumerate(rendered[leaf_index]):
-                    if line_no == 0:
-                        lines.append(bullet_indent + "· " + body)
-                    else:
-                        lines.append(bullet_indent + "  " + body)
-                leaf_index += 1
-
-    emit_children(0)
-    if leaf_index != count:
-        raise R.RenderError("structural_refused", "renderer emitted the wrong number of leaves",
-                            side="harness")
-    # The copied non-tail suffix is existing source, not generated replacement
-    # code.  Keep a separate lint view so an existing `simpa` is not mistaken
-    # for a newly emitted simp-family tactic.
-    generated = [line for line in lines if not line.lstrip().startswith("simpa")]
+                lines.append(base_indent + "  " + body)
+        if suffix:
+            # Bullets close their own goal scopes.  Copying a source
+            # continuation into each bullet preserves the `<;>` all-goals
+            # behavior while keeping the suffix in its original order.
+            suffix_lines = textwrap.dedent(suffix).splitlines()
+            lines.extend(base_indent + "  " + line for line in suffix_lines)
+    generated = [base_indent + "· " + body
+                 for leaf in rendered for body in leaf]
+    if suffix:
+        suffix_lines = textwrap.dedent(suffix).splitlines()
+        generated.extend(base_indent + "  " + line
+                         for _leaf in rendered for line in suffix_lines)
     return lines, (start, end), count, generated
 
 
 def render_site(site: S.Site, trace: dict | list[dict] | None,
                 source: str | None = None,
                 include_original_comment: bool = True,
-                use_manual_overrides: bool = True) -> dict:
+                use_manual_overrides: bool = True,
+                syntax_ancestry: dict | None = None,
+                module_sites: list[S.Site] | None = None) -> dict:
     """Render one site, returning its record.
 
     Four outcomes, and the record's `lines` are what gets spliced in every one:
@@ -865,7 +1032,7 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
       is counted as unresolved rather than hidden;
     * a `RenderError` -> `render_failed:<reason>`, original call kept;
     * otherwise the rendered replacement; a complete invocation list is
-      rendered as a structural branch expansion when source is supplied.
+      rendered only with authenticated Lean syntax ancestry for its source site.
     """
     indent = " " * site.column
     record: dict = {
@@ -937,6 +1104,7 @@ def render_site(site: S.Site, trace: dict | list[dict] | None,
         try:
             expanded, span, count, generated = _structural_replacement(
                 source, site, executions, site.line_indent or indent,
+                syntax_ancestry, module_sites or [site],
                 include_original_comment=include_original_comment)
         except R.RenderError as exc:
             if exc.reason.startswith("unresolved:"):
@@ -1307,11 +1475,51 @@ def replay_module(mathlib_rel: str, t1: pathlib.Path, t2: pathlib.Path,
         executions.sort(key=lambda record: record["invocation"])
         traces[ordinal] = (dict(executions[0]) if len(executions) == 1
                            else [dict(record) for record in executions])
+
+    syntax_by_site: dict[int, dict] = {}
+    multi_invocation_sites = [
+        site for site in site_list
+        if isinstance(traces.get(site.index), list)
+        and len(traces[site.index]) > 1
+    ]
+    if multi_invocation_sites:
+        module_suffix = mathlib_rel[len("Mathlib/") : -len(".lean")]
+        module_name = "Mathlib." + module_suffix.replace("/", ".")
+        try:
+            syntax_records = TSA.extract_tactic_ancestries(
+                module=module_name,
+                source_path=source_path,
+                sites=[{
+                    "start_char": site.start,
+                    "end_char": site.end,
+                    "expected_text": site.text,
+                } for site in multi_invocation_sites],
+                expected_source_sha256=hashlib.sha256(source.encode("utf-8")).hexdigest(),
+                mathlib_root=mathlib.parent,
+                raise_on_refusal=False,
+            )
+            syntax_by_site = {
+                site.index: syntax
+                for site, syntax in zip(multi_invocation_sites, syntax_records)
+            }
+        except (OSError, RuntimeError, ValueError) as error:
+            syntax_by_site = {
+                site.index: {
+                    "status": "refused",
+                    "reason": "syntax_extraction_failed",
+                    "detail": str(error),
+                }
+                for site in multi_invocation_sites
+            }
     identity["renderAttempted"] = True
     manual_by_site = manual_overrides_for_sites(mathlib_rel, source, site_list)
     records = [
         render_manual_override(site, manual_by_site[site.index], source)
-        if site.index in manual_by_site else render_site(site, traces.get(site.index), source)
+        if site.index in manual_by_site else render_site(
+            site, traces.get(site.index), source,
+            syntax_ancestry=syntax_by_site.get(site.index),
+            module_sites=site_list,
+        )
         for site in site_list
     ]
     for rec in records:
