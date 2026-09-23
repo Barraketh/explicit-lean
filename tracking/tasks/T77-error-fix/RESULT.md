@@ -14,6 +14,8 @@ Subsequent reviewed mechanism commits:
 - `16e32d5`: quantified proposition validation aligned with existing
   selected-redex `explicit_rw` replay.
 - `ad3ed44`: self-delimiting generated exact-term closes.
+- `edf2690`: exact path-tagged binder spines for dependent rewrite validation.
+- `ac6a8a4`: authenticated source-application validation evidence.
 
 ## Implemented controls and principled fixes
 
@@ -82,6 +84,20 @@ Subsequent reviewed mechanism commits:
   `explicit_rw [] then close [term]` after the hypothesis rewrite, keeping the
   same delimiter in every generated context. Legacy hand-written `exact term`
   remains accepted.
+- Rewrite validation now records the exact ordered binder spine crossed by the
+  simplifier, including dummy slots for nondependent arrows. Validation filters
+  that spine by the selected redex path and fails closed on structural-depth
+  mismatches instead of padding missing binders at the innermost end. This
+  fixes interleaved dependent/nondependent binders such as the real
+  `AlgEquiv.toLinearMap_apply` step in `map_div`.
+- Direct source arguments retain an internal, nonserialized witness of the
+  exact elaborated application spine joined to the registered source range.
+  Explicit arguments already present in source are therefore validated before
+  checking for unassigned binders; implicit and instance arguments remain
+  ordinary elaboration. Term and universe metavariables cannot escape the
+  recorder's local context. The renderer still emits only the authenticated
+  source text. A bare conditional theorem remains valid only with its recorded
+  proof-side trace.
 
 ## Verified checks
 
@@ -106,6 +122,16 @@ Subsequent reviewed mechanism commits:
   LocalHandles Lean fixtures, 116 renderer assertions, 16 focused renderer
   regressions, JSON validation, the no-simp-family audit, and independent
   trust review including a tactic-block rejection probe.
+- The exact-binder-spine fixture passed nested `forall`, implication,
+  existential, conjunction, and the copied `map_div` proof shape; `CacheFork`
+  and the SimpTrace tactic build also passed. Independent trust review found no
+  silent depth fallback.
+- The authenticated source-application fixture recorded, rendered, and
+  replay-compiled `mul_inv_cancel_left₀ ha`, `hf.eq_iff`, and
+  `if_neg (not_le.mpr hx)` with their exact source spelling. Removing the proof
+  side from a bare `if_neg` trace was rejected. The SimpTrace build and
+  independent trust review passed; validator-only evidence does not occur in
+  trace JSON.
 - T9 trace identity tests and T22 source-argument tests.
 - 316 pipeline checks excluding the unavailable historical T1/T2
   worktree-dependent site-count and end-to-end checks.
