@@ -16,6 +16,16 @@ Subsequent reviewed mechanism commits:
 - `ad3ed44`: self-delimiting generated exact-term closes.
 - `edf2690`: exact path-tagged binder spines for dependent rewrite validation.
 - `ac6a8a4`: authenticated source-application validation evidence.
+- `82c33bf`: exact temporary term/universe metavariable snapshots.
+- `273c4fb`: class-valued explicit-argument validator parity.
+- `b676829` / `c0d2acd`: exact opaque-simproc attribution recovery.
+- `aeec19c` / `a3128cb` / `02ba91e`: named zeta-delta replay as readable
+  `change`.
+- `f904265`: authenticated congruence-event roots and exact nested event-slice
+  validation.
+- `42d422d`: explicit failure-status-only merge refinement for audited retry
+  databases.
+- `70ed7b6`: projection reduction through WHNF-exposed constructor majors.
 
 ## Implemented controls and principled fixes
 
@@ -117,6 +127,14 @@ Subsequent reviewed mechanism commits:
   recorded position. This covers local-definition unfolding such as `O₂` while
   retaining fail-closed rejection of a `name` field on beta, eta, projection,
   or iota reductions.
+- Congruence and transport event slices are now recursively rooted in the
+  exact selected expression. Cached provenance is rejected and recomputed when
+  its root is stale, and exact no-op definitional events are omitted rather
+  than retaining provisional positions that no longer identify a subterm.
+- Projection reductions may expose the projection major by ordinary WHNF, but
+  proceed only when it is a complete constructor application and the existing
+  exact definitional-equality validation succeeds. Stuck structure variables
+  continue to fail closed.
 
 ## Verified checks
 
@@ -174,6 +192,13 @@ Subsequent reviewed mechanism commits:
   it as `change`; independent trust review passed. The added Lean fixture was
   statically reviewed but has not yet been compiled in the live checkout while
   the shared worker artifacts are in use.
+- The congruence/root fix passed a private isolated build and real
+  `CondDistrib` replay fixture, including memoized and nonmemoized duplicate
+  `Nat.add_zero` controls. Independent trust review passed.
+- The projection-WHNF fix passed the ExplicitRw build, definitional and
+  negative fixtures, and compiled the exact historical
+  `Mathlib.Algebra.Category.ModuleCat.Subobject` staged candidate. Independent
+  static review passed.
 - T9 trace identity tests and T22 source-argument tests.
 - 316 pipeline checks excluding the unavailable historical T1/T2
   worktree-dependent site-count and end-to-end checks.
@@ -243,3 +268,20 @@ It is forbidden from provisioning cloud resources or mutating any original,
 baseline, or frozen database.
 
 Whole-tree coverage and simp-disabled certification remain unclaimed.
+
+## Named-zeta retry run
+
+Run root:
+`.lake/private/T77-error-fix-20260923/named-zeta-retry-20260923`.
+
+Two additional local workers are active in `explicit-lean-zeta-000` and
+`explicit-lean-zeta-001`. Their manifests are pairwise disjoint and their
+union is exactly the 303 modules containing the 388 T76 rows classified as
+`render_failed:reduction_has_name: zeta step`. Both writable databases are
+copies of the validated T76 merged output and passed `PRAGMA integrity_check`.
+The retry driver processes every `render_failed` row in each owned module so
+that command compilation remains module-consistent. It selected 269 modules
+with usable stopped artifacts; 34 manifest modules currently have no selected
+artifact and must remain explicitly unprocessed unless a valid source bundle
+is located. This brings the campaign to its hard maximum of six concurrent
+local workers; no further shard may start while these are active.

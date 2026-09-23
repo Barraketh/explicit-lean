@@ -1,6 +1,6 @@
 # T76 isolated stopped-trace compilation
 
-Status at 2026-09-23T04:05:33Z: **RUNNING LOCALLY**.
+Status at 2026-09-23T09:42:45Z: **COMPLETE, VALIDATED, AND MERGED TO A NEW COPY**.
 
 This run consumes every collected partial trace bundle for the 2,867 modules
 whose candidate rows were labelled `record_failed` by the stopped Scaleway
@@ -50,7 +50,34 @@ Four detached workers launched under these screen sessions:
 - `explicit-lean-isolated-002`
 - `explicit-lean-isolated-003`
 
-Each worker has a separate manifest, writable SQLite database, scratch tree,
-log, and terminal completion marker. The original user database and stopped-run
-merged baseline are read-only inputs and will not be overwritten. Completion,
-merge, certification, and whole-tree acceptance are not yet claimed.
+Each worker had a separate manifest, writable SQLite database, scratch tree,
+log, and terminal completion marker. All four workers exited zero. Their
+completion reports and databases passed `PRAGMA integrity_check`; the manifests
+remained pairwise disjoint and still covered exactly the original 2,867
+modules. Across the four manifest-owned partitions, 30,057 command rows were
+audited and 10,828 became compiled successes. Every audited success had
+nonempty `replacement_text`, a null error, and no executable `sorry` or
+`admit` token.
+
+## Validated merged output
+
+The result was merged into a new copy at
+`.lake/private/T76-isolated-trace-20260923/mathlib-db-isolated-merged.sqlite3`.
+Its SHA-256 is
+`2c87114f971b9e7d17237fd8ed61ba3f307a502e6d379d732f017ec169202c04`
+and its integrity check is `ok`. The merged database contains the unioned
+30,057-row `isolated_trace_audit` table and these final replacement statuses:
+
+- `success`: 13,489;
+- `noop`: 3,956;
+- `render_failed`: 13,282;
+- `compile_failed`: 4,564;
+- `record_failed`: 2,929;
+- `pending`: 13,102.
+
+The merge refined only manifest-owned rows whose exact baseline status was
+`record_failed`; 30,057 rows were merged and 2,404 already-identical terminal
+rows were accepted without changing their value. The original user database,
+the stopped-run baseline, and all four worker databases were preserved. This
+is isolated stock compilation evidence, not simp-disabled certification or
+whole-tree acceptance.

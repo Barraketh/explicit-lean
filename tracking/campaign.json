@@ -178,7 +178,11 @@
       "273c4fb",
       "b676829",
       "aeec19c",
-      "a3128cb"
+      "a3128cb",
+      "02ba91e",
+      "f904265",
+      "42d422d",
+      "70ed7b6"
     ],
     "status": "active_local_disjoint_runs",
     "principledFixes": [
@@ -199,7 +203,9 @@
       "temporary_metavariable_event_snapshot_boundary",
       "class_valued_explicit_argument_validator_parity",
       "exact_opaque_simproc_attribution_with_isolated_probes",
-      "named_zeta_delta_replay_as_typed_change"
+      "named_zeta_delta_replay_as_typed_change",
+      "authenticated_congruence_event_roots_and_recursive_transport_validation",
+      "whnf_exposed_constructor_projection_reduction"
     ],
     "checks": {
       "isolatedCompile": 19,
@@ -216,6 +222,8 @@
       "classExplicitArguments": "passed_iInf_pos_and_fail_closed_nonclass_value_binder",
       "opaqueSimprocAttribution": "passed_real_cmpLE_swap_nested_local_evidence_false_outer_attribution_rejection_and_probe_state_isolation",
       "namedZetaDelta": "passed_122_renderer_assertions_16_focused_regressions_and_independent_static_review_lean_fixture_not_yet_compiled",
+      "congruenceEventRoots": "passed_private_isolated_build_real_CondDistrib_and_memoized_nonmemoized_duplicate_controls_independent_trust_review",
+      "projectionWhnf": "passed_ExplicitRw_build_definitional_negative_and_historical_ModuleCat_Subobject_candidate_independent_static_review",
       "pipelineWithoutUnavailableWorktreeChecks": 316,
       "independentTrustReview": "passed"
     },
@@ -250,6 +258,18 @@
       "preparedWorkers": [],
       "fastPathRestartedAt": "2026-09-23T06:27:03Z",
       "maximumConcurrentLocalCampaignWorkers": 6,
+      "cloudUsed": false
+    },
+    "namedZetaRetryRun": {
+      "root": ".lake/private/T77-error-fix-20260923/named-zeta-retry-20260923",
+      "sourceDatabase": ".lake/private/T76-isolated-trace-20260923/mathlib-db-isolated-merged.sqlite3",
+      "targetRows": 388,
+      "manifestUnionModules": 303,
+      "manifestsDisjoint": true,
+      "driverSelectedModules": 269,
+      "manifestModulesWithoutSelectedArtifact": 34,
+      "runningWorkers": ["000", "001"],
+      "sourceStatus": "render_failed",
       "cloudUsed": false
     },
     "simpDisabledCertification": "not_claimed",
@@ -1328,7 +1348,7 @@
   },
   "isolatedTraceCompileRun": {
     "task": "T76-isolated-trace-compile",
-    "status": "running_local_four_disjoint_workers",
+    "status": "complete_validated_merged_new_copy",
     "launchedAt": "2026-09-23T04:05:33Z",
     "harnessCommit": "f13aa0f19feeff474b340ed8fb82a0d12c0972c6",
     "cloudUsed": false,
@@ -1351,6 +1371,23 @@
     "stockCompile": true,
     "simpDisabledCertification": "deferred",
     "originalDatabaseOverwritten": false,
+    "completedAt": "2026-09-23T09:42:45Z",
+    "mergedDatabase": {
+      "path": ".lake/private/T76-isolated-trace-20260923/mathlib-db-isolated-merged.sqlite3",
+      "sha256": "2c87114f971b9e7d17237fd8ed61ba3f307a502e6d379d732f017ec169202c04",
+      "integrityCheck": "ok",
+      "auditRows": 30057,
+      "auditedSuccesses": 10828,
+      "unsafeAuditedSuccesses": 0,
+      "statusCounts": {
+        "success": 13489,
+        "noop": 3956,
+        "render_failed": 13282,
+        "compile_failed": 4564,
+        "record_failed": 2929,
+        "pending": 13102
+      }
+    },
     "result": "tracking/tasks/T76-isolated-trace-compile/RESULT.md",
     "wholeTreeAcceptance": "not_claimed"
   },
