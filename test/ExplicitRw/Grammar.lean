@@ -1,9 +1,10 @@
 /-
-Coverage fixtures for the whitelisted term grammar.
+Coverage fixtures for the structural and delimited term grammar.
 
-Round 4 widened `explicitRwTerm` to what Lean's pretty printer actually emits, so
-that a generator can pass a recorded `lhs`/`rhs`/`to` string through rather than
-re-rendering it into a narrower dialect.
+The structural grammar handles common terms. `lean_term(...)` lets the generator
+pass a recorded `lhs`/`rhs`/`to` string through Lean's ordinary parser when its
+notation is outside that structural grammar, with an explicit boundary before
+the next DSL step field.
 
 Each theorem below uses one such spelling in a real step and asserts the
 resulting goal, so it pins both that the spelling **parses** and that it
@@ -15,6 +16,7 @@ import Mathlib.Data.Set.Basic
 import Mathlib.Algebra.Order.Group.Nat
 import Mathlib.Data.Real.Basic
 import Mathlib.Data.Complex.Basic
+import Mathlib.Data.Finsupp.Defs
 
 namespace ExplicitRwTest.Grammar
 
@@ -196,5 +198,35 @@ theorem numeric_ascription (y : ℝ) : (2 : ℝ) * y = y * 2 := by
 theorem numeric_complex (x y : ℂ) (h : x = y) : x + 0 = y := by
   explicit_rw [change ((x : ℂ) + 0) at [0, 1], h at [0, 1, 0, 1]]
   exact add_zero y
+
+/-! ## Caller notation as parenthesized ordinary Lean terms
+
+These operators are intentionally outside the structural term grammar. The
+parenthesized form must let Lean parse notation in the caller's scope while the
+outer `explicit_rw` parser retains an exact step boundary.
+-/
+
+theorem bottom_top_terms : ((⊥ : Prop) = (⊥ : Prop)) := by
+  explicit_rw [change lean_term(False = False) at []]
+  rfl
+
+set_option linter.unusedTactic false in
+theorem lattice_notation_term (p q : Prop) : (p ⊔ q) = (p ⊔ q) := by
+  explicit_rw [change lean_term((p ⊔ q) = (p ⊔ q)) at []]
+  rfl
+
+set_option linter.unusedTactic false in
+theorem set_complement_term (s : Set Nat) : sᶜ = sᶜ := by
+  explicit_rw [change lean_term(sᶜ = sᶜ) at []]
+  rfl
+
+set_option linter.unusedTactic false in
+theorem linear_map_arrow_term : (Nat →₀ Nat) = (Nat →₀ Nat) := by
+  explicit_rw [change lean_term((Finsupp Nat Nat) = (Finsupp Nat Nat)) at []]
+  rfl
+
+theorem let_binding_in_general_term : 1 = 1 := by
+  explicit_rw [change lean_term((let x := 1; x) = 1) at []]
+  rfl
 
 end ExplicitRwTest.Grammar

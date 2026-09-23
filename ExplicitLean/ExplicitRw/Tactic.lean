@@ -110,9 +110,11 @@ This needs no `explicit_rw` syntax and is why none exists.
 
 `e` is an ordinary term, so explicit arguments (`baz a b`), local hypotheses and
 side-condition proofs are written as usual and elaborated as usual: implicits,
-universes and instances are recovered by elaboration and unification. Terms are
-restricted to the whitelist grammar below; a `pp.all` term from the recorder
-(universe annotations, `nat_lit`) must be re-rendered into it.
+universes and instances are recovered by elaboration and unification. Common
+terms use the structural grammar below; generated terms outside that grammar
+use the fully delimited `lean_term(...)` form, which delegates parsing to Lean
+in the caller's notation scope. A stale `pp.all` term (`nat_lit`) remains
+invalid recorder output.
 
 Positions are raw child indices, *not* `conv`'s `arg n` numbering: `conv`'s
 `arg` counts explicit arguments, while `0`/`1` here are the `fn`/`arg` children
@@ -152,11 +154,12 @@ any simp-family tactic; `Experiment/check_no_simp_family.py` enforces that.
 
 For what a *trace* can introduce, the guarantee is deliberately stated as a
 conditional, because that is what is true. The two tactic slots are closed
-enumerations and every term is parsed in the whitelist grammar above, so no
-tactic — simp-family or otherwise — can be written into a trace. What the
-grammar cannot see is an identifier bound to a custom term elaborator, which is
-indistinguishable from an ordinary constant at parse time and can run the
-simplifier in `MetaM` without producing any `by` syntax. So:
+enumerations. Every term slot is parsed in `explicitRwTerm`; its fully
+parenthesized Lean-term form is checked for tactic blocks before and after
+elaboration. What the grammar cannot see is an identifier bound to a custom
+term elaborator, which is indistinguishable from an ordinary constant at parse
+time and can run the simplifier in `MetaM` without producing any `by` syntax.
+So:
 
 > No trace written in this syntax can introduce a simp-family tactic, **provided
 > the file it lives in declares no term elaborators** (`elab`, `macro`,
@@ -164,9 +167,10 @@ simplifier in `MetaM` without producing any `by` syntax. So:
 
 That proviso holds for generated Mathlib files by construction — a translated
 file has no business declaring elaborators — and is to be enforced generator-side
-by a lint (T4), not from inside this tactic. The synthetic-metavariable check in
-`checkNoPendingTactic` remains as defence in depth for anything that slips past
-the grammar.
+by a lint (T4), not from inside this tactic. The macro-expanded syntax check in
+`checkNoTacticBlock` and the synthetic-metavariable check in
+`checkNoPendingTactic` enforce the restriction on tactic blocks for both term
+forms.
 -/
 
 namespace ExplicitLean.ExplicitRw
@@ -174,28 +178,28 @@ namespace ExplicitLean.ExplicitRw
 open Lean Elab Tactic Meta
 
 /-!
-## The whitelisted term grammar
+## The term grammar
 
 Every term a trace hands to `explicit_rw` — a rewrite lemma with its explicit
 arguments, an `eq` equation, a `change` target, an `exact` closer — is parsed in
-the `explicitRwTerm` category below rather than as a general Lean `term`.
+the `explicitRwTerm` category below. The structural productions make common
+forms explicit. A fully parenthesized Lean `term` production also admits
+notation from the caller's scope and makes its boundary unambiguous to the
+enclosing step grammar.
 
-This is a **whitelist enforced by the parser**, which is the point. Guarding a
-general `term` means enumerating the shapes that can run tactics and hoping the
-enumeration is complete; it is not. A `by` block is easy to spot, but a term
-elaborator declared with `elab` can build its proof by calling the simplifier in
-`MetaM` directly, producing neither `by` syntax nor a synthetic metavariable, so
-nothing is left for a syntactic or a metavariable-based guard to see. A grammar
-has no such escape: what it does not admit never reaches an elaborator at all.
+Parenthesization does not bypass the tactic guard. Before elaboration, every
+term slot expands macros and rejects `by`/tactic-sequence syntax; after
+elaboration, the synthetic-metavariable check catches tactic blocks introduced
+indirectly. A custom term elaborator that invokes the simplifier directly can
+still be indistinguishable from an ordinary constant, so the generator-side
+restriction against local elaborator declarations remains necessary.
 
-Admitted: identifiers (dotted, optionally `@`-prefixed, including projection
-suffixes such as `h.elim`), application of whitelisted terms, `_`, numeric and
-string literals, parentheses, and type ascriptions `(t : T)` whose type is built
-from the same grammar plus the binder-free connectives needed to *state* an
-equation (`=`, `↔`, `¬`, `∧`, `∨`, `→`) and typed `∀`/`∃`/`fun` binders.
-
-Not admitted, deliberately: `by`, `match`, `let`, `do`, `⟨…⟩` anonymous
-constructors, `show … from`, `‹_›`, and `▸`.
+The structural grammar admits identifiers (dotted, optionally `@`-prefixed,
+including projection suffixes such as `h.elim`), application, `_`, literals,
+parentheses, ascriptions, binders, and the operators used by the trace format.
+The parenthesized ordinary-term production covers notation and term forms not
+enumerated there. `by` blocks and tactic sequences are refused by the checks
+described above.
 
 **Residual hole, stated honestly.** A bare identifier can be bound to a custom
 term elaborator via `@[term_elab]`, and that is indistinguishable from an
@@ -208,13 +212,13 @@ in declares no term elaborators.
 -/
 
 /--
-A whitelisted term. One category covers terms and types alike: in dependent type
+A trace term. One category covers terms and types alike: in dependent type
 theory they are the same syntactic class, and splitting them only duplicated
 every production.
 -/
 declare_syntax_cat explicitRwTerm
 
-/-- Types are whitelisted terms; the alias keeps the step syntax readable. -/
+/-- Types use the same trace-term category; the alias keeps step syntax readable. -/
 syntax explicitRwType := explicitRwTerm
 
 /-! ### Atoms -/
@@ -227,10 +231,10 @@ syntax:max (name := explicitRwTermHole) "_" : explicitRwTerm
 syntax:max (name := explicitRwTermNum) num : explicitRwTerm
 /-!
 `local_ref` and `introduced_ref` are deliberately syntax in this private
-whitelist category, rather than ordinary Lean terms.  Their term elaborators
+trace category, rather than ordinary Lean terms. Their term elaborators
 in the companion `ExplicitRw.LocalHandles` module are therefore reachable only
-after `explicit_rw` has accepted the closed grammar; source code cannot write
-either spelling as a normal term.
+after `explicit_rw` has accepted the DSL term; source code cannot write either
+spelling as a normal term.
 -/
 declare_syntax_cat localRefSuffix
 syntax:max ("." num)+ : localRefSuffix
@@ -266,6 +270,17 @@ the ordinary explicit term grammar before it is lowered to Lean's
 syntax:max (name := explicitRwTermNamedArg) "(" ident " := " explicitRwTerm ")" : explicitRwTerm
 /-- Parentheses. -/
 syntax:max (name := explicitRwTermParen) "(" explicitRwTerm ")" : explicitRwTerm
+/--
+An ordinary Lean term behind an explicit delimiter. The recorder sometimes
+prints notation that the structural grammar above does not spell out (for
+example `⊥`, a user-defined lattice operator, or a linear-map arrow). The
+`lean_term(...)` delimiters make the extent explicit to the `explicit_rw`
+parser; Lean's ordinary term parser handles the interior in the caller's scope.
+`toTermCore` removes this wrapper and returns the parsed term syntax. Tactic
+blocks are still rejected by the per-step macro and synthetic-mvar checks
+before the term can be used.
+-/
+syntax:max (name := explicitRwTermLean) "lean_term(" term ")" : explicitRwTerm
 /-- A type ascription, whose type is itself whitelisted. -/
 syntax:max (name := explicitRwTermAscr) "(" explicitRwTerm " : " explicitRwTerm ")" : explicitRwTerm
 /-- A pair, as the pretty printer writes it. -/
@@ -752,13 +767,12 @@ def mkExplicitApplication (head : Syntax) (args : Array Term) : Term := Id.run d
     #[explicitHead, Lean.mkNullNode (args.map (·.raw))]).raw⟩
 
 /--
-Translate a whitelisted term or type into ordinary Lean syntax.
+Translate a trace term or type into ordinary Lean syntax.
 
-The whitelist is a syntactic restriction only: once a term has been shown to be
-inside the grammar, it is elaborated exactly as the corresponding ordinary term
-would be, so implicits, universes, instances and coercions behave as in any
-Lean proof. This function is total on the grammar; an unrecognised node is an
-internal error, never a silent pass-through to a general `term`.
+Structural terms are rebuilt here; `lean_term(...)` passes its ordinary Lean
+term syntax through. Both forms elaborate as ordinary terms, so implicits,
+universes, instances and coercions behave as in any Lean proof. An unrecognised
+structural node is an internal error, never a silent pass-through.
 -/
 partial def toTermCore (stx : Syntax) : TermElabM Term := do
   match stx.getKind with
@@ -818,6 +832,7 @@ partial def toTermCore (stx : Syntax) : TermElabM Term := do
     let args := stx.getArgs.set! 3 value.raw
     return ⟨Syntax.node stx.getHeadInfo ``Lean.Parser.Term.namedArgument args⟩
   | ``explicitRwTermParen => do let t ← toTermCore stx[1]; `(($t))
+  | ``explicitRwTermLean => return ⟨stx[1]⟩
   | ``explicitRwTermAscr => do
     let t ← toTermCore stx[1]; let ty ← toTermCore stx[3]; `(($t : $ty))
   | ``explicitRwTermPair => do

@@ -1,13 +1,14 @@
-Escape sweep for the `explicit_rw` whitelist grammar.
+Escape sweep for the unmarked structural `explicit_rw` grammar.
 
 `probes.json` lists terms and the slots they are spliced into.
 `Experiment/check_explicit_rw.py` generates one Lean file per (term, slot) pair,
 compiles it, and classifies the outcome:
 
-- an **escape** term must be rejected by the *parser* — Lean reports
-  `unexpected token`/`unexpected identifier`/`expected token`. The whitelist is
-  a parser-level fence, so a term that merely fails to elaborate would not
-  demonstrate it.
+- an **escape** term, when written directly without the generated
+  `lean_term(...)` delimiter, must be rejected by the parser — Lean reports
+  `unexpected token`/`unexpected identifier`/`expected token`. The delimiter is
+  the ordinary Lean term form; that form separately rejects tactic blocks
+  after macro expansion.
 - a **benign** term must reach elaboration, i.e. produce no parse error. Whether
   it then type-checks is not the sweep's business; the probe templates put terms
   in slots where most of them are ill-typed on purpose.

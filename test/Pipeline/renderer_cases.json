@@ -181,14 +181,14 @@
    "why": "spec STEP `change`: definitional replacement checked by defeq",
    "step": {"kind": "change", "pos": [1], "to": "Nat.succ n",
             "before": "n + 1"},
-   "expect": "change Nat.succ n at [1]"
+   "expect": "change lean_term(Nat.succ n) at [1]"
   },
   {
    "name": "change_dsimproc",
    "why": "spec: a dsimproc firing is a `change` with `source`, never an `eq`",
    "step": {"kind": "change", "pos": [], "to": "(3)", "source": "dreduceIte",
             "before": "if True then 3 else 4"},
-   "expect": "change (3) at []"
+   "expect": "change lean_term((3)) at []"
   },
 
   {
@@ -196,14 +196,14 @@
    "why": "spec STEP `eq`: a simproc equation proved by an ordinary tactic",
    "step": {"kind": "eq", "pos": [1], "lhs": "2 + 3", "rhs": "5", "by": "rfl",
             "source": "Nat.reduceAdd"},
-   "expect": "eq (2 + 3 = 5) by rfl at [1]"
+   "expect": "eq (lean_term(2 + 3) = lean_term(5)) by rfl at [1]"
   },
   {
    "name": "eq_step_decide",
    "why": "spec: `by` is exactly `rfl` or `decide`",
    "step": {"kind": "eq", "pos": [], "lhs": "(2 : ℕ) < 5", "rhs": "True",
             "by": "decide", "source": "Nat.reduceLT"},
-   "expect": "eq ((2 : ℕ) < 5 = True) by decide at []"
+   "expect": "eq (lean_term((2 : ℕ) < 5) = lean_term(True)) by decide at []"
   },
 
   {
@@ -235,13 +235,13 @@
    "name": "change_universe_annotations",
    "why": "renderer preserves the exact trace text; fresh recorder output hides universes",
    "step": {"kind": "change", "pos": [], "to": "Prod.{u_1, u_2} α α'"},
-   "expect": "change Prod.{u_1, u_2} α α' at []"
+   "expect": "change lean_term(Prod.{u_1, u_2} α α') at []"
   },
   {
    "name": "change_string_with_universe_like_text",
    "why": "universe-like punctuation inside an ordinary string literal is preserved exactly",
    "step": {"kind": "change", "pos": [], "to": "\"literal.{abc}\""},
-   "expect": "change \"literal.{abc}\" at []"
+   "expect": "change lean_term(\"literal.{abc}\") at []"
   },
   {
     "name": "dependent_forall_transport",

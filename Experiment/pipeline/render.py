@@ -12,9 +12,9 @@ silently drop a step.
 
 Rendering rules, in one place:
 
-* `rw`     -> `[← ]<term> at [pos][ with [side, ...]]`, where `<term>` is
-              `name` (wrapped by `eq_true`/`eq_false` when `prop` is set)
-              followed by its parenthesised `args`.
+* `rw`     -> `[← ]lean_term(<term>) at [pos][ with [side, ...]]` for
+              source-backed terms, where `<term>` is the authenticated source term; legacy
+              names and their parenthesized arguments retain their spelling.
 * `unfold` -> `unfold <name> at [pos]`
 * `beta`/`eta`/`proj`/`iota` -> `<kind> at [pos]`; unnamed `zeta` uses the
   same form, while named `zeta` (a local-definition unfold) uses
@@ -102,11 +102,12 @@ def check_name(name: Any, what: str) -> str:
 def check_term(text: Any, what: str) -> str:
     """Validate a spec field a replayer splices as a *term*.
 
-    `args`, `change.to`, `eq.lhs`/`eq.rhs` are all written into T2's whitelisted
-    term grammar. Three shapes are known not to survive it and are refused by
-    name rather than shipped into a parse error: the elision marker `⋯` (which
-    is pretty-printer output, not a term), embedded newlines or `have`/`let`
-    telescopes, and the stale `pp.all` `nat_lit` annotation.
+    `change.to` and `eq.lhs`/`eq.rhs` are written in the ordinary
+    `lean_term(...)` form admitted by ExplicitRw. `args` are separately
+    parenthesized as application arguments. Two recorder artifacts
+    are still rejected: the elision marker `⋯` (which is pretty-printer output,
+    not a term) and the stale `pp.all` `nat_lit` annotation. Embedded newlines
+    are refused because this renderer emits one-line step syntax.
     """
     if not isinstance(text, str) or not text.strip():
         raise RenderError("bad_term", f"{what} is not a non-empty string: {text!r}")
@@ -114,10 +115,6 @@ def check_term(text: Any, what: str) -> str:
         raise RenderError("elided_term", f"{what} contains the elision marker ⋯: {text!r}")
     if "\n" in text:
         raise RenderError("multiline_term", f"{what} contains a newline: {text!r}")
-    if re.search(r"(?<![\w.])(have|let|match|do|fun\b.*=>.*\bby)\b", text):
-        raise RenderError(
-            "non_term_syntax", f"{what} carries tactic/telescope syntax: {text!r}"
-        )
     # Fresh recorder output uses ordinary Lean surface syntax and explicitly
     # disables universe printing.  Do not normalize the authenticated text:
     # even punctuation that resembles a pp.all annotation may occur inside a
@@ -132,23 +129,15 @@ def check_term(text: Any, what: str) -> str:
         raise RenderError(
             "inaccessible_name", f"{what} splices an inaccessible name: {text!r}"
         )
-    # These are simp-argument/configuration spellings, not terms admitted by
-    # ExplicitRw's whitelist. In particular `*` and `-foo` belong to simp's
-    # argument language and must not be guessed into replay.  A named binder
-    # such as `(a := a)` is the one source-level exception: ExplicitRw preserves
-    # it as Lean's own named-argument syntax, while recursively checking only
-    # its value through the same closed term grammar.  Keep a bare `foo := bar`
-    # refusal so malformed source spans remain visible before parser rejection.
+    # These are simp-argument/configuration spellings, not Lean terms. The
+    # authenticated source span may contain arbitrary ordinary term syntax,
+    # including named arguments and record updates; Lean's parser, rather than
+    # a punctuation check here, distinguishes those forms.
     checked = text.strip()
     if checked in ("*", "_") or re.fullmatch(r"-[^\s]+", checked):
         raise RenderError(
             "unparseable_source_argument",
             f"{what} is simp syntax rather than an explicit_rw term: {text!r}",
-        )
-    if ":=" in text and not re.search(r"\([^)]*:=\s", checked):
-        raise RenderError(
-            "unparseable_source_argument",
-            f"{what} is not a parenthesized named argument: {text!r}",
         )
     if "by " in text or checked.endswith(" by"):
         raise RenderError("term_has_by", f"{what} contains a `by` block: {text!r}")
@@ -165,18 +154,13 @@ def render_pos(pos: Any) -> str:
 
 
 def atomize(term: str) -> str:
-    """Parenthesise a compound term so application binds as intended.
-
-    `args` entries and `prop`-wrapped names are applied, so `f a` as an argument
-    must become `(f a)`. Already-parenthesised and atomic terms are left alone.
-    """
+    """Parenthesise a compound term so application binds as intended."""
     term = term.strip()
     if not term:
         raise RenderError("bad_term", "empty term")
     if IDENT_RE.fullmatch(term):
         return term
     if term.startswith("(") and term.endswith(")"):
-        # Only when the outer parens actually match, so `(a) + (b)` is wrapped.
         depth = 0
         for i, ch in enumerate(term):
             if ch == "(":
@@ -188,6 +172,13 @@ def atomize(term: str) -> str:
         else:
             return term
     return f"({term})"
+
+
+def lean_term(term: str) -> str:
+    """Delimit an ordinary Lean term in the ExplicitRw DSL."""
+    if not term.strip():
+        raise RenderError("bad_term", "empty term")
+    return f"lean_term({term})"
 
 
 def render_close(close: Any, introduced: dict[str, int] | None = None) -> str:
@@ -567,14 +558,22 @@ def render_rw(step: dict, depth: int, source_text: Any = None,
                    else "false" if "not_to_false" in preprocess
                    else prop if projected_prop and prop in ("true", "false")
                    else None)
+    wrapped_as_prop_step = False
     if mapped_prop is not None and not local_iff:
-        term = ("prop_true " if mapped_prop == "true" else "prop_false ") + atomize(term)
+        prop_term = (lean_term(term) if details and details["source"] == "simp-argument"
+                     else atomize(term))
+        term = ("prop_true " if mapped_prop == "true" else "prop_false ") + prop_term
+        wrapped_as_prop_step = True
     elif prop is not None and details is not None and not local_iff:
         if prop not in ("true", "false"):
             raise RenderError("bad_prop", f"rw.prop is {prop!r}, not 'true'/'false'")
         # Legacy v1 traces use eq_true/eq_false. Operational T16 traces use
         # the proposition-specific T17 forms above.
         term = ("eq_true " if prop == "true" else "eq_false ") + atomize(term)
+        wrapped_as_prop_step = True
+
+    if details and details["source"] == "simp-argument" and not wrapped_as_prop_step:
+        term = lean_term(term)
 
     direction = step.get("dir", "fwd")
     if direction not in ("fwd", "rev"):
@@ -586,9 +585,9 @@ def render_rw(step: dict, depth: int, source_text: Any = None,
         if step.get("dir") not in (None, "fwd", "rev"):
             raise RenderError("bad_dir", f"rw.dir is {step.get('dir')!r}")
         direction = "rev"
-    # A source argument is already written in the exact syntax supplied to
-    # `simp`; only its leading direction marker was peeled above. Do not
-    # atomize or re-pretty-print it, since this is the source-of-truth path.
+    # A source argument is still written in the exact syntax supplied to
+    # `simp`; only its leading direction marker was peeled above. The
+    # `lean_term(...)` wrapper delimits it but does not rewrite its contents.
     out = ("← " if direction == "rev" else "") + term + " " + render_pos(step.get("pos"))
 
     sides = step.get("side")
@@ -837,7 +836,7 @@ def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
     if kind == "change":
         return (
             "change "
-            + check_term(step.get("to"), "change.to")
+            + lean_term(check_term(step.get("to"), "change.to"))
             + " "
             + render_pos(step.get("pos"))
         )
@@ -847,7 +846,7 @@ def render_step(step: Any, depth: int = 0, *, source_text: Any = None,
             raise RenderError("bad_eq_by", f"eq.by is {by!r}, not 'rfl'/'decide'")
         lhs = check_term(step.get("lhs"), "eq.lhs")
         rhs = check_term(step.get("rhs"), "eq.rhs")
-        return f"eq ({lhs} = {rhs}) by {by} " + render_pos(step.get("pos"))
+        return f"eq ({lean_term(lhs)} = {lean_term(rhs)}) by {by} " + render_pos(step.get("pos"))
     if kind == "congr":
         arg = step.get("arg")
         if not isinstance(arg, int) or arg < 0:

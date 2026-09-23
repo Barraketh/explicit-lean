@@ -966,15 +966,15 @@ def derivation_tests(f: Failures) -> None:
         {"argId": 4, "startChar": 37, "endChar": 40, "direction": "fwd"},
     ]
     cases = [
-        ("direct_eq", step(), "foo at []"),
-        ("iff_propext", step("iff_propext"), "foo at []"),
-        ("prop_true", step("prop_to_true", prop="true"), "prop_true foo at []"),
-        ("prop_false", step("not_to_false", prop="false"), "prop_false foo at []"),
-        ("conjunction_left", step("conjunction_left", source_arg=3), "H.1 at []"),
-        ("conjunction_right", step("conjunction_right", source_arg=4), "H.2 at []"),
+        ("direct_eq", step(), "lean_term(foo) at []"),
+        ("iff_propext", step("iff_propext"), "lean_term(foo) at []"),
+        ("prop_true", step("prop_to_true", prop="true"), "prop_true lean_term(foo) at []"),
+        ("prop_false", step("not_to_false", prop="false"), "prop_false lean_term(foo) at []"),
+        ("conjunction_left", step("conjunction_left", source_arg=3), "lean_term(H.1) at []"),
+        ("conjunction_right", step("conjunction_right", source_arg=4), "lean_term(H.2) at []"),
         ("reverse", dict(step("direct_eq", direction="fwd"),
                           derivation={**step("direct_eq")["derivation"],
-                                      "preprocess": ["reverse", "direct_eq"]}), "← foo at []"),
+                                      "preprocess": ["reverse", "direct_eq"]}), "← lean_term(foo) at []"),
         ("extra_args_no_payload", step(source=None, source_arg=None, extra=1,
                                         args=["forged_payload"]), "lemma at []"),
         ("extra_args_option_or_else", step(source=None, source_arg=None, extra=2,
@@ -1000,7 +1000,7 @@ def derivation_tests(f: Failures) -> None:
     f.equal("derivation/source_lambda_exact",
             R.render_step(source_lambda, source_text=source, source_args=source_args,
                           operational=True),
-            "if_neg (fun h => h) at []")
+            "lean_term(if_neg (fun h => h)) at []")
     named_source = "heq_comm (a := a), heq_iff_exists_eq_cast"
     named_term, named_direction = R.source_argument(named_source, [
         {"argId": 0, "startChar": 0, "endChar": 17, "direction": "fwd"},
@@ -1014,7 +1014,7 @@ def derivation_tests(f: Failures) -> None:
                               {"argId": 0, "startChar": 0, "endChar": 17,
                                "direction": "fwd"}],
                           operational=True),
-            "heq_comm (a := a) at []")
+            "lean_term(heq_comm (a := a)) at []")
     reversed_source = step("direct_eq", direction="fwd")
     try:
         R.render_step(reversed_source, source_text="← foo", source_args=[
@@ -1030,16 +1030,14 @@ def derivation_tests(f: Failures) -> None:
             R.render_step(matching_reverse, source_text="← foo", source_args=[
                 {"argId": 0, "startChar": 0, "endChar": 5, "direction": "rev"}],
                 operational=True),
-            "← foo at []")
-    unparseable = step(source_arg=0)
-    try:
-        R.render_step(unparseable, source_text="foo := bar", source_args=[
-            {"argId": 0, "startChar": 0, "endChar": 10, "direction": "fwd"}],
-            operational=True)
-        f.check("derivation/unparseable_source", False, "named argument was accepted")
-    except R.RenderError as exc:
-        f.equal("derivation/unparseable_source/reason", exc.reason,
-                "unparseable_source_argument")
+            "← lean_term(foo) at []")
+    source_record_update = step(source_arg=0)
+    f.equal("derivation/source_named_argument_is_delimited",
+            R.render_step(source_record_update, source_text="foo (a := bar)",
+                          source_args=[{"argId": 0, "startChar": 0,
+                                        "endChar": 14, "direction": "fwd"}],
+                          operational=True),
+            "lean_term(foo (a := bar)) at []")
 
     local = step(source="local-evidence", source_arg=None, name="H.1",
                  args=[], binders=[])
@@ -1055,7 +1053,7 @@ def derivation_tests(f: Failures) -> None:
     f.equal("derivation/nested_discharge",
             R.render_step(nested, source_text=source, source_args=source_args,
                           operational=True),
-            "foo at [] with [explicit_rw [side at []] then rfl]")
+            "lean_term(foo) at [] with [explicit_rw [side at []] then rfl]")
 
     refusals = [
         ("missing", step(include_derivation=False), "missing_derivation"),
