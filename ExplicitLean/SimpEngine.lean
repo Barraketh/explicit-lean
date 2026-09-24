@@ -189,26 +189,41 @@ opaque MethodsRef.toMethods (methods : MethodsRef) : Methods
   if runtime.mode == .reference then
     mapSimpM Simp.withFreshCache x
   else
-    let saved := (← runtime.cacheProvenance.get).simpSources
-    runtime.cacheProvenance.modify fun current => { current with simpSources := {} }
+    let provenance ← runtime.cacheProvenance.get
+    let savedSources := provenance.simpSources
+    let savedOperations := provenance.simpOperations
+    runtime.cacheProvenance.modify fun current => {
+      current with simpSources := {}, simpOperations := {} }
     try mapSimpM Simp.withFreshCache x finally
-      runtime.cacheProvenance.modify fun current => { current with simpSources := saved }
+      runtime.cacheProvenance.modify fun current => {
+        current with simpSources := savedSources, simpOperations := savedOperations }
 
 @[inline] def withPreservedCache (x : EngineM α) : EngineM α := do
   let runtime : Runtime ← readThe Runtime
   if runtime.mode == .reference then
     mapSimpM Simp.withPreservedCache x
   else
-    let saved := (← runtime.cacheProvenance.get).simpSources
+    let provenance ← runtime.cacheProvenance.get
+    let savedSources := provenance.simpSources
+    let savedOperations := provenance.simpOperations
     runtime.cacheProvenance.modify fun current => {
-      current with simpSources := current.simpSources.switch
+      current with
+        simpSources := current.simpSources.switch
+        simpOperations := current.simpOperations.switch
     }
     try mapSimpM Simp.withPreservedCache x finally
-      runtime.cacheProvenance.modify fun current => {
-        current with simpSources := {
-          current.simpSources with map₂ := saved.map₂, stage₁ := saved.stage₁
+      runtime.cacheProvenance.modify fun current =>
+        let simpSources := {
+          current.simpSources with
+            map₂ := savedSources.map₂
+            stage₁ := savedSources.stage₁
         }
-      }
+        let simpOperations := {
+          current.simpOperations with
+            map₂ := savedOperations.map₂
+            stage₁ := savedOperations.stage₁
+        }
+        { current with simpSources, simpOperations }
 
 @[inline] def withInDSimpWithCache
     (k : ExprStructMap Expr → EngineM (α × ExprStructMap Expr)) : EngineM α :=
@@ -2379,16 +2394,36 @@ def simpStep (e : Expr) (simpStepOrdinal : Nat) : EngineM Result := do
     return { expr := output }
   | .fvar ..     => return { expr := (← reduceFVar (← getConfig) (← getSimpTheorems) e) }
 
-def cacheResult (e : Expr) (cfg : Config) (r : Result) : EngineM Result := do
+private def dropPositionPrefix (base position : Array Nat) : Option (Array Nat) := Id.run do
+  if base.size > position.size then return none
+  for i in [0 : base.size] do
+    if base[i]! != position[i]! then return none
+  return some (position.extract base.size position.size)
+
+private def relativeCacheOperations (base : Option (Array Nat))
+    (events : Array Operations.Event) : Array Operations.Event :=
+  events.map fun event => {
+    event with position := match base, event.position with
+      | some base, some position => dropPositionPrefix base position
+      | none, _ | _, none => none
+  }
+
+def cacheResult (e : Expr) (cfg : Config) (r : Result)
+    (operationStart : Nat) (operationBase : Option (Array Nat)) : EngineM Result := do
   if cfg.memoize && r.cache then
     let runtime ← getRuntime
     modify fun s => { s with cache := s.cache.insert e r }
     if runtime.mode != .reference then
-      let path := (← getRecorderState).path
+      let recorderState ← getRecorderState
+      let path := recorderState.path
+      let operations := relativeCacheOperations operationBase <|
+        recorderState.operationalEvents.extract operationStart
+          recorderState.operationalEvents.size
       runtime.cacheProvenance.modify fun provenance => {
         provenance with
           simpSources := provenance.simpSources.insert e
             (path, provenance.simpOrder.size)
+          simpOperations := provenance.simpOperations.insert e operations
           simpOrder := provenance.simpOrder.push path
       }
   return r
@@ -2422,6 +2457,16 @@ partial def simpLoop (e : Expr) : EngineM Result := withIncRecDepth do
         | some (sourcePath, sourceIndex) =>
             recordBranch "struct.cacheHit"
             emitStructural (.cacheHit sourcePath sourceIndex)
+            if result.expr != e then
+              let some operations := provenance.simpOperations.find? e
+                | throwError "record_simp_cache_operations_missing: path={repr state.path}, input={e}"
+              modifyRecorderState fun current => {
+                current with operationalEvents := current.operationalEvents.push {
+                  position := current.operationPosition
+                  phase := current.phase
+                  action := .cacheReuse operations
+                }
+              }
         | none =>
             let observations ← runtime.observations.get
             unless deferredBySimproc observations.deferred do
@@ -2431,23 +2476,29 @@ partial def simpLoop (e : Expr) : EngineM Result := withIncRecDepth do
   if (← get).numSteps > cfg.maxSteps then
     throwError "`simp` failed: maximum number of steps exceeded"
   else
+    let recorderState ← getRecorderState
+    let operationStart := recorderState.operationalEvents.size
+    let operationBase := recorderState.operationPosition
     checkSystem "simp"
     modify fun s => { s with numSteps := s.numSteps + 1 }
     let pathOrdinal ← nextPathInvocationOrdinal
     match (← withPath (.preVisit pathOrdinal) <| withPhase .pre <|
         recordPhaseStep e <| pre e) with
-    | .done r  => cacheResult e cfg r
-    | .visit r => cacheResult e cfg (← r.mkEqTrans (← simpLoop r.expr))
-    | .continue none => visitPreContinue cfg { expr := e }
-    | .continue (some r) => visitPreContinue cfg r
+    | .done r  => cacheResult e cfg r operationStart operationBase
+    | .visit r =>
+        let result ← r.mkEqTrans (← simpLoop r.expr)
+        cacheResult e cfg result operationStart operationBase
+    | .continue none => visitPreContinue cfg operationStart operationBase { expr := e }
+    | .continue (some r) => visitPreContinue cfg operationStart operationBase r
 where
-  visitPreContinue (cfg : Config) (r : Result) : EngineM Result := do
+  visitPreContinue (cfg : Config) (operationStart : Nat)
+      (operationBase : Option (Array Nat)) (r : Result) : EngineM Result := do
     let pathOrdinal ← nextPathInvocationOrdinal
     let eNew ← withPath (.reductionVisit pathOrdinal) <| reduceStep r.expr
     if eNew != r.expr then
       trace[Debug.Meta.Tactic.simp] "reduceStep (pre) {e} => {eNew}"
       let r := { r with expr := eNew }
-      cacheResult e cfg (← r.mkEqTrans (← simpLoop r.expr))
+      cacheResult e cfg (← r.mkEqTrans (← simpLoop r.expr)) operationStart operationBase
     else
       let runtime ← getRuntime
       let simpStepOrdinal := (← getRecorderState).simpStepOrdinal
@@ -2459,20 +2510,23 @@ where
             if let .unassignedMVarStop expectedOrdinal := expected.witness then
               if expectedOrdinal == simpStepOrdinal then
                 emitStructural (.unassignedMVarStop simpStepOrdinal)
-                return ← visitPost cfg r
+                return ← visitPost cfg operationStart operationBase r
       let r ← r.mkEqTrans (← simpStep r.expr simpStepOrdinal)
-      visitPost cfg r
-  visitPost (cfg : Config) (r : Result) : EngineM Result := do
+      visitPost cfg operationStart operationBase r
+  visitPost (cfg : Config) (operationStart : Nat)
+      (operationBase : Option (Array Nat)) (r : Result) : EngineM Result := do
     match (← withPhase .post <| recordPhaseStep r.expr <| post r.expr) with
-    | .done r' => cacheResult e cfg (← r.mkEqTrans r')
-    | .continue none => visitPostContinue cfg r
-    | .visit r' | .continue (some r') => visitPostContinue cfg (← r.mkEqTrans r')
-  visitPostContinue (cfg : Config) (r : Result) : EngineM Result := do
+    | .done r' => cacheResult e cfg (← r.mkEqTrans r') operationStart operationBase
+    | .continue none => visitPostContinue cfg operationStart operationBase r
+    | .visit r' | .continue (some r') =>
+        visitPostContinue cfg operationStart operationBase (← r.mkEqTrans r')
+  visitPostContinue (cfg : Config) (operationStart : Nat)
+      (operationBase : Option (Array Nat)) (r : Result) : EngineM Result := do
     let mut r := r
     unless cfg.singlePass || e == r.expr do
       let pathOrdinal ← nextPathInvocationOrdinal
       r ← r.mkEqTrans (← withPath (.postRestart pathOrdinal) <| simpLoop r.expr)
-    cacheResult e cfg r
+    cacheResult e cfg r operationStart operationBase
 
 set_option compiler.ignoreBorrowAnnotation true in
 @[export explicit_lean_simp_engine]

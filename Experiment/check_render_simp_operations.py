@@ -137,6 +137,21 @@ class RenderOperationsTest(unittest.TestCase):
             render_trace({"events": [event]}),
         )
 
+    def test_cache_reuse_names_its_exact_producing_operations(self) -> None:
+        cached = rewrite_event([])
+        trace = {
+            "events": [{
+                "position": [0, 1],
+                "phase": "post",
+                "action": {"cacheReuse": {"events": [cached]}},
+            }]
+        }
+        self.assertEqual(
+            render_trace(trace),
+            "explicit_rw_v2 [cached [rule Nat.add_zero variant 0 phase post fwd "
+            "extra 0 at [] with []] at [0, 1]]",
+        )
+
     def test_reductions(self) -> None:
         trace = {
             "events": [

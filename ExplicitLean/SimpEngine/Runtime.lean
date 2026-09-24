@@ -70,6 +70,11 @@ structure PassiveObservations where
 structure CacheProvenance where
   /-- Provenance for Lean's staged `Simp.Cache`; it switches and restores with the cache. -/
   simpSources : SExprMap (ExecutionPath × Nat) := {}
+  /-- Exact source-facing operations which produced each simplifier cache
+      entry. Positions are relative to the cached expression, so a later cache
+      hit can be replayed at its new raw-child position without serializing an
+      expression or proof. -/
+  simpOperations : SExprMap (Array Operations.Event) := {}
   /-- Provenance for the `State.dsimpCache` value outside the active dsimp traversal. -/
   dsimpStateSources : ExprStructMap (ExecutionPath × Nat) := {}
   /-- Provenance for the cache threaded locally through the active dsimp traversal. -/

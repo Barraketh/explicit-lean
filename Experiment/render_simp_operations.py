@@ -138,6 +138,16 @@ def render_events(events: list[dict[str, Any]]) -> list[str]:
                 raise UnsupportedOperation("simproc operation is a known residual")
             elif "builtin" in action:
                 raise UnsupportedOperation("builtin simp operation has no exact source operation yet")
+            elif "cacheReuse" in action:
+                cached = action["cacheReuse"].get("events")
+                if not isinstance(cached, list) or not cached:
+                    raise UnsupportedOperation("changed simp cache result has no source operations")
+                steps.append(
+                    "cached ["
+                    + ", ".join(render_events(cached))
+                    + "] "
+                    + render_position(event["position"])
+                )
             else:
                 raise UnsupportedOperation(f"unknown operation {action!r}")
         except UnsupportedOperation as error:

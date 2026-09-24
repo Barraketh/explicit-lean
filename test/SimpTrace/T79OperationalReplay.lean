@@ -76,6 +76,13 @@ example (n : Nat) : replayNestedPremiseProp n := by
       rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with [],
       rule eq_self variant 0 phase post fwd extra 0 at [] with []] then true_intro]] then true_intro
 
+/- A cache hit is explicit and carries the exact source operations that first
+produced the cached result. They are replayed relative to the new occurrence. -/
+example (n : Nat) : (n + 0) + 0 = n := by
+  explicit_rw_v2 [cached [rule Nat.add_zero variant 0 phase post fwd extra 0 at [] with []]
+    at [0, 1, 0, 1], rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with []]
+  rfl
+
 /- Definitional operations share the same path semantics. -/
 example (n : Nat) : n = n := by
   explicit_rw_v2 [instantiate at []]

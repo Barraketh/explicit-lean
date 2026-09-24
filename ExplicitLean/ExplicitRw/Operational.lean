@@ -167,7 +167,9 @@ private def runNamedRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
   else
     Impl.runRwStep idx e pos term reverse sideTacs
 
-private def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Replacement := do
+mutual
+
+private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Replacement := do
   match step.getKind with
   | ``explicitRwOperationalRule => do
     let reverse ← validateRuleMetadata idx step[5] step[6]
@@ -246,12 +248,20 @@ private def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Replacement 
     let c ← realizeGlobalConstNoOverloadWithInfo step[1]
     let pos := parsePos step[2]
     Impl.runDefeqStep idx e pos m!"`unfold {c}`" (Impl.unfoldConst idx c)
+  | ``explicitRwOperationalCached => do
+    let steps := step[2].getSepArgs
+    if steps.isEmpty then
+      stepError idx m!"a changed simp cache result must name its producing operations."
+    let pos := parsePos step[4]
+    rewriteAt e pos
+      (fun sub => runOperationsAt steps sub)
+      (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwOperationalSimproc =>
     throwError "explicit_rw_v2: simproc `{step[1].getId}` is not a rewrite-rule operation."
   | k =>
     throwError "explicit_rw_v2: internal error: unexpected operation kind `{k}`"
 
-private def runOperationsAt (steps : Array Syntax) (e : Expr) : TacticM Replacement := do
+private partial def runOperationsAt (steps : Array Syntax) (e : Expr) : TacticM Replacement := do
   let mut current := e
   let mut proof? : Option Expr := none
   for h : idx in [0 : steps.size] do
@@ -274,6 +284,8 @@ private def runOperationsAt (steps : Array Syntax) (e : Expr) : TacticM Replacem
     | some p, some q => proof? := some (← mkEqTrans p (← instantiateMVars q))
     current := newE
   return { newExpr := current, proof? := proof? }
+
+end
 
 private structure Target where
   fvarId : FVarId

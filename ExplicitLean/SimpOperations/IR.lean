@@ -62,6 +62,10 @@ mutual
     | reduce (reduction : Reduction)
     | builtin (builtin : Builtin)
     | simproc (declarations : Array String)
+    /-- Reuse of an exact result from Lean's simp cache. The nested operations
+    are the source-facing operations that originally produced the cache entry,
+    with positions relative to the cached expression. -/
+    | cacheReuse (events : Array Event)
     deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
   /--

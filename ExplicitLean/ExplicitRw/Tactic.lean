@@ -465,6 +465,8 @@ syntax (name := explicitRwOperationalUnfold)
   "unfold " ident explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalSimproc)
   &"simproc" ident explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalCached)
+  "cached" "[" explicitRwOperationalStep,* "]" explicitRwPos : explicitRwOperationalStep
 
 declare_syntax_cat explicitRwOperationalClose
 syntax (name := explicitRwOperationalClose)
