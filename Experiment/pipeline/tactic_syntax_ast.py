@@ -297,8 +297,7 @@ def _validate_simp_inventory_result(
                 or type(entry.get("commandOrdinal")) is not int
                 or entry.get("commandOrdinal") != ordinal
                 or not isinstance(entry.get("kind"), str)
-                or not (entry["kind"].startswith("Lean.Parser.Command.")
-                        or entry["kind"] in {"Lean.runCmd", "lemma"})
+                or not entry["kind"]
                 or not isinstance(entry.get("simpSites"), list)):
             raise SyntaxExtractionError("Lean simp syntax inventory has malformed command ownership")
         start, stop = entry.get("startChar"), entry.get("endChar")

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import copy
 from pathlib import Path
 import subprocess
 import tempfile
@@ -351,6 +352,22 @@ def tokenAuditAdmit : Nat := admit
         self.assertEqual(dirty_result["status"], "refused", dirty_result)
         self.assertEqual([item["token"] for item in dirty_result["proofHoles"]],
                          ["sorry", "admit"])
+
+    def test_inventory_accepts_imported_command_macro_kinds(self) -> None:
+        result = copy.deepcopy(self.simp_inventory)
+        result["commands"][0]["kind"] = "Demo.ImportedCommandMacro.expansion"
+        validated = ast._validate_simp_inventory_result(
+            result,
+            module="Mathlib.SimpCommandInventoryFixture",
+            source=SIMP_INVENTORY_FIXTURE,
+            source_bytes=SIMP_INVENTORY_FIXTURE.encode("utf-8"),
+            digest=self.simp_inventory_digest,
+            request_id=result["requestId"],
+        )
+        self.assertEqual(
+            validated["commands"][0]["kind"],
+            "Demo.ImportedCommandMacro.expansion",
+        )
 
     def test_direct_simp_inventory_covers_executable_command_contexts_only(self) -> None:
         commands = self.simp_inventory["commands"]
