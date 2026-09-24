@@ -397,13 +397,27 @@ private def runElaboratedSourceRule (idx : Nat) (e : Expr) (pos : Pos) (term : T
       return Replacement.eq replacement equality)
     (fun pfx child sub => badPosError idx pos pfx child sub)
 
-private def materializeSourceReplacement (idx : Nat) (term : Term)
-    (replacement : Replacement) : TacticM Replacement := do
+private def materializeSourceReplacement (idx : Nat) (term : Term) (input : Expr)
+    (replacement : Replacement) (allowNewLevelMVars := false) : TacticM Replacement := do
+  -- A source rule can run inside a congruence theorem whose still-open
+  -- arguments already occur in the selected expression. Those metavariables
+  -- belong to the enclosing exact proof program and are closed by that
+  -- program after its child replay finishes. Reject only metavariables that
+  -- the source operand itself introduced; requiring the whole intermediate
+  -- expression to be closed incorrectly rejects ordinary terms such as
+  -- `h.left_inv _` below a congruence binder.
+  let inputExprMVars := (input.collectMVars {}).result
+  let inputLevelMVars := (collectLevelMVars {} input).result
   let newExpr ← instantiateMVars replacement.newExpr
   let proof? ← replacement.proof?.mapM instantiateMVars
-  if newExpr.hasExprMVar || newExpr.hasLevelMVar ||
-      proof?.any fun proof => proof.hasExprMVar || proof.hasLevelMVar then
-    stepError idx m!"source rule `{term}` retained an unassigned metavariable after replay."
+  let outputExprMVars := (newExpr.collectMVars {}).result ++
+    (proof?.map (fun proof => (proof.collectMVars {}).result) |>.getD #[])
+  if outputExprMVars.any fun id => !inputExprMVars.contains id then
+    stepError idx m!"source rule `{term}` retained an unassigned expression metavariable after replay."
+  let outputLevelMVars := (collectLevelMVars {} newExpr).result ++
+    (proof?.map (fun proof => (collectLevelMVars {} proof).result) |>.getD #[])
+  if !allowNewLevelMVars && outputLevelMVars.any fun id => !inputLevelMVars.contains id then
+    stepError idx m!"source rule `{term}` retained an unassigned universe level after replay."
   return { newExpr, proof? }
 
 /--
@@ -419,22 +433,23 @@ private def runSourceRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
   let saved ← Tactic.saveState
   try
     let result ← runNamedRule idx e pos term reverse sideTacs
-    let result ← materializeSourceReplacement idx term result
+    let result ← materializeSourceReplacement idx term e result
     saved.restore
     return result
   catch _ =>
     saved.restore
     let fallbackSaved ← Tactic.saveState
     let result ← runElaboratedSourceRule idx e pos term reverse sideTacs
-    let newExpr ← instantiateMVars result.newExpr
-    let proof? ← result.proof?.mapM instantiateMVars
-    if newExpr.hasExprMVar || proof?.any (·.hasExprMVar) then
-      fallbackSaved.restore
-      stepError idx m!"source rule `{term}` retained an unassigned expression metavariable after replay."
-    let result := { newExpr, proof? }
-    if newExpr.hasLevelMVar || proof?.any (·.hasLevelMVar) then
+    let result ← materializeSourceReplacement idx term e result
+      (allowNewLevelMVars := true)
+    let newExpr := result.newExpr
+    let proof? := result.proof?
+    let inputLevelMVars := (collectLevelMVars {} e).result
+    let outputLevelMVars := (collectLevelMVars {} newExpr).result ++
+      (proof?.map (fun proof => (collectLevelMVars {} proof).result) |>.getD #[])
+    if outputLevelMVars.any fun id => !inputLevelMVars.contains id then
       -- This is the same ordinary `rw` elaboration path used for declaration
-      -- rules.  A universe may be fixed only when the reconstructed equality
+      -- rules. A universe may be fixed only when the reconstructed equality
       -- is unified with the enclosing declaration target, so keep precisely
       -- those assignments live for the caller instead of prematurely
       -- requiring a standalone universe solution.
