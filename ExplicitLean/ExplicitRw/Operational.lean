@@ -58,6 +58,13 @@ syntax (name := explicitRwOperationalRule)
   "rule " ident " variant " num " phase " ident ("fwd" <|> "rev")
   " extra " num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
 
+/-- A parser-authenticated source operand from the original `simp` argument.
+`lean_term(...)` remains ordinary Lean syntax; the recorder never serializes
+its elaborated expression or proof. -/
+syntax (name := explicitRwOperationalSource)
+  "source " explicitRwTerm " variant " num " phase " ident ("fwd" <|> "rev")
+  " extra " num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
+
 syntax (name := explicitRwOperationalEquation)
   "equation " ident " index " num " variant " num " phase " ident ("fwd" <|> "rev")
   " extra " num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
@@ -230,6 +237,11 @@ private def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Replacement 
     let _ ← realizeGlobalConstNoOverloadWithInfo decl
     let termStx ← `(explicitRwTerm| $decl:ident)
     let term ← Impl.toTerm termStx.raw
+    runNamedRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
+  | ``explicitRwOperationalSource => do
+    let reverse ← validateRuleMetadata idx step[5] step[6]
+    let sideTacs ← lowerProofs step[10]
+    let term ← Impl.toTerm step[1]
     runNamedRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
   | ``explicitRwOperationalEquation => do
     let reverse ← validateRuleMetadata idx step[7] step[8]

@@ -26,6 +26,16 @@ example (n : Nat) (h : n + 0 = n) : n + 0 = n := by
   explicit_rw_v2 [local h variant 0 phase pre fwd extra 0 at [0, 1] with []]
   rfl
 
+/- A nontrivial source operand is replayed from its original parser syntax.
+The operational record contains no elaborated theorem or proof term. -/
+example (n : Nat) (h : n + 0 = n) : n + 0 = n := by
+  explicit_rw_v2 [source lean_term(h) variant 0 phase pre fwd extra 0 at [0, 1] with []]
+  rfl
+
+example (n : Nat) : n = n + 0 := by
+  explicit_rw_v2 [source lean_term(Nat.add_zero n) variant 0 phase pre rev extra 0 at [1] with []]
+  rfl
+
 /- `local_ref` selects a declaration by its local-context identity rather than
    by searching for a theorem of a compatible type. In this Lean local context,
    `h` is declaration 2. -/

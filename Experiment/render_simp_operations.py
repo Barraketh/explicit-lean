@@ -52,8 +52,14 @@ def render_rule_origin(origin: dict[str, Any]) -> str:
             f"equation {render_name(equation['declaration'])} "
             f"index {equation['index']}"
         )
-    if origin == "syntax" or "syntax" in origin:
-        raise UnsupportedOperation("source-syntax simp rule is not yet an operational operand")
+    if "syntax" in origin:
+        syntax = origin["syntax"]
+        if not isinstance(syntax, dict) or not isinstance(syntax.get("source"), str):
+            raise UnsupportedOperation("source-syntax simp rule has no exact parser source")
+        source = syntax["source"].strip()
+        if not source:
+            raise UnsupportedOperation("source-syntax simp rule has empty parser source")
+        return f"source lean_term({source})"
     if "other" in origin:
         raise UnsupportedOperation("opaque simp rule origin is not an operational operand")
     raise UnsupportedOperation(f"unknown rule origin {origin!r}")

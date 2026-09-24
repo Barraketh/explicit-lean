@@ -16,7 +16,9 @@ inductive RuleOrigin where
   | decl (name : Name)
   | equation (declaration : Name) (index : Nat)
   | local (contextIndex : Nat)
-  | syntax
+  /-- Exact parser source for a rule supplied as a nontrivial `simp` operand.
+  This is source syntax, not an elaborated term or proof payload. -/
+  | syntax (source : String)
   | other (name : Name)
   deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 

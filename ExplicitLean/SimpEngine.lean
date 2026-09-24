@@ -348,7 +348,7 @@ private def sourceRuleOrigin : RuleOrigin → Operations.RuleOrigin
   | .decl name => .decl name
   | .equation declaration index => .equation declaration index
   | .local subject => .local subject.contextIndex
-  | .syntax _ => .syntax
+  | .syntax source => .syntax source
   | .other name => .other name
 
 private def sourceReduction : Reduction → Operations.Reduction
@@ -2610,8 +2610,15 @@ private def ruleOrigin (origin : Origin) (override? : Option RuleOrigin := none)
     let localDecl ← getFVarLocalDecl (.fvar fvarId)
     return (.local (← localRefOfDecl localDecl), s!"local:{localDecl.index}", false)
   | .stx _ ref =>
-    let source := canonicalRuleSyntaxSource ref
-    return (.syntax source, source, false)
+    -- `Origin.stx` retains the exact parser node of the explicit simp
+    -- operand. Keep the operand term, while recording the parser-level
+    -- reverse marker separately as the rewrite direction. No elaborated
+    -- expression or proof crosses the operational boundary.
+    let isLemma := ref.getKind == ``Parser.Tactic.simpLemma
+    let sourceTerm := if isLemma then ref[2] else ref
+    let source := canonicalRuleSyntaxSource sourceTerm
+    let inverse := isLemma && !ref[1].isNone
+    return (.syntax source, source, inverse)
   | .other name => return (.other name, toString name, false)
 
 private def useImplicitDefEqProofRecorded (thm : SimpTheorem) : EngineM Bool := do

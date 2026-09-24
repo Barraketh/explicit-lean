@@ -38,8 +38,8 @@ def main() -> None:
         for line in output.splitlines()
         if "SIMP_OPERATIONS " in line
     ]
-    if len(traces) != 5:
-        raise RuntimeError(f"expected five traces, got {len(traces)}\n{output}")
+    if len(traces) != 7:
+        raise RuntimeError(f"expected seven traces, got {len(traces)}\n{output}")
     tagged = [line.split("SIMP_OPERATIONS_SITE ", 1)[1]
               for line in output.splitlines() if "SIMP_OPERATIONS_SITE " in line]
     if len(tagged) != 1 or not tagged[0].startswith("17 {"):
@@ -74,6 +74,16 @@ def main() -> None:
     )
     if render_trace(traces[0]) != expected:
         raise RuntimeError(f"unexpected rendered source: {render_trace(traces[0])}")
+    source_rule = traces[5]["events"][0]["action"]["rewrite"]["rule"]
+    if source_rule["origin"] != {"syntax": {"source": "Nat.add_zero n"}}:
+        raise RuntimeError(f"source rule lost exact parser syntax: {source_rule}")
+    if "source lean_term(Nat.add_zero n)" not in render_trace(traces[5]):
+        raise RuntimeError(f"source rule did not render as ordinary Lean: {traces[5]}")
+    reverse_rule = traces[6]["events"][0]["action"]["rewrite"]["rule"]
+    if reverse_rule["origin"] != {"syntax": {"source": "Nat.succ_eq_add_one n"}}:
+        raise RuntimeError(f"reverse source rule changed parser syntax: {reverse_rule}")
+    if not reverse_rule["inverse"] or " phase post rev " not in render_trace(traces[6]):
+        raise RuntimeError(f"reverse source rule lost its parser direction: {reverse_rule}")
     print("operational recorder: exact rule identities and raw positions: ok")
 
 

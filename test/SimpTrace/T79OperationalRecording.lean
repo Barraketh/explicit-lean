@@ -47,4 +47,14 @@ example (n : Nat) : n + 0 = n := by
   simp_operations_observe only [Nat.add_zero]
   exact Nat.add_zero n
 
+/- A nontrivial simp argument is retained as parser syntax. The operation
+stream does not serialize the elaborated proof application. -/
+example (n : Nat) : n + 0 = n := by
+  simp_operations_observe only [Nat.add_zero n]
+  exact Nat.add_zero n
+
+example (n : Nat) : n + 1 = Nat.succ n := by
+  simp_operations_observe only [← Nat.succ_eq_add_one n]
+  exact (Nat.succ_eq_add_one n).symm
+
 end ExplicitLean.SimpTrace.T79OperationalRecording

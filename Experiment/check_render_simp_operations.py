@@ -43,6 +43,17 @@ class RenderOperationsTest(unittest.TestCase):
             "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 at [] with []] then true_intro",
         )
 
+    def test_source_syntax_operand_is_rendered_as_ordinary_lean(self) -> None:
+        event = rewrite_event([0, 1])
+        event["action"]["rewrite"]["rule"]["origin"] = {
+            "syntax": {"source": "localRule n"}
+        }
+        self.assertEqual(
+            render_trace({"events": [event]}),
+            "explicit_rw_v2 [source lean_term(localRule n) variant 0 phase post "
+            "fwd extra 0 at [0, 1] with []]",
+        )
+
     def test_local_premise_is_a_reference_not_a_term(self) -> None:
         event = rewrite_event([])
         event["action"]["rewrite"]["premises"] = [
