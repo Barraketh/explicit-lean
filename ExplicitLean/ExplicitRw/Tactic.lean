@@ -428,6 +428,8 @@ syntax (name := explicitRwOperationalProofAssumptionRef)
   "assumption " "local_ref " num : explicitRwOperationalProof
 syntax (name := explicitRwOperationalProofAssumption)
   "assumption " ident : explicitRwOperationalProof
+syntax (name := explicitRwOperationalProofIntro)
+  "intro " num " ; " explicitRwOperationalProof : explicitRwOperationalProof
 
 syntax explicitRwOperationalWith := " with " "[" explicitRwOperationalProof,* "]"
 
@@ -467,6 +469,13 @@ syntax (name := explicitRwOperationalSimproc)
   &"simproc" ident explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalCached)
   "cached" "[" explicitRwOperationalStep,* "]" explicitRwPos : explicitRwOperationalStep
+
+declare_syntax_cat explicitRwOperationalCongruenceArg
+syntax (name := explicitRwOperationalCongruenceArg)
+  "arg " num explicitRwOperationalProof : explicitRwOperationalCongruenceArg
+syntax (name := explicitRwOperationalCongruence)
+  "congr_rule " ident explicitRwPos " with "
+    "[" explicitRwOperationalCongruenceArg,* "]" : explicitRwOperationalStep
 
 declare_syntax_cat explicitRwOperationalClose
 syntax (name := explicitRwOperationalClose)
@@ -1097,8 +1106,8 @@ where
       return some "by"
     if k == ``Lean.Parser.Tactic.tacticSeq || k == ``Lean.Parser.Tactic.tacticSeq1Indented then
       return some "tactic sequence"
-    for arg in s.getArgs do
-      if let some r := find? arg then
+    for child in s.getArgs do
+      if let some r := find? child then
         return some r
     return none
 
@@ -1197,7 +1206,8 @@ def elabEquation (idx : Nat) (stx : Term) :
       let lvls ← info.levelParams.mapM fun _ => mkFreshLevelMVar
       pure (mkConst name lvls)
     else
-      elabStrict (some idx) s!"the lemma term of this step" stx (allowMVars := true)
+      elabStrict (some idx) s!"the lemma term of this step" stx
+        (allowMVars := true) (synthesize := false)
   checkNoPendingTactic s!"the lemma term of this step" (some idx) snapshot
   let proof ← instantiateMVars proof
   -- Elaboration runs under `withoutErrToSorry`, so a term that fails (an unknown
@@ -1407,6 +1417,7 @@ partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bo
         stepError idx m!"lemma `{stx}` does not match the subterm at \
           position {Pos.render pos}.\nExpected{indentExpr (← instantiateMVars source)}\n\
           but the subterm is{indentExpr sub}"
+      Term.synthesizeSyntheticMVars (postpone := .no) (ignoreStuckTC := true)
       synthesizeInstanceMVars idx m!"`{stx}`" mvars sub
       -- Discharge the lemma's hypotheses with the `with` clause, in order. A
       -- hypothesis is a Prop-valued argument metavariable the position did not
@@ -1418,6 +1429,7 @@ partial def runRwStep (idx : Nat) (e : Expr) (pos : Pos) (stx : Term) (symm : Bo
       for h : i in [0 : sideTacs.size] do
         let .mvar mid := ← instantiateMVars propMVars[i]! | pure ()
         runSideProofOn idx (some i) sideTacs[i] mid handles
+      Term.synthesizeSyntheticMVarsNoPostponing
       closeLemmaMVars idx m!"`{stx}`" mvars
       let eqProof ← instantiateMVars eqProof
       let target ← instantiateMVars target
@@ -1907,9 +1919,24 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
   let stx := if stx.getKind == ``explicitRwSideTac then stx[0] else stx
   match stx.getKind with
   | ``explicitRwSideRfl => run (← `(tactic| rfl))
+  | ``explicitRwOperationalProofRfl => run (← `(tactic| rfl))
   | ``explicitRwSideDecide => run (← `(tactic| decide))
   | ``explicitRwSideOmega => run (← `(tactic| omega))
   | ``explicitRwSideNofun => run (← `(tactic| exact nofun))
+  | ``explicitRwOperationalProofTrueIntro => run (← `(tactic| exact True.intro))
+  | ``explicitRwOperationalProofAssumption =>
+    goal.withContext do
+      let hyp : Ident := ⟨stx[1]⟩
+      let fvarId ← getFVarId hyp.raw
+      goal.assign (.fvar fvarId)
+  | ``explicitRwOperationalProofAssumptionRef =>
+    goal.withContext do
+      let localIndex : TSyntax `num := ⟨stx[2]⟩
+      let t ← `(explicitRwTerm| local_ref $localIndex:num)
+      let t ← toTerm t.raw handles
+      let val ← elabStrict (some idx) s!"the recorded local assumption" t
+        (expectedType? := some (← goal.getType))
+      goal.assign val
   | ``explicitRwSideExact =>
     goal.withContext do
       let t ← toTerm stx[1] handles
@@ -1930,6 +1957,12 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
       goal.assign (← instantiateMVars val)
   | ``explicitRwSideIntro =>
     let names : Array Name := stx[1].getArgs.map fun a => a.getId
+    let (_, goal') ← goal.introN names.size names.toList
+    runSideProofOn idx which? stx[3] goal' handles
+  | ``explicitRwOperationalProofIntro =>
+    let count := stx[1].isNatLit?.getD 0
+    let names := (Array.range count).map fun i =>
+      Name.mkSimple s!"__explicit_rw_v2_bound_{i}"
     let (_, goal') ← goal.introN names.size names.toList
     runSideProofOn idx which? stx[3] goal' handles
   | ``explicitRwSideIntroRef =>

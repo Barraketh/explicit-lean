@@ -316,6 +316,26 @@ mapping yet; consumers must leave any events beneath it unresolved. -/
         operationPosition := previous.operationPosition
       }
 
+/-- Enter a semantic path whose readable operations are rooted at an
+independent congruence side condition. -/
+@[inline] def withOperationRoot (step : PathStep) (x : EngineM α) : EngineM α := do
+  let runtime ← getRuntime
+  if runtime.mode == .reference then
+    x
+  else
+    let previous ← runtime.state.get
+    runtime.state.set {
+      previous with
+        path.steps := previous.path.steps.push step
+        operationPosition := some #[]
+    }
+    try x finally
+      runtime.state.modify fun current => {
+        current with
+          path := previous.path
+          operationPosition := previous.operationPosition
+      }
+
 private def appFunctionPosition (numArgs : Nat) : Array Nat :=
   Array.replicate numArgs 0
 
@@ -378,6 +398,13 @@ private def sourceReduction : Reduction → Operations.Reduction
   | .foldRawNatLit => .foldRawNatLit
   | .localDef subject reason => .localDef subject.contextIndex reason
 
+private def sourcePremiseTerminal : PremiseTerminal → Operations.PremiseTerminal
+  | .localAssumption contextIndex => .localAssumption contextIndex
+  | .equationHypothesis => .equationHypothesis
+  | .dischargeRfl => .dischargeRfl
+  | .isTrue => .isTrue
+  | .failed => .failed
+
 private def sourceAction? (operation : Operation)
     (premiseOperations : Array Operations.Premise) : Option Operations.Action :=
   match operation with
@@ -393,6 +420,53 @@ private def sourceAction? (operation : Operation)
   | .builtin builtin => some (.builtin builtin)
   | .semanticSimproc fold =>
       some <| .simproc (fold.candidates.map fun candidate => toString candidate.declaration)
+
+private def boundOrdinal? (binders : Array Nat) (contextIndex : Nat) : Option Nat := Id.run do
+  for h : ordinal in [0 : binders.size] do
+    if binders[ordinal] == contextIndex then return some ordinal
+  return none
+
+mutual
+  private partial def bindCongruencePremise (binders : Array Nat)
+      (premise : Operations.Premise) : Operations.Premise := {
+    terminal := match premise.terminal with
+      | .localAssumption contextIndex => match boundOrdinal? binders contextIndex with
+        | some ordinal => .boundAssumption ordinal
+        | none => premise.terminal
+      | _ => premise.terminal
+    events := premise.events.map (bindCongruenceEvent binders)
+  }
+
+  private partial def bindCongruenceAction (binders : Array Nat)
+      (action : Operations.Action) : Operations.Action :=
+    match action with
+    | .rewrite rule premises =>
+        let origin := match rule.origin with
+          | .local contextIndex => match boundOrdinal? binders contextIndex with
+            | some ordinal => Operations.RuleOrigin.bound ordinal
+            | none => rule.origin
+          | _ => rule.origin
+        .rewrite { rule with origin } (premises.map (bindCongruencePremise binders))
+    | .reduce reduction => .reduce reduction
+    | .builtin builtin => .builtin builtin
+    | .simproc declarations => .simproc declarations
+    | .cacheReuse events => .cacheReuse (events.map (bindCongruenceEvent binders))
+    | .congruence theoremName children premises =>
+        .congruence theoremName
+          (children.map fun child => {
+            child with events := child.events.map (bindCongruenceEvent binders) })
+          (premises.map fun premise => {
+            premise with premise := bindCongruencePremise binders premise.premise })
+
+  private partial def bindCongruenceEvent (binders : Array Nat)
+      (event : Operations.Event) : Operations.Event :=
+    { event with action := bindCongruenceAction binders event.action }
+end
+
+private def prefixOperationPosition (pathPrefix : Array Nat)
+    (event : Operations.Event) : Operations.Event := {
+  event with position := event.position.map (pathPrefix ++ ·)
+}
 
 def emitEvent (input output : Expr) (operation : Operation)
     (stepDisposition : StepDisposition) : EngineM Unit := do
@@ -2014,7 +2088,7 @@ private def finishPremiseProgram (outer : RecorderState) (type : Expr) : EngineM
     runtime.state.set {
       outer with
       pendingPremiseOperations := outer.pendingPremiseOperations.push {
-        terminal
+        terminal := sourcePremiseTerminal terminal
         events := nestedEvents
       }
     }
@@ -2082,16 +2156,22 @@ private def dischargeRecorded? (_thmId : Origin) (x type : Expr)
   recordBranch "rewrite.premise"
   return some (← finishPremiseProgram outer type, true)
 
+private structure RecordedArgumentPremise where
+  argumentIndex : Nat
+  program : PremiseProgram
+
 private inductive ArgumentSynthesis where
-  | success (premises : Array PremiseProgram)
-  | failed (premises : Array PremiseProgram)
+  | success (premises : Array RecordedArgumentPremise)
+  | failed (premises : Array RecordedArgumentPremise)
 
 private def synthesizeRecordedArgs (thmId : Origin) (bis : Array BinderInfo)
     (xs : Array Expr) (expectedPremises? : Option (Array PremiseProgram) := none) :
     EngineM ArgumentSynthesis := do
   let skipAssignedInstances := tactic.skipAssignedInstances.get (← getOptions)
   let mut premises := #[]
-  for x in xs, bi in bis do
+  for h : argumentIndex in [0 : xs.size] do
+    let x := xs[argumentIndex]
+    let bi := bis[argumentIndex]!
     let type ← inferType x
     if !skipAssignedInstances && bi.isInstImplicit then
       unless (← synthesizeInstance x type) do return .failed premises
@@ -2102,7 +2182,7 @@ private def synthesizeRecordedArgs (thmId : Origin) (bis : Array BinderInfo)
         let some (premise, succeeded) ← dischargeRecorded? thmId x type premises.size
             expectedPremises?
           | return .failed premises
-        premises := premises.push premise
+        premises := premises.push { argumentIndex, program := premise }
         unless succeeded do return .failed premises
   return .success premises
 where
@@ -2151,9 +2231,15 @@ partial def congrDefault (e : Expr) (invocationOrdinal : Nat) : EngineM Result :
       restoreRecorderState recorderSaved
     withParent e <| simpAppUsingCongr e invocationOrdinal
 
-/-- Process the given congruence theorem hypothesis. Return true if it made "progress". -/
-def processCongrHypothesis (h : Expr) (hType : Expr) : EngineM Bool := do
+private structure CongruenceHypothesisResult where
+  modified : Bool
+  binderIndices : Array Nat
+
+/-- Process one congruence theorem hypothesis and retain the exact local-context
+indices of the binders introduced for that side condition. -/
+private def processCongrHypothesis (h : Expr) (hType : Expr) : EngineM CongruenceHypothesisResult := do
   forallTelescopeReducing hType fun xs hType => withNewLemmas xs do
+    let binderIndices ← xs.mapM fun x => return (← x.fvarId!.getDecl).index
     let lhs ← instantiateMVars hType.appFn!.appArg!
     let r ← simp lhs
     let rhs := hType.appArg!
@@ -2183,7 +2269,10 @@ def processCongrHypothesis (h : Expr) (hType : Expr) : EngineM Bool := do
 
           Thus, we have an extra check now if `xs.size > 0`. TODO: refine this test.
       -/
-      return r.proof?.isSome || (xs.size > 0 && lhs != r.expr)
+      return {
+        modified := r.proof?.isSome || (xs.size > 0 && lhs != r.expr)
+        binderIndices
+      }
 
 private structure UserCongruenceAttempt where
   result? : Option Result
@@ -2233,15 +2322,31 @@ private def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr)
     extraArgs := args[numArgs...*].toArray
   if (← withSimpMetaConfig <| isDefEq lhs e) then
     let mut modified := false
+    let mut operationChildren : Array Operations.CongruenceChild := #[]
     for i in c.hypothesesPos do
       let h := xs[i]!
       let hType ← instantiateMVars (← inferType h)
       let hType ← if thmHasBinderNameHint then hType.resolveBinderNameHint else pure hType
+      let operationStart := (← getRecorderState).operationalEvents.size
       try
-        if (← withOperationPath (.userCongrHypothesis c.theoremName i) none <|
-            processCongrHypothesis h hType) then
+        let hypothesis ← withOperationRoot (.userCongrHypothesis c.theoremName i) <|
+          processCongrHypothesis h hType
+        let after ← getRecorderState
+        let events := (after.operationalEvents.extract operationStart
+          after.operationalEvents.size).map (bindCongruenceEvent hypothesis.binderIndices)
+          |>.map (prefixOperationPosition #[0, 1])
+        modifyRecorderState fun state => {
+          state with operationalEvents := state.operationalEvents.extract 0 operationStart }
+        operationChildren := operationChildren.push {
+          argumentIndex := i
+          binderCount := hypothesis.binderIndices.size
+          events
+        }
+        if hypothesis.modified then
           modified := true
       catch ex =>
+        modifyRecorderState fun state => {
+          state with operationalEvents := state.operationalEvents.extract 0 operationStart }
         -- Upstream treats any ordinary hypothesis-processing exception as a
         -- failed congruence candidate.  A certificate-selected successful
         -- candidate is no longer speculative, however: swallowing a nested
@@ -2256,8 +2361,9 @@ private def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr)
       trace[Meta.Tactic.simp.congr] "{c.theoremName} not modified"
       return some (← makeAttempt none #[])
     let synthesis ← synthesizeRecordedArgs (.decl c.theoremName) bis xs expectedPremises?
-    let premises := match synthesis with
+    let indexedPremises := match synthesis with
       | .success premises | .failed premises => premises
+    let premises := indexedPremises.map (·.program)
     unless synthesis matches .success _ do
       trace[Meta.Tactic.simp.congr] "{c.theoremName} synthesizeArgs failed"
       return some (← makeAttempt none premises)
@@ -2270,6 +2376,27 @@ private def trySimpCongrTheorem? (c : SimpCongrTheorem) (e : Expr)
       trace[Meta.Tactic.simp.congr] "{c.theoremName} has unassigned metavariables"
       return some (← makeAttempt none premises)
     let result ← congrArgs { expr := eNew, proof? := proof } extraArgs
+    let runtime ← getRuntime
+    if runtime.mode == .record then
+      let state ← getRecorderState
+      if state.pendingPremiseOperations.size < indexedPremises.size then
+        throwError "operational_congruence_premise_trace_underflow"
+      let premiseStart := state.pendingPremiseOperations.size - indexedPremises.size
+      let sourcePremises := state.pendingPremiseOperations.extract premiseStart
+        state.pendingPremiseOperations.size
+      let congruencePremises := indexedPremises.zip sourcePremises |>.map fun pair => {
+        argumentIndex := pair.1.argumentIndex
+        premise := pair.2
+      }
+      runtime.state.set {
+        state with
+          operationalEvents := state.operationalEvents.push {
+            position := state.operationPosition
+            phase := state.phase
+            action := .congruence c.theoremName operationChildren congruencePremises
+          }
+          pendingPremiseOperations := state.pendingPremiseOperations.extract 0 premiseStart
+      }
     return some (← makeAttempt (some result) premises)
   else
     return none
@@ -2790,11 +2917,13 @@ private def tryTheoremCoreRecorded (lhs : Expr) (xs : Array Expr)
       restoreRecorderState recorderSaved
     return none
   let synthesis ← synthesizeRecordedArgs thm.origin bis xs
+  let indexedPremises := match synthesis with
+    | .success premises | .failed premises => premises
+  let premises := indexedPremises.map (·.program)
   let premises? := match synthesis with
-    | .success premises => some premises
+    | .success _ => some premises
     | .failed _ => none
   let some premises := premises? | do
-    let .failed premises := synthesis | unreachable!
     return ← failAttempt premises
   let proof? ← if (← useImplicitDefEqProofRecorded thm) then
     pure none

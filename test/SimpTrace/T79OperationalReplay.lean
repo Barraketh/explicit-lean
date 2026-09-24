@@ -36,6 +36,14 @@ example (n : Nat) : n = n + 0 := by
   explicit_rw_v2 [source_rule lean_term(Nat.add_zero n) variant 0 phase pre rev extra 0 at [1] with []]
   rfl
 
+/- A polymorphic source application is elaborated while Lean matches the exact
+recorded redex, so the redex fixes the otherwise-stuck cast carrier. -/
+example (p : Prop) [Decidable p] (x y : Nat) :
+    ((↑(if p then x else y) : Int)) = if p then (↑x : Int) else ↑y := by
+  explicit_rw_v2 [source_rule lean_term(apply_ite Nat.cast) variant 0 phase post fwd extra 0
+    at [0, 1] with []]
+  rfl
+
 /- `local_ref` selects a declaration by its local-context identity rather than
    by searching for a theorem of a compatible type. In this Lean local context,
    `h` is declaration 2. -/
@@ -81,6 +89,17 @@ produced the cached result. They are replayed relative to the new occurrence. -/
 example (n : Nat) : (n + 0) + 0 = n := by
   explicit_rw_v2 [cached [rule Nat.add_zero variant 0 phase post fwd extra 0 at [] with []]
     at [0, 1, 0, 1], rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with []]
+  rfl
+
+private theorem operationalNotCongr (p q : Prop) (h : p ↔ q) : (¬p) ↔ (¬q) := not_congr h
+
+/- A named congruence theorem states its exact proposition argument index. The
+side program fixes the theorem's right-hand proposition without search. -/
+example (n : Nat) : (¬(n + 0 = n)) = False := by
+  explicit_rw_v2 [congr_rule operationalNotCongr at [0, 1] with [arg 2
+    explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1, 0, 1] with [],
+      rule eq_self variant 0 phase post fwd extra 0 at [0, 1] with []] then rfl],
+    rule not_true_eq_false variant 0 phase post fwd extra 0 at [0, 1] with []]
   rfl
 
 /- Definitional operations share the same path semantics. -/

@@ -152,6 +152,29 @@ class RenderOperationsTest(unittest.TestCase):
             "extra 0 at [] with []] at [0, 1]]",
         )
 
+    def test_named_congruence_indexes_its_recursive_child(self) -> None:
+        trace = {
+            "events": [{
+                "position": [0, 1],
+                "phase": "post",
+                "action": {"congruence": {
+                    "theoremName": name("Demo", "congr"),
+                    "children": [{
+                        "argumentIndex": 3,
+                        "binderCount": 1,
+                        "events": [rewrite_event([0, 1])],
+                    }],
+                    "premises": [],
+                }},
+            }]
+        }
+        self.assertEqual(
+            render_trace(trace),
+            "explicit_rw_v2 [congr_rule Demo.congr at [0, 1] with [arg 3 intro 1 ; "
+            "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+            "at [0, 1] with []] then rfl]]",
+        )
+
     def test_reductions(self) -> None:
         trace = {
             "events": [

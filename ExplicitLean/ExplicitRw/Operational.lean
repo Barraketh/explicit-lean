@@ -3,6 +3,7 @@ prelude
 
 public meta import ExplicitLean.ExplicitRw.Tactic
 public meta import ExplicitLean.ExplicitRw.LocalHandles
+public meta import Lean.Elab.Tactic.Rewrite
 public meta import Lean.Meta.Eqns
 
 public meta section
@@ -82,6 +83,10 @@ private def lowerProof (stx : Syntax) : TacticM Syntax := do
   | ``explicitRwOperationalProofAssumptionRef => do
     let localIndex : TSyntax `num := ⟨stx[2]⟩
     return (← `(explicitRwSideTac| exact local_ref $localIndex:num)).raw
+  | ``explicitRwOperationalProofIntro =>
+    -- `Impl.runSideProofOn` introduces the exact recorded binder count and
+    -- recurses into the same closed operational proof grammar.
+    return stx
   | ``explicitRwOperationalProofNested =>
     -- The nested v2 grammar is already closed. Preserve it for
     -- `Impl.runSideProofOn`, which runs it against exactly the premise goal.
@@ -91,8 +96,17 @@ private def lowerProof (stx : Syntax) : TacticM Syntax := do
 private def lowerProofs (withStx : Syntax) : TacticM (Array Syntax) :=
   (sideProofs withStx).mapM lowerProof
 
-private def ruleConclusionMatchesProp (idx : Nat) (term : Term) (sub : Expr) :
+private def ruleConclusionMatchesPropCore (idx : Nat) (term : Term) (sub : Expr) :
     TacticM (Option Bool) := do
+  -- Classify an equality/Iff theorem before considering proposition rules.
+  -- Whether its left side matches is the actual rewrite step's job; treating a
+  -- mismatching equation as proposition evidence produces misleading failures.
+  let isEquation ← withoutModifyingMCtx do
+    try
+      let _ ← Impl.elabEquation idx term
+      pure true
+    catch _ => pure false
+  if isEquation then return none
   -- This inspects only the named theorem's type. Opening its binders lets the
   -- exact selected proposition determine ordinary parameters; assignments
   -- made by this classification probe are discarded.
@@ -121,11 +135,20 @@ private def ruleConclusionMatchesProp (idx : Nat) (term : Term) (sub : Expr) :
     if ← isDefEq conclusion (mkApp (mkConst ``Not) proposition) then return some false
     return none
 
+private def ruleConclusionMatchesProp (idx : Nat) (term : Term) (sub : Expr) :
+    TacticM (Option Bool) := do
+  let saved ← Tactic.saveState
+  try
+    ruleConclusionMatchesPropCore idx term sub
+  finally
+    saved.restore
+
 private def runPropRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
     (truth : Bool) (sideTacs : Array Syntax) : TacticM Replacement := do
   rewriteAt e pos
     (fun sub => do
       let (proof, mvars) ← Impl.elabProposition idx term sub truth
+      Term.synthesizeSyntheticMVars (postpone := .no) (ignoreStuckTC := true)
       synthesizeInstanceMVars idx m!"`{term}`" mvars sub
       let propMVars ← unassignedRewritePropMVars mvars
       if sideTacs.size > propMVars.size then
@@ -134,6 +157,7 @@ private def runPropRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
       for h : i in [0 : sideTacs.size] do
         let .mvar mid := ← instantiateMVars propMVars[i]! | pure ()
         Impl.runSideProofOn idx (some i) sideTacs[i] mid
+      Term.synthesizeSyntheticMVarsNoPostponing
       closeLemmaMVars idx m!"`{term}`" mvars
       let proof ← instantiateMVars proof
       let subType ← inferType sub
@@ -167,6 +191,185 @@ private def runNamedRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
   else
     Impl.runRwStep idx e pos term reverse sideTacs
 
+/--
+Replay a nontrivial source operand through Lean's ordinary rewrite elaborator,
+but only at the already selected expression. This matters for applications such
+as `apply_ite Nat.cast`: the result carrier of the function argument is fixed
+by matching the rewrite theorem, so elaborating it as a standalone equation
+would try to synthesize `NatCast ?R` too early. `rw` deliberately elaborates
+and matches in one transaction for exactly this reason.
+-/
+private def runElaboratedSourceRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
+    (reverse : Bool) (sideTacs : Array Syntax) : TacticM Replacement := do
+  Impl.checkNoTacticBlock s!"the source rule of this step" (some idx) term
+  rewriteAt e pos
+    (fun sub => do
+      let syntheticsBefore := (← getThe Term.State).syntheticMVars
+      -- `rewriteAt` may have opened binders on the path to `sub`. The main
+      -- tactic goal predates those locals, so use a temporary goal created in
+      -- the *current* context when asking Lean's rewrite elaborator to build
+      -- the equation proof. Otherwise a rule below a forall can leak the
+      -- opened binder as an unknown free variable.
+      let contextGoalExpr ← mkFreshExprSyntheticOpaqueMVar (mkConst ``True)
+      let contextGoal := contextGoalExpr.mvarId!
+      let result ← Term.withSynthesize do
+        Tactic.elabRewrite contextGoal sub term.raw reverse
+          (config := { occs := .pos [1] })
+      contextGoal.assign (mkConst ``True.intro)
+      -- `rewrite` numbers matching occurrences, not expression paths. Since it
+      -- runs on the already selected subexpression, occurrence 1 must be its
+      -- root. Reject a congruence motive here rather than silently accepting a
+      -- nested match when the recorded source rule does not match that root.
+      let equality ← instantiateMVars result.eqProof
+      let args := equality.getAppArgs
+      let rootRewrite :=
+        equality.getAppFn.constName? == some ``congrArg &&
+          match args[4]? with
+          | some motive =>
+            match motive with
+            | .lam _ _ body _ => body == .bvar 0
+            | _ => false
+          | none => false
+      unless rootRewrite do
+        stepError idx m!"source rule `{term}` does not rewrite the root of the recorded \
+          subexpression at position {Pos.render pos}."
+      let mvars := result.mvarIds.toArray.map Expr.mvar
+      let propMVars ← unassignedRewritePropMVars mvars
+      if sideTacs.size > propMVars.size then
+        stepError idx m!"the `with` clause supplies {sideTacs.size} proof(s) but source rule \
+          `{term}` has {propMVars.size} undetermined hypothesis(es) at this position."
+      for h : i in [0 : sideTacs.size] do
+        let .mvar mid := ← instantiateMVars propMVars[i]! | pure ()
+        Impl.runSideProofOn idx (some i) sideTacs[i] mid
+      Term.synthesizeSyntheticMVarsNoPostponing
+      closeLemmaMVars idx m!"`{term}`" mvars
+      let replacement ← instantiateMVars result.eNew
+      let equality ← instantiateMVars result.eqProof
+      if replacement.hasSorry || replacement.hasSyntheticSorry ||
+          equality.hasSorry || equality.hasSyntheticSorry then
+        stepError idx m!"source rule `{term}` elaborated with an invalid recovery term."
+      Impl.checkNoLevelMVars idx m!"`{term}`" #[replacement, equality]
+      -- Every synthetic created by the source operand has been forced and all
+      -- returned metavariables have been closed above. Do not let its resolved
+      -- elaboration records escape a binder opened only while navigating this
+      -- position; such a record would retain the temporary free-variable IDs.
+      modifyThe Term.State fun state => { state with syntheticMVars := syntheticsBefore }
+      return Replacement.eq replacement equality)
+    (fun pfx child sub => badPosError idx pos pfx child sub)
+
+private def materializeSourceReplacement (idx : Nat) (term : Term)
+    (replacement : Replacement) : TacticM Replacement := do
+  let newExpr ← instantiateMVars replacement.newExpr
+  let proof? ← replacement.proof?.mapM instantiateMVars
+  if newExpr.hasExprMVar || newExpr.hasLevelMVar ||
+      proof?.any fun proof => proof.hasExprMVar || proof.hasLevelMVar then
+    stepError idx m!"source rule `{term}` retained an unassigned metavariable after replay."
+  return { newExpr, proof? }
+
+/--
+Source operands have two ordinary Lean elaboration shapes. Most can be opened
+as an equation and matched directly, which is also safe below binders. A source
+application with a postponed instance whose carrier is fixed only by rewrite
+matching needs Lean's transactional `rw` elaborator instead. Both branches use
+the same written source operand at the same exact root; neither selects another
+lemma or position.
+-/
+private def runSourceRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
+    (reverse : Bool) (sideTacs : Array Syntax) : TacticM Replacement := do
+  let saved ← Tactic.saveState
+  try
+    let result ← runNamedRule idx e pos term reverse sideTacs
+    let result ← materializeSourceReplacement idx term result
+    saved.restore
+    return result
+  catch _ =>
+    saved.restore
+    let fallbackSaved ← Tactic.saveState
+    let result ← runElaboratedSourceRule idx e pos term reverse sideTacs
+    let result ← materializeSourceReplacement idx term result
+    fallbackSaved.restore
+    return result
+
+private def elabDeclarationEquation (idx : Nat) (name : Name) :
+    TacticM (Expr × Expr × Expr × Array Expr) := do
+  let info ← getConstInfo name
+  let levels ← info.levelParams.mapM fun _ => mkFreshLevelMVar
+  let proof := mkConst name levels
+  let type ← inferType proof
+  let (mvars, _, conclusion) ← forallMetaTelescopeReducing type
+  let proof := mkAppN proof mvars
+  let (lhs, rhs, equality) ← asEquation idx m!"`{name}`" proof conclusion
+  return (lhs, rhs, equality, mvars)
+
+private def runDeclarationRule (idx : Nat) (e : Expr) (pos : Pos) (name : Name)
+    (term : Term) (sideTacs : Array Syntax) : TacticM Replacement := do
+  let probeSaved ← Tactic.saveState
+  let equationMatchesRef ← IO.mkRef false
+  try
+    let _ ← rewriteAt e pos
+      (fun sub => do
+        let (lhs, _, _, _) ← elabDeclarationEquation idx name
+        equationMatchesRef.set (← matchRewriteSource lhs sub)
+        return Replacement.defeq sub)
+      (fun pfx child sub => badPosError idx pos pfx child sub)
+  catch _ => pure ()
+  probeSaved.restore
+  let equationMatches ← equationMatchesRef.get
+  if !equationMatches then
+    return ← runNamedRule idx e pos term false sideTacs
+  rewriteAt e pos
+    (fun sub => do
+      let (lhs, rhs, equality, mvars) ← elabDeclarationEquation idx name
+      unless ← matchRewriteSource lhs sub do
+        stepError idx m!"lemma `{name}` does not match the subterm at position {Pos.render pos}."
+      synthesizeInstanceMVars idx m!"`{term}`" mvars sub
+      let propMVars ← unassignedRewritePropMVars mvars
+      if sideTacs.size > propMVars.size then
+        stepError idx m!"the `with` clause supplies too many proofs for `{term}`."
+      for h : proofIndex in [0 : sideTacs.size] do
+        let .mvar mid := ← instantiateMVars propMVars[proofIndex]! | pure ()
+        Impl.runSideProofOn idx (some proofIndex) sideTacs[proofIndex] mid
+      closeLemmaMVars idx m!"`{term}`" mvars
+      let rhs ← instantiateMVars rhs
+      let equality ← instantiateMVars equality
+      if rhs.hasLevelMVar || equality.hasLevelMVar then
+        stepError idx m!"lemma `{term}` retains an unassigned universe level."
+      return Replacement.eq rhs equality)
+    (fun pfx child sub => badPosError idx pos pfx child sub)
+
+private def runCongruenceRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
+    (indexedProofs : Array (Nat × Syntax)) : TacticM Replacement := do
+  rewriteAt e pos
+    (fun sub => do
+      let (lhs, rhs, eqProof, mvars) ← Impl.elabEquation idx term
+      unless ← matchRewriteSource lhs sub do
+        stepError idx m!"congruence theorem `{term}` does not match the subterm at position \
+          {Pos.render pos}."
+      -- A congruence theorem may have target-side parameters, and therefore
+      -- instances, that are determined only by its recorded equality premises.
+      -- Replay those exact premises first; only then synthesize the instances
+      -- fixed by the source match plus those proofs.
+      for h : proofIndex in [0 : indexedProofs.size] do
+        let (argumentIndex, proofStx) := indexedProofs[proofIndex]
+        let some argument := mvars[argumentIndex]? | do
+          stepError idx m!"congruence theorem `{term}` has no argument {argumentIndex}."
+        let .mvar mid := ← instantiateMVars argument | do
+          stepError idx m!"congruence theorem `{term}` argument {argumentIndex} was already \
+            determined before its recorded side proof."
+        unless ← isProp (← instantiateMVars (← mid.getType)) do
+          stepError idx m!"congruence theorem `{term}` argument {argumentIndex} is not a proposition."
+        Impl.runSideProofOn idx (some proofIndex) proofStx mid
+      Term.synthesizeSyntheticMVars (postpone := .no) (ignoreStuckTC := true)
+      synthesizeInstanceMVars idx m!"`{term}`" mvars sub
+      Term.synthesizeSyntheticMVarsNoPostponing
+      closeLemmaMVars idx m!"`{term}`" mvars
+      let eqProof ← instantiateMVars eqProof
+      let rhs ← instantiateMVars rhs
+      if eqProof.hasLevelMVar || rhs.hasLevelMVar then
+        stepError idx m!"congruence theorem `{term}` retains an unassigned universe level."
+      return Replacement.eq rhs eqProof)
+    (fun pfx child sub => badPosError idx pos pfx child sub)
+
 mutual
 
 private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Replacement := do
@@ -177,15 +380,18 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
     let decl : Ident := ⟨step[1]⟩
     -- Resolve as a global constant up front.  In particular, `rule h` cannot
     -- silently switch to a local variable when a declaration is missing.
-    let _ ← realizeGlobalConstNoOverloadWithInfo decl
+    let declaration ← realizeGlobalConstNoOverloadWithInfo decl
     let termStx ← `(explicitRwTerm| $decl:ident)
     let term ← Impl.toTerm termStx.raw
-    runNamedRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
+    if reverse then
+      runNamedRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
+    else
+      runDeclarationRule idx e (withExtra (parsePos step[9]) step[8]) declaration term sideTacs
   | ``explicitRwOperationalSource => do
     let reverse ← validateRuleMetadata idx step[5] step[6]
     let sideTacs ← lowerProofs step[10]
     let term ← Impl.toTerm step[1]
-    runNamedRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
+    runSourceRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
   | ``explicitRwOperationalEquation => do
     let reverse ← validateRuleMetadata idx step[7] step[8]
     let sideTacs ← lowerProofs step[12]
@@ -256,6 +462,20 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
     rewriteAt e pos
       (fun sub => runOperationsAt steps sub)
       (fun pfx child sub => badPosError idx pos pfx child sub)
+  | ``explicitRwOperationalCongruence => do
+    let decl : Ident := ⟨step[1]⟩
+    let _ ← realizeGlobalConstNoOverloadWithInfo decl
+    let termStx ← `(explicitRwTerm| $decl:ident)
+    let term ← Impl.toTerm termStx.raw
+    let pos := parsePos step[2]
+    let mut indexedProofs : Array (Nat × Syntax) := #[]
+    for entry in step[5].getSepArgs do
+      let argumentIndex := entry[1].isNatLit?.getD 0
+      if indexedProofs.any (·.1 == argumentIndex) then
+        stepError idx m!"congruence theorem `{decl.getId}` repeats argument {argumentIndex}."
+      indexedProofs := indexedProofs.push (argumentIndex, ← lowerProof entry[2])
+    indexedProofs := indexedProofs.qsort fun a b => a.1 < b.1
+    runCongruenceRule idx e pos term indexedProofs
   | ``explicitRwOperationalSimproc =>
     throwError "explicit_rw_v2: simproc `{step[1].getId}` is not a rewrite-rule operation."
   | k =>
@@ -323,8 +543,11 @@ private def runOperations (steps : Array Syntax) (target : Option Target)
       return some target
     | some target, some proof =>
       let proof ← instantiateMVars proof
-      let newProof ← mkEqMP proof (mkFVar target.fvarId)
-      let result ← goal.replace target.fvarId newProof newExpr
+      -- Use Lean's dependency-aware local rewrite primitive. Constructing a
+      -- replacement proof and calling `MVarId.replace` directly leaves later
+      -- local declarations referring to the retired free-variable identity
+      -- after sequential `at *` subjects.
+      let result ← goal.replaceLocalDecl target.fvarId newExpr proof
       replaceMainGoal [result.mvarId]
       return some { target with fvarId := result.fvarId }
 

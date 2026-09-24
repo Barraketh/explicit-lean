@@ -16,11 +16,22 @@ inductive RuleOrigin where
   | decl (name : Name)
   | equation (declaration : Name) (index : Nat)
   | local (contextIndex : Nat)
+  /-- A local introduced by the enclosing named-congruence side condition. -/
+  | bound (ordinal : Nat)
   /-- Exact parser source for a rule supplied as a nontrivial `simp` operand.
   This is source syntax, not an elaborated term or proof payload. -/
   | syntax (source : String)
   | other (name : Name)
   deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+inductive PremiseTerminal where
+  | localAssumption (contextIndex : Nat)
+  | boundAssumption (ordinal : Nat)
+  | equationHypothesis
+  | dischargeRfl
+  | isTrue
+  | failed
+  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
 
 /-- A definitional operation stripped of legacy validation payloads. -/
 inductive Reduction where
@@ -51,8 +62,23 @@ mutual
   /-- A rewrite premise's exact recursive operation stream and terminal proof
   action. No proposition, proof, or elaborated expression is serialized. -/
   structure Premise where
-    terminal : PremiseTerminal
+    terminal : Operations.PremiseTerminal
     events : Array Event := #[]
+    deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+  /-- One recursively simplified equality/Iff hypothesis of a named simp
+  congruence theorem. -/
+  structure CongruenceChild where
+    argumentIndex : Nat
+    binderCount : Nat
+    events : Array Event := #[]
+    deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
+  /-- One additional proposition argument discharged while applying a named
+  simp congruence theorem. -/
+  structure CongruencePremise where
+    argumentIndex : Nat
+    premise : Premise
     deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
   /-- A source-facing operation. Failed candidates are deliberately absent:
@@ -66,6 +92,9 @@ mutual
     are the source-facing operations that originally produced the cache entry,
     with positions relative to the cached expression. -/
     | cacheReuse (events : Array Event)
+    /-- Exact application of a named simp congruence theorem. -/
+    | congruence (theoremName : Name) (children : Array CongruenceChild)
+        (premises : Array CongruencePremise)
     deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
   /--

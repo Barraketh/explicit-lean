@@ -41,11 +41,19 @@ def render_position(position: Any) -> str:
     return "at [" + ", ".join(str(index) for index in position) + "]"
 
 
-def render_rule_origin(origin: dict[str, Any]) -> str:
+def render_rule_origin(origin: dict[str, Any], bound_names: tuple[str, ...] = ()) -> str:
     if "decl" in origin:
         return f"rule {render_name(origin['decl'])}"
     if "local" in origin:
         return f"local local_ref {origin['local']['contextIndex']}"
+    if "bound" in origin:
+        ordinal = origin["bound"]["ordinal"]
+        try:
+            return f"local {bound_names[ordinal]}"
+        except (IndexError, TypeError):
+            raise UnsupportedOperation(
+                f"congruence-bound local {ordinal} is outside {len(bound_names)} binders"
+            ) from None
     if "equation" in origin:
         equation = origin["equation"]
         return (
@@ -65,7 +73,9 @@ def render_rule_origin(origin: dict[str, Any]) -> str:
     raise UnsupportedOperation(f"unknown rule origin {origin!r}")
 
 
-def render_premise_terminal(premise: dict[str, Any]) -> str:
+def render_premise_terminal(
+    premise: dict[str, Any], bound_names: tuple[str, ...] = ()
+) -> str:
     terminal = premise["terminal"]
     if terminal == "dischargeRfl":
         return "rfl"
@@ -74,6 +84,14 @@ def render_premise_terminal(premise: dict[str, Any]) -> str:
     if isinstance(terminal, dict) and "localAssumption" in terminal:
         index = terminal["localAssumption"]["contextIndex"]
         return f"assumption local_ref {index}"
+    if isinstance(terminal, dict) and "boundAssumption" in terminal:
+        ordinal = terminal["boundAssumption"]["ordinal"]
+        try:
+            return f"assumption {bound_names[ordinal]}"
+        except (IndexError, TypeError):
+            raise UnsupportedOperation(
+                f"congruence-bound assumption {ordinal} is outside {len(bound_names)} binders"
+            ) from None
     if terminal == "equationHypothesis":
         raise UnsupportedOperation("equation-hypothesis premise terminal is not implemented")
     if terminal == "failed":
@@ -81,25 +99,31 @@ def render_premise_terminal(premise: dict[str, Any]) -> str:
     raise UnsupportedOperation(f"unknown premise terminal {terminal!r}")
 
 
-def render_premise(premise: dict[str, Any]) -> str:
-    proof = render_premise_terminal(premise)
+def render_premise(premise: dict[str, Any], bound_names: tuple[str, ...] = ()) -> str:
+    proof = render_premise_terminal(premise, bound_names)
     events = premise.get("events")
     if not isinstance(events, list):
         raise UnsupportedOperation("rewrite premise has no recursive operation stream")
     if not events:
         return proof
-    return f"explicit_rw_v2 [{', '.join(render_events(events))}] then {proof}"
+    return (
+        f"explicit_rw_v2 [{', '.join(render_events(events, bound_names))}] then {proof}"
+    )
 
 
-def render_rewrite(payload: dict[str, Any], position: Any) -> str:
+def render_rewrite(
+    payload: dict[str, Any], position: Any, bound_names: tuple[str, ...] = ()
+) -> str:
     rule = payload["rule"]
-    premises = ", ".join(render_premise(premise) for premise in payload["premises"])
+    premises = ", ".join(
+        render_premise(premise, bound_names) for premise in payload["premises"]
+    )
     phase = rule["phase"]
     if phase not in ("pre", "post", "dpre", "dpost"):
         raise UnsupportedOperation(f"rewrite phase {phase!r} is not supported by the source DSL")
     direction = "rev" if rule["inverse"] else "fwd"
     return (
-        f"{render_rule_origin(rule['origin'])} variant {rule['variant']} "
+        f"{render_rule_origin(rule['origin'], bound_names)} variant {rule['variant']} "
         f"phase {phase} {direction} extra {rule['numExtraArgs']} "
         f"{render_position(position)} with [{premises}]"
     )
@@ -125,13 +149,44 @@ def render_reduction(payload: Any, position: Any) -> str:
     raise UnsupportedOperation(f"reduction {payload!r} has no exact source operation yet")
 
 
-def render_events(events: list[dict[str, Any]]) -> list[str]:
+def render_congruence(payload: dict[str, Any], position: Any) -> str:
+    entries: list[tuple[int, str]] = []
+    for child in payload["children"]:
+        argument = child["argumentIndex"]
+        count = child["binderCount"]
+        names = tuple(f"__explicit_rw_v2_bound_{i}" for i in range(count))
+        events = child.get("events")
+        if not isinstance(events, list):
+            raise UnsupportedOperation("named congruence child has no operation stream")
+        proof = "rfl"
+        if events:
+            proof = f"explicit_rw_v2 [{', '.join(render_events(events, names))}] then rfl"
+        if count:
+            proof = f"intro {count} ; {proof}"
+        entries.append((argument, f"arg {argument} {proof}"))
+    for indexed in payload["premises"]:
+        argument = indexed["argumentIndex"]
+        entries.append((argument, f"arg {argument} {render_premise(indexed['premise'])}"))
+    entries.sort(key=lambda entry: entry[0])
+    if len({argument for argument, _ in entries}) != len(entries):
+        raise UnsupportedOperation("named congruence has duplicate theorem argument programs")
+    return (
+        f"congr_rule {render_name(payload['theoremName'])} "
+        f"{render_position(position)} with [{', '.join(source for _, source in entries)}]"
+    )
+
+
+def render_events(
+    events: list[dict[str, Any]], bound_names: tuple[str, ...] = ()
+) -> list[str]:
     steps: list[str] = []
     for index, event in enumerate(events):
         action = event["action"]
         try:
             if "rewrite" in action:
-                steps.append(render_rewrite(action["rewrite"], event["position"]))
+                steps.append(
+                    render_rewrite(action["rewrite"], event["position"], bound_names)
+                )
             elif "reduce" in action:
                 steps.append(render_reduction(action["reduce"]["reduction"], event["position"]))
             elif "simproc" in action:
@@ -144,10 +199,12 @@ def render_events(events: list[dict[str, Any]]) -> list[str]:
                     raise UnsupportedOperation("changed simp cache result has no source operations")
                 steps.append(
                     "cached ["
-                    + ", ".join(render_events(cached))
+                    + ", ".join(render_events(cached, bound_names))
                     + "] "
                     + render_position(event["position"])
                 )
+            elif "congruence" in action:
+                steps.append(render_congruence(action["congruence"], event["position"]))
             else:
                 raise UnsupportedOperation(f"unknown operation {action!r}")
         except UnsupportedOperation as error:
