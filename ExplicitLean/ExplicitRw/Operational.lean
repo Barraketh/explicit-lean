@@ -90,7 +90,11 @@ private partial def lowerBoundAssumptions
 private def lowerProof (stx : Syntax) (boundLocals : Array FVarId := #[]) : TacticM Syntax := do
   match stx.getKind with
   | ``explicitRwOperationalProofAtom =>
-    match stx[0].getId.toString with
+    -- Soft keywords are represented by their token atom, not an identifier.
+    -- Reading that atom also avoids using the source range, which can extend
+    -- through trailing trivia such as the following comment.
+    let atom := stx[0][0].getAtomVal
+    match atom with
     | "rfl" => return (← `(explicitRwSideTac| rfl)).raw
     | "true_intro" => return (← `(explicitRwSideTac| close [True.intro])).raw
     | "equation_hypothesis" => return stx
@@ -574,7 +578,7 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax)
   | ``explicitRwOperationalSource => do
     let reverse ← validateRuleMetadata idx step[5] step[6]
     let sideTacs ← lowerProofs step[10] boundLocals
-    let term ← Impl.toTerm step[1]
+    let term : Term := ⟨step[1][1]⟩
     runSourceRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
   | ``explicitRwOperationalEquation => do
     let reverse ← validateRuleMetadata idx step[7] step[8]

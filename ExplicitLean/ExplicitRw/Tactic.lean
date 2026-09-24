@@ -420,111 +420,114 @@ syntax explicitRwPos := " at " "[" num,* "]"
 closed v2 program can recursively discharge a rewrite premise. Its evaluator
 remains in `ExplicitRw.Operational`; this section defines syntax only. -/
 
-declare_syntax_cat explicitRwOperationalStep
-declare_syntax_cat explicitRwOperationalProof
+declare_syntax_cat explicitRwOperationalStep (behavior := symbol)
+declare_syntax_cat explicitRwOperationalProof (behavior := symbol)
 
-/- Parse closed proof atoms as identifiers instead of reserving `rfl` (or
-future atom names) globally. Reserving `rfl` here changes ordinary Lean parsing
-in every module that imports `ExplicitRw`. The evaluator accepts only the two
-enumerated spellings. -/
-syntax (name := explicitRwOperationalProofAtom) ident : explicitRwOperationalProof
+/- Closed proof atoms are soft keywords: they remain available as ordinary
+identifiers everywhere outside this v2 proof category. -/
 syntax (name := explicitRwOperationalProofAssumptionRef)
-  "assumption " "local_ref " num : explicitRwOperationalProof
+  &"assumption" "local_ref " num : explicitRwOperationalProof
 syntax (name := explicitRwOperationalProofAssumption)
-  "assumption " ident : explicitRwOperationalProof
+  &"assumption" ident : explicitRwOperationalProof
 syntax (name := explicitRwOperationalProofAssumptionBound)
-  "assumption " "bound " num : explicitRwOperationalProof
+  &"assumption" &"bound" num : explicitRwOperationalProof
 syntax (name := explicitRwOperationalProofIntro)
-  "intro " num " ; " explicitRwOperationalProof : explicitRwOperationalProof
+  &"intro" num ";" explicitRwOperationalProof : explicitRwOperationalProof
+syntax (name := explicitRwOperationalProofAtom)
+  (&"rfl" <|> &"true_intro" <|> &"equation_hypothesis") : explicitRwOperationalProof
 
-syntax explicitRwOperationalWith := " with " "[" explicitRwOperationalProof,* "]"
+syntax explicitRwOperationalWith := &"with" "[" explicitRwOperationalProof,* "]"
 
 syntax (name := explicitRwOperationalRule)
-  "rule " ident " variant " num " phase " ident ("fwd" <|> "rev")
+  &"rule" ident &"variant" num &"phase" ident (&"fwd" <|> &"rev")
   &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
 
+declare_syntax_cat explicitRwOperationalSourceTerm (behavior := symbol)
+syntax:max (name := explicitRwOperationalSourceTermLean)
+  &"lean_term(" term ")" : explicitRwOperationalSourceTerm
 syntax (name := explicitRwOperationalSource)
-  "source_rule " explicitRwTerm " variant " num " phase " ident ("fwd" <|> "rev")
+  &"source_rule" explicitRwOperationalSourceTerm &"variant" num &"phase" ident
+    (&"fwd" <|> &"rev")
   &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
 
 syntax (name := explicitRwOperationalEquation)
-  "equation " ident &"index" num " variant " num " phase " ident ("fwd" <|> "rev")
+  &"equation" ident &"index" num &"variant" num &"phase" ident (&"fwd" <|> &"rev")
   &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
 
 syntax (name := explicitRwOperationalLocal)
-  "local " ident " variant " num " phase " ident ("fwd" <|> "rev")
+  &"local" ident &"variant" num &"phase" ident (&"fwd" <|> &"rev")
   &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
 
 syntax (name := explicitRwOperationalLocalRef)
-  &"local" "local_ref " num " variant " num " phase " ident ("fwd" <|> "rev")
+  &"local" "local_ref " num &"variant" num &"phase" ident (&"fwd" <|> &"rev")
   &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
 
 /-- A local introduced structurally by an enclosing `forall_congr`. The ordinal
 is relative to the innermost enclosing congruence binder, so replay never
 depends on a generated user name or a context search. -/
 syntax (name := explicitRwOperationalBound)
-  "bound " num " variant " num " phase " ident ("fwd" <|> "rev")
+  &"bound" num &"variant" num &"phase" ident (&"fwd" <|> &"rev")
   &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
 
 syntax (name := explicitRwOperationalBeta)
-  "beta " explicitRwPos : explicitRwOperationalStep
+  &"beta" explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalInstantiate)
-  "instantiate " explicitRwPos : explicitRwOperationalStep
+  &"instantiate" explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalIota)
-  "iota " explicitRwPos : explicitRwOperationalStep
+  &"iota" explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalProj)
-  "proj " explicitRwPos : explicitRwOperationalStep
+  &"proj" explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalZeta)
-  "zeta " explicitRwPos : explicitRwOperationalStep
+  &"zeta" explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalZetaLocal)
-  "zeta_local " "local_ref " num ident explicitRwPos : explicitRwOperationalStep
+  &"zeta_local" "local_ref " num ident explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalFoldNatLit)
-  "fold_nat_lit " explicitRwPos : explicitRwOperationalStep
+  &"fold_nat_lit" explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalUnfold)
-  "unfold " ident explicitRwPos : explicitRwOperationalStep
+  &"unfold" ident explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalSimproc)
   &"simproc" ident explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalCached)
-  "cached" "[" explicitRwOperationalStep,* "]" explicitRwPos : explicitRwOperationalStep
+  &"cached" "[" explicitRwOperationalStep,* "]" explicitRwPos : explicitRwOperationalStep
 
-declare_syntax_cat explicitRwOperationalCongruenceArg
+declare_syntax_cat explicitRwOperationalCongruenceArg (behavior := symbol)
 syntax (name := explicitRwOperationalCongruenceArg)
-  "arg " num explicitRwOperationalProof : explicitRwOperationalCongruenceArg
+  &"arg" num explicitRwOperationalProof : explicitRwOperationalCongruenceArg
 syntax (name := explicitRwOperationalCongruence)
-  "congr_rule " ident explicitRwPos " with "
+  &"congr_rule" ident explicitRwPos &"with"
     "[" explicitRwOperationalCongruenceArg,* "]" : explicitRwOperationalStep
 
-declare_syntax_cat explicitRwOperationalAutoCongruenceArg
+declare_syntax_cat explicitRwOperationalAutoCongruenceArg (behavior := symbol)
 syntax (name := explicitRwOperationalAutoCongruenceArg)
-  "arg " num "[" explicitRwOperationalStep,* "]" : explicitRwOperationalAutoCongruenceArg
+  &"arg" num "[" explicitRwOperationalStep,* "]" : explicitRwOperationalAutoCongruenceArg
 syntax (name := explicitRwOperationalAutoCongruence)
-  "auto_congr " explicitRwPos " with "
+  &"auto_congr" explicitRwPos &"with"
     "[" explicitRwOperationalAutoCongruenceArg,* "]" : explicitRwOperationalStep
 
 syntax (name := explicitRwOperationalForallCongruence)
-  "forall_congr " explicitRwPos
-    &" domain " "[" explicitRwOperationalStep,* "]"
-    &" body " "[" explicitRwOperationalStep,* "]" : explicitRwOperationalStep
+  &"forall_congr" explicitRwPos
+    &"domain" "[" explicitRwOperationalStep,* "]"
+    &"body" "[" explicitRwOperationalStep,* "]" : explicitRwOperationalStep
 
-declare_syntax_cat explicitRwOperationalClose
+declare_syntax_cat explicitRwOperationalClose (behavior := symbol)
 syntax (name := explicitRwOperationalClose)
-  " then " explicitRwOperationalProof : explicitRwOperationalClose
+  &"then" explicitRwOperationalProof : explicitRwOperationalClose
 syntax (name := explicitRwOperationalCloseFalseElim)
-  " then " &"false_elim" : explicitRwOperationalClose
+  &"then" &"false_elim" : explicitRwOperationalClose
 
 syntax (name := explicitRwOperationalProofNested)
-  "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
+  &"explicit_rw_v2" "[" explicitRwOperationalStep,* "]"
   (explicitRwOperationalClose)? : explicitRwOperationalProof
 
-declare_syntax_cat explicitRwOperationalLocation
+declare_syntax_cat explicitRwOperationalLocation (behavior := symbol)
 syntax (name := explicitRwOperationalLocationIdent)
-  " at " ident : explicitRwOperationalLocation
+  &"at" ident : explicitRwOperationalLocation
 syntax (name := explicitRwOperationalLocationRef)
-  &" at " &"local_ref " num : explicitRwOperationalLocation
+  &"at" "local_ref " num : explicitRwOperationalLocation
 
-declare_syntax_cat explicitRwOperationalGoalAction
+declare_syntax_cat explicitRwOperationalGoalAction (behavior := symbol)
 syntax (name := explicitRwOperationalGoalAction)
-  "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
+  &"explicit_rw_v2" "[" explicitRwOperationalStep,* "]"
   (explicitRwOperationalLocation)? (explicitRwOperationalClose)? :
     explicitRwOperationalGoalAction
 
@@ -532,21 +535,21 @@ syntax (name := explicitRwOperationalGoalAction)
 to several exact located replays on the same goal (for example `simp at *`
 under `<;>`). -/
 syntax (name := explicitRwOperationalProofSequence)
-  "explicit_rw_v2_sequence " "[" explicitRwOperationalGoalAction,* "]" :
+  &"explicit_rw_v2_sequence" "[" explicitRwOperationalGoalAction,* "]" :
     explicitRwOperationalProof
 
 syntax (name := explicitRwOperational)
-  "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
+  &"explicit_rw_v2" "[" explicitRwOperationalStep,* "]"
   (explicitRwOperationalLocation)? (explicitRwOperationalClose)? : tactic
 
 /-- Replay one recorded `explicit_rw_v2` program per current goal, in order. -/
 syntax (name := explicitRwOperationalGoals)
-  "explicit_rw_v2_goals " "[" explicitRwOperationalProof,* "]" : tactic
+  &"explicit_rw_v2_goals" "[" explicitRwOperationalProof,* "]" : tactic
 
 /-- Run one ordinary source tactic, then replay one recorded v2 program for
 each goal it produced, in exact order. -/
 syntax (name := explicitRwOperationalGoalsAfter)
-  "explicit_rw_v2_goals_after " "[" explicitRwOperationalProof,* "]" " by " tacticSeq : tactic
+  &"explicit_rw_v2_goals_after" "[" explicitRwOperationalProof,* "]" &"by" tacticSeq : tactic
 
 /--
 A **side proof**: the closed, recursive grammar for discharging a side condition
@@ -575,17 +578,17 @@ syntax (name := explicitRwSideOmega) &"omega" : explicitRwSideProof
 /-- An impossible constructor equation. -/
 syntax (name := explicitRwSideNofun) &"nofun" : explicitRwSideProof
 /-- A closing term. -/
-syntax (name := explicitRwSideExact) &"exact " explicitRwTerm : explicitRwSideProof
+syntax (name := explicitRwSideExact) &"exact" explicitRwTerm : explicitRwSideProof
 /-- A delimiter-bearing exact proof term for generated source. -/
-syntax (name := explicitRwSideClose) &"close " "[" explicitRwTerm "]" : explicitRwSideProof
+syntax (name := explicitRwSideClose) &"close" "[" explicitRwTerm "]" : explicitRwSideProof
 /-- Introduce the antecedents of an implication-shaped side condition. -/
 /- A recorder-issued handle introduces exactly one binder.  The continuation is
    recursive, so nested side proofs can introduce further handles in order. -/
 syntax (name := explicitRwSideIntroRef)
-  &"intro_ref " num " ; " explicitRwSideProof : explicitRwSideProof
+  &"intro_ref" num ";" explicitRwSideProof : explicitRwSideProof
 /-- Introduce the antecedents of an implication-shaped side condition. -/
 syntax (name := explicitRwSideIntro)
-  &"intro " (ident)+ " ; " explicitRwSideProof : explicitRwSideProof
+  &"intro" (ident)+ ";" explicitRwSideProof : explicitRwSideProof
 
 /-- Retained name for the entries of a `with [...]` clause. -/
 syntax explicitRwSideTac := explicitRwSideProof
@@ -620,7 +623,7 @@ let-declaration. Unlike plain `zeta`, whose selected subterm must be a `letE`,
 this is the source form for simp's zeta-delta reduction of a local free
 variable. The context index is recorder evidence; no name lookup is performed.
 -/
-syntax explicitRwZetaLocal := &"zeta_local " &"local_ref " num explicitRwPos
+syntax explicitRwZetaLocal := &"zeta_local" &"local_ref" num explicitRwPos
 
 /-- `change t at [1]` — last-resort definitional replacement, checked by defeq. -/
 syntax explicitRwChange := "change " explicitRwTerm explicitRwPos
@@ -650,7 +653,7 @@ syntax explicitRwCloser := explicitRwSideProof
 ordinary tactic. The spec's `by` field is exactly `rfl | decide`, so only those
 two are accepted; see `explicitRwCloser` for why this is not a `tacticSeq`.
 -/
-syntax explicitRwEq := &"eq " explicitRwType " by " (&"rfl" <|> &"decide") explicitRwPos
+syntax explicitRwEq := &"eq" explicitRwType " by " (&"rfl" <|> &"decide") explicitRwPos
 
 /-- The innermost nesting level: no further `congr`. -/
 syntax explicitRwInnerStep0 :=
@@ -663,18 +666,18 @@ syntax explicitRwInnerStep0 :=
    enter/exit scope positions. Nested ordinary steps run while the handle is
    in scope; `introduced_ref` is the only way they can refer to it. -/
 syntax explicitRwIntroCtx :=
-  &"intro_ctx " num
-  " domain " explicitRwPos
-  " deps " "[" num,* "]"
-  " scope " num
-  " enter " explicitRwPos
-  " exit " explicitRwPos
-  " with " "[" explicitRwInnerStep0,* "]"
+  &"intro_ctx" num
+  &"domain" explicitRwPos
+  &"deps" "[" num,* "]"
+  &"scope" num
+  &"enter" explicitRwPos
+  &"exit" explicitRwPos
+  &"with" "[" explicitRwInnerStep0,* "]"
   explicitRwPos
 
 /-- A `congr` whose nested steps are innermost. -/
 syntax explicitRwCongr0 :=
-  &"congr " num " [" explicitRwInnerStep0,* "]" explicitRwPos
+  &"congr" num " [" explicitRwInnerStep0,* "]" explicitRwPos
 
 /-- One nesting level up, so a `congr` may nest a `congr` — which T1's
 `congr_nested_cast` trace does, transporting two levels of type equality. -/
@@ -698,12 +701,12 @@ simplifier: it lives outside `Lean.Meta.Tactic.Simp`, and
 `Experiment/check_no_simp_family.py` accepts the import.
 -/
 syntax explicitRwCongr :=
-  &"congr " num " [" explicitRwInnerStep,* "]" explicitRwPos
+  &"congr" num " [" explicitRwInnerStep,* "]" explicitRwPos
 
 /- A recorder-issued dependent-forall transport.  The first step list rewrites
 the domain; the second (under the stable binder handle) rewrites its body. -/
 syntax explicitRwTransport :=
-  &"transport " &"forall " num " [" explicitRwInnerStep,* "]" &" body " "[" explicitRwInnerStep,* "]" explicitRwPos
+  &"transport" &"forall" num " [" explicitRwInnerStep,* "]" &"body" "[" explicitRwInnerStep,* "]" explicitRwPos
 
 /-- One step of an `explicit_rw` trace. The keyword-led forms are tried before
 the bare-term rewrite, so `beta at [...]` is the reduction rather than a lemma
@@ -1971,7 +1974,7 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
   match stx.getKind with
   | ``explicitRwSideRfl => run (← `(tactic| rfl))
   | ``explicitRwOperationalProofAtom =>
-    match stx[0].getId.toString with
+    match stx[0][0].getAtomVal with
     | "rfl" => run (← `(tactic| rfl))
     | "true_intro" => run (← `(tactic| exact True.intro))
     | "equation_hypothesis" =>

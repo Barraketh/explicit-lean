@@ -2,6 +2,16 @@ import ExplicitLean.ExplicitRw
 
 namespace ExplicitLean.SimpTrace.T79OperationalReplay
 
+/- The v2 DSL must not reserve its descriptive words in ordinary Lean syntax.
+They are deliberately soft keywords inside the operational syntax categories. -/
+private structure ParserKeywordFixture where
+  proj : Nat
+  arg : Nat
+  domain : Nat
+  rev : Nat
+  rule : Nat
+  variant : Nat
+
 example : True ∧ True := by
   constructor
   explicit_rw_v2_goals [

@@ -197,11 +197,7 @@ inductive Vec (α : Type) : Nat → Type where
 def DependentP (n : Nat) (_v : Vec Nat n) : Prop := True
 
 /--
-error: explicit_rw: step 1: position [0, 1] rewrites an argument of a dependent function, whose result type mentions that argument; rebuilding the term would need a cast, which `explicit_rw` does not build. Only definitional steps are supported there.
-Function:
-  DependentP
-of type:
-  (n : Nat) → Vec Nat n → Prop
+error: explicit_rw: step 1: position [0, 1]: generated congruence theorem classifies the selected argument as `Lean.Meta.CongrArgKind.fixed`, so it cannot transport a propositional rewrite
 -/
 #guard_msgs in
 example (n m : Nat) (h : n = m) (_v : Vec Nat n) : DependentP n _v := by
