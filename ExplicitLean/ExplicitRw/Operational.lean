@@ -275,42 +275,73 @@ private def runOperationsAt (steps : Array Syntax) (e : Expr) : TacticM Replacem
     current := newE
   return { newExpr := current, proof? := proof? }
 
-private def runOperations (steps : Array Syntax) (target : Option FVarId) : TacticM Unit := do
+private structure Target where
+  fvarId : FVarId
+
+private def runOperations (steps : Array Syntax) (target : Option Target)
+    (closeLocalFalse : Bool) :
+    TacticM (Option Target) := do
   let goal ← getMainGoal
   goal.withContext do
     let initial ← match target with
       | none => instantiateMVars (← goal.getType)
-      | some fvarId => instantiateMVars (← fvarId.getType)
+      | some target => instantiateMVars (← target.fvarId.getType)
     let replacement ← runOperationsAt steps initial
     let newExpr ← instantiateMVars replacement.newExpr
+    if closeLocalFalse then
+      let some target := target
+        | throwError "explicit_rw_v2: `false_elim` requires a hypothesis location."
+      unless newExpr.isFalse do
+        throwError "explicit_rw_v2: `false_elim` expected the selected hypothesis to simplify to False."
+      let falseProof ← match replacement.proof? with
+        | none => pure (mkFVar target.fvarId)
+        | some proof => mkEqMP (← instantiateMVars proof) (mkFVar target.fvarId)
+      goal.assign (← mkFalseElim (← goal.getType) falseProof)
+      replaceMainGoal []
+      return none
     match target, replacement.proof? with
-    | none, none => replaceMainGoal [← goal.replaceTargetDefEq newExpr]
+    | none, none =>
+      replaceMainGoal [← goal.replaceTargetDefEq newExpr]
+      return none
     | none, some proof =>
       replaceMainGoal [← goal.replaceTargetEq newExpr (← instantiateMVars proof)]
-    | some fvarId, none =>
-      replaceMainGoal [← goal.replaceLocalDeclDefEq fvarId newExpr]
-    | some fvarId, some proof =>
+      return none
+    | some target, none =>
+      replaceMainGoal [← goal.replaceLocalDeclDefEq target.fvarId newExpr]
+      return some target
+    | some target, some proof =>
       let proof ← instantiateMVars proof
-      let newProof ← mkEqMP proof (mkFVar fvarId)
-      let result ← goal.replace fvarId newProof newExpr
+      let newProof ← mkEqMP proof (mkFVar target.fvarId)
+      let result ← goal.replace target.fvarId newProof newExpr
       replaceMainGoal [result.mvarId]
+      return some { target with fvarId := result.fvarId }
 
-private def resolveTarget (locStx : Syntax) : TacticM (Option FVarId) := do
+private def resolveTarget (locStx : Syntax) : TacticM (Option Target) := do
   if locStx.isNone then return none
   let loc := locStx[0]
   match loc.getKind with
-  | ``explicitRwOperationalLocationIdent =>
-    return some (← getFVarId loc[1])
+  | ``explicitRwOperationalLocationIdent => do
+    let fvarId ← getFVarId loc[1]
+    return some { fvarId }
   | ``explicitRwOperationalLocationRef =>
     let index ← Impl.checkedHandle loc[2] "location local_ref index"
-    return some (← Impl.indexedLocalDecl index).fvarId
+    return some { fvarId := (← Impl.indexedLocalDecl index).fvarId }
   | kind =>
     throwError "explicit_rw_v2: internal error: unknown location `{kind}`."
 
-private def runTerminal (stx : Syntax) : TacticM Unit := do
+private def runTerminal (stx : Syntax) (target : Option Target) : TacticM Unit := do
   let close := stx[0]
-  let closer ← lowerProof close[1]
-  Impl.runCloser closer
+  match close.getKind with
+  | ``explicitRwOperationalClose =>
+    if target.isSome then
+      throwError "explicit_rw_v2: this terminal operation applies only to the goal, not a hypothesis."
+    let closer ← lowerProof close[1]
+    Impl.runCloser closer
+  | kind =>
+    throwError "explicit_rw_v2: internal error: unknown terminal operation `{kind}`."
+
+private def isFalseElimTerminal (stx : Syntax) : Bool :=
+  !stx.isNone && stx[0].getKind == ``explicitRwOperationalCloseFalseElim
 
 end Operational
 
@@ -318,10 +349,10 @@ end Operational
 public meta def evalExplicitRwOperational : Tactic := fun stx => do
   let steps := stx[2].getSepArgs
   let target ← Operational.resolveTarget stx[4]
-  Operational.runOperations steps target
+  let closeLocalFalse := Operational.isFalseElimTerminal stx[5]
+  let target ← Operational.runOperations steps target closeLocalFalse
   unless stx[5].isNone do
-    if target.isSome then
-      throwError "explicit_rw_v2: terminal operations apply only to the goal, not a hypothesis."
-    Operational.runTerminal stx[5]
+    unless closeLocalFalse do
+      Operational.runTerminal stx[5] target
 
 end ExplicitLean.ExplicitRw

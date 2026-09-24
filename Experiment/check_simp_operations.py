@@ -38,8 +38,8 @@ def main() -> None:
         for line in output.splitlines()
         if "SIMP_OPERATIONS " in line
     ]
-    if len(traces) != 10:
-        raise RuntimeError(f"expected ten traces, got {len(traces)}\n{output}")
+    if len(traces) != 11:
+        raise RuntimeError(f"expected eleven traces, got {len(traces)}\n{output}")
     tagged = [line.split("SIMP_OPERATIONS_SITE ", 1)[1]
               for line in output.splitlines() if "SIMP_OPERATIONS_SITE " in line]
     if len(tagged) != 1 or not tagged[0].startswith("17 {"):
@@ -95,10 +95,15 @@ def main() -> None:
     located = traces[9].get("subjects")
     if not isinstance(located, list) or len(located) != 1:
         raise RuntimeError(f"located simp did not emit one ordered subject: {traces[9]}")
-    if located[0].get("subject") != {"local": {"contextIndex": 2}}:
-        raise RuntimeError(f"located simp lost exact local identity: {located[0]}")
+    if located[0].get("subject") != {"namedLocal": {"source": "h"}}:
+        raise RuntimeError(f"located simp lost exact source identifier: {located[0]}")
     if not located[0].get("trace", {}).get("events"):
         raise RuntimeError(f"located simp lost its operational trace: {located[0]}")
+    local_false = traces[10].get("subjects")
+    if not isinstance(local_false, list) or len(local_false) != 1:
+        raise RuntimeError(f"local-false simp lost its subject: {traces[10]}")
+    if local_false[0].get("trace", {}).get("terminal") != "falseElim":
+        raise RuntimeError(f"local-false simp lost its terminal action: {local_false[0]}")
     print("operational recorder: exact rule identities and raw positions: ok")
 
 

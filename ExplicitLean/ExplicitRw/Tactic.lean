@@ -469,6 +469,8 @@ syntax (name := explicitRwOperationalSimproc)
 declare_syntax_cat explicitRwOperationalClose
 syntax (name := explicitRwOperationalClose)
   " then " explicitRwOperationalProof : explicitRwOperationalClose
+syntax (name := explicitRwOperationalCloseFalseElim)
+  " then " &"false_elim" : explicitRwOperationalClose
 
 syntax (name := explicitRwOperationalProofNested)
   "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"

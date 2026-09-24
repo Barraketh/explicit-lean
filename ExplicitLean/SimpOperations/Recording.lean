@@ -42,12 +42,37 @@ private def observe (simpStx : Syntax) (target : Expr) :
     initialMeta.restore
     setGoals initialGoals
 
+private def nameLocationSubjects
+    (operations : Array Lean.Meta.Simp.Operations.SubjectTrace)
+    (names : Array (Option String)) :
+    Array Lean.Meta.Simp.Operations.SubjectTrace :=
+  let initial : Nat × Array Lean.Meta.Simp.Operations.SubjectTrace := (0, #[])
+  (operations.foldl (init := initial) fun (localIndex, result) operation =>
+    match operation.subject with
+    | Lean.Meta.Simp.Operations.Subject.target =>
+      (localIndex, result.push operation)
+    | Lean.Meta.Simp.Operations.Subject.namedLocal _ =>
+      (localIndex, result.push operation)
+    | Lean.Meta.Simp.Operations.Subject.local _ =>
+      let operation := match names[localIndex]?.join with
+        | some source =>
+          ⟨Lean.Meta.Simp.Operations.Subject.namedLocal source, operation.trace⟩
+        | none => operation
+      (localIndex + 1, result.push operation)).2
+
 private def observeLocations (simpStx : Syntax) :
     TacticM Lean.Meta.Simp.Operations.TacticTrace := do
   let { ctx, simprocs, dischargeWrapper, .. } ←
     mkSimpContext simpStx (eraseLocal := false)
+  let location := expandOptLocation simpStx[5]
   let (fvarIds, simplifyTarget) ←
-    SimpEngine.Recording.locationSubjects (expandOptLocation simpStx[5])
+    SimpEngine.Recording.locationSubjects location
+  let namedLocals : Array (Option String) := match location with
+    | .targets hyps _ => hyps.map fun hyp =>
+        some <| match hyp with
+          | Syntax.ident _ rawVal _ _ => rawVal.toString
+          | stx => stx.reprint.getD hyp.getId.toString
+    | .wildcard => Array.replicate fvarIds.size none
   let initialMeta ← Simp.Engine.saveFullMetaState
   let initialGoals ← getGoals
   let mainGoal := initialGoals.head!
@@ -59,7 +84,7 @@ private def observeLocations (simpStx : Syntax) :
             (wellBehavedDischarge := false)
       let recorded ← SimpEngine.Recording.recordGoal
         mainGoal ctx methods simplifyTarget fvarIds
-      return { subjects := recorded.operations }
+      return { subjects := nameLocationSubjects recorded.operations namedLocals }
   finally
     initialMeta.restore
     setGoals initialGoals

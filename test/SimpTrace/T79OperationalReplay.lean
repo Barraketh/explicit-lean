@@ -140,6 +140,10 @@ example (n : Nat) (h : n + 0 = n) : n = n := by
   explicit_rw_v2 [rule Nat.add_zero variant 0 phase pre fwd extra 0 at [0, 1] with []] at h
   exact h
 
+example (h : (0 : Nat) = 1) : False := by
+  explicit_rw_v2 [rule Nat.zero_ne_one variant 0 phase post fwd extra 0 at [] with []]
+    at h then false_elim
+
 example (n : Nat) (h : n + 0 = n) : n = n := by
   explicit_rw_v2 [rule Nat.add_zero variant 0 phase pre fwd extra 0 at [0, 1] with []]
     at local_ref 2

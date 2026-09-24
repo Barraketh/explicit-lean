@@ -75,4 +75,8 @@ example (n : Nat) (h : n + 0 = n) : True := by
   simp_operations_observe only [Nat.add_zero] at h
   trivial
 
+example (h : (0 : Nat) = 1) : True := by
+  simp_operations_observe at h
+  trivial
+
 end ExplicitLean.SimpTrace.T79OperationalRecording

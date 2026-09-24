@@ -153,7 +153,10 @@ def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
     }
     operations := operations.push {
       subject := .local subjectRef.contextIndex
-      trace
+      trace := if result.expr.isFalse then
+        { trace with terminal := .falseElim }
+      else
+        trace
     }
     match result.proof? with
     | some _ =>

@@ -83,6 +83,8 @@ corresponds to the ordinary goal-level step used when simp changes a target to
 inductive Terminal where
   | open
   | trueIntro
+  /-- A simplified local hypothesis is `False`, so it closes the main goal. -/
+  | falseElim
   deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
 
 /-- The committed operations in execution order. -/
@@ -96,6 +98,8 @@ instance : Inhabited Trace := ⟨{}⟩
 /-- The exact proof-state subject simplified by one operational trace. -/
 inductive Subject where
   | target
+  /-- Exact parser spelling of an explicitly named `at h` subject. -/
+  | namedLocal (source : String)
   | local (contextIndex : Nat)
   deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
 

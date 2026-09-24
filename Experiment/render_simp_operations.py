@@ -153,6 +153,10 @@ def render_trace(trace: dict[str, Any], location: str | None = None) -> str:
     terminal = trace.get("terminal", "open")
     if terminal == "trueIntro":
         source += " then true_intro"
+    elif terminal == "falseElim":
+        if location is None:
+            raise UnsupportedOperation("false-elimination terminal has no local subject")
+        source += " then false_elim"
     elif terminal != "open":
         raise UnsupportedOperation(f"unknown terminal operation {terminal!r}")
     return source
@@ -175,6 +179,11 @@ def render_observation(observation: dict[str, Any]) -> list[str]:
     identity = subject.get("subject")
     if identity == "target":
         location = None
+    elif isinstance(identity, dict) and isinstance(identity.get("namedLocal"), dict):
+        source = identity["namedLocal"].get("source")
+        if not isinstance(source, str) or not source.strip():
+            raise UnsupportedOperation("located simp local has no exact source identifier")
+        location = f"at {source}"
     elif isinstance(identity, dict) and isinstance(identity.get("local"), dict):
         index = identity["local"].get("contextIndex")
         if not isinstance(index, int):

@@ -67,14 +67,14 @@ class RenderOperationsTest(unittest.TestCase):
     def test_single_hypothesis_location_uses_exact_context_identity(self) -> None:
         observation = {
             "subjects": [{
-                "subject": {"local": {"contextIndex": 4}},
+                "subject": {"namedLocal": {"source": "h"}},
                 "trace": {"events": [rewrite_event([0, 1])]},
             }]
         }
         self.assertEqual(
             render_observation(observation),
             ["explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
-             "at [0, 1] with []] at local_ref 4"],
+             "at [0, 1] with []] at h"],
         )
 
     def test_multiple_locations_remain_a_structured_residual(self) -> None:
@@ -85,6 +85,19 @@ class RenderOperationsTest(unittest.TestCase):
                     {"subject": "target", "trace": {"events": []}},
                 ]
             })
+
+    def test_local_false_closes_the_goal_from_the_same_subject(self) -> None:
+        observation = {
+            "subjects": [{
+                "subject": {"namedLocal": {"source": "h"}},
+                "trace": {"events": [rewrite_event([])], "terminal": "falseElim"},
+            }]
+        }
+        self.assertEqual(
+            render_observation(observation),
+            ["explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+             "at [] with []] at h then false_elim"],
+        )
 
     def test_nested_premise_operations_are_recursive(self) -> None:
         event = rewrite_event([])
