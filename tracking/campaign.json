@@ -1561,6 +1561,48 @@
     "result": "tracking/tasks/T76-isolated-trace-compile/RESULT.md",
     "wholeTreeAcceptance": "not_claimed"
   },
+  "t83ScalewayV2Run": {
+    "task": "T83-scaleway-v2",
+    "status": "deadline_cleanup_complete_partial_merge",
+    "hostCount": 1,
+    "hardDeadline": "2026-09-24T12:30:00Z",
+    "pass2CompletedShards": 32,
+    "pass3CompletedShards": 9,
+    "pass6LaunchedShards": 32,
+    "collectedPass6Shards": 21,
+    "collectedFallbackShards": 6,
+    "missingShards": [
+      "job-008b",
+      "job-009a",
+      "job-011b",
+      "job-012a",
+      "job-013a"
+    ],
+    "mergedDatabase": {
+      "path": ".lake/private/T83-scaleway-v2-20260924/mathlib-db-t83-partial-merged.sqlite3",
+      "integrityCheck": "ok",
+      "mergedJobDatabases": 27,
+      "manifestModules": 2624,
+      "newSuccesses": 4750,
+      "statusCounts": {
+        "success": 34529,
+        "noop": 4900,
+        "record_failed": 4652,
+        "render_failed": 3177,
+        "compile_failed": 4064
+      }
+    },
+    "cleanup": {
+      "server": "absent",
+      "volume": "absent",
+      "flexibleIp": "absent",
+      "securityGroup": "absent",
+      "completedAt": "2026-09-24T12:31:08Z"
+    },
+    "result": "tracking/tasks/T83-scaleway-v2/RESULT.md",
+    "wholeTreeAcceptance": "not_claimed",
+    "simpDisabledCertification": "not_claimed"
+  },
   "remoteWorker": {
     "decidedAt": "2026-09-16",
     "provider": "scaleway",
