@@ -170,13 +170,6 @@ def render_observation(observation: dict[str, Any]) -> list[str]:
         raise UnsupportedOperation("operational observation has neither events nor subjects")
     if not subjects:
         raise UnsupportedOperation("located simp observation has no subjects")
-    if len(subjects) > 1 and any(
-            isinstance(subject.get("subject"), dict)
-            and "local" in subject["subject"]
-            for subject in subjects):
-        raise UnsupportedOperation(
-            "wildcard simp locations require atomic local-context replay"
-        )
     rendered: list[str] = []
     for subject in subjects:
         trace = subject.get("trace")

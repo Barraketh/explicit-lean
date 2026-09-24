@@ -98,14 +98,16 @@ class RenderOperationsTest(unittest.TestCase):
             ],
         )
 
-    def test_multiple_wildcard_locations_remain_a_structured_residual(self) -> None:
-        with self.assertRaisesRegex(UnsupportedOperation, "atomic"):
+    def test_wildcard_locations_replay_in_recorded_order(self) -> None:
+        self.assertEqual(
             render_observation({
                 "subjects": [
                     {"subject": {"local": {"contextIndex": 2}}, "trace": {"events": []}},
                     {"subject": "target", "trace": {"events": []}},
                 ]
-            })
+            }),
+            ["explicit_rw_v2 [] at local_ref 2", "explicit_rw_v2 []"],
+        )
 
     def test_local_false_closes_the_goal_from_the_same_subject(self) -> None:
         observation = {
