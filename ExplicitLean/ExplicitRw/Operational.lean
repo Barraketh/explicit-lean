@@ -755,9 +755,7 @@ public meta def evalExplicitRwOperational : Tactic := fun stx => do
     unless closeLocalFalse do
       Operational.runTerminal stx[5] target
 
-@[tactic explicitRwOperationalGoals]
-public meta def evalExplicitRwOperationalGoals : Tactic := fun stx => do
-  let programs := stx[2].getSepArgs
+private meta def runOperationalGoalPrograms (programs : Array Syntax) : TacticM Unit := do
   let goals ← getGoals
   unless programs.size == goals.length do
     throwError "explicit_rw_v2_goals: recorded {programs.size} invocation(s), but the preceding tactic produced {goals.length} goal(s)."
@@ -771,5 +769,15 @@ public meta def evalExplicitRwOperationalGoals : Tactic := fun stx => do
     ]⟩
     remaining := remaining ++ (← Tactic.run goals[i]! (evalTactic nested))
   setGoals remaining.toList
+
+@[tactic explicitRwOperationalGoals]
+public meta def evalExplicitRwOperationalGoals : Tactic := fun stx => do
+  runOperationalGoalPrograms stx[2].getSepArgs
+
+@[tactic explicitRwOperationalGoalsAfter]
+public meta def evalExplicitRwOperationalGoalsAfter : Tactic := fun stx => do
+  let sourceTactic : TSyntax ``Lean.Parser.Tactic.tacticSeq := ⟨stx[5]⟩
+  evalTactic (← `(tactic| ($sourceTactic:tacticSeq)))
+  runOperationalGoalPrograms stx[2].getSepArgs
 
 end ExplicitLean.ExplicitRw

@@ -261,8 +261,7 @@ def _direct_repeated_sequence_parents(
                         break
                     child_source = source[child_start:child_end]
                     child_sources.append(child_source)
-                    if (index > 0 and child_start <= site.startChar
-                            and child_end >= site.endChar):
+                    if child_start <= site.startChar and child_end >= site.endChar:
                         containing_index = index
                 start, end = node.get("startChar"), node.get("endChar")
                 if (not child_sources or containing_index is None
@@ -622,13 +621,30 @@ def render_command(source: str, command: dict[str, Any],
             line_start = command_text.rfind("\n", 0, start) + 1
             line_prefix = command_text[line_start:start]
             line_indent = line_prefix[:len(line_prefix) - len(line_prefix.lstrip(" \t"))]
-            continuation = line_indent + "  "
+            # The reconstructed left tactic is complete.  Replay is the next
+            # tactic in the same `by` sequence, not a continuation of the
+            # left tactic's term syntax.  Extra indentation makes Lean parse
+            # `explicit_rw_v2_goals` as another argument to commands such as
+            # `refine f ?_ ?_ <;> simp`.
+            continuation = line_indent
             left = str(parent["left"])
             first_prefix = line_indent if not line_prefix.strip() else ""
-            lines = [first_prefix + left] if left else []
+            lines: list[str] = []
             comment_indent = continuation if left else (first_prefix or line_indent)
             lines.extend(worker.S.comment_original(trace_site.callText, comment_indent))
-            lines.extend(continuation + line for line in goal_lines)
+            wrapper = goal_lines[0].replace(
+                "explicit_rw_v2_goals ", "explicit_rw_v2_goals_after ", 1
+            ) + " by"
+            lines.append(continuation + wrapper)
+            source_tactic = left or "skip"
+            source_lines = source_tactic.splitlines()
+            if line_indent:
+                source_lines = [
+                    line[len(line_indent):] if index > 0 and line.startswith(line_indent)
+                    else line
+                    for index, line in enumerate(source_lines)
+                ]
+            lines.extend(continuation + "  " + line for line in source_lines)
             for following in parent.get("after", []):
                 lines.append(continuation + "all_goals " + str(following))
             ranges[local_site.index] = (start, end)

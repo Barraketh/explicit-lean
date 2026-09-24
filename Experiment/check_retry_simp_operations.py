@@ -380,7 +380,15 @@ def check_repeated_goal_command_rewrite() -> None:
     assert error is None and rewritten is not None, error
     assert "constructor <;>" not in rewritten, rewritten
     assert rewritten.count("explicit_rw_v2 [] then true_intro") == 2, rewritten
-    assert "explicit_rw_v2_goals" in rewritten, rewritten
+    assert "explicit_rw_v2_goals_after" in rewritten, rewritten
+    assert "    constructor" in rewritten, rewritten
+    with tempfile.TemporaryDirectory(prefix="retry-repeated-goals-") as temp:
+        path = pathlib.Path(temp) / "RepeatedGoals.lean"
+        path.write_text("import ExplicitLean.ExplicitRw\n\n" + rewritten, encoding="utf-8")
+        code, stdout, stderr, _ = retry.replay.run(
+            ["lake", "env", "lean", str(path)], ROOT, timeout=30,
+        )
+        assert code == 0, stdout + stderr
 
 
 def main() -> None:

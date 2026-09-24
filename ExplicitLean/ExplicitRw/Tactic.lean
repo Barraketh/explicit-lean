@@ -521,6 +521,11 @@ syntax (name := explicitRwOperational)
 syntax (name := explicitRwOperationalGoals)
   "explicit_rw_v2_goals " "[" explicitRwOperationalProof,* "]" : tactic
 
+/-- Run one ordinary source tactic, then replay one recorded v2 program for
+each goal it produced, in exact order. -/
+syntax (name := explicitRwOperationalGoalsAfter)
+  "explicit_rw_v2_goals_after " "[" explicitRwOperationalProof,* "]" " by " tacticSeq : tactic
+
 /--
 A **side proof**: the closed, recursive grammar for discharging a side condition
 or closing a goal.
