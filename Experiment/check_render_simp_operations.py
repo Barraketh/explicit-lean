@@ -77,11 +77,32 @@ class RenderOperationsTest(unittest.TestCase):
              "at [0, 1] with []] at h"],
         )
 
-    def test_multiple_locations_remain_a_structured_residual(self) -> None:
-        with self.assertRaisesRegex(UnsupportedOperation, "simultaneous"):
+    def test_named_locations_replay_in_recorded_order(self) -> None:
+        observation = {
+            "subjects": [
+                {"subject": {"namedLocal": {"source": "h₁"}},
+                 "trace": {"events": [rewrite_event([])]}},
+                {"subject": {"namedLocal": {"source": "h₂"}},
+                 "trace": {"events": [rewrite_event([0, 1])]}},
+                {"subject": "target", "trace": {"events": []}},
+            ]
+        }
+        self.assertEqual(
+            render_observation(observation),
+            [
+                "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+                "at [] with []] at h₁",
+                "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+                "at [0, 1] with []] at h₂",
+                "explicit_rw_v2 []",
+            ],
+        )
+
+    def test_multiple_wildcard_locations_remain_a_structured_residual(self) -> None:
+        with self.assertRaisesRegex(UnsupportedOperation, "atomic"):
             render_observation({
                 "subjects": [
-                    {"subject": "target", "trace": {"events": []}},
+                    {"subject": {"local": {"contextIndex": 2}}, "trace": {"events": []}},
                     {"subject": "target", "trace": {"events": []}},
                 ]
             })

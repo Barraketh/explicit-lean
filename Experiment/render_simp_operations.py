@@ -168,30 +168,37 @@ def render_observation(observation: dict[str, Any]) -> list[str]:
     subjects = observation.get("subjects")
     if not isinstance(subjects, list):
         raise UnsupportedOperation("operational observation has neither events nor subjects")
-    if len(subjects) != 1:
+    if not subjects:
+        raise UnsupportedOperation("located simp observation has no subjects")
+    if len(subjects) > 1 and any(
+            isinstance(subject.get("subject"), dict)
+            and "local" in subject["subject"]
+            for subject in subjects):
         raise UnsupportedOperation(
-            "multiple simp locations require simultaneous local-context replay"
+            "wildcard simp locations require atomic local-context replay"
         )
-    subject = subjects[0]
-    trace = subject.get("trace")
-    if not isinstance(trace, dict) or not isinstance(trace.get("events"), list):
-        raise UnsupportedOperation("located simp subject has no operational trace")
-    identity = subject.get("subject")
-    if identity == "target":
-        location = None
-    elif isinstance(identity, dict) and isinstance(identity.get("namedLocal"), dict):
-        source = identity["namedLocal"].get("source")
-        if not isinstance(source, str) or not source.strip():
-            raise UnsupportedOperation("located simp local has no exact source identifier")
-        location = f"at {source}"
-    elif isinstance(identity, dict) and isinstance(identity.get("local"), dict):
-        index = identity["local"].get("contextIndex")
-        if not isinstance(index, int):
-            raise UnsupportedOperation("located simp local has no exact context index")
-        location = f"at local_ref {index}"
-    else:
-        raise UnsupportedOperation(f"unknown simp subject {identity!r}")
-    return [render_trace(trace, location)]
+    rendered: list[str] = []
+    for subject in subjects:
+        trace = subject.get("trace")
+        if not isinstance(trace, dict) or not isinstance(trace.get("events"), list):
+            raise UnsupportedOperation("located simp subject has no operational trace")
+        identity = subject.get("subject")
+        if identity == "target":
+            location = None
+        elif isinstance(identity, dict) and isinstance(identity.get("namedLocal"), dict):
+            source = identity["namedLocal"].get("source")
+            if not isinstance(source, str) or not source.strip():
+                raise UnsupportedOperation("located simp local has no exact source identifier")
+            location = f"at {source}"
+        elif isinstance(identity, dict) and isinstance(identity.get("local"), dict):
+            index = identity["local"].get("contextIndex")
+            if not isinstance(index, int):
+                raise UnsupportedOperation("located simp local has no exact context index")
+            location = f"at local_ref {index}"
+        else:
+            raise UnsupportedOperation(f"unknown simp subject {identity!r}")
+        rendered.append(render_trace(trace, location))
+    return rendered
 
 
 def load_trace(path: Path | None) -> dict[str, Any]:
