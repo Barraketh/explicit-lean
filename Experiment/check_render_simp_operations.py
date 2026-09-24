@@ -42,6 +42,16 @@ class RenderOperationsTest(unittest.TestCase):
             "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with []]",
         )
 
+    def test_private_declaration_uses_its_source_scope_name(self) -> None:
+        event = rewrite_event([])
+        event["action"]["rewrite"]["rule"]["origin"] = {
+            "decl": {"name": "_private._stdin.0.Example.hidden"}
+        }
+        self.assertIn(
+            "rule Example.hidden variant",
+            render_trace({"events": [event]}),
+        )
+
     def test_true_terminal_is_term_free(self) -> None:
         self.assertEqual(
             render_trace({"events": [rewrite_event([])], "terminal": "trueIntro"}),

@@ -39,6 +39,36 @@ def render_name(value: Any) -> str:
 
 def render_global_name(value: Any) -> str:
     """Render the recorder's exact root-qualified declaration identity."""
+    parts = value["name"] if isinstance(value, dict) and "name" in value else value
+    # Lean's environment identity for a source `private` declaration is
+    # `_private.<module>.<nonce>.<user name>`. That internal name is neither
+    # legal nor resolvable as source (`.0` is a numeric Name component). The
+    # declaration is replayed in the same module after its original command,
+    # where Lean resolves its exact user-facing private name back to that
+    # environment declaration. Keep it unqualified by `_root_`: private-name
+    # resolution is intentionally source-scope aware.
+    if isinstance(parts, str):
+        components = parts.split(".")
+        if components and components[0] == "_private":
+            nonce = next(
+                (index for index, component in enumerate(components[1:], 1)
+                 if component.isdecimal()),
+                None,
+            )
+            if nonce is None or nonce + 1 >= len(components):
+                raise UnsupportedOperation("malformed private declaration identity")
+            return ".".join(components[nonce + 1:])
+    elif isinstance(parts, list) and parts:
+        first = parts[0]
+        if first == ["str", "_private"] or first == ("str", "_private"):
+            nonce = next(
+                (index for index, component in enumerate(parts[1:], 1)
+                 if component[0] == "num"),
+                None,
+            )
+            if nonce is None or nonce + 1 >= len(parts):
+                raise UnsupportedOperation("malformed private declaration identity")
+            return render_name(parts[nonce + 1:])
     return "_root_." + render_name(value)
 
 
