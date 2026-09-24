@@ -8,6 +8,8 @@ public meta import Lean.Meta.Tactic.Assert
 public meta import Lean.Meta.WHNF
 public meta import Lean.Meta.SynthInstance
 public meta import Lean.Meta.Transform
+public meta import Lean.Meta.CongrTheorems
+public meta import Lean.Meta.Tactic.Simp.Types
 
 public meta section
 
@@ -187,6 +189,23 @@ where
           would need a cast, which `explicit_rw` does not build. Only definitional \
           steps are supported there.\nFunction:{indentExpr f}\nof type:{indentExpr fType}"
 
+/-- Decode the raw binary application path prefix selecting one argument of
+the maximal application spine.  For `f a b c`, `[1]` selects `c`, `[0, 1]`
+selects `b`, and `[0, 0, 1]` selects `a`. -/
+private def applicationArgumentPath? (e : Expr) (pos : Pos) :
+    Option (Nat × Pos × Pos) := do
+  let count := e.getAppNumArgs
+  if count == 0 then none else
+  let rec loop (zeros : Nat) : Pos → Option (Nat × Pos × Pos)
+    | 1 :: rest =>
+      if zeros < count then
+        some (count - zeros - 1, rest, List.replicate zeros 0 ++ [1])
+      else
+        none
+    | 0 :: rest => loop (zeros + 1) rest
+    | _ => none
+  loop 0 pos
+
 /--
 Navigate `e` along `pos` and apply `k` to the subterm found there, then rebuild
 `e` with a congruence proof back to the root.
@@ -208,6 +227,99 @@ where
     | [] => k e
     | i :: rest' =>
       let seen' := seen ++ [i]
+      -- Rebuild an application through the same generated congruence theorem
+      -- shape used by the simplifier.  Binary `congrArg` is insufficient for
+      -- a dependent application spine: changing an early argument can change
+      -- the types of later cast or typeclass arguments (notably the condition
+      -- and `Decidable` argument of `ite`).
+      if let some (argumentIndex, argumentRest, consumed) :=
+          applicationArgumentPath? e rest then
+        let fn := e.getAppFn
+        let args := e.getAppArgs
+        -- Replay the selected child before generating the congruence theorem.
+        -- Congruence generation allocates metavariables; doing it first can
+        -- constrain the exact source-rule elaboration performed by `k`.
+        let argument := args[argumentIndex]!
+        let replacement ← go argument argumentRest (seen ++ consumed)
+        let some congrThm ← (Lean.Meta.mkCongrSimp? fn : MetaM _)
+          | throwError "position {Pos.render (seen ++ consumed)}: no congruence \
+              theorem can rebuild this application"
+        if congrThm.argKinds.size == args.size &&
+            congrThm.argKinds[argumentIndex]? == some .eq then
+            let mut argsNew := args.set! argumentIndex replacement.newExpr
+            let mut proof := congrThm.proof
+            let mut type := congrThm.type
+            let mut subst : Array Expr := #[]
+            for h : currentIndex in [0 : args.size] do
+              let current := args[currentIndex]
+              let currentNew := argsNew[currentIndex]!
+              let kind := congrThm.argKinds[currentIndex]!
+              proof := mkApp proof current
+              type := type.bindingBody!
+              match kind with
+              | .fixed =>
+                subst := subst.push currentNew
+              | .cast =>
+                subst := subst.push current
+              | .subsingletonInst =>
+                subst := subst.push current
+                let classNew := type.bindingDomain!.instantiateRev subst
+                let instanceNew ← (do
+                  if ← isDefEq (← inferType current) classNew then
+                    pure current
+                  else
+                    match ← trySynthInstance classNew with
+                    | LOption.some value => pure value
+                    | _ =>
+                      match classNew.getAppFnArgs with
+                      | (``Decidable, #[proposition]) =>
+                        mkAppM ``Classical.propDecidable #[proposition]
+                      | _ => throwError "position {Pos.render (seen ++ consumed)}: \
+                          failed to synthesize a transported subsingleton instance \
+                          for{indentExpr classNew}" : MetaM Expr)
+                proof := mkApp proof instanceNew
+                argsNew := argsNew.set! currentIndex instanceNew
+                subst := subst.push instanceNew
+                type := type.bindingBody!
+              | .eq =>
+                subst := subst.push current
+                let argumentProof ← (if currentIndex == argumentIndex then
+                    match replacement.proof? with
+                    | some equality => instantiateMVars equality
+                    | none => mkEqRefl current
+                  else
+                    mkEqRefl current : MetaM Expr)
+                proof := mkApp2 proof currentNew argumentProof
+                subst := subst.push currentNew |>.push argumentProof
+                type := type.bindingBody!.bindingBody!
+              | other =>
+                throwError "position {Pos.render (seen ++ consumed)}: generated \
+                  congruence theorem uses unsupported argument kind `{repr other}`"
+            let some (_, _, rhs) := type.instantiateRev subst |>.eq?
+              | throwError "position {Pos.render (seen ++ consumed)}: generated \
+                  congruence theorem did not produce an equality"
+            let proofFinal ← (instantiateMVars proof : MetaM Expr)
+            let rhs ← (Lean.Meta.Simp.removeUnnecessaryCasts rhs : MetaM Expr)
+            let rhs ← (instantiateMVars rhs : MetaM Expr)
+            let expected ← (mkEq e rhs : MetaM Expr)
+            unless ← (isDefEq (← inferType proofFinal) expected : MetaM Bool) do
+              throwError "position {Pos.render (seen ++ consumed)}: generated \
+                congruence proof does not establish the rebuilt application equality"
+            return .eq rhs proofFinal
+        else
+          let kind := congrThm.argKinds[argumentIndex]?.map repr |>.getD "missing"
+          match replacement.proof? with
+          | some _ =>
+            throwError "position {Pos.render (seen ++ consumed)}: generated \
+              congruence theorem classifies the selected argument as `{kind}`, \
+              so it cannot transport a propositional rewrite"
+          | none =>
+            let newExpr := mkAppN fn (args.set! argumentIndex replacement.newExpr)
+            unless ← (isDefEq e newExpr : MetaM Bool) do
+              throwError "position {Pos.render (seen ++ consumed)}: generated \
+                congruence theorem classifies the selected argument as `{kind}`, \
+                and its definitional replacement does not rebuild the application"
+            return .defeq newExpr
       match e with
       | .app f a =>
         match i with

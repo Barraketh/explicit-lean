@@ -211,6 +211,18 @@ example (n : Nat) (h : n + 0 = n) : n = n := by
     at local_ref 2
   exact h
 
+/- Rewriting an early argument of a dependent application spine transports
+the later subsingleton argument through Lean's generated congruence theorem.
+For `ite`, the `Decidable` argument depends on the condition and need not be
+available as a source-level instance after the condition changes. -/
+example (p q : Prop) [decision : Decidable p] (h : p = q) :
+    (if p then 1 else 0) = (if p then 1 else 0) := by
+  explicit_rw_v2 [source_rule lean_term(h) variant 0 phase post fwd extra 0
+    at [0, 1, 0, 0, 0, 1] with []]
+  cases h
+  have instancesAgree : Classical.propDecidable p = decision := Subsingleton.elim _ _
+  rw [instancesAgree]
+
 /- The selected node does not match, although matching redexes exist elsewhere.
    The operation fails at the recorded path instead of searching the goal. -/
 /-- error: explicit_rw_v2: step 1: lemma `Nat.add_zero` does not match the subterm at position [0, 0] -/
