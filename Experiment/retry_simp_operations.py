@@ -553,15 +553,15 @@ def _replacement_lines(site: worker.S.Site, source_call: str,
         return worker.S.comment_original(source_call, indent) + [
             indent + line for line in rendered
         ], False
-    # The first line is inserted immediately after the preceding tactic, so a
-    # line comment safely terminates that line. Continuations and the v2 tactic
-    # are indented as a child tactic sequence; the untouched source suffix is
-    # appended by `splice` to the final operation line.
-    comments = ["-- Original simp:"] + [
+    # A mid-line tactic can sit inside a term delimiter (`(by ext; simp)`), a
+    # structure field, or a semicolon sequence.  Make the replacement one
+    # parenthesized tactic atom, so line comments cannot swallow the enclosing
+    # source suffix and layout cannot turn v2 into another term argument.
+    comments = ["(-- Original simp:"] + [
         indent + "  -- " + line for line in source_call.splitlines()
     ]
     body = [indent + "  " + line for line in rendered]
-    return comments + body, True
+    return comments + body + [indent + ")"], True
 
 
 def render_command(source: str, command: dict[str, Any],

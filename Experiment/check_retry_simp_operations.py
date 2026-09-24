@@ -391,6 +391,28 @@ def check_repeated_goal_command_rewrite() -> None:
         assert code == 0, stdout + stderr
 
 
+def check_midline_tactic_rewrite() -> None:
+    source = "theorem t83MidlineFixture : True := (by simp)\n"
+    trace_site = retry.TI.find_sites(source)[0]
+    render_site = retry.worker.S.find_sites(source)[0]
+    rewritten, error = retry.render_command(
+        source,
+        {"start": 0, "end": len(source.encode("utf-8"))},
+        [(trace_site, render_site)],
+        {trace_site.siteOrdinal: {"events": [], "terminal": "trueIntro"}},
+    )
+    assert error is None and rewritten is not None, error
+    assert "(by (-- Original simp:" in rewritten, rewritten
+    assert "explicit_rw_v2 [] then true_intro" in rewritten, rewritten
+    with tempfile.TemporaryDirectory(prefix="retry-midline-tactic-") as temp:
+        path = pathlib.Path(temp) / "MidlineTactic.lean"
+        path.write_text("import ExplicitLean.ExplicitRw\n\n" + rewritten, encoding="utf-8")
+        code, stdout, stderr, _ = retry.replay.run(
+            ["lake", "env", "lean", str(path)], ROOT, timeout=30,
+        )
+        assert code == 0, stdout + stderr
+
+
 def main() -> None:
     check_selection()
     check_closed_boundaries()
@@ -398,6 +420,7 @@ def main() -> None:
     check_reserved_marker_refusal()
     check_declaration_isolation()
     check_repeated_goal_command_rewrite()
+    check_midline_tactic_rewrite()
     check_end_to_end()
     print("operational DB retry: selection, residuals, module replay, and selected-row updates passed")
 
