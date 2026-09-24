@@ -60,6 +60,22 @@ private def nameLocationSubjects
         | none => operation
       (localIndex + 1, result.push operation)).2
 
+/-- Return the authored identifier for a wildcard location subject when that
+identifier denotes exactly one declaration in the source context.  Raw
+`LocalDecl.index` values are elaborator-state identities: observer
+instrumentation may allocate locals before the replacement is elaborated, so
+those numbers are not a stable source-level address across the two runs. -/
+private def sourceLocationName? (lctx : LocalContext) (fvarId : FVarId) : Option String := do
+  let decl ← lctx.find? fvarId
+  let name := decl.userName
+  if name.isAnonymous || name.isInaccessibleUserName || name.hasMacroScopes then
+    none
+  else
+    let mut occurrences := 0
+    for other in lctx do
+      if other.userName == name then occurrences := occurrences + 1
+    if occurrences == 1 then some name.toString else none
+
 private def observeLocations (simpStx : Syntax) :
     TacticM Lean.Meta.Simp.Operations.TacticTrace := do
   let { ctx, simprocs, dischargeWrapper, .. } ←
@@ -67,12 +83,13 @@ private def observeLocations (simpStx : Syntax) :
   let location := expandOptLocation simpStx[5]
   let (fvarIds, simplifyTarget) ←
     SimpEngine.Recording.locationSubjects location
+  let lctx ← getLCtx
   let namedLocals : Array (Option String) := match location with
     | .targets hyps _ => hyps.map fun hyp =>
         some <| match hyp with
           | Syntax.ident _ rawVal _ _ => rawVal.toString
           | stx => stx.reprint.getD hyp.getId.toString
-    | .wildcard => Array.replicate fvarIds.size none
+    | .wildcard => fvarIds.map (sourceLocationName? lctx)
   let initialMeta ← Simp.Engine.saveFullMetaState
   let initialGoals ← getGoals
   let mainGoal := initialGoals.head!

@@ -213,7 +213,6 @@ class RenderOperationsTest(unittest.TestCase):
                 "at [] with []] at h₁",
                 "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 "
                 "at [0, 1] with []] at h₂",
-                "explicit_rw_v2 []",
             ],
         )
 
@@ -225,7 +224,18 @@ class RenderOperationsTest(unittest.TestCase):
                     {"subject": "target", "trace": {"events": []}},
                 ]
             }),
-            ["explicit_rw_v2 [] at local_ref 2", "explicit_rw_v2 []"],
+            ["skip"],
+        )
+
+    def test_unchanged_location_is_skipped_but_closing_terminal_is_not(self) -> None:
+        self.assertEqual(
+            render_observation({
+                "subjects": [
+                    {"subject": {"namedLocal": {"source": "h"}},
+                     "trace": {"events": [], "terminal": "falseElim"}},
+                ]
+            }),
+            ["explicit_rw_v2 [] at h then false_elim"],
         )
 
     def test_local_false_closes_the_goal_from_the_same_subject(self) -> None:

@@ -387,6 +387,12 @@ def render_observation(observation: dict[str, Any]) -> list[str]:
         trace = subject.get("trace")
         if not isinstance(trace, dict) or not isinstance(trace.get("events"), list):
             raise UnsupportedOperation("located simp subject has no operational trace")
+        # `simp at *` reports every eligible hypothesis and the target, even
+        # when a subject is unchanged.  Such a subject is not an operation to
+        # replay.  In particular, rewriting an unchanged local declaration
+        # would retire its fvar and perturb the identities of later subjects.
+        if not trace["events"] and trace.get("terminal", "open") == "open":
+            continue
         identity = subject.get("subject")
         if identity == "target":
             location = None
@@ -403,7 +409,7 @@ def render_observation(observation: dict[str, Any]) -> list[str]:
         else:
             raise UnsupportedOperation(f"unknown simp subject {identity!r}")
         rendered.append(render_trace(trace, location))
-    return rendered
+    return rendered or ["skip"]
 
 
 def load_trace(path: Path | None) -> dict[str, Any]:

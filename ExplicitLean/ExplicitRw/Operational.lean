@@ -860,6 +860,13 @@ private def runOperations (steps : Array Syntax) (target : Option Target)
       replaceMainGoal [← goal.replaceTargetEq newExpr (← instantiateMVars proof)]
       return none
     | some target, none =>
+      if newExpr == initial then
+        -- A located `simp at *` observation includes subjects on which simp
+        -- made no change. Replaying an empty program must leave that local
+        -- declaration physically untouched: replacing it definitionally with
+        -- the identical type retires its original context index and shifts the
+        -- exact identities used by later recorded subjects.
+        return some target
       replaceMainGoal [← goal.replaceLocalDeclDefEq target.fvarId newExpr]
       return some target
     | some target, some proof =>
