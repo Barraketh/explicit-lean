@@ -15,11 +15,16 @@ private def affectsParserContext (stx : Syntax) : Bool :=
   stx.isOfKind ``Lean.Parser.Command.«open»
 
 private def definesNotation (stx : Syntax) : Bool :=
+  let kind := stx.getKind.toString
   stx.isOfKind ``Lean.Parser.Command.syntax ||
+  stx.isOfKind ``Lean.Parser.Command.syntaxAbbrev ||
   stx.isOfKind ``Lean.Parser.Command.«notation» ||
   stx.isOfKind ``Lean.Parser.Command.«mixfix» ||
   stx.isOfKind `Lean.Parser.Command.mixfix ||
-  stx.isOfKind `Mathlib.Tactic.scopedNS
+  stx.isOfKind `Mathlib.Notation3.notation3 ||
+  stx.isOfKind `Mathlib.Tactic.scopedNS ||
+  kind == "Lean.Parser.Command.macro" ||
+  kind == "Lean.Parser.Command.elab"
 
 private def elabNotationForParser (command : Syntax) :
     Lean.Elab.Frontend.FrontendM Unit := do
@@ -35,8 +40,17 @@ private def elabNotationForParser (command : Syntax) :
   let after ← Lean.Elab.Frontend.getCommandState
   let scope :: scopes := after.scopes
     | throw <| IO.Error.userError "syntax extractor lost its command scope"
+  -- We elaborate notation commands only to install their parser entries for
+  -- later commands.  Semantic attributes such as `inherit_doc` and the
+  -- notation expansion itself may refer to declarations earlier in this
+  -- source file, which this parser-only pass deliberately does not elaborate.
+  -- Discard those semantic diagnostics after retaining the parser state.  A
+  -- notation that was not installed is still detected exactly when a later
+  -- command using it fails to parse.
   Lean.Elab.Frontend.setCommandState {
-    after with scopes := { scope with opts := savedOptions } :: scopes
+    after with
+      scopes := { scope with opts := savedOptions } :: scopes
+      messages := before.messages
   }
 
 private def processCommand : Lean.Elab.Frontend.FrontendM Syntax := do
@@ -59,7 +73,11 @@ private def processCommand : Lean.Elab.Frontend.FrontendM Syntax := do
     if definesNotation command then
       elabNotationForParser command
     else if affectsParserContext command then
-      Lean.Elab.Frontend.elabCommandAtFrontend command
+      -- Namespace/open commands can mention declarations introduced earlier
+      -- in this same file.  They still carry exact parser context (including
+      -- scoped syntax), so retain that state while discarding semantic name
+      -- resolution diagnostics just as for notation declarations.
+      elabNotationForParser command
   return command
 
 private partial def processCommands (commands : Array Syntax := #[]) :

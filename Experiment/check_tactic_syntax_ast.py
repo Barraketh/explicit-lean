@@ -76,6 +76,29 @@ theorem equations : ∀ n : Nat, n = n
   | n + 1 => by simp
 '''
 
+PARSER_CONTEXT_FIXTURE = '''import Mathlib
+
+def parserContextDocTarget : Nat := 0
+
+@[inherit_doc parserContextDocTarget]
+scoped syntax:max "t82⟦" term "⟧" : term
+macro_rules | `(t82⟦$x⟧) => `($x)
+
+syntax t82Binder := ident
+syntax "t82BinderTerm " t82Binder : term
+macro "t82_local_tac" : tactic => `(tactic| exact True.intro)
+
+namespace ParserContextLocal
+def sourceLocalName : Nat := 0
+end ParserContextLocal
+open ParserContextLocal (sourceLocalName)
+
+open scoped ParserContextFixture in
+theorem parserContextBody : True := by
+  t82_local_tac
+  simp
+'''
+
 
 class TacticSyntaxAstChecks(unittest.TestCase):
     @classmethod
@@ -371,6 +394,23 @@ def tokenAuditAdmit : Nat := admit
         self.assertEqual(
             validated["commands"][0]["kind"],
             "Demo.ImportedCommandMacro.expansion",
+        )
+
+    def test_inventory_installs_source_local_parser_context_without_semantic_declarations(self) -> None:
+        digest = hashlib.sha256(PARSER_CONTEXT_FIXTURE.encode()).hexdigest()
+        inventory = ast.inventory_simp_tactics(
+            module="Mathlib.ParserContextFixture",
+            source=PARSER_CONTEXT_FIXTURE,
+            expected_source_sha256=digest,
+        )
+        self.assertEqual(inventory["status"], "ok", inventory)
+        sites = [
+            site for command in inventory["commands"] for site in command["simpSites"]
+        ]
+        self.assertEqual(len(sites), 1)
+        self.assertEqual(
+            PARSER_CONTEXT_FIXTURE[sites[0]["startChar"]:sites[0]["endChar"]],
+            "simp",
         )
 
     def test_direct_simp_inventory_covers_executable_command_contexts_only(self) -> None:
