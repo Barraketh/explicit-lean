@@ -63,6 +63,12 @@ example : True := by
   fun_prop (disch := simp)
 
 theorem multi : True := by simp; simp
+
+lemma letTyped : (let x := True; x) := by simp
+
+theorem structured : And True True where
+  left := by simp
+  right := by simp
 '''
 
 
@@ -369,6 +375,12 @@ def tokenAuditAdmit : Nat := admit
         multi = next(command for command in commands
                      if "theorem multi" in SIMP_INVENTORY_FIXTURE[
                          command["startChar"]:command["endChar"]])
+        let_typed = next(command for command in commands
+                         if "lemma letTyped" in SIMP_INVENTORY_FIXTURE[
+                             command["startChar"]:command["endChar"]])
+        structured = next(command for command in commands
+                          if "theorem structured" in SIMP_INVENTORY_FIXTURE[
+                              command["startChar"]:command["endChar"]])
         self.assertEqual(len(body["simpSites"]), 1)
         self.assertEqual(len(only["simpSites"]), 1)
         only_site = only["simpSites"][0]
@@ -379,12 +391,20 @@ def tokenAuditAdmit : Nat := admit
         self.assertEqual(len(configured["simpSites"]), 0)
         self.assertEqual(len(disch["simpSites"]), 1)
         self.assertEqual(len(multi["simpSites"]), 2)
+        self.assertEqual(let_typed["theoremBodyForm"], "term")
+        self.assertTrue(SIMP_INVENTORY_FIXTURE[
+            let_typed["theoremBody"]["startChar"]:
+            let_typed["theoremBody"]["endChar"]].startswith("by simp"))
+        self.assertEqual(structured["theoremBodyForm"], "whereStructInst")
+        self.assertTrue(SIMP_INVENTORY_FIXTURE[
+            structured["theoremBody"]["startChar"]:
+            structured["theoremBody"]["endChar"]].startswith("where"))
         direct_spans = [
             SIMP_INVENTORY_FIXTURE[site["startChar"]:site["endChar"]]
             for command in commands for site in command["simpSites"]
         ]
-        self.assertEqual(sum(len(command["simpSites"]) for command in commands), 7)
-        self.assertEqual(direct_spans.count("simp"), 6)
+        self.assertEqual(sum(len(command["simpSites"]) for command in commands), 10)
+        self.assertEqual(direct_spans.count("simp"), 9)
         self.assertEqual(sum(span.startswith("simp only") for span in direct_spans), 1)
 
     def test_success_postcondition_checks_the_full_owned_command(self) -> None:

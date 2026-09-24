@@ -2,17 +2,21 @@
 """Retry failed simp replacement rows with exact term-free operations.
 
 The input is a writable merged replacement database.  Failed rows are grouped
-by Mathlib module, observed once per module with the operational recorder,
-rendered as ``explicit_rw_v2``, and compiled as one module-level candidate.
+by Mathlib module, then each declaration is independently observed with the
+operational recorder, rendered as ``explicit_rw_v2``, and compiled.
 Only rows selected from ``record_failed``, ``render_failed``, and
-``compile_failed`` are updated.  Unsupported operations remain explicit
-row-level residuals; no theorem/proof/pre/post expressions are serialized.
+``compile_failed`` are updated.  Each declaration is recorded and compiled in
+an isolated module copy where every other theorem/lemma proof body is replaced
+by ``by sorry``.  The proof holes are scratch-only and are never persisted.
+Unsupported operations remain explicit row-level residuals; no
+theorem/proof/pre/post expressions are serialized.
 """
 
 from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import hashlib
 import json
 import pathlib
 import re
@@ -30,8 +34,10 @@ sys.path.insert(0, str(ROOT / "Experiment" / "pipeline"))
 sys.path.insert(0, str(ROOT / "test" / "SimpTrace"))
 
 import render_simp_operations as operation_renderer  # noqa: E402
+import isolated_trace_compile as isolated  # noqa: E402
 import replay_module as replay  # noqa: E402
 import simp_replacement_worker as worker  # noqa: E402
+import tactic_syntax_ast as TSA  # noqa: E402
 import trace_identity as TI  # noqa: E402
 
 
@@ -199,10 +205,183 @@ def record_operations(module_path: str, source: str, sites: list[TI.Site],
     except subprocess.TimeoutExpired as exc:
         raise RetryError("recorder compile timed out after 1800 seconds") from exc
     if code:
-        diagnostic = " ".join((stdout + stderr).split())[:1800]
+        output = stdout + stderr
+        errors = [match.group(0) for match in replay.DIAG_RE.finditer(output)
+                  if match.group("sev") == "error"]
+        diagnostic = ("\n".join(errors[:8])
+                      or " ".join(output.split()))[:1800]
         raise RetryError("recorder compile failed: " + (diagnostic or f"exit {code}"))
     return _parse_observations(stdout + "\n" + stderr,
                                {site.siteOrdinal for site in sites})
+
+
+def _declaration_commands(db: sqlite3.Connection, module: str, source: str,
+                          commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach exact source/body fields required by the proven body masker."""
+    rows = db.execute(
+        "SELECT ordinal,start_byte,end_byte,kind,body FROM commands "
+        "WHERE module_name=? ORDER BY ordinal", (module,),
+    ).fetchall()
+    by_ordinal = {command["ordinal"]: command for command in commands}
+    if [int(row[0]) for row in rows] != [command["ordinal"] for command in commands]:
+        raise RetryError(f"declaration command inventory changed for {module}")
+    raw = source.encode("utf-8")
+    result: list[dict[str, Any]] = []
+    for ordinal, start, end, kind, body in rows:
+        base = by_ordinal[int(ordinal)]
+        if (int(start), int(end), str(kind)) != (
+                base["start"], base["end"], base["kind"]):
+            raise RetryError(f"declaration command row changed for {module}:{ordinal}")
+        try:
+            command_source = raw[int(start):int(end)].decode("utf-8")
+            if isinstance(body, bytes):
+                body = body.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise RetryError(
+                f"declaration body is not UTF-8 for {module}:{ordinal}: {exc}"
+            ) from exc
+        result.append({
+            **base,
+            "command_source": command_source,
+            "body": body,
+        })
+
+    # Some historical databases populated `body` by splitting at the first
+    # textual `:=`, which is wrong for theorem types containing `let` or named
+    # arguments.  Reuse a stored body only when the original exact masker can
+    # authenticate it.  Otherwise ask Lean's parser for the theorem/lemma term
+    # range and bind it back to the source-command DB ranges.
+    if any(isolated._is_theorem_or_lemma(command)
+           and isolated._mask_body(source, command) is None
+           for command in result):
+        inventory = TSA.inventory_simp_tactics(
+            module=module,
+            source=source,
+            expected_source_sha256=hashlib.sha256(source.encode("utf-8")).hexdigest(),
+            repo_root=ROOT,
+        )
+        parsed_commands = inventory["commands"]
+        if len(parsed_commands) != len(result):
+            raise RetryError(f"Lean parser command count differs for {module}")
+        source_bytes = source.encode("utf-8")
+        for command, parsed in zip(result, parsed_commands):
+            if (parsed["commandOrdinal"] != command["ordinal"]
+                    or parsed["startByte"] != command["start"]
+                    or parsed["endByte"] != command["end"]):
+                raise RetryError(
+                    f"Lean parser command range differs for {module}:{command['ordinal']}"
+                )
+            if not isolated._is_theorem_or_lemma(command):
+                continue
+            body_range = parsed.get("theoremBody")
+            if not isinstance(body_range, dict):
+                raise RetryError(
+                    f"Lean parser found no theorem body for {module}:{command['ordinal']}"
+                )
+            start = body_range["startByte"]
+            end = body_range["endByte"]
+            command["body"] = source_bytes[start:end].decode("utf-8")
+            if not (command["start"] < start < end <= command["end"]):
+                raise RetryError(
+                    f"Lean parser theorem body is outside its command for "
+                    f"{module}:{command['ordinal']}"
+                )
+            command["parser_body_start"] = start
+            command["parser_body_end"] = end
+            body_range_form = parsed.get("theoremBodyForm")
+            command["parser_body_form"] = body_range_form
+            if body_range_form not in {"term", "whereStructInst"}:
+                raise RetryError(
+                    f"Lean parser theorem body form is invalid for "
+                    f"{module}:{command['ordinal']}"
+                )
+    return result
+
+
+def _mask_theorem_body(source: str, command: dict[str, Any]) -> str | None:
+    """Mask one theorem body using DB evidence or an exact Lean parser range."""
+    masked = isolated._mask_body(source, command)
+    if masked is not None:
+        return masked
+    start = command.get("parser_body_start")
+    end = command.get("parser_body_end")
+    if not isinstance(start, int) or not isinstance(end, int):
+        return None
+    raw = source.encode("utf-8")
+    command_start, command_end = command["start"], command["end"]
+    if not (command_start < start < end <= command_end):
+        return None
+    segment = raw[command_start:command_end]
+    local_start = start - command_start
+    local_end = end - command_start
+    replacement = (b"by sorry" if command.get("parser_body_form") == "term"
+                   else b":= by sorry")
+    return (segment[:local_start] + replacement + segment[local_end:]).decode("utf-8")
+
+
+def _isolated_declaration_source(
+        source: str, commands: list[dict[str, Any]], target_ordinal: int,
+        target_replacement: str | None = None) -> tuple[str, int]:
+    """Keep one declaration body and mask every other theorem/lemma body.
+
+    Return the scratch source and the target command's new byte start.  This is
+    the same exact theorem/lemma body boundary used by the original isolated
+    trace pipeline; the only unmasked proof body is the declaration currently
+    being recorded or compiled.
+    """
+    command_by_ordinal = {command["ordinal"]: command for command in commands}
+    target = command_by_ordinal.get(target_ordinal)
+    if target is None:
+        raise RetryError(f"isolated declaration target is missing: {target_ordinal}")
+    edits: list[tuple[int, int, bytes]] = []
+    for command in commands:
+        ordinal = command["ordinal"]
+        replacement: str | None = None
+        if ordinal == target_ordinal:
+            replacement = target_replacement
+        elif isolated._is_theorem_or_lemma(command):
+            replacement = _mask_theorem_body(source, command)
+            if replacement is None:
+                raise RetryError(
+                    "isolation_mask_failed: could not replace theorem/lemma body "
+                    f"at command {ordinal}"
+                )
+        if replacement is not None:
+            edits.append((command["start"], command["end"], replacement.encode("utf-8")))
+
+    target_start = target["start"] + sum(
+        len(replacement) - (end - start)
+        for start, end, replacement in edits if end <= target["start"]
+    )
+    raw = source.encode("utf-8")
+    for start, end, replacement in sorted(edits, reverse=True):
+        raw = raw[:start] + replacement + raw[end:]
+    try:
+        return raw.decode("utf-8"), target_start
+    except UnicodeDecodeError as exc:
+        raise RetryError(f"isolated declaration source is not UTF-8: {exc}") from exc
+
+
+def _relocate_declaration_sites(
+        source: str, isolated_source: str, command: dict[str, Any],
+        isolated_start_byte: int, sites: list[TI.Site]) -> list[TI.Site]:
+    """Move original source-site identities into an isolated scratch module."""
+    original_start = worker.byte_to_char(source, command["start"])
+    isolated_start = worker.byte_to_char(isolated_source, isolated_start_byte)
+    relocated: list[TI.Site] = []
+    for site in sites:
+        start = isolated_start + site.startChar - original_start
+        end = isolated_start + site.endChar - original_start
+        if isolated_source[start:end] != site.callText:
+            raise RetryError(
+                f"isolated source-site identity changed at site {site.siteOrdinal}"
+            )
+        line = isolated_source.count("\n", 0, start) + 1
+        line_start = isolated_source.rfind("\n", 0, start) + 1
+        relocated.append(TI.Site(
+            site.siteOrdinal, start, end, line, start - line_start, site.callText
+        ))
+    return relocated
 
 
 def _split_v2_source(rendered: str) -> tuple[list[str], str]:
@@ -237,11 +416,6 @@ def _render_lines(trace: dict[str, Any], indent: str) -> list[str]:
         "explicit_rw_v2 [", steps, "]" + tail,
         indent, indent + "  ",
     )
-    too_long = worker.S.overlong(lines)
-    if too_long:
-        raise operation_renderer.UnsupportedOperation(
-            "explicit_rw_v2 operation exceeds readable line width: " + too_long[0]
-        )
     return lines
 
 
@@ -312,7 +486,8 @@ def ensure_prerequisites() -> pathlib.Path:
     ]
     try:
         built = subprocess.run(
-            ["lake", "build", "ExplicitLean:shared", "ExplicitLean.ExplicitRw"],
+            ["lake", "build", "ExplicitLean:shared", "ExplicitLean.ExplicitRw",
+             "ExplicitLean.SimpOperations.Recording"],
             cwd=ROOT, capture_output=True, text=True, timeout=TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as exc:
@@ -437,7 +612,17 @@ def _process_module(db: sqlite3.Connection, module: str, scratch: pathlib.Path,
         )
         return _commit_module_residual(db, module, selected, detail, started)
     all_candidates = worker.candidate_rows(db, module)
+    try:
+        declaration_commands = _declaration_commands(db, module, source, commands)
+    except Exception as exc:
+        detail = (
+            f"declaration_isolation_failed: {type(exc).__name__}: {exc}"
+        )[:1800]
+        return _commit_module_residual(db, module, selected, detail, started)
     command_by_ordinal = {command["ordinal"]: command for command in commands}
+    declaration_by_ordinal = {
+        command["ordinal"]: command for command in declaration_commands
+    }
     candidate_by_ordinal = {row["ordinal"]: row for row in all_candidates}
     if any(row["ordinal"] not in candidate_by_ordinal for row in selected):
         raise RetryError(f"selected replacement row missing from module read: {module}")
@@ -518,13 +703,33 @@ def _process_module(db: sqlite3.Connection, module: str, scratch: pathlib.Path,
     traces: dict[int, list[dict[str, Any]]] = {}
     if recordable:
         recorder = recorder or record_operations
-        try:
-            traces = recorder(module_path, source, recordable, scratch, dylib)
-        except Exception as exc:
-            detail = f"operation_record_failed: {type(exc).__name__}: {exc}"[:1800]
-            for ordinal, pairs in command_sites.items():
-                if any(site in recordable for site, _ in pairs) and ordinal not in row_failures:
-                    row_failures[ordinal] = ("record_failed", detail)
+        recordable_ids = {site.siteOrdinal for site in recordable}
+        for ordinal, pairs in sorted(command_sites.items()):
+            if ordinal in row_failures:
+                continue
+            owned = [site for site, _ in pairs
+                     if site.siteOrdinal in recordable_ids]
+            if not owned:
+                continue
+            try:
+                isolated_source, isolated_start = _isolated_declaration_source(
+                    source, declaration_commands, ordinal
+                )
+                isolated_sites = _relocate_declaration_sites(
+                    source, isolated_source, declaration_by_ordinal[ordinal],
+                    isolated_start, owned,
+                )
+                recorded = recorder(
+                    module_path, isolated_source, isolated_sites,
+                    scratch / f"record-command-{ordinal:06d}", dylib,
+                )
+                traces.update(recorded)
+            except Exception as exc:
+                detail = (
+                    f"operation_record_failed: declaration {ordinal}: "
+                    f"{type(exc).__name__}: {exc}"
+                )[:1800]
+                row_failures[ordinal] = ("record_failed", detail)
 
     site_outcomes: dict[int, tuple[str, str | None]] = {}
     for site in recordable:
@@ -595,53 +800,53 @@ def _process_module(db: sqlite3.Connection, module: str, scratch: pathlib.Path,
     }
     if candidate_replacements:
         compiler = compiler or _compile_candidate
-        existing_successes = {
-            row["ordinal"]: row["replacement"]
-            for row in all_candidates
-            if row["status"] == "success" and row["replacement"] is not None
-        }
-        combined = dict(existing_successes)
-        combined.update(candidate_replacements)
-        combined_source = worker.module_with_replacements(source, commands, combined)
-        okay, detail, seconds = compiler(module_path, combined_source, scratch, 0, dylib)
-        if okay:
-            for ordinal, replacement in candidate_replacements.items():
+        serial = 0
+        for ordinal, replacement in sorted(candidate_replacements.items()):
+            try:
+                candidate_source, _ = _isolated_declaration_source(
+                    source, declaration_commands, ordinal, replacement
+                )
+                candidate_source = worker.S.add_import(candidate_source)
+            except Exception as exc:
+                outcomes[ordinal] = (
+                    "compile_failed", None,
+                    (f"isolated_compile_setup_failed: {type(exc).__name__}: {exc}")[:1800],
+                )
+                continue
+            probe_ok, probe_detail, _ = compiler(
+                module_path, candidate_source, scratch, serial, dylib
+            )
+            serial += 1
+            if probe_ok:
                 outcomes[ordinal] = ("success", replacement, None)
-        else:
-            baseline_source = worker.module_with_replacements(
-                source, commands, existing_successes
-            )
+                continue
+
+            # Distinguish a bad generated declaration from a pre-existing
+            # problem in the same isolated declaration/environment.
+            try:
+                baseline_source, _ = _isolated_declaration_source(
+                    source, declaration_commands, ordinal
+                )
+                baseline_source = worker.S.add_import(baseline_source)
+            except Exception as exc:
+                outcomes[ordinal] = (
+                    "compile_failed", None,
+                    (f"isolated_baseline_setup_failed: {type(exc).__name__}: {exc}")[:1800],
+                )
+                continue
             baseline_ok, baseline_detail, _ = compiler(
-                module_path, baseline_source, scratch, 1, dylib
+                module_path, baseline_source, scratch, serial, dylib
             )
+            serial += 1
             if not baseline_ok:
-                diagnostic = (
-                    "baseline_compile_failed: existing successful replacements do not "
-                    "compile before this retry: " + (baseline_detail or detail)
-                )[:1800]
-                for ordinal in candidate_replacements:
-                    outcomes[ordinal] = ("compile_failed", None, diagnostic)
+                detail = (
+                    "isolated_baseline_compile_failed: original target declaration does "
+                    "not compile with every other theorem/lemma body masked: "
+                    + (baseline_detail or probe_detail)
+                )
             else:
-                accepted = dict(existing_successes)
-                serial = 2
-                for ordinal, replacement in sorted(candidate_replacements.items()):
-                    trial = dict(accepted)
-                    trial[ordinal] = replacement
-                    trial_source = worker.module_with_replacements(
-                        source, commands, trial
-                    )
-                    probe_ok, probe_detail, _ = compiler(
-                        module_path, trial_source, scratch, serial, dylib
-                    )
-                    serial += 1
-                    if probe_ok:
-                        accepted[ordinal] = replacement
-                        outcomes[ordinal] = ("success", replacement, None)
-                    else:
-                        outcomes[ordinal] = (
-                            "compile_failed", None,
-                            ("compile_failed: " + probe_detail)[:1800],
-                        )
+                detail = "compile_failed: " + probe_detail
+            outcomes[ordinal] = ("compile_failed", None, detail[:1800])
 
     # Any selected row omitted by an earlier stage is an explicit driver
     # residual, never an implicit success or a silent pending result.

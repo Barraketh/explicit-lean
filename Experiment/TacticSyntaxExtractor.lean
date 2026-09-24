@@ -424,6 +424,35 @@ private partial def collectSimpSites (stx : Syntax) : Array Syntax := Id.run do
     sites := sites ++ collectSimpSites child
   return sites
 
+private def declValBody? (parent : Syntax) : Option (Syntax × String) := Id.run do
+  for child in parent.getArgs do
+    if kindString child == "Lean.Parser.Command.declValSimple" then
+      if let some body := child.getArgs[1]? then return some (body, "term")
+    if kindString child == "Lean.Parser.Command.whereStructInst" then
+      return some (child, "whereStructInst")
+  return none
+
+private def theoremBody? (command : Syntax) : Option (Syntax × String) := Id.run do
+  -- A parsed theorem/lemma declaration has a direct `Command.theorem` child;
+  -- its `declValSimple` child owns the exact proof term after the declaration
+  -- separator.  Restrict the lookup to these direct parser nodes so `:=` in a
+  -- declaration type, named argument, quotation, or proof-local `have` can
+  -- never be mistaken for the declaration body.
+  -- Mathlib's `lemma` command is a command macro whose parsed root kind is
+  -- literally `lemma`; its direct `group` child has the same declId/declSig/
+  -- declValSimple layout as Lean's built-in theorem command.
+  if kindString command == "lemma" then
+    for child in command.getArgs do
+      if kindString child == "group" then
+        if let some body := declValBody? child then return some body
+    return none
+  let mut theorem? : Option Syntax := none
+  for child in command.getArgs do
+    if kindString child == "Lean.Parser.Command.theorem" then
+      theorem? := some child
+  let some theoremStx := theorem? | return none
+  return declValBody? theoremStx
+
 private def simpSyntaxInventoryJson (moduleName requestId : String)
     (commands : Array Syntax) : Json := Id.run do
   let mut entries := #[]
@@ -453,10 +482,14 @@ private def simpSyntaxInventoryJson (moduleName requestId : String)
       | some (start, stop) => [
           ("startByte", toJson start), ("endByte", toJson stop)]
       | none => []
+    let theoremBodyFields := match theoremBody? command with
+      | some (body, form) => [
+          ("theoremBody", jsonRange body), ("theoremBodyForm", toJson form)]
+      | none => []
     entries := entries.push <| Json.mkObj <| [
       ("commandOrdinal", toJson commandIndex),
       ("kind", toJson (kindString command)),
-      ("simpSites", Json.arr sites)] ++ fields
+      ("simpSites", Json.arr sites)] ++ fields ++ theoremBodyFields
   return Json.mkObj [
     ("module", toJson moduleName),
     ("requestId", toJson requestId),

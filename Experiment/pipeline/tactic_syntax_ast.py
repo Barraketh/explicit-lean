@@ -298,7 +298,7 @@ def _validate_simp_inventory_result(
                 or entry.get("commandOrdinal") != ordinal
                 or not isinstance(entry.get("kind"), str)
                 or not (entry["kind"].startswith("Lean.Parser.Command.")
-                        or entry["kind"] == "Lean.runCmd")
+                        or entry["kind"] in {"Lean.runCmd", "lemma"})
                 or not isinstance(entry.get("simpSites"), list)):
             raise SyntaxExtractionError("Lean simp syntax inventory has malformed command ownership")
         start, stop = entry.get("startChar"), entry.get("endChar")
@@ -309,6 +309,22 @@ def _validate_simp_inventory_result(
                 f"Lean command range is invalid or overlapping at ordinal {ordinal}"
             )
         previous_command_end = stop
+        theorem_body = entry.get("theoremBody")
+        if theorem_body is not None:
+            if not isinstance(theorem_body, dict):
+                raise SyntaxExtractionError("Lean theorem body range is malformed")
+            body_start = theorem_body.get("startChar")
+            body_stop = theorem_body.get("endChar")
+            if (not isinstance(body_start, int) or isinstance(body_start, bool)
+                    or not isinstance(body_stop, int) or isinstance(body_stop, bool)
+                    or not (start < body_start < body_stop <= stop)):
+                raise SyntaxExtractionError(
+                    f"Lean theorem body range is outside command ordinal {ordinal}"
+                )
+            if entry.get("theoremBodyForm") not in {"term", "whereStructInst"}:
+                raise SyntaxExtractionError("Lean theorem body form is malformed")
+        elif "theoremBodyForm" in entry:
+            raise SyntaxExtractionError("Lean theorem body form has no range")
         for site in entry["simpSites"]:
             if (not isinstance(site, dict)
                     or site.get("kind") != "Lean.Parser.Tactic.simp"):

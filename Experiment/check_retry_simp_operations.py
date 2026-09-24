@@ -49,14 +49,17 @@ def make_database(db: sqlite3.Connection, module: str, module_path: str,
     for ordinal, (start, end) in enumerate(theorem_ranges):
         command_raw = raw[start:end]
         command_text = command_raw.decode("utf-8")
+        assignment = command_text.rfind(":=")
+        assert assignment >= 0, command_text
+        body = command_text[assignment + 2:].lstrip()
         status = ("compile_failed" if ordinal == 0 else
                   "success" if ordinal == 1 else "pending")
         replacement = command_text if status == "success" else None
         error = "old isolated compile failure" if status == "compile_failed" else None
         db.execute(
-            "INSERT INTO commands VALUES(?,?,?,?,?,?,?,NULL)",
+            "INSERT INTO commands VALUES(?,?,?,?,?,?,?,?)",
             (module, ordinal, len(raw[:start]), len(raw[:end]), "theorem",
-             hashlib.sha256(command_raw).hexdigest(), command_text),
+             hashlib.sha256(command_raw).hexdigest(), command_text, body),
         )
         db.execute("INSERT INTO simp_replacements VALUES(?,?,?,?,?)",
                    (module, ordinal, status, replacement, error))
@@ -96,6 +99,49 @@ def check_closed_boundaries() -> None:
         assert "simproc" in str(error)
     else:
         raise AssertionError("simproc operation must stay an explicit residual")
+    long_trace = {
+        "events": [{
+            "phase": "post", "position": [],
+            "action": {"rewrite": {
+                "premises": [],
+                "rule": {
+                    "inverse": False, "numExtraArgs": 0,
+                    "origin": {"decl": {"name": "Long." + "x" * 180}},
+                    "phase": "post", "variant": 0,
+                },
+            }},
+        }],
+        "terminal": "trueIntro",
+    }
+    long_lines = retry._render_lines(long_trace, "")
+    assert any(len(line) > retry.worker.S.MAX_LINE for line in long_lines), long_lines
+
+    recorder_source = (
+        "import Mathlib.Data.Nat.Basic\n\n"
+        "theorem diagnosticFixture : True := by\n  simp\n"
+    )
+    recorder_sites = retry.TI.find_sites(recorder_source)
+    old_run = retry.replay.run
+    retry.replay.run = lambda *args, **kwargs: (
+        1,
+        "Scratch.lean:1:1: warning: declaration uses `sorry`\n"
+        "Scratch.lean:2:3: error: actual recorder failure\n",
+        "", 0.01,
+    )
+    try:
+        with tempfile.TemporaryDirectory(prefix="retry-recorder-diagnostic-") as temp:
+            try:
+                retry.record_operations(
+                    "Mathlib/DiagnosticFixture.lean", recorder_source,
+                    recorder_sites, pathlib.Path(temp), pathlib.Path("unused"),
+                )
+            except retry.RetryError as error:
+                assert "actual recorder failure" in str(error), error
+                assert "declaration uses" not in str(error), error
+            else:
+                raise AssertionError("recorder compile failure was accepted")
+    finally:
+        retry.replay.run = old_run
 
 
 def check_canonical_module_path_refusal() -> None:
@@ -179,6 +225,88 @@ theorem retryDemo (n : Nat) : n + 0 = n := by
         db.close()
 
 
+def check_declaration_isolation() -> None:
+    source = """import Mathlib.Data.Nat.Basic
+
+theorem first (n : Nat) : n + 0 = n := by
+  simp only [Nat.add_zero]
+
+theorem second (n : Nat) : n + 0 = n := by
+  simp only [Nat.add_zero]
+"""
+    module = "Mathlib.T79DeclarationIsolation"
+    module_path = "Mathlib/T79DeclarationIsolation.lean"
+    trace = {
+        "events": [{
+            "phase": "post",
+            "position": [],
+            "action": {"rewrite": {
+                "premises": [],
+                "rule": {
+                    "inverse": False,
+                    "numExtraArgs": 0,
+                    "origin": {"decl": {"name": "Nat.add_zero"}},
+                    "phase": "post",
+                    "variant": 0,
+                },
+            }},
+        }],
+        "terminal": "trueIntro",
+    }
+    with tempfile.TemporaryDirectory(prefix="retry-declaration-isolation-") as temp:
+        temp_root = pathlib.Path(temp)
+        source_root = temp_root / "source"
+        source_path = source_root / module_path
+        source_path.parent.mkdir(parents=True)
+        source_path.write_text(source, encoding="utf-8")
+        db = sqlite3.connect(":memory:")
+        make_database(db, module, module_path, source)
+        db.execute(
+            "UPDATE simp_replacements SET status='record_failed',replacement_text=NULL,error='old'"
+        )
+        db.commit()
+        artifacts = temp_root / "artifacts"
+        artifacts.mkdir()
+        recorded: list[int] = []
+        compiled: list[str] = []
+
+        def recorder(module_path_arg, isolated_source, sites, scratch, dylib):
+            assert module_path_arg == module_path
+            assert len(sites) == 1, sites
+            site = sites[0]
+            recorded.append(site.siteOrdinal)
+            # Exactly the target proof stays executable; its sibling is a
+            # scratch-only sorry body.
+            assert isolated_source.count("simp only [Nat.add_zero]") == 1
+            assert isolated_source.count("by sorry") == 1
+            if site.siteOrdinal == 0:
+                raise retry.RetryError("fixture target recorder failure")
+            return {site.siteOrdinal: [trace]}
+
+        def compiler(module_path_arg, isolated_source, scratch, serial, dylib):
+            assert module_path_arg == module_path
+            compiled.append(isolated_source)
+            assert isolated_source.count("explicit_rw_v2") == 1
+            assert isolated_source.count("by sorry") == 1
+            return True, "", 0.01
+
+        report = retry.process_module(
+            db, module, artifacts, pathlib.Path("unused"), source_root=source_root,
+            recorder=recorder, compiler=compiler,
+        )
+        assert recorded == [0, 1], recorded
+        assert len(compiled) == 1, len(compiled)
+        assert report["counts"] == {"record_failed": 1, "success": 1}, report
+        rows = db.execute(
+            "SELECT ordinal,status,replacement_text,error FROM simp_replacements "
+            "ORDER BY ordinal"
+        ).fetchall()
+        assert rows[0][1] == "record_failed" and "declaration 0" in rows[0][3], rows[0]
+        assert rows[1][1] == "success" and "explicit_rw_v2" in rows[1][2], rows[1]
+        assert rows[1][3] is None, rows[1]
+        db.close()
+
+
 def check_end_to_end() -> None:
     source = """import Mathlib.Data.Nat.Basic
 
@@ -230,6 +358,7 @@ def main() -> None:
     check_closed_boundaries()
     check_canonical_module_path_refusal()
     check_reserved_marker_refusal()
+    check_declaration_isolation()
     check_end_to_end()
     print("operational DB retry: selection, residuals, module replay, and selected-row updates passed")
 
