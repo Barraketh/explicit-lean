@@ -8,6 +8,16 @@ example : True ∧ True := by
     explicit_rw_v2 [] then true_intro,
     explicit_rw_v2 [] then true_intro]
 
+example (n : Nat) (h : n + 0 = n) : True ∧ True := by
+  constructor
+  explicit_rw_v2_goals [
+    explicit_rw_v2_sequence [
+      explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with []] at h,
+      explicit_rw_v2 [] then true_intro],
+    explicit_rw_v2_sequence [
+      explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with []] at h,
+      explicit_rw_v2 [] then true_intro]]
+
 example : ∀ n : Nat, 0 = Nat.succ n → False := by
   explicit_rw_v2 [] then equation_hypothesis
 

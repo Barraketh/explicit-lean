@@ -364,11 +364,15 @@ def render_repeated_goal_traces(observations: list[dict[str, Any]]) -> list[str]
     """Render repeated executions of one source tactic in exact goal order."""
     programs: list[str] = []
     for index, observation in enumerate(observations):
-        if not isinstance(observation.get("events"), list):
-            raise UnsupportedOperation(
-                f"repeated invocation {index} is location-aware and has multiple subjects"
+        rendered = render_observation(observation)
+        rendered = ["explicit_rw_v2 []" if item == "skip" else item
+                    for item in rendered]
+        if len(rendered) == 1 and isinstance(observation.get("events"), list):
+            programs.append(rendered[0])
+        else:
+            programs.append(
+                "explicit_rw_v2_sequence [" + ", ".join(rendered) + "]"
             )
-        programs.append(render_trace(observation))
     if not programs:
         raise UnsupportedOperation("repeated source tactic emitted no invocations")
     return ["explicit_rw_v2_goals [" + ", ".join(programs) + "]"]

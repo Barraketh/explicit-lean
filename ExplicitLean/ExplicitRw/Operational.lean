@@ -931,12 +931,29 @@ private meta def runOperationalGoalPrograms (programs : Array Syntax) : TacticM 
   let mut remaining : Array MVarId := #[]
   for h : i in [0 : programs.size] do
     let program := programs[i]
-    unless program.getKind == ``explicitRwOperationalProofNested do
-      throwError "explicit_rw_v2_goals: internal error: expected a closed explicit_rw_v2 program."
-    let nested : TSyntax `tactic := ⟨mkNode ``explicitRwOperational #[
-      program[0], program[1], program[2], program[3], mkNullNode #[], program[4]
-    ]⟩
-    remaining := remaining ++ (← Tactic.run goals[i]! (evalTactic nested))
+    let runNested (goal : MVarId) (nestedProgram : Syntax) : TacticM (Array MVarId) := do
+      unless nestedProgram.getKind == ``explicitRwOperationalProofNested do
+        throwError "explicit_rw_v2_goals: internal error: expected a closed explicit_rw_v2 program."
+      let nested : TSyntax `tactic := ⟨mkNode ``explicitRwOperational #[
+        nestedProgram[0], nestedProgram[1], nestedProgram[2], nestedProgram[3],
+        mkNullNode #[], nestedProgram[4]
+      ]⟩
+      return (← Tactic.run goal (evalTactic nested)).toArray
+    if program.getKind == ``explicitRwOperationalProofNested then
+      remaining := remaining ++ (← runNested goals[i]! program)
+    else if program.getKind == ``explicitRwOperationalProofSequence then
+      let mut current := #[goals[i]!]
+      for action in program[2].getSepArgs do
+        unless current.size == 1 do
+          throwError "explicit_rw_v2_sequence: an intermediate replay produced \
+            {current.size} goals; exactly one was expected."
+        unless action.getKind == ``explicitRwOperationalGoalAction do
+          throwError "explicit_rw_v2_sequence: internal error: expected a closed action."
+        let tactic : TSyntax `tactic := ⟨mkNode ``explicitRwOperational action.getArgs⟩
+        current := (← Tactic.run current[0]! (evalTactic tactic)).toArray
+      remaining := remaining ++ current
+    else
+      throwError "explicit_rw_v2_goals: internal error: expected a closed operational program."
   setGoals remaining.toList
 
 @[tactic explicitRwOperationalGoals]

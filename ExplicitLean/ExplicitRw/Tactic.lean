@@ -522,6 +522,19 @@ syntax (name := explicitRwOperationalLocationIdent)
 syntax (name := explicitRwOperationalLocationRef)
   &" at " &"local_ref " num : explicitRwOperationalLocation
 
+declare_syntax_cat explicitRwOperationalGoalAction
+syntax (name := explicitRwOperationalGoalAction)
+  "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
+  (explicitRwOperationalLocation)? (explicitRwOperationalClose)? :
+    explicitRwOperationalGoalAction
+
+/-- A closed sequence used when one repeated source `simp` invocation expands
+to several exact located replays on the same goal (for example `simp at *`
+under `<;>`). -/
+syntax (name := explicitRwOperationalProofSequence)
+  "explicit_rw_v2_sequence " "[" explicitRwOperationalGoalAction,* "]" :
+    explicitRwOperationalProof
+
 syntax (name := explicitRwOperational)
   "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
   (explicitRwOperationalLocation)? (explicitRwOperationalClose)? : tactic

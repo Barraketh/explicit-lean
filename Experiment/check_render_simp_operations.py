@@ -66,6 +66,23 @@ class RenderOperationsTest(unittest.TestCase):
             ["explicit_rw_v2_goals [explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 at [0] with []], explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 at [1] with []] then true_intro]"],
         )
 
+    def test_repeated_located_trace_is_one_closed_sequence_per_goal(self) -> None:
+        located = {
+            "subjects": [
+                {"subject": {"namedLocal": {"source": "h"}},
+                 "trace": {"events": [rewrite_event([])]}},
+                {"subject": "target",
+                 "trace": {"events": [rewrite_event([0, 1])]}}
+            ]
+        }
+        self.assertEqual(
+            render_repeated_goal_traces([located]),
+            ["explicit_rw_v2_goals [explicit_rw_v2_sequence ["
+             "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 "
+             "at [] with []] at h, explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 "
+             "phase post fwd extra 0 at [0, 1] with []]]]"],
+        )
+
     def test_raw_nat_literal_folding_has_an_exact_reduction(self) -> None:
         trace = {
             "events": [{
