@@ -663,6 +663,33 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax)
       return toExpr value
   | ``explicitRwOperationalUnfold => do
     let c ← realizeGlobalConstNoOverloadWithInfo step[1]
+    let strategy := step[3].getId.toString
+    unless strategy == "requestedSmart" || strategy == "requestedPartial" ||
+        strategy == "requestedOrdinary" || strategy == "autoSmart" ||
+        strategy == "autoMatch" || strategy == "ground" do
+      stepError idx m!"unknown delta-reduction strategy `{strategy}`."
+    let pos := parsePos step[4]
+    Impl.runDefeqStep idx e pos m!"`unfold {c}`" fun sub => do
+      let some unfolded ←
+        if ← isIrreducible c then pure none
+        else unfoldDefinition? sub (ignoreTransparency := true)
+        | stepError idx m!"`unfold {c}` cannot unfold the subterm at this position."
+      if strategy == "autoMatch" then
+        match ← reduceMatcher? unfolded with
+        | .reduced output => return output
+        | _ => stepError idx m!"`unfold {c} strategy autoMatch` did not reduce its matcher."
+      else if strategy == "ground" then
+        let .const declName levels := sub.getAppFn
+          | stepError idx m!"ground delta reduction has no constant head."
+        let info ← getConstInfo declName
+        unless info.hasValue && info.levelParams.length == levels.length do
+          stepError idx m!"`unfold {c} strategy ground` has no exact body."
+        let body ← instantiateValueLevelParams info levels
+        return body.betaRev sub.getAppRevArgs (useZeta := true)
+      else
+        return unfolded
+  | ``explicitRwOperationalUnfoldLegacy => do
+    let c ← realizeGlobalConstNoOverloadWithInfo step[1]
     let pos := parsePos step[2]
     Impl.runDefeqStep idx e pos m!"`unfold {c}`" (Impl.unfoldConst idx c)
   | ``explicitRwOperationalCached => do

@@ -34,6 +34,21 @@ example : ∀ n : Nat, 0 = Nat.succ n → False := by
 /- Importing the v2 syntax must not reserve Lean's ordinary `rfl` term. -/
 private theorem ordinaryTermRfl : True = True := rfl
 
+private def operationalOne : Nat := 1
+
+example : operationalOne = 1 := by
+  explicit_rw_v2 [unfold operationalOne strategy requestedOrdinary at [0, 1]] then rfl
+
+private def operationalIsZero : Nat → Bool
+  | 0 => true
+  | _ + 1 => false
+
+example : operationalIsZero 0 = true := by
+  explicit_rw_v2 [unfold operationalIsZero strategy autoMatch at [0, 1]] then rfl
+
+example : operationalOne = 1 := by
+  explicit_rw_v2 [unfold operationalOne strategy ground at [0, 1]] then rfl
+
 /- A requested local-definition reduction names the exact let declaration. -/
 example : True := by
   let n : Nat := 1

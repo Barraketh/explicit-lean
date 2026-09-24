@@ -484,6 +484,8 @@ syntax (name := explicitRwOperationalZetaLocal)
 syntax (name := explicitRwOperationalFoldNatLit)
   &"fold_nat_lit" explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalUnfold)
+  &"unfold" ident &"strategy" ident explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalUnfoldLegacy)
   &"unfold" ident explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalSimproc)
   &"simproc" ident explicitRwPos : explicitRwOperationalStep

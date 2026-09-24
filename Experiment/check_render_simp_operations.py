@@ -360,7 +360,10 @@ class RenderOperationsTest(unittest.TestCase):
                     "action": {
                         "reduce": {
                             "reduction": {
-                                "delta": {"name": name("Demo", "f"), "strategy": "regular"}
+                                "delta": {
+                                    "name": name("Demo", "f"),
+                                    "strategy": "requestedOrdinary",
+                                }
                             }
                         }
                     },
@@ -369,7 +372,8 @@ class RenderOperationsTest(unittest.TestCase):
         }
         self.assertEqual(
             render_trace(trace),
-            "explicit_rw_v2 [instantiate at [0], beta at [1], unfold _root_.Demo.f at []]",
+            "explicit_rw_v2 [instantiate at [0], beta at [1], unfold _root_.Demo.f "
+            "strategy requestedOrdinary at []]",
         )
 
     def test_simproc_is_residual(self) -> None:

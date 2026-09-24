@@ -205,7 +205,19 @@ def render_reduction(payload: Any, position: Any) -> str:
         if "projection" in payload or "projectionFunction" in payload:
             return f"proj {at}"
         if "delta" in payload:
-            return f"unfold {render_global_name(payload['delta']['name'])} {at}"
+            delta = payload["delta"]
+            strategy = delta.get("strategy")
+            if strategy not in {
+                "requestedSmart", "requestedPartial", "requestedOrdinary",
+                "autoSmart", "autoMatch", "ground",
+            }:
+                raise UnsupportedOperation(
+                    f"delta reduction has unknown strategy {strategy!r}"
+                )
+            return (
+                f"unfold {render_global_name(delta['name'])} "
+                f"strategy {strategy} {at}"
+            )
         if "localDef" in payload:
             local_def = payload["localDef"]
             index = local_def.get("contextIndex")
