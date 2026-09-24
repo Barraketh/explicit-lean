@@ -46,7 +46,10 @@ structure RecorderState where
       placing the operational cache maps back inside rollback-able state. -/
   savedSimpCacheProducerCount : Nat := 0
   savedDSimpCacheProducerCount : Nat := 0
-  pendingMonadSimpPaths : Array PathStep := #[]
+  /-- Exact semantic and raw-child locations for the successive callbacks made
+  by `Meta.simpHaveTelescope`. The callback API exposes only the instantiated
+  subexpression, so the enclosing telescope records its source position here. -/
+  pendingMonadSimpPaths : Array (PathStep × Array Nat) := #[]
   expectedPremiseTerminal : Option PremiseTerminal := none
   /-- Result and no-result simproc calls in logical execution order.  Unlike
       `PassiveObservations.simprocs`, this trace is part of rollback-able

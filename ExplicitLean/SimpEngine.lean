@@ -1147,7 +1147,7 @@ local instance : MonadSimp EngineM where
     let path? := state.pendingMonadSimpPaths[0]?
     modifyRecorderState fun current => { current with pendingMonadSimpPaths := #[] }
     let r ← match path? with
-      | some path => withOperationPath path none <| simp e
+      | some (path, delta) => withOperationPath path (some delta) <| simp e
       | none => simp e
     modifyRecorderState fun current => {
       current with pendingMonadSimpPaths := state.pendingMonadSimpPaths.drop 1
@@ -1161,7 +1161,7 @@ local instance : MonadSimp EngineM where
     let path? := state.pendingMonadSimpPaths[0]?
     modifyRecorderState fun current => { current with pendingMonadSimpPaths := #[] }
     let result ← match path? with
-      | some path => withOperationPath path none <| dsimp e
+      | some (path, delta) => withOperationPath path (some delta) <| dsimp e
       | none => dsimp e
     modifyRecorderState fun current => {
       current with pendingMonadSimpPaths := state.pendingMonadSimpPaths.drop 1
@@ -1622,10 +1622,12 @@ def simpHaveTelescope (e : Expr) : EngineM Result := do
       emitStructural (.dropUnusedHave index)
       recordBranch "struct.dropUnusedHave"
     else if fixed.getD index true then
-      paths := paths.push (.haveValue index .dsimp)
+      paths := paths.push (
+        .haveValue index .dsimp, nestedFieldPosition index 2 1)
     else
-      paths := paths.push (.haveValue index .simp)
-  paths := paths.push .haveBody
+      paths := paths.push (
+        .haveValue index .simp, nestedFieldPosition index 2 1)
+  paths := paths.push (.haveBody, Array.replicate info.haveInfo.size 2)
   modifyRecorderState fun state => { state with pendingMonadSimpPaths := paths }
   match (← Meta.simpHaveTelescope e zetaUnusedMode) with
   | .rfl =>
@@ -2319,6 +2321,16 @@ def congr (e : Expr) : EngineM Result := do
         | none =>
             let after ← getRecorderState
             if ← recorderStateProgressed recorderSaved after then
+              -- A failed user-congruence attempt remains in the internal
+              -- certificate so replay can verify that simp tried it. Its
+              -- nested rewrites did not contribute to the returned
+              -- expression, however, so they are not source operations and
+              -- must roll back with the attempt.
+              modifyRecorderState fun current => {
+                current with
+                operationalEvents := recorderSaved.operationalEvents
+                pendingPremiseOperations := recorderSaved.pendingPremiseOperations
+              }
               emitStructural (.congruence invocationOrdinal
                 (.userAttemptFailed c.theoremName c.priority c.hypothesesPos
                   attempt.theoremFingerprint attempt.matchEnvelope attempt.premises))

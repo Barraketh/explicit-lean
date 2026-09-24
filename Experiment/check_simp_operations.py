@@ -38,8 +38,8 @@ def main() -> None:
         for line in output.splitlines()
         if "SIMP_OPERATIONS " in line
     ]
-    if len(traces) != 8:
-        raise RuntimeError(f"expected eight traces, got {len(traces)}\n{output}")
+    if len(traces) != 9:
+        raise RuntimeError(f"expected nine traces, got {len(traces)}\n{output}")
     tagged = [line.split("SIMP_OPERATIONS_SITE ", 1)[1]
               for line in output.splitlines() if "SIMP_OPERATIONS_SITE " in line]
     if len(tagged) != 1 or not tagged[0].startswith("17 {"):
@@ -89,6 +89,9 @@ def main() -> None:
         raise RuntimeError(f"nested premise lost its recursive operations: {nested_premises}")
     if "with [explicit_rw_v2 [" not in render_trace(traces[7]):
         raise RuntimeError(f"nested premise did not render recursively: {traces[7]}")
+    have_events = traces[8]["events"]
+    if not have_events or any(event["position"] is None for event in have_events):
+        raise RuntimeError(f"have-telescope operation lost its exact raw position: {have_events}")
     print("operational recorder: exact rule identities and raw positions: ok")
 
 

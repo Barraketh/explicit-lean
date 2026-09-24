@@ -65,4 +65,10 @@ example (n : Nat) : nestedPremiseProp n := by
   simp_operations_observe only [nestedPremiseRule, Nat.add_zero]
   exact Nat.add_zero n
 
+/- `Meta.simpHaveTelescope` invokes simplification through `MonadSimp`; the
+recorder must retain the exact raw child path of the have value and body. -/
+example (n : Nat) : (have x := n + 0; x) = n := by
+  simp_operations_observe (config := { zeta := false, zetaUnused := false }) only [Nat.add_zero]
+  exact Nat.add_zero n
+
 end ExplicitLean.SimpTrace.T79OperationalRecording
