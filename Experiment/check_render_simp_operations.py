@@ -67,6 +67,25 @@ class RenderOperationsTest(unittest.TestCase):
             render_trace(trace), "explicit_rw_v2 [fold_nat_lit at [0, 1]]"
         )
 
+    def test_forall_congruence_keeps_domain_and_bound_body_streams_nested(self) -> None:
+        domain = rewrite_event([])
+        body = rewrite_event([])
+        body["action"]["rewrite"]["rule"]["origin"] = {
+            "bound": {"ordinal": 0}
+        }
+        trace = {
+            "events": [{
+                "position": [0, 1],
+                "action": {"forallCongruence": {
+                    "domain": [domain],
+                    "body": [body],
+                }},
+            }]
+        }
+        rendered = render_trace(trace)
+        self.assertIn("forall_congr at [0, 1] domain [rule _root_.Nat.add_zero", rendered)
+        self.assertIn("body [local __explicit_rw_v2_forall_bound", rendered)
+
     def test_source_syntax_operand_is_rendered_as_ordinary_lean(self) -> None:
         event = rewrite_event([0, 1])
         event["action"]["rewrite"]["rule"]["origin"] = {

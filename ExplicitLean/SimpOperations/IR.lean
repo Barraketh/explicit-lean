@@ -108,6 +108,10 @@ mutual
     /-- Exact application of Lean's automatically generated simp congruence
     theorem for the selected application head. -/
     | autoCongruence (children : Array AutoCongruenceChild)
+    /-- Exact recursive operations used while simplifying a non-arrow `∀`.
+    Domain and body positions are relative to their respective roots; body
+    locals introduced by the traversal are converted to `bound` origins. -/
+    | forallCongruence (domain body : Array Event)
     deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
   /--

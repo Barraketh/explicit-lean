@@ -492,6 +492,11 @@ syntax (name := explicitRwOperationalAutoCongruence)
   "auto_congr " explicitRwPos " with "
     "[" explicitRwOperationalAutoCongruenceArg,* "]" : explicitRwOperationalStep
 
+syntax (name := explicitRwOperationalForallCongruence)
+  "forall_congr " explicitRwPos
+    &" domain " "[" explicitRwOperationalStep,* "]"
+    &" body " "[" explicitRwOperationalStep,* "]" : explicitRwOperationalStep
+
 declare_syntax_cat explicitRwOperationalClose
 syntax (name := explicitRwOperationalClose)
   " then " explicitRwOperationalProof : explicitRwOperationalClose

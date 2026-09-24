@@ -228,6 +228,19 @@ def render_auto_congruence(payload: dict[str, Any], position: Any) -> str:
     )
 
 
+def render_forall_congruence(payload: dict[str, Any], position: Any) -> str:
+    domain = payload.get("domain")
+    body = payload.get("body")
+    if not isinstance(domain, list) or not isinstance(body, list):
+        raise UnsupportedOperation("forall congruence has no exact operation streams")
+    bound = ("__explicit_rw_v2_forall_bound",)
+    return (
+        f"forall_congr {render_position(position)} "
+        f"domain [{', '.join(render_events(domain))}] "
+        f"body [{', '.join(render_events(body, bound))}]"
+    )
+
+
 def render_events(
     events: list[dict[str, Any]], bound_names: tuple[str, ...] = ()
 ) -> list[str]:
@@ -260,6 +273,12 @@ def render_events(
             elif "autoCongruence" in action:
                 steps.append(
                     render_auto_congruence(action["autoCongruence"], event["position"])
+                )
+            elif "forallCongruence" in action:
+                steps.append(
+                    render_forall_congruence(
+                        action["forallCongruence"], event["position"]
+                    )
                 )
             else:
                 raise UnsupportedOperation(f"unknown operation {action!r}")

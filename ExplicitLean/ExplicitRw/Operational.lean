@@ -603,6 +603,38 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
           stepError idx m!"`auto_congr`: the generated congruence proof does not establish the reconstructed application equality."
         return Replacement.eq rhs proofFinal)
       (fun pfx child sub => badPosError idx pos pfx child sub)
+  | ``explicitRwOperationalForallCongruence => do
+    let pos := parsePos step[1]
+    let domainSteps := step[4].getSepArgs
+    let bodySteps := step[8].getSepArgs
+    rewriteAt e pos
+      (fun sub => do
+        let .forallE binderName binderType binderBody binderInfo := sub
+          | stepError idx m!"`forall_congr` at position {Pos.render pos} requires a `∀`"
+        let domainReplacement ← runOperationsAt domainSteps binderType
+        let newDomain ← instantiateMVars domainReplacement.newExpr
+        match domainReplacement.proof? with
+        | some domainEquality =>
+          withLocalDecl `__explicit_rw_v2_forall_bound binderInfo newDomain fun x => do
+            let castArg ← mkAppM ``Eq.mp #[← mkEqSymm domainEquality, x]
+            let bodySeed := binderBody.instantiate1 castArg
+            let bodyReplacement ← runOperationsAt bodySteps bodySeed
+            dependentForallTransport binderName binderInfo binderType binderBody
+              domainReplacement (some x) (some bodyReplacement)
+        | none =>
+          withLocalDecl `__explicit_rw_v2_forall_bound binderInfo newDomain fun x => do
+            let bodyReplacement ←
+              runOperationsAt bodySteps (binderBody.instantiate1 x)
+            let bodyLambda ← mkLambdaFVars #[x] bodyReplacement.newExpr
+            let .lam _ _ newBody _ := bodyLambda
+              | stepError idx m!"`forall_congr` failed to abstract its body"
+            let newForall := .forallE binderName newDomain newBody binderInfo
+            match bodyReplacement.proof? with
+            | none => return Replacement.defeq newForall
+            | some bodyEquality =>
+              let proofLambda ← mkLambdaFVars #[x] bodyEquality
+              return Replacement.eq newForall (← mkForallCongr proofLambda))
+      (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwOperationalSimproc =>
     throwError "explicit_rw_v2: simproc `{step[1].getId}` is not a rewrite-rule operation."
   | k =>

@@ -460,6 +460,10 @@ mutual
     | .autoCongruence children =>
         .autoCongruence (children.map fun child => {
           child with events := child.events.map (bindCongruenceEvent binders) })
+    | .forallCongruence domain body =>
+        .forallCongruence
+          (domain.map (bindCongruenceEvent binders))
+          (body.map (bindCongruenceEvent binders))
 
   private partial def bindCongruenceEvent (binders : Array Nat)
       (event : Operations.Event) : Operations.Event :=
@@ -1688,6 +1692,39 @@ def simpArrow (e : Expr) : EngineM Result := do
     recordBranch "struct.forall.implicationPlain"
     mkImpCongr e rp (← withOperationPath .implicationBody (some #[1]) <| simp q)
 
+private def relativeForallEvents (base : Option (Array Nat)) (child : Nat)
+    (events : Array Operations.Event) : Array Operations.Event :=
+  events.map fun event => {
+    event with position := match base, event.position with
+      | some base, some position =>
+          let childBase := base.push child
+          if childBase.size <= position.size &&
+              (List.range childBase.size).all fun i => childBase[i]! == position[i]! then
+            some (position.extract childBase.size position.size)
+          else
+            none
+      | none, _ | _, none => none
+  }
+
+private def groupForallOperations (operationStart bodyStart binderIndex : Nat)
+    (operationBase : Option (Array Nat)) (operationPhase : Phase) : EngineM Unit := do
+  let current ← getRecorderState
+  let domain := relativeForallEvents operationBase 0 <|
+    current.operationalEvents.extract operationStart bodyStart
+  let body := (relativeForallEvents operationBase 1 <|
+    current.operationalEvents.extract bodyStart current.operationalEvents.size).map
+      (bindCongruenceEvent #[binderIndex])
+  if domain.isEmpty && body.isEmpty then
+    return
+  modifyRecorderState fun state => {
+    state with operationalEvents :=
+      (state.operationalEvents.extract 0 operationStart).push {
+        position := operationBase
+        phase := operationPhase
+        action := .forallCongruence domain body
+      }
+  }
+
 def simpForall (e : Expr) : EngineM Result := withParent e do
   trace[Debug.Meta.Tactic.simp] "forall {e}"
   if e.isArrow then
@@ -1695,6 +1732,10 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
   else if (← isProp e) then
     /- The forall is a proposition. -/
     let domain := e.bindingDomain!
+    let operationState ← getRecorderState
+    let operationStart := operationState.operationalEvents.size
+    let operationBase := operationState.operationPosition
+    let operationPhase := operationState.phase
     if (← isProp domain) then
       /-
       The domain of the forall is also a proposition, and we can use `forall_prop_domain_congr`
@@ -1717,6 +1758,7 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
         let p₁ := domain
         let p₂ := rd.expr
         let q₁ := mkLambda e.bindingName! e.bindingInfo! p₁ e.bindingBody!
+        let bodyStart := (← getRecorderState).operationalEvents.size
         let result ← withLocalDecl e.bindingName! e.bindingInfo! p₂ fun a => withNewLemmas #[a] do
           let prop := mkSort Level.zero
           let h₁_substr_a := mkApp6 (mkConst ``Eq.substr [Level.one]) prop (mkLambda `x .default prop (mkBVar 0)) p₂ p₁ h₁ a
@@ -1726,15 +1768,25 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
           let q₂ ← mkLambdaFVars #[a] rb.expr
           let result ← mkForallFVars #[a] rb.expr
           let proof := mkApp6 (mkConst ``forall_prop_domain_congr) p₁ p₂ q₁ q₂ h₁ h₂
+          let binderIndex := (← a.fvarId!.getDecl).index
+          groupForallOperations operationStart bodyStart binderIndex operationBase operationPhase
           return { expr := result, proof? := proof }
         return result
     emitStructural (.forallBranch .propositionDomainDSimp)
     recordBranch "struct.forall.propositionDomainDSimp"
+    -- The preceding full `simp` probe did not produce a propositional domain
+    -- equality, so stock simp discards its result and runs `dsimp` from the
+    -- original domain. Its operational events are equally speculative.
+    modifyRecorderState fun state => {
+      state with operationalEvents := state.operationalEvents.extract 0 operationStart }
     let domain ← withOperationPath (.forallDomain 0) (some #[0]) <| dsimp domain
+    let bodyStart := (← getRecorderState).operationalEvents.size
     withLocalDecl e.bindingName! e.bindingInfo! domain fun x => withNewLemmas #[x] do
       let b := e.bindingBody!.instantiate1 x
       let rb ← withOperationPath .forallBody (some #[1]) <| simp b
       let eNew ← mkForallFVars #[x] rb.expr
+      let binderIndex := (← x.fvarId!.getDecl).index
+      groupForallOperations operationStart bodyStart binderIndex operationBase operationPhase
       match rb.proof? with
       | none   => return { expr := eNew }
       | some h => return { expr := eNew, proof? := (← mkForallCongr (← mkLambdaFVars #[x] h)) }

@@ -60,6 +60,11 @@ example (n : Nat) : n + 0 = n := by
   explicit_rw_v2 [source_rule lean_term((by exact Nat.add_zero n : n + 0 = n)) variant 0 phase pre fwd
     extra 0 at [0, 1] with []] then rfl
 
+example (P Q : Prop) (h : P = Q) : (∀ _ : P, P) = (∀ _ : Q, Q) := by
+  explicit_rw_v2 [forall_congr at [0, 1]
+    domain [local h variant 0 phase pre fwd extra 0 at [] with []]
+    body [local h variant 0 phase pre fwd extra 0 at [] with []]] then rfl
+
 /- A polymorphic source application is elaborated while Lean matches the exact
 recorded redex, so the redex fixes the otherwise-stuck cast carrier. -/
 example (p : Prop) [Decidable p] (x y : Nat) :
