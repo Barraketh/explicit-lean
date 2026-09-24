@@ -57,19 +57,19 @@ def main() -> None:
     if third[0]["position"] != [0, 1] or "reduce" not in third[0]["action"]:
         raise RuntimeError(f"unexpected beta operation: {third[0]}")
     local_json = json.dumps(traces[3], sort_keys=True)
-    if "contextIndex" not in local_json:
-        raise RuntimeError(f"local operation lost its context identity: {local_json}")
+    if '"bound": {"ordinal": 0}' not in local_json:
+        raise RuntimeError(f"contextual implication lost its structural binder identity: {local_json}")
     for forbidden in ("typeFingerprint", "valueFingerprint", "fingerprint"):
         if forbidden in local_json:
             raise RuntimeError(f"local operation leaked {forbidden}: {local_json}")
-    if "local local_ref 2" not in render_trace(traces[3]):
-        raise RuntimeError(f"local operation did not render by context identity: {traces[3]}")
+    if "bound 0" not in render_trace(traces[3]):
+        raise RuntimeError(f"contextual implication did not render by binder ordinal: {traces[3]}")
     metadata_positions = [event["position"] for event in traces[4]["events"]]
     if metadata_positions != [[0, 0, 1], [0]]:
         raise RuntimeError(f"unexpected metadata trace positions: {metadata_positions}")
     expected = (
-        "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
-        "at [0, 1] with [], rule eq_self variant 0 phase post fwd extra 0 "
+        "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 "
+        "at [0, 1] with [], rule _root_.eq_self variant 0 phase post fwd extra 0 "
         "at [] with []] then true_intro"
     )
     if render_trace(traces[0]) != expected:

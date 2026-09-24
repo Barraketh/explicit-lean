@@ -432,6 +432,8 @@ syntax (name := explicitRwOperationalProofAssumptionRef)
   "assumption " "local_ref " num : explicitRwOperationalProof
 syntax (name := explicitRwOperationalProofAssumption)
   "assumption " ident : explicitRwOperationalProof
+syntax (name := explicitRwOperationalProofAssumptionBound)
+  "assumption " "bound " num : explicitRwOperationalProof
 syntax (name := explicitRwOperationalProofIntro)
   "intro " num " ; " explicitRwOperationalProof : explicitRwOperationalProof
 
@@ -455,6 +457,13 @@ syntax (name := explicitRwOperationalLocal)
 
 syntax (name := explicitRwOperationalLocalRef)
   &"local" "local_ref " num " variant " num " phase " ident ("fwd" <|> "rev")
+  &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
+
+/-- A local introduced structurally by an enclosing `forall_congr`. The ordinal
+is relative to the innermost enclosing congruence binder, so replay never
+depends on a generated user name or a context search. -/
+syntax (name := explicitRwOperationalBound)
+  "bound " num " variant " num " phase " ident ("fwd" <|> "rev")
   &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
 
 syntax (name := explicitRwOperationalBeta)

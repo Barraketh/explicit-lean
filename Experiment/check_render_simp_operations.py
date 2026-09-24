@@ -84,7 +84,34 @@ class RenderOperationsTest(unittest.TestCase):
         }
         rendered = render_trace(trace)
         self.assertIn("forall_congr at [0, 1] domain [rule _root_.Nat.add_zero", rendered)
-        self.assertIn("body [local __explicit_rw_v2_forall_bound", rendered)
+        self.assertIn("body [bound 0", rendered)
+
+    def test_named_congruence_propagates_its_binder_scope_recursively(self) -> None:
+        body = rewrite_event([])
+        body["action"]["rewrite"]["rule"]["origin"] = {
+            "bound": {"ordinal": 1}
+        }
+        trace = {
+            "events": [{
+                "position": [],
+                "action": {"congruence": {
+                    "theoremName": name("forall_congr"),
+                    "children": [{
+                        "argumentIndex": 0,
+                        "binderCount": 2,
+                        "events": [{
+                            "position": [],
+                            "action": {"autoCongruence": {
+                                "children": [{"argumentIndex": 0, "events": [body]}]
+                            }},
+                        }],
+                    }],
+                    "premises": [],
+                }},
+            }]
+        }
+        rendered = render_trace(trace)
+        self.assertIn("local __explicit_rw_v2_bound_1", rendered)
 
     def test_source_syntax_operand_is_rendered_as_ordinary_lean(self) -> None:
         event = rewrite_event([0, 1])
@@ -126,6 +153,16 @@ class RenderOperationsTest(unittest.TestCase):
             }
         ]
         self.assertIn("with [assumption local_ref 4]", render_trace({"events": [event]}))
+
+    def test_congruence_bound_premise_uses_structural_ordinal(self) -> None:
+        event = rewrite_event([])
+        event["action"]["rewrite"]["premises"] = [
+            {
+                "terminal": {"boundAssumption": {"ordinal": 0}},
+                "events": [],
+            }
+        ]
+        self.assertIn("with [assumption bound 0]", render_trace({"events": [event]}))
 
     def test_equation_hypothesis_premise_is_an_exact_closed_operation(self) -> None:
         event = rewrite_event([])

@@ -427,47 +427,50 @@ private def boundOrdinal? (binders : Array Nat) (contextIndex : Nat) : Option Na
   return none
 
 mutual
-  private partial def bindCongruencePremise (binders : Array Nat)
+  private partial def bindCongruencePremise (binders : Array Nat) (offset : Nat)
       (premise : Operations.Premise) : Operations.Premise := {
     terminal := match premise.terminal with
       | .localAssumption contextIndex => match boundOrdinal? binders contextIndex with
-        | some ordinal => .boundAssumption ordinal
+        | some ordinal => .boundAssumption (offset + ordinal)
         | none => premise.terminal
       | _ => premise.terminal
-    events := premise.events.map (bindCongruenceEvent binders)
+    events := premise.events.map (bindCongruenceEvent binders offset)
   }
 
   private partial def bindCongruenceAction (binders : Array Nat)
-      (action : Operations.Action) : Operations.Action :=
+      (offset : Nat) (action : Operations.Action) : Operations.Action :=
     match action with
     | .rewrite rule premises =>
         let origin := match rule.origin with
           | .local contextIndex => match boundOrdinal? binders contextIndex with
-            | some ordinal => Operations.RuleOrigin.bound ordinal
+            | some ordinal => Operations.RuleOrigin.bound (offset + ordinal)
             | none => rule.origin
           | _ => rule.origin
-        .rewrite { rule with origin } (premises.map (bindCongruencePremise binders))
+        .rewrite { rule with origin }
+          (premises.map (bindCongruencePremise binders offset))
     | .reduce reduction => .reduce reduction
     | .builtin builtin => .builtin builtin
     | .simproc declarations => .simproc declarations
-    | .cacheReuse events => .cacheReuse (events.map (bindCongruenceEvent binders))
+    | .cacheReuse events =>
+        .cacheReuse (events.map (bindCongruenceEvent binders offset))
     | .congruence theoremName children premises =>
         .congruence theoremName
-          (children.map fun child => {
-            child with events := child.events.map (bindCongruenceEvent binders) })
+          (children.map fun child => { child with
+            events := child.events.map
+              (bindCongruenceEvent binders (offset + child.binderCount)) })
           (premises.map fun premise => {
-            premise with premise := bindCongruencePremise binders premise.premise })
+            premise with premise := bindCongruencePremise binders offset premise.premise })
     | .autoCongruence children =>
         .autoCongruence (children.map fun child => {
-          child with events := child.events.map (bindCongruenceEvent binders) })
+          child with events := child.events.map (bindCongruenceEvent binders offset) })
     | .forallCongruence domain body =>
         .forallCongruence
-          (domain.map (bindCongruenceEvent binders))
-          (body.map (bindCongruenceEvent binders))
+          (domain.map (bindCongruenceEvent binders offset))
+          (body.map (bindCongruenceEvent binders (offset + 1)))
 
-  private partial def bindCongruenceEvent (binders : Array Nat)
+  private partial def bindCongruenceEvent (binders : Array Nat) (offset : Nat := 0)
       (event : Operations.Event) : Operations.Event :=
-    { event with action := bindCongruenceAction binders event.action }
+    { event with action := bindCongruenceAction binders offset event.action }
 end
 
 private def prefixOperationPosition (pathPrefix : Array Nat)
@@ -1656,42 +1659,6 @@ def simpLambda (e : Expr) : EngineM Result :=
     let r ← simp e
     r.addLambdas xs
 
-def simpArrow (e : Expr) : EngineM Result := do
-  trace[Debug.Meta.Tactic.simp] "arrow {e}"
-  let p := e.bindingDomain!
-  let q := e.bindingBody!
-  let rp ← withOperationPath .implicationDomain (some #[0]) <| simp p
-  trace[Debug.Meta.Tactic.simp] "arrow [{(← getConfig).contextual}] {p} [{← isProp p}] -> {q} [{← isProp q}]"
-  if (← pure (← getConfig).contextual <&&> isProp p <&&> isProp q) then
-    emitStructural (.forallBranch .implicationContextual)
-    recordBranch "struct.forall.implicationContextual"
-    trace[Debug.Meta.Tactic.simp] "ctx arrow {rp.expr} -> {q}"
-    withLocalDeclD e.bindingName! rp.expr fun h => withNewLemmas #[h] do
-      let rq ← withOperationPath .implicationBody (some #[1]) <| simp q
-      match rq.proof? with
-      | none    => mkImpCongr e rp rq
-      | some hq =>
-        let hq ← mkLambdaFVars #[h] hq
-        /-
-          We use the default reducibility setting at `mkImpDepCongrCtx` and `mkImpCongrCtx` because they use the theorems
-          ```lean
-          @implies_dep_congr_ctx : ∀ {p₁ p₂ q₁ : Prop}, p₁ = p₂ → ∀ {q₂ : p₂ → Prop}, (∀ (h : p₂), q₁ = q₂ h) → (p₁ → q₁) = ∀ (h : p₂), q₂ h
-          @implies_congr_ctx : ∀ {p₁ p₂ q₁ q₂ : Prop}, p₁ = p₂ → (p₂ → q₁ = q₂) → (p₁ → q₁) = (p₂ → q₂)
-          ```
-          And the proofs may be from `rfl` theorems which are now omitted. Moreover, we cannot establish that the two
-          terms are definitionally equal using `withReducible`.
-          TODO (better solution): provide the problematic implicit arguments explicitly. It is more efficient and avoids this
-          problem.
-          -/
-        if rq.expr.containsFVar h.fvarId! then
-          return { expr := (← mkForallFVars #[h] rq.expr), proof? := (← withDefault <| mkImpDepCongrCtx (← rp.getProof) hq) }
-        else
-          return { expr := e.updateForallE! rp.expr rq.expr, proof? := (← withDefault <| mkImpCongrCtx (← rp.getProof) hq) }
-  else
-    emitStructural (.forallBranch .implicationPlain)
-    recordBranch "struct.forall.implicationPlain"
-    mkImpCongr e rp (← withOperationPath .implicationBody (some #[1]) <| simp q)
-
 private def relativeForallEvents (base : Option (Array Nat)) (child : Nat)
     (events : Array Operations.Event) : Array Operations.Event :=
   events.map fun event => {
@@ -1706,14 +1673,16 @@ private def relativeForallEvents (base : Option (Array Nat)) (child : Nat)
       | none, _ | _, none => none
   }
 
-private def groupForallOperations (operationStart bodyStart binderIndex : Nat)
+private def groupForallOperations (operationStart bodyStart : Nat) (binderIndex? : Option Nat)
     (operationBase : Option (Array Nat)) (operationPhase : Phase) : EngineM Unit := do
   let current ← getRecorderState
   let domain := relativeForallEvents operationBase 0 <|
     current.operationalEvents.extract operationStart bodyStart
-  let body := (relativeForallEvents operationBase 1 <|
-    current.operationalEvents.extract bodyStart current.operationalEvents.size).map
-      (bindCongruenceEvent #[binderIndex])
+  let body := relativeForallEvents operationBase 1 <|
+    current.operationalEvents.extract bodyStart current.operationalEvents.size
+  let body := match binderIndex? with
+    | some binderIndex => body.map (bindCongruenceEvent #[binderIndex])
+    | none => body
   if domain.isEmpty && body.isEmpty then
     return
   modifyRecorderState fun state => {
@@ -1724,6 +1693,54 @@ private def groupForallOperations (operationStart bodyStart binderIndex : Nat)
         action := .forallCongruence domain body
       }
   }
+
+def simpArrow (e : Expr) : EngineM Result := do
+  trace[Debug.Meta.Tactic.simp] "arrow {e}"
+  let p := e.bindingDomain!
+  let q := e.bindingBody!
+  let operationState ← getRecorderState
+  let operationStart := operationState.operationalEvents.size
+  let operationBase := operationState.operationPosition
+  let operationPhase := operationState.phase
+  let rp ← withOperationPath .implicationDomain (some #[0]) <| simp p
+  let bodyStart := (← getRecorderState).operationalEvents.size
+  trace[Debug.Meta.Tactic.simp] "arrow [{(← getConfig).contextual}] {p} [{← isProp p}] -> {q} [{← isProp q}]"
+  if (← pure (← getConfig).contextual <&&> isProp p <&&> isProp q) then
+    emitStructural (.forallBranch .implicationContextual)
+    recordBranch "struct.forall.implicationContextual"
+    trace[Debug.Meta.Tactic.simp] "ctx arrow {rp.expr} -> {q}"
+    withLocalDeclD e.bindingName! rp.expr fun h => withNewLemmas #[h] do
+      let rq ← withOperationPath .implicationBody (some #[1]) <| simp q
+      let result ← match rq.proof? with
+        | none    => mkImpCongr e rp rq
+        | some hq =>
+          let hq ← mkLambdaFVars #[h] hq
+        /-
+          We use the default reducibility setting at `mkImpDepCongrCtx` and `mkImpCongrCtx` because they use the theorems
+          ```lean
+          @implies_dep_congr_ctx : ∀ {p₁ p₂ q₁ : Prop}, p₁ = p₂ → ∀ {q₂ : p₂ → Prop}, (∀ (h : p₂), q₁ = q₂ h) → (p₁ → q₁) = ∀ (h : p₂), q₂ h
+          @implies_congr_ctx : ∀ {p₁ p₂ q₁ q₂ : Prop}, p₁ = p₂ → (p₂ → q₁ = q₂) → (p₁ → q₁) = (p₂ → q₂)
+          ```
+          And the proofs may be from `rfl` theorems which are now omitted. Moreover, we cannot establish that the two
+          terms are definitionally equal using `withReducible`.
+          TODO (better solution): provide the problematic implicit arguments explicitly. It is more efficient and avoids this
+          problem.
+          -/
+          if rq.expr.containsFVar h.fvarId! then
+            pure { expr := (← mkForallFVars #[h] rq.expr), proof? := (← withDefault <| mkImpDepCongrCtx (← rp.getProof) hq) }
+          else
+            pure { expr := e.updateForallE! rp.expr rq.expr, proof? := (← withDefault <| mkImpCongrCtx (← rp.getProof) hq) }
+      let binderIndex := (← h.fvarId!.getDecl).index
+      groupForallOperations operationStart bodyStart (some binderIndex)
+        operationBase operationPhase
+      return result
+  else
+    emitStructural (.forallBranch .implicationPlain)
+    recordBranch "struct.forall.implicationPlain"
+    let rq ← withOperationPath .implicationBody (some #[1]) <| simp q
+    let result ← mkImpCongr e rp rq
+    groupForallOperations operationStart bodyStart none operationBase operationPhase
+    return result
 
 def simpForall (e : Expr) : EngineM Result := withParent e do
   trace[Debug.Meta.Tactic.simp] "forall {e}"
@@ -1769,7 +1786,8 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
           let result ← mkForallFVars #[a] rb.expr
           let proof := mkApp6 (mkConst ``forall_prop_domain_congr) p₁ p₂ q₁ q₂ h₁ h₂
           let binderIndex := (← a.fvarId!.getDecl).index
-          groupForallOperations operationStart bodyStart binderIndex operationBase operationPhase
+          groupForallOperations operationStart bodyStart (some binderIndex)
+            operationBase operationPhase
           return { expr := result, proof? := proof }
         return result
     emitStructural (.forallBranch .propositionDomainDSimp)
@@ -1786,7 +1804,8 @@ def simpForall (e : Expr) : EngineM Result := withParent e do
       let rb ← withOperationPath .forallBody (some #[1]) <| simp b
       let eNew ← mkForallFVars #[x] rb.expr
       let binderIndex := (← x.fvarId!.getDecl).index
-      groupForallOperations operationStart bodyStart binderIndex operationBase operationPhase
+      groupForallOperations operationStart bodyStart (some binderIndex)
+        operationBase operationPhase
       match rb.proof? with
       | none   => return { expr := eNew }
       | some h => return { expr := eNew, proof? := (← mkForallCongr (← mkLambdaFVars #[x] h)) }

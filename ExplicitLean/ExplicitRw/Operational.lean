@@ -35,6 +35,7 @@ Examples:
 explicit_rw_v2 [rule Nat.add_zero variant 0 phase pre fwd extra 0 at [0, 1] with []]
 explicit_rw_v2 [equation myDef index 0 variant 1 phase dpre fwd extra 0 at [0, 1] with []]
 explicit_rw_v2 [local local_ref 4 variant 0 phase dpost rev extra 0 at [1] with []]
+explicit_rw_v2 [forall_congr at [] domain [] body [bound 0 variant 0 phase pre fwd extra 0 at [] with []]]
 explicit_rw_v2 [beta at [0], instantiate at [1], iota at [2], proj at [3], zeta at [4]]
 ```
 -/
@@ -70,7 +71,23 @@ private def withExtra (pos : Pos) (extraStx : Syntax) : Pos :=
 private def sideProofs (withStx : Syntax) : Array Syntax :=
   withStx[2].getSepArgs
 
-private def lowerProof (stx : Syntax) : TacticM Syntax := do
+private def boundLocalIndex (idx : Nat) (boundLocals : Array FVarId) : TacticM Nat := do
+  let some fvarId := boundLocals[idx]?
+    | throwError "explicit_rw_v2: bound local {idx} is outside {boundLocals.size} enclosing binder(s)."
+  return (← FVarId.getDecl fvarId).index
+
+private partial def lowerBoundAssumptions
+    (stx : Syntax) (boundLocals : Array FVarId) : TacticM Syntax := do
+  if stx.getKind == ``explicitRwOperationalProofAssumptionBound then
+    let index ← boundLocalIndex (stx[2].isNatLit?.getD 0) boundLocals
+    let indexStx : TSyntax `num := ⟨Syntax.mkNumLit (toString index)⟩
+    return (← `(explicitRwOperationalProof| assumption local_ref $indexStx:num)).raw
+  let oldArgs := stx.getArgs
+  let args ← oldArgs.mapM fun child => lowerBoundAssumptions child boundLocals
+  if args == oldArgs then return stx
+  return Syntax.node stx.getHeadInfo stx.getKind args
+
+private def lowerProof (stx : Syntax) (boundLocals : Array FVarId := #[]) : TacticM Syntax := do
   match stx.getKind with
   | ``explicitRwOperationalProofAtom =>
     match stx[0].getId.toString with
@@ -85,6 +102,10 @@ private def lowerProof (stx : Syntax) : TacticM Syntax := do
   | ``explicitRwOperationalProofAssumptionRef => do
     let localIndex : TSyntax `num := ⟨stx[2]⟩
     return (← `(explicitRwSideTac| exact local_ref $localIndex:num)).raw
+  | ``explicitRwOperationalProofAssumptionBound => do
+    let index ← boundLocalIndex (stx[2].isNatLit?.getD 0) boundLocals
+    let indexStx : TSyntax `num := ⟨Syntax.mkNumLit (toString index)⟩
+    return (← `(explicitRwSideTac| exact local_ref $indexStx:num)).raw
   | ``explicitRwOperationalProofIntro =>
     -- `Impl.runSideProofOn` introduces the exact recorded binder count and
     -- recurses into the same closed operational proof grammar.
@@ -92,11 +113,12 @@ private def lowerProof (stx : Syntax) : TacticM Syntax := do
   | ``explicitRwOperationalProofNested =>
     -- The nested v2 grammar is already closed. Preserve it for
     -- `Impl.runSideProofOn`, which runs it against exactly the premise goal.
-    return stx
+    lowerBoundAssumptions stx boundLocals
   | k => throwError "explicit_rw_v2: internal error: unknown closed proof operation `{k}`"
 
-private def lowerProofs (withStx : Syntax) : TacticM (Array Syntax) :=
-  (sideProofs withStx).mapM lowerProof
+private def lowerProofs (withStx : Syntax) (boundLocals : Array FVarId := #[]) :
+    TacticM (Array Syntax) :=
+  (sideProofs withStx).mapM fun proof => lowerProof proof boundLocals
 
 private def ruleConclusionMatchesPropCore (idx : Nat) (term : Term) (sub : Expr) :
     TacticM (Option Bool) := do
@@ -192,6 +214,118 @@ private def runNamedRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
     runPropRule idx e pos term truth sideTacs
   else
     Impl.runRwStep idx e pos term reverse sideTacs
+
+private def elabBoundEquation (idx : Nat) (ordinal : Nat) (proof : Expr) :
+    TacticM (Expr × Expr × Expr × Array Expr) := do
+  let type ← inferType proof
+  let (mvars, _, conclusion) ← forallMetaTelescopeReducing type
+  let proof := mkAppN proof mvars
+  let (lhs, rhs, equality) ←
+    asEquation idx m!"bound local {ordinal}" proof conclusion
+  return (lhs, rhs, equality, mvars)
+
+private def boundConclusionMatchesPropCore
+    (proof : Expr) (sub : Expr) : TacticM (Option Bool) := do
+  let type ← inferType proof
+  let (_, _, conclusion) ← forallMetaTelescope type
+  let subType ← inferType sub
+  let subIsBool ← isDefEq subType (mkConst ``Bool)
+  let proposition? ←
+    if subIsBool then
+      some <$> mkAppM ``Eq #[sub, mkConst ``true]
+    else if ← isProp sub then
+      pure (some sub)
+    else
+      pure none
+  let some proposition := proposition? | return none
+  if ← isDefEq conclusion proposition then return some true
+  if ← isDefEq conclusion (mkApp (mkConst ``Not) proposition) then return some false
+  return none
+
+private def boundConclusionMatchesProp (proof : Expr) (sub : Expr) :
+    TacticM (Option Bool) := do
+  let saved ← Tactic.saveState
+  try
+    boundConclusionMatchesPropCore proof sub
+  finally
+    saved.restore
+
+private def runBoundPropRule (idx ordinal : Nat) (e : Expr) (pos : Pos)
+    (proof : Expr) (truth : Bool) (sideTacs : Array Syntax) : TacticM Replacement := do
+  rewriteAt e pos
+    (fun sub => do
+      let type ← inferType proof
+      let (mvars, _, conclusion) ← forallMetaTelescope type
+      let proof := mkAppN proof mvars
+      let subType ← inferType sub
+      let subIsBool ← isDefEq subType (mkConst ``Bool)
+      let proposition ←
+        if subIsBool then mkAppM ``Eq #[sub, mkConst ``true] else pure sub
+      let expected :=
+        if truth then proposition else mkApp (mkConst ``Not) proposition
+      unless ← isDefEq conclusion expected do
+        stepError idx m!"bound local {ordinal} does not prove the selected proposition."
+      Term.synthesizeSyntheticMVars (postpone := .no) (ignoreStuckTC := true)
+      synthesizeInstanceMVars idx m!"bound local {ordinal}" mvars sub
+      let propMVars ← unassignedRewritePropMVars mvars
+      if sideTacs.size > propMVars.size then
+        stepError idx m!"the `with` clause supplies {sideTacs.size} proof(s) but bound local \
+          {ordinal} has {propMVars.size} undetermined hypothesis(es) at this position."
+      for h : proofIndex in [0 : sideTacs.size] do
+        let .mvar mid := ← instantiateMVars propMVars[proofIndex]! | pure ()
+        Impl.runSideProofOn idx (some proofIndex) sideTacs[proofIndex] mid
+      Term.synthesizeSyntheticMVarsNoPostponing
+      closeLemmaMVars idx m!"bound local {ordinal}" mvars
+      let proof ← instantiateMVars proof
+      let (replacement, equality) ←
+        if subIsBool then
+          if truth then
+            pure (mkConst ``true, proof)
+          else
+            pure (mkConst ``false, ← mkAppM ``Bool.of_not_eq_true #[proof])
+        else
+          let equality ←
+            if truth then mkAppM ``eq_true #[proof] else mkAppM ``eq_false #[proof]
+          pure (if truth then mkConst ``True else mkConst ``False, equality)
+      Impl.checkNoLevelMVars idx m!"bound local {ordinal}" #[equality]
+      return Replacement.eq replacement equality)
+    (fun pfx child sub => badPosError idx pos pfx child sub)
+
+private def runBoundRule (idx ordinal : Nat) (e : Expr) (pos : Pos)
+    (proof : Expr) (reverse : Bool) (sideTacs : Array Syntax) : TacticM Replacement := do
+  let propRef ← IO.mkRef (none : Option Bool)
+  let _ ← rewriteAt e pos
+    (fun sub => do
+      propRef.set (← boundConclusionMatchesProp proof sub)
+      return Replacement.defeq sub)
+    (fun pfx child sub => badPosError idx pos pfx child sub)
+  if let some truth := ← propRef.get then
+    if reverse then
+      stepError idx m!"a proposition-valued bound local is only supported in the forward direction."
+    return ← runBoundPropRule idx ordinal e pos proof truth sideTacs
+  rewriteAt e pos
+    (fun sub => do
+      let (lhs, rhs, equality, mvars) ← elabBoundEquation idx ordinal proof
+      let (source, target) := if reverse then (rhs, lhs) else (lhs, rhs)
+      let equality ← if reverse then mkEqSymm equality else pure equality
+      unless ← matchRewriteSource source sub do
+        stepError idx m!"bound local {ordinal} does not match the subterm at position \
+          {Pos.render pos}."
+      Term.synthesizeSyntheticMVars (postpone := .no) (ignoreStuckTC := true)
+      synthesizeInstanceMVars idx m!"bound local {ordinal}" mvars sub
+      let propMVars ← unassignedRewritePropMVars mvars
+      if sideTacs.size > propMVars.size then
+        stepError idx m!"the `with` clause supplies too many proofs for bound local {ordinal}."
+      for h : proofIndex in [0 : sideTacs.size] do
+        let .mvar mid := ← instantiateMVars propMVars[proofIndex]! | pure ()
+        Impl.runSideProofOn idx (some proofIndex) sideTacs[proofIndex] mid
+      Term.synthesizeSyntheticMVarsNoPostponing
+      closeLemmaMVars idx m!"bound local {ordinal}" mvars
+      let target ← instantiateMVars target
+      let equality ← instantiateMVars equality
+      Impl.checkNoLevelMVars idx m!"bound local {ordinal}" #[target, equality]
+      return Replacement.eq target equality)
+    (fun pfx child sub => badPosError idx pos pfx child sub)
 
 /--
 Replay a nontrivial source operand through Lean's ordinary rewrite elaborator,
@@ -405,11 +539,12 @@ private def runCongruenceRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
 
 mutual
 
-private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Replacement := do
+private partial def runOne (idx : Nat) (e : Expr) (step : Syntax)
+    (boundLocals : Array FVarId) : TacticM Replacement := do
   match step.getKind with
   | ``explicitRwOperationalRule => do
     let reverse ← validateRuleMetadata idx step[5] step[6]
-    let sideTacs ← lowerProofs step[10]
+    let sideTacs ← lowerProofs step[10] boundLocals
     let decl : Ident := ⟨step[1]⟩
     -- Resolve as a global constant up front.  In particular, `rule h` cannot
     -- silently switch to a local variable when a declaration is missing.
@@ -423,12 +558,12 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
         declaration term sideTacs
   | ``explicitRwOperationalSource => do
     let reverse ← validateRuleMetadata idx step[5] step[6]
-    let sideTacs ← lowerProofs step[10]
+    let sideTacs ← lowerProofs step[10] boundLocals
     let term ← Impl.toTerm step[1]
     runSourceRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
   | ``explicitRwOperationalEquation => do
     let reverse ← validateRuleMetadata idx step[7] step[8]
-    let sideTacs ← lowerProofs step[12]
+    let sideTacs ← lowerProofs step[12] boundLocals
     let decl : Ident := ⟨step[1]⟩
     let declaration ← realizeGlobalConstNoOverloadWithInfo decl
     let some equations ← getEqnsFor? declaration
@@ -443,7 +578,7 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
       (withExtra (parsePos step[11]) step[10]) term reverse sideTacs
   | ``explicitRwOperationalLocal => do
     let reverse ← validateRuleMetadata idx step[5] step[6]
-    let sideTacs ← lowerProofs step[10]
+    let sideTacs ← lowerProofs step[10] boundLocals
     let hyp : Ident := ⟨step[1]⟩
     -- `getFVarId` elaborates precisely the identifier and rejects a global
     -- theorem here.  The resulting source term still carries the readable
@@ -454,11 +589,19 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
     runNamedRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
   | ``explicitRwOperationalLocalRef => do
     let reverse ← validateRuleMetadata idx step[6] step[7]
-    let sideTacs ← lowerProofs step[11]
+    let sideTacs ← lowerProofs step[11] boundLocals
     let localIndex : TSyntax `num := ⟨step[2]⟩
     let termStx ← `(explicitRwTerm| local_ref $localIndex:num)
     let term ← Impl.toTerm termStx.raw
     runNamedRule idx e (withExtra (parsePos step[10]) step[9]) term reverse sideTacs
+  | ``explicitRwOperationalBound => do
+    let ordinal := step[1].isNatLit?.getD 0
+    let some fvarId := boundLocals[ordinal]?
+      | stepError idx m!"bound local {ordinal} is outside {boundLocals.size} enclosing binder(s)."
+    let reverse ← validateRuleMetadata idx step[5] step[6]
+    let sideTacs ← lowerProofs step[10] boundLocals
+    runBoundRule idx ordinal e (withExtra (parsePos step[9]) step[8])
+      (mkFVar fvarId) reverse sideTacs
   | ``explicitRwOperationalBeta => do
     let pos := parsePos step[1]
     Impl.runDefeqStep idx e pos m!"`beta`" fun sub => do
@@ -509,7 +652,7 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
       stepError idx m!"a changed simp cache result must name its producing operations."
     let pos := parsePos step[4]
     rewriteAt e pos
-      (fun sub => runOperationsAt steps sub)
+      (fun sub => runOperationsAt steps sub boundLocals)
       (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwOperationalCongruence => do
     let decl : Ident := ⟨step[1]⟩
@@ -522,7 +665,8 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
       let argumentIndex := entry[1].isNatLit?.getD 0
       if indexedProofs.any (·.1 == argumentIndex) then
         stepError idx m!"congruence theorem `{decl.getId}` repeats argument {argumentIndex}."
-      indexedProofs := indexedProofs.push (argumentIndex, ← lowerProof entry[2])
+      indexedProofs := indexedProofs.push
+        (argumentIndex, ← lowerProof entry[2] boundLocals)
     indexedProofs := indexedProofs.qsort fun a b => a.1 < b.1
     runCongruenceRule idx e pos term indexedProofs
   | ``explicitRwOperationalAutoCongruence => do
@@ -549,7 +693,7 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
             | stepError idx m!"`auto_congr`: the selected application has no argument {argumentIndex}."
           unless kind == .fixed || kind == .eq do
             stepError idx m!"`auto_congr`: argument {argumentIndex} has generated congruence kind `{repr kind}`, which has no recursive operation program."
-          let replacement ← runOperationsAt childSteps args[argumentIndex]!
+          let replacement ← runOperationsAt childSteps args[argumentIndex]! boundLocals
           argsNew := argsNew.set! argumentIndex (← instantiateMVars replacement.newExpr)
           replacements := replacements.push (argumentIndex, replacement)
         let replacementAt? (argumentIndex : Nat) : Option Replacement :=
@@ -611,20 +755,22 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
       (fun sub => do
         let .forallE binderName binderType binderBody binderInfo := sub
           | stepError idx m!"`forall_congr` at position {Pos.render pos} requires a `∀`"
-        let domainReplacement ← runOperationsAt domainSteps binderType
+        let domainReplacement ← runOperationsAt domainSteps binderType boundLocals
         let newDomain ← instantiateMVars domainReplacement.newExpr
         match domainReplacement.proof? with
         | some domainEquality =>
-          withLocalDecl `__explicit_rw_v2_forall_bound binderInfo newDomain fun x => do
+          withLocalDecl `explicit_rw_v2_bound binderInfo newDomain fun x => do
             let castArg ← mkAppM ``Eq.mp #[← mkEqSymm domainEquality, x]
             let bodySeed := binderBody.instantiate1 castArg
             let bodyReplacement ← runOperationsAt bodySteps bodySeed
+              (#[x.fvarId!] ++ boundLocals)
             dependentForallTransport binderName binderInfo binderType binderBody
               domainReplacement (some x) (some bodyReplacement)
         | none =>
-          withLocalDecl `__explicit_rw_v2_forall_bound binderInfo newDomain fun x => do
+          withLocalDecl `explicit_rw_v2_bound binderInfo newDomain fun x => do
             let bodyReplacement ←
               runOperationsAt bodySteps (binderBody.instantiate1 x)
+                (#[x.fvarId!] ++ boundLocals)
             let bodyLambda ← mkLambdaFVars #[x] bodyReplacement.newExpr
             let .lam _ _ newBody _ := bodyLambda
               | stepError idx m!"`forall_congr` failed to abstract its body"
@@ -640,14 +786,15 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
   | k =>
     throwError "explicit_rw_v2: internal error: unexpected operation kind `{k}`"
 
-private partial def runOperationsAt (steps : Array Syntax) (e : Expr) : TacticM Replacement := do
+private partial def runOperationsAt (steps : Array Syntax) (e : Expr)
+    (boundLocals : Array FVarId := #[]) : TacticM Replacement := do
   let mut current := e
   let mut proof? : Option Expr := none
   for h : idx in [0 : steps.size] do
     let step := steps[idx]
     let replacement ←
       try
-        runOne idx current step
+        runOne idx current step boundLocals
       catch ex => do
         let msg ← ex.toMessageData.toString
         if msg.startsWith "explicit_rw_v2:" then

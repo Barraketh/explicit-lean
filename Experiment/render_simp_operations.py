@@ -48,19 +48,28 @@ def render_position(position: Any) -> str:
     return "at [" + ", ".join(str(index) for index in position) + "]"
 
 
-def render_rule_origin(origin: dict[str, Any], bound_names: tuple[str, ...] = ()) -> str:
+BoundNames = tuple[str | None, ...]
+
+
+def render_rule_origin(origin: dict[str, Any], bound_names: BoundNames = ()) -> str:
     if "decl" in origin:
         return f"rule {render_global_name(origin['decl'])}"
     if "local" in origin:
         return f"local local_ref {origin['local']['contextIndex']}"
     if "bound" in origin:
         ordinal = origin["bound"]["ordinal"]
-        try:
-            return f"local {bound_names[ordinal]}"
-        except (IndexError, TypeError):
-            raise UnsupportedOperation(
-                f"congruence-bound local {ordinal} is outside {len(bound_names)} binders"
-            ) from None
+        if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
+            raise UnsupportedOperation("congruence-bound local has no ordinal")
+        if bound_names:
+            try:
+                name = bound_names[ordinal]
+            except IndexError:
+                raise UnsupportedOperation(
+                    f"congruence-bound local {ordinal} is outside {len(bound_names)} binders"
+                ) from None
+            if name is not None:
+                return f"local {name}"
+        return f"bound {ordinal}"
     if "equation" in origin:
         equation = origin["equation"]
         return (
@@ -87,7 +96,7 @@ def render_rule_origin(origin: dict[str, Any], bound_names: tuple[str, ...] = ()
 
 
 def render_premise_terminal(
-    premise: dict[str, Any], bound_names: tuple[str, ...] = ()
+    premise: dict[str, Any], bound_names: BoundNames = ()
 ) -> str:
     terminal = premise["terminal"]
     if terminal == "dischargeRfl":
@@ -101,18 +110,24 @@ def render_premise_terminal(
         return f"assumption local_ref {index}"
     if isinstance(terminal, dict) and "boundAssumption" in terminal:
         ordinal = terminal["boundAssumption"]["ordinal"]
-        try:
-            return f"assumption {bound_names[ordinal]}"
-        except (IndexError, TypeError):
-            raise UnsupportedOperation(
-                f"congruence-bound assumption {ordinal} is outside {len(bound_names)} binders"
-            ) from None
+        if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
+            raise UnsupportedOperation("congruence-bound assumption has no ordinal")
+        if bound_names:
+            try:
+                name = bound_names[ordinal]
+            except IndexError:
+                raise UnsupportedOperation(
+                    f"congruence-bound assumption {ordinal} is outside {len(bound_names)} binders"
+                ) from None
+            if name is not None:
+                return f"assumption {name}"
+        return f"assumption bound {ordinal}"
     if terminal == "failed":
         raise UnsupportedOperation("committed rewrite contains a failed premise")
     raise UnsupportedOperation(f"unknown premise terminal {terminal!r}")
 
 
-def render_premise(premise: dict[str, Any], bound_names: tuple[str, ...] = ()) -> str:
+def render_premise(premise: dict[str, Any], bound_names: BoundNames = ()) -> str:
     proof = render_premise_terminal(premise, bound_names)
     events = premise.get("events")
     if not isinstance(events, list):
@@ -125,7 +140,7 @@ def render_premise(premise: dict[str, Any], bound_names: tuple[str, ...] = ()) -
 
 
 def render_rewrite(
-    payload: dict[str, Any], position: Any, bound_names: tuple[str, ...] = ()
+    payload: dict[str, Any], position: Any, bound_names: BoundNames = ()
 ) -> str:
     rule = payload["rule"]
     premises = ", ".join(
@@ -175,12 +190,14 @@ def render_reduction(payload: Any, position: Any) -> str:
     raise UnsupportedOperation(f"reduction {payload!r} has no exact source operation yet")
 
 
-def render_congruence(payload: dict[str, Any], position: Any) -> str:
+def render_congruence(
+    payload: dict[str, Any], position: Any, bound_names: BoundNames = ()
+) -> str:
     entries: list[tuple[int, str]] = []
     for child in payload["children"]:
         argument = child["argumentIndex"]
         count = child["binderCount"]
-        names = tuple(f"__explicit_rw_v2_bound_{i}" for i in range(count))
+        names = tuple(f"__explicit_rw_v2_bound_{i}" for i in range(count)) + bound_names
         events = child.get("events")
         if not isinstance(events, list):
             raise UnsupportedOperation("named congruence child has no operation stream")
@@ -192,7 +209,9 @@ def render_congruence(payload: dict[str, Any], position: Any) -> str:
         entries.append((argument, f"arg {argument} {proof}"))
     for indexed in payload["premises"]:
         argument = indexed["argumentIndex"]
-        entries.append((argument, f"arg {argument} {render_premise(indexed['premise'])}"))
+        entries.append(
+            (argument, f"arg {argument} {render_premise(indexed['premise'], bound_names)}")
+        )
     entries.sort(key=lambda entry: entry[0])
     if len({argument for argument, _ in entries}) != len(entries):
         raise UnsupportedOperation("named congruence has duplicate theorem argument programs")
@@ -202,7 +221,9 @@ def render_congruence(payload: dict[str, Any], position: Any) -> str:
     )
 
 
-def render_auto_congruence(payload: dict[str, Any], position: Any) -> str:
+def render_auto_congruence(
+    payload: dict[str, Any], position: Any, bound_names: BoundNames = ()
+) -> str:
     entries: list[str] = []
     seen: set[int] = set()
     for child in payload["children"]:
@@ -220,7 +241,7 @@ def render_auto_congruence(payload: dict[str, Any], position: Any) -> str:
                 "automatic congruence child has no operation stream"
             )
         entries.append(
-            f"arg {argument} [{', '.join(render_events(events))}]"
+            f"arg {argument} [{', '.join(render_events(events, bound_names))}]"
         )
     return (
         f"auto_congr {render_position(position)} with "
@@ -228,21 +249,22 @@ def render_auto_congruence(payload: dict[str, Any], position: Any) -> str:
     )
 
 
-def render_forall_congruence(payload: dict[str, Any], position: Any) -> str:
+def render_forall_congruence(
+    payload: dict[str, Any], position: Any, bound_names: BoundNames = ()
+) -> str:
     domain = payload.get("domain")
     body = payload.get("body")
     if not isinstance(domain, list) or not isinstance(body, list):
         raise UnsupportedOperation("forall congruence has no exact operation streams")
-    bound = ("__explicit_rw_v2_forall_bound",)
     return (
         f"forall_congr {render_position(position)} "
-        f"domain [{', '.join(render_events(domain))}] "
-        f"body [{', '.join(render_events(body, bound))}]"
+        f"domain [{', '.join(render_events(domain, bound_names))}] "
+        f"body [{', '.join(render_events(body, (None,) + bound_names))}]"
     )
 
 
 def render_events(
-    events: list[dict[str, Any]], bound_names: tuple[str, ...] = ()
+    events: list[dict[str, Any]], bound_names: BoundNames = ()
 ) -> list[str]:
     steps: list[str] = []
     for index, event in enumerate(events):
@@ -269,15 +291,19 @@ def render_events(
                     + render_position(event["position"])
                 )
             elif "congruence" in action:
-                steps.append(render_congruence(action["congruence"], event["position"]))
+                steps.append(
+                    render_congruence(action["congruence"], event["position"], bound_names)
+                )
             elif "autoCongruence" in action:
                 steps.append(
-                    render_auto_congruence(action["autoCongruence"], event["position"])
+                    render_auto_congruence(
+                        action["autoCongruence"], event["position"], bound_names
+                    )
                 )
             elif "forallCongruence" in action:
                 steps.append(
                     render_forall_congruence(
-                        action["forallCongruence"], event["position"]
+                        action["forallCongruence"], event["position"], bound_names
                     )
                 )
             else:
