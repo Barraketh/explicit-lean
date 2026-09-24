@@ -309,7 +309,10 @@ def _declaration_assignment_before_body(source: str, theorem_head_end: int,
     closing_to_opening = {")": "(", "]": "[", "}": "{", "⟩": "⟨"}
     assignments: list[int] = []
     index = theorem_head_end
-    while index < len(masked):
+    # Only the declaration prefix can authenticate the body boundary. Once the
+    # exact stored suffix begins, later `:=` tokens belong to the proof (for
+    # example a tactic `let`) and are irrelevant to the declaration separator.
+    while index < body_start:
         if masked[index] == "«":
             quoted_end = masked.find("»", index + 1)
             if quoted_end < 0:
@@ -335,8 +338,6 @@ def _declaration_assignment_before_body(source: str, theorem_head_end: int,
     if not preceding_assignments:
         return None
     assignment = preceding_assignments[-1]
-    if any(position > assignment for position in assignments):
-        return None
     if masked[assignment + 2:body_start].strip():
         return None
     return assignment
@@ -352,6 +353,9 @@ def _mask_body(source: str, command: dict[str, Any]) -> str | None:
     body = command["body"]
     if not body or not segment.endswith(body):
         return None
+    strong_body_start = re.match(
+        r"\s*(?:by|rfl|calc|fun|match|show|nomatch)\b", body
+    ) is not None
     at = len(segment) - len(body)
     # Attribute arguments and named arguments can contain their own `:=`.
     # Only mask when the exact body suffix follows a top-level declaration
@@ -362,7 +366,68 @@ def _mask_body(source: str, command: dict[str, Any]) -> str | None:
     head = re.search(r"\b(?:theorem|lemma)\b", masked_prefix)
     if head is None or _declaration_assignment_before_body(segment, head.end(), at) is None:
         return None
+    if not strong_body_start:
+        # A simple term body is authenticated only when no later top-level
+        # assignment exists. Such a later assignment is the real declaration
+        # separator when a historical row was split at `let x := ...` in the
+        # theorem type. Assignments inside delimiters (for example structure
+        # fields) are part of the term and remain valid.
+        masked_body = worker.S.mask_comments_and_strings(segment[at:])
+        openers: list[str] = []
+        closing_to_opening = {")": "(", "]": "[", "}": "{", "⟩": "⟨"}
+        index = 0
+        while index < len(masked_body):
+            if not openers and masked_body.startswith(":=", index):
+                return None
+            char = masked_body[index]
+            if char in "([{⟨":
+                openers.append(char)
+            elif char in ")]}⟩":
+                if not openers or openers[-1] != closing_to_opening[char]:
+                    return None
+                openers.pop()
+            index += 1
+        if openers:
+            return None
     return segment[:at] + "by sorry" + segment[at + len(body):]
+
+
+def _recover_strong_theorem_body(command_source: str) -> str | None:
+    """Recover an exact proof suffix after a top-level declaration separator.
+
+    This covers historical rows split at an earlier ``:=`` in a theorem type
+    or attribute. The accepted suffix must start with a closed, unmistakable
+    Lean proof introducer; arbitrary term bodies remain parser-owned.
+    """
+    masked = worker.S.mask_comments_and_strings(command_source)
+    head_masked = worker.S.mask_attributes(masked)
+    head = re.search(r"\b(?:theorem|lemma)\b", head_masked)
+    if head is None:
+        return None
+    openers: list[str] = []
+    closing_to_opening = {")": "(", "]": "[", "}": "{", "⟩": "⟨"}
+    index = head.end()
+    while index < len(masked):
+        if not openers and masked.startswith(":=", index):
+            body_start = index + 2
+            while body_start < len(masked) and masked[body_start].isspace():
+                body_start += 1
+            if re.match(
+                r"(?:by|rfl|calc|fun|match|show|nomatch)\b",
+                masked[body_start:],
+            ):
+                return command_source[body_start:]
+            index += 2
+            continue
+        char = masked[index]
+        if char in "([{⟨":
+            openers.append(char)
+        elif char in ")]}⟩":
+            if not openers or openers[-1] != closing_to_opening[char]:
+                return None
+            openers.pop()
+        index += 1
+    return None
 
 
 def _space_explicit_rw_empty_path_closers(source: str) -> str:

@@ -466,6 +466,8 @@ syntax (name := explicitRwOperationalProj)
   "proj " explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalZeta)
   "zeta " explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalZetaLocal)
+  "zeta_local " "local_ref " num ident explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalUnfold)
   "unfold " ident explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalSimproc)

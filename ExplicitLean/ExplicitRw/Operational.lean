@@ -249,7 +249,6 @@ private def runElaboratedSourceRule (idx : Nat) (e : Expr) (pos : Pos) (term : T
       if replacement.hasSorry || replacement.hasSyntheticSorry ||
           equality.hasSorry || equality.hasSyntheticSorry then
         stepError idx m!"source rule `{term}` elaborated with an invalid recovery term."
-      Impl.checkNoLevelMVars idx m!"`{term}`" #[replacement, equality]
       -- Every synthetic created by the source operand has been forced and all
       -- returned metavariables have been closed above. Do not let its resolved
       -- elaboration records escape a binder opened only while navigating this
@@ -338,6 +337,21 @@ private def runDeclarationRule (idx : Nat) (e : Expr) (pos : Pos) (name : Name)
       return Replacement.eq rhs equality)
     (fun pfx child sub => badPosError idx pos pfx child sub)
 
+private def runDeclarationRuleWithFallback (idx : Nat) (e : Expr) (pos : Pos)
+    (name : Name) (term : Term) (sideTacs : Array Syntax) : TacticM Replacement := do
+  let saved ← Tactic.saveState
+  try
+    runDeclarationRule idx e pos name term sideTacs
+  catch ex =>
+    let message ← ex.toMessageData.toString
+    saved.restore
+    unless message.contains "retains an unassigned universe level" do
+      throw ex
+    -- This is exactly Lean's ordinary `rw` elaboration path. Keep its
+    -- metavariable state live so the enclosing declaration elaborator can
+    -- resolve universe levels in the same way it does for a handwritten `rw`.
+    runElaboratedSourceRule idx e pos term false sideTacs
+
 private def runCongruenceRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
     (indexedProofs : Array (Nat × Syntax)) : TacticM Replacement := do
   rewriteAt e pos
@@ -387,7 +401,8 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
     if reverse then
       runNamedRule idx e (withExtra (parsePos step[9]) step[8]) term reverse sideTacs
     else
-      runDeclarationRule idx e (withExtra (parsePos step[9]) step[8]) declaration term sideTacs
+      runDeclarationRuleWithFallback idx e (withExtra (parsePos step[9]) step[8])
+        declaration term sideTacs
   | ``explicitRwOperationalSource => do
     let reverse ← validateRuleMetadata idx step[5] step[6]
     let sideTacs ← lowerProofs step[10]
@@ -450,6 +465,15 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
   | ``explicitRwOperationalZeta => do
     let pos : TSyntax ``ExplicitLean.ExplicitRw.explicitRwPos := ⟨step[1]⟩
     let legacyStep ← `(explicitRwStep| zeta $pos)
+    Impl.runStep idx e legacyStep.raw
+  | ``explicitRwOperationalZetaLocal => do
+    let reason := step[3].getId.toString
+    unless reason == "zetaDelta" || reason == "requested" ||
+        reason == "implementationDetail" do
+      stepError idx m!"unknown local-definition reduction reason `{reason}`."
+    let localIndex : TSyntax `num := ⟨step[2]⟩
+    let pos : TSyntax ``ExplicitLean.ExplicitRw.explicitRwPos := ⟨step[4]⟩
+    let legacyStep ← `(explicitRwStep| zeta_local local_ref $localIndex:num $pos)
     Impl.runStep idx e legacyStep.raw
   | ``explicitRwOperationalUnfold => do
     let c ← realizeGlobalConstNoOverloadWithInfo step[1]

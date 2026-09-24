@@ -2737,7 +2737,10 @@ def mainCoreOperationalRecording (e : Expr) (ctx : Context) (s : State := {})
   recordSimpUses state
   let recording ← finishRecording runtime result.expr
   let recorderState ← runtime.state.get
-  let terminal := if result.expr.isConstOf ``True then
+  -- `simp` can leave source annotations around the proposition `True`.
+  -- Use the same annotation-insensitive predicate as the goal recorder rather
+  -- than testing only for a bare constant node.
+  let terminal := if result.expr.isTrue then
     Operations.Terminal.trueIntro
   else
     Operations.Terminal.open

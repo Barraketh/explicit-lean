@@ -207,6 +207,19 @@ class RenderOperationsTest(unittest.TestCase):
                 }
             )
 
+    def test_local_definition_reduction_is_explicit(self) -> None:
+        self.assertEqual(
+            render_trace({
+                "events": [{
+                    "position": [0, 1],
+                    "action": {"reduce": {"reduction": {
+                        "localDef": {"contextIndex": 3, "reason": "requested"}
+                    }}},
+                }]
+            }),
+            "explicit_rw_v2 [zeta_local local_ref 3 requested at [0, 1]]",
+        )
+
     def test_unknown_position_is_not_searched(self) -> None:
         event = rewrite_event([])
         event["position"] = None

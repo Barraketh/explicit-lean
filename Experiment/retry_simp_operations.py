@@ -253,6 +253,13 @@ def _declaration_commands(db: sqlite3.Connection, module: str, source: str,
     # arguments.  Reuse a stored body only when the original exact masker can
     # authenticate it.  Otherwise ask Lean's parser for the theorem/lemma term
     # range and bind it back to the source-command DB ranges.
+    for command in result:
+        if (isolated._is_theorem_or_lemma(command)
+                and isolated._mask_body(source, command) is None):
+            recovered = isolated._recover_strong_theorem_body(command["command_source"])
+            if recovered is not None:
+                command["body"] = recovered
+
     if any(isolated._is_theorem_or_lemma(command)
            and isolated._mask_body(source, command) is None
            for command in result):

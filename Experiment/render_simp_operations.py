@@ -146,6 +146,17 @@ def render_reduction(payload: Any, position: Any) -> str:
             return f"proj {at}"
         if "delta" in payload:
             return f"unfold {render_name(payload['delta']['name'])} {at}"
+        if "localDef" in payload:
+            local_def = payload["localDef"]
+            index = local_def.get("contextIndex")
+            reason = local_def.get("reason")
+            if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+                raise UnsupportedOperation("local-definition reduction has no context index")
+            if reason not in ("zetaDelta", "requested", "implementationDetail"):
+                raise UnsupportedOperation(
+                    f"local-definition reduction has unknown reason {reason!r}"
+                )
+            return f"zeta_local local_ref {index} {reason} {at}"
     raise UnsupportedOperation(f"reduction {payload!r} has no exact source operation yet")
 
 

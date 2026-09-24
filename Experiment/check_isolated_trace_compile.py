@@ -124,6 +124,22 @@ class IsolatedTraceCompileTests(unittest.TestCase):
         self.assertEqual(isolated._mask_body(source, command),
                          source.replace("by trivial", "by sorry"))
 
+    def test_proof_local_assignment_does_not_invalidate_exact_body_suffix(self) -> None:
+        source = "lemma foo : True := by\n  let h := True.intro\n  exact h"
+        body = source[source.index("by\n"):]
+        command = {"kind": "lemma", "body": body, "start": 0,
+                   "end": len(source), "command_source": source}
+        self.assertEqual(isolated._mask_body(source, command),
+                         "lemma foo : True := by sorry")
+
+    def test_recovers_body_after_top_level_let_in_theorem_type(self) -> None:
+        source = "theorem foo : let x := Nat; x = x := by rfl"
+        self.assertEqual(isolated._recover_strong_theorem_body(source), "by rfl")
+
+    def test_recovers_body_after_attribute_assignment(self) -> None:
+        source = '@[deprecated foo (since := "2025-01-01")] theorem bar : True := rfl'
+        self.assertEqual(isolated._recover_strong_theorem_body(source), "rfl")
+
     def test_declaration_separator_scan_refuses_mismatched_delimiters(self) -> None:
         source = "lemma foo : (True] := by trivial"
         command = {"kind": "lemma", "body": "by trivial", "start": 0,

@@ -5,6 +5,14 @@ namespace ExplicitLean.SimpTrace.T79OperationalReplay
 /- Importing the v2 syntax must not reserve Lean's ordinary `rfl` term. -/
 private theorem ordinaryTermRfl : True = True := rfl
 
+/- A requested local-definition reduction names the exact let declaration. -/
+example : True := by
+  let n : Nat := 1
+  have h : n = 1 := by
+    explicit_rw_v2 [zeta_local local_ref 1 requested at [0, 1]]
+    rfl
+  exact True.intro
+
 /- A declaration operand, variant/phase/direction metadata, exact raw child path,
    and empty ordered premise list are all visible in the generated source. -/
 example (n : Nat) : n + 0 = n := by
