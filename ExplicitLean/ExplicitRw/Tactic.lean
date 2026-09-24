@@ -474,9 +474,15 @@ syntax (name := explicitRwOperationalProofNested)
   "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
   (explicitRwOperationalClose)? : explicitRwOperationalProof
 
+declare_syntax_cat explicitRwOperationalLocation
+syntax (name := explicitRwOperationalLocationIdent)
+  " at " ident : explicitRwOperationalLocation
+syntax (name := explicitRwOperationalLocationRef)
+  &" at " &"local_ref " num : explicitRwOperationalLocation
+
 syntax (name := explicitRwOperational)
   "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
-  (Lean.Parser.Tactic.location)? (explicitRwOperationalClose)? : tactic
+  (explicitRwOperationalLocation)? (explicitRwOperationalClose)? : tactic
 
 /--
 A **side proof**: the closed, recursive grammar for discharging a side condition

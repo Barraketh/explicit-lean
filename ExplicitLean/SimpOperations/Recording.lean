@@ -42,19 +42,48 @@ private def observe (simpStx : Syntax) (target : Expr) :
     initialMeta.restore
     setGoals initialGoals
 
+private def observeLocations (simpStx : Syntax) :
+    TacticM Lean.Meta.Simp.Operations.TacticTrace := do
+  let { ctx, simprocs, dischargeWrapper, .. } ←
+    mkSimpContext simpStx (eraseLocal := false)
+  let (fvarIds, simplifyTarget) ←
+    SimpEngine.Recording.locationSubjects (expandOptLocation simpStx[5])
+  let initialMeta ← Simp.Engine.saveFullMetaState
+  let initialGoals ← getGoals
+  let mainGoal := initialGoals.head!
+  try
+    dischargeWrapper.with fun discharge? => do
+      let methods := match discharge? with
+        | none => Simp.Engine.mkDefaultMethodsCore simprocs
+        | some discharge => Simp.Engine.mkMethods simprocs discharge
+            (wellBehavedDischarge := false)
+      let recorded ← SimpEngine.Recording.recordGoal
+        mainGoal ctx methods simplifyTarget fvarIds
+      return { subjects := recorded.operations }
+  finally
+    initialMeta.restore
+    setGoals initialGoals
+
+private def observeAndLog (simpStx : Syntax) (site? : Option Nat := none) : TacticM Unit := do
+  let payload ←
+    if simpStx[5].isNone then
+      let target ← instantiateMVars (← (← getMainGoal).getType)
+      Lean.toJson <$> observe simpStx target
+    else
+      Lean.toJson <$> observeLocations simpStx
+  match site? with
+  | none => logInfo m!"SIMP_OPERATIONS {payload.compress}"
+  | some site => logInfo m!"SIMP_OPERATIONS_SITE {site} {payload.compress}"
+
 elab_rules : tactic
   | `(tactic| simp_operations_observe $args:simpEngineRecordingArgs) => withMainContext do
-      let target ← instantiateMVars (← (← getMainGoal).getType)
       let inner := mkNode ``Lean.Parser.Tactic.simp #[
         mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
-      let trace ← observe inner target
-      logInfo m!"SIMP_OPERATIONS {Lean.toJson trace |>.compress}"
+      observeAndLog inner
   | `(tactic| simp_operations_observe_at $site:num $args:simpEngineRecordingArgs) =>
       withMainContext do
-        let target ← instantiateMVars (← (← getMainGoal).getType)
         let inner := mkNode ``Lean.Parser.Tactic.simp #[
           mkAtom "simp", args.raw[0], args.raw[1], args.raw[2], args.raw[3], args.raw[4]]
-        let trace ← observe inner target
-        logInfo m!"SIMP_OPERATIONS_SITE {site.getNat} {Lean.toJson trace |>.compress}"
+        observeAndLog inner (some site.getNat)
 
 end ExplicitLean.SimpOperations.Recording

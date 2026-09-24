@@ -183,7 +183,9 @@ def _parse_observations(output: str, expected_sites: set[int]) -> dict[int, list
             trace = json.loads(json_text)
         except json.JSONDecodeError as exc:
             raise RetryError(f"operational recorder emitted malformed trace for site {site}: {exc}") from exc
-        if not isinstance(trace, dict) or not isinstance(trace.get("events"), list):
+        if not isinstance(trace, dict) or not (
+                isinstance(trace.get("events"), list)
+                or isinstance(trace.get("subjects"), list)):
             raise RetryError(f"operational recorder emitted an invalid trace for site {site}")
         found[site].append(trace)
     return dict(found)
@@ -409,13 +411,20 @@ def _split_v2_source(rendered: str) -> tuple[list[str], str]:
     return steps, tail
 
 
-def _render_lines(trace: dict[str, Any], indent: str) -> list[str]:
-    rendered = operation_renderer.render_trace(trace)
-    steps, tail = _split_v2_source(rendered)
-    lines = worker.S.wrap_step_list(
-        "explicit_rw_v2 [", steps, "]" + tail,
-        indent, indent + "  ",
-    )
+def _render_lines(trace: dict[str, Any]) -> list[str]:
+    """Render lines relative to their eventual source indentation.
+
+    `_replacement_lines` owns the source-site indentation.  Keeping this
+    function relative avoids applying that indentation twice when a wrapped
+    operation list spans multiple lines.
+    """
+    lines: list[str] = []
+    for rendered in operation_renderer.render_observation(trace):
+        steps, tail = _split_v2_source(rendered)
+        lines.extend(worker.S.wrap_step_list(
+            "explicit_rw_v2 [", steps, "]" + tail,
+            "", "  ",
+        ))
     return lines
 
 
@@ -457,7 +466,7 @@ def render_command(source: str, command: dict[str, Any],
             original_site, source, command_start, len(local_sites)
         )
         try:
-            rendered = _render_lines(trace, local_site.line_indent or "")
+            rendered = _render_lines(trace)
         except operation_renderer.UnsupportedOperation as exc:
             return None, f"site {trace_site.siteOrdinal}: unsupported operation: {exc}"
         lines, is_midline = _replacement_lines(
@@ -692,12 +701,6 @@ def _process_module(db: sqlite3.Connection, module: str, scratch: pathlib.Path,
                       if any(pair[0].siteOrdinal == site.siteOrdinal for pair in pairs)), None)
         if owner is None or owner in row_failures:
             continue
-        if _has_top_level_location(site.callText):
-            row_failures[owner] = (
-                "record_failed",
-                f"hypothesis_location_not_observed: source site {site.siteOrdinal} has a trailing `at` location",
-            )
-            continue
         recordable.append(site)
 
     traces: dict[int, list[dict[str, Any]]] = {}
@@ -752,8 +755,8 @@ def _process_module(db: sqlite3.Connection, module: str, scratch: pathlib.Path,
             )
             continue
         try:
-            rendered = operation_renderer.render_trace(observations[0])
-            _render_lines(observations[0], "")
+            rendered = "\n".join(operation_renderer.render_observation(observations[0]))
+            _render_lines(observations[0])
             site_outcomes[site.siteOrdinal] = ("success", rendered)
         except operation_renderer.UnsupportedOperation as exc:
             site_outcomes[site.siteOrdinal] = (

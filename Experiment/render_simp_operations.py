@@ -145,15 +145,44 @@ def render_events(events: list[dict[str, Any]]) -> list[str]:
     return steps
 
 
-def render_trace(trace: dict[str, Any]) -> str:
+def render_trace(trace: dict[str, Any], location: str | None = None) -> str:
     steps = render_events(trace["events"])
     source = "explicit_rw_v2 [" + ", ".join(steps) + "]"
+    if location is not None:
+        source += " " + location
     terminal = trace.get("terminal", "open")
     if terminal == "trueIntro":
         source += " then true_intro"
     elif terminal != "open":
         raise UnsupportedOperation(f"unknown terminal operation {terminal!r}")
     return source
+
+
+def render_observation(observation: dict[str, Any]) -> list[str]:
+    if isinstance(observation.get("events"), list):
+        return [render_trace(observation)]
+    subjects = observation.get("subjects")
+    if not isinstance(subjects, list):
+        raise UnsupportedOperation("operational observation has neither events nor subjects")
+    if len(subjects) != 1:
+        raise UnsupportedOperation(
+            "multiple simp locations require simultaneous local-context replay"
+        )
+    subject = subjects[0]
+    trace = subject.get("trace")
+    if not isinstance(trace, dict) or not isinstance(trace.get("events"), list):
+        raise UnsupportedOperation("located simp subject has no operational trace")
+    identity = subject.get("subject")
+    if identity == "target":
+        location = None
+    elif isinstance(identity, dict) and isinstance(identity.get("local"), dict):
+        index = identity["local"].get("contextIndex")
+        if not isinstance(index, int):
+            raise UnsupportedOperation("located simp local has no exact context index")
+        location = f"at local_ref {index}"
+    else:
+        raise UnsupportedOperation(f"unknown simp subject {identity!r}")
+    return [render_trace(trace, location)]
 
 
 def load_trace(path: Path | None) -> dict[str, Any]:

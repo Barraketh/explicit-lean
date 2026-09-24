@@ -73,7 +73,8 @@ def localRef (localDecl : LocalDecl) : MetaM Simp.Engine.LocalRef := do
 
 def recordExpression (expression : Expr) (ctx : Simp.Context)
     (methods : Simp.Engine.Methods) (stats : Simp.Stats) :
-    MetaM (Simp.Result × Simp.Stats × Simp.Engine.Recording) := do
+    MetaM (Simp.Result × Simp.Stats × Simp.Engine.Recording ×
+      Simp.Operations.Trace) := do
   let initialMeta ← Simp.Engine.saveFullMetaState
   let referenceAction : MetaM ReferenceRun := do
     let (reference, referenceState) ←
@@ -92,22 +93,23 @@ def recordExpression (expression : Expr) (ctx : Simp.Context)
     initialMeta.restore
     throw error
   initialMeta.restore
-  let recordingAction : MetaM Simp.Engine.Recording := do
-    let (recorded, recordedState, recording) ←
-      Simp.Engine.mainCoreRecording expression ctx { stats with }
+  let recordingAction : MetaM (Simp.Engine.Recording × Simp.Operations.Trace) := do
+    let (recorded, recordedState, recording, operations) ←
+      Simp.Engine.mainCoreOperationalRecording expression ctx { stats with }
         (methods := methods)
     let recordedSummary ← differentialSummary recorded recordedState
     assertRecordedEquivalent referenceRun.summary recordedSummary
-    return recording
-  let recording ← try
+    return (recording, operations)
+  let (recording, operations) ← try
     recordingAction
   finally
     referenceRun.finalMetaState.restore
-  return (referenceRun.result, { referenceRun.state with }, recording)
+  return (referenceRun.result, { referenceRun.state with }, recording, operations)
 
 structure RecordedGoal where
   result? : Option (Array FVarId × MVarId)
   subjects : Array Simp.Engine.SubjectProgram
+  operations : Array Simp.Operations.SubjectTrace
   branches : Array String
   deriving Inhabited
 
@@ -122,6 +124,7 @@ def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
   let mut replaced := #[]
   let mut stats : Simp.Stats := {}
   let mut subjects := #[]
+  let mut operations := #[]
   let mut branches := #[]
   for fvarId in fvarIdsToSimp do
     let localDecl ← fvarId.getDecl
@@ -129,7 +132,8 @@ def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
     let type ← instantiateMVars localDecl.type
     let subjectCtx := ctx.setSimpTheorems <|
       ctx.simpTheorems.eraseTheorem (.fvar localDecl.fvarId)
-    let (result, statsNew, recording) ← recordExpression type subjectCtx methods stats
+    let (result, statsNew, recording, trace) ←
+      recordExpression type subjectCtx methods stats
     stats := statsNew
     branches := branches ++ recording.coveredBranches
     let terminal :=
@@ -147,24 +151,29 @@ def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
       deferred := recording.deferred
       simprocs := recording.simprocs
     }
+    operations := operations.push {
+      subject := .local subjectRef.contextIndex
+      trace
+    }
     match result.proof? with
     | some _ =>
         match (← applySimpResult mvarIdNew (mkFVar fvarId) type result) with
-        | none => return { result? := none, subjects, branches }
+        | none => return { result? := none, subjects, operations, branches }
         | some (value, type) =>
             toAssert := toAssert.push {
               userName := localDecl.userName, type := type, value := value }
     | none =>
         if result.expr.isFalse then
           mvarIdNew.assign (← mkFalseElim (← mvarIdNew.getType) (mkFVar fvarId))
-          return { result? := none, subjects, branches }
+          return { result? := none, subjects, operations, branches }
         mvarIdNew ← mvarIdNew.replaceLocalDeclDefEq fvarId result.expr
         replaced := replaced.push fvarId
   if simplifyTarget then
-    let (target, result, statsNew, recording) ← mvarIdNew.withContext do
+    let (target, result, statsNew, recording, trace) ← mvarIdNew.withContext do
       let target ← instantiateMVars (← mvarIdNew.getType)
-      let (result, statsNew, recording) ← recordExpression target ctx methods stats
-      return (target, result, statsNew, recording)
+      let (result, statsNew, recording, trace) ←
+        recordExpression target ctx methods stats
+      return (target, result, statsNew, recording, trace)
     stats := statsNew
     branches := branches ++ recording.coveredBranches
     let terminal := if result.expr.isTrue then
@@ -179,12 +188,13 @@ def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
       deferred := recording.deferred
       simprocs := recording.simprocs
     }
+    operations := operations.push { subject := .target, trace }
     if result.expr.isTrue then
       mvarIdNew.withContext do
         match result.proof? with
         | some proof => mvarIdNew.assign (← mkOfEqTrue proof)
         | none => mvarIdNew.assign (mkConst ``True.intro)
-      return { result? := none, subjects, branches }
+      return { result? := none, subjects, operations, branches }
     let next ← mvarIdNew.withContext do
       applySimpResultToTarget mvarIdNew target result
     mvarIdNew := next
@@ -194,7 +204,7 @@ def recordGoal (mvarId : MVarId) (ctx : Simp.Context)
   mvarIdNew ← mvarIdNew.tryClearMany toClear
   if ctx.config.failIfUnchanged && mvarId == mvarIdNew then
     throwError "`simp` made no progress"
-  return { result? := some (fvarIdsNew, mvarIdNew), subjects, branches }
+  return { result? := some (fvarIdsNew, mvarIdNew), subjects, operations, branches }
 
 def locationSubjects (location : Location) : TacticM (Array FVarId × Bool) := do
   match location with
@@ -297,7 +307,7 @@ private def recordObservation (simpStx : Syntax) (target : Expr) : TacticM Unit 
         | none => Simp.Engine.mkDefaultMethodsCore simprocs
         | some discharge => Simp.Engine.mkMethods simprocs discharge
             (wellBehavedDischarge := false)
-      let (_, _, recording) ← recordExpression target ctx methods {}
+      let (_, _, recording, _) ← recordExpression target ctx methods {}
       return recording
   finally
     initialMeta.restore

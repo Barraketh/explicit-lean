@@ -297,14 +297,15 @@ private def runOperations (steps : Array Syntax) (target : Option FVarId) : Tact
 
 private def resolveTarget (locStx : Syntax) : TacticM (Option FVarId) := do
   if locStx.isNone then return none
-  match expandLocation locStx[0] with
-  | .targets hyps goalToo =>
-    if goalToo || hyps.size != 1 then
-      throwError "explicit_rw_v2: an operation list applies to exactly one location: \
-        either the goal or `at h` for one hypothesis."
-    return some (← getFVarId hyps[0]!)
-  | .wildcard =>
-    throwError "explicit_rw_v2: `at *` is not supported; write one operation list per location."
+  let loc := locStx[0]
+  match loc.getKind with
+  | ``explicitRwOperationalLocationIdent =>
+    return some (← getFVarId loc[1])
+  | ``explicitRwOperationalLocationRef =>
+    let index ← Impl.checkedHandle loc[2] "location local_ref index"
+    return some (← Impl.indexedLocalDecl index).fvarId
+  | kind =>
+    throwError "explicit_rw_v2: internal error: unknown location `{kind}`."
 
 private def runTerminal (stx : Syntax) : TacticM Unit := do
   let close := stx[0]

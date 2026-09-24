@@ -113,7 +113,7 @@ def check_closed_boundaries() -> None:
         }],
         "terminal": "trueIntro",
     }
-    long_lines = retry._render_lines(long_trace, "")
+    long_lines = retry._render_lines(long_trace)
     assert any(len(line) > retry.worker.S.MAX_LINE for line in long_lines), long_lines
 
     recorder_source = (

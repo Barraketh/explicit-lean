@@ -140,6 +140,11 @@ example (n : Nat) (h : n + 0 = n) : n = n := by
   explicit_rw_v2 [rule Nat.add_zero variant 0 phase pre fwd extra 0 at [0, 1] with []] at h
   exact h
 
+example (n : Nat) (h : n + 0 = n) : n = n := by
+  explicit_rw_v2 [rule Nat.add_zero variant 0 phase pre fwd extra 0 at [0, 1] with []]
+    at local_ref 2
+  exact h
+
 /- The selected node does not match, although matching redexes exist elsewhere.
    The operation fails at the recorded path instead of searching the goal. -/
 /-- error: explicit_rw_v2: step 1: lemma `Nat.add_zero` does not match the subterm at position [0, 0] -/

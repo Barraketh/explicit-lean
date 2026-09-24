@@ -93,4 +93,21 @@ structure Trace where
 
 instance : Inhabited Trace := ⟨{}⟩
 
+/-- The exact proof-state subject simplified by one operational trace. -/
+inductive Subject where
+  | target
+  | local (contextIndex : Nat)
+  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/-- One subject of a location-aware `simp at ...` invocation. -/
+structure SubjectTrace where
+  subject : Subject
+  trace : Trace
+  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+
+/-- Ordered subject traces for one source `simp` invocation. -/
+structure TacticTrace where
+  subjects : Array SubjectTrace := #[]
+  deriving Inhabited, Repr, BEq, Lean.ToJson, Lean.FromJson
+
 end Lean.Meta.Simp.Operations

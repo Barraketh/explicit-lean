@@ -71,4 +71,8 @@ example (n : Nat) : (have x := n + 0; x) = n := by
   simp_operations_observe (config := { zeta := false, zetaUnused := false }) only [Nat.add_zero]
   exact Nat.add_zero n
 
+example (n : Nat) (h : n + 0 = n) : True := by
+  simp_operations_observe only [Nat.add_zero] at h
+  trivial
+
 end ExplicitLean.SimpTrace.T79OperationalRecording

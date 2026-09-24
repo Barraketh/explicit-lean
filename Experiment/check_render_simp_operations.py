@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from render_simp_operations import UnsupportedOperation, render_trace
+from render_simp_operations import UnsupportedOperation, render_observation, render_trace
 
 
 def name(*parts: str) -> dict[str, object]:
@@ -63,6 +63,28 @@ class RenderOperationsTest(unittest.TestCase):
             }
         ]
         self.assertIn("with [assumption local_ref 4]", render_trace({"events": [event]}))
+
+    def test_single_hypothesis_location_uses_exact_context_identity(self) -> None:
+        observation = {
+            "subjects": [{
+                "subject": {"local": {"contextIndex": 4}},
+                "trace": {"events": [rewrite_event([0, 1])]},
+            }]
+        }
+        self.assertEqual(
+            render_observation(observation),
+            ["explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+             "at [0, 1] with []] at local_ref 4"],
+        )
+
+    def test_multiple_locations_remain_a_structured_residual(self) -> None:
+        with self.assertRaisesRegex(UnsupportedOperation, "simultaneous"):
+            render_observation({
+                "subjects": [
+                    {"subject": "target", "trace": {"events": []}},
+                    {"subject": "target", "trace": {"events": []}},
+                ]
+            })
 
     def test_nested_premise_operations_are_recursive(self) -> None:
         event = rewrite_event([])
