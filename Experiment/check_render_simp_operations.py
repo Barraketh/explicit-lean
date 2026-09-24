@@ -307,7 +307,7 @@ class RenderOperationsTest(unittest.TestCase):
         self.assertEqual(
             render_trace(trace),
             "explicit_rw_v2 [cached [rule _root_.Nat.add_zero variant 0 phase post fwd "
-            "extra 0 at [] with []] at [0, 1]]",
+            "extra 0 at [] with [] ] at [0, 1]]",
         )
 
     def test_named_congruence_indexes_its_recursive_child(self) -> None:

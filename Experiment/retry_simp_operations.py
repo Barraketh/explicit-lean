@@ -242,6 +242,13 @@ def _parse_observations(output: str, expected_sites: set[int]) -> dict[int, list
     return dict(found)
 
 
+def _is_direct_repeated_child(kind: str, source: str, call_text: str) -> bool:
+    child = source.strip()
+    if child == call_text.strip():
+        return True
+    return kind == "Lean.cdot" and child.removeprefix("·").strip() == call_text.strip()
+
+
 def _direct_repeated_sequence_parents(
         module: str, source_path: pathlib.Path, source: str,
         sites: list[TI.Site]) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
@@ -304,6 +311,7 @@ def _direct_repeated_sequence_parents(
                 if not isinstance(children, list) or len(children) < 2:
                     continue
                 child_sources: list[str] = []
+                child_kinds: list[str] = []
                 containing_index: int | None = None
                 for index, child in enumerate(children):
                     child_start, child_end = child.get("startChar"), child.get("endChar")
@@ -312,6 +320,7 @@ def _direct_repeated_sequence_parents(
                         break
                     child_source = source[child_start:child_end]
                     child_sources.append(child_source)
+                    child_kinds.append(str(child.get("kind", "")))
                     if child_start <= site.startChar and child_end >= site.endChar:
                         containing_index = index
                 start, end = node.get("startChar"), node.get("endChar")
@@ -323,8 +332,10 @@ def _direct_repeated_sequence_parents(
                     "end": end,
                     "children": child_sources,
                     "target": containing_index,
-                    "direct": (
-                        child_sources[containing_index].strip() == site.callText.strip()
+                    "direct": _is_direct_repeated_child(
+                        child_kinds[containing_index],
+                        child_sources[containing_index],
+                        site.callText,
                     ),
                 })
             if chain and chain[-1]["direct"]:
@@ -611,7 +622,9 @@ def _replacement_lines(site: worker.S.Site, source_call: str,
     comments = ["(-- Original simp:"] + [
         indent + "  -- " + line for line in source_call.splitlines()
     ]
-    body = [indent + "  " + line for line in rendered]
+    # Inside a parenthesized tactic/term, Lean can lex adjacent generated list
+    # closers as its distinct `]]` token instead of two DSL delimiters.
+    body = [indent + "  " + line.replace("]]", "] ]") for line in rendered]
     return comments + body + [indent + ")"], True
 
 
@@ -669,6 +682,9 @@ def render_command(source: str, command: dict[str, Any],
                 goal_lines = operation_renderer.render_repeated_goal_traces(observations)
             except operation_renderer.UnsupportedOperation as exc:
                 return None, f"site {trace_site.siteOrdinal}: unsupported operation: {exc}"
+            # Each goal program is nested inside the goals list. Keep its
+            # closing delimiter lexically separate from the enclosing list.
+            goal_lines = [line.replace("]]", "] ]") for line in goal_lines]
             line_start = command_text.rfind("\n", 0, start) + 1
             line_prefix = command_text[line_start:start]
             line_indent = line_prefix[:len(line_prefix) - len(line_prefix.lstrip(" \t"))]

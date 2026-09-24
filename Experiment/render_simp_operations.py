@@ -317,7 +317,10 @@ def render_events(
                 steps.append(
                     "cached ["
                     + ", ".join(render_events(cached, bound_names))
-                    + "] "
+                    # Separate the nested cache-program close from a final
+                    # inner list close. Lean otherwise lexes the compact
+                    # generated ``]]`` as one token in this parser context.
+                    + " ] "
                     + render_position(event["position"])
                 )
             elif "congruence" in action:

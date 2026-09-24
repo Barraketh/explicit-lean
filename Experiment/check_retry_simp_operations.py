@@ -402,6 +402,12 @@ theorem retryLocation (n : Nat) (h : n + 0 = n) : n = n := by
 
 
 def check_repeated_goal_command_rewrite() -> None:
+    assert retry._is_direct_repeated_child(
+        "Lean.cdot", "· simp [relabelAux]", "simp [relabelAux]"
+    )
+    assert not retry._is_direct_repeated_child(
+        "Lean.cdot", "· rw [h]; simp", "simp"
+    )
     source = "theorem pair : True ∧ True := by\n  constructor <;> simp\n"
     trace_site = retry.TI.find_sites(source)[0]
     render_site = retry.worker.S.find_sites(source)[0]
