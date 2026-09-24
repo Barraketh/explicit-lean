@@ -600,6 +600,13 @@ def _render_lines(trace: dict[str, Any]) -> list[str]:
     """
     lines: list[str] = []
     for rendered in operation_renderer.render_observation(trace):
+        # A located simp can enumerate only unchanged subjects.  The
+        # operational renderer deliberately represents that exact no-op as
+        # `skip`; it is already complete ordinary Lean rather than a v2
+        # program whose step list needs line wrapping.
+        if rendered == "skip":
+            lines.append(rendered)
+            continue
         steps, tail = _split_v2_source(rendered)
         lines.extend(worker.S.wrap_step_list(
             "explicit_rw_v2 [", steps, "]" + tail,

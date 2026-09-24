@@ -470,6 +470,22 @@ def check_repeated_goal_command_rewrite() -> None:
         assert code == 0, stdout + stderr
 
 
+def check_located_noop_rendering() -> None:
+    trace = {
+        "subjects": [
+            {
+                "subject": {"namedLocal": {"source": "h"}},
+                "trace": {"events": [], "terminal": "open"},
+            },
+            {
+                "subject": "target",
+                "trace": {"events": [], "terminal": "open"},
+            },
+        ]
+    }
+    assert retry._render_lines(trace) == ["skip"]
+
+
 def check_midline_tactic_rewrite() -> None:
     source = "theorem t83MidlineFixture : True := (by simp)\n"
     trace_site = retry.TI.find_sites(source)[0]
@@ -501,6 +517,7 @@ def main() -> None:
     check_reserved_marker_refusal()
     check_declaration_isolation()
     check_repeated_goal_command_rewrite()
+    check_located_noop_rendering()
     check_midline_tactic_rewrite()
     check_end_to_end()
     check_multiline_location_end_to_end()
