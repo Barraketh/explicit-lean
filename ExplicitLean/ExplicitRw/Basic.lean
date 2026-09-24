@@ -206,6 +206,17 @@ private def applicationArgumentPath? (e : Expr) (pos : Pos) :
     | _ => none
   loop 0 pos
 
+private def applicationNeedsDependentTransport
+    (fn : Expr) (argumentIndex argumentCount : Nat) : MetaM Bool := do
+  forallTelescopeReducing (← inferType fn) fun binders resultType => do
+    if binders.size < argumentCount then return false
+    let some selected := binders[argumentIndex]?
+      | return false
+    let selectedId := selected.fvarId!
+    for later in binders.extract (argumentIndex + 1) argumentCount do
+      if (← later.fvarId!.getType).containsFVar selectedId then return true
+    return resultType.containsFVar selectedId
+
 /--
 Navigate `e` along `pos` and apply `k` to the subterm found there, then rebuild
 `e` with a congruence proof back to the root.
@@ -241,6 +252,27 @@ where
         -- constrain the exact source-rule elaboration performed by `k`.
         let argument := args[argumentIndex]!
         let replacement ← go argument argumentRest (seen ++ consumed)
+        let needsDependentTransport ←
+          (applicationNeedsDependentTransport fn argumentIndex args.size : MetaM Bool)
+        unless needsDependentTransport do
+          let mut oldApplication := fn
+          let mut newApplication := fn
+          let mut applicationProof? : Option Expr := none
+          for h : currentIndex in [0 : args.size] do
+            let current := args[currentIndex]
+            let currentNew := if currentIndex == argumentIndex then
+              replacement.newExpr
+            else
+              current
+            let argumentProof? := if currentIndex == argumentIndex then
+              replacement.proof?
+            else
+              none
+            applicationProof? ← (congrApp (seen ++ consumed) oldApplication current
+              applicationProof? argumentProof? : MetaM _)
+            oldApplication := .app oldApplication current
+            newApplication := .app newApplication currentNew
+          return { newExpr := newApplication, proof? := applicationProof? }
         let some congrThm ← (Lean.Meta.mkCongrSimp? fn : MetaM _)
           | throwError "position {Pos.render (seen ++ consumed)}: no congruence \
               theorem can rebuild this application"
