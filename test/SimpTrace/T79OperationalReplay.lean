@@ -2,6 +2,15 @@ import ExplicitLean.ExplicitRw
 
 namespace ExplicitLean.SimpTrace.T79OperationalReplay
 
+example : True ∧ True := by
+  constructor
+  explicit_rw_v2_goals [
+    explicit_rw_v2 [] then true_intro,
+    explicit_rw_v2 [] then true_intro]
+
+example : ∀ n : Nat, 0 = Nat.succ n → False := by
+  explicit_rw_v2 [] then equation_hypothesis
+
 /- Importing the v2 syntax must not reserve Lean's ordinary `rfl` term. -/
 private theorem ordinaryTermRfl : True = True := rfl
 
@@ -165,6 +174,13 @@ example (n : Nat) : operationalIdentity n = n := by
 example (n : Nat) : n + 0 = n := by
   explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with [],
     rule eq_self variant 0 phase post fwd extra 0 at [] with []] then true_intro
+
+/- Automatic congruence replays the recorded child program at the selected
+   argument and applies Lean's generated congruence theorem once. -/
+example (n : Nat) : id (n + 0) = n := by
+  explicit_rw_v2 [auto_congr at [0, 1] with [arg 1 [
+    rule Nat.add_zero variant 0 phase post fwd extra 0 at [] with []]]]
+  rfl
 
 /- A named local negative proposition rule performs the corresponding exact
    `P → False` operation. -/

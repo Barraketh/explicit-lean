@@ -35,6 +35,11 @@ def render_name(value: Any) -> str:
     return ".".join(rendered)
 
 
+def render_global_name(value: Any) -> str:
+    """Render the recorder's exact root-qualified declaration identity."""
+    return "_root_." + render_name(value)
+
+
 def render_position(position: Any) -> str:
     if position is None:
         raise UnsupportedOperation("operation has no exact raw child position")
@@ -43,7 +48,7 @@ def render_position(position: Any) -> str:
 
 def render_rule_origin(origin: dict[str, Any], bound_names: tuple[str, ...] = ()) -> str:
     if "decl" in origin:
-        return f"rule {render_name(origin['decl'])}"
+        return f"rule {render_global_name(origin['decl'])}"
     if "local" in origin:
         return f"local local_ref {origin['local']['contextIndex']}"
     if "bound" in origin:
@@ -57,7 +62,7 @@ def render_rule_origin(origin: dict[str, Any], bound_names: tuple[str, ...] = ()
     if "equation" in origin:
         equation = origin["equation"]
         return (
-            f"equation {render_name(equation['declaration'])} "
+            f"equation {render_global_name(equation['declaration'])} "
             f"index {equation['index']}"
         )
     if "syntax" in origin:
@@ -81,6 +86,8 @@ def render_premise_terminal(
         return "rfl"
     if terminal == "isTrue":
         return "true_intro"
+    if terminal == "equationHypothesis":
+        return "equation_hypothesis"
     if isinstance(terminal, dict) and "localAssumption" in terminal:
         index = terminal["localAssumption"]["contextIndex"]
         return f"assumption local_ref {index}"
@@ -92,8 +99,6 @@ def render_premise_terminal(
             raise UnsupportedOperation(
                 f"congruence-bound assumption {ordinal} is outside {len(bound_names)} binders"
             ) from None
-    if terminal == "equationHypothesis":
-        raise UnsupportedOperation("equation-hypothesis premise terminal is not implemented")
     if terminal == "failed":
         raise UnsupportedOperation("committed rewrite contains a failed premise")
     raise UnsupportedOperation(f"unknown premise terminal {terminal!r}")
@@ -139,13 +144,15 @@ def render_reduction(payload: Any, position: Any) -> str:
         return f"iota {at}"
     if payload in ("zetaUnused",):
         return f"zeta {at}"
+    if payload == "foldRawNatLit":
+        return f"fold_nat_lit {at}"
     if isinstance(payload, dict):
         if "zetaUsed" in payload:
             return f"zeta {at}"
         if "projection" in payload or "projectionFunction" in payload:
             return f"proj {at}"
         if "delta" in payload:
-            return f"unfold {render_name(payload['delta']['name'])} {at}"
+            return f"unfold {render_global_name(payload['delta']['name'])} {at}"
         if "localDef" in payload:
             local_def = payload["localDef"]
             index = local_def.get("contextIndex")
@@ -182,8 +189,34 @@ def render_congruence(payload: dict[str, Any], position: Any) -> str:
     if len({argument for argument, _ in entries}) != len(entries):
         raise UnsupportedOperation("named congruence has duplicate theorem argument programs")
     return (
-        f"congr_rule {render_name(payload['theoremName'])} "
+        f"congr_rule {render_global_name(payload['theoremName'])} "
         f"{render_position(position)} with [{', '.join(source for _, source in entries)}]"
+    )
+
+
+def render_auto_congruence(payload: dict[str, Any], position: Any) -> str:
+    entries: list[str] = []
+    seen: set[int] = set()
+    for child in payload["children"]:
+        argument = child["argumentIndex"]
+        if not isinstance(argument, int) or isinstance(argument, bool) or argument < 0:
+            raise UnsupportedOperation("automatic congruence child has no argument index")
+        if argument in seen:
+            raise UnsupportedOperation(
+                f"automatic congruence repeats argument {argument}"
+            )
+        seen.add(argument)
+        events = child.get("events")
+        if not isinstance(events, list):
+            raise UnsupportedOperation(
+                "automatic congruence child has no operation stream"
+            )
+        entries.append(
+            f"arg {argument} [{', '.join(render_events(events))}]"
+        )
+    return (
+        f"auto_congr {render_position(position)} with "
+        f"[{', '.join(entries)}]"
     )
 
 
@@ -216,6 +249,10 @@ def render_events(
                 )
             elif "congruence" in action:
                 steps.append(render_congruence(action["congruence"], event["position"]))
+            elif "autoCongruence" in action:
+                steps.append(
+                    render_auto_congruence(action["autoCongruence"], event["position"])
+                )
             else:
                 raise UnsupportedOperation(f"unknown operation {action!r}")
         except UnsupportedOperation as error:
@@ -238,6 +275,20 @@ def render_trace(trace: dict[str, Any], location: str | None = None) -> str:
     elif terminal != "open":
         raise UnsupportedOperation(f"unknown terminal operation {terminal!r}")
     return source
+
+
+def render_repeated_goal_traces(observations: list[dict[str, Any]]) -> list[str]:
+    """Render repeated executions of one source tactic in exact goal order."""
+    programs: list[str] = []
+    for index, observation in enumerate(observations):
+        if not isinstance(observation.get("events"), list):
+            raise UnsupportedOperation(
+                f"repeated invocation {index} is location-aware and has multiple subjects"
+            )
+        programs.append(render_trace(observation))
+    if not programs:
+        raise UnsupportedOperation("repeated source tactic emitted no invocations")
+    return ["explicit_rw_v2_goals [" + ", ".join(programs) + "]"]
 
 
 def render_observation(observation: dict[str, Any]) -> list[str]:

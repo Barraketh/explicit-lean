@@ -428,6 +428,8 @@ private def declValBody? (parent : Syntax) : Option (Syntax × String) := Id.run
   for child in parent.getArgs do
     if kindString child == "Lean.Parser.Command.declValSimple" then
       if let some body := child.getArgs[1]? then return some (body, "term")
+    if kindString child == "Lean.Parser.Command.declValEqns" then
+      return some (child, "equations")
     if kindString child == "Lean.Parser.Command.whereStructInst" then
       return some (child, "whereStructInst")
   return none

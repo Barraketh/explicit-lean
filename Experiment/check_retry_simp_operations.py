@@ -353,12 +353,43 @@ theorem untouched (n : Nat) : n = n := by
         db.close()
 
 
+def check_repeated_goal_command_rewrite() -> None:
+    source = "theorem pair : True ∧ True := by\n  constructor <;> simp\n"
+    trace_site = retry.TI.find_sites(source)[0]
+    render_site = retry.worker.S.find_sites(source)[0]
+    command = {
+        "start": 0,
+        "end": len(source.encode("utf-8")),
+    }
+    parent_start = source.index("constructor")
+    parent_end = source.index("\n", parent_start)
+    observations = [
+        {"events": [], "terminal": "trueIntro"},
+        {"events": [], "terminal": "trueIntro"},
+    ]
+    rewritten, error = retry.render_command(
+        source,
+        command,
+        [(trace_site, render_site)],
+        {},
+        {trace_site.siteOrdinal: (
+            observations,
+            {"start": parent_start, "end": parent_end, "left": "constructor"},
+        )},
+    )
+    assert error is None and rewritten is not None, error
+    assert "constructor <;>" not in rewritten, rewritten
+    assert rewritten.count("explicit_rw_v2 [] then true_intro") == 2, rewritten
+    assert "explicit_rw_v2_goals" in rewritten, rewritten
+
+
 def main() -> None:
     check_selection()
     check_closed_boundaries()
     check_canonical_module_path_refusal()
     check_reserved_marker_refusal()
     check_declaration_isolation()
+    check_repeated_goal_command_rewrite()
     check_end_to_end()
     print("operational DB retry: selection, residuals, module replay, and selected-row updates passed")
 

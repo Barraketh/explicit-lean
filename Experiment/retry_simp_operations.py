@@ -191,6 +191,118 @@ def _parse_observations(output: str, expected_sites: set[int]) -> dict[int, list
     return dict(found)
 
 
+def _direct_repeated_sequence_parents(
+        module: str, source_path: pathlib.Path, source: str,
+        sites: list[TI.Site]) -> tuple[dict[int, dict[str, Any]], dict[int, str]]:
+    """Find an exact `<;>` parent whose right child is the repeated simp.
+
+    Replacing the child alone cannot distinguish its separate invocations.
+    The authenticated parser range lets us replace `left <;> simp` by the same
+    `left` tactic followed by one ordered multi-goal replay.  More complicated
+    parents remain explicit residuals instead of being guessed from text.
+    """
+    if not sites:
+        return {}, {}
+    try:
+        results = TSA.extract_tactic_ancestries(
+            module=module,
+            source_path=source_path,
+            sites=[{
+                "start_char": site.startChar,
+                "end_char": site.endChar,
+                "expected_text": site.callText,
+            } for site in sites],
+            expected_source_sha256=hashlib.sha256(source.encode("utf-8")).hexdigest(),
+            repo_root=ROOT,
+            raise_on_refusal=False,
+        )
+    except Exception as exc:
+        detail = f"repeated_parent_parse_failed: {type(exc).__name__}: {exc}"
+        return {}, {site.siteOrdinal: detail for site in sites}
+
+    parents: dict[int, dict[str, Any]] = {}
+    errors: dict[int, str] = {}
+    sequence_kind = "Lean.Parser.Tactic.«tactic_<;>_»"
+    for site, result in zip(sites, results):
+        if result.get("status") != "ok":
+            errors[site.siteOrdinal] = (
+                "repeated_parent_not_owned: Lean parser did not find a unique tactic ancestry"
+            )
+            continue
+        chosen: dict[str, Any] | None = None
+        for node in reversed(result.get("ancestry", [])):
+            goal_combinator = {
+                "Lean.Parser.Tactic.allGoals": "all_goals",
+                "Lean.Parser.Tactic.anyGoals": "any_goals",
+            }.get(node.get("kind"))
+            if goal_combinator is not None:
+                start, end = node.get("startChar"), node.get("endChar")
+                if isinstance(start, int) and isinstance(end, int):
+                    parent_source = source[start:end].strip()
+                    prefix = goal_combinator
+                    if (parent_source.startswith(prefix)
+                            and parent_source[len(prefix):].strip() == site.callText.strip()):
+                        chosen = {"start": start, "end": end, "left": ""}
+                        break
+        if chosen is None:
+            chain: list[dict[str, Any]] = []
+            for node in result.get("ancestry", []):
+                if node.get("kind") != sequence_kind:
+                    continue
+                children = node.get("branchChildren")
+                if not isinstance(children, list) or len(children) < 2:
+                    continue
+                child_sources: list[str] = []
+                containing_index: int | None = None
+                for index, child in enumerate(children):
+                    child_start, child_end = child.get("startChar"), child.get("endChar")
+                    if not isinstance(child_start, int) or not isinstance(child_end, int):
+                        child_sources = []
+                        break
+                    child_source = source[child_start:child_end]
+                    child_sources.append(child_source)
+                    if (index > 0 and child_start <= site.startChar
+                            and child_end >= site.endChar):
+                        containing_index = index
+                start, end = node.get("startChar"), node.get("endChar")
+                if (not child_sources or containing_index is None
+                        or not isinstance(start, int) or not isinstance(end, int)):
+                    continue
+                chain.append({
+                    "start": start,
+                    "end": end,
+                    "children": child_sources,
+                    "target": containing_index,
+                    "direct": (
+                        child_sources[containing_index].strip() == site.callText.strip()
+                    ),
+                })
+            if chain and chain[-1]["direct"]:
+                before: list[str] = []
+                after_levels: list[list[str]] = []
+                for level in chain:
+                    target_index = int(level["target"])
+                    before.extend(level["children"][:target_index])
+                    after_levels.append(level["children"][target_index + 1:])
+                after: list[str] = []
+                for level_after in reversed(after_levels):
+                    after.extend(level_after)
+                chosen = {
+                    "start": chain[0]["start"],
+                    "end": chain[0]["end"],
+                    "left": " <;> ".join(before),
+                    "after": after,
+                }
+        if chosen is None:
+            errors[site.siteOrdinal] = (
+                "repeated_parent_not_direct: repeated simp is neither a direct goal-combinator "
+                "child nor an exact repeated child of a `<;>` syntax node"
+            )
+        else:
+            parents[site.siteOrdinal] = chosen
+    return parents, errors
+
+
 def record_operations(module_path: str, source: str, sites: list[TI.Site],
                       scratch: pathlib.Path, dylib: pathlib.Path,
                       ) -> dict[int, list[dict[str, Any]]]:
@@ -299,7 +411,7 @@ def _declaration_commands(db: sqlite3.Connection, module: str, source: str,
             command["parser_body_end"] = end
             body_range_form = parsed.get("theoremBodyForm")
             command["parser_body_form"] = body_range_form
-            if body_range_form not in {"term", "whereStructInst"}:
+            if body_range_form not in {"term", "equations", "whereStructInst"}:
                 raise RetryError(
                     f"Lean parser theorem body form is invalid for "
                     f"{module}:{command['ordinal']}"
@@ -455,30 +567,72 @@ def _replacement_lines(site: worker.S.Site, source_call: str,
 
 def render_command(source: str, command: dict[str, Any],
                    sites: list[tuple[TI.Site, worker.S.Site]],
-                   traces: dict[int, dict[str, Any]]) -> tuple[str | None, str | None]:
+                   traces: dict[int, dict[str, Any]],
+                   repeated: dict[int, tuple[list[dict[str, Any]], dict[str, Any]]] | None = None,
+                   ) -> tuple[str | None, str | None]:
     command_start = worker.byte_to_char(source, command["start"])
     command_end = worker.byte_to_char(source, command["end"])
     command_text = source[command_start:command_end]
     replacements: dict[int, list[str]] = {}
+    ranges: dict[int, tuple[int, int]] = {}
     local_sites: list[worker.S.Site] = []
     multiline_midline: set[int] = set()
     for trace_site, original_site in sites:
         if not (command_start <= trace_site.startChar
                 and trace_site.endChar <= command_end):
             continue
-        trace = traces.get(trace_site.siteOrdinal)
-        if trace is None:
-            return None, f"no operational trace for source site {trace_site.siteOrdinal}"
         local_site = worker.local_site(
             original_site, source, command_start, len(local_sites)
         )
-        try:
-            rendered = _render_lines(trace)
-        except operation_renderer.UnsupportedOperation as exc:
-            return None, f"site {trace_site.siteOrdinal}: unsupported operation: {exc}"
-        lines, is_midline = _replacement_lines(
-            local_site, trace_site.callText, rendered
-        )
+        repeated_entry = (repeated or {}).get(trace_site.siteOrdinal)
+        if repeated_entry is None:
+            trace = traces.get(trace_site.siteOrdinal)
+            if trace is None:
+                return None, f"no operational trace for source site {trace_site.siteOrdinal}"
+            try:
+                rendered = _render_lines(trace)
+            except operation_renderer.UnsupportedOperation as exc:
+                return None, f"site {trace_site.siteOrdinal}: unsupported operation: {exc}"
+            lines, is_midline = _replacement_lines(
+                local_site, trace_site.callText, rendered
+            )
+        else:
+            observations, parent = repeated_entry
+            if any(
+                other.siteOrdinal != trace_site.siteOrdinal
+                and int(parent["start"]) <= other.startChar
+                and other.endChar <= int(parent["end"])
+                for other, _ in sites
+            ):
+                return None, (
+                    "repeated `<;>` parent contains another selected simp site; "
+                    "nested multi-site ownership is not yet represented"
+                )
+            start = int(parent["start"]) - command_start
+            end = int(parent["end"]) - command_start
+            if not (0 <= start < end <= len(command_text)):
+                return None, f"site {trace_site.siteOrdinal}: repeated parent is outside its command"
+            for prior_start, prior_end in ranges.values():
+                if start < prior_end and prior_start < end:
+                    return None, "overlapping repeated `<;>` parents need nested branch ownership"
+            try:
+                goal_lines = operation_renderer.render_repeated_goal_traces(observations)
+            except operation_renderer.UnsupportedOperation as exc:
+                return None, f"site {trace_site.siteOrdinal}: unsupported operation: {exc}"
+            line_start = command_text.rfind("\n", 0, start) + 1
+            line_prefix = command_text[line_start:start]
+            line_indent = line_prefix[:len(line_prefix) - len(line_prefix.lstrip(" \t"))]
+            continuation = line_indent + "  "
+            left = str(parent["left"])
+            first_prefix = line_indent if not line_prefix.strip() else ""
+            lines = [first_prefix + left] if left else []
+            comment_indent = continuation if left else (first_prefix or line_indent)
+            lines.extend(worker.S.comment_original(trace_site.callText, comment_indent))
+            lines.extend(continuation + line for line in goal_lines)
+            for following in parent.get("after", []):
+                lines.append(continuation + "all_goals " + str(following))
+            ranges[local_site.index] = (start, end)
+            is_midline = False
         replacements[local_site.index] = lines
         if is_midline:
             multiline_midline.add(local_site.index)
@@ -487,6 +641,7 @@ def render_command(source: str, command: dict[str, Any],
         return None, "no selected simp source sites belong to this command"
     try:
         return worker.S.splice(command_text, replacements, local_sites,
+                               ranges=ranges,
                                multiline_midline=multiline_midline), None
     except (ValueError, IndexError) as exc:
         return None, f"command splice failed: {type(exc).__name__}: {exc}"
@@ -742,6 +897,7 @@ def _process_module(db: sqlite3.Connection, module: str, scratch: pathlib.Path,
                 row_failures[ordinal] = ("record_failed", detail)
 
     site_outcomes: dict[int, tuple[str, str | None]] = {}
+    repeated_observations: dict[int, list[dict[str, Any]]] = {}
     for site in recordable:
         observations = traces.get(site.siteOrdinal, [])
         owner = next((ordinal for ordinal, pairs in command_sites.items()
@@ -755,11 +911,16 @@ def _process_module(db: sqlite3.Connection, module: str, scratch: pathlib.Path,
             )
             continue
         if len(observations) != 1:
-            site_outcomes[site.siteOrdinal] = (
-                "record_failed",
-                f"repeated_tactic_invocation: source site {site.siteOrdinal} emitted "
-                f"{len(observations)} traces; this source site needs recursive branch ownership",
-            )
+            try:
+                operation_renderer.render_repeated_goal_traces(observations)
+                repeated_observations[site.siteOrdinal] = observations
+                site_outcomes[site.siteOrdinal] = (
+                    "success", f"{len(observations)} ordered goal traces"
+                )
+            except operation_renderer.UnsupportedOperation as exc:
+                site_outcomes[site.siteOrdinal] = (
+                    "render_failed", f"unsupported repeated invocation: {exc}"
+                )
             continue
         try:
             rendered = "\n".join(operation_renderer.render_observation(observations[0]))
@@ -769,6 +930,14 @@ def _process_module(db: sqlite3.Connection, module: str, scratch: pathlib.Path,
             site_outcomes[site.siteOrdinal] = (
                 "render_failed", f"unsupported_operation: {exc}"
             )
+
+    repeated_parents, repeated_parent_errors = _direct_repeated_sequence_parents(
+        module, pinned_source, source,
+        [site_by_id[site_id] for site_id in sorted(repeated_observations)],
+    )
+    for site_id, detail in repeated_parent_errors.items():
+        site_outcomes[site_id] = ("record_failed", detail)
+        repeated_observations.pop(site_id, None)
 
     candidate_replacements: dict[int, str] = {}
     for ordinal, pairs in command_sites.items():
@@ -795,8 +964,19 @@ def _process_module(db: sqlite3.Connection, module: str, scratch: pathlib.Path,
         rendered_traces = {
             site.siteOrdinal: traces[site.siteOrdinal][0]
             for site, _ in pairs
+            if site.siteOrdinal not in repeated_observations
         }
-        rewritten, error = render_command(source, command, pairs, rendered_traces)
+        repeated_entries = {
+            site.siteOrdinal: (
+                repeated_observations[site.siteOrdinal],
+                repeated_parents[site.siteOrdinal],
+            )
+            for site, _ in pairs
+            if site.siteOrdinal in repeated_observations
+        }
+        rewritten, error = render_command(
+            source, command, pairs, rendered_traces, repeated_entries
+        )
         if error or rewritten is None:
             row_failures[ordinal] = (
                 "render_failed", (error or "renderer produced no command")[:1800]

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import unittest
 
-from render_simp_operations import UnsupportedOperation, render_observation, render_trace
+from render_simp_operations import (
+    UnsupportedOperation,
+    render_observation,
+    render_repeated_goal_traces,
+    render_trace,
+)
 
 
 def name(*parts: str) -> dict[str, object]:
@@ -34,13 +39,32 @@ class RenderOperationsTest(unittest.TestCase):
     def test_declaration_rewrite(self) -> None:
         self.assertEqual(
             render_trace({"events": [rewrite_event([0, 1])]}),
-            "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with []]",
+            "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with []]",
         )
 
     def test_true_terminal_is_term_free(self) -> None:
         self.assertEqual(
             render_trace({"events": [rewrite_event([])], "terminal": "trueIntro"}),
-            "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 at [] with []] then true_intro",
+            "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 at [] with []] then true_intro",
+        )
+
+    def test_repeated_goal_traces_preserve_invocation_order(self) -> None:
+        first = {"events": [rewrite_event([0])], "terminal": "open"}
+        second = {"events": [rewrite_event([1])], "terminal": "trueIntro"}
+        self.assertEqual(
+            render_repeated_goal_traces([first, second]),
+            ["explicit_rw_v2_goals [explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 at [0] with []], explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 at [1] with []] then true_intro]"],
+        )
+
+    def test_raw_nat_literal_folding_has_an_exact_reduction(self) -> None:
+        trace = {
+            "events": [{
+                "position": [0, 1],
+                "action": {"reduce": {"reduction": "foldRawNatLit"}},
+            }]
+        }
+        self.assertEqual(
+            render_trace(trace), "explicit_rw_v2 [fold_nat_lit at [0, 1]]"
         )
 
     def test_source_syntax_operand_is_rendered_as_ordinary_lean(self) -> None:
@@ -64,6 +88,15 @@ class RenderOperationsTest(unittest.TestCase):
         ]
         self.assertIn("with [assumption local_ref 4]", render_trace({"events": [event]}))
 
+    def test_equation_hypothesis_premise_is_an_exact_closed_operation(self) -> None:
+        event = rewrite_event([])
+        event["action"]["rewrite"]["premises"] = [
+            {"terminal": "equationHypothesis", "events": []}
+        ]
+        self.assertIn(
+            "with [equation_hypothesis]", render_trace({"events": [event]})
+        )
+
     def test_single_hypothesis_location_uses_exact_context_identity(self) -> None:
         observation = {
             "subjects": [{
@@ -73,7 +106,7 @@ class RenderOperationsTest(unittest.TestCase):
         }
         self.assertEqual(
             render_observation(observation),
-            ["explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+            ["explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 "
              "at [0, 1] with []] at h"],
         )
 
@@ -90,9 +123,9 @@ class RenderOperationsTest(unittest.TestCase):
         self.assertEqual(
             render_observation(observation),
             [
-                "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+                "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 "
                 "at [] with []] at h₁",
-                "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+                "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 "
                 "at [0, 1] with []] at h₂",
                 "explicit_rw_v2 []",
             ],
@@ -118,7 +151,7 @@ class RenderOperationsTest(unittest.TestCase):
         }
         self.assertEqual(
             render_observation(observation),
-            ["explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+            ["explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 "
              "at [] with []] at h then false_elim"],
         )
 
@@ -148,7 +181,7 @@ class RenderOperationsTest(unittest.TestCase):
         }
         self.assertEqual(
             render_trace(trace),
-            "explicit_rw_v2 [cached [rule Nat.add_zero variant 0 phase post fwd "
+            "explicit_rw_v2 [cached [rule _root_.Nat.add_zero variant 0 phase post fwd "
             "extra 0 at [] with []] at [0, 1]]",
         )
 
@@ -170,9 +203,26 @@ class RenderOperationsTest(unittest.TestCase):
         }
         self.assertEqual(
             render_trace(trace),
-            "explicit_rw_v2 [congr_rule Demo.congr at [0, 1] with [arg 3 intro 1 ; "
-            "explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 "
+            "explicit_rw_v2 [congr_rule _root_.Demo.congr at [0, 1] with [arg 3 intro 1 ; "
+            "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 "
             "at [0, 1] with []] then rfl]]",
+        )
+
+    def test_automatic_congruence_keeps_child_operations_relative(self) -> None:
+        trace = {
+            "events": [{
+                "position": [0, 1],
+                "phase": "post",
+                "action": {"autoCongruence": {"children": [{
+                    "argumentIndex": 2,
+                    "events": [rewrite_event([])],
+                }]}},
+            }]
+        }
+        self.assertEqual(
+            render_trace(trace),
+            "explicit_rw_v2 [auto_congr at [0, 1] with [arg 2 [rule "
+            "_root_.Nat.add_zero variant 0 phase post fwd extra 0 at [] with []]]]",
         )
 
     def test_reductions(self) -> None:
@@ -194,7 +244,7 @@ class RenderOperationsTest(unittest.TestCase):
         }
         self.assertEqual(
             render_trace(trace),
-            "explicit_rw_v2 [instantiate at [0], beta at [1], unfold Demo.f at []]",
+            "explicit_rw_v2 [instantiate at [0], beta at [1], unfold _root_.Demo.f at []]",
         )
 
     def test_simproc_is_residual(self) -> None:

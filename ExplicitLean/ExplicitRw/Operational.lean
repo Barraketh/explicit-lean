@@ -76,6 +76,7 @@ private def lowerProof (stx : Syntax) : TacticM Syntax := do
     match stx[0].getId.toString with
     | "rfl" => return (← `(explicitRwSideTac| rfl)).raw
     | "true_intro" => return (← `(explicitRwSideTac| close [True.intro])).raw
+    | "equation_hypothesis" => return stx
     | atom => throwError "explicit_rw_v2: unknown closed proof operation `{atom}`"
   | ``explicitRwOperationalProofAssumption => do
     let hyp : Ident := ⟨stx[1]⟩
@@ -286,7 +287,19 @@ private def runSourceRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
     saved.restore
     let fallbackSaved ← Tactic.saveState
     let result ← runElaboratedSourceRule idx e pos term reverse sideTacs
-    let result ← materializeSourceReplacement idx term result
+    let newExpr ← instantiateMVars result.newExpr
+    let proof? ← result.proof?.mapM instantiateMVars
+    if newExpr.hasExprMVar || proof?.any (·.hasExprMVar) then
+      fallbackSaved.restore
+      stepError idx m!"source rule `{term}` retained an unassigned expression metavariable after replay."
+    let result := { newExpr, proof? }
+    if newExpr.hasLevelMVar || proof?.any (·.hasLevelMVar) then
+      -- This is the same ordinary `rw` elaboration path used for declaration
+      -- rules.  A universe may be fixed only when the reconstructed equality
+      -- is unified with the enclosing declaration target, so keep precisely
+      -- those assignments live for the caller instead of prematurely
+      -- requiring a standalone universe solution.
+      return result
     fallbackSaved.restore
     return result
 
@@ -475,6 +488,12 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
     let pos : TSyntax ``ExplicitLean.ExplicitRw.explicitRwPos := ⟨step[4]⟩
     let legacyStep ← `(explicitRwStep| zeta_local local_ref $localIndex:num $pos)
     Impl.runStep idx e legacyStep.raw
+  | ``explicitRwOperationalFoldNatLit => do
+    let pos := parsePos step[1]
+    Impl.runDefeqStep idx e pos m!"`fold_nat_lit`" fun sub => do
+      let some value := sub.rawNatLit?
+        | stepError idx m!"`fold_nat_lit` at this position requires a raw natural-number literal."
+      return toExpr value
   | ``explicitRwOperationalUnfold => do
     let c ← realizeGlobalConstNoOverloadWithInfo step[1]
     let pos := parsePos step[2]
@@ -501,6 +520,84 @@ private partial def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Repl
       indexedProofs := indexedProofs.push (argumentIndex, ← lowerProof entry[2])
     indexedProofs := indexedProofs.qsort fun a b => a.1 < b.1
     runCongruenceRule idx e pos term indexedProofs
+  | ``explicitRwOperationalAutoCongruence => do
+    let pos := parsePos step[1]
+    let mut indexedSteps : Array (Nat × Array Syntax) := #[]
+    for entry in step[4].getSepArgs do
+      let argumentIndex := entry[1].isNatLit?.getD 0
+      if indexedSteps.any (·.1 == argumentIndex) then
+        stepError idx m!"automatic congruence repeats argument {argumentIndex}."
+      indexedSteps := indexedSteps.push (argumentIndex, entry[3].getSepArgs)
+    indexedSteps := indexedSteps.qsort fun a b => a.1 < b.1
+    rewriteAt e pos
+      (fun sub => do
+        let fn := sub.getAppFn
+        let args := sub.getAppArgs
+        let some congrThm ← Lean.Meta.mkCongrSimp? fn
+          | stepError idx m!"`auto_congr`: no simp congruence theorem could be generated for the head{indentExpr fn}"
+        unless congrThm.argKinds.size == args.size do
+          stepError idx m!"`auto_congr`: the generated theorem has {congrThm.argKinds.size} argument kind(s), but the selected application has {args.size} argument(s)."
+        let mut argsNew := args
+        let mut replacements : Array (Nat × Replacement) := #[]
+        for (argumentIndex, childSteps) in indexedSteps do
+          let some kind := congrThm.argKinds[argumentIndex]?
+            | stepError idx m!"`auto_congr`: the selected application has no argument {argumentIndex}."
+          unless kind == .fixed || kind == .eq do
+            stepError idx m!"`auto_congr`: argument {argumentIndex} has generated congruence kind `{repr kind}`, which has no recursive operation program."
+          let replacement ← runOperationsAt childSteps args[argumentIndex]!
+          argsNew := argsNew.set! argumentIndex (← instantiateMVars replacement.newExpr)
+          replacements := replacements.push (argumentIndex, replacement)
+        let replacementAt? (argumentIndex : Nat) : Option Replacement :=
+          (replacements.find? fun item => item.1 == argumentIndex).map (·.2)
+        let mut proof := congrThm.proof
+        let mut type := congrThm.type
+        let mut subst : Array Expr := #[]
+        for h : argumentIndex in [0 : args.size] do
+          let argument := args[argumentIndex]
+          let argumentNew := argsNew[argumentIndex]!
+          let kind := congrThm.argKinds[argumentIndex]!
+          proof := mkApp proof argument
+          type := type.bindingBody!
+          match kind with
+          | .fixed =>
+            subst := subst.push argumentNew
+          | .cast =>
+            subst := subst.push argument
+          | .subsingletonInst =>
+            subst := subst.push argument
+            let clsNew := type.bindingDomain!.instantiateRev subst
+            let instNew ← if ← isDefEq (← inferType argument) clsNew then
+              pure argument
+            else
+              match ← trySynthInstance clsNew with
+              | LOption.some value => pure value
+              | _ => stepError idx m!"`auto_congr`: failed to synthesize the transported subsingleton instance for argument {argumentIndex}."
+            proof := mkApp proof instNew
+            subst := subst.push instNew
+            type := type.bindingBody!
+          | .eq =>
+            subst := subst.push argument
+            let argProof ← match replacementAt? argumentIndex with
+              | some replacement => match replacement.proof? with
+                | some equality => instantiateMVars equality
+                | none => mkEqRefl argument
+              | none => mkEqRefl argument
+            proof := mkApp2 proof argumentNew argProof
+            subst := subst.push argumentNew |>.push argProof
+            type := type.bindingBody!.bindingBody!
+          | other =>
+            stepError idx m!"`auto_congr`: the generated theorem uses unsupported argument kind `{repr other}` at argument {argumentIndex}."
+        let some (_, _, rhs) := type.instantiateRev subst |>.eq?
+          | stepError idx m!"`auto_congr`: the generated theorem did not produce an equality."
+        let rhs ← Simp.removeUnnecessaryCasts rhs
+        let proofFinal ← instantiateMVars proof
+        let rhs ← instantiateMVars rhs
+        let proofType ← inferType proofFinal
+        let expected ← mkEq sub rhs
+        unless ← isDefEq proofType expected do
+          stepError idx m!"`auto_congr`: the generated congruence proof does not establish the reconstructed application equality."
+        return Replacement.eq rhs proofFinal)
+      (fun pfx child sub => badPosError idx pos pfx child sub)
   | ``explicitRwOperationalSimproc =>
     throwError "explicit_rw_v2: simproc `{step[1].getId}` is not a rewrite-rule operation."
   | k =>
@@ -620,5 +717,22 @@ public meta def evalExplicitRwOperational : Tactic := fun stx => do
   unless stx[5].isNone do
     unless closeLocalFalse do
       Operational.runTerminal stx[5] target
+
+@[tactic explicitRwOperationalGoals]
+public meta def evalExplicitRwOperationalGoals : Tactic := fun stx => do
+  let programs := stx[2].getSepArgs
+  let goals ← getGoals
+  unless programs.size == goals.length do
+    throwError "explicit_rw_v2_goals: recorded {programs.size} invocation(s), but the preceding tactic produced {goals.length} goal(s)."
+  let mut remaining : Array MVarId := #[]
+  for h : i in [0 : programs.size] do
+    let program := programs[i]
+    unless program.getKind == ``explicitRwOperationalProofNested do
+      throwError "explicit_rw_v2_goals: internal error: expected a closed explicit_rw_v2 program."
+    let nested : TSyntax `tactic := ⟨mkNode ``explicitRwOperational #[
+      program[0], program[1], program[2], program[3], mkNullNode #[], program[4]
+    ]⟩
+    remaining := remaining ++ (← Tactic.run goals[i]! (evalTactic nested))
+  setGoals remaining.toList
 
 end ExplicitLean.ExplicitRw

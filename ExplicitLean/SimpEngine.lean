@@ -457,6 +457,9 @@ mutual
             child with events := child.events.map (bindCongruenceEvent binders) })
           (premises.map fun premise => {
             premise with premise := bindCongruencePremise binders premise.premise })
+    | .autoCongruence children =>
+        .autoCongruence (children.map fun child => {
+          child with events := child.events.map (bindCongruenceEvent binders) })
 
   private partial def bindCongruenceEvent (binders : Array Nat)
       (event : Operations.Event) : Operations.Event :=
@@ -1437,12 +1440,46 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
   let theoremTypeFingerprint ← liftM (exprFingerprintHash cgrThm.type)
   let proofFingerprint ← liftM (exprStructuralFingerprintHash cgrThm.proof)
   let argumentKinds := cgrThm.argKinds.map generatedCongruenceArgKind
+  let operationState ← getRecorderState
+  let operationStart := operationState.operationalEvents.size
+  let operationBase := operationState.operationPosition
+  let operationPhase := operationState.phase
+  let relativeArgumentEvents (argumentIndex start : Nat) : EngineM (Array Operations.Event) := do
+    let events := (← getRecorderState).operationalEvents
+    let events := events.extract start events.size
+    let suffix := appArgumentPosition args.size argumentIndex
+    return events.map fun event => {
+      event with position := match operationBase, event.position with
+        | some base, some position =>
+          let childBase := base ++ suffix
+          if childBase.size <= position.size &&
+              (List.range childBase.size).all fun i => childBase[i]! == position[i]! then
+            some (position.extract childBase.size position.size)
+          else
+            none
+        | none, _ | _, none => none
+    }
+  let replaceArgumentEvents (children : Array Operations.AutoCongruenceChild) :
+      EngineM Unit := do
+    modifyRecorderState fun current => {
+      current with
+        operationalEvents :=
+          (current.operationalEvents.extract 0 operationStart).push {
+            position := operationBase
+            phase := operationPhase
+            action := .autoCongruence children
+          }
+    }
+  let discardArgumentEvents : EngineM Unit := do
+    modifyRecorderState fun current => {
+      current with operationalEvents := current.operationalEvents.extract 0 operationStart }
   let mut synthesizedAssignments := #[]
   let mut simplified := false
   let mut hasProof   := false
   let mut hasCast    := false
   let mut argsNew    := #[]
   let mut argResults := #[]
+  let mut operationChildren : Array Operations.AutoCongruenceChild := #[]
   let mut i          := 0 -- index at args
   for arg in args, kind in cgrThm.argKinds do
     if h : config.ground ∧ i < infos.size then
@@ -1454,16 +1491,24 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
         continue
     match kind with
     | CongrArgKind.fixed =>
+      let childStart := (← getRecorderState).operationalEvents.size
       let argNew ← withOperationPath (.autoCongrArgument i .dsimp)
         (some <| appArgumentPosition args.size i) <| dsimp arg
+      let childEvents ← relativeArgumentEvents i childStart
+      if arg != argNew || !childEvents.isEmpty then
+        operationChildren := operationChildren.push { argumentIndex := i, events := childEvents }
       if arg != argNew then
         simplified := true
       argsNew := argsNew.push argNew
     | CongrArgKind.cast  => hasCast := true; argsNew := argsNew.push arg
     | CongrArgKind.subsingletonInst => argsNew := argsNew.push arg
     | CongrArgKind.eq =>
+      let childStart := (← getRecorderState).operationalEvents.size
       let argResult ← withOperationPath (.autoCongrArgument i .simp)
         (some <| appArgumentPosition args.size i) <| simp arg
+      let childEvents ← relativeArgumentEvents i childStart
+      if arg != argResult.expr || !childEvents.isEmpty then
+        operationChildren := operationChildren.push { argumentIndex := i, events := childEvents }
       argResults := argResults.push argResult
       argsNew    := argsNew.push argResult.expr
       if argResult.proof?.isSome then hasProof := true
@@ -1471,6 +1516,7 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
     | _ => unreachable!
     i := i + 1
   if !simplified then
+    discardArgumentEvents
     emitStructural (.congruence invocationOrdinal
       (.generated theoremTypeFingerprint proofFingerprint argumentKinds childModes
         synthesizedAssignments))
@@ -1501,6 +1547,7 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
     Thus, we decided to return here only if the auto generated congruence theorem does not introduce casts.
   -/
   if !hasProof && !hasCast then
+    replaceArgumentEvents operationChildren
     emitStructural (.congruence invocationOrdinal
       (.generated theoremTypeFingerprint proofFingerprint argumentKinds childModes
         synthesizedAssignments))
@@ -1553,6 +1600,7 @@ def tryAutoCongrTheorem? (e : Expr) (invocationOrdinal : Nat) : EngineM (Option 
     (.generated theoremTypeFingerprint proofFingerprint argumentKinds childModes
       synthesizedAssignments))
   recordBranch "struct.congruence.generated"
+  replaceArgumentEvents operationChildren
   if hasProof then
     return some { expr := rhs, proof? := proof }
   else

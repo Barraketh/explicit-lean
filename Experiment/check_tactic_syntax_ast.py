@@ -70,6 +70,10 @@ lemma letTyped : (let x := True; x) := by simp
 theorem structured : And True True where
   left := by simp
   right := by simp
+
+theorem equations : ∀ n : Nat, n = n
+  | 0 => by simp
+  | n + 1 => by simp
 '''
 
 
@@ -398,6 +402,9 @@ def tokenAuditAdmit : Nat := admit
         structured = next(command for command in commands
                           if "theorem structured" in SIMP_INVENTORY_FIXTURE[
                               command["startChar"]:command["endChar"]])
+        equations = next(command for command in commands
+                         if "theorem equations" in SIMP_INVENTORY_FIXTURE[
+                             command["startChar"]:command["endChar"]])
         self.assertEqual(len(body["simpSites"]), 1)
         self.assertEqual(len(only["simpSites"]), 1)
         only_site = only["simpSites"][0]
@@ -416,12 +423,16 @@ def tokenAuditAdmit : Nat := admit
         self.assertTrue(SIMP_INVENTORY_FIXTURE[
             structured["theoremBody"]["startChar"]:
             structured["theoremBody"]["endChar"]].startswith("where"))
+        self.assertEqual(equations["theoremBodyForm"], "equations")
+        self.assertTrue(SIMP_INVENTORY_FIXTURE[
+            equations["theoremBody"]["startChar"]:
+            equations["theoremBody"]["endChar"]].lstrip().startswith("| 0"))
         direct_spans = [
             SIMP_INVENTORY_FIXTURE[site["startChar"]:site["endChar"]]
             for command in commands for site in command["simpSites"]
         ]
-        self.assertEqual(sum(len(command["simpSites"]) for command in commands), 10)
-        self.assertEqual(direct_spans.count("simp"), 9)
+        self.assertEqual(sum(len(command["simpSites"]) for command in commands), 12)
+        self.assertEqual(direct_spans.count("simp"), 11)
         self.assertEqual(sum(span.startswith("simp only") for span in direct_spans), 1)
 
     def test_success_postcondition_checks_the_full_owned_command(self) -> None:

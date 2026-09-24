@@ -11,6 +11,7 @@ public meta import Lean.Elab.SyntheticMVars
 public meta import Lean.Meta.Tactic.Intro
 public meta import Lean.Parser.Tactic
 public meta import Lean.Meta.CongrTheorems
+public meta import Lean.Meta.Tactic.Simp.Rewrite
 public meta import Lean.Util.CollectFVars
 
 public meta section
@@ -468,6 +469,8 @@ syntax (name := explicitRwOperationalZeta)
   "zeta " explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalZetaLocal)
   "zeta_local " "local_ref " num ident explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalFoldNatLit)
+  "fold_nat_lit " explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalUnfold)
   "unfold " ident explicitRwPos : explicitRwOperationalStep
 syntax (name := explicitRwOperationalSimproc)
@@ -481,6 +484,13 @@ syntax (name := explicitRwOperationalCongruenceArg)
 syntax (name := explicitRwOperationalCongruence)
   "congr_rule " ident explicitRwPos " with "
     "[" explicitRwOperationalCongruenceArg,* "]" : explicitRwOperationalStep
+
+declare_syntax_cat explicitRwOperationalAutoCongruenceArg
+syntax (name := explicitRwOperationalAutoCongruenceArg)
+  "arg " num "[" explicitRwOperationalStep,* "]" : explicitRwOperationalAutoCongruenceArg
+syntax (name := explicitRwOperationalAutoCongruence)
+  "auto_congr " explicitRwPos " with "
+    "[" explicitRwOperationalAutoCongruenceArg,* "]" : explicitRwOperationalStep
 
 declare_syntax_cat explicitRwOperationalClose
 syntax (name := explicitRwOperationalClose)
@@ -501,6 +511,10 @@ syntax (name := explicitRwOperationalLocationRef)
 syntax (name := explicitRwOperational)
   "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
   (explicitRwOperationalLocation)? (explicitRwOperationalClose)? : tactic
+
+/-- Replay one recorded `explicit_rw_v2` program per current goal, in order. -/
+syntax (name := explicitRwOperationalGoals)
+  "explicit_rw_v2_goals " "[" explicitRwOperationalProof,* "]" : tactic
 
 /--
 A **side proof**: the closed, recursive grammar for discharging a side condition
@@ -1928,6 +1942,11 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
     match stx[0].getId.toString with
     | "rfl" => run (← `(tactic| rfl))
     | "true_intro" => run (← `(tactic| exact True.intro))
+    | "equation_hypothesis" =>
+      goal.withContext do
+        let some proof ← Lean.Meta.Simp.dischargeEqnThmHypothesis? (← goal.getType)
+          | stepError idx m!"the recorded equation-hypothesis discharge no longer applies in {where?}."
+        goal.assign (← instantiateMVars proof)
     | atom => stepError idx m!"unknown closed proof operation `{atom}` in {where?}"
   | ``explicitRwSideDecide => run (← `(tactic| decide))
   | ``explicitRwSideOmega => run (← `(tactic| omega))

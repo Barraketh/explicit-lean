@@ -320,7 +320,8 @@ def _validate_simp_inventory_result(
                 raise SyntaxExtractionError(
                     f"Lean theorem body range is outside command ordinal {ordinal}"
                 )
-            if entry.get("theoremBodyForm") not in {"term", "whereStructInst"}:
+            if entry.get("theoremBodyForm") not in {
+                    "term", "equations", "whereStructInst"}:
                 raise SyntaxExtractionError("Lean theorem body form is malformed")
         elif "theoremBodyForm" in entry:
             raise SyntaxExtractionError("Lean theorem body form has no range")

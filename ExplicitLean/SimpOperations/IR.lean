@@ -81,6 +81,16 @@ mutual
     premise : Premise
     deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
+  /-- The exact recursive operations run on one argument of an automatically
+  generated simp congruence theorem.  These operations are kept relative to
+  the argument root: replay applies the same generated theorem once, rather
+  than trying to rebuild a dependent application one expression child at a
+  time. -/
+  structure AutoCongruenceChild where
+    argumentIndex : Nat
+    events : Array Event := #[]
+    deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+
   /-- A source-facing operation. Failed candidates are deliberately absent:
   they do not transform the expression and require no replay action. -/
   inductive Action where
@@ -95,6 +105,9 @@ mutual
     /-- Exact application of a named simp congruence theorem. -/
     | congruence (theoremName : Name) (children : Array CongruenceChild)
         (premises : Array CongruencePremise)
+    /-- Exact application of Lean's automatically generated simp congruence
+    theorem for the selected application head. -/
+    | autoCongruence (children : Array AutoCongruenceChild)
     deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
   /--
