@@ -233,6 +233,17 @@ example (p q : Prop) [decision : Decidable p] (h : p = q) :
   have instancesAgree : Classical.propDecidable p = decision := Subsingleton.elim _ _
   rw [instancesAgree]
 
+/- A declaration can have a generically dependent result type even though its
+   actual family argument is constant. Dependency detection must inspect that
+   instantiated application prefix rather than the unspecialized declaration. -/
+private def applyFamily {α : Type} (β : α → Type) (f : ∀ x, β x) (x : α) : β x := f x
+
+example (f : Nat → Nat) (n : Nat) :
+    applyFamily (fun _ ↦ Nat) f (n + 0) = applyFamily (fun _ ↦ Nat) f n := by
+  explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0
+    at [0, 1, 1] with []]
+  rfl
+
 /- The selected node does not match, although matching redexes exist elsewhere.
    The operation fails at the recorded path instead of searching the goal. -/
 /-- error: explicit_rw_v2: step 1: lemma `Nat.add_zero` does not match the subterm at position [0, 0] -/

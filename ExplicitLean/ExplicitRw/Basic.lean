@@ -207,15 +207,17 @@ private def applicationArgumentPath? (e : Expr) (pos : Pos) :
   loop 0 pos
 
 private def applicationNeedsDependentTransport
-    (fn : Expr) (argumentIndex argumentCount : Nat) : MetaM Bool := do
-  forallTelescopeReducing (← inferType fn) fun binders resultType => do
-    if binders.size < argumentCount then return false
-    let some selected := binders[argumentIndex]?
-      | return false
-    let selectedId := selected.fvarId!
-    for later in binders.extract (argumentIndex + 1) argumentCount do
-      if (← later.fvarId!.getType).containsFVar selectedId then return true
-    return resultType.containsFVar selectedId
+    (fn : Expr) (args : Array Expr) (argumentIndex : Nat) : MetaM Bool := do
+  -- Inspect the selected argument after applying the actual earlier arguments.
+  -- Looking at the generic telescope of `fn` is too conservative: for example,
+  -- `DFunLike.coe` is generically dependent, but its instantiated codomain is
+  -- constant for an ordinary `LinearMap`.  In that case changing the value
+  -- argument is plain `congrArg`, not dependent transport.
+  let appliedPrefix := mkAppN fn (args.extract 0 argumentIndex)
+  let prefixType ← whnf (← inferType appliedPrefix)
+  match prefixType with
+  | .forallE _ _ body _ => return body.hasLooseBVars
+  | _ => return false
 
 /--
 Navigate `e` along `pos` and apply `k` to the subterm found there, then rebuild
@@ -253,7 +255,7 @@ where
         let argument := args[argumentIndex]!
         let replacement ← go argument argumentRest (seen ++ consumed)
         let needsDependentTransport ←
-          (applicationNeedsDependentTransport fn argumentIndex args.size : MetaM Bool)
+          (applicationNeedsDependentTransport fn args argumentIndex : MetaM Bool)
         unless needsDependentTransport do
           let mut oldApplication := fn
           let mut newApplication := fn
