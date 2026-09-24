@@ -50,7 +50,7 @@ class RenderOperationsTest(unittest.TestCase):
         }
         self.assertEqual(
             render_trace({"events": [event]}),
-            "explicit_rw_v2 [source lean_term(localRule n) variant 0 phase post "
+            "explicit_rw_v2 [source_rule lean_term(localRule n) variant 0 phase post "
             "fwd extra 0 at [0, 1] with []]",
         )
 
@@ -59,14 +59,30 @@ class RenderOperationsTest(unittest.TestCase):
         event["action"]["rewrite"]["premises"] = [
             {
                 "terminal": {"localAssumption": {"contextIndex": 4}},
-                "operationCount": 0,
+                "events": [],
             }
         ]
         self.assertIn("with [assumption local_ref 4]", render_trace({"events": [event]}))
 
+    def test_nested_premise_operations_are_recursive(self) -> None:
+        event = rewrite_event([])
+        event["action"]["rewrite"]["premises"] = [
+            {
+                "terminal": "dischargeRfl",
+                "events": [
+                    {"position": [0, 1], "action": {"reduce": {"reduction": "beta"}}}
+                ],
+            }
+        ]
+        self.assertIn(
+            "with [explicit_rw_v2 [beta at [0, 1]] then rfl]",
+            render_trace({"events": [event]}),
+        )
+
     def test_reductions(self) -> None:
         trace = {
             "events": [
+                {"position": [0], "action": {"reduce": {"reduction": "instantiateMVars"}}},
                 {"position": [1], "action": {"reduce": {"reduction": "beta"}}},
                 {
                     "position": [],
@@ -82,7 +98,7 @@ class RenderOperationsTest(unittest.TestCase):
         }
         self.assertEqual(
             render_trace(trace),
-            "explicit_rw_v2 [beta at [1], unfold Demo.f at []]",
+            "explicit_rw_v2 [instantiate at [0], beta at [1], unfold Demo.f at []]",
         )
 
     def test_simproc_is_residual(self) -> None:

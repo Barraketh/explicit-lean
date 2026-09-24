@@ -57,4 +57,12 @@ example (n : Nat) : n + 1 = Nat.succ n := by
   simp_operations_observe only [← Nat.succ_eq_add_one n]
   exact (Nat.succ_eq_add_one n).symm
 
+private def nestedPremiseProp (n : Nat) : Prop := n + 0 = n
+
+private theorem nestedPremiseRule (n : Nat) (h : n + 0 = n) : nestedPremiseProp n := h
+
+example (n : Nat) : nestedPremiseProp n := by
+  simp_operations_observe only [nestedPremiseRule, Nat.add_zero]
+  exact Nat.add_zero n
+
 end ExplicitLean.SimpTrace.T79OperationalRecording

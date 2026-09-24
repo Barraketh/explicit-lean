@@ -29,11 +29,11 @@ example (n : Nat) (h : n + 0 = n) : n + 0 = n := by
 /- A nontrivial source operand is replayed from its original parser syntax.
 The operational record contains no elaborated theorem or proof term. -/
 example (n : Nat) (h : n + 0 = n) : n + 0 = n := by
-  explicit_rw_v2 [source lean_term(h) variant 0 phase pre fwd extra 0 at [0, 1] with []]
+  explicit_rw_v2 [source_rule lean_term(h) variant 0 phase pre fwd extra 0 at [0, 1] with []]
   rfl
 
 example (n : Nat) : n = n + 0 := by
-  explicit_rw_v2 [source lean_term(Nat.add_zero n) variant 0 phase pre rev extra 0 at [1] with []]
+  explicit_rw_v2 [source_rule lean_term(Nat.add_zero n) variant 0 phase pre rev extra 0 at [1] with []]
   rfl
 
 /- `local_ref` selects a declaration by its local-context identity rather than
@@ -55,7 +55,32 @@ example (n : Nat) (h : n = 0) : n + 0 = 0 := by
   explicit_rw_v2 [rule conditionalRule variant 0 phase pre fwd extra 0 at [0, 1] with [assumption local_ref 2]]
   rfl
 
+/- A premise may itself be discharged by the exact recursive operation stream
+that simp used, rather than by a guessed theorem search. -/
+example (n : Nat) : (if n + 0 = n then 1 else 2) = 1 := by
+  explicit_rw_v2 [rule if_pos variant 0 phase pre fwd extra 0 at [0, 1] with [
+    explicit_rw_v2 [rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with []]
+      then rfl]]
+  rfl
+
+private def replayNestedPremiseProp (n : Nat) : Prop := n + 0 = n
+
+private theorem replayNestedPremiseRule (n : Nat) (h : n + 0 = n) :
+    replayNestedPremiseProp n := h
+
+/- This is the exact recursive shape emitted by the recorder probe, including
+the simplifier's explicit metavariable-instantiation operation and terminal. -/
+example (n : Nat) : replayNestedPremiseProp n := by
+  explicit_rw_v2 [rule replayNestedPremiseRule variant 0 phase post fwd extra 0 at [] with [
+    explicit_rw_v2 [instantiate at [0, 1, 0, 1],
+      rule Nat.add_zero variant 0 phase post fwd extra 0 at [0, 1] with [],
+      rule eq_self variant 0 phase post fwd extra 0 at [] with []] then true_intro]] then true_intro
+
 /- Definitional operations share the same path semantics. -/
+example (n : Nat) : n = n := by
+  explicit_rw_v2 [instantiate at []]
+  rfl
+
 example (n : Nat) : (fun x : Nat => x) n = n := by
   explicit_rw_v2 [beta at [0, 1]]
   rfl

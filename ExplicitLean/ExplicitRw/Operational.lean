@@ -34,76 +34,13 @@ Examples:
 explicit_rw_v2 [rule Nat.add_zero variant 0 phase pre fwd extra 0 at [0, 1] with []]
 explicit_rw_v2 [equation myDef index 0 variant 1 phase dpre fwd extra 0 at [0, 1] with []]
 explicit_rw_v2 [local local_ref 4 variant 0 phase dpost rev extra 0 at [1] with []]
-explicit_rw_v2 [beta at [0], iota at [1], proj at [2], zeta at [3]]
+explicit_rw_v2 [beta at [0], instantiate at [1], iota at [2], proj at [3], zeta at [4]]
 ```
 -/
 
 namespace ExplicitLean.ExplicitRw
 
 open Lean Elab Tactic Meta
-
-declare_syntax_cat explicitRwOperationalStep
-
-declare_syntax_cat explicitRwOperationalProof
-syntax (name := explicitRwOperationalProofRfl) &"rfl" : explicitRwOperationalProof
-syntax (name := explicitRwOperationalProofTrueIntro) "true_intro" : explicitRwOperationalProof
-syntax (name := explicitRwOperationalProofAssumptionRef)
-  "assumption " "local_ref " num : explicitRwOperationalProof
-syntax (name := explicitRwOperationalProofAssumption)
-  "assumption " ident : explicitRwOperationalProof
-
-syntax explicitRwOperationalWith := " with " "[" explicitRwOperationalProof,* "]"
-
-syntax (name := explicitRwOperationalRule)
-  "rule " ident " variant " num " phase " ident ("fwd" <|> "rev")
-  " extra " num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
-
-/-- A parser-authenticated source operand from the original `simp` argument.
-`lean_term(...)` remains ordinary Lean syntax; the recorder never serializes
-its elaborated expression or proof. -/
-syntax (name := explicitRwOperationalSource)
-  "source " explicitRwTerm " variant " num " phase " ident ("fwd" <|> "rev")
-  " extra " num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
-
-syntax (name := explicitRwOperationalEquation)
-  "equation " ident " index " num " variant " num " phase " ident ("fwd" <|> "rev")
-  " extra " num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
-
-syntax (name := explicitRwOperationalLocal)
-  "local " ident " variant " num " phase " ident ("fwd" <|> "rev")
-  " extra " num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
-
-syntax (name := explicitRwOperationalLocalRef)
-  &"local" "local_ref " num " variant " num " phase " ident ("fwd" <|> "rev")
-  " extra " num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
-
-syntax (name := explicitRwOperationalBeta)
-  "beta " explicitRwPos : explicitRwOperationalStep
-
-syntax (name := explicitRwOperationalIota)
-  "iota " explicitRwPos : explicitRwOperationalStep
-
-syntax (name := explicitRwOperationalProj)
-  "proj " explicitRwPos : explicitRwOperationalStep
-
-syntax (name := explicitRwOperationalZeta)
-  "zeta " explicitRwPos : explicitRwOperationalStep
-
-syntax (name := explicitRwOperationalUnfold)
-  "unfold " ident explicitRwPos : explicitRwOperationalStep
-
-syntax (name := explicitRwOperationalSimproc)
-  &"simproc" ident explicitRwPos : explicitRwOperationalStep
-
-declare_syntax_cat explicitRwOperationalClose
-syntax (name := explicitRwOperationalClose)
-  " then " explicitRwOperationalProof : explicitRwOperationalClose
-
-/- This has its own `explicit_rw_v2 [ ... ]` spelling and parser. It neither
-   overlaps nor dispatches through the legacy surface tactic. -/
-syntax (name := explicitRwOperational)
-  "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
-  (Lean.Parser.Tactic.location)? (explicitRwOperationalClose)? : tactic
 
 namespace Operational
 
@@ -145,6 +82,10 @@ private def lowerProof (stx : Syntax) : TacticM Syntax := do
   | ``explicitRwOperationalProofAssumptionRef => do
     let localIndex : TSyntax `num := ⟨stx[2]⟩
     return (← `(explicitRwSideTac| exact local_ref $localIndex:num)).raw
+  | ``explicitRwOperationalProofNested =>
+    -- The nested v2 grammar is already closed. Preserve it for
+    -- `Impl.runSideProofOn`, which runs it against exactly the premise goal.
+    return stx
   | k => throwError "explicit_rw_v2: internal error: unknown closed proof operation `{k}`"
 
 private def lowerProofs (withStx : Syntax) : TacticM (Array Syntax) :=
@@ -283,6 +224,12 @@ private def runOne (idx : Nat) (e : Expr) (step : Syntax) : TacticM Replacement 
       if reduced == sub then
         stepError idx m!"`beta` at this position: the subterm is not a beta-redex."
       return reduced
+  | ``explicitRwOperationalInstantiate => do
+    let pos := parsePos step[1]
+    -- `instantiateMVars` is itself a recorded simplifier operation. Replaying
+    -- it at the exact recorded node preserves that operational boundary; it
+    -- does not search for a redex or choose a theorem.
+    Impl.runDefeqStep idx e pos m!"`instantiate`" instantiateMVars
   | ``explicitRwOperationalIota => do
     let pos : TSyntax ``ExplicitLean.ExplicitRw.explicitRwPos := ⟨step[1]⟩
     let legacyStep ← `(explicitRwStep| iota $pos)

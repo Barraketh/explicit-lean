@@ -47,33 +47,35 @@ structure Rule where
   numExtraArgs : Nat
   deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
-/-- Term-free summary of one rewrite premise.  Premises with nested operations
-remain visible as residuals until the recursive v2 premise syntax lands. -/
-structure Premise where
-  terminal : PremiseTerminal
-  operationCount : Nat
-  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+mutual
+  /-- A rewrite premise's exact recursive operation stream and terminal proof
+  action. No proposition, proof, or elaborated expression is serialized. -/
+  structure Premise where
+    terminal : PremiseTerminal
+    events : Array Event := #[]
+    deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
-/-- A source-facing operation.  Failed candidates are deliberately absent:
-they do not transform the expression and require no replay action. -/
-inductive Action where
-  | rewrite (rule : Rule) (premises : Array Premise)
-  | reduce (reduction : Reduction)
-  | builtin (builtin : Builtin)
-  | simproc (declarations : Array String)
-  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+  /-- A source-facing operation. Failed candidates are deliberately absent:
+  they do not transform the expression and require no replay action. -/
+  inductive Action where
+    | rewrite (rule : Rule) (premises : Array Premise)
+    | reduce (reduction : Reduction)
+    | builtin (builtin : Builtin)
+    | simproc (declarations : Array String)
+    deriving Repr, BEq, Lean.ToJson, Lean.FromJson
 
-/--
-One operation committed by the simplifier, expressed without an elaborated
-term or proof payload.  `position` is the raw `Expr` child path at which the
-operation ran.  A missing position is an explicit unsupported boundary; a
-consumer must not search for a matching redex.
--/
-structure Event where
-  position : Option (Array Nat)
-  phase : Phase
-  action : Action
-  deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+  /--
+  One operation committed by the simplifier, expressed without an elaborated
+  term or proof payload. `position` is the raw `Expr` child path at which the
+  operation ran. A missing position is an explicit unsupported boundary; a
+  consumer must not search for a matching redex.
+  -/
+  structure Event where
+    position : Option (Array Nat)
+    phase : Phase
+    action : Action
+    deriving Repr, BEq, Lean.ToJson, Lean.FromJson
+end
 
 /-- Term-free action needed after the expression operations.  `trueIntro`
 corresponds to the ordinary goal-level step used when simp changes a target to

@@ -415,6 +415,69 @@ syntax:25 (name := explicitRwTermArrow) explicitRwTerm:26 " → " explicitRwTerm
 /-- `at [0, 1, 1]` — the position a step applies at. `at []` is the whole location. -/
 syntax explicitRwPos := " at " "[" num,* "]"
 
+/-! The operational v2 syntax is declared in this shared parser module so a
+closed v2 program can recursively discharge a rewrite premise. Its evaluator
+remains in `ExplicitRw.Operational`; this section defines syntax only. -/
+
+declare_syntax_cat explicitRwOperationalStep
+declare_syntax_cat explicitRwOperationalProof
+
+syntax (name := explicitRwOperationalProofRfl) "rfl" : explicitRwOperationalProof
+syntax (name := explicitRwOperationalProofTrueIntro) "true_intro" : explicitRwOperationalProof
+syntax (name := explicitRwOperationalProofAssumptionRef)
+  "assumption " "local_ref " num : explicitRwOperationalProof
+syntax (name := explicitRwOperationalProofAssumption)
+  "assumption " ident : explicitRwOperationalProof
+
+syntax explicitRwOperationalWith := " with " "[" explicitRwOperationalProof,* "]"
+
+syntax (name := explicitRwOperationalRule)
+  "rule " ident " variant " num " phase " ident ("fwd" <|> "rev")
+  &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
+
+syntax (name := explicitRwOperationalSource)
+  "source_rule " explicitRwTerm " variant " num " phase " ident ("fwd" <|> "rev")
+  &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
+
+syntax (name := explicitRwOperationalEquation)
+  "equation " ident &"index" num " variant " num " phase " ident ("fwd" <|> "rev")
+  &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
+
+syntax (name := explicitRwOperationalLocal)
+  "local " ident " variant " num " phase " ident ("fwd" <|> "rev")
+  &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
+
+syntax (name := explicitRwOperationalLocalRef)
+  &"local" "local_ref " num " variant " num " phase " ident ("fwd" <|> "rev")
+  &"extra" num explicitRwPos explicitRwOperationalWith : explicitRwOperationalStep
+
+syntax (name := explicitRwOperationalBeta)
+  "beta " explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalInstantiate)
+  "instantiate " explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalIota)
+  "iota " explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalProj)
+  "proj " explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalZeta)
+  "zeta " explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalUnfold)
+  "unfold " ident explicitRwPos : explicitRwOperationalStep
+syntax (name := explicitRwOperationalSimproc)
+  &"simproc" ident explicitRwPos : explicitRwOperationalStep
+
+declare_syntax_cat explicitRwOperationalClose
+syntax (name := explicitRwOperationalClose)
+  " then " explicitRwOperationalProof : explicitRwOperationalClose
+
+syntax (name := explicitRwOperationalProofNested)
+  "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
+  (explicitRwOperationalClose)? : explicitRwOperationalProof
+
+syntax (name := explicitRwOperational)
+  "explicit_rw_v2 " "[" explicitRwOperationalStep,* "]"
+  (Lean.Parser.Tactic.location)? (explicitRwOperationalClose)? : tactic
+
 /--
 A **side proof**: the closed, recursive grammar for discharging a side condition
 or closing a goal.
@@ -1865,6 +1928,14 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
       stepError idx m!"{where?} duplicates introduced handle {handle}."
     let (fvarId, goal') ← goal.intro1P
     runSideProofOn idx which? stx[3] goal' (handles.insert handle fvarId)
+  | ``explicitRwOperationalProofNested =>
+    -- Reclassify the same closed parser children as the tactic-level v2 node.
+    -- The inserted empty optional location keeps the recursive proof scoped to
+    -- this exact side goal; the v2 evaluator performs the actual operations.
+    let nested : TSyntax `tactic := ⟨mkNode ``explicitRwOperational #[
+      stx[0], stx[1], stx[2], stx[3], mkNullNode #[], stx[4]
+    ]⟩
+    run nested
   | ``explicitRwSideNested =>
     -- Replay a nested trace under the introduced hypotheses.
     let steps := stx[2].getSepArgs

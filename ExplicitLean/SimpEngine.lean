@@ -363,18 +363,16 @@ private def sourceReduction : Reduction → Operations.Reduction
   | .foldRawNatLit => .foldRawNatLit
   | .localDef subject reason => .localDef subject.contextIndex reason
 
-private def sourceAction? (operation : Operation) : Option Operations.Action :=
+private def sourceAction? (operation : Operation)
+    (premiseOperations : Array Operations.Premise) : Option Operations.Action :=
   match operation with
-  | .rewrite rule _ premises => some <| .rewrite {
+  | .rewrite rule _ _ => some <| .rewrite {
       origin := sourceRuleOrigin rule.origin
       inverse := rule.inverse
       phase := rule.phase
       variant := rule.variant
       numExtraArgs := rule.numExtraArgs
-    } (premises.map fun premise => {
-      terminal := premise.terminal
-      operationCount := premise.program.events.size
-    })
+    } premiseOperations
   | .rewriteAttemptFailed .. => none
   | .reduce reduction => some (.reduce (sourceReduction reduction))
   | .builtin builtin => some (.builtin builtin)
@@ -398,7 +396,16 @@ def emitEvent (input output : Expr) (operation : Operation)
       stepDisposition
     }
     if runtime.mode == .record then
-      let operationalEvents := match sourceAction? operation with
+      let premiseCount := match operation with
+        | .rewrite _ _ premises | .rewriteAttemptFailed _ _ premises => premises.size
+        | _ => 0
+      if state.pendingPremiseOperations.size < premiseCount then
+        throwError "operational_premise_trace_underflow"
+      let premiseStart := state.pendingPremiseOperations.size - premiseCount
+      let premiseOperations := state.pendingPremiseOperations.extract
+        premiseStart state.pendingPremiseOperations.size
+      let remainingPremises := state.pendingPremiseOperations.extract 0 premiseStart
+      let operationalEvents := match sourceAction? operation premiseOperations with
         | some action => state.operationalEvents.push {
             position := state.operationPosition
             phase := state.phase
@@ -409,6 +416,7 @@ def emitEvent (input output : Expr) (operation : Operation)
         state with
         program.events := state.program.events.push event
         operationalEvents
+        pendingPremiseOperations := remainingPremises
       }
     else
       let some expected := state.program.events[state.eventCursor]?
@@ -1983,11 +1991,20 @@ private def finishPremiseProgram (outer : RecorderState) (type : Expr) : EngineM
   let runtime ← getRuntime
   if runtime.mode == .record then
     let inner ← runtime.state.get
-    runtime.state.set outer
+    let terminal := inner.lastPremiseTerminal.getD .isTrue
+    let nestedEvents := inner.operationalEvents.extract
+      outer.operationalEvents.size inner.operationalEvents.size
+    runtime.state.set {
+      outer with
+      pendingPremiseOperations := outer.pendingPremiseOperations.push {
+        terminal
+        events := nestedEvents
+      }
+    }
     return {
       resolvedPropositionFingerprint := ← liftM (exprFingerprintHash type)
       program := inner.program
-      terminal := inner.lastPremiseTerminal.getD .isTrue
+      terminal
     }
   else if runtime.mode == .replay then
     let inner ← runtime.state.get

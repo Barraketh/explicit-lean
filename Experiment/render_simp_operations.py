@@ -59,15 +59,13 @@ def render_rule_origin(origin: dict[str, Any]) -> str:
         source = syntax["source"].strip()
         if not source:
             raise UnsupportedOperation("source-syntax simp rule has empty parser source")
-        return f"source lean_term({source})"
+        return f"source_rule lean_term({source})"
     if "other" in origin:
         raise UnsupportedOperation("opaque simp rule origin is not an operational operand")
     raise UnsupportedOperation(f"unknown rule origin {origin!r}")
 
 
-def render_premise(premise: dict[str, Any]) -> str:
-    if premise["operationCount"]:
-        raise UnsupportedOperation("rewrite premise has nested operations")
+def render_premise_terminal(premise: dict[str, Any]) -> str:
     terminal = premise["terminal"]
     if terminal == "dischargeRfl":
         return "rfl"
@@ -81,6 +79,16 @@ def render_premise(premise: dict[str, Any]) -> str:
     if terminal == "failed":
         raise UnsupportedOperation("committed rewrite contains a failed premise")
     raise UnsupportedOperation(f"unknown premise terminal {terminal!r}")
+
+
+def render_premise(premise: dict[str, Any]) -> str:
+    proof = render_premise_terminal(premise)
+    events = premise.get("events")
+    if not isinstance(events, list):
+        raise UnsupportedOperation("rewrite premise has no recursive operation stream")
+    if not events:
+        return proof
+    return f"explicit_rw_v2 [{', '.join(render_events(events))}] then {proof}"
 
 
 def render_rewrite(payload: dict[str, Any], position: Any) -> str:
@@ -99,6 +107,8 @@ def render_rewrite(payload: dict[str, Any], position: Any) -> str:
 
 def render_reduction(payload: Any, position: Any) -> str:
     at = render_position(position)
+    if payload == "instantiateMVars":
+        return f"instantiate {at}"
     if payload == "beta":
         return f"beta {at}"
     if payload == "iota":
@@ -115,9 +125,9 @@ def render_reduction(payload: Any, position: Any) -> str:
     raise UnsupportedOperation(f"reduction {payload!r} has no exact source operation yet")
 
 
-def render_trace(trace: dict[str, Any]) -> str:
+def render_events(events: list[dict[str, Any]]) -> list[str]:
     steps: list[str] = []
-    for index, event in enumerate(trace["events"]):
+    for index, event in enumerate(events):
         action = event["action"]
         try:
             if "rewrite" in action:
@@ -132,6 +142,11 @@ def render_trace(trace: dict[str, Any]) -> str:
                 raise UnsupportedOperation(f"unknown operation {action!r}")
         except UnsupportedOperation as error:
             raise UnsupportedOperation(f"event {index}: {error}") from error
+    return steps
+
+
+def render_trace(trace: dict[str, Any]) -> str:
+    steps = render_events(trace["events"])
     source = "explicit_rw_v2 [" + ", ".join(steps) + "]"
     terminal = trace.get("terminal", "open")
     if terminal == "trueIntro":

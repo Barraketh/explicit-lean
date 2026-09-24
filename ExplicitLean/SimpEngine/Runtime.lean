@@ -26,6 +26,9 @@ structure RecorderState where
       remain a residual rather than trigger a search. -/
   operationPosition : Option (Array Nat) := some #[]
   operationalEvents : Array Operations.Event := #[]
+  /-- Recursive premise traces awaiting the parent rewrite event. This stack is
+  rollback-able with the recorder state, exactly like the selected rewrite. -/
+  pendingPremiseOperations : Array Operations.Premise := #[]
   phase : Phase := .pre
   phaseInvocationOrdinal : Nat := 0
   currentPhaseInvocationOrdinal : Nat := 0
