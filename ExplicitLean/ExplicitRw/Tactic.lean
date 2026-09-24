@@ -1374,16 +1374,18 @@ def unfoldConst (idx : Nat) (c : Name) (sub : Expr) : TacticM Expr := do
   unless sub.getAppFn.constName? == some c do
     stepError idx m!"`unfold {c}` was applied where the head constant is \
       `{sub.getAppFn}`."
-  -- `unfoldDefinition?` fails for plain definitions under `withReducible`, so
-  -- fall back to default transparency. Both are delta steps on `c` alone.
-  match ← withReducible (unfoldDefinition? sub) with
+  -- This is Lean's one-step delta primitive used by simp's requested and
+  -- smart-unfold paths.  `unfoldDefinition?` uses the ambient transparency
+  -- mode and can choose a different equation/unfolding declaration, which
+  -- changes the child layout before the separately recorded iota steps.
+  let unfolded ←
+    if ← isIrreducible c then pure none
+    else unfoldDefinition? sub (ignoreTransparency := true)
+  match unfolded with
   | some e => return e
   | none =>
-    match ← unfoldDefinition? sub with
-    | some e => return e
-    | none =>
-      stepError idx m!"`unfold {c}` cannot unfold the subterm at this position; \
-        `{c}` has no delta-reduction here."
+    stepError idx m!"`unfold {c}` cannot unfold the subterm at this position; \
+      `{c}` has no delta-reduction here."
 
 /-- Eta-reduce `fun x => f x` to `f`, failing when the subterm is not an eta-redex. -/
 def etaReduce (idx : Nat) (sub : Expr) : TacticM Expr := do
@@ -1528,16 +1530,9 @@ partial def runStep (idx : Nat) (e : Expr) (stx : Syntax)
         -- the single-step primitive. `whnfCore` would iterate to weak-head
         -- normal form and swallow the redexes that later recorded `iota` steps
         -- address, so a trace of N steps would fail at step 2.
-        let fn := sub.getAppFn
-        let isMatcher ← Meta.isMatcherApp sub
-        let env ← getEnv
-        let isRec :=
-          match fn with
-          | .const c _ => (env.find? c).any (· matches .recInfo _)
-          | _ => false
-        unless isMatcher || isRec do
-          stepError idx m!"`iota` at this position: the subterm is not a matcher or \
-            recursor application; its head is `{fn}`."
+        -- Do not pre-classify the head: eliminators such as `Sum.casesOn` are
+        -- accepted by this reduction primitive even though they are neither a
+        -- matcher nor represented as `.recInfo` in the environment.
         match ← reduceRecMatcher? sub with
         | some r => return r
         | none =>
