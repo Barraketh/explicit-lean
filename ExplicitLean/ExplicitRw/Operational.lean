@@ -72,10 +72,11 @@ private def sideProofs (withStx : Syntax) : Array Syntax :=
 
 private def lowerProof (stx : Syntax) : TacticM Syntax := do
   match stx.getKind with
-  | ``explicitRwOperationalProofRfl =>
-    return (← `(explicitRwSideTac| rfl)).raw
-  | ``explicitRwOperationalProofTrueIntro =>
-    return (← `(explicitRwSideTac| close [True.intro])).raw
+  | ``explicitRwOperationalProofAtom =>
+    match stx[0].getId.toString with
+    | "rfl" => return (← `(explicitRwSideTac| rfl)).raw
+    | "true_intro" => return (← `(explicitRwSideTac| close [True.intro])).raw
+    | atom => throwError "explicit_rw_v2: unknown closed proof operation `{atom}`"
   | ``explicitRwOperationalProofAssumption => do
     let hyp : Ident := ⟨stx[1]⟩
     let _ ← getFVarId hyp.raw
@@ -576,7 +577,13 @@ private def runTerminal (stx : Syntax) (target : Option Target) : TacticM Unit :
     throwError "explicit_rw_v2: internal error: unknown terminal operation `{kind}`."
 
 private def isFalseElimTerminal (stx : Syntax) : Bool :=
-  !stx.isNone && stx[0].getKind == ``explicitRwOperationalCloseFalseElim
+  if stx.isNone then
+    false
+  else
+    let close := stx[0]
+    close.getKind == ``explicitRwOperationalCloseFalseElim ||
+      (close.getNumArgs > 0 && close[0].getKind == ``explicitRwOperationalCloseFalseElim) ||
+      (close.getNumArgs > 1 && close[1].getKind == ``explicitRwOperationalCloseFalseElim)
 
 end Operational
 

@@ -422,8 +422,11 @@ remains in `ExplicitRw.Operational`; this section defines syntax only. -/
 declare_syntax_cat explicitRwOperationalStep
 declare_syntax_cat explicitRwOperationalProof
 
-syntax (name := explicitRwOperationalProofRfl) "rfl" : explicitRwOperationalProof
-syntax (name := explicitRwOperationalProofTrueIntro) "true_intro" : explicitRwOperationalProof
+/- Parse closed proof atoms as identifiers instead of reserving `rfl` (or
+future atom names) globally. Reserving `rfl` here changes ordinary Lean parsing
+in every module that imports `ExplicitRw`. The evaluator accepts only the two
+enumerated spellings. -/
+syntax (name := explicitRwOperationalProofAtom) ident : explicitRwOperationalProof
 syntax (name := explicitRwOperationalProofAssumptionRef)
   "assumption " "local_ref " num : explicitRwOperationalProof
 syntax (name := explicitRwOperationalProofAssumption)
@@ -1919,11 +1922,14 @@ partial def runSideProofOn (idx : Nat) (which? : Option Nat) (stx : Syntax)
   let stx := if stx.getKind == ``explicitRwSideTac then stx[0] else stx
   match stx.getKind with
   | ``explicitRwSideRfl => run (← `(tactic| rfl))
-  | ``explicitRwOperationalProofRfl => run (← `(tactic| rfl))
+  | ``explicitRwOperationalProofAtom =>
+    match stx[0].getId.toString with
+    | "rfl" => run (← `(tactic| rfl))
+    | "true_intro" => run (← `(tactic| exact True.intro))
+    | atom => stepError idx m!"unknown closed proof operation `{atom}` in {where?}"
   | ``explicitRwSideDecide => run (← `(tactic| decide))
   | ``explicitRwSideOmega => run (← `(tactic| omega))
   | ``explicitRwSideNofun => run (← `(tactic| exact nofun))
-  | ``explicitRwOperationalProofTrueIntro => run (← `(tactic| exact True.intro))
   | ``explicitRwOperationalProofAssumption =>
     goal.withContext do
       let hyp : Ident := ⟨stx[1]⟩

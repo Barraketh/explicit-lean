@@ -2,6 +2,9 @@ import ExplicitLean.ExplicitRw
 
 namespace ExplicitLean.SimpTrace.T79OperationalReplay
 
+/- Importing the v2 syntax must not reserve Lean's ordinary `rfl` term. -/
+private theorem ordinaryTermRfl : True = True := rfl
+
 /- A declaration operand, variant/phase/direction metadata, exact raw child path,
    and empty ordered premise list are all visible in the generated source. -/
 example (n : Nat) : n + 0 = n := by
