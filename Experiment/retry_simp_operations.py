@@ -626,12 +626,26 @@ def render_command(source: str, command: dict[str, Any],
             # left tactic's term syntax.  Extra indentation makes Lean parse
             # `explicit_rw_v2_goals` as another argument to commands such as
             # `refine f ?_ ?_ <;> simp`.
-            continuation = line_indent
+            is_midline = bool(line_prefix.strip())
+            continuation = line_indent + ("  " if is_midline else "")
             left = str(parent["left"])
-            first_prefix = line_indent if not line_prefix.strip() else ""
             lines: list[str] = []
-            comment_indent = continuation if left else (first_prefix or line_indent)
-            lines.extend(worker.S.comment_original(trace_site.callText, comment_indent))
+            if is_midline:
+                # The replaced `<;>` parent is one tactic atom inside an
+                # enclosing sequence or term delimiter. Keep the original
+                # call adjacent, and make the multiline reconstruction one
+                # parenthesized atom so layout cannot reinterpret the replay
+                # as a term argument (notably `by ext; cases x <;> simp`).
+                lines.append("(-- Original simp:")
+                lines.extend(
+                    continuation + "-- " + line
+                    for line in trace_site.callText.splitlines()
+                )
+            else:
+                comment_indent = continuation if left else line_indent
+                lines.extend(worker.S.comment_original(
+                    trace_site.callText, comment_indent
+                ))
             wrapper = goal_lines[0].replace(
                 "explicit_rw_v2_goals ", "explicit_rw_v2_goals_after ", 1
             ) + " by"
@@ -647,8 +661,9 @@ def render_command(source: str, command: dict[str, Any],
             lines.extend(continuation + "  " + line for line in source_lines)
             for following in parent.get("after", []):
                 lines.append(continuation + "all_goals " + str(following))
+            if is_midline:
+                lines.append(line_indent + ")")
             ranges[local_site.index] = (start, end)
-            is_midline = False
         replacements[local_site.index] = lines
         if is_midline:
             multiline_midline.add(local_site.index)

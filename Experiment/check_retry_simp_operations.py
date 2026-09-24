@@ -390,6 +390,31 @@ def check_repeated_goal_command_rewrite() -> None:
         )
         assert code == 0, stdout + stderr
 
+    midline_source = "theorem pairMidline : True ∧ True := by skip; constructor <;> simp\n"
+    trace_site = retry.TI.find_sites(midline_source)[0]
+    render_site = retry.worker.S.find_sites(midline_source)[0]
+    parent_start = midline_source.index("constructor")
+    parent_end = midline_source.index("\n", parent_start)
+    rewritten, error = retry.render_command(
+        midline_source,
+        {"start": 0, "end": len(midline_source.encode("utf-8"))},
+        [(trace_site, render_site)],
+        {},
+        {trace_site.siteOrdinal: (
+            observations,
+            {"start": parent_start, "end": parent_end, "left": "constructor"},
+        )},
+    )
+    assert error is None and rewritten is not None, error
+    assert "; (-- Original simp:" in rewritten, rewritten
+    with tempfile.TemporaryDirectory(prefix="retry-repeated-midline-") as temp:
+        path = pathlib.Path(temp) / "RepeatedMidline.lean"
+        path.write_text("import ExplicitLean.ExplicitRw\n\n" + rewritten, encoding="utf-8")
+        code, stdout, stderr, _ = retry.replay.run(
+            ["lake", "env", "lean", str(path)], ROOT, timeout=30,
+        )
+        assert code == 0, stdout + stderr
+
 
 def check_midline_tactic_rewrite() -> None:
     source = "theorem t83MidlineFixture : True := (by simp)\n"
