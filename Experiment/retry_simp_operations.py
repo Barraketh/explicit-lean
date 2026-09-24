@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from dataclasses import replace
 import hashlib
 import json
 import pathlib
@@ -122,6 +123,49 @@ def _has_top_level_location(call_text: str) -> bool:
     return False
 
 
+def _multiline_location_end(source: str, end: int) -> int:
+    """Extend a lexer site across a location clause on the following line.
+
+    The shared historical site scanner ends a tactic at a top-level newline,
+    while Lean permits the location clause to start on the next layout line.
+    Consume exactly that following ``at ...`` line; ``call_end`` already knows
+    how to stop before a comment or the next line without parsing term syntax.
+    """
+    suffix = source[end:]
+    match = re.match(r"[ \t]*\n[ \t]*at\b", suffix)
+    if match is None:
+        return end
+    at_offset = match.end() - 2
+    at_start = end + at_offset
+    location_end = at_start + 2 + worker.S.call_end(source[at_start + 2:])
+    return at_start + len(source[at_start:location_end].rstrip())
+
+
+def _extend_trace_site_location(source: str, site: TI.Site) -> TI.Site:
+    end = _multiline_location_end(source, site.endChar)
+    if end == site.endChar:
+        return site
+    return TI.Site(
+        site.siteOrdinal, site.startChar, end, site.line, site.column,
+        source[site.startChar:end],
+    )
+
+
+def _extend_render_site_location(source: str, site: worker.S.Site) -> worker.S.Site:
+    end = _multiline_location_end(source, site.end)
+    if end == site.end:
+        return site
+    line_end = source.find("\n", end)
+    if line_end < 0:
+        line_end = len(source)
+    return replace(
+        site,
+        end=end,
+        text=source[site.start:end],
+        trailing=source[end:line_end],
+    )
+
+
 def _source_site_owner_map(source: str, commands: list[dict[str, Any]]) -> tuple[
         list[tuple[TI.Site, worker.S.Site, int]], list[TI.Site]]:
     renderer_sites, trace_sites = worker.align_sites(source)
@@ -129,25 +173,32 @@ def _source_site_owner_map(source: str, commands: list[dict[str, Any]]) -> tuple
         (site.start, site.end, site.text): site for site in renderer_sites
     }
     owned: list[tuple[TI.Site, worker.S.Site, int]] = []
-    for trace_site in trace_sites:
+    extended_trace_sites: list[TI.Site] = []
+    for raw_trace_site in trace_sites:
+        trace_site = _extend_trace_site_location(source, raw_trace_site)
+        extended_trace_sites.append(trace_site)
         if not worker.TARGET.match(trace_site.callText):
             continue
         owner = worker.command_for_site(source, commands, trace_site)
         if owner is None:
             continue
-        render_site = renderer_by_span.get((
-            trace_site.startChar, trace_site.endChar, trace_site.callText
+        raw_render_site = renderer_by_span.get((
+            raw_trace_site.startChar, raw_trace_site.endChar, raw_trace_site.callText
         ))
-        if render_site is None:
+        if raw_render_site is None:
             raise RetryError(
                 f"renderer/recorder site identity mismatch at site {trace_site.siteOrdinal}"
             )
+        render_site = _extend_render_site_location(source, raw_render_site)
         owned.append((trace_site, render_site, owner))
-    return owned, trace_sites
+    return owned, extended_trace_sites
 
 
 def _instrument_source(source: str, sites: list[TI.Site]) -> str:
-    renderer_sites = worker.S.find_sites(source)
+    renderer_sites = [
+        _extend_render_site_location(source, site)
+        for site in worker.S.find_sites(source)
+    ]
     by_span = {(site.start, site.end, site.text): site for site in renderer_sites}
     replacements: dict[int, list[str]] = {}
     for site in sites:

@@ -353,6 +353,54 @@ theorem untouched (n : Nat) : n = n := by
         db.close()
 
 
+def check_multiline_location_end_to_end() -> None:
+    source = """import Mathlib.Data.Nat.Basic
+
+theorem retryLocation (n : Nat) (h : n + 0 = n) : n = n := by
+  simp only [Nat.add_zero]
+    at h
+  rfl
+"""
+    module = "Mathlib.T79OperationalRetryLocation"
+    module_path = "Mathlib/T79OperationalRetryLocation.lean"
+    raw_trace_site = retry.TI.find_sites(source)[0]
+    assert raw_trace_site.callText == "simp only [Nat.add_zero]"
+    owned, _ = retry._source_site_owner_map(
+        source,
+        [{"ordinal": 0, "start": source.index("theorem "),
+          "end": len(source.encode("utf-8")), "kind": "theorem"}],
+    )
+    assert len(owned) == 1, owned
+    trace_site, render_site, _ = owned[0]
+    assert trace_site.callText == "simp only [Nat.add_zero]\n    at h", trace_site
+    assert render_site.text == trace_site.callText, render_site
+    with tempfile.TemporaryDirectory(prefix="retry-simp-operations-location-") as temp:
+        temp_root = pathlib.Path(temp)
+        source_root = temp_root / "source"
+        source_path = source_root / module_path
+        source_path.parent.mkdir(parents=True)
+        source_path.write_text(source, encoding="utf-8")
+        database = temp_root / "mathlib-db.sqlite3"
+        db = sqlite3.connect(database)
+        make_database(db, module, module_path, source)
+        artifacts = temp_root / "artifacts"
+        artifacts.mkdir()
+        report = retry.process_module(
+            db, module, artifacts, retry.ensure_prerequisites(), source_root=source_root,
+        )
+        diagnostic = db.execute(
+            "SELECT status,replacement_text,error FROM simp_replacements WHERE ordinal=0"
+        ).fetchone()
+        assert report["counts"] == {"success": 1}, (report, diagnostic)
+        status, replacement, error = db.execute(
+            "SELECT status,replacement_text,error FROM simp_replacements WHERE ordinal=0"
+        ).fetchone()
+        assert status == "success" and error is None, (status, error)
+        assert "explicit_rw_v2" in replacement and "at h" in replacement, replacement
+        assert "simp only [Nat.add_zero]\n" in replacement, replacement
+        db.close()
+
+
 def check_repeated_goal_command_rewrite() -> None:
     source = "theorem pair : True ∧ True := by\n  constructor <;> simp\n"
     trace_site = retry.TI.find_sites(source)[0]
@@ -364,8 +412,8 @@ def check_repeated_goal_command_rewrite() -> None:
     parent_start = source.index("constructor")
     parent_end = source.index("\n", parent_start)
     observations = [
-        {"events": [], "terminal": "trueIntro"},
-        {"events": [], "terminal": "trueIntro"},
+        {"initialIsTrue": True, "events": [], "terminal": "trueIntro"},
+        {"initialIsTrue": True, "events": [], "terminal": "trueIntro"},
     ]
     rewritten, error = retry.render_command(
         source,
@@ -424,7 +472,9 @@ def check_midline_tactic_rewrite() -> None:
         source,
         {"start": 0, "end": len(source.encode("utf-8"))},
         [(trace_site, render_site)],
-        {trace_site.siteOrdinal: {"events": [], "terminal": "trueIntro"}},
+        {trace_site.siteOrdinal: {
+            "initialIsTrue": True, "events": [], "terminal": "trueIntro"
+        }},
     )
     assert error is None and rewritten is not None, error
     assert "(by (-- Original simp:" in rewritten, rewritten
@@ -447,6 +497,7 @@ def main() -> None:
     check_repeated_goal_command_rewrite()
     check_midline_tactic_rewrite()
     check_end_to_end()
+    check_multiline_location_end_to_end()
     print("operational DB retry: selection, residuals, module replay, and selected-row updates passed")
 
 

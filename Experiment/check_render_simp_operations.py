@@ -58,6 +58,18 @@ class RenderOperationsTest(unittest.TestCase):
             "explicit_rw_v2 [rule _root_.Nat.add_zero variant 0 phase post fwd extra 0 at [] with []] then true_intro",
         )
 
+    def test_nontrivial_true_without_operations_is_residual(self) -> None:
+        with self.assertRaisesRegex(
+            UnsupportedOperation, "without a recorded operation"
+        ):
+            render_trace({"events": [], "terminal": "trueIntro"})
+        self.assertEqual(
+            render_trace({
+                "initialIsTrue": True, "events": [], "terminal": "trueIntro"
+            }),
+            "explicit_rw_v2 [] then true_intro",
+        )
+
     def test_repeated_goal_traces_preserve_invocation_order(self) -> None:
         first = {"events": [rewrite_event([0])], "terminal": "open"}
         second = {"events": [rewrite_event([1])], "terminal": "trueIntro"}

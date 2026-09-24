@@ -139,6 +139,10 @@ inductive Terminal where
 
 /-- The committed operations in execution order. -/
 structure Trace where
+  /-- Whether the input proposition was already `True`.  This distinguishes a
+  legitimate empty `simp` on `True` from an unrecorded operation that changed a
+  nontrivial proposition to `True`. -/
+  initialIsTrue : Bool := false
   events : Array Event := #[]
   terminal : Terminal := .open
   deriving Repr, BEq, Lean.ToJson, Lean.FromJson

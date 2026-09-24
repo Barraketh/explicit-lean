@@ -350,7 +350,16 @@ def render_trace(trace: dict[str, Any], location: str | None = None) -> str:
         source += " " + location
     terminal = trace.get("terminal", "open")
     if terminal == "trueIntro":
-        source += " then true_intro"
+        # On the goal, `True` closes the goal.  At a hypothesis location the
+        # same terminal means the operation stream changed that hypothesis to
+        # `True`; the proof already carried by the local declaration is
+        # transported with its type, and no goal-level closer is run.
+        if location is None:
+            if not steps and trace.get("initialIsTrue") is not True:
+                raise UnsupportedOperation(
+                    "nontrivial simplification reached True without a recorded operation"
+                )
+            source += " then true_intro"
     elif terminal == "falseElim":
         if location is None:
             raise UnsupportedOperation("false-elimination terminal has no local subject")

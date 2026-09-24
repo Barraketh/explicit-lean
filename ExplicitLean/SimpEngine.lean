@@ -2864,6 +2864,7 @@ def mainCoreOperationalRecording (e : Expr) (ctx : Context) (s : State := {})
   else
     Operations.Terminal.open
   return (result, state, recording, {
+    initialIsTrue := e.isTrue
     events := recorderState.operationalEvents
     terminal
   })
