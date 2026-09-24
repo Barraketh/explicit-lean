@@ -203,7 +203,12 @@ and matches in one transaction for exactly this reason.
 -/
 private def runElaboratedSourceRule (idx : Nat) (e : Expr) (pos : Pos) (term : Term)
     (reverse : Bool) (sideTacs : Array Syntax) : TacticM Replacement := do
-  Impl.checkNoTacticBlock s!"the source rule of this step" (some idx) term
+  -- This is the exact source operand of the original `simp` call, not a
+  -- serialized proof term. It is emitted visibly as ordinary Lean and the
+  -- renderer rejects every simp-family token before producing this syntax.
+  -- Thus an ordinary proof block such as `by omega` remains readable source.
+  -- Its result is still elaborated without recovery, checked for `sorry`, and
+  -- confined to the already-recorded root position.
   rewriteAt e pos
     (fun sub => do
       let syntheticsBefore := (← getThe Term.State).syntheticMVars

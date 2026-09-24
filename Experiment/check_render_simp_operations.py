@@ -78,6 +78,26 @@ class RenderOperationsTest(unittest.TestCase):
             "fwd extra 0 at [0, 1] with []]",
         )
 
+    def test_source_syntax_ordinary_tactic_block_is_visible_lean(self) -> None:
+        event = rewrite_event([0, 1])
+        event["action"]["rewrite"]["rule"]["origin"] = {
+            "syntax": {"source": "(by omega : n + 0 = n)"}
+        }
+        self.assertIn(
+            "source_rule lean_term((by omega : n + 0 = n))",
+            render_trace({"events": [event]}),
+        )
+
+    def test_source_syntax_simp_family_tactic_is_rejected(self) -> None:
+        event = rewrite_event([0, 1])
+        event["action"]["rewrite"]["rule"]["origin"] = {
+            "syntax": {"source": "(by simp : n + 0 = n)"}
+        }
+        with self.assertRaisesRegex(
+            UnsupportedOperation, "forbidden simp-family tactic.*simp"
+        ):
+            render_trace({"events": [event]})
+
     def test_local_premise_is_a_reference_not_a_term(self) -> None:
         event = rewrite_event([])
         event["action"]["rewrite"]["premises"] = [

@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import simp_family_lint
+
 
 class UnsupportedOperation(ValueError):
     pass
@@ -72,6 +74,12 @@ def render_rule_origin(origin: dict[str, Any], bound_names: tuple[str, ...] = ()
         source = syntax["source"].strip()
         if not source:
             raise UnsupportedOperation("source-syntax simp rule has empty parser source")
+        forbidden = simp_family_lint.findings(source)
+        if forbidden:
+            names = ", ".join(dict.fromkeys(item.token for item in forbidden))
+            raise UnsupportedOperation(
+                f"source-syntax simp rule contains forbidden simp-family tactic(s): {names}"
+            )
         return f"source_rule lean_term({source})"
     if "other" in origin:
         raise UnsupportedOperation("opaque simp rule origin is not an operational operand")
